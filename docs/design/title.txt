@@ -1,11 +1,11 @@
 ---
-title: Template DotNet Tool Software Design Document
+title: Agent Control Software Design Document
 subtitle: A .NET Reference Implementation for CLI Tools
 author: DEMA Consulting
-description: Detailed design document for the Template DotNet Tool
+description: Detailed design document for the Agent Control
 lang: en-US
 keywords:
-  - Template DotNet Tool
+  - Agent Control
   - .NET
   - Command-Line Tool
   - Design

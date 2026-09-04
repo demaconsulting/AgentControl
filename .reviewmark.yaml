@@ -25,7 +25,7 @@ needs-review:
 # and an index.json before enforcement (--enforce flag) can be enabled in the pipeline.
 evidence-source:
   type: url
-  location: https://raw.githubusercontent.com/demaconsulting/TemplateDotNetTool/reviews/index.json
+  location: https://raw.githubusercontent.com/demaconsulting/AgentControl/reviews/index.json
 
 # Context included for all reviews.
 context:
@@ -45,7 +45,7 @@ reviews:
 
   # Decomposition Review (only one per repository)
   - id: Decomposition
-    title: Review that TemplateDotNetTool Decomposition Addresses the Stated Purpose
+    title: Review that AgentControl Decomposition Addresses the Stated Purpose
     context:
       - README.md
       - "docs/user_guide/**/*.md"
@@ -54,127 +54,127 @@ reviews:
       - docs/design/introduction.md
       - "docs/sysml2/**/*.sysml"
 
-  # TemplateTool - Specials
-  - id: TemplateTool-Architecture
-    title: Review of Template DotNet Tool system architecture and operational validation
+  # AgentControl - Specials
+  - id: AgentControl-Architecture
+    title: Review of Agent Control system architecture and operational validation
     context:
       - README.md
       - "docs/user_guide/**/*.md"
     paths:
-      - "docs/reqstream/template-dot-net-tool.yaml"
+      - "docs/reqstream/agent-control.yaml"
       - "docs/design/introduction.md"
-      - "docs/design/template-dot-net-tool.md"
+      - "docs/design/agent-control.md"
       - "docs/verification/introduction.md"
-      - "docs/verification/template-dot-net-tool.md"
+      - "docs/verification/agent-control.md"
       - "test/**/IntegrationTests.cs"
 
-  - id: TemplateTool-Design
-    title: Review of Template DotNet Tool architectural and design consistency
+  - id: AgentControl-Design
+    title: Review of Agent Control architectural and design consistency
     context:
-      - docs/reqstream/template-dot-net-tool.yaml
+      - docs/reqstream/agent-control.yaml
     paths:
-      - "docs/reqstream/template-dot-net-tool/platform-requirements.yaml"
+      - "docs/reqstream/agent-control/platform-requirements.yaml"
       - "docs/design/introduction.md"
-      - "docs/design/template-dot-net-tool/**/*.md"
+      - "docs/design/agent-control/**/*.md"
       - "docs/design/ots.md"
       - "docs/verification/ots.md"
 
-  - id: TemplateTool-AllRequirements
-    title: Review of Template DotNet Tool requirements quality and traceability
+  - id: AgentControl-AllRequirements
+    title: Review of Agent Control requirements quality and traceability
     context:
-      - docs/design/template-dot-net-tool.md
-      - docs/reqstream/template-dot-net-tool.yaml
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
     paths:
-      - "docs/reqstream/template-dot-net-tool/**/*.yaml"
+      - "docs/reqstream/agent-control/**/*.yaml"
 
-  # TemplateTool - Program
-  - id: TemplateTool-Program
-    title: Review of Template DotNet Tool Program unit implementation
+  # AgentControl - Program
+  - id: AgentControl-Program
+    title: Review of Agent Control Program unit implementation
     context:
-      - docs/design/template-dot-net-tool.md
-      - docs/reqstream/template-dot-net-tool.yaml
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
     paths:
-      - "docs/reqstream/template-dot-net-tool/program.yaml"
-      - "docs/design/template-dot-net-tool/program.md"
-      - "docs/verification/template-dot-net-tool/program.md"
+      - "docs/reqstream/agent-control/program.yaml"
+      - "docs/design/agent-control/program.md"
+      - "docs/verification/agent-control/program.md"
       - "src/**/Program.cs"
       - "test/**/ProgramTests.cs"
 
-  # TemplateTool - Cli
-  - id: TemplateTool-Cli
-    title: Review of Template DotNet Tool Cli subsystem architecture and interfaces
+  # AgentControl - Cli
+  - id: AgentControl-Cli
+    title: Review of Agent Control Cli subsystem architecture and interfaces
     context:
-      - docs/design/template-dot-net-tool.md
-      - docs/reqstream/template-dot-net-tool.yaml
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
     paths:
-      - "docs/reqstream/template-dot-net-tool/cli.yaml"
-      - "docs/design/template-dot-net-tool/cli.md"
-      - "docs/verification/template-dot-net-tool/cli.md"
+      - "docs/reqstream/agent-control/cli.yaml"
+      - "docs/design/agent-control/cli.md"
+      - "docs/verification/agent-control/cli.md"
       - "test/**/Cli/CliSubsystemTests.cs"
 
-  - id: TemplateTool-Cli-Context
-    title: Review of Template DotNet Tool Context unit implementation
+  - id: AgentControl-Cli-Context
+    title: Review of Agent Control Context unit implementation
     context:
-      - docs/design/template-dot-net-tool.md
-      - docs/reqstream/template-dot-net-tool.yaml
-      - docs/design/template-dot-net-tool/cli.md
-      - docs/reqstream/template-dot-net-tool/cli.yaml
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/cli.md
+      - docs/reqstream/agent-control/cli.yaml
     paths:
-      - "docs/reqstream/template-dot-net-tool/cli/context.yaml"
-      - "docs/design/template-dot-net-tool/cli/context.md"
-      - "docs/verification/template-dot-net-tool/cli/context.md"
+      - "docs/reqstream/agent-control/cli/context.yaml"
+      - "docs/design/agent-control/cli/context.md"
+      - "docs/verification/agent-control/cli/context.md"
       - "src/**/Cli/Context.cs"
       - "test/**/Cli/ContextTests.cs"
 
-  # TemplateTool - SelfTest
-  - id: TemplateTool-SelfTest
-    title: Review of Template DotNet Tool SelfTest subsystem architecture and interfaces
+  # AgentControl - SelfTest
+  - id: AgentControl-SelfTest
+    title: Review of Agent Control SelfTest subsystem architecture and interfaces
     context:
-      - docs/design/template-dot-net-tool.md
-      - docs/reqstream/template-dot-net-tool.yaml
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
     paths:
-      - "docs/reqstream/template-dot-net-tool/self-test.yaml"
-      - "docs/design/template-dot-net-tool/self-test.md"
-      - "docs/verification/template-dot-net-tool/self-test.md"
+      - "docs/reqstream/agent-control/self-test.yaml"
+      - "docs/design/agent-control/self-test.md"
+      - "docs/verification/agent-control/self-test.md"
       - "test/**/SelfTest/SelfTestSubsystemTests.cs"
 
-  - id: TemplateTool-SelfTest-Validation
-    title: Review of Template DotNet Tool Validation unit implementation
+  - id: AgentControl-SelfTest-Validation
+    title: Review of Agent Control Validation unit implementation
     context:
-      - docs/design/template-dot-net-tool.md
-      - docs/reqstream/template-dot-net-tool.yaml
-      - docs/design/template-dot-net-tool/self-test.md
-      - docs/reqstream/template-dot-net-tool/self-test.yaml
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/self-test.md
+      - docs/reqstream/agent-control/self-test.yaml
     paths:
-      - "docs/reqstream/template-dot-net-tool/self-test/validation.yaml"
-      - "docs/design/template-dot-net-tool/self-test/validation.md"
-      - "docs/verification/template-dot-net-tool/self-test/validation.md"
+      - "docs/reqstream/agent-control/self-test/validation.yaml"
+      - "docs/design/agent-control/self-test/validation.md"
+      - "docs/verification/agent-control/self-test/validation.md"
       - "src/**/SelfTest/Validation.cs"
       - "test/**/SelfTest/ValidationTests.cs"
 
-  # TemplateTool - Utilities
-  - id: TemplateTool-Utilities
-    title: Review of Template DotNet Tool Utilities subsystem architecture and interfaces
+  # AgentControl - Utilities
+  - id: AgentControl-Utilities
+    title: Review of Agent Control Utilities subsystem architecture and interfaces
     context:
-      - docs/design/template-dot-net-tool.md
-      - docs/reqstream/template-dot-net-tool.yaml
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
     paths:
-      - "docs/reqstream/template-dot-net-tool/utilities.yaml"
-      - "docs/design/template-dot-net-tool/utilities.md"
-      - "docs/verification/template-dot-net-tool/utilities.md"
+      - "docs/reqstream/agent-control/utilities.yaml"
+      - "docs/design/agent-control/utilities.md"
+      - "docs/verification/agent-control/utilities.md"
       - "test/**/Utilities/UtilitiesSubsystemTests.cs"
 
-  - id: TemplateTool-Utilities-PathHelpers
-    title: Review of Template DotNet Tool PathHelpers unit implementation
+  - id: AgentControl-Utilities-PathHelpers
+    title: Review of Agent Control PathHelpers unit implementation
     context:
-      - docs/design/template-dot-net-tool.md
-      - docs/reqstream/template-dot-net-tool.yaml
-      - docs/design/template-dot-net-tool/utilities.md
-      - docs/reqstream/template-dot-net-tool/utilities.yaml
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/utilities.md
+      - docs/reqstream/agent-control/utilities.yaml
     paths:
-      - "docs/reqstream/template-dot-net-tool/utilities/path-helpers.yaml"
-      - "docs/design/template-dot-net-tool/utilities/path-helpers.md"
-      - "docs/verification/template-dot-net-tool/utilities/path-helpers.md"
+      - "docs/reqstream/agent-control/utilities/path-helpers.yaml"
+      - "docs/design/agent-control/utilities/path-helpers.md"
+      - "docs/verification/agent-control/utilities/path-helpers.md"
       - "src/**/Utilities/PathHelpers.cs"
       - "test/**/Utilities/PathHelpersTests.cs"
 

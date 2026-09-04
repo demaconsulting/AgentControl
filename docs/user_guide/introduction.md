@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Template DotNet Tool is a demonstration project that showcases best practices for DEMA
+Agent Control is a demonstration project that showcases best practices for DEMA
 Consulting DotNet Tools.
 
 ## Scope
@@ -34,7 +34,7 @@ compliance evidence is generated automatically on every CI run.
 Install the tool globally using the .NET CLI:
 
 ```bash
-dotnet tool install -g DemaConsulting.TemplateDotNetTool
+dotnet tool install -g DemaConsulting.AgentControl
 ```
 
 # Usage
@@ -44,7 +44,7 @@ dotnet tool install -g DemaConsulting.TemplateDotNetTool
 Display the tool version:
 
 ```bash
-templatetool --version
+agentcontrol --version
 ```
 
 ## Default Behavior
@@ -52,7 +52,7 @@ templatetool --version
 When invoked with no arguments, the tool displays the banner and copyright notice:
 
 ```bash
-templatetool
+agentcontrol
 ```
 
 ## Display Help
@@ -60,12 +60,12 @@ templatetool
 Display usage information:
 
 ```bash
-templatetool --help
+agentcontrol --help
 ```
 
 ## Self-Validation
 
-Self-validation produces a report demonstrating that Template DotNet Tool is functioning
+Self-validation produces a report demonstrating that Agent Control is functioning
 correctly. This is useful in regulated industries where tool validation evidence is required.
 
 ### Running Validation
@@ -73,13 +73,13 @@ correctly. This is useful in regulated industries where tool validation evidence
 To perform self-validation:
 
 ```bash
-templatetool --validate
+agentcontrol --validate
 ```
 
 To save validation results to a file:
 
 ```bash
-templatetool --validate --results results.trx
+agentcontrol --validate --results results.trx
 ```
 
 The `--result` option is an accepted alias for `--results`.
@@ -94,7 +94,7 @@ This is useful when embedding the validation report into a larger markdown docum
 
 ```bash
 # Embed validation at heading level 2
-templatetool --validate --depth 2
+agentcontrol --validate --depth 2
 ```
 
 ### Validation Report
@@ -105,7 +105,7 @@ The validation report contains the tool version, machine name, operating system 
 Example validation report:
 
 ```text
-# DEMA Consulting Template DotNet Tool
+# DEMA Consulting Agent Control
 
 | Information         | Value                                              |
 | :------------------ | :------------------------------------------------- |
@@ -115,8 +115,8 @@ Example validation report:
 | DotNet Runtime      | .NET 10.0.0                                        |
 | Time Stamp          | 2024-01-15 10:30:00 UTC                            |
 
-✓ TemplateTool_VersionDisplay - Passed
-✓ TemplateTool_HelpDisplay - Passed
+✓ AgentControl_VersionDisplay - Passed
+✓ AgentControl_HelpDisplay - Passed
 
 Total Tests: 2
 Passed: 2
@@ -127,15 +127,15 @@ Failed: 0
 
 Each test proves specific functionality works correctly:
 
-- **`TemplateTool_VersionDisplay`** - `--version` outputs a valid version string.
-- **`TemplateTool_HelpDisplay`** - `--help` outputs usage and options information.
+- **`AgentControl_VersionDisplay`** - `--version` outputs a valid version string.
+- **`AgentControl_HelpDisplay`** - `--help` outputs usage and options information.
 
 ## Silent Mode
 
 Suppress console output:
 
 ```bash
-templatetool --silent
+agentcontrol --silent
 ```
 
 ## Logging
@@ -143,7 +143,7 @@ templatetool --silent
 Write output to a log file:
 
 ```bash
-templatetool --log output.log
+agentcontrol --log output.log
 ```
 
 ## Error Handling
@@ -177,19 +177,19 @@ The following command-line options are supported:
 ## Example 1: Basic Usage
 
 ```bash
-templatetool
+agentcontrol
 ```
 
 ## Example 2: Self-Validation with Results
 
 ```bash
-templatetool --validate --results validation-results.trx
+agentcontrol --validate --results validation-results.trx
 ```
 
 ## Example 3: Silent Mode with Logging
 
 ```bash
-templatetool --silent --log tool-output.log
+agentcontrol --silent --log tool-output.log
 ```
 
 ## References

@@ -103,9 +103,9 @@ Use the `System-Component-Feature` pattern because ReqStream uses IDs as-is in
 all generated reports and the trace matrix - opaque IDs make those outputs
 unreadable without a separate lookup:
 
-- **System-level**: `TemplateTool-Core-DisplayHelp`
-- **Subsystem-level**: `TemplateTool-Parser-ParseYaml`
-- **Unit-level**: `TemplateTool-Validator-CheckFormat`
+- **System-level**: `AgentControl-Core-DisplayHelp`
+- **Subsystem-level**: `AgentControl-Parser-ParseYaml`
+- **Unit-level**: `AgentControl-Validator-CheckFormat`
 - **Bad**: `REQ-042` (meaningless in report output)
 
 # Source Filter Requirements (CRITICAL)

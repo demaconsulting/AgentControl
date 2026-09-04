@@ -1,24 +1,24 @@
 ---
 resource-path:
   - docs/design
-  - docs/design/template-dot-net-tool
-  - docs/design/template-dot-net-tool/cli
-  - docs/design/template-dot-net-tool/self-test
-  - docs/design/template-dot-net-tool/utilities
+  - docs/design/agent-control
+  - docs/design/agent-control/cli
+  - docs/design/agent-control/self-test
+  - docs/design/agent-control/utilities
   - docs/design/ots
   - docs/template
 
 input-files:
   - docs/design/title.txt
   - docs/design/introduction.md
-  - docs/design/template-dot-net-tool.md
-  - docs/design/template-dot-net-tool/program.md
-  - docs/design/template-dot-net-tool/cli.md
-  - docs/design/template-dot-net-tool/cli/context.md
-  - docs/design/template-dot-net-tool/self-test.md
-  - docs/design/template-dot-net-tool/self-test/validation.md
-  - docs/design/template-dot-net-tool/utilities.md
-  - docs/design/template-dot-net-tool/utilities/path-helpers.md
+  - docs/design/agent-control.md
+  - docs/design/agent-control/program.md
+  - docs/design/agent-control/cli.md
+  - docs/design/agent-control/cli/context.md
+  - docs/design/agent-control/self-test.md
+  - docs/design/agent-control/self-test/validation.md
+  - docs/design/agent-control/utilities.md
+  - docs/design/agent-control/utilities/path-helpers.md
   - docs/design/ots.md
   - docs/design/ots/buildmark.md
   - docs/design/ots/fileassert.md

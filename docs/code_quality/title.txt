@@ -1,11 +1,11 @@
 ---
-title: Template DotNet Tool Code Quality Report
+title: Agent Control Code Quality Report
 subtitle: Code Quality Analysis Report
 author: DEMA Consulting
-description: Code Quality Analysis Report for Template DotNet Tool
+description: Code Quality Analysis Report for Agent Control
 lang: en-US
 keywords:
-  - Template DotNet Tool
+  - Agent Control
   - Code Quality
   - Analysis
   - .NET
