@@ -1,11 +1,11 @@
 ---
-title: Template DotNet Tool Requirements
-subtitle: Requirements Specification for the Template DotNet Tool
+title: Agent Control Requirements
+subtitle: Requirements Specification for the Agent Control
 author: DEMA Consulting
-description: Requirements Specification for the Template DotNet Tool
+description: Requirements Specification for the Agent Control
 lang: en-US
 keywords:
-  - Template DotNet Tool
+  - Agent Control
   - Requirements
   - Specification
   - .NET

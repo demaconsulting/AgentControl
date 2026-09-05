@@ -8,15 +8,15 @@
 root-tags: [system, quality]
 includes:
   - docs/reqstream/quality.yaml
-  - docs/reqstream/template-dot-net-tool.yaml
-  - docs/reqstream/template-dot-net-tool/program.yaml
-  - docs/reqstream/template-dot-net-tool/cli.yaml
-  - docs/reqstream/template-dot-net-tool/cli/context.yaml
-  - docs/reqstream/template-dot-net-tool/self-test.yaml
-  - docs/reqstream/template-dot-net-tool/self-test/validation.yaml
-  - docs/reqstream/template-dot-net-tool/utilities.yaml
-  - docs/reqstream/template-dot-net-tool/utilities/path-helpers.yaml
-  - docs/reqstream/template-dot-net-tool/platform-requirements.yaml
+  - docs/reqstream/agent-control.yaml
+  - docs/reqstream/agent-control/program.yaml
+  - docs/reqstream/agent-control/cli.yaml
+  - docs/reqstream/agent-control/cli/context.yaml
+  - docs/reqstream/agent-control/self-test.yaml
+  - docs/reqstream/agent-control/self-test/validation.yaml
+  - docs/reqstream/agent-control/utilities.yaml
+  - docs/reqstream/agent-control/utilities/path-helpers.yaml
+  - docs/reqstream/agent-control/platform-requirements.yaml
   - docs/reqstream/ots/xunit.yaml
   - docs/reqstream/ots/reqstream.yaml
   - docs/reqstream/ots/buildmark.yaml

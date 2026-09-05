@@ -5,7 +5,7 @@ and renders its declared views to SVG diagrams consumed by the design documentat
 
 ### Purpose
 
-SysML2Tools provides the toolchain that keeps TemplateDotNetTool's architecture model
+SysML2Tools provides the toolchain that keeps AgentControl's architecture model
 (`docs/sysml2/model/**/*.sysml`) and its declared views (`docs/sysml2/views/design-views.sysml`)
 consistent with the design documentation. It validates the model for syntax and reference errors,
 and renders each declared view to an SVG diagram embedded directly in the corresponding design

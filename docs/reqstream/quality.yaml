@@ -1,5 +1,5 @@
 ---
-# Quality/process requirements grouping TemplateDotNetTool's use of off-the-shelf
+# Quality/process requirements grouping AgentControl's use of off-the-shelf
 # (OTS) process tooling. These requirements exist so that OTS-derived requirements
 # (which describe capabilities the repository's build/quality pipeline relies on
 # from third-party tools, not user-visible tool functionality) are not reported
