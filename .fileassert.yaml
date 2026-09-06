@@ -1,7 +1,8 @@
 ---
 # FileAssert document validation tests for AgentControl.
 # Tests are tagged by document group to allow per-group execution during the build pipeline.
-# Tags: build-notes, code-quality, code-review, design, verification, user-guide, requirements.
+# Tags: build-notes, code-quality, code-review, design, verification, user-guide, requirements,
+# installer.
 #
 # NOTE: build-notes through user-guide tests provide OTS evidence for Pandoc and WeasyPrint
 # and run before ReqStream. The requirements tests run after ReqStream and validate the
@@ -384,3 +385,17 @@ tests:
             min: 1
           text:
             - contains: "Trace Matrix"
+
+  # --- INSTALLER ---
+  # This test provides real, TRX-backed OTS evidence for the WiX Toolset's
+  # MSI packaging capability (AgentControl-OTS-WixToolset-BuildInstaller), replacing
+  # the previously-cited vendor-capability placeholder test names that had no
+  # backing TRX result. Runs in the package-msi job, immediately after the MSI is built.
+
+  - name: WixToolset_BuildMsiPackage
+    description: "Windows MSI installer package was built by the WiX Toolset"
+    tags: [installer]
+    files:
+      - pattern: "src/DemaConsulting.AgentControl.Msi/bin/x64/Release/*.msi"
+        count: 1
+        min-size: 1000000

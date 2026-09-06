@@ -341,6 +341,15 @@ jobs:
           --configuration Release
           --property:ProductVersion=${{ steps.msi-version.outputs.value }}
 
+      # Asserts the built MSI file exists and is a non-trivial size, producing a
+      # TRX-backed test result cited by AgentControl-OTS-WixToolset-BuildInstaller
+      # in requirements.yaml (see docs/reqstream/ots/wixtoolset.yaml).
+      - name: Assert MSI Package with FileAssert
+        run: >
+          dotnet fileassert
+          --results artifacts/fileassert-installer.trx
+          installer
+
       # === UPLOAD ARTIFACTS ===
       # This section uploads all generated artifacts for use by downstream jobs.
       # Downstream projects: Add any additional artifact uploads here.
