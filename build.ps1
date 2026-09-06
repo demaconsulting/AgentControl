@@ -21,7 +21,11 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # [PROJECT-SPECIFIC] Add additional build steps here.
 
 Write-Host "Running unit tests..."
-dotnet test --configuration Release
+# --max-parallel-test-modules 1 forces the Tests and UiTests projects to run one after
+# another rather than concurrently: both spawn real child processes (git subprocesses,
+# FlaUI-driven app instances), and running them at the same time causes intermittent,
+# non-deterministic contention failures between the two (confirmed via live CI runs).
+dotnet test --configuration Release --max-parallel-test-modules 1
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # [PROJECT-SPECIFIC] Add additional test or post-build steps here.
