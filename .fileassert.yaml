@@ -311,7 +311,7 @@ tests:
             - field: "Author"
               contains: "DEMA Consulting"
             - field: "Subject"
-              contains: "Reference Implementation"
+              contains: "Desktop Launcher"
           pages:
             min: 3
           text:
