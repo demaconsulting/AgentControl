@@ -1,0 +1,102 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Build Configuration -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- Required so restore/build succeed on every OS: without this, the "-windows" TFM suffix
+         makes the SDK fail restore/build with NETSDK1100 on non-Windows hosts. This matters
+         because the protected lint.ps1's bare "dotnet restore" auto-discovers and restores the
+         whole root .slnx (this project included), and must not fail on Linux/macOS. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <!-- Code Quality Configuration -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+  </PropertyGroup>
+
+  <!--
+    Windows-only per architecture.md: FlaUI drives Windows UI Automation and cannot run on
+    non-Windows platforms. The TFM stays "net10.0-windows" for correct Windows API typing (FlaUI
+    types are only available under a Windows TFM), while "EnableWindowsTargeting=true" above
+    lets restore/build succeed on every OS. Actual test *execution* still self-skips at runtime
+    via each test's own OperatingSystem.IsWindows() + Assert.Skip guard, so "dotnet test" reports
+    these as skipped (not failed) off-Windows, and a Windows machine without an interactive
+    desktop session (e.g. a headless Windows CI runner) reports a clear skip/failure reason
+    instead of a cryptic FlaUI/UIA exception.
+  -->
+
+  <!-- Implicit Usings -->
+  <ItemGroup>
+    <Using Include="Polyfills" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- Test Framework Dependencies -->
+  <ItemGroup>
+    <PackageReference Include="coverlet.MTP" Version="10.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>compile; runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.3.3" />
+    <PackageReference Include="xunit.v3" Version="4.0.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!--
+    Disables in-assembly test parallelization (see xunit.runner.json): FlaUI end-to-end tests
+    drive real mouse clicks and real top-level windows on the single shared desktop session, so
+    running more than one test's AgentControl.exe instance at a time causes window-focus/
+    clickable-point interference between unrelated tests (observed directly in this project's own
+    verification run).
+  -->
+  <ItemGroup>
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- FlaUI (Windows UI Automation) Dependencies -->
+  <ItemGroup>
+    <PackageReference Include="FlaUI.Core" Version="5.0.0" />
+    <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
+  </ItemGroup>
+
+  <!-- Code Analysis Dependencies -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.400">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.33.0.1635">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!--
+    ReferenceOutputAssembly="false" project references: these tests drive AgentControl.exe and
+    the arg-logger stub as external black-box processes via FlaUI (matching how a real user runs
+    AgentControl), so neither assembly needs to be linked into this test binary, and their
+    `internal` types are never exposed here. The references exist purely to make `dotnet build`/
+    `dotnet test` on the solution build both apps before this project, so TestPaths.cs's build-
+    output path lookups (see that file) always find fresh binaries.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DemaConsulting.AgentControl\DemaConsulting.AgentControl.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\DemaConsulting.AgentControl.ArgLoggerStub\DemaConsulting.AgentControl.ArgLoggerStub.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,50 @@
+---
+# AgentPackageManagement Subsystem Requirements
+#
+# PURPOSE:
+# - Define requirements for the AgentControl AgentPackageManagement subsystem
+# - AgentPackageManagement spans PackageSource.cs (discovers packages/versions at a source
+#   folder), PackageVersion.cs (parses/compares version strings), and PackageVersionCache.cs
+#   (caches per-source scan results)
+# - Subsystem requirements describe the package-discovery/version-comparison behavior shared
+#   by the rest of the application
+
+sections:
+  - title: AgentPackageManagement Subsystem Requirements
+    requirements:
+      - id: AgentControl-AgentPackageManagement-DiscoverPackages
+        title: >-
+          The AgentPackageManagement subsystem shall determine a package's name and version
+          from its zip filename, and shall enumerate the distinct package names and available
+          versions present in a package source folder.
+        justification: |
+          The package-selection window and upgrade-detection logic both need to know what
+          package names and versions physically exist at a configured source folder, derived
+          purely from the zip filenames present there.
+        children:
+          - AgentControl-PackageSource-EnumeratePackages
+          - AgentControl-PackageSource-DiscoverNames
+          - AgentControl-PackageSource-FindLatest
+          - AgentControl-PackageVersion-Parse
+          - AgentControl-PackageVersionCache-CachePackageNames
+          - AgentControl-PackageVersionCache-CacheVersions
+          - AgentControl-PackageVersionCache-Invalidate
+        tests:
+          - PackageSource_EnumeratePackageNames_MixedDirectory_ReturnsDistinctSortedNames
+
+      - id: AgentControl-AgentPackageManagement-UpgradeDetection
+        title: >-
+          The AgentPackageManagement subsystem shall determine whether a newer package version
+          exists at the source than a repo's pinned version, treating an unparsable pinned
+          version as always upgradable.
+        justification: |
+          Drives the upgrade-available badge and the Upgrade action; an unparsable pin (e.g.
+          from manual file editing) must not silently block the developer from being offered
+          an upgrade path back to a known-good version.
+        children:
+          - AgentControl-PackageSource-DetectNewerVersion
+          - AgentControl-PackageVersion-Compare
+          - AgentControl-PackageVersionCache-CacheNewerVersion
+        tests:
+          - PackageSource_IsNewerVersionAvailable_SourceHasNewerVersion_ReturnsTrue
+          - PackageSource_IsNewerVersionAvailable_UnparsablePin_ReturnsTrue

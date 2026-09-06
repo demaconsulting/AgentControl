@@ -1,0 +1,31 @@
+---
+# Software Unit Requirements for the StartupOptions Class
+#
+# StartupOptions parses the fixed set of startup arguments AgentControl accepts: a
+# configuration-directory override, a git executable override, and an agent-tool command
+# override, used together to support hermetic, isolated end-to-end testing.
+
+sections:
+  - title: StartupOptions Unit Requirements
+    requirements:
+      - id: AgentControl-StartupOptions-Parse
+        title: >-
+          The StartupOptions class shall parse zero or more of a configuration-directory
+          override, a git executable override, and an agent-tool command override from the
+          given arguments, leaving unspecified overrides null, and shall reject an
+          unsupported argument, a missing value for a recognized argument, or a null
+          arguments array.
+        justification: |
+          Every override is optional (a normal end-user launch supplies none of them), but
+          when a caller (such as an automated test harness) does supply one, it must be
+          captured accurately, and any malformed invocation must fail clearly rather than
+          silently launch with unexpected defaults.
+        tests:
+          - StartupOptions_Parse_NoArguments_AllOverridesNull
+          - StartupOptions_Parse_ConfigDirArgument_CapturesValue
+          - StartupOptions_Parse_GitPathArgument_CapturesValue
+          - StartupOptions_Parse_AgentToolCommandArgument_CapturesValue
+          - StartupOptions_Parse_AllArguments_CapturesAllValues
+          - StartupOptions_Parse_UnsupportedArgument_ThrowsArgumentException
+          - StartupOptions_Parse_MissingValue_ThrowsArgumentException
+          - StartupOptions_Parse_NullArguments_ThrowsArgumentNullException

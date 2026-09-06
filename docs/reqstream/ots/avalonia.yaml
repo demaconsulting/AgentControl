@@ -1,0 +1,27 @@
+---
+# Avalonia OTS Software Requirements
+#
+# Requirements for the Avalonia cross-platform UI framework functionality.
+
+sections:
+  - title: OTS Software Requirements
+    sections:
+      - title: Avalonia Requirements
+        requirements:
+          - id: AgentControl-OTS-Avalonia-RenderUi
+            title: >-
+              Avalonia shall render the application's windows and controls, and expose UI
+              Automation identifiers for automated testing.
+            justification: |
+              Avalonia 12 is the cross-platform UI framework AgentControl's LauncherUI subsystem
+              is built on (main window, repo cards, package-selection window, settings window,
+              about dialog, release-notes viewer). Its classic desktop lifetime shows the main
+              window on startup, and its AutomationId support lets FlaUI-driven end-to-end tests
+              reliably locate UI elements. A passing end-to-end smoke test that finds the main
+              window by its expected automation identifier, and a passing unit test that Avalonia's
+              application builder is configured for the App class, together demonstrate Avalonia is
+              rendering the application correctly.
+            tags: [ots]
+            tests:
+              - windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId
+              - Program_BuildAvaloniaApp_ReturnsConfiguredAppBuilder

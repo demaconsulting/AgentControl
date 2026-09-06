@@ -1,0 +1,192 @@
+---
+# LauncherUI Subsystem Requirements
+#
+# PURPOSE:
+# - Define requirements for the AgentControl LauncherUI subsystem
+# - LauncherUI spans the recent-repos main window, per-repo cards, the package-selection
+#   window, and the settings window (MainWindowViewModel, RepoCardViewModel,
+#   SelectPackageWindowViewModel, SettingsWindowViewModel), plus their Avalonia .axaml Views
+#   and shared MVVM support types (RelayCommand, ViewModelBase, FavoriteIconConverter), which
+#   have no dedicated test files and are folded into this subsystem-level description rather
+#   than given separate unit files
+# - Subsystem requirements describe the aggregate UI behavior a user experiences
+
+sections:
+  - title: LauncherUI Subsystem Requirements
+    requirements:
+      - id: AgentControl-LauncherUI-RecentReposDisplay
+        title: >-
+          The LauncherUI subsystem shall display a card for each recent repo, showing its
+          name, path, pinned package, and branch.
+        justification: |
+          A developer needs a compact visual summary of every tracked repo without having to
+          open each one individually.
+        children:
+          - AgentControl-MainWindowViewModel-PopulateRecentRepos
+          - AgentControl-RepoCardViewModel-DisplayInfo
+        tests:
+          - MainWindowViewModel_Constructor_SettingsHaveRecentRepos_PopulatesRepoCards
+
+      - id: AgentControl-LauncherUI-StatusBadges
+        title: >-
+          The LauncherUI subsystem shall show an upgrade-available badge, a missing-repo
+          indicator, and a committed-agent-files-changed badge on each repo card as
+          applicable.
+        justification: |
+          Badges let a developer notice, at a glance, which repos have an available agent
+          package upgrade, are no longer present on disk, or have local edits to their
+          committed agent files, without needing to click into each repo.
+        children:
+          - AgentControl-RepoCardViewModel-UpgradeBadge
+          - AgentControl-RepoCardViewModel-MissingRepo
+          - AgentControl-RepoCardViewModel-CommittedFilesBadge
+        tests:
+          - RepoCardViewModel_Refresh_NewerVersionAtSource_SetsUpgradeAvailableTrue
+          - RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState
+          - RepoCardViewModel_RefreshCheap_UnchangedHeadHash_CommittedFilesBadgeIsCached
+
+      - id: AgentControl-LauncherUI-AddRepo
+        title: The LauncherUI subsystem shall let the user add an existing folder as a tracked repo.
+        justification: |
+          Adding a repo is the only entry point for AgentControl to begin tracking a folder,
+          and must reject paths that do not exist or are already tracked to avoid duplicate
+          or invalid entries.
+        children:
+          - AgentControl-MainWindowViewModel-AddRepo
+        tests:
+          - MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings
+          - MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse
+          - MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse
+
+      - id: AgentControl-LauncherUI-RemoveRepo
+        title: The LauncherUI subsystem shall remove a repo card only after the user confirms the removal request.
+        justification: |
+          Removing a repo discards AgentControl's tracking of it (though not the repo itself);
+          requiring confirmation prevents an accidental click from silently losing that state.
+        children:
+          - AgentControl-MainWindowViewModel-RemoveRepo
+          - AgentControl-RepoCardViewModel-RemoveRequest
+        tests:
+          - MainWindowViewModel_RemoveRepo_RemovesFromCollectionsAndPersistsSettings
+          - MainWindowViewModel_CardRaisesRemoveRequested_DoesNotRemoveCardWithoutConfirmation
+          - RepoCardViewModel_RemoveCommand_RaisesRemoveRequestedWithoutMutatingState
+
+      - id: AgentControl-LauncherUI-SearchFilter
+        title: >-
+          The LauncherUI subsystem shall filter displayed repo cards by a case-insensitive
+          match against the repo's name or path.
+        justification: |
+          Lets a developer quickly narrow a long recent-repos list down to the repo they are
+          looking for.
+        children:
+          - AgentControl-MainWindowViewModel-SearchFilter
+        tests:
+          - MainWindowViewModel_FilterText_MatchesRepoNameCaseInsensitive_FiltersDisplayedRepoCards
+          - MainWindowViewModel_FilterText_MatchesRepoPath_FiltersDisplayedRepoCards
+
+      - id: AgentControl-LauncherUI-SortOrder
+        title: >-
+          The LauncherUI subsystem shall order displayed repo cards with favorites first,
+          then by most-recently-launched.
+        justification: |
+          Surfaces the repos a developer is most likely to want next without requiring manual
+          reordering.
+        children:
+          - AgentControl-MainWindowViewModel-SortOrder
+          - AgentControl-RepoCardViewModel-Favorite
+        tests:
+          - MainWindowViewModel_DisplayedRepoCards_SortsFavoritesAboveNonFavorites
+          - MainWindowViewModel_DisplayedRepoCards_SortsByLastLaunchedUtcDescendingWithNullsLast
+
+      - id: AgentControl-LauncherUI-Launch
+        title: >-
+          The LauncherUI subsystem shall launch the configured agent tool for a repo once its
+          agent files are confirmed synced.
+        justification: |
+          The whole purpose of AgentControl is to guarantee the agent tool sees up-to-date
+          instructions/standards before the developer starts working; launch must not proceed
+          if that sync could not be confirmed.
+        children:
+          - AgentControl-RepoCardViewModel-Launch
+          - AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch
+        tests:
+          - RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting
+
+      - id: AgentControl-LauncherUI-Pull
+        title: >-
+          The LauncherUI subsystem shall let the user pull the latest commits for a repo
+          card, enabled only when its working tree is clean.
+        justification: |
+          Prevents the user from triggering a git pull that could produce merge conflicts
+          AgentControl cannot resolve on the developer's behalf.
+        children:
+          - AgentControl-RepoCardViewModel-PullGating
+          - AgentControl-RepoCardViewModel-Pull
+        tests:
+          - RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue
+          - RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse
+          - RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage
+
+      - id: AgentControl-LauncherUI-SelectPackage
+        title: >-
+          The LauncherUI subsystem shall let the user browse available package name/version
+          pairs from the configured package source and apply one to a repo with no existing
+          pin.
+        justification: |
+          A repo with no pin has no prior version to upgrade from, so an explicit
+          package/version selection window is the only way to establish the initial pin.
+        children:
+          - AgentControl-RepoCardViewModel-SelectPackage
+          - AgentControl-SelectPackageWindowViewModel-ListPackages
+          - AgentControl-SelectPackageWindowViewModel-VersionSelection
+          - AgentControl-SelectPackageWindowViewModel-ConfirmGating
+          - AgentControl-SelectPackageWindowViewModel-Confirm
+          - AgentControl-RepoCardViewModel-ApplySelectedPackage
+        tests:
+          - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourcePath
+          - SelectPackageWindowViewModel_SelectPackageName_PopulatesVersionsDescendingAndDefaultsToLatest
+          - SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithSelectedPair
+          - RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady
+
+      - id: AgentControl-LauncherUI-Upgrade
+        title: >-
+          The LauncherUI subsystem shall let the user upgrade a pinned repo to the newest
+          available package version, only when a newer version exists at the package source.
+        justification: |
+          Upgrading is only meaningful when a newer version is actually available; offering
+          the action otherwise would confuse the user or risk a no-op re-extraction.
+        children:
+          - AgentControl-RepoCardViewModel-Upgrade
+        tests:
+          - RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesPinAndRaisesReleaseNotesReady
+          - RepoCardViewModel_UpgradeCommand_NoPackageSourceConfigured_RaisesErrorOccurred
+
+      - id: AgentControl-LauncherUI-Settings
+        title: >-
+          The LauncherUI subsystem shall let the user view and edit the package source path,
+          git executable override, agent tool selection, and shell preference, and persist
+          changes on save.
+        justification: |
+          These preferences vary per developer/company and must be editable through the UI
+          rather than requiring manual configuration-file edits.
+        children:
+          - AgentControl-SettingsWindowViewModel-Seed
+          - AgentControl-SettingsWindowViewModel-CustomAgentTool
+          - AgentControl-SettingsWindowViewModel-Save
+          - AgentControl-MainWindowViewModel-ApplySettings
+        tests:
+          - SettingsWindowViewModel_Constructor_SeedsPropertiesFromInitialSettings
+          - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
+          - MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields
+
+      - id: AgentControl-LauncherUI-About
+        title: >-
+          The LauncherUI subsystem shall provide an About command that opens a dialog showing
+          the application version and copyright.
+        justification: |
+          Lets a developer confirm exactly which AgentControl build they are running.
+        tests:
+          # No unit test targets the About dialog directly (it has no dedicated view-model
+          # class); real coverage is end-to-end only, via the FlaUI UiTests project.
+          - windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright

@@ -14,7 +14,22 @@ language: en
 
 # Project-specific technical terms and tool names
 words:
+  - agentcontrol
+  - abbrevref
+  - ARGLOGGER
+  - arglogger
+  - ARGLOGGERSTUB
+  - Avalonia
+  - axaml
   - Blockquotes
+  - contoso
+  - esac
+  - favorited
+  - gitdir
+  - headlessly
+  - lsfiles
+  - Mvvm
+  - MVVM
   - Postconditions
   - buildmark
   - buildtransitive
@@ -27,24 +42,41 @@ words:
   - docversion
   - errorlevel
   - fileassert
+  - finalizer
+  - flaui
   - xunit
   - nameof
   - pagetitle
   - Pandoc
+  - parameterless
   - Qube
   - reqstream
+  - Rescanning
+  - rescanned
+  - rethrowing
+  - revparsehead
   - reviewmark
   - SARIF
   - sarifmark
+  - Serilog
   - setlocal
+  - slnx
   - snupkg
   - sonarmark
   - sysml
   - sysml2tools
-  - agentcontrol
   - venv
+  - unconfigured
   - versionmark
   - Weasyprint
+  - wixproj
+  - wixpublish
+  - wixtoolset
+  - wixext
+  - worktree
+  - worktrees
+  - Worktree
+  - Worktrees
   - yamlfix
 
 # Exclude common build artifacts, dependencies, and vendored third-party code

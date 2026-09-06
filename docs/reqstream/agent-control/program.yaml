@@ -1,43 +1,46 @@
 ---
 # Software Unit Requirements for the Program Class
 #
-# The Program unit is the top-level command dispatcher for the tool.
+# The Program unit is the application entry point: it parses the fixed set of startup
+# arguments, initializes diagnostic logging, and hands off to Avalonia's classic desktop
+# lifetime. Avalonia's App class (App.axaml.cs) has no dedicated unit test file (it is
+# exercised only indirectly, via ProgramTests.Program_BuildAvaloniaApp_ReturnsConfiguredAppBuilder
+# and end-to-end via the FlaUI UiTests project), so its bootstrap responsibility - loading
+# settings and showing the main window once the desktop lifetime initializes - is documented
+# here rather than as a separate unit, per sysml2-modeling.md's documented exception for units
+# without a dedicated companion test file.
 
 sections:
   - title: Program Unit Requirements
     requirements:
-      - id: Template-Program-Version
-        title: The Program class shall support -v and --version flags to display version information.
+      - id: AgentControl-Program-Version
+        title: The Program class shall expose the application's version string.
         justification: |
-          Users need to quickly identify the version of the tool they are using for
-          troubleshooting and compatibility verification.
+          The About dialog and diagnostic log entries both need a single, reliable source for
+          the running build's version.
         tests:
-          - Program_Run_WithVersionFlag_DisplaysVersionOnly
-          - Program_Run_WithShortVersionFlag_DisplaysVersion
           - Program_Version_ReturnsNonEmptyString
 
-      - id: Template-Program-Help
-        title: The Program class shall support -?, -h, and --help flags to display usage information.
+      - id: AgentControl-Program-Bootstrap
+        title: >-
+          The Program class shall parse startup arguments, initialize diagnostic logging, and
+          configure the Avalonia application so that settings are loaded and the main window
+          is shown.
         justification: |
-          Users need access to command-line usage documentation without requiring
-          external resources.
+          Diagnostic logging must be initialized before the Avalonia app builder runs so that
+          even startup-time failures are captured on disk; the parsed startup options (config
+          directory, git/agent-tool overrides) must reach App.OnFrameworkInitializationCompleted
+          so it can load settings from the correct (possibly overridden) configuration
+          directory before showing the main window.
         tests:
-          - Program_Run_WithHelpFlag_DisplaysUsageInformation
-          - Program_Run_WithShortHelpFlag_DisplaysUsage
-          - Program_Run_WithQuestionMarkFlag_DisplaysUsage
+          - Program_BuildAvaloniaApp_ReturnsConfiguredAppBuilder
 
-      - id: Template-Program-Validate
-        title: The Program class shall support --validate flag to invoke the self-validation framework.
+      - id: AgentControl-Program-ErrorHandling
+        title: >-
+          The Program class shall report a startup argument error to stderr and return a
+          non-zero exit code without starting the UI.
         justification: |
-          Provides a built-in mechanism to verify the tool is functioning correctly
-          in the deployment environment.
+          An invalid startup argument must fail fast with a clear message rather than allow
+          the UI to start with unexpected/undefined behavior.
         tests:
-          - Program_Run_WithValidateFlag_RunsValidation
-
-      - id: Template-Program-ExitCode
-        title: The Program class shall return a non-zero exit code on failure.
-        justification: |
-          Callers (scripts, CI/CD pipelines) must be able to detect failure conditions
-          programmatically via the process exit code.
-        tests:
-          - Program_Main_WithInvalidArgs_ReturnsNonZeroExitCode
+          - Program_Main_WithInvalidArgument_ReturnsNonZeroExitCode

@@ -1,0 +1,43 @@
+---
+# Software Unit Requirements for the SettingsWindowViewModel Class
+#
+# SettingsWindowViewModel backs the settings dialog: the package source path, git executable
+# override, agent tool selection, and shell preference.
+
+sections:
+  - title: SettingsWindowViewModel Unit Requirements
+    requirements:
+      - id: AgentControl-SettingsWindowViewModel-Seed
+        title: >-
+          The SettingsWindowViewModel class shall seed its editable properties from the
+          current application settings on construction, and shall reject a null initial
+          settings value.
+        justification: |
+          The settings dialog must open showing the developer's actual current configuration,
+          not blank or default values, and must fail fast if constructed without a settings
+          value to seed from.
+        tests:
+          - SettingsWindowViewModel_Constructor_SeedsPropertiesFromInitialSettings
+          - SettingsWindowViewModel_Constructor_NullInitial_ThrowsArgumentNullException
+
+      - id: AgentControl-SettingsWindowViewModel-CustomAgentTool
+        title: >-
+          The SettingsWindowViewModel class shall indicate a custom agent tool is selected
+          only when the agent tool value is not one of the well-known built-in tools.
+        justification: |
+          Drives the UI to reveal a custom-command entry field only when needed, keeping the
+          common case (a well-known built-in tool) simple.
+        tests:
+          - SettingsWindowViewModel_IsCustomAgentToolSelected_WellKnownTool_ReturnsFalse
+          - SettingsWindowViewModel_AgentTool_SetToCustom_TogglesIsCustomAgentToolSelected
+
+      - id: AgentControl-SettingsWindowViewModel-Save
+        title: >-
+          The SettingsWindowViewModel class shall, on save, pass its current property values
+          to its owner and signal that settings were saved.
+        justification: |
+          Persisting settings and notifying the caller must happen together so the main window
+          can immediately apply the new configuration (e.g. invalidate cached package
+          versions) after a save.
+        tests:
+          - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved

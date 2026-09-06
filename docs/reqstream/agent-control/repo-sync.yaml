@@ -1,0 +1,49 @@
+---
+# RepoSync Subsystem Requirements
+#
+# PURPOSE:
+# - Define requirements for the AgentControl RepoSync subsystem
+# - RepoSync spans PackageZipExtractor.cs (extracts a package zip's managed folders into a
+#   repo, blind delete-replace) and ReleaseNotesViewerViewModel.cs (backs the release-notes
+#   dialog shown after a sync); the ReleaseNotesViewerView .axaml has no dedicated test file
+#   and is folded into this subsystem-level description
+# - Subsystem requirements describe the observable behavior of syncing a repo's agent files
+#   to a package's contents
+
+sections:
+  - title: RepoSync Subsystem Requirements
+    requirements:
+      - id: AgentControl-RepoSync-Sync
+        title: >-
+          The RepoSync subsystem shall replace a repo's managed agent-file folders with the
+          contents of a package zip, and shall reject a zip file that is not a valid archive.
+        justification: |
+          Per architecture.md's "blind delete-replace sync" decision, agent files are
+          entirely package-managed content, so a sync must fully replace the managed folders
+          rather than attempt a partial merge; a corrupt/invalid zip must not damage the
+          repo's existing files.
+        children:
+          - AgentControl-PackageZipExtractor-Extract
+          - AgentControl-PackageZipExtractor-AllManagedFoldersExist
+          - AgentControl-Utilities-SafePaths
+        tests:
+          - PackageZipExtractor_Extract_FreshRepo_CreatesManagedFoldersOnly
+          - PackageZipExtractor_Extract_ExistingManagedFolder_ReplacesOldContents
+          - PackageZipExtractor_Extract_InvalidZipFile_ThrowsInvalidOperationException
+
+      - id: AgentControl-RepoSync-ReleaseNotes
+        title: >-
+          The RepoSync subsystem shall read a package's release notes from its zip without
+          extracting the package, and shall display them to the user after a successful sync,
+          using a placeholder message when the package has none.
+        justification: |
+          Per architecture.md's Scope, release notes must be surfaced immediately after an
+          upgrade so the developer notices any migration steps, without requiring a full
+          extraction just to preview them.
+        children:
+          - AgentControl-PackageZipExtractor-ReadReleaseNotes
+          - AgentControl-ReleaseNotesViewerViewModel-Display
+        tests:
+          - PackageZipExtractor_ReadReleaseNotes_EntryPresent_ReturnsContentWithoutExtracting
+          - PackageZipExtractor_ReadReleaseNotes_NoEntry_ReturnsNull
+          - ReleaseNotesViewerViewModel_Constructor_EmptyReleaseNotes_UsesPlaceholderMessage

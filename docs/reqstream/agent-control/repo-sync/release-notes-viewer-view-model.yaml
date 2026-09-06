@@ -1,0 +1,24 @@
+---
+# Software Unit Requirements for the ReleaseNotesViewerViewModel Class
+#
+# ReleaseNotesViewerViewModel backs the release-notes dialog shown after a successful sync,
+# exposing the repo name, package title, and release-notes content (or a placeholder when
+# the package has none).
+
+sections:
+  - title: ReleaseNotesViewerViewModel Unit Requirements
+    requirements:
+      - id: AgentControl-ReleaseNotesViewerViewModel-Display
+        title: >-
+          The ReleaseNotesViewerViewModel class shall expose the repo name, package title, and
+          release-notes content for display, substituting a placeholder message when the
+          package has no release notes, and shall reject a null repo name or release notes
+          value.
+        justification: |
+          The developer must always see a coherent dialog after an upgrade, even for a
+          package version that ships no release notes, rather than a blank or broken view.
+        tests:
+          - ReleaseNotesViewerViewModel_Constructor_NonEmptyReleaseNotes_ExposesTitleAndContent
+          - ReleaseNotesViewerViewModel_Constructor_EmptyReleaseNotes_UsesPlaceholderMessage
+          - ReleaseNotesViewerViewModel_Constructor_NullRepoName_ThrowsArgumentNullException
+          - ReleaseNotesViewerViewModel_Constructor_NullReleaseNotes_ThrowsArgumentNullException

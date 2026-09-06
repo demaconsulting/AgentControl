@@ -1,0 +1,28 @@
+---
+# Startup Subsystem Requirements
+#
+# PURPOSE:
+# - Define requirements for the AgentControl Startup subsystem
+# - Startup spans StartupOptions.cs, which parses the fixed set of startup arguments
+#   (configuration-directory override, git executable override, agent-tool command
+#   override) used to support hermetic, isolated end-to-end testing
+# - Subsystem requirements describe the observable startup-argument behavior
+
+sections:
+  - title: Startup Subsystem Requirements
+    requirements:
+      - id: AgentControl-Startup-ParseArguments
+        title: >-
+          The Startup subsystem shall parse a configuration-directory override, a git
+          executable override, and an agent-tool command override from startup arguments, and
+          shall reject an unsupported argument or a missing value.
+        justification: |
+          Per architecture.md's testability decision, FlaUI end-to-end tests must be able to
+          isolate AgentControl's settings folder and substitute stub executables for git/the
+          agent tool; a malformed invocation must fail clearly rather than silently ignore an
+          override the caller expected to take effect.
+        children:
+          - AgentControl-StartupOptions-Parse
+        tests:
+          - StartupOptions_Parse_ConfigDirArgument_CapturesValue
+          - StartupOptions_Parse_UnsupportedArgument_ThrowsArgumentException

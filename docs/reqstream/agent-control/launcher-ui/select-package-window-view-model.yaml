@@ -1,0 +1,51 @@
+---
+# Software Unit Requirements for the SelectPackageWindowViewModel Class
+#
+# SelectPackageWindowViewModel backs the package-selection dialog, letting the user browse
+# package names and versions available at the configured package source and confirm a choice.
+
+sections:
+  - title: SelectPackageWindowViewModel Unit Requirements
+    requirements:
+      - id: AgentControl-SelectPackageWindowViewModel-ListPackages
+        title: >-
+          The SelectPackageWindowViewModel class shall list the package names discovered at
+          the configured package source, and shall present an empty list when the source has
+          no packages.
+        justification: |
+          The developer must choose from the packages actually available, never from a
+          stale or fabricated list.
+        tests:
+          - SelectPackageWindowViewModel_EmptySource_EmptyPackageNamesAndCanConfirmFalse
+
+      - id: AgentControl-SelectPackageWindowViewModel-VersionSelection
+        title: >-
+          The SelectPackageWindowViewModel class shall list a selected package's available
+          versions in descending order, defaulting to the newest, and shall recompute the
+          version list when the selected package name changes.
+        justification: |
+          Presenting versions newest-first with the newest pre-selected minimizes clicks for
+          the common case of wanting the latest version, while still allowing the developer to
+          pick an older one deliberately.
+        tests:
+          - SelectPackageWindowViewModel_SelectPackageName_PopulatesVersionsDescendingAndDefaultsToLatest
+          - SelectPackageWindowViewModel_ChangeSelectedPackageName_RecomputesVersionsAndResetsSelection
+
+      - id: AgentControl-SelectPackageWindowViewModel-ConfirmGating
+        title: >-
+          The SelectPackageWindowViewModel class shall permit confirmation only when both a
+          package name and version are selected.
+        justification: |
+          Prevents the developer from confirming an incomplete or ambiguous selection.
+        tests:
+          - SelectPackageWindowViewModel_NoSelection_CanConfirmIsFalse
+
+      - id: AgentControl-SelectPackageWindowViewModel-Confirm
+        title: >-
+          The SelectPackageWindowViewModel class shall signal the confirmed package
+          name/version pair when the user confirms their selection.
+        justification: |
+          The confirmed pair is what the owning RepoCardViewModel applies as the repo's new
+          pin, so the exact chosen values must be communicated accurately.
+        tests:
+          - SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithSelectedPair

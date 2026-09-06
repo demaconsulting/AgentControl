@@ -1,0 +1,30 @@
+---
+# Settings Subsystem Requirements
+#
+# PURPOSE:
+# - Define requirements for the AgentControl Settings subsystem
+# - Settings spans SettingsStore.cs (loads/saves application-wide settings), and the
+#   AppSettings.cs/RecentRepo.cs/AgentToolKind.cs data types, which are folded into this
+#   subsystem-level description as they have no dedicated test file
+# - Subsystem requirements describe the observable behavior of persisting application-wide
+#   preferences (package source, git/agent tool overrides, recent repos, shell preference)
+
+sections:
+  - title: Settings Subsystem Requirements
+    requirements:
+      - id: AgentControl-Settings-Persistence
+        title: >-
+          The Settings subsystem shall persist application-wide settings to a configuration
+          file, returning default settings when none has yet been saved, and shall resolve a
+          default configuration directory under the user's application-data folder.
+        justification: |
+          The developer's package source path, tool preferences, and recent-repos list must
+          survive across application restarts, and a first-ever run (with no existing
+          settings file) must still produce a usable, non-null default configuration.
+        children:
+          - AgentControl-SettingsStore-Load
+          - AgentControl-SettingsStore-Save
+          - AgentControl-SettingsStore-DefaultDirectory
+        tests:
+          - SettingsStore_SaveThenLoad_RoundTripsAllFields
+          - SettingsStore_Load_NoSettingsFile_ReturnsDefaults

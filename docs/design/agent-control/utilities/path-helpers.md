@@ -52,5 +52,9 @@ callers receive exceptions directly.
 
 #### Callers
 
-- **Validation** — calls `PathHelpers.SafePathCombine` to construct log file paths and
-  temporary directory paths during self-validation test execution.
+- **RepoPinStore** — calls `SafePathCombine` to construct the per-repo `.agentcontrol.json`
+  pin file path in both `Load` and `Save`, so a malformed repo root path cannot escape the
+  repo directory.
+- **PackageZipExtractor** — calls `SafePathCombine` to construct managed-folder paths for
+  `AllManagedFoldersExist` and zip-entry destination paths during `Extract`, so a malicious or
+  malformed zip-entry name cannot write outside the target repo.

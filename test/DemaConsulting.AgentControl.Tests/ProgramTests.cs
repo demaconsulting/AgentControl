@@ -18,256 +18,74 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using DemaConsulting.AgentControl.Cli;
-
 namespace DemaConsulting.AgentControl.Tests;
 
 /// <summary>
 ///     Unit tests for the Program class.
 /// </summary>
+/// <remarks>
+///     <see cref="Program.Main"/> is only exercised here for the argument-parsing error path:
+///     any successful parse hands off to Avalonia's <c>StartWithClassicDesktopLifetime</c>,
+///     which blocks for the lifetime of the application and requires a real UI backend, so it
+///     must never be invoked from a headless unit test. <see cref="Program.BuildAvaloniaApp"/>
+///     is exercised directly instead, since configuring (but not starting) an
+///     <see cref="Avalonia.AppBuilder"/> is safe to do headlessly.
+/// </remarks>
 [Collection("Sequential")]
 public class ProgramTests
 {
     /// <summary>
-    ///     Test that Run with version flag displays version only.
-    /// </summary>
-    [Fact]
-    public void Program_Run_WithVersionFlag_DisplaysVersionOnly()
-    {
-        // Arrange: setup test conditions
-        var originalOut = Console.Out;
-        try
-        {
-            using var outWriter = new StringWriter();
-            Console.SetOut(outWriter);
-            using var context = Context.Create(["--version"]);
-
-            // Act: execute the operation being tested
-            Program.Run(context);
-
-            // Assert: verify expected behavior
-            var output = outWriter.ToString();
-            Assert.Contains(Program.Version, output);
-            Assert.DoesNotContain("Copyright", output);
-            Assert.DoesNotContain("Agent Control version", output);
-            Assert.Equal(0, context.ExitCode);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
-    }
-
-    /// <summary>
-    ///     Test that Run with help flag displays usage information.
-    /// </summary>
-    [Fact]
-    public void Program_Run_WithHelpFlag_DisplaysUsageInformation()
-    {
-        // Arrange: setup test conditions
-        var originalOut = Console.Out;
-        try
-        {
-            using var outWriter = new StringWriter();
-            Console.SetOut(outWriter);
-            using var context = Context.Create(["--help"]);
-
-            // Act: execute the operation being tested
-            Program.Run(context);
-
-            // Assert: verify expected behavior
-            var output = outWriter.ToString();
-            Assert.Contains("Usage:", output);
-            Assert.Contains("Options:", output);
-            Assert.Contains("--version", output);
-            Assert.Contains("--help", output);
-            Assert.Equal(0, context.ExitCode);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
-    }
-
-    /// <summary>
-    ///     Test that Run with validate flag runs validation.
-    /// </summary>
-    [Fact]
-    public void Program_Run_WithValidateFlag_RunsValidation()
-    {
-        // Arrange: setup test conditions
-        var originalOut = Console.Out;
-        try
-        {
-            using var outWriter = new StringWriter();
-            Console.SetOut(outWriter);
-            using var context = Context.Create(["--validate"]);
-
-            // Act: execute the operation being tested
-            Program.Run(context);
-
-            // Assert: verify expected behavior
-            var output = outWriter.ToString();
-            Assert.Contains("Total Tests:", output);
-            Assert.Equal(0, context.ExitCode);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
-    }
-
-    /// <summary>
-    ///     Test that Run with no arguments displays default behavior.
-    /// </summary>
-    [Fact]
-    public void Program_Run_NoArguments_DisplaysDefaultBehavior()
-    {
-        // Arrange: setup test conditions
-        var originalOut = Console.Out;
-        try
-        {
-            using var outWriter = new StringWriter();
-            Console.SetOut(outWriter);
-            using var context = Context.Create([]);
-
-            // Act: execute the operation being tested
-            Program.Run(context);
-
-            // Assert: verify expected behavior
-            var output = outWriter.ToString();
-            Assert.Contains("Agent Control version", output);
-            Assert.Contains("Copyright", output);
-            Assert.Equal(0, context.ExitCode);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
-    }
-
-    /// <summary>
-    ///     Test that version property returns non-empty version string.
+    ///     Test that Version returns a non-empty string.
     /// </summary>
     [Fact]
     public void Program_Version_ReturnsNonEmptyString()
     {
-        // Act: execute the operation being tested
+        // Act: read the version property
         var version = Program.Version;
 
-        // Assert: verify expected behavior
+        // Assert: version is a non-empty string
         Assert.False(string.IsNullOrWhiteSpace(version));
     }
 
     /// <summary>
-    ///     Test that Main with invalid arguments returns non-zero exit code.
+    ///     Test that BuildAvaloniaApp returns a configured, non-null AppBuilder without starting
+    ///     any UI lifetime.
     /// </summary>
     [Fact]
-    public void Program_Main_WithInvalidArgs_ReturnsNonZeroExitCode()
+    public void Program_BuildAvaloniaApp_ReturnsConfiguredAppBuilder()
     {
-        // Arrange: redirect stderr to suppress error output during test
+        // Act: configure (but do not start) the Avalonia application builder
+        var builder = Program.BuildAvaloniaApp();
+
+        // Assert: a builder was returned, targeting the App class
+        Assert.NotNull(builder);
+        Assert.Equal(typeof(App), builder.ApplicationType);
+    }
+
+    /// <summary>
+    ///     Test that Main with an unsupported argument writes an error and returns a non-zero
+    ///     exit code without attempting to start the Avalonia UI.
+    /// </summary>
+    [Fact]
+    public void Program_Main_WithInvalidArgument_ReturnsNonZeroExitCode()
+    {
+        // Arrange: redirect stderr to suppress error output during the test
         var originalError = Console.Error;
         try
         {
             using var errWriter = new StringWriter();
             Console.SetError(errWriter);
 
-            // Act: invoke Main with an invalid argument
-            var result = Program.Main(["--invalid-argument"]);
+            // Act: invoke Main with an unsupported argument
+            var result = Program.Main(["--not-a-real-option"]);
 
-            // Assert: invalid arguments produce a non-zero exit code
+            // Assert: unsupported arguments produce a non-zero exit code and an error message
             Assert.Equal(1, result);
+            Assert.Contains("Error", errWriter.ToString());
         }
         finally
         {
             Console.SetError(originalError);
         }
     }
-
-    /// <summary>
-    ///     Test that Run with short version flag -v displays version.
-    /// </summary>
-    [Fact]
-    public void Program_Run_WithShortVersionFlag_DisplaysVersion()
-    {
-        // Arrange: setup test conditions
-        var originalOut = Console.Out;
-        try
-        {
-            using var outWriter = new StringWriter();
-            Console.SetOut(outWriter);
-            using var context = Context.Create(["-v"]);
-
-            // Act: execute the operation being tested
-            Program.Run(context);
-
-            // Assert: verify expected behavior
-            var output = outWriter.ToString();
-            Assert.Contains(Program.Version, output);
-            Assert.Equal(0, context.ExitCode);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
-    }
-
-    /// <summary>
-    ///     Test that Run with short help flag -h displays usage.
-    /// </summary>
-    [Fact]
-    public void Program_Run_WithShortHelpFlag_DisplaysUsage()
-    {
-        // Arrange: setup test conditions
-        var originalOut = Console.Out;
-        try
-        {
-            using var outWriter = new StringWriter();
-            Console.SetOut(outWriter);
-            using var context = Context.Create(["-h"]);
-
-            // Act: execute the operation being tested
-            Program.Run(context);
-
-            // Assert: verify expected behavior
-            var output = outWriter.ToString();
-            Assert.Contains("Usage:", output);
-            Assert.Contains("Options:", output);
-            Assert.Equal(0, context.ExitCode);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
-    }
-
-    /// <summary>
-    ///     Test that Run with short help flag -? displays usage.
-    /// </summary>
-    [Fact]
-    public void Program_Run_WithQuestionMarkFlag_DisplaysUsage()
-    {
-        // Arrange: setup test conditions
-        var originalOut = Console.Out;
-        try
-        {
-            using var outWriter = new StringWriter();
-            Console.SetOut(outWriter);
-            using var context = Context.Create(["-?"]);
-
-            // Act: execute the operation being tested
-            Program.Run(context);
-
-            // Assert: verify expected behavior
-            var output = outWriter.ToString();
-            Assert.Contains("Usage:", output);
-            Assert.Contains("Options:", output);
-            Assert.Equal(0, context.ExitCode);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
-    }
 }
-

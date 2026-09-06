@@ -1,0 +1,27 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        x:Class="DemaConsulting.AgentControl.LauncherUI.AboutWindow"
+        Name="AboutWindowRoot"
+        Title="About AgentControl"
+        Width="360" SizeToContent="Height"
+        MinWidth="280"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+    <StackPanel Margin="16" Spacing="8">
+        <TextBlock Text="AgentControl" FontWeight="Bold" FontSize="16" />
+        <TextBlock Name="AboutVersionText"
+                    AutomationProperties.AutomationId="AboutVersionText" />
+        <TextBlock Name="AboutCopyrightText"
+                    AutomationProperties.AutomationId="AboutCopyrightText" />
+        <TextBlock Name="AboutLicenseText"
+                    AutomationProperties.AutomationId="AboutLicenseText"
+                    TextWrapping="Wrap" />
+        <Button Name="AboutCloseButton"
+                 AutomationProperties.AutomationId="AboutCloseButton"
+                 Content="Close"
+                 Click="CloseButton_Click"
+                 HorizontalAlignment="Right" />
+    </StackPanel>
+</Window>

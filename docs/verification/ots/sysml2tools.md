@@ -33,10 +33,12 @@ assertions on its actual pipeline output:
   omits the diagram silently - so a successful Pandoc/WeasyPrint build is not sufficient evidence
   that render succeeded. Instead, `SysML2Tools_DesignDiagramsSvg` is a FileAssert test that runs
   immediately after the render step and directly asserts that each expected SVG file
-  (`SoftwareStructureView.svg`, `AgentControlView.svg`, `CliView.svg`, `SelfTestView.svg`,
-  `UtilitiesView.svg`) exists in `docs/design/generated/`, has a non-trivial size, and is
-  well-formed XML with an `<svg>` root element. This is the only evidence that render actually
-  produced the required diagrams against the real model.
+  (`SoftwareStructureView.svg`, `AgentControlView.svg`, `LauncherUIView.svg`,
+  `AgentPackageManagementView.svg`, `RepoSyncView.svg`, `RepoConfigView.svg`,
+  `AgentToolLauncherView.svg`, `GitIntegrationView.svg`, `SettingsView.svg`, `LoggingView.svg`,
+  `StartupView.svg`, `UtilitiesView.svg`) exists in `docs/design/generated/`, has a non-trivial
+  size, and is well-formed XML with an `<svg>` root element. This is the only evidence that
+  render actually produced the required diagrams against the real model.
 
 ### Test Scenarios
 
@@ -48,7 +50,7 @@ and a known-bad model fixture as part of its built-in self-test suite.
 **Expected**: Exits 0 with no reported syntax or reference errors for the valid fixture, and
 correctly reports an error for the invalid fixture.
 
-**Requirement coverage**: `Template-OTS-SysML2Tools-Lint`.
+**Requirement coverage**: `AgentControl-OTS-SysML2Tools-Lint`.
 
 #### SysML2Tools_RenderSvgSelfTest
 
@@ -57,19 +59,19 @@ against a known-good model fixture as part of its built-in self-test suite.
 
 **Expected**: Exits 0 and produces a non-empty SVG file for the fixture's declared view.
 
-**Requirement coverage**: `Template-OTS-SysML2Tools-Render`.
+**Requirement coverage**: `AgentControl-OTS-SysML2Tools-Render`.
 
 #### SysML2Tools_DesignDiagramsSvg
 
 **Scenario**: FileAssert asserts, immediately after the real `dotnet sysml2tools render` step runs
-against this project's actual model, that each of the five expected SVG files exists in
+against this project's actual model, that each of the twelve expected SVG files exists in
 `docs/design/generated/`, has a non-trivial size, and is well-formed XML with an `<svg>` root
 element.
 
 **Expected**: FileAssert exits 0, proving render produced every declared view's diagram against the
 real model - not just the self-test's fixture.
 
-**Requirement coverage**: `Template-OTS-SysML2Tools-Render`.
+**Requirement coverage**: `AgentControl-OTS-SysML2Tools-Render`.
 
 ### Acceptance Criteria
 

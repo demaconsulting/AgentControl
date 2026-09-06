@@ -1,0 +1,42 @@
+---
+# Software Unit Requirements for the SettingsStore Class
+#
+# SettingsStore loads and saves the application's settings file (package source path,
+# git/agent-tool overrides, recent-repos list, shell preference), and resolves the default
+# configuration directory under the user's application-data folder.
+
+sections:
+  - title: SettingsStore Unit Requirements
+    requirements:
+      - id: AgentControl-SettingsStore-Load
+        title: >-
+          The SettingsStore class shall load previously saved settings, returning default
+          settings when no settings file exists yet.
+        justification: |
+          A first-ever run of AgentControl has no settings file; the application must still
+          start successfully with a well-defined default configuration rather than failing.
+        tests:
+          - SettingsStore_SaveThenLoad_RoundTripsAllFields
+          - SettingsStore_Load_NoSettingsFile_ReturnsDefaults
+
+      - id: AgentControl-SettingsStore-Save
+        title: >-
+          The SettingsStore class shall save settings to the configuration directory,
+          creating the directory when it does not yet exist, and shall reject a null settings
+          value.
+        justification: |
+          The configuration directory may not exist yet on a first-ever run; save must not
+          require the developer to manually create it.
+        tests:
+          - SettingsStore_Save_DirectoryDoesNotExist_CreatesDirectory
+          - SettingsStore_Save_NullSettings_ThrowsArgumentNullException
+
+      - id: AgentControl-SettingsStore-DefaultDirectory
+        title: >-
+          The SettingsStore class shall resolve a default configuration directory under the
+          user's application-data folder.
+        justification: |
+          Provides a per-user, OS-conventional storage location for settings when no
+          configuration-directory override has been supplied at startup.
+        tests:
+          - SettingsStore_GetDefaultConfigDirectory_ReturnsPathUnderApplicationData

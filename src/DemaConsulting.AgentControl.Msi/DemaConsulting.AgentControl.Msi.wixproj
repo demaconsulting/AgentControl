@@ -1,0 +1,144 @@
+<!--
+  Minimal functional WiX Toolset v5 packaging project for DemaConsulting.AgentControl.
+
+  Per architecture.md's Phase 3 scope note, a "functional packaging approach is enough for v1":
+  this project packages the self-contained, single-file `dotnet publish` output of the main
+  DemaConsulting.AgentControl project into an installable MSI with a Start Menu shortcut.
+  There is intentionally no code signing, no custom UI, and no complex upgrade/versioning
+  logic - those are explicitly out of scope for v1.
+
+  Self-contained, single-file publish output was chosen so the target machine needs no
+  pre-installed .NET 10 desktop runtime; the trade-off is a larger packaged payload (the full
+  runtime plus Avalonia's native rendering stack are bundled into the published output), which
+  is an accepted v1 trade-off per the architecture's stated packaging scope.
+-->
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <PropertyGroup>
+    <!-- The main app targets plain "net10.0" (not a Windows-specific TFM), so the publish
+         RID must be specified explicitly here to produce a Windows-runnable, self-contained,
+         single-file output for harvesting. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <Platform>x64</Platform>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
+    <DefineConstants>ProductVersion=$(ProductVersion)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Plain ProjectReference (no Publish="true"). A normal reference still forces MSBuild to
+         fully Build DemaConsulting.AgentControl.csproj before this project's targets run (that
+         ordering guarantee comes from the reference itself, independent of "Publish=true"), but
+         it no longer triggers WiX's own nested "dotnet publish" of that reference.
+
+         Root cause of the Phase 3 quality-review defect: "Publish=true" made WiX run a SECOND,
+         separate publish-equivalent build of DemaConsulting.AgentControl.csproj concurrently
+         with the solution's own normal build of the exact same project into the exact same
+         default "obj\Release\net10.0\" / "bin\Release\net10.0\" folders (a framework-dependent
+         RID publish does not append a RID-specific intermediate path, since the produced IL is
+         RID-agnostic) - two MSBuild instances writing/reading the same .pdb/.dll files at once
+         causes an intermittent AVLN9999/CS2012 file-lock race. This is fixed below by replacing
+         "Publish=true" with an explicit custom Target that runs a fully independent, isolated
+         "dotnet publish" of that project into its own dedicated obj/bin/output folders, run only
+         after the normal build has already completed (see PublishAgentControlForHarvest below). -->
+    <ProjectReference Include="..\DemaConsulting.AgentControl\DemaConsulting.AgentControl.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The HarvestDirectory build task (a heat.exe-equivalent) that turns the published
+         output into WiX authoring at build time ships as a separate package. -->
+    <PackageReference Include="WixToolset.Heat" Version="5.0.2" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- Dedicated, isolated locations for the standalone nested publish below, kept entirely
+         separate from DemaConsulting.AgentControl's own default obj/bin so the two builds never
+         write to the same files. -->
+    <AgentControlProjectDir>$(MSBuildProjectDirectory)\..\DemaConsulting.AgentControl\</AgentControlProjectDir>
+    <AgentControlIsolatedObj>$(MSBuildProjectDirectory)\obj\wixpublish\obj\</AgentControlIsolatedObj>
+    <AgentControlIsolatedBin>$(MSBuildProjectDirectory)\obj\wixpublish\bin\</AgentControlIsolatedBin>
+    <AgentControlPublishDir>$(MSBuildProjectDirectory)\obj\wixpublish\publish\</AgentControlPublishDir>
+  </PropertyGroup>
+
+  <Target Name="PublishAgentControlForHarvest" BeforeTargets="GetHarvestDirectoryContent">
+    <!-- Because the ProjectReference above guarantees DemaConsulting.AgentControl.csproj's own
+         normal Build target has already fully completed by the time this runs, that project's
+         compiler-generated "obj\Release\net10.0\*.AssemblyInfo.cs" / "*.AssemblyAttributes.cs"
+         fragments already exist on disk and are no longer needed (they are already compiled
+         into that project's own output DLL). MSBuild's default "**/*.cs" wildcard used by the
+         isolated publish below has no way to exclude that OLD default obj folder once a
+         different BaseIntermediateOutputPath is in effect, so those two known, safely-
+         regenerable generated files are removed first to prevent them being picked up a second
+         time (which otherwise causes CS0579 duplicate-attribute errors during the isolated
+         publish). -->
+    <ItemGroup>
+      <_StaleAgentControlGeneratedCompile Include="$(AgentControlProjectDir)obj\$(Configuration)\**\*.AssemblyInfo.cs" />
+      <_StaleAgentControlGeneratedCompile Include="$(AgentControlProjectDir)obj\$(Configuration)\**\.NETCoreApp,Version=v*.AssemblyAttributes.cs" />
+    </ItemGroup>
+    <Delete Files="@(_StaleAgentControlGeneratedCompile)" Condition="Exists('%(_StaleAgentControlGeneratedCompile.Identity)')" />
+
+    <RemoveDir Directories="$(AgentControlPublishDir)" Condition="Exists('$(AgentControlPublishDir)')" />
+
+    <!-- A genuinely separate "dotnet publish" process (not an in-process MSBuild task) writing
+         to fully isolated obj/bin/output folders, run only after the normal build above has
+         finished - this eliminates the concurrent-write race by construction. "/nodeReuse:false"
+         is required in addition: MSBuild's default node-reuse pool lets this nested "dotnet
+         publish" invocation's build node be the SAME OS process as one already used earlier in
+         this build to evaluate/build DemaConsulting.AgentControl.csproj with its DEFAULT
+         BaseIntermediateOutputPath. When that happens, the reused node's in-memory project cache
+         mixes generated-file state between the two different BaseIntermediateOutputPath
+         evaluations of the same project, producing spurious CS0579 "duplicate attribute" errors
+         in this isolated publish's own generated AssemblyInfo/AssemblyAttributes files. Disabling
+         node reuse forces a brand-new MSBuild process for this publish, which has no such stale
+         cross-build state. -->
+    <!-- A single trailing backslash immediately before a closing quote is mis-parsed by the
+         Windows CRT argv parser as an escaped quote character, corrupting argument splitting;
+         each path below is trimmed of any trailing backslash and then given back exactly two
+         (an even count, which argv parsing resolves to one literal backslash plus a real,
+         unescaped closing quote) so BaseIntermediateOutputPath/BaseOutputPath still end in a
+         proper path separator for the SDK's own path concatenation. -->
+    <Exec Command="dotnet publish &quot;$(AgentControlProjectDir)DemaConsulting.AgentControl.csproj&quot; --configuration $(Configuration) --runtime win-x64 --self-contained true --output &quot;$(AgentControlPublishDir.TrimEnd('\'))&quot; -p:BaseIntermediateOutputPath=&quot;$(AgentControlIsolatedObj.TrimEnd('\'))\\&quot; -p:BaseOutputPath=&quot;$(AgentControlIsolatedBin.TrimEnd('\'))\\&quot; /nodeReuse:false" />
+  </Target>
+
+  <!-- Note: the isolation mechanism above (dedicated obj/bin/publish folders plus
+       "/nodeReuse:false") remains required regardless of self-contained/single-file status.
+       Its root cause - MSBuild node-reuse reusing an OS process whose in-memory project cache
+       already evaluated DemaConsulting.AgentControl.csproj under its DEFAULT
+       BaseIntermediateOutputPath, then mixing that stale generated-file state into this
+       isolated publish's own evaluation - is independent of RID/self-contained/single-file
+       settings, so it applies identically whether the nested publish is framework-dependent or
+       self-contained, single-file or multi-file. Additionally, now that SelfContained=true is
+       propagated as part of this project's own build (see PropertyGroup above), MSBuild's
+       standard SDK project-reference protocol also flows RuntimeIdentifier/SelfContained down
+       to DemaConsulting.AgentControl.csproj's own *normal* Build (not just this isolated
+       publish), causing that project's normal build to additionally emit a nested
+       "obj\Release\net10.0\win-x64\" self-contained build folder (with its own
+       AssemblyInfo.cs/AssemblyAttributes.cs) alongside its plain "obj\Release\net10.0\" folder.
+       The stale-file cleanup globs above use "**" (not a single "*") between $(Configuration)
+       and the file name specifically to catch both the RID-agnostic and RID-specific generated
+       files, regardless of how many intermediate subfolder levels the normal build produces. -->
+
+  <ItemGroup>
+    <!-- WiX's "!(bindpath.X)" syntax is a bind-time variable resolved only inside .wxs source,
+         not at MSBuild item-evaluation time, so it cannot be used directly as a HarvestDirectory
+         Include path here. The PublishAgentControlForHarvest target above places its isolated
+         "dotnet publish" output at $(AgentControlPublishDir), so that known, real path is
+         harvested instead. -->
+    <HarvestDirectory Include="$(AgentControlPublishDir)">
+      <ComponentGroupName>AgentControlPublishedComponents</ComponentGroupName>
+      <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
+      <SuppressRootDirectory>true</SuppressRootDirectory>
+    </HarvestDirectory>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Heat's harvested file references resolve relative to a WiX "bind path"; a plain
+         ProjectReference automatically contributes DemaConsulting.AgentControl's normal build
+         output directory as a bind path, but not every published file (in particular, RID-
+         specific native runtime assets only present in publish output) lives there. This
+         explicit bind path points resolution at the isolated publish directory instead, so all
+         harvested files - including publish-only native assets - resolve correctly. -->
+    <BindPath Include="$(AgentControlPublishDir)" />
+  </ItemGroup>
+
+</Project>

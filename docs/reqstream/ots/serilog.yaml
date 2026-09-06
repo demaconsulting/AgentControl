@@ -1,0 +1,26 @@
+---
+# Serilog OTS Software Requirements
+#
+# Requirements for the Serilog structured-logging library functionality.
+
+sections:
+  - title: OTS Software Requirements
+    sections:
+      - title: Serilog Requirements
+        requirements:
+          - id: AgentControl-OTS-Serilog-WriteLogFile
+            title: Serilog shall write a rolling diagnostic log file initialized at application startup.
+            justification: |
+              Serilog (via Serilog.Extensions.Logging and Serilog.Sinks.File) backs
+              AgentControl's Logging subsystem, writing the rolling diagnostic log file used to
+              troubleshoot process-launch and git-integration issues. No dedicated unit test
+              directly exercises the diagnostic log file's contents (see
+              docs/reqstream/agent-control/logging.yaml's test-evidence disclosure); the only
+              test-suite touch point is TestLoggingFixture.cs, an xUnit v3 assembly fixture that
+              calls LoggingSetup.Initialize (which configures Serilog) once before any test in the
+              assembly runs. Any passing test in that assembly is therefore indirect evidence that
+              Serilog initialized without throwing.
+            tags: [ots]
+            tests:
+              # Indirect evidence only, via TestLoggingFixture.cs - see justification above.
+              - GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue

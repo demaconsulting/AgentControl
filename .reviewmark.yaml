@@ -66,7 +66,9 @@ reviews:
       - "docs/design/agent-control.md"
       - "docs/verification/introduction.md"
       - "docs/verification/agent-control.md"
-      - "test/**/IntegrationTests.cs"
+      - "test/**/AssemblyInfo.cs"
+      - "test/**/DemaConsulting.AgentControl.UiTests/**/*.cs"
+      - "test/**/DemaConsulting.AgentControl.ArgLoggerStub/**/*.cs"
 
   - id: AgentControl-Design
     title: Review of Agent Control architectural and design consistency
@@ -86,6 +88,7 @@ reviews:
       - docs/reqstream/agent-control.yaml
     paths:
       - "docs/reqstream/agent-control/**/*.yaml"
+      - "docs/reqstream/quality.yaml"
 
   # AgentControl - Program
   - id: AgentControl-Program
@@ -98,59 +101,358 @@ reviews:
       - "docs/design/agent-control/program.md"
       - "docs/verification/agent-control/program.md"
       - "src/**/Program.cs"
+      - "src/**/App.axaml"
+      - "src/**/App.axaml.cs"
       - "test/**/ProgramTests.cs"
 
-  # AgentControl - Cli
-  - id: AgentControl-Cli
-    title: Review of Agent Control Cli subsystem architecture and interfaces
+  # AgentControl - LauncherUI
+  - id: AgentControl-LauncherUI
+    title: Review of Agent Control LauncherUI subsystem architecture and interfaces
     context:
       - docs/design/agent-control.md
       - docs/reqstream/agent-control.yaml
     paths:
-      - "docs/reqstream/agent-control/cli.yaml"
-      - "docs/design/agent-control/cli.md"
-      - "docs/verification/agent-control/cli.md"
-      - "test/**/Cli/CliSubsystemTests.cs"
+      - "docs/reqstream/agent-control/launcher-ui.yaml"
+      - "docs/design/agent-control/launcher-ui.md"
+      - "docs/verification/agent-control/launcher-ui.md"
+      - "src/**/LauncherUI/MainWindow.axaml"
+      - "src/**/LauncherUI/MainWindow.axaml.cs"
+      - "src/**/LauncherUI/AboutWindow.axaml"
+      - "src/**/LauncherUI/AboutWindow.axaml.cs"
+      - "src/**/LauncherUI/ConfirmationWindow.axaml"
+      - "src/**/LauncherUI/ConfirmationWindow.axaml.cs"
+      - "src/**/LauncherUI/MessageBoxWindow.axaml"
+      - "src/**/LauncherUI/MessageBoxWindow.axaml.cs"
+      - "src/**/LauncherUI/SelectPackageWindow.axaml"
+      - "src/**/LauncherUI/SelectPackageWindow.axaml.cs"
+      - "src/**/LauncherUI/SettingsWindow.axaml"
+      - "src/**/LauncherUI/SettingsWindow.axaml.cs"
+      - "src/**/LauncherUI/RelayCommand.cs"
+      - "src/**/LauncherUI/ViewModelBase.cs"
+      - "src/**/LauncherUI/FavoriteIconConverter.cs"
 
-  - id: AgentControl-Cli-Context
-    title: Review of Agent Control Context unit implementation
+  - id: AgentControl-LauncherUI-MainWindowViewModel
+    title: Review of Agent Control MainWindowViewModel unit implementation
     context:
       - docs/design/agent-control.md
       - docs/reqstream/agent-control.yaml
-      - docs/design/agent-control/cli.md
-      - docs/reqstream/agent-control/cli.yaml
+      - docs/design/agent-control/launcher-ui.md
+      - docs/reqstream/agent-control/launcher-ui.yaml
     paths:
-      - "docs/reqstream/agent-control/cli/context.yaml"
-      - "docs/design/agent-control/cli/context.md"
-      - "docs/verification/agent-control/cli/context.md"
-      - "src/**/Cli/Context.cs"
-      - "test/**/Cli/ContextTests.cs"
+      - "docs/reqstream/agent-control/launcher-ui/main-window-view-model.yaml"
+      - "docs/design/agent-control/launcher-ui/main-window-view-model.md"
+      - "docs/verification/agent-control/launcher-ui/main-window-view-model.md"
+      - "src/**/LauncherUI/MainWindowViewModel.cs"
+      - "test/**/LauncherUI/MainWindowViewModelTests.cs"
 
-  # AgentControl - SelfTest
-  - id: AgentControl-SelfTest
-    title: Review of Agent Control SelfTest subsystem architecture and interfaces
+  - id: AgentControl-LauncherUI-RepoCardViewModel
+    title: Review of Agent Control RepoCardViewModel unit implementation
     context:
       - docs/design/agent-control.md
       - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/launcher-ui.md
+      - docs/reqstream/agent-control/launcher-ui.yaml
     paths:
-      - "docs/reqstream/agent-control/self-test.yaml"
-      - "docs/design/agent-control/self-test.md"
-      - "docs/verification/agent-control/self-test.md"
-      - "test/**/SelfTest/SelfTestSubsystemTests.cs"
+      - "docs/reqstream/agent-control/launcher-ui/repo-card-view-model.yaml"
+      - "docs/design/agent-control/launcher-ui/repo-card-view-model.md"
+      - "docs/verification/agent-control/launcher-ui/repo-card-view-model.md"
+      - "src/**/LauncherUI/RepoCardViewModel.cs"
+      - "test/**/LauncherUI/RepoCardViewModelTests.cs"
 
-  - id: AgentControl-SelfTest-Validation
-    title: Review of Agent Control Validation unit implementation
+  - id: AgentControl-LauncherUI-SelectPackageWindowViewModel
+    title: Review of Agent Control SelectPackageWindowViewModel unit implementation
     context:
       - docs/design/agent-control.md
       - docs/reqstream/agent-control.yaml
-      - docs/design/agent-control/self-test.md
-      - docs/reqstream/agent-control/self-test.yaml
+      - docs/design/agent-control/launcher-ui.md
+      - docs/reqstream/agent-control/launcher-ui.yaml
     paths:
-      - "docs/reqstream/agent-control/self-test/validation.yaml"
-      - "docs/design/agent-control/self-test/validation.md"
-      - "docs/verification/agent-control/self-test/validation.md"
-      - "src/**/SelfTest/Validation.cs"
-      - "test/**/SelfTest/ValidationTests.cs"
+      - "docs/reqstream/agent-control/launcher-ui/select-package-window-view-model.yaml"
+      - "docs/design/agent-control/launcher-ui/select-package-window-view-model.md"
+      - "docs/verification/agent-control/launcher-ui/select-package-window-view-model.md"
+      - "src/**/LauncherUI/SelectPackageWindowViewModel.cs"
+      - "test/**/LauncherUI/SelectPackageWindowViewModelTests.cs"
+
+  - id: AgentControl-LauncherUI-SettingsWindowViewModel
+    title: Review of Agent Control SettingsWindowViewModel unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/launcher-ui.md
+      - docs/reqstream/agent-control/launcher-ui.yaml
+    paths:
+      - "docs/reqstream/agent-control/launcher-ui/settings-window-view-model.yaml"
+      - "docs/design/agent-control/launcher-ui/settings-window-view-model.md"
+      - "docs/verification/agent-control/launcher-ui/settings-window-view-model.md"
+      - "src/**/LauncherUI/SettingsWindowViewModel.cs"
+      - "test/**/LauncherUI/SettingsWindowViewModelTests.cs"
+
+  # AgentControl - AgentPackageManagement
+  - id: AgentControl-AgentPackageManagement
+    title: Review of Agent Control AgentPackageManagement subsystem architecture and interfaces
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-package-management.yaml"
+      - "docs/design/agent-control/agent-package-management.md"
+      - "docs/verification/agent-control/agent-package-management.md"
+
+  - id: AgentControl-AgentPackageManagement-PackageSource
+    title: Review of Agent Control PackageSource unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-package-management.md
+      - docs/reqstream/agent-control/agent-package-management.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-package-management/package-source.yaml"
+      - "docs/design/agent-control/agent-package-management/package-source.md"
+      - "docs/verification/agent-control/agent-package-management/package-source.md"
+      - "src/**/AgentPackageManagement/PackageSource.cs"
+      - "test/**/AgentPackageManagement/PackageSourceTests.cs"
+
+  - id: AgentControl-AgentPackageManagement-PackageVersion
+    title: Review of Agent Control PackageVersion unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-package-management.md
+      - docs/reqstream/agent-control/agent-package-management.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-package-management/package-version.yaml"
+      - "docs/design/agent-control/agent-package-management/package-version.md"
+      - "docs/verification/agent-control/agent-package-management/package-version.md"
+      - "src/**/AgentPackageManagement/PackageVersion.cs"
+      - "test/**/AgentPackageManagement/PackageVersionTests.cs"
+
+  - id: AgentControl-AgentPackageManagement-PackageVersionCache
+    title: Review of Agent Control PackageVersionCache unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-package-management.md
+      - docs/reqstream/agent-control/agent-package-management.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-package-management/package-version-cache.yaml"
+      - "docs/design/agent-control/agent-package-management/package-version-cache.md"
+      - "docs/verification/agent-control/agent-package-management/package-version-cache.md"
+      - "src/**/AgentPackageManagement/PackageVersionCache.cs"
+      - "test/**/AgentPackageManagement/PackageVersionCacheTests.cs"
+
+  # AgentControl - RepoSync
+  - id: AgentControl-RepoSync
+    title: Review of Agent Control RepoSync subsystem architecture and interfaces
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+    paths:
+      - "docs/reqstream/agent-control/repo-sync.yaml"
+      - "docs/design/agent-control/repo-sync.md"
+      - "docs/verification/agent-control/repo-sync.md"
+      - "src/**/RepoSync/ReleaseNotesViewer.axaml"
+      - "src/**/RepoSync/ReleaseNotesViewer.axaml.cs"
+
+  - id: AgentControl-RepoSync-PackageZipExtractor
+    title: Review of Agent Control PackageZipExtractor unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/repo-sync.md
+      - docs/reqstream/agent-control/repo-sync.yaml
+    paths:
+      - "docs/reqstream/agent-control/repo-sync/package-zip-extractor.yaml"
+      - "docs/design/agent-control/repo-sync/package-zip-extractor.md"
+      - "docs/verification/agent-control/repo-sync/package-zip-extractor.md"
+      - "src/**/RepoSync/PackageZipExtractor.cs"
+      - "test/**/RepoSync/PackageZipExtractorTests.cs"
+
+  - id: AgentControl-RepoSync-ReleaseNotesViewerViewModel
+    title: Review of Agent Control ReleaseNotesViewerViewModel unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/repo-sync.md
+      - docs/reqstream/agent-control/repo-sync.yaml
+    paths:
+      - "docs/reqstream/agent-control/repo-sync/release-notes-viewer-view-model.yaml"
+      - "docs/design/agent-control/repo-sync/release-notes-viewer-view-model.md"
+      - "docs/verification/agent-control/repo-sync/release-notes-viewer-view-model.md"
+      - "src/**/RepoSync/ReleaseNotesViewerViewModel.cs"
+      - "test/**/RepoSync/ReleaseNotesViewerViewModelTests.cs"
+
+  # AgentControl - RepoConfig
+  - id: AgentControl-RepoConfig
+    title: Review of Agent Control RepoConfig subsystem architecture and interfaces
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+    paths:
+      - "docs/reqstream/agent-control/repo-config.yaml"
+      - "docs/design/agent-control/repo-config.md"
+      - "docs/verification/agent-control/repo-config.md"
+      - "src/**/RepoConfig/RepoPin.cs"
+
+  - id: AgentControl-RepoConfig-RepoPinStore
+    title: Review of Agent Control RepoPinStore unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/repo-config.md
+      - docs/reqstream/agent-control/repo-config.yaml
+    paths:
+      - "docs/reqstream/agent-control/repo-config/repo-pin-store.yaml"
+      - "docs/design/agent-control/repo-config/repo-pin-store.md"
+      - "docs/verification/agent-control/repo-config/repo-pin-store.md"
+      - "src/**/RepoConfig/RepoPinStore.cs"
+      - "test/**/RepoConfig/RepoPinStoreTests.cs"
+
+  # AgentControl - AgentToolLauncherSubsystem
+  - id: AgentControl-AgentToolLauncherSubsystem
+    title: Review of Agent Control AgentToolLauncher subsystem architecture and interfaces
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-tool-launcher.yaml"
+      - "docs/design/agent-control/agent-tool-launcher.md"
+      - "docs/verification/agent-control/agent-tool-launcher.md"
+      - "src/**/AgentToolLauncher/ShellKind.cs"
+
+  - id: AgentControl-AgentToolLauncherSubsystem-AgentToolLauncher
+    title: Review of Agent Control AgentToolLauncher unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-tool-launcher.md
+      - docs/reqstream/agent-control/agent-tool-launcher.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-tool-launcher/agent-tool-launcher.yaml"
+      - "docs/design/agent-control/agent-tool-launcher/agent-tool-launcher.md"
+      - "docs/verification/agent-control/agent-tool-launcher/agent-tool-launcher.md"
+      - "src/**/AgentToolLauncher/AgentToolLauncher.cs"
+      - "test/**/AgentToolLauncher/AgentToolLauncherTests.cs"
+
+  - id: AgentControl-AgentToolLauncherSubsystem-ShellDetector
+    title: Review of Agent Control ShellDetector unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-tool-launcher.md
+      - docs/reqstream/agent-control/agent-tool-launcher.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-tool-launcher/shell-detector.yaml"
+      - "docs/design/agent-control/agent-tool-launcher/shell-detector.md"
+      - "docs/verification/agent-control/agent-tool-launcher/shell-detector.md"
+      - "src/**/AgentToolLauncher/ShellDetector.cs"
+      - "test/**/AgentToolLauncher/ShellDetectorTests.cs"
+
+  # AgentControl - GitIntegration
+  - id: AgentControl-GitIntegration
+    title: Review of Agent Control GitIntegration subsystem architecture and interfaces
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+    paths:
+      - "docs/reqstream/agent-control/git-integration.yaml"
+      - "docs/design/agent-control/git-integration.md"
+      - "docs/verification/agent-control/git-integration.md"
+
+  - id: AgentControl-GitIntegration-GitClient
+    title: Review of Agent Control GitClient unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/git-integration.md
+      - docs/reqstream/agent-control/git-integration.yaml
+    paths:
+      - "docs/reqstream/agent-control/git-integration/git-client.yaml"
+      - "docs/design/agent-control/git-integration/git-client.md"
+      - "docs/verification/agent-control/git-integration/git-client.md"
+      - "src/**/GitIntegration/GitClient.cs"
+      - "test/**/GitIntegration/GitClientTests.cs"
+      - "test/**/GitIntegration/GitStub.cs"
+
+  - id: AgentControl-GitIntegration-CommittedAgentFilesCache
+    title: Review of Agent Control CommittedAgentFilesCache unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/git-integration.md
+      - docs/reqstream/agent-control/git-integration.yaml
+    paths:
+      - "docs/reqstream/agent-control/git-integration/committed-agent-files-cache.yaml"
+      - "docs/design/agent-control/git-integration/committed-agent-files-cache.md"
+      - "docs/verification/agent-control/git-integration/committed-agent-files-cache.md"
+      - "src/**/GitIntegration/CommittedAgentFilesCache.cs"
+      - "test/**/GitIntegration/CommittedAgentFilesCacheTests.cs"
+
+  # AgentControl - Settings
+  - id: AgentControl-Settings
+    title: Review of Agent Control Settings subsystem architecture and interfaces
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+    paths:
+      - "docs/reqstream/agent-control/settings.yaml"
+      - "docs/design/agent-control/settings.md"
+      - "docs/verification/agent-control/settings.md"
+      - "src/**/Settings/AppSettings.cs"
+      - "src/**/Settings/RecentRepo.cs"
+      - "src/**/Settings/AgentToolKind.cs"
+
+  - id: AgentControl-Settings-SettingsStore
+    title: Review of Agent Control SettingsStore unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/settings.md
+      - docs/reqstream/agent-control/settings.yaml
+    paths:
+      - "docs/reqstream/agent-control/settings/settings-store.yaml"
+      - "docs/design/agent-control/settings/settings-store.md"
+      - "docs/verification/agent-control/settings/settings-store.md"
+      - "src/**/Settings/SettingsStore.cs"
+      - "test/**/Settings/SettingsStoreTests.cs"
+
+  # AgentControl - Logging (no dedicated unit test file; documented at subsystem level only)
+  - id: AgentControl-Logging
+    title: Review of Agent Control Logging subsystem architecture and interfaces
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+    paths:
+      - "docs/reqstream/agent-control/logging.yaml"
+      - "docs/design/agent-control/logging.md"
+      - "docs/verification/agent-control/logging.md"
+      - "src/**/Logging/AppLogging.cs"
+      - "src/**/Logging/LoggingSetup.cs"
+      - "test/**/TestLoggingFixture.cs"
+
+  # AgentControl - Startup
+  - id: AgentControl-Startup
+    title: Review of Agent Control Startup subsystem architecture and interfaces
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+    paths:
+      - "docs/reqstream/agent-control/startup.yaml"
+      - "docs/design/agent-control/startup.md"
+      - "docs/verification/agent-control/startup.md"
+
+  - id: AgentControl-Startup-StartupOptions
+    title: Review of Agent Control StartupOptions unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/startup.md
+      - docs/reqstream/agent-control/startup.yaml
+    paths:
+      - "docs/reqstream/agent-control/startup/startup-options.yaml"
+      - "docs/design/agent-control/startup/startup-options.md"
+      - "docs/verification/agent-control/startup/startup-options.md"
+      - "src/**/Startup/StartupOptions.cs"
+      - "test/**/Startup/StartupOptionsTests.cs"
 
   # AgentControl - Utilities
   - id: AgentControl-Utilities
@@ -179,6 +481,13 @@ reviews:
       - "test/**/Utilities/PathHelpersTests.cs"
 
   # OTS Items
+  - id: OTS-Avalonia
+    title: Review of Avalonia OTS verification evidence
+    paths:
+      - "docs/reqstream/ots/avalonia.yaml"
+      - "docs/design/ots/avalonia.md"
+      - "docs/verification/ots/avalonia.md"
+
   - id: OTS-BuildMark
     title: Review of BuildMark OTS verification evidence
     paths:
@@ -192,6 +501,13 @@ reviews:
       - "docs/reqstream/ots/fileassert.yaml"
       - "docs/design/ots/fileassert.md"
       - "docs/verification/ots/fileassert.md"
+
+  - id: OTS-FlaUI
+    title: Review of FlaUI OTS verification evidence
+    paths:
+      - "docs/reqstream/ots/flaui.yaml"
+      - "docs/design/ots/flaui.md"
+      - "docs/verification/ots/flaui.md"
 
   - id: OTS-Pandoc
     title: Review of Pandoc OTS verification evidence
@@ -221,6 +537,13 @@ reviews:
       - "docs/design/ots/sarifmark.md"
       - "docs/verification/ots/sarifmark.md"
 
+  - id: OTS-Serilog
+    title: Review of Serilog OTS verification evidence
+    paths:
+      - "docs/reqstream/ots/serilog.yaml"
+      - "docs/design/ots/serilog.md"
+      - "docs/verification/ots/serilog.md"
+
   - id: OTS-SonarMark
     title: Review of SonarMark OTS verification evidence
     paths:
@@ -248,6 +571,13 @@ reviews:
       - "docs/reqstream/ots/weasyprint.yaml"
       - "docs/design/ots/weasyprint.md"
       - "docs/verification/ots/weasyprint.md"
+
+  - id: OTS-WixToolset
+    title: Review of WixToolset OTS verification evidence
+    paths:
+      - "docs/reqstream/ots/wixtoolset.yaml"
+      - "docs/design/ots/wixtoolset.md"
+      - "docs/verification/ots/wixtoolset.md"
 
   - id: OTS-xUnit
     title: Review of xUnit OTS verification evidence

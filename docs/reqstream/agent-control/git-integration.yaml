@@ -1,0 +1,68 @@
+---
+# GitIntegration Subsystem Requirements
+#
+# PURPOSE:
+# - Define requirements for the AgentControl GitIntegration subsystem
+# - GitIntegration spans GitClient.cs (invokes the configured git executable for status,
+#   pull, branch, and committed-files queries) and CommittedAgentFilesCache.cs (caches the
+#   committed-agent-files-changed check keyed by HEAD commit hash)
+# - Subsystem requirements describe the observable git-derived status/actions surfaced on
+#   each repo card
+
+sections:
+  - title: GitIntegration Subsystem Requirements
+    requirements:
+      - id: AgentControl-GitIntegration-PullGating
+        title: >-
+          The GitIntegration subsystem shall report whether a repo's working tree is clean, so
+          pull can be gated on that state.
+        justification: |
+          Pull must only be offered when it cannot produce a merge conflict AgentControl
+          cannot resolve automatically.
+        children:
+          - AgentControl-GitClient-CheckWorkingTree
+        tests:
+          - GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue
+          - GitClient_IsWorkingTreeClean_DirtyRepo_ReturnsFalse
+
+      - id: AgentControl-GitIntegration-Pull
+        title: >-
+          The GitIntegration subsystem shall pull a repo's latest commits using the configured
+          git executable, reporting success or failure without throwing.
+        justification: |
+          A pull failure (network issue, auth failure, no upstream) is a normal, expected
+          outcome the UI must be able to display, not treat as an application error.
+        children:
+          - AgentControl-GitClient-Pull
+        tests:
+          - GitClient_Pull_Succeeds_ReturnsSucceededResult
+          - GitClient_Pull_Fails_ReturnsNonSucceededResultWithoutThrowing
+
+      - id: AgentControl-GitIntegration-DetectCommittedFiles
+        title: >-
+          The GitIntegration subsystem shall detect whether a repo has committed agent files
+          (rather than only gitignored/local ones), caching the result per HEAD commit hash so
+          repeated checks against an unchanged commit avoid re-invoking git.
+        justification: |
+          Surfaces the committed-agent-files-changed badge cheaply across frequent UI
+          refreshes, since the underlying git query only needs to be redone when the repo's
+          HEAD commit actually changes.
+        children:
+          - AgentControl-GitClient-DetectCommittedFiles
+          - AgentControl-CommittedAgentFilesCache-Cache
+          - AgentControl-GitClient-HeadHash
+        tests:
+          - GitClient_HasCommittedAgentFiles_LsFilesReportsFiles_ReturnsTrue
+          - CommittedAgentFilesCache_SameRepoAndHash_ReturnsCachedValue
+
+      - id: AgentControl-GitIntegration-CurrentBranch
+        title: >-
+          The GitIntegration subsystem shall resolve a repo's current branch name for display
+          on each repo card.
+        justification: |
+          The recent-repos list shows each repo's current git branch so a developer can tell
+          at a glance which branch they last worked from, without opening a terminal.
+        children:
+          - AgentControl-GitClient-CurrentBranch
+        tests:
+          - GitClient_GetCurrentBranch_FastPathNormalBranch_ReturnsBranchNameWithoutInvokingGit

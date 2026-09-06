@@ -9,5 +9,6 @@ keywords:
   - Requirements
   - Specification
   - .NET
-  - Command-Line Tool
+  - Avalonia
+  - Desktop Application
 ---

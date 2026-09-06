@@ -1,0 +1,47 @@
+---
+# Software Unit Requirements for the PackageZipExtractor Class
+#
+# PackageZipExtractor extracts a package zip's managed folders into a repo, fully replacing
+# any existing managed-folder contents, and can read a package's release notes without
+# extracting the archive.
+
+sections:
+  - title: PackageZipExtractor Unit Requirements
+    requirements:
+      - id: AgentControl-PackageZipExtractor-Extract
+        title: >-
+          The PackageZipExtractor class shall extract a package zip's managed folders into a
+          repo, creating them when absent and replacing their prior contents when present, and
+          shall reject a file that is not a valid zip archive.
+        justification: |
+          Guarantees the repo's agent files are always an exact match for the pinned
+          package's contents, whether this is the first extraction or replacing an older
+          version, and fails clearly on a corrupt input rather than partially extracting it.
+        tests:
+          - PackageZipExtractor_Extract_FreshRepo_CreatesManagedFoldersOnly
+          - PackageZipExtractor_Extract_ExistingManagedFolder_ReplacesOldContents
+          - PackageZipExtractor_Extract_InvalidZipFile_ThrowsInvalidOperationException
+
+      - id: AgentControl-PackageZipExtractor-AllManagedFoldersExist
+        title: >-
+          The PackageZipExtractor class shall report whether all of a repo's managed agent-file
+          folders are present, returning false if any are missing.
+        justification: |
+          Used by the ensure-synced-before-launch check to decide whether a re-extraction is
+          needed without re-scanning file contents.
+        tests:
+          - PackageZipExtractor_AllManagedFoldersExist_AllFourPresent_ReturnsTrue
+          - PackageZipExtractor_AllManagedFoldersExist_SomeMissing_ReturnsFalse
+          - PackageZipExtractor_AllManagedFoldersExist_NoneExist_ReturnsFalse
+
+      - id: AgentControl-PackageZipExtractor-ReadReleaseNotes
+        title: >-
+          The PackageZipExtractor class shall read a package's release notes entry from its
+          zip without extracting the archive, and shall return none when the package has no
+          release notes entry.
+        justification: |
+          Lets the UI preview release notes for an upgrade candidate before committing to a
+          full extraction.
+        tests:
+          - PackageZipExtractor_ReadReleaseNotes_EntryPresent_ReturnsContentWithoutExtracting
+          - PackageZipExtractor_ReadReleaseNotes_NoEntry_ReturnsNull

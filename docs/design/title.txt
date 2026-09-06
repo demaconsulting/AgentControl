@@ -1,13 +1,14 @@
 ---
 title: Agent Control Software Design Document
-subtitle: A .NET Reference Implementation for CLI Tools
+subtitle: A Desktop Launcher for Distributing Proprietary Agent Packages
 author: DEMA Consulting
 description: Detailed design document for the Agent Control
 lang: en-US
 keywords:
   - Agent Control
   - .NET
-  - Command-Line Tool
+  - Avalonia
+  - Desktop Application
   - Design
   - Software Design Document
 ---

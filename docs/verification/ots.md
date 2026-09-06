@@ -16,14 +16,18 @@ Internal OTS tool design is out of scope; only integration and usage evidence is
 
 The following OTS items have verification evidence in this section:
 
+- Avalonia (_avalonia.md_) — cross-platform UI framework
 - BuildMark (_buildmark.md_) — build-notes documentation tool
 - FileAssert (_fileassert.md_) — document assertion tool
+- FlaUI (_flaui.md_) — Windows UI Automation testing library
 - Pandoc (_pandoc.md_) — Markdown-to-HTML conversion tool
 - ReqStream (_reqstream.md_) — requirements traceability tool
 - ReviewMark (_reviewmark.md_) — file review enforcement tool
 - SarifMark (_sarifmark.md_) — SARIF report conversion tool
+- Serilog (_serilog.md_) — structured-logging library
 - SonarMark (_sonarmark.md_) — SonarCloud quality report tool
 - SysML2Tools (_sysml2tools.md_) — architecture model validation and diagram rendering tool
 - VersionMark (_versionmark.md_) — tool-version documentation tool
 - WeasyPrint (_weasyprint.md_) — HTML-to-PDF conversion tool
+- WiX Toolset (_wixtoolset.md_) — Windows MSI installer packaging tool
 - xUnit (_xunit.md_) — unit-testing framework

@@ -1,33 +1,36 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
-    <!-- NuGet Tool Package Configuration -->
-    <PackAsTool>true</PackAsTool>
-    <ToolCommandName>agentcontrol</ToolCommandName>
-    <PackageId>DemaConsulting.AgentControl</PackageId>
+    <!-- Avalonia Configuration -->
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+
+    <!-- Application Identity (desktop app metadata; retained for About/publish use) -->
+    <IsPackable>false</IsPackable>
+    <AssemblyName>DemaConsulting.AgentControl</AssemblyName>
+    <!-- Windows executable/taskbar icon, generated from the repository-root Icon.png (see
+         Assets/AppIcon.ico). Avalonia decodes .ico files itself (cross-platform), so the same
+         file is also referenced as MainWindow's Icon in XAML for the title-bar/task-switcher
+         icon on every OS; ApplicationIcon here additionally covers the Win32 .exe file icon
+         shown in Explorer, which XAML alone cannot set. -->
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <Version>0.0.0</Version>
     <Authors>DEMA Consulting</Authors>
     <Company>DEMA Consulting</Company>
-    <Description>Template project for DEMA Consulting DotNet Tools</Description>
+    <Description>Desktop launcher for distributing proprietary AI-agent configuration alongside public repositories.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/demaconsulting/AgentControl</PackageProjectUrl>
     <RepositoryUrl>https://github.com/demaconsulting/AgentControl</RepositoryUrl>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageIcon>Icon.png</PackageIcon>
-    <PackageTags>template;dotnet-tool</PackageTags>
     <Copyright>Copyright DEMA Consulting</Copyright>
     <Title>Agent Control</Title>
     <Product>DemaConsulting.AgentControl</Product>
 
-    <!-- Symbol Package Configuration -->
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <!-- Source Link Configuration -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
@@ -41,14 +44,39 @@
 
     <!-- SBOM Configuration -->
     <GenerateSBOM>true</GenerateSBOM>
-    <SBOMPackageName>$(PackageId)</SBOMPackageName>
+    <SBOMPackageName>$(AssemblyName)</SBOMPackageName>
     <SBOMPackageVersion>$(Version)</SBOMPackageVersion>
     <SBOMPackageSupplier>Organization: $(Company)</SBOMPackageSupplier>
   </PropertyGroup>
 
-  <!-- Runtime Dependencies -->
+  <!-- Self-Contained Single-File Publish Configuration -->
+  <!-- "$(_IsPublishing)" is an SDK-reserved property that the SDK itself sets to "true" only
+       during an actual "dotnet publish" invocation (never during "dotnet build", "dotnet test",
+       or an IDE/F5 debug build), so guarding this entire PropertyGroup on it keeps every
+       ordinary build/test/debug output path completely unaffected - no RuntimeIdentifier is
+       declared here (it remains CLI-only, supplied by the WiX MSI project's isolated nested
+       publish via the "runtime win-x64" CLI switch), so SelfContained=true never triggers
+       NETSDK1031 ("SelfContained requires RuntimeIdentifier") on a plain build. This makes the
+       published output self-contained (bundles its own .NET 10 runtime, so end users need no
+       pre-installed runtime) and a single file (one .exe, easing distribution via the MSI's
+       Start Menu shortcut). -->
+  <PropertyGroup Condition="'$(_IsPublishing)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <!-- Bundles native dependencies (notably Avalonia's native graphics-rendering libraries)
+         into the single-file executable itself rather than extracting them alongside it, so the
+         published output truly is one file. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Compresses the bundled runtime/native assets inside the single-file executable to
+         reduce its on-disk size; this is an explicit, accepted trade-off (slightly higher
+         startup-time decompression cost) in exchange for a smaller distributable payload. -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+  <!-- Embedded application assets (app icon, etc.), addressable at runtime via
+       avares://DemaConsulting.AgentControl/Assets/... -->
   <ItemGroup>
-    <PackageReference Include="DemaConsulting.TestResults" Version="1.10.0" />
+    <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
 
   <!-- Build Tool Dependencies -->
@@ -56,6 +84,31 @@
     <PackageReference Include="Microsoft.Sbom.Targets" Version="4.1.5" PrivateAssets="All" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.400" PrivateAssets="All" />
     <PackageReference Include="Polyfill" Version="11.2.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <!-- Logging Dependencies -->
+  <!-- Serilog provides the file sink (with built-in rolling/retention via
+       RollingInterval and retainedFileCountLimit, so no hand-rolled log cleanup is
+       needed) that backs the Microsoft.Extensions.Logging.ILogger abstraction used
+       throughout the app, so subsystems depend only on the portable ILogger<T>
+       interface rather than Serilog directly. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+  <!-- Avalonia UI Dependencies -->
+  <!-- Avalonia.Diagnostics (the classic F12 dev-tools overlay) was removed as of Avalonia 12.0
+       (see https://docs.avaloniaui.net/docs/avalonia12-breaking-changes) with no free-tier
+       drop-in replacement published to nuget.org; its Debug-only dev-tools role is therefore
+       intentionally omitted here rather than pinned to an incompatible 11.x version. -->
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />
+    <PackageReference Include="Material.Icons.Avalonia" Version="3.0.2" />
   </ItemGroup>
 
   <!-- Code Analysis Dependencies -->
@@ -77,11 +130,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DemaConsulting.AgentControl.Tests" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
-    <None Include="..\..\Icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

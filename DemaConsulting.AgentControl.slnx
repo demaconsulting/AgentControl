@@ -1,8 +1,15 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/DemaConsulting.AgentControl/DemaConsulting.AgentControl.csproj" />
+    <Project Path="src/DemaConsulting.AgentControl.Msi/DemaConsulting.AgentControl.Msi.wixproj">
+      <Platform Project="x64" />
+      <Build Solution="Debug|Any CPU" Project="true" />
+      <Build Solution="Release|Any CPU" Project="true" />
+    </Project>
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/DemaConsulting.AgentControl.Tests/DemaConsulting.AgentControl.Tests.csproj" />
+    <Project Path="test/DemaConsulting.AgentControl.UiTests/DemaConsulting.AgentControl.UiTests.csproj" />
+    <Project Path="test/DemaConsulting.AgentControl.ArgLoggerStub/DemaConsulting.AgentControl.ArgLoggerStub.csproj" />
   </Folder>
 </Solution>

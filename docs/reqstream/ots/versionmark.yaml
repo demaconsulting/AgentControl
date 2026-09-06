@@ -8,7 +8,7 @@ sections:
     sections:
       - title: VersionMark Requirements
         requirements:
-          - id: Template-OTS-VersionMark
+          - id: AgentControl-OTS-VersionMark
             title: VersionMark shall publish captured tool-version information.
             justification: |
               DemaConsulting.VersionMark reads version metadata for each dotnet tool used in the

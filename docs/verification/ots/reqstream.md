@@ -33,7 +33,7 @@ complete test coverage.
 
 **Expected**: Correctly loads and parses all requirements.
 
-**Requirement coverage**: `Template-OTS-ReqStream`.
+**Requirement coverage**: `AgentControl-OTS-ReqStream`.
 
 #### ReqStream_TraceMatrix
 
@@ -42,7 +42,7 @@ results.
 
 **Expected**: Produces a correctly linked trace matrix.
 
-**Requirement coverage**: `Template-OTS-ReqStream`.
+**Requirement coverage**: `AgentControl-OTS-ReqStream`.
 
 #### ReqStream_ReportExport
 
@@ -50,7 +50,7 @@ results.
 
 **Expected**: Produces a correctly formatted requirements report.
 
-**Requirement coverage**: `Template-OTS-ReqStream`.
+**Requirement coverage**: `AgentControl-OTS-ReqStream`.
 
 #### ReqStream_TagsFiltering
 
@@ -58,7 +58,7 @@ results.
 
 **Expected**: Returns only requirements matching the specified tags.
 
-**Requirement coverage**: `Template-OTS-ReqStream`.
+**Requirement coverage**: `AgentControl-OTS-ReqStream`.
 
 #### ReqStream_EnforcementMode
 
@@ -67,7 +67,7 @@ coverage.
 
 **Expected**: Exits 0; would exit non-zero if any requirement lacked coverage.
 
-**Requirement coverage**: `Template-OTS-ReqStream`.
+**Requirement coverage**: `AgentControl-OTS-ReqStream`.
 
 #### ReqStream_Lint
 
@@ -76,4 +76,4 @@ deliberate issues.
 
 **Expected**: Correctly identifies and reports the issues.
 
-**Requirement coverage**: `Template-OTS-ReqStream`.
+**Requirement coverage**: `AgentControl-OTS-ReqStream`.

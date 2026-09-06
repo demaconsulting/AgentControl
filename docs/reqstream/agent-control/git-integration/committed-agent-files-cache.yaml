@@ -1,0 +1,25 @@
+---
+# Software Unit Requirements for the CommittedAgentFilesCache Class
+#
+# CommittedAgentFilesCache memoizes the committed-agent-files-changed result per repo path,
+# keyed by HEAD commit hash, so the check need not be re-run against an unchanged commit.
+
+sections:
+  - title: CommittedAgentFilesCache Unit Requirements
+    requirements:
+      - id: AgentControl-CommittedAgentFilesCache-Cache
+        title: >-
+          The CommittedAgentFilesCache class shall return a cached value for a repo path and
+          commit hash pair previously stored, treat a different hash or an unknown repo path
+          as a cache miss, and overwrite a previously cached value when the same key is set
+          again.
+        justification: |
+          Guarantees the cache never serves a stale result for a repo whose HEAD has moved,
+          while still avoiding redundant git queries when the HEAD is unchanged, and lets a
+          single repo's cache entry be invalidated independently of others.
+        tests:
+          - CommittedAgentFilesCache_SameRepoAndHash_ReturnsCachedValue
+          - CommittedAgentFilesCache_DifferentHash_IsTreatedAsCacheMiss
+          - CommittedAgentFilesCache_UnknownRepoPath_IsTreatedAsCacheMiss
+          - CommittedAgentFilesCache_Invalidate_ClearsOnlyThatRepoPath
+          - CommittedAgentFilesCache_SetSameKeyTwice_OverwritesPreviousValue

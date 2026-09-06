@@ -9,7 +9,7 @@
 sections:
   - title: Utilities Subsystem Requirements
     requirements:
-      - id: Template-Utilities-SafePaths
+      - id: AgentControl-Utilities-SafePaths
         title: >-
           The Utilities subsystem shall provide safe file path manipulation that
           prevents path traversal and absolute path injection.
@@ -20,7 +20,7 @@ sections:
           file system access. This requirement captures the subsystem-level safety guarantee
           that all consumers of the Utilities subsystem can rely upon.
         children:
-          - Template-PathHelpers-SafeCombine
+          - AgentControl-PathHelpers-SafeCombine
         tests:
           - UtilitiesSubsystem_PathResolutionWorkflow_ValidPaths_ResolvesCorrectly
           - UtilitiesSubsystem_DirectoryCreationWorkflow_ValidPaths_CreatesDirectories

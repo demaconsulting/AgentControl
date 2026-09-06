@@ -33,7 +33,7 @@ from a test configuration.
 
 **Expected**: Exits 0 and produces a non-empty review plan markdown file.
 
-**Requirement coverage**: `Template-OTS-ReviewMark`.
+**Requirement coverage**: `AgentControl-OTS-ReviewMark`.
 
 #### ReviewMark_ReviewReportGeneration
 
@@ -42,7 +42,7 @@ report from a test configuration and evidence store.
 
 **Expected**: Exits 0 and produces a non-empty review report.
 
-**Requirement coverage**: `Template-OTS-ReviewMark`.
+**Requirement coverage**: `AgentControl-OTS-ReviewMark`.
 
 #### ReviewMark_Enforce
 
@@ -51,7 +51,7 @@ issues.
 
 **Expected**: Exits with a non-zero exit code when review issues are present.
 
-**Requirement coverage**: `Template-OTS-ReviewMark-Enforce`.
+**Requirement coverage**: `AgentControl-OTS-ReviewMark-Enforce`.
 
 #### ReviewMark_Elaborate
 
@@ -60,7 +60,7 @@ named review set.
 
 **Expected**: Exits 0 and prints the review-set ID, fingerprint, and file list.
 
-**Requirement coverage**: `Template-OTS-ReviewMark-Elaborate`.
+**Requirement coverage**: `AgentControl-OTS-ReviewMark-Elaborate`.
 
 #### ReviewMark_Lint
 
@@ -69,4 +69,4 @@ issues.
 
 **Expected**: Correctly reports structural and semantic issues found in the test definition.
 
-**Requirement coverage**: `Template-OTS-ReviewMark-Lint`.
+**Requirement coverage**: `AgentControl-OTS-ReviewMark-Lint`.

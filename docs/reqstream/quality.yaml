@@ -16,8 +16,8 @@ sections:
           to the quality root so they participate in orphan detection without being
           falsely reported as disconnected from tool functionality.
         children:
-          - Template-OTS-xUnit-Execute
-          - Template-OTS-xUnit-Report
+          - AgentControl-OTS-xUnit-Execute
+          - AgentControl-OTS-xUnit-Report
 
       - id: Quality-BuildIntegrity
         title: >-
@@ -31,8 +31,8 @@ sections:
           orphan detection without being falsely reported as disconnected from
           tool functionality.
         children:
-          - Template-OTS-BuildMark
-          - Template-OTS-VersionMark
+          - AgentControl-OTS-BuildMark
+          - AgentControl-OTS-VersionMark
 
       - id: Quality-StaticAnalysis
         title: The repository shall rely on SarifMark and SonarMark to enforce static-analysis quality gates.
@@ -44,9 +44,9 @@ sections:
           detection without being falsely reported as disconnected from tool
           functionality.
         children:
-          - Template-OTS-SarifMark
-          - Template-OTS-SarifMark-Enforcement
-          - Template-OTS-SonarMark
+          - AgentControl-OTS-SarifMark
+          - AgentControl-OTS-SarifMark-Enforcement
+          - AgentControl-OTS-SonarMark
 
       - id: Quality-PeerReview
         title: The repository shall rely on ReviewMark to enforce peer-review tracking and reporting.
@@ -57,10 +57,10 @@ sections:
           requirements to the quality root so they participate in orphan detection
           without being falsely reported as disconnected from tool functionality.
         children:
-          - Template-OTS-ReviewMark
-          - Template-OTS-ReviewMark-Enforce
-          - Template-OTS-ReviewMark-Elaborate
-          - Template-OTS-ReviewMark-Lint
+          - AgentControl-OTS-ReviewMark
+          - AgentControl-OTS-ReviewMark-Enforce
+          - AgentControl-OTS-ReviewMark-Elaborate
+          - AgentControl-OTS-ReviewMark-Lint
 
       - id: Quality-DocumentationGeneration
         title: The repository shall rely on Pandoc and WeasyPrint to generate HTML and PDF documentation.
@@ -71,8 +71,8 @@ sections:
           requirements to the quality root so they participate in orphan detection
           without being falsely reported as disconnected from tool functionality.
         children:
-          - Template-OTS-Pandoc
-          - Template-OTS-WeasyPrint
+          - AgentControl-OTS-Pandoc
+          - AgentControl-OTS-WeasyPrint
 
       - id: Quality-RequirementsTraceability
         title: >-
@@ -86,8 +86,8 @@ sections:
           root so they participate in orphan detection without being falsely
           reported as disconnected from tool functionality.
         children:
-          - Template-OTS-ReqStream
-          - Template-OTS-FileAssert
+          - AgentControl-OTS-ReqStream
+          - AgentControl-OTS-FileAssert
 
       - id: Quality-SoftwareStructureModeling
         title: The repository shall rely on SysML2Tools to lint and render software-structure models.
@@ -99,5 +99,29 @@ sections:
           detection without being falsely reported as disconnected from tool
           functionality.
         children:
-          - Template-OTS-SysML2Tools-Lint
-          - Template-OTS-SysML2Tools-Render
+          - AgentControl-OTS-SysML2Tools-Lint
+          - AgentControl-OTS-SysML2Tools-Render
+
+      - id: Quality-UiTestAutomation
+        title: The repository shall rely on FlaUI to drive Windows UI Automation end-to-end test scenarios.
+        tags: [quality]
+        justification: |
+          End-to-end UI test coverage for LauncherUI depends on FlaUI's ability to
+          locate and interact with Avalonia controls through Windows UI Automation.
+          This grouping requirement links the FlaUI OTS requirement to the quality
+          root so it participates in orphan detection without being falsely
+          reported as disconnected from tool functionality.
+        children:
+          - AgentControl-OTS-FlaUI-DriveUiTests
+
+      - id: Quality-InstallerPackaging
+        title: The repository shall rely on the WiX Toolset to build the Windows MSI installer package.
+        tags: [quality]
+        justification: |
+          Distributing AgentControl as a Windows installer depends on the WiX
+          Toolset's MSI packaging capability. This grouping requirement links the
+          WiX Toolset OTS requirement to the quality root so it participates in
+          orphan detection without being falsely reported as disconnected from tool
+          functionality.
+        children:
+          - AgentControl-OTS-WixToolset-BuildInstaller

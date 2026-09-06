@@ -1,0 +1,47 @@
+---
+# Logging Subsystem Requirements
+#
+# PURPOSE:
+# - Define requirements for the AgentControl Logging subsystem
+# - Logging spans AppLogging.cs (process-wide ILoggerFactory holder) and LoggingSetup.cs
+#   (configures Serilog to write a rolling diagnostic log file at startup)
+# - This subsystem has a single dedicated unit test file,
+#   `test/DemaConsulting.AgentControl.Tests/Logging/LoggingSetupTests.cs`, and is otherwise
+#   documented at subsystem level only, with no separate unit files
+#
+# TEST-EVIDENCE BASIS:
+# `LoggingSetupTests` directly proves both the documented `InvalidOperationException`
+# error-handling contract (invalid log-directory path) and that a log entry written through
+# the pipeline is actually persisted to the documented `logs` subfolder location and content.
+# It reuses the already-initialized `test/DemaConsulting.AgentControl.Tests/TestLoggingFixture.cs`
+# assembly fixture rather than calling `LoggingSetup.Initialize` a second time with a valid
+# directory, because doing so would redirect the process-wide static `Serilog.Log.Logger` away
+# from the fixture's location for the remainder of the test run. Multi-day rolling and the
+# 14-file retention limit are not independently re-verified here - they are Serilog's own
+# tested behavior, only configured (not reimplemented) by this subsystem. Every other passing
+# test in the assembly remains additional *indirect* evidence that `LoggingSetup.Initialize`
+# did not throw, since `TestLoggingFixture` runs it once before any test executes.
+
+sections:
+  - title: Logging Subsystem Requirements
+    requirements:
+      - id: AgentControl-Logging-DiagnosticFile
+        title: >-
+          The Logging subsystem shall write a rolling diagnostic log file capturing
+          process-launch and git-integration detail, initialized once at application startup.
+        justification: |
+          Per architecture.md, troubleshooting a flaky process launch by message box alone
+          proved insufficient in practice; a diagnostic log file provides the detail (exit
+          codes, stderr, timing) needed to root-cause such issues after the fact.
+        tests:
+          # Direct evidence: a log entry written through the fixture-initialized pipeline is
+          # found, verbatim, in the documented "logs" subfolder location.
+          - LoggingSetup_Initialize_LogEntryWritten_AppearsInLogFileUnderLogsSubfolder
+          # Direct evidence: an unusable log directory path is normalized to the documented
+          # InvalidOperationException contract.
+          - LoggingSetup_Initialize_LogDirectoryPathInvalid_ThrowsInvalidOperationException
+          # Indirect evidence only - see the TEST-EVIDENCE BASIS note above. Any passing test
+          # in the DemaConsulting.AgentControl.Tests assembly demonstrates
+          # LoggingSetup.Initialize completed without throwing, since TestLoggingFixture runs
+          # it once before any test executes.
+          - GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue

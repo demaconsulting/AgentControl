@@ -1,0 +1,211 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:DemaConsulting.AgentControl.LauncherUI"
+        xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        mc:Ignorable="d"
+        d:DesignWidth="720" d:DesignHeight="480"
+        x:Class="DemaConsulting.AgentControl.LauncherUI.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Name="MainWindowRoot"
+        Title="AgentControl"
+        Icon="/Assets/AppIcon.ico"
+        Width="720" Height="480"
+        MinWidth="480" MinHeight="320">
+    <Window.Resources>
+        <vm:FavoriteIconConverter x:Key="FavoriteIconConverter" />
+    </Window.Resources>
+    <DockPanel Margin="12">
+
+        <!-- Combined toolbar: filter box on the left, add-repo/settings/about icons on the right -->
+        <Grid DockPanel.Dock="Top"
+              ColumnDefinitions="*,Auto,Auto,Auto"
+              Margin="0,0,0,12">
+            <!-- Filter box: substring-filters the recent-repos list by display name/path -->
+            <TextBox Grid.Column="0"
+                      Name="FilterTextBox"
+                      AutomationProperties.AutomationId="FilterTextBox"
+                      PlaceholderText="Filter repos..."
+                      ToolTip.Tip="Filter the repo list below by name or path"
+                      Text="{Binding FilterText, Mode=TwoWay}"
+                      Margin="0,0,8,0" />
+            <Button Grid.Column="1"
+                     Name="AddRepoButton"
+                     AutomationProperties.AutomationId="AddRepoButton"
+                     Click="AddRepoButton_Click"
+                     ToolTip.Tip="Add a repository"
+                     Margin="0,0,8,0">
+                <materialIcons:MaterialIcon Kind="FolderPlus" />
+            </Button>
+            <Button Grid.Column="2"
+                     Name="OpenSettingsButton"
+                     AutomationProperties.AutomationId="OpenSettingsButton"
+                     Click="OpenSettingsButton_Click"
+                     ToolTip.Tip="Settings"
+                     Margin="0,0,8,0">
+                <materialIcons:MaterialIcon Kind="Cog" />
+            </Button>
+            <Button Grid.Column="3"
+                     Name="OpenAboutButton"
+                     AutomationProperties.AutomationId="OpenAboutButton"
+                     Click="OpenAboutButton_Click"
+                     ToolTip.Tip="About AgentControl">
+                <materialIcons:MaterialIcon Kind="Information" />
+            </Button>
+        </Grid>
+
+        <!-- Recent-repos list -->
+        <ListBox Name="RepoListBox"
+                  AutomationProperties.AutomationId="RepoListBox"
+                  ItemsSource="{Binding DisplayedRepoCards}">
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:RepoCardViewModel">
+                    <Border BorderBrush="Gray" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,8"
+                             AttachedToVisualTree="RepoCard_AttachedToVisualTree">
+                        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+
+                            <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                                <TextBlock Name="RepoNameText"
+                                            AutomationProperties.AutomationId="RepoNameText"
+                                            Text="{Binding RepoName}"
+                                            ToolTip.Tip="{Binding RepoName}"
+                                            FontWeight="Bold" />
+                                <Border Name="UpgradeAvailableBadge"
+                                         AutomationProperties.AutomationId="UpgradeAvailableBadge"
+                                         IsVisible="{Binding IsUpgradeAvailable}"
+                                         ToolTip.Tip="{Binding UpgradeTooltip}"
+                                         Background="Orange"
+                                         CornerRadius="8"
+                                         Padding="6,1">
+                                    <TextBlock Text="Update available" FontSize="10" />
+                                </Border>
+                                <TextBlock Name="CommittedAgentFilesBadge"
+                                            AutomationProperties.AutomationId="CommittedAgentFilesBadge"
+                                            IsVisible="{Binding HasCommittedAgentFiles}"
+                                            ToolTip.Tip="This repo has committed agent files (.github/agents, .github/standards, .github/templates, or .github/skills) tracked at HEAD."
+                                            Text="⚠️"
+                                            FontSize="14" />
+                                <TextBlock Name="MissingRepoBadge"
+                                            AutomationProperties.AutomationId="MissingRepoBadge"
+                                            IsVisible="{Binding IsMissing}"
+                                            ToolTip.Tip="This repo's folder could not be found on disk."
+                                            Text="❌"
+                                            FontSize="14" />
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0"
+                                        Name="RepoPathText"
+                                        AutomationProperties.AutomationId="RepoPathText"
+                                        Text="{Binding RepoPath}"
+                                        ToolTip.Tip="{Binding RepoPath}"
+                                        Opacity="0.7" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0"
+                                        Name="RepoPinnedVersionText"
+                                        AutomationProperties.AutomationId="RepoPinnedVersionText"
+                                        Text="{Binding PinnedPackageVersion, StringFormat='Pinned version: {0}'}"
+                                        ToolTip.Tip="The agent package version currently extracted into this repo"
+                                        Opacity="0.7" />
+
+                            <TextBlock Grid.Row="3" Grid.Column="0"
+                                        Name="CurrentBranchText"
+                                        AutomationProperties.AutomationId="CurrentBranchText"
+                                        Text="{Binding CurrentBranch, StringFormat='Branch: {0}'}"
+                                        ToolTip.Tip="The current checked-out git branch for this repo"
+                                        Opacity="0.7" />
+
+                            <ToggleButton Grid.Row="0" Grid.RowSpan="4" Grid.Column="1"
+                                     Name="FavoriteToggleButton"
+                                     AutomationProperties.AutomationId="FavoriteToggleButton"
+                                     ToolTip.Tip="Favorite/pin this repo to the top of the list"
+                                     IsChecked="{Binding IsFavorite, Mode=TwoWay}"
+                                     Command="{Binding FavoriteToggleCommand}"
+                                     VerticalAlignment="Center"
+                                     Margin="0,0,8,0">
+                                <materialIcons:MaterialIcon Kind="{Binding IsFavorite, Converter={StaticResource FavoriteIconConverter}}" />
+                            </ToggleButton>
+
+                            <Button Grid.Row="0" Grid.RowSpan="4" Grid.Column="2"
+                                     Name="LaunchButton"
+                                     AutomationProperties.AutomationId="LaunchButton"
+                                     Command="{Binding LaunchCommand}"
+                                     ToolTip.Tip="Launch the configured agent tool in this repo"
+                                     VerticalAlignment="Center"
+                                     Margin="0,0,8,0">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <materialIcons:MaterialIcon Kind="Rocket" />
+                                    <TextBlock Text="Launch" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button Grid.Row="0" Grid.RowSpan="4" Grid.Column="3"
+                                     Name="PullButton"
+                                     AutomationProperties.AutomationId="PullButton"
+                                     Command="{Binding PullCommand}"
+                                     IsVisible="{Binding CanPull}"
+                                     ToolTip.Tip="Pull the latest commits for this repo"
+                                     VerticalAlignment="Center"
+                                     Margin="0,0,8,0">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <materialIcons:MaterialIcon Kind="CloudDownload" />
+                                    <TextBlock Text="Pull" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button Grid.Row="0" Grid.RowSpan="4" Grid.Column="4"
+                                     Name="MoreActionsButton"
+                                     AutomationProperties.AutomationId="MoreActionsButton"
+                                     ToolTip.Tip="More actions"
+                                     VerticalAlignment="Center">
+                                <materialIcons:MaterialIcon Kind="DotsHorizontal" />
+                                <Button.Flyout>
+                                    <MenuFlyout>
+                                        <MenuItem Name="RefreshMenuItem"
+                                                   AutomationProperties.AutomationId="RefreshMenuItem"
+                                                   Header="Refresh"
+                                                   ToolTip.Tip="Re-check this repo's branch, badges, and upgrade status"
+                                                   Command="{Binding RefreshCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="Refresh" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Name="SelectPackageMenuItem"
+                                                   AutomationProperties.AutomationId="SelectPackageMenuItem"
+                                                   Header="Select Package..."
+                                                   ToolTip.Tip="Choose an initial agent package to pin to this repo"
+                                                   IsVisible="{Binding IsPackageSelectionNeeded}"
+                                                   Click="SelectPackageMenuItem_Click">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="PackageVariant" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Name="UpgradeMenuItem"
+                                                   AutomationProperties.AutomationId="UpgradeMenuItem"
+                                                   Header="Upgrade"
+                                                   ToolTip.Tip="{Binding UpgradeTooltip}"
+                                                   IsVisible="{Binding IsUpgradeAvailable}"
+                                                   Command="{Binding UpgradeCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="ArrowUpBold" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Name="RemoveMenuItem"
+                                                   AutomationProperties.AutomationId="RemoveMenuItem"
+                                                   Header="Remove from list"
+                                                   ToolTip.Tip="Remove this repo from AgentControl's recent-repos list (does not delete it from disk)"
+                                                   Click="RemoveMenuItem_Click">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="TrashCan" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                    </MenuFlyout>
+                                </Button.Flyout>
+                            </Button>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </DockPanel>
+</Window>

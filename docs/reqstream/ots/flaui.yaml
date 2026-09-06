@@ -1,0 +1,35 @@
+---
+# FlaUI OTS Software Requirements
+#
+# Requirements for the FlaUI Windows UI Automation testing library functionality.
+#
+# Per user decision, FlaUI receives OTS requirements only (no SysML2 part), matching the
+# asymmetric requirements-only precedent already established for other test/build tools in
+# this repo (e.g. xUnit, Pandoc) that have OTS requirements without a corresponding
+# docs/sysml2/model entry.
+
+sections:
+  - title: OTS Software Requirements
+    sections:
+      - title: FlaUI Requirements
+        requirements:
+          - id: AgentControl-OTS-FlaUI-DriveUiTests
+            title: >-
+              FlaUI shall drive the published application's UI via Windows UI Automation to
+              exercise end-to-end test scenarios.
+            justification: |
+              FlaUI.Core and FlaUI.UIA3 back the DemaConsulting.AgentControl.UiTests project's
+              end-to-end tests, which launch the published application and interact with its
+              windows/controls exactly as a developer would. Passing FlaUI-driven tests
+              demonstrate the library can locate elements by automation identifier, invoke
+              commands, and read control state from a real running Avalonia window.
+            tags: [ots]
+            tests:
+              - windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId
+              - windows@RemoveMenuItem_ClickThenConfirm_RemovesCard_DecliningLeavesItInPlace
+              - windows@FilterTextBox_TypingNonMatchingText_HidesRepoCard_ClearingRestoresIt
+              - windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory
+              - windows@PullButton_Click_InvokesConfiguredGitExecutableWithPullArgument
+              - windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders
+              - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
+              - windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright

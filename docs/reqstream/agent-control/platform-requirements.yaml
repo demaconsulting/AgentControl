@@ -1,77 +1,38 @@
 ---
 # System-Level Platform Requirements
 #
-# These requirements specify the platforms and runtimes the tool must support.
-# They ensure the tool works across the required execution environments.
+# These requirements specify the platform and runtime the tool must support.
 #
-# Test links can include a source filter prefix (e.g. "windows@", "ubuntu@", "dotnet8.x@") to restrict
-# which test results count as evidence for a requirement. This is critical for platform and runtime
-# requirements - removing these filters invalidates the evidence-based proof.
+# Test links can include a source filter prefix (e.g. "windows@") to restrict which test
+# results count as evidence for a requirement - critical for platform requirements, since
+# removing the filter would invalidate the evidence-based proof. AgentControl ships as a
+# Windows-only MSI for v1 (see architecture.md's Scope: "Non-Windows installers for v1... only
+# an MSI is produced initially"), so every requirement here is Windows-scoped.
 #
-# Source filter prefixes:
-#   windows@TestName      - proves the test passed on a Windows platform
-#   ubuntu@TestName       - proves the test passed on a Linux (Ubuntu) platform
-#   macos@TestName        - proves the test passed on a macOS platform
-#   dotnet8.x@TestName    - proves the self-validation test ran with .NET 8.x runtime
-#   dotnet9.x@TestName    - proves the self-validation test ran with .NET 9.x runtime
-#   dotnet10.x@TestName   - proves the self-validation test ran with .NET 10.x runtime
+# Source filter prefix:
+#   windows@TestName - proves the test passed on a Windows platform
 
 sections:
   - title: Platform Support
     requirements:
-      - id: Template-Platform-Windows
-        title: The tool shall execute successfully on Windows platforms.
+      - id: AgentControl-Platform-Windows
+        title: >-
+          The tool shall run as a native Windows desktop application exposing UI Automation
+          identifiers for automated testing.
         tags: [system]
         justification: |
-          DEMA Consulting tools must support Windows as a major development platform.
+          Per architecture.md's Technology Stack, v1 is distributed as a Windows MSI installer
+          (a WinExe build) and relies on Avalonia 12's AutomationId support so FlaUI-driven
+          integration tests can reliably locate UI elements. Non-Windows installers are
+          explicitly deferred (Open Concerns  # 2).
         tests:
-          # Tests link to "windows" to ensure results come from Windows platform
-          - "windows@AgentControl_VersionDisplay"
-          - "windows@AgentControl_HelpDisplay"
+          - "windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId"
 
-      - id: Template-Platform-Linux
-        title: The tool shall execute successfully on Linux platforms.
+      - id: AgentControl-Platform-Net10
+        title: The tool shall run on the .NET 10 runtime.
         tags: [system]
         justification: |
-          DEMA Consulting tools must support Linux for CI/CD and containerized environments.
+          Per architecture.md's Technology Stack, AgentControl targets .NET 10 to remain
+          compatible with the current .NET ecosystem and its tooling.
         tests:
-          # Tests link to "ubuntu" to ensure results come from Linux platform
-          - "ubuntu@AgentControl_VersionDisplay"
-          - "ubuntu@AgentControl_HelpDisplay"
-
-      - id: Template-Platform-MacOS
-        title: The tool shall execute successfully on macOS platforms.
-        tags: [system]
-        justification: |
-          DEMA Consulting tools must support macOS for developers using Apple platforms.
-        tests:
-          # Tests link to "macos" to ensure results come from macOS platform
-          - "macos@AgentControl_VersionDisplay"
-          - "macos@AgentControl_HelpDisplay"
-
-      - id: Template-Platform-Net8
-        title: The tool shall support .NET 8 runtime.
-        tags: [system]
-        justification: |
-          .NET 8 is an LTS release providing long-term stability for enterprise users.
-        tests:
-          - "dotnet8.x@AgentControl_VersionDisplay"
-          - "dotnet8.x@AgentControl_HelpDisplay"
-
-      - id: Template-Platform-Net9
-        title: The tool shall support .NET 9 runtime.
-        tags: [system]
-        justification: |
-          .NET 9 support enables users to leverage the latest .NET features.
-        tests:
-          - "dotnet9.x@AgentControl_VersionDisplay"
-          - "dotnet9.x@AgentControl_HelpDisplay"
-
-      - id: Template-Platform-Net10
-        title: The tool shall support .NET 10 runtime.
-        tags: [system]
-        justification: |
-          .NET 10 support ensures the tool remains compatible with the latest .NET ecosystem.
-        tests:
-          - "dotnet10.x@AgentControl_VersionDisplay"
-          - "dotnet10.x@AgentControl_HelpDisplay"
+          - "Program_Version_ReturnsNonEmptyString"

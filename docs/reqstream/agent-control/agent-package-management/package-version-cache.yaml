@@ -1,0 +1,57 @@
+---
+# Software Unit Requirements for the PackageVersionCache Class
+#
+# PackageVersionCache memoizes PackageSource scan results per source folder so repeated
+# refreshes (e.g. across multiple repo cards sharing one package source) do not repeatedly
+# re-scan the filesystem.
+
+sections:
+  - title: PackageVersionCache Unit Requirements
+    requirements:
+      - id: AgentControl-PackageVersionCache-CachePackageNames
+        title: >-
+          The PackageVersionCache class shall cache the package names discovered at a source
+          folder and reuse that cached result on repeated calls without re-scanning, until
+          invalidated.
+        justification: |
+          Multiple repo cards commonly share the same configured package source; caching
+          avoids redundant filesystem scans on every UI refresh.
+        tests:
+          - PackageVersionCache_GetPackageNames_RepeatedCall_ReturnsCachedResultWithoutRescanning
+
+      - id: AgentControl-PackageVersionCache-CacheVersions
+        title: >-
+          The PackageVersionCache class shall cache a package's descending version list and
+          reuse it on repeated calls without re-scanning, and shall throw when the source
+          folder does not exist and no cached result is available.
+        justification: |
+          Version-list lookups for the package-selection window are frequent; caching avoids
+          redundant scans, while an invalid uncached source folder must still be reported
+          clearly.
+        tests:
+          - PackageVersionCache_GetVersionsDescending_MultipleVersions_ReturnsDescendingAndCached
+          - PackageVersionCache_RepeatedCallSameSource_ReturnsCachedResultWithoutRescanning
+          - PackageVersionCache_UncachedCallMissingDirectory_ThrowsDirectoryNotFoundException
+
+      - id: AgentControl-PackageVersionCache-CacheNewerVersion
+        title: >-
+          The PackageVersionCache class shall determine whether a newer package version is
+          available using its cached scan results, treating an unparsable pinned version as
+          always upgradable.
+        justification: |
+          The upgrade-available badge must be fast to compute across many repo cards sharing
+          the same source, without sacrificing the unparsable-pin-is-upgradable safety
+          behavior of the underlying PackageSource check.
+        tests:
+          - PackageVersionCache_UnparsablePinnedVersion_ReturnsTrue
+
+      - id: AgentControl-PackageVersionCache-Invalidate
+        title: >-
+          The PackageVersionCache class shall discard all cached package name and version
+          results when invalidated, forcing the next call to re-scan the source folder.
+        justification: |
+          When the configured package source path itself changes (a settings update), any
+          previously cached scan results become stale and must not continue to be served.
+        tests:
+          - PackageVersionCache_Invalidate_ForcesReEnumeration
+          - PackageVersionCache_Invalidate_ClearsPackageNamesAndVersionsDescendingCaches

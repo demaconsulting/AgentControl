@@ -31,7 +31,7 @@ VersionMark did not execute correctly.
 
 **Expected**: Exits 0 and captures version data for every tool.
 
-**Requirement coverage**: `Template-OTS-VersionMark`.
+**Requirement coverage**: `AgentControl-OTS-VersionMark`.
 
 #### VersionMark_GeneratesMarkdownReport
 
@@ -39,7 +39,7 @@ VersionMark did not execute correctly.
 
 **Expected**: Exits 0 and produces a non-empty versions markdown file.
 
-**Requirement coverage**: `Template-OTS-VersionMark`.
+**Requirement coverage**: `AgentControl-OTS-VersionMark`.
 
 #### VersionMark_LintPassesForValidConfig
 
@@ -48,7 +48,7 @@ config.
 
 **Expected**: Exits 0 and reports no errors.
 
-**Requirement coverage**: `Template-OTS-VersionMark`.
+**Requirement coverage**: `AgentControl-OTS-VersionMark`.
 
 #### VersionMark_LintReportsErrorsForInvalidConfig
 
@@ -57,4 +57,4 @@ deliberate errors.
 
 **Expected**: Correctly identifies and reports the configuration errors.
 
-**Requirement coverage**: `Template-OTS-VersionMark`.
+**Requirement coverage**: `AgentControl-OTS-VersionMark`.

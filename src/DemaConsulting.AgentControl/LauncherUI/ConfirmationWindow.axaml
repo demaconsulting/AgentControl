@@ -1,0 +1,25 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="DemaConsulting.AgentControl.LauncherUI.ConfirmationWindow"
+        Name="ConfirmationRoot"
+        Title="AgentControl"
+        Width="420" SizeToContent="Height"
+        MinWidth="320"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+    <StackPanel Margin="16" Spacing="16">
+        <TextBlock Name="ConfirmationMessageText"
+                    AutomationProperties.AutomationId="ConfirmationMessageText"
+                    TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Name="ConfirmationNoButton"
+                     AutomationProperties.AutomationId="ConfirmationNoButton"
+                     Content="No"
+                     Click="NoButton_Click" />
+            <Button Name="ConfirmationYesButton"
+                     AutomationProperties.AutomationId="ConfirmationYesButton"
+                     Content="Yes"
+                     Click="YesButton_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

@@ -1,8 +1,10 @@
 # Introduction
 
-This document provides the detailed design for the Agent Control, a .NET command-line
-application demonstrating best practices for DEMA Consulting DotNet Tools. It covers local
-software items (systems, subsystems, and units) and the OTS software items they consume.
+This document provides the detailed design for the Agent Control, a .NET desktop launcher
+application that lets a company distribute proprietary AI-agent configuration alongside
+public source repositories without committing that content to source control. It covers
+local software items (systems, subsystems, and units) and the OTS software items they
+consume.
 
 ## Purpose
 
@@ -21,16 +23,20 @@ Local items:
 
 OTS items:
 
+- **Avalonia**: integration and usage design.
 - **BuildMark**: integration and usage design.
 - **FileAssert**: integration and usage design.
+- **FlaUI**: integration and usage design.
 - **Pandoc**: integration and usage design.
 - **ReqStream**: integration and usage design.
 - **ReviewMark**: integration and usage design.
 - **SarifMark**: integration and usage design.
+- **Serilog**: integration and usage design.
 - **SonarMark**: integration and usage design.
 - **SysML2Tools**: integration and usage design.
 - **VersionMark**: integration and usage design.
 - **WeasyPrint**: integration and usage design.
+- **WiX Toolset**: integration and usage design.
 - **xUnit**: integration and usage design.
 
 The following topics are out of scope:
@@ -52,10 +58,20 @@ the OTS items listed in Scope above are build-time/pipeline tooling, documented 
 ## Folder Layout
 
 - **src/** - source files and projects
-  - **DemaConsulting.AgentControl/** - main application source
-    - **Cli/** - command-line interface subsystem
-    - **SelfTest/** - self-validation subsystem
+  - **DemaConsulting.AgentControl/** - main Avalonia desktop application source
+    - **LauncherUI/** - main window, repo cards, package-selection and settings windows
+    - **AgentPackageManagement/** - package discovery and version comparison
+    - **RepoSync/** - package zip extraction and release-notes viewing
+    - **RepoConfig/** - per-repo pin file persistence
+    - **AgentToolLauncher/** - shell detection and agent-tool process launching
+    - **GitIntegration/** - git status/pull/branch queries
+    - **Settings/** - application-wide settings persistence
+    - **Logging/** - diagnostic file logging setup
+    - **Startup/** - startup-argument parsing
     - **Utilities/** - shared utilities subsystem
+  - **DemaConsulting.AgentControl.Msi/** - WiX Toolset MSI installer project
+- **test/** - test projects
+  - **DemaConsulting.AgentControl.UiTests/** - FlaUI end-to-end UI test project
 
 ## Document Conventions
 

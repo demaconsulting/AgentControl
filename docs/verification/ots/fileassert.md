@@ -34,7 +34,7 @@ results containing both passing and failing outcomes.
 
 **Expected**: Writes a TRX results file with correctly classified pass and fail entries.
 
-**Requirement coverage**: `Template-OTS-FileAssert`.
+**Requirement coverage**: `AgentControl-OTS-FileAssert`.
 
 #### FileAssert_File
 
@@ -43,7 +43,7 @@ assert file existence.
 
 **Expected**: Passes when the specified file is present.
 
-**Requirement coverage**: `Template-OTS-FileAssert`.
+**Requirement coverage**: `AgentControl-OTS-FileAssert`.
 
 #### FileAssert_Text
 
@@ -52,7 +52,7 @@ to verify file text content.
 
 **Expected**: Passes when the specified content is present.
 
-**Requirement coverage**: `Template-OTS-FileAssert`.
+**Requirement coverage**: `AgentControl-OTS-FileAssert`.
 
 #### FileAssert_Html
 
@@ -61,7 +61,7 @@ assert HTML document structure.
 
 **Expected**: Passes when the specified HTML nodes are present.
 
-**Requirement coverage**: `Template-OTS-FileAssert`.
+**Requirement coverage**: `AgentControl-OTS-FileAssert`.
 
 #### FileAssert_Pdf
 
@@ -70,4 +70,4 @@ fields and body text content.
 
 **Expected**: Passes when the PDF contains the expected metadata and text.
 
-**Requirement coverage**: `Template-OTS-FileAssert`.
+**Requirement coverage**: `AgentControl-OTS-FileAssert`.

@@ -18,6 +18,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Initializes the same Serilog-backed logging pipeline the shipped app uses, once for the
+// whole assembly, so that GitClient/AgentToolLauncher process-launch diagnostics logged during
+// test runs (notably GitClientTests, where the flaky exit-code -1 failure this logging exists
+// to root-cause actually occurs) are captured to disk. See TestLoggingFixture for full detail.
+[assembly: Xunit.AssemblyFixture(typeof(DemaConsulting.AgentControl.Tests.TestLoggingFixture))]
+
 namespace DemaConsulting.AgentControl.Tests;
 
 // Tests share Console state, so they must not run in parallel.
@@ -28,3 +34,17 @@ namespace DemaConsulting.AgentControl.Tests;
 /// </summary>
 [CollectionDefinition("Sequential", DisableParallelization = true)]
 public sealed class SequentialCollection { }
+
+// GitClientTests and RepoCardViewModelTests both spawn real child processes (git-stub
+// .bat/.sh scripts via GitClient.RunGit/Process.Start), so they must not run concurrently
+// with each other: racing real OS process creation/exit between the two classes has been
+// observed to cause intermittent stub-process failures (e.g. non-zero/unexpected exit
+// codes or stale stdout/stderr reads) under xUnit's default cross-class parallelism.
+/// <summary>
+/// Defines the RealProcess test collection.
+/// Tests in this collection are disabled from running in parallel to
+/// prevent contention over OS-level process-creation resources between
+/// tests that spawn real child processes (git-stub scripts).
+/// </summary>
+[CollectionDefinition("RealProcess", DisableParallelization = true)]
+public sealed class RealProcessCollection { }

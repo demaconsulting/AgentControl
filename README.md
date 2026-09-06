@@ -7,137 +7,115 @@
 [![Build][badge-build]][link-build]
 [![Quality Gate][badge-quality]][link-quality]
 [![Security][badge-security]][link-security]
-[![NuGet][badge-nuget]][link-nuget]
 
-DEMA Consulting template project for DotNet Tools, demonstrating best practices for building command-line tools with .NET.
+AgentControl is a Windows desktop launcher that lets a company distribute proprietary
+AI-agent configuration (Copilot/agentic-CLI instruction files, standards, templates, and
+skills) alongside public source repositories, without ever committing that proprietary
+content to source control. A developer picks a repo from a recent-repos list, AgentControl
+makes sure the repo's `.github/agents`, `.github/standards`, `.github/templates`, and
+`.github/skills` folders match the version pinned in that repo's `.agentcontrol.json` file,
+then launches the developer's preferred agentic CLI tool (for example, GitHub Copilot CLI)
+in that repo's working directory.
 
 ## Features
 
-This template demonstrates:
+- **Recent-repos list**: add repos via a folder-browse button; each repo is shown as a card
+  with its display name, path, pinned package/version, and current git branch
+- **Version-pinned agent packages**: every repo names an exact agent package name and
+  semantic version in its `.agentcontrol.json` pin file — there is no floating "latest" mode,
+  so upgrades are always a deliberate, visible action
+- **Status badges**: each repo card shows an upgrade-available badge, a committed-agent-files
+  warning (advisory only — flags when the managed folders were accidentally committed to
+  git), and a missing-repo indicator when the path no longer exists on disk
+- **Ensure-synced-before-launch**: clicking Launch verifies the four managed agent folders
+  are present before starting the agent tool; if they are missing (for example, a fresh
+  clone) it silently re-extracts the currently pinned version first — it never auto-upgrades
+  to a newer version on your behalf
+- **Git integration**: pull the latest commits for a repo directly from its card (offered
+  only when the working tree is clean), with a configurable git executable override
+- **Configurable agent tool**: choose GitHub Copilot CLI, Cursor, Claude Code, or a custom
+  command line, plus a shell/terminal preference
+- **Configurable package source**: agent packages are fetched from a configurable filesystem
+  path (local drive, mapped drive, or UNC share)
+- **Upgrade notifications**: a badge and release-notes viewer let you see when a newer agent
+  package version is available and what changed before you apply it
+- **About dialog**: reachable from the main window, shows the running app's version,
+  copyright, and license
 
-- **Standardized Command-Line Interface**: Context class handling common arguments
-  (`--version`, `--help`, `--silent`, `--validate`, `--results`, `--depth`, `--log`)
-- **Self-Validation**: Built-in validation tests with TRX/JUnit output
-- **Multi-Platform Support**: Builds and runs on Windows, Linux, and macOS
-- **Multi-Runtime Support**: Targets .NET 8, 9, and 10
-- **Comprehensive CI/CD**: GitHub Actions workflows with quality checks, builds, and
-  integration tests
-- **Linting Enforcement**: markdownlint, cspell, and yamllint enforced on every CI run
-- **Continuous Compliance**: Compliance evidence generated automatically on every CI run, following
-  the [Continuous Compliance][link-continuous-compliance] methodology
-- **SonarCloud Integration**: Quality gate and security analysis on every build
-- **Documentation Generation**: Automated build notes, user guide, code quality reports,
-  requirements, justifications, and trace matrix
-- **Requirements Traceability**: Requirements linked to passing tests with auto-generated trace matrix
+See [architecture.md](architecture.md) for the full system design.
 
 ## Installation
 
-Install the tool globally using the .NET CLI:
+AgentControl is distributed as a Windows MSI installer, built from
+[`src/DemaConsulting.AgentControl.Msi/`](src/DemaConsulting.AgentControl.Msi/README.md).
 
-```bash
-dotnet tool install -g DemaConsulting.AgentControl
-```
+1. Download the latest `DemaConsulting.AgentControl.Msi.msi` from the
+   [releases][link-build] for this repository.
+2. Run the installer and follow the prompts.
+3. Launch **AgentControl** from the Start menu.
+
+The installed application is **self-contained and single-file** — it bundles its own copy of
+the .NET 10 runtime, so the target machine needs no pre-installed runtime.
 
 ## Usage
 
-```bash
-# Default behavior (no arguments) — displays banner and copyright
-agentcontrol
+### Adding a repo
 
-# Display version
-agentcontrol --version
+Click the folder-plus icon button on the toolbar and browse to a repository's root folder.
+The repo is added to the recent-repos list as a card showing its display name, path, pinned
+package/version (if any), and current git branch.
 
-# Display help
-agentcontrol --help
+### Selecting a package
 
-# Run self-validation
-agentcontrol --validate
+A repo that has never been synced shows a **Select Package...** action (in place of
+**Upgrade**) in its card's "..." menu. This lists the distinct package names discoverable at
+the configured package source, lets you pick one, then lists that package's available
+versions (defaulting to the latest) before extracting and pinning it into the repo.
 
-# Save validation results (--result is an accepted alias for --results)
-agentcontrol --validate --results results.trx
-agentcontrol --validate --result results.xml
+### Upgrading
 
-# Set heading depth for embedded validation output
-agentcontrol --validate --depth 2
+Once a repo is pinned, its card's "..." menu instead shows **Upgrade** whenever a newer
+version of the pinned package is discoverable at the package source. Upgrading re-runs the
+same validate → delete → extract → pin sequence and then shows the new package's
+`release-notes.md` (when present) in a non-modal window.
 
-# Silent mode with logging
-agentcontrol --silent --log output.log
-```
+### Launching
 
-## Command-Line Options
+Click **Launch** to start your configured agentic CLI tool in the repo's working directory.
+Before launching, AgentControl verifies the four managed agent folders exist on disk for a
+pinned repo; if any are missing, it silently re-extracts the *currently pinned* version first
+(never a newer one). If the repo has no pin yet, Launch tells you to use
+**Select Package...** first instead of starting the agent tool with no agent files present.
 
-| Option                                | Description                                                  |
-| ------------------------------------- | ------------------------------------------------------------ |
-| `-v`, `--version`                     | Display version information                                  |
-| `-?`, `-h`, `--help`                  | Display help message                                         |
-| `--silent`                            | Suppress console output                                      |
-| `--validate`                          | Run self-validation                                          |
-| `--results <file>`, `--result <file>` | Write results to `.trx` (TRX) or `.xml` (JUnit XML) file.    |
-| `--depth <#>`                         | Set heading depth for markdown output (default: 1)           |
-| `--log <file>`                        | Write output to log file                                     |
+### Pulling changes
 
-## Error Handling
+The **Pull** button on a repo card runs `git pull` in that repo, and is only offered when the
+working tree is clean.
 
-Unrecognized arguments cause the tool to print an error message to standard error and exit
-with a non-zero exit code. For example:
+### Settings
 
-```text
-Error: Unsupported argument '--unknown'
-```
+The Settings window lets you configure:
 
-This behavior enables CI/CD pipelines to detect and surface misconfiguration failures
-automatically.
+- **Package source path** — the filesystem path (local, mapped drive, or UNC) from which
+  agent package zip files are discovered
+- **Git executable override** — a specific `git` executable to use instead of resolving it
+  from `PATH`
+- **Agent tool selection** — GitHub Copilot CLI, Cursor, Claude Code, or a custom command
+- **Shell/terminal preference** — which shell to launch the agent tool in, or leave unset to
+  let AgentControl auto-detect the best available shell
 
-## Self Validation
+### About
 
-Running self-validation produces a report containing the following information:
+The About dialog (reachable from the main window) shows the running build's version,
+copyright, and license, so it can be identified without inspecting file properties.
 
-```text
-# DEMA Consulting Agent Control
+## Authoring agent packages
 
-| Information         | Value                                              |
-| :------------------ | :------------------------------------------------- |
-| Tool Version        | <version>                                          |
-| Machine Name        | <machine-name>                                     |
-| OS Version          | <os-version>                                       |
-| DotNet Runtime      | <dotnet-runtime-version>                           |
-| Time Stamp          | <timestamp> UTC                                    |
-
-✓ AgentControl_VersionDisplay - Passed
-✓ AgentControl_HelpDisplay - Passed
-
-Total Tests: 2
-Passed: 2
-Failed: 0
-```
-
-Each test in the report proves:
-
-- **`AgentControl_VersionDisplay`** - `--version` outputs a valid version string.
-- **`AgentControl_HelpDisplay`** - `--help` outputs usage and options information.
-
-Use `--depth <#>` to control the heading level of the validation output (default: `1`).
-This is useful when embedding validation output into a larger markdown document:
-
-```bash
-# Embed validation at heading level 2
-agentcontrol --validate --depth 2
-```
-
-See the [User Guide][link-guide] for more details on the self-validation tests.
-
-On validation failure the tool will exit with a non-zero exit code.
-
-## Documentation
-
-Generated documentation includes:
-
-- **Build Notes**: Release information and changes
-- **User Guide**: Comprehensive usage documentation
-- **Code Quality Report**: CodeQL and SonarCloud analysis results
-- **Requirements**: Functional and non-functional requirements
-- **Requirements Justifications**: Detailed requirement rationale
-- **Trace Matrix**: Requirements to test traceability
+Agent packages are plain zip files following a naming and content convention that
+AgentControl's package source scanner and extractor understand. See the
+[**Authoring Agent Packages**](docs/user_guide/introduction.md#authoring-agent-packages)
+section of the [User Guide][link-guide] for the full, source-verified guide to naming,
+versioning, and structuring a package zip.
 
 ## Contributing
 
@@ -158,7 +136,6 @@ By contributing to this project, you agree that your contributions will be licen
 [badge-build]: https://img.shields.io/github/actions/workflow/status/demaconsulting/AgentControl/build_on_push.yaml?style=plastic
 [badge-quality]: https://sonarcloud.io/api/project_badges/measure?project=demaconsulting_AgentControl&metric=alert_status
 [badge-security]: https://sonarcloud.io/api/project_badges/measure?project=demaconsulting_AgentControl&metric=security_rating
-[badge-nuget]: https://img.shields.io/nuget/v/DemaConsulting.AgentControl?style=plastic
 
 <!-- Link References -->
 [link-forks]: https://github.com/demaconsulting/AgentControl/network/members
@@ -168,6 +145,4 @@ By contributing to this project, you agree that your contributions will be licen
 [link-build]: https://github.com/demaconsulting/AgentControl/actions/workflows/build_on_push.yaml
 [link-quality]: https://sonarcloud.io/dashboard?id=demaconsulting_AgentControl
 [link-security]: https://sonarcloud.io/dashboard?id=demaconsulting_AgentControl
-[link-nuget]: https://www.nuget.org/packages/DemaConsulting.AgentControl
 [link-guide]: https://github.com/demaconsulting/AgentControl/blob/main/docs/user_guide/introduction.md
-[link-continuous-compliance]: https://github.com/demaconsulting/ContinuousCompliance

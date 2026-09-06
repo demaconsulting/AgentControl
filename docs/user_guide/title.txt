@@ -1,13 +1,14 @@
 ---
 title: Agent Control User Guide
-subtitle: A .NET Reference Implementation for CLI Tools
+subtitle: A Desktop Launcher for Distributing Proprietary Agent Packages
 author: DEMA Consulting
-description: A .NET Reference Implementation for CLI Tools
+description: A Desktop Launcher for Distributing Proprietary Agent Packages
 lang: en-US
 keywords:
   - Agent Control
   - .NET
-  - Command-Line Tool
+  - Avalonia
+  - Desktop Application
+  - Agent Packages
   - Documentation
-  - Best Practices
 ---

@@ -1,0 +1,39 @@
+---
+# Software Unit Requirements for the PackageVersion Class
+#
+# PackageVersion parses a version string (release or prerelease) into comparable components
+# and implements ordering so releases and prereleases compare correctly against each other.
+
+sections:
+  - title: PackageVersion Unit Requirements
+    requirements:
+      - id: AgentControl-PackageVersion-Parse
+        title: >-
+          The PackageVersion class shall parse a release or prerelease version string into its
+          components, and shall report failure without throwing for a malformed or empty
+          input.
+        justification: |
+          Version strings are derived from zip filenames, which are not guaranteed to be
+          well-formed; parsing must fail gracefully so a single bad file cannot crash package
+          discovery.
+        tests:
+          - PackageVersion_TryParse_ReleaseVersion_ParsesComponents
+          - PackageVersion_TryParse_PrereleaseVersion_ParsesPrereleaseIdentifier
+          - PackageVersion_TryParse_MalformedInput_ReturnsFalse
+          - PackageVersion_Constructor_NegativeMajor_ThrowsArgumentOutOfRangeException
+
+      - id: AgentControl-PackageVersion-Compare
+        title: >-
+          The PackageVersion class shall compare versions numerically, treating a release
+          version as greater than a prerelease version with the same numeric components, and
+          shall consider two versions with the same version string equal, and round-trip
+          through its string representation.
+        justification: |
+          Upgrade detection and version-list sorting both depend on version ordering matching
+          conventional semantic-versioning expectations, including release-over-prerelease
+          precedence.
+        tests:
+          - PackageVersion_CompareTo_HigherNumericVersion_ComparesGreater
+          - PackageVersion_CompareTo_ReleaseVsPrereleaseSameNumeric_ReleaseIsGreater
+          - PackageVersion_Equals_SameVersionString_ReturnsTrue
+          - PackageVersion_ToString_ParsedVersion_RoundTripsThroughParse

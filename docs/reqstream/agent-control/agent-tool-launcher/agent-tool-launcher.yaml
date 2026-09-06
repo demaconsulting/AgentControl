@@ -1,0 +1,38 @@
+---
+# Software Unit Requirements for the AgentToolLauncher Class
+#
+# AgentToolLauncher builds the process-start information needed to run the configured agent
+# tool command inside a detected shell, shaping the shell's arguments so the resulting
+# terminal window stays open (or exits cleanly, for PowerShell) and validating its inputs.
+
+sections:
+  - title: AgentToolLauncher Unit Requirements
+    requirements:
+      - id: AgentControl-AgentToolLauncher-BuildCommand
+        title: >-
+          The AgentToolLauncher class shall build process-start information appropriate to the
+          detected shell kind: no-exit arguments for PowerShell Core and Windows PowerShell,
+          keep-open arguments for the Command shell, and a `-c` argument for POSIX shells.
+        justification: |
+          Each shell has a different way of running a command while leaving an interactive
+          session open afterward for the developer, and the correct argument form must be
+          produced per shell so the agent tool is actually launched and the terminal remains
+          usable.
+        tests:
+          - AgentToolLauncher_BuildProcessStartInfo_PowerShellCore_ProducesNoExitCommandArguments
+          - AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShell_ProducesNoExitCommandArguments
+          - AgentToolLauncher_BuildProcessStartInfo_Cmd_ProducesKeepOpenArguments
+          - AgentToolLauncher_BuildProcessStartInfo_Posix_ProducesDashCArgument
+
+      - id: AgentControl-AgentToolLauncher-Validation
+        title: >-
+          The AgentToolLauncher class shall reject a null shell, an empty command, an empty
+          working directory, or an unrecognized shell kind.
+        justification: |
+          Launch must fail fast with a clear error for any invalid input rather than attempt
+          to start a process with incomplete or nonsensical configuration.
+        tests:
+          - AgentToolLauncher_BuildProcessStartInfo_NullShell_ThrowsArgumentNullException
+          - AgentToolLauncher_BuildProcessStartInfo_EmptyCommand_ThrowsArgumentException
+          - AgentToolLauncher_BuildProcessStartInfo_EmptyWorkingDirectory_ThrowsArgumentException
+          - AgentToolLauncher_BuildProcessStartInfo_UnrecognizedShellKind_ThrowsArgumentOutOfRangeException

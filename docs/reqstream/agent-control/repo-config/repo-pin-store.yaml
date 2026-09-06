@@ -1,0 +1,32 @@
+---
+# Software Unit Requirements for the RepoPinStore Class
+#
+# RepoPinStore loads and saves a repo's `.agentcontrol.json` pin file, recording the pinned
+# agent package name and version for that repo.
+
+sections:
+  - title: RepoPinStore Unit Requirements
+    requirements:
+      - id: AgentControl-RepoPinStore-Load
+        title: >-
+          The RepoPinStore class shall load a repo's pin file when present, returning none
+          when the repo has no pin file, and shall reject a null repo root path.
+        justification: |
+          Callers throughout the application (badge computation, upgrade detection,
+          ensure-synced-before-launch) need a single, consistent way to determine a repo's
+          current pin state, including the "not yet pinned" case.
+        tests:
+          - RepoPinStore_Load_NoPinFile_ReturnsNull
+          - RepoPinStore_Load_NullRepoRoot_ThrowsArgumentNullException
+          - RepoPinStore_SaveThenLoad_RoundTripsAllFields
+
+      - id: AgentControl-RepoPinStore-Save
+        title: >-
+          The RepoPinStore class shall save a repo's pin file, overwriting any existing pin
+          file's values, and shall reject a null pin value.
+        justification: |
+          Selecting a package or upgrading must durably record the new pin so it survives
+          across application restarts and correctly replaces any prior pin for that repo.
+        tests:
+          - RepoPinStore_Save_ExistingPinFile_OverwritesWithNewValues
+          - RepoPinStore_Save_NullPin_ThrowsArgumentNullException

@@ -3,162 +3,228 @@
 #
 # PURPOSE:
 # - Define system-level requirements describing what end-users need the tool to provide
-# - These requirements capture the externally visible behavior of the complete system
-# - System requirements are validated through integration tests that exercise the
-#   published dotnet DLL end-to-end
+# - These requirements capture the externally visible behavior of the complete system: a
+#   desktop launcher for syncing/launching proprietary agent-tool configuration alongside
+#   public repos (see architecture.md's Purpose/Scope)
+# - System requirements are validated through FlaUI end-to-end integration tests that drive
+#   the real published application via Windows UI Automation (test project:
+#   test/DemaConsulting.AgentControl.UiTests), hence the `windows@` source filters below
 
 sections:
   - title: System-Level Requirements
     requirements:
-      - id: Template-System-Version
-        title: The tool shall display version information when the version flag is provided.
-        tags: [system]
-        justification: |
-          Users need to quickly identify the version of the tool they are using for
-          troubleshooting and compatibility verification. The version display must
-          work from a standard dotnet invocation without additional configuration.
-        children:
-          - Template-Program-Version
-          - Template-Cli-Version
-        tests:
-          - AgentControl_VersionFlag_Provided_OutputsVersion
-
-      - id: Template-System-Help
-        title: The tool shall display usage information when the help flag is provided.
-        tags: [system]
-        justification: |
-          Users need access to command-line usage documentation without requiring
-          external resources. Help output must be accessible from a standard dotnet
-          invocation and must list the available options so that users can self-serve.
-        children:
-          - Template-Program-Help
-          - Template-Cli-Help
-        tests:
-          - AgentControl_HelpFlag_Provided_OutputsUsageInformation
-
-      - id: Template-System-Validate
-        title: The tool shall execute self-validation tests when the validate flag is provided.
-        tags: [system]
-        justification: |
-          Regulated environments require tool qualification evidence to demonstrate
-          that the tool functions correctly in its deployment environment before it
-          is used to generate compliance artifacts. The validation mode exercises
-          core behaviors and produces a structured test result file, providing the
-          qualification evidence required by quality management systems.
-        children:
-          - Template-Program-Validate
-          - Template-Cli-Validate
-          - Template-SelfTest-Qualification
-        tests:
-          - AgentControl_ValidateFlag_Provided_RunsValidation
-
-      - id: Template-System-Silent
-        title: The tool shall suppress console output when the silent flag is provided.
-        tags: [system]
-        justification: |
-          Enables automated scripts and CI/CD pipelines to run the tool without
-          cluttering output logs when only the exit code is needed.
-        children:
-          - Template-Cli-Silent
-        tests:
-          - AgentControl_SilentFlag_Provided_SuppressesOutput
-
-      - id: Template-System-Log
-        title: The tool shall write output to a log file when the log flag is provided.
-        tags: [system]
-        justification: |
-          Provides persistent logging for debugging and compliance audit trails.
-          Log files enable post-run inspection of tool output without requiring
-          console capture.
-        children:
-          - Template-Cli-Log
-        tests:
-          - AgentControl_LogFlag_Provided_WritesOutputToFile
-
-      - id: Template-System-ErrorHandling
-        title: The tool shall return a non-zero exit code for unrecognized arguments.
-        tags: [system]
-        justification: |
-          A non-zero exit code enables CI/CD pipelines to detect and
-          surface misconfiguration failures automatically.
-        children:
-          - Template-Program-ExitCode
-          - Template-Cli-ExitCode
-        tests:
-          - AgentControl_UnknownArgument_Provided_ReturnsError
-
-      - id: Template-System-ErrorMessage
-        title: The tool shall report an error message for unrecognized arguments.
-        tags: [system]
-        justification: |
-          Clear feedback for unrecognized arguments helps users quickly correct
-          mistakes and prevents silent misconfiguration.
-        children:
-          - Template-Cli-InvalidArgs
-          - Template-Cli-ErrorOutput
-        tests:
-          - AgentControl_UnknownArgument_Provided_ReturnsError
-
-      - id: Template-System-Results
+      - id: AgentControl-System-RecentRepos
         title: >-
-          The tool shall write self-validation results to a standard test result
-          file when the `--results` flag is provided.
+          The tool shall display a recent-repos list showing each repo's display name, full
+          path, pinned package/version, current git branch, and status badges.
         tags: [system]
         justification: |
-          Enables integration with CI/CD systems that expect standard test result formats.
-          TRX format is compatible with MSTest; JUnit XML is compatible with many CI tools.
+          A developer managing several repos needs an at-a-glance view of each repo's sync
+          state without opening a terminal, so they can decide which repos need attention
+          before starting an AI-assisted development session.
         children:
-          - Template-Cli-Results
-          - Template-SelfTest-ResultsOutput
+          - AgentControl-LauncherUI-RecentReposDisplay
+          - AgentControl-LauncherUI-StatusBadges
+          - AgentControl-GitIntegration-DetectCommittedFiles
+          - AgentControl-GitIntegration-CurrentBranch
         tests:
-          - AgentControl_ValidateWithTrxResults_Requested_GeneratesTrxFile
-          - AgentControl_ValidateWithXmlResults_Requested_GeneratesJUnitFile
+          - windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId
 
-      - id: Template-System-Depth
-        title: The tool shall adjust the heading depth of validation output when the `--depth` flag is provided.
+      - id: AgentControl-System-AddRemoveRepo
+        title: >-
+          The tool shall let the user add a repo to, and remove a repo (after confirmation)
+          from, the recent-repos list.
         tags: [system]
         justification: |
-          Enables validation output to be embedded within larger markdown documents at
-          the appropriate heading level, supporting documentation workflows that combine
-          multiple reports.
+          Developers work across a changing set of repos over time; the recent-repos list
+          must be user-maintained rather than fixed, and removal must be confirmed since it
+          is a destructive action against AgentControl's own state.
         children:
-          - Template-Cli-Depth
+          - AgentControl-LauncherUI-AddRepo
+          - AgentControl-LauncherUI-RemoveRepo
         tests:
-          - AgentControl_ValidateFlag_Provided_RunsValidation
-          - AgentControl_ValidateWithDepth_DepthThree_OutputsCorrectHeadingLevel
+          - windows@RemoveMenuItem_ClickThenConfirm_RemovesCard_DecliningLeavesItInPlace
 
-      - id: Template-System-ValidateFailure
-        title: The tool shall return a non-zero exit code when the results file cannot be written.
+      - id: AgentControl-System-SearchAndSort
+        title: >-
+          The tool shall let the user search/filter the recent-repos list, and shall order
+          it with favorited repos first, then by most-recently-launched.
         tags: [system]
         justification: |
-          A non-zero exit code on results-write failure enables CI/CD pipelines to detect
-          and surface output errors automatically, preventing silent loss of validation
-          evidence in compliance-critical workflows.
+          As the recent-repos list grows, developers need to quickly locate a specific repo
+          (search) and see their most relevant repos without scrolling (favorites/recency
+          ordering), per architecture.md's recent-repos information-design decisions.
         children:
-          - Template-SelfTest-InvalidExtension
+          - AgentControl-LauncherUI-SearchFilter
+          - AgentControl-LauncherUI-SortOrder
         tests:
-          - AgentControl_ValidateWithBadExtension_ExtensionInvalid_ReturnsNonZero
+          - windows@FilterTextBox_TypingNonMatchingText_HidesRepoCard_ClearingRestoresIt
 
-      - id: Template-System-DefaultBehavior
-        title: The tool shall display a banner then run the default tool logic when invoked without any action flags.
+      - id: AgentControl-System-Launch
+        title: >-
+          The tool shall ensure a repo's agent files are synced before launching the
+          configured agentic CLI tool in that repo's working directory.
         tags: [system]
         justification: |
-          When a user invokes the tool without any recognized action flag, the tool shall
-          display a banner identifying itself and run its primary logic so that the
-          invocation is never silently empty.
+          Launching the agent tool with missing or stale agent files (e.g. a fresh clone
+          whose gitignored agent folders were never unpacked) would silently defeat the
+          tool's core purpose; Launch must first guarantee the pinned agent files are
+          actually present on disk.
         children:
-          - Template-Cli-ArgumentParsing
-          - Template-Cli-OutputChannels
+          - AgentControl-LauncherUI-Launch
+          - AgentControl-AgentToolLauncherSubsystem-Launch
         tests:
-          - AgentControl_NoArguments_Invoked_DisplaysBanner
+          - windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory
 
-      - id: Template-System-ResultAlias
-        title: The tool shall accept `--result` as a legacy alias for `--results`.
+      - id: AgentControl-System-Pull
+        title: The tool shall let the user pull the latest commits for a repo whose working tree is clean.
         tags: [system]
         justification: |
-          Backward compatibility with scripts that use the earlier `--result` spelling
-          prevents breakage when upgrading to newer tool versions.
+          Developers commonly want the newest commits before starting an AI-assisted
+          session; pulling into a dirty working tree risks merge conflicts the tool cannot
+          safely resolve, so the action must be gated on a clean working tree.
         children:
-          - Template-Cli-ResultAlias
+          - AgentControl-LauncherUI-Pull
+          - AgentControl-GitIntegration-PullGating
+          - AgentControl-GitIntegration-Pull
         tests:
-          - AgentControl_ResultAlias_LegacyFlag_WritesResultsFile
+          - windows@PullButton_Click_InvokesConfiguredGitExecutableWithPullArgument
+
+      - id: AgentControl-System-SelectPackage
+        title: >-
+          The tool shall let the user select an initial agent package name and version for a
+          repo that has no existing pin.
+        tags: [system]
+        justification: |
+          A newly added repo has no prior pin to upgrade from; without an explicit
+          "Select Package..." action there would be no UI path to ever acquire agent files
+          for it, contrary to the tool's Purpose.
+        children:
+          - AgentControl-LauncherUI-SelectPackage
+          - AgentControl-AgentPackageManagement-DiscoverPackages
+        tests:
+          - windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders
+
+      - id: AgentControl-System-Upgrade
+        title: >-
+          The tool shall let the user sync a repo to the newest available agent package
+          version, and shall display the new package's release notes after a successful
+          upgrade.
+        tags: [system]
+        justification: |
+          Agent package updates may include instructions/standards changes the developer
+          needs to be aware of; surfacing release notes immediately after an upgrade avoids
+          the developer missing that information.
+        children:
+          - AgentControl-LauncherUI-Upgrade
+          - AgentControl-RepoSync-Sync
+          - AgentControl-RepoSync-ReleaseNotes
+          - AgentControl-AgentPackageManagement-UpgradeDetection
+        tests:
+          - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
+
+      - id: AgentControl-System-PinFile
+        title: >-
+          The tool shall persist each repo's pinned agent package name and exact version, so
+          that upgrades are an explicit user action rather than an automatic version float.
+        tags: [system]
+        justification: |
+          Per architecture.md's "Mandatory version pinning" decision, package upgrades can
+          require manual migration steps documented in release notes, so silently floating
+          to the newest version would risk applying breaking changes unnoticed.
+        children:
+          - AgentControl-RepoConfig-PinPersistence
+        tests:
+          - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
+
+      - id: AgentControl-System-Settings
+        title: >-
+          The tool shall let the user configure the package source path, a git executable
+          override, the agent tool selection, and a shell/terminal preference.
+        tags: [system]
+        justification: |
+          The package source location, git installation, preferred agentic CLI tool, and
+          preferred terminal all vary by company/developer, so they must be user-editable
+          rather than hardcoded.
+        children:
+          - AgentControl-LauncherUI-Settings
+          - AgentControl-Settings-Persistence
+        tests:
+          # No dedicated FlaUI end-to-end test opens the Settings window (UiTests pre-seed
+          # settings JSON directly via TestSettingsWriter instead); this system requirement is
+          # therefore verified via the underlying view-model's own unit test - a disclosed
+          # granularity limitation, not a fabricated end-to-end claim.
+          - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
+
+      - id: AgentControl-System-DiagnosticLogging
+        title: >-
+          The tool shall write a rolling diagnostic log file capturing process-launch and
+          git-integration detail, to support troubleshooting when a message box alone is
+          insufficient.
+        tags: [system]
+        justification: |
+          Per architecture.md, real-world flaky-process-launch troubleshooting showed that a
+          message box alone could not root-cause intermittent failures; a diagnostic log
+          captures exit codes, timing, stderr, and Win32 error codes a message box cannot show.
+        children:
+          - AgentControl-Logging-DiagnosticFile
+          - AgentControl-OTS-Serilog-WriteLogFile
+        tests:
+          # Logging has no dedicated test file (see AgentControl-Logging-DiagnosticFile's own
+          # justification for the full disclosure); this system requirement inherits the same
+          # indirect evidence.
+          - GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue
+
+      - id: AgentControl-System-About
+        title: The tool shall provide an About dialog showing the application version, copyright, and license.
+        tags: [system]
+        justification: |
+          Lets a developer identify exactly which build they are running (e.g. when
+          reporting an issue) without inspecting file properties.
+        children:
+          - AgentControl-LauncherUI-About
+          - AgentControl-Program-Version
+        tests:
+          - windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright
+
+      - id: AgentControl-System-TestIsolation
+        title: >-
+          The tool shall support a configuration-directory override and git/agent-tool
+          command overrides so automated tests can run hermetically against an isolated
+          configuration folder.
+        tags: [system]
+        justification: |
+          Per architecture.md's testability decision, FlaUI-driven integration tests must be
+          able to point AgentControl at an isolated settings folder and substitute stub
+          executables for git/the agentic CLI tool, giving fully repeatable end-to-end
+          automation without depending on a real git installation or agentic CLI tool.
+        children:
+          - AgentControl-Startup-ParseArguments
+        tests:
+          - StartupOptions_Parse_ConfigDirArgument_CapturesValue
+
+      - id: AgentControl-System-Startup
+        title: >-
+          The tool shall load persisted settings and display the recent-repos window when
+          launched.
+        tags: [system]
+        justification: |
+          The application must present the developer's existing recent-repos list and
+          preferences immediately on launch rather than starting from a blank slate every
+          time.
+        children:
+          - AgentControl-Program-Bootstrap
+          - AgentControl-Program-ErrorHandling
+        tests:
+          - windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId
+
+      - id: AgentControl-System-UiFramework
+        title: The tool shall render its user interface using a cross-platform UI framework.
+        tags: [system]
+        justification: |
+          Per architecture.md's Technology Stack, the UI is built on Avalonia so the
+          codebase stays platform-portable even though only a Windows MSI ships for v1.
+        children:
+          - AgentControl-OTS-Avalonia-RenderUi
+        tests:
+          - windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId

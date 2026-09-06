@@ -1,7 +1,8 @@
 # Introduction
 
-This document provides the verification design for the Agent Control, a .NET command-line
-application demonstrating best practices for DEMA Consulting DotNet Tools.
+This document provides the verification design for the Agent Control, a .NET desktop launcher
+application that lets a company distribute proprietary AI-agent configuration alongside public
+source repositories without committing that content to source control.
 
 ## Purpose
 
@@ -17,27 +18,46 @@ This document covers the verification design for the following software items:
 
 **Local items:**
 
-- **AgentControl** — system, subsystem, and unit verification:
-  - **Program** — entry point and execution orchestrator
-  - **Cli** subsystem
-    - **Context** — argument parser and I/O owner
-  - **SelfTest** subsystem
-    - **Validation** — self-validation test runner
+- **AgentControl** — system-level verification:
+  - **Program** — entry point and bootstrap orchestrator (also documents Avalonia's `App`
+    bootstrap responsibility, which has no dedicated unit test file)
+  - **LauncherUI** subsystem
+    - **MainWindowViewModel**, **RepoCardViewModel**, **SelectPackageWindowViewModel**,
+      **SettingsWindowViewModel**
+  - **AgentPackageManagement** subsystem
+    - **PackageSource**, **PackageVersion**, **PackageVersionCache**
+  - **RepoSync** subsystem
+    - **PackageZipExtractor**, **ReleaseNotesViewerViewModel**
+  - **RepoConfig** subsystem
+    - **RepoPinStore**
+  - **AgentToolLauncher** subsystem
+    - **ShellDetector**, **AgentToolLauncher**
+  - **GitIntegration** subsystem
+    - **GitClient**, **CommittedAgentFilesCache**
+  - **Settings** subsystem
+    - **SettingsStore**
+  - **Logging** subsystem (no dedicated unit — indirect-only test coverage, disclosed below)
+  - **Startup** subsystem
+    - **StartupOptions**
   - **Utilities** subsystem
     - **PathHelpers** — safe path combination utilities
 
 **OTS items:**
 
+- **Avalonia** — cross-platform UI framework
 - **BuildMark** — build-notes documentation tool
 - **FileAssert** — document assertion tool
+- **FlaUI** — Windows UI Automation testing library
 - **Pandoc** — Markdown-to-HTML conversion tool
 - **ReqStream** — requirements traceability tool
 - **ReviewMark** — file review enforcement tool
 - **SarifMark** — SARIF report conversion tool
+- **Serilog** — structured-logging library
 - **SonarMark** — SonarCloud quality report tool
 - **SysML2Tools** — architecture model validation and diagram rendering tool
 - **VersionMark** — tool-version documentation tool
 - **WeasyPrint** — HTML-to-PDF conversion tool
+- **WiX Toolset** — Windows MSI installer packaging tool
 - **xUnit** — unit-testing framework
 
 The following topics are out of scope:
@@ -54,7 +74,17 @@ The test folder structure mirrors the source subsystem breakdown:
 
 ```text
 test/
-└── DemaConsulting.AgentControl.Tests/  — unit and integration tests
+├── DemaConsulting.AgentControl.Tests/    — unit and integration tests (xUnit v3)
+│   ├── LauncherUI/
+│   ├── AgentPackageManagement/
+│   ├── RepoSync/
+│   ├── RepoConfig/
+│   ├── AgentToolLauncher/
+│   ├── GitIntegration/
+│   ├── Settings/
+│   ├── Startup/
+│   └── Utilities/
+└── DemaConsulting.AgentControl.UiTests/  — FlaUI end-to-end Windows UI Automation tests
 ```
 
 ## Companion Artifact Structure

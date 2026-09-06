@@ -161,6 +161,7 @@ jobs:
       - name: Restore Dependencies
         run: >
           dotnet restore
+          .github/DemaConsulting.AgentControl.CrossPlatform.slnx
 
       - name: Start Sonar Scanner
         env:
@@ -178,6 +179,7 @@ jobs:
       - name: Build
         run: >
           dotnet build
+          .github/DemaConsulting.AgentControl.CrossPlatform.slnx
           --no-restore
           --configuration Release
           --property:Version=${{ inputs.version }}
@@ -185,6 +187,7 @@ jobs:
       - name: Test
         run: >
           dotnet test
+          .github/DemaConsulting.AgentControl.CrossPlatform.slnx
           --no-build
           --configuration Release
           --property:Version=${{ inputs.version }}
@@ -205,6 +208,7 @@ jobs:
       - name: Create Dotnet Tool
         run: >
           dotnet pack
+          .github/DemaConsulting.AgentControl.CrossPlatform.slnx
           --no-build
           --no-restore
           --configuration Release
@@ -227,6 +231,95 @@ jobs:
           path: |
             src/DemaConsulting.AgentControl/bin/Release/*.nupkg
             src/DemaConsulting.AgentControl/bin/Release/*.snupkg
+
+  # Builds the Windows MSI installer package from the self-contained, single-file publish
+  # output of DemaConsulting.AgentControl (see DemaConsulting.AgentControl.Msi.wixproj's
+  # isolated nested publish). Isolated to windows-latest since the WiX MSI build requires
+  # Windows-only packaging tooling, so it is never attempted in the cross-platform build matrix.
+  package-msi:
+    name: Package MSI
+    runs-on: windows-latest
+    needs: build
+    permissions:
+      contents: read
+
+    steps:
+      # === INSTALL DEPENDENCIES ===
+      # This section installs all required dependencies and tools for building the MSI.
+      # Downstream projects: Add any additional dependency installations here.
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.x
+
+      - name: Restore Tools
+        run: >
+          dotnet tool restore
+
+      # === CAPTURE TOOL VERSIONS ===
+      # This section captures the versions of all tools used in the build process.
+      # Downstream projects: Add any additional tools to capture here.
+
+      - name: Capture tool versions
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          echo "Capturing tool versions..."
+          dotnet versionmark --capture --job-id "package-msi" \
+            --output "artifacts/versionmark-package-msi.json" -- \
+            dotnet git versionmark
+          echo "✓ Tool versions captured"
+
+      # === CAPTURE OTS SELF-VALIDATION RESULTS ===
+      # This section runs the self-validation of each OTS tool and saves TRX results
+      # so that OTS Software Requirements in requirements.yaml can be satisfied.
+      # Downstream projects: Add any additional OTS tool self-validation steps here.
+
+      - name: Run VersionMark self-validation
+        run: >
+          dotnet versionmark
+          --validate
+          --results artifacts/versionmark-self-validation-package-msi.trx
+
+      # === BUILD MSI ===
+      # This section builds the WiX MSI installer package from the self-contained,
+      # single-file publish output of DemaConsulting.AgentControl.
+      # Downstream projects: Add any additional MSI build steps here.
+
+      - name: Build MSI
+        run: >
+          dotnet build
+          src/DemaConsulting.AgentControl.Msi/DemaConsulting.AgentControl.Msi.wixproj
+          --configuration Release
+          --property:ProductVersion=${{ inputs.version }}
+
+      # === UPLOAD ARTIFACTS ===
+      # This section uploads all generated artifacts for use by downstream jobs.
+      # Downstream projects: Add any additional artifact uploads here.
+
+      - name: Copy MSI to artifacts folder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts-msi | Out-Null
+          Copy-Item -Path "src/DemaConsulting.AgentControl.Msi/bin/x64/Release/*.msi" -Destination artifacts-msi/
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: msi-installer
+          path: artifacts-msi/*.msi
+
+      - name: Upload package-msi tool-version artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-package-msi
+          path: artifacts/
 
   # Runs CodeQL security and quality analysis, gathering results to include
   # in the code quality report.
@@ -272,6 +365,7 @@ jobs:
       - name: Restore Dependencies
         run: >
           dotnet restore
+          .github/DemaConsulting.AgentControl.CrossPlatform.slnx
 
       # === BUILD AND ANALYZE ===
       # This section builds the project and performs CodeQL analysis.
@@ -280,6 +374,7 @@ jobs:
       - name: Build
         run: >
           dotnet build
+          .github/DemaConsulting.AgentControl.CrossPlatform.slnx
           --no-restore
           --configuration Release
           --property:Version=${{ inputs.version }}

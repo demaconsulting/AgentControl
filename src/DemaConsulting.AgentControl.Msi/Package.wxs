@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (c) DEMA Consulting
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+-->
+<!--
+  Minimal functional v1 MSI package for AgentControl: installs the self-contained,
+  single-file publish output of DemaConsulting.AgentControl under Program Files and creates a single
+  Start Menu shortcut. No custom UI, no code signing, no MajorUpgrade logic beyond a basic
+  UpgradeCode reservation for future use - per architecture.md's explicit v1 packaging scope.
+
+  The published payload embeds directly into the .msi (see <MediaTemplate EmbedCab="yes" />
+  below), so the build produces a single, self-contained .msi file with no external .cab
+  files shipped alongside it.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="AgentControl"
+    Manufacturer="DEMA Consulting"
+    Version="$(ProductVersion)"
+    UpgradeCode="EF6D37A6-9EA8-426A-B034-5C4923C4E651">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of AgentControl is already installed." />
+
+    <!-- Embed all generated cabinets directly into the .msi so the installer is a single,
+         self-contained file - without this, WiX's default splits the published payload into
+         external cab1.cab/cab2.cab/... files that must be shipped alongside the .msi for
+         install to succeed. -->
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="InstallVendorFolder" Name="DEMA Consulting">
+        <Directory Id="INSTALLFOLDER" Name="AgentControl" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="AgentControl" />
+    </StandardDirectory>
+
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ApplicationShortcutComponent" Guid="4E6D0F63-6C1E-4B7A-9C5E-2C3E9E7F6B1A">
+        <Shortcut
+          Id="ApplicationStartMenuShortcut"
+          Name="AgentControl"
+          Description="Desktop launcher for distributing proprietary AI-agent configuration alongside public repositories."
+          Target="[INSTALLFOLDER]DemaConsulting.AgentControl.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveApplicationProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\DEMA Consulting\AgentControl"
+          Name="StartMenuShortcutInstalled"
+          Type="integer"
+          Value="1"
+          KeyPath="true" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="MainFeature" Title="AgentControl" Level="1">
+      <ComponentGroupRef Id="AgentControlPublishedComponents" />
+      <ComponentRef Id="ApplicationShortcutComponent" />
+    </Feature>
+
+  </Package>
+</Wix>

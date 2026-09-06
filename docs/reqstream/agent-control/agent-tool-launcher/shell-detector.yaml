@@ -1,0 +1,37 @@
+---
+# Software Unit Requirements for the ShellDetector Class
+#
+# ShellDetector chooses which shell/terminal to launch the agent tool through: PowerShell
+# Core or Windows PowerShell on Windows (preferring pwsh when available), and the user's
+# configured POSIX shell (falling back to a sensible default) on non-Windows platforms.
+
+sections:
+  - title: ShellDetector Unit Requirements
+    requirements:
+      - id: AgentControl-ShellDetector-DetectWindows
+        title: >-
+          The ShellDetector class shall, on Windows, prefer PowerShell Core when available on
+          the path or at its well-known install location, falling back to Windows PowerShell,
+          then to the Command shell when neither is resolvable.
+        justification: |
+          PowerShell Core is the preferred modern shell where present; the fallback chain
+          ensures a repo can still be launched into a working shell on any supported Windows
+          configuration.
+        tests:
+          - ShellDetector_Detect_WindowsWithPwshOnPath_ReturnsPowerShellCore
+          - ShellDetector_Detect_WindowsWithPwshAtWellKnownPath_ReturnsPowerShellCore
+          - ShellDetector_Detect_WindowsWithOnlyLegacyPowerShellOnPath_ReturnsWindowsPowerShell
+          - ShellDetector_Detect_WindowsWithLegacyAtWellKnownPathOnly_ReturnsWindowsPowerShell
+          - ShellDetector_Detect_WindowsWithNoPowerShellAvailable_ReturnsCmd
+          - ShellDetector_Detect_WindowsWithNothingResolvable_ReturnsCmdWithDefaultName
+
+      - id: AgentControl-ShellDetector-DetectPosix
+        title: >-
+          The ShellDetector class shall, on non-Windows platforms, use the shell named by the
+          SHELL environment variable when set, and a default POSIX shell otherwise.
+        justification: |
+          Respects the developer's own configured login shell on Linux/macOS while still
+          providing a working default when SHELL is unset.
+        tests:
+          - ShellDetector_Detect_NonWindowsWithShellVariableSet_ReturnsPosixShell
+          - ShellDetector_Detect_NonWindowsWithShellVariableUnset_ReturnsDefaultPosixShell

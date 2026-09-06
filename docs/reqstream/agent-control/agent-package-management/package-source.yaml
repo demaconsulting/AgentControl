@@ -1,0 +1,62 @@
+---
+# Software Unit Requirements for the PackageSource Class
+#
+# PackageSource scans a package source folder's zip files to enumerate package names and
+# versions, find the latest version of a named package, and detect whether a newer version
+# is available than a given pinned version.
+
+sections:
+  - title: PackageSource Unit Requirements
+    requirements:
+      - id: AgentControl-PackageSource-EnumeratePackages
+        title: >-
+          The PackageSource class shall enumerate the packages matching a given name in a
+          source folder, and shall reject a source folder that does not exist.
+        justification: |
+          Callers need the concrete set of a specific package's available zip files at the
+          source, and must be told clearly when the configured source folder is invalid
+          rather than receiving a silently empty result.
+        tests:
+          - PackageSource_EnumeratePackages_MixedDirectory_FindsOnlyMatchingPackage
+          - PackageSource_EnumeratePackages_DirectoryDoesNotExist_ThrowsDirectoryNotFoundException
+
+      - id: AgentControl-PackageSource-FindLatest
+        title: >-
+          The PackageSource class shall find the highest-versioned package matching a given
+          name, and return none when no match exists.
+        justification: |
+          The Launch/ensure-synced and Upgrade flows both need to resolve "the newest
+          available version of package X" as a single well-defined operation.
+        tests:
+          - PackageSource_FindLatest_MultipleVersions_ReturnsHighest
+          - PackageSource_FindLatest_NoMatchingPackage_ReturnsNull
+
+      - id: AgentControl-PackageSource-DiscoverNames
+        title: >-
+          The PackageSource class shall determine a package's name and version from its zip
+          filename, and shall enumerate the distinct package names present in a source folder,
+          skipping files with no valid name/version split point.
+        justification: |
+          The package-selection window needs the list of available package names before any
+          specific package is chosen, and must not be broken by an unrelated or malformed
+          zip file present in the source folder.
+        tests:
+          - PackageSource_EnumeratePackageNames_MixedDirectory_ReturnsDistinctSortedNames
+          - PackageSource_EnumeratePackageNames_HyphenatedPackageName_SplitsAtLeftmostParseableHyphen
+          - PackageSource_EnumeratePackageNames_NoValidSplitPoint_SkipsFile
+          - PackageSource_EnumeratePackageNames_EmptyDirectory_ReturnsEmptyList
+          - PackageSource_EnumeratePackageNames_DirectoryDoesNotExist_ThrowsDirectoryNotFoundException
+
+      - id: AgentControl-PackageSource-DetectNewerVersion
+        title: >-
+          The PackageSource class shall report whether a newer version of a named package is
+          available than a given pinned version, treating an unparsable pinned version or no
+          packages found as producing a definite answer rather than an error.
+        justification: |
+          The upgrade-available badge must always resolve to a clear true/false outcome so the
+          UI never shows an ambiguous or crashed state for this check.
+        tests:
+          - PackageSource_IsNewerVersionAvailable_SourceHasNewerVersion_ReturnsTrue
+          - PackageSource_IsNewerVersionAvailable_PinIsCurrent_ReturnsFalse
+          - PackageSource_IsNewerVersionAvailable_NoPackagesFound_ReturnsFalse
+          - PackageSource_IsNewerVersionAvailable_UnparsablePin_ReturnsTrue

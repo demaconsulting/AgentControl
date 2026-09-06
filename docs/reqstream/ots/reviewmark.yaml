@@ -8,7 +8,7 @@ sections:
     sections:
       - title: ReviewMark Requirements
         requirements:
-          - id: Template-OTS-ReviewMark
+          - id: AgentControl-OTS-ReviewMark
             title: ReviewMark shall produce review documentation from the review configuration.
             justification: |
               DemaConsulting.ReviewMark reads the .reviewmark.yaml configuration and the review
@@ -20,7 +20,7 @@ sections:
               - ReviewMark_ReviewPlanGeneration
               - ReviewMark_ReviewReportGeneration
 
-          - id: Template-OTS-ReviewMark-Lint
+          - id: AgentControl-OTS-ReviewMark-Lint
             title: ReviewMark shall validate the review configuration file.
             justification: |
               DemaConsulting.ReviewMark --lint is run in the CI lint pass to validate the
@@ -30,7 +30,7 @@ sections:
             tests:
               - ReviewMark_Lint
 
-          - id: Template-OTS-ReviewMark-Elaborate
+          - id: AgentControl-OTS-ReviewMark-Elaborate
             title: ReviewMark shall elaborate review-set details for agent consumption.
             justification: |
               DemaConsulting.ReviewMark --elaborate is invoked by the formal-review agent
@@ -40,7 +40,7 @@ sections:
             tests:
               - ReviewMark_Elaborate
 
-          - id: Template-OTS-ReviewMark-Enforce
+          - id: AgentControl-OTS-ReviewMark-Enforce
             title: ReviewMark shall enforce that all review-sets have current review evidence.
             justification: |
               DemaConsulting.ReviewMark --enforce is run in the CI pipeline to verify that

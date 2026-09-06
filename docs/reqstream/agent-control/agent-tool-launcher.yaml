@@ -1,0 +1,36 @@
+---
+# AgentToolLauncher Subsystem Requirements
+#
+# PURPOSE:
+# - Define requirements for the AgentControl AgentToolLauncher subsystem
+# - AgentToolLauncher spans ShellDetector.cs (chooses the terminal/shell to launch through)
+#   and AgentToolLauncher.cs (builds the process-start info to run the agent tool inside that
+#   shell); the ShellKind.cs enum is folded into this subsystem-level description as it has no
+#   dedicated test file
+# - Subsystem requirements describe the observable behavior of launching an agentic CLI tool
+#   in a repo's working directory
+#
+# NOTE: this subsystem and one of its units share the name "AgentToolLauncher"; per
+# software-items.md's naming-collision convention, both retain the plain name at their own
+# level (the folder/leaf-file path disambiguates: agent-tool-launcher.yaml (subsystem) vs.
+# agent-tool-launcher/agent-tool-launcher.yaml (unit)).
+
+sections:
+  - title: AgentToolLauncher Subsystem Requirements
+    requirements:
+      - id: AgentControl-AgentToolLauncherSubsystem-Launch
+        title: >-
+          The AgentToolLauncher subsystem shall detect the appropriate shell for the current
+          platform and build process-start information that runs the configured agent tool
+          command inside that shell in the repo's working directory.
+        justification: |
+          The agent tool must run inside a real interactive shell (so the developer can keep
+          working in that terminal) appropriate to the current platform, rather than being
+          launched as a bare, ephemeral process.
+        children:
+          - AgentControl-ShellDetector-DetectWindows
+          - AgentControl-ShellDetector-DetectPosix
+          - AgentControl-AgentToolLauncher-BuildCommand
+          - AgentControl-AgentToolLauncher-Validation
+        tests:
+          - windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory

@@ -1,0 +1,28 @@
+---
+# RepoConfig Subsystem Requirements
+#
+# PURPOSE:
+# - Define requirements for the AgentControl RepoConfig subsystem
+# - RepoConfig spans RepoPinStore.cs (loads/saves a repo's `.agentcontrol.json` pin file) and
+#   the RepoPin.cs data record, which is folded into this subsystem-level description as it
+#   has no dedicated test file
+# - Subsystem requirements describe the observable behavior of persisting a repo's pinned
+#   package name/version
+
+sections:
+  - title: RepoConfig Subsystem Requirements
+    requirements:
+      - id: AgentControl-RepoConfig-PinPersistence
+        title: >-
+          The RepoConfig subsystem shall persist a repo's pinned package name and exact
+          version in a per-repo pin file, and shall report no pin for a repo that has none.
+        justification: |
+          Per architecture.md's mandatory version-pinning decision, the pinned package/version
+          must survive across application restarts and be readable per-repo without any
+          central registry.
+        children:
+          - AgentControl-RepoPinStore-Load
+          - AgentControl-RepoPinStore-Save
+        tests:
+          - RepoPinStore_SaveThenLoad_RoundTripsAllFields
+          - RepoPinStore_Load_NoPinFile_ReturnsNull

@@ -1,0 +1,43 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:DemaConsulting.AgentControl.LauncherUI"
+        mc:Ignorable="d"
+        d:DesignWidth="420" d:DesignHeight="420"
+        x:Class="DemaConsulting.AgentControl.LauncherUI.SelectPackageWindow"
+        x:DataType="vm:SelectPackageWindowViewModel"
+        Name="SelectPackageRoot"
+        Title="Select Package"
+        Width="420" SizeToContent="Height"
+        MinWidth="320"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+    <StackPanel Margin="16" Spacing="12">
+
+        <TextBlock Text="Package" FontWeight="Bold" />
+        <ListBox Name="SelectPackageNameList"
+                  AutomationProperties.AutomationId="SelectPackageNameList"
+                  ItemsSource="{Binding PackageNames}"
+                  SelectedItem="{Binding SelectedPackageName, Mode=TwoWay}"
+                  MaxHeight="140" />
+
+        <TextBlock Text="Version" FontWeight="Bold" />
+        <ListBox Name="SelectPackageVersionList"
+                  AutomationProperties.AutomationId="SelectPackageVersionList"
+                  ItemsSource="{Binding AvailableVersions}"
+                  SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
+                  MaxHeight="140" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Name="SelectPackageCancelButton"
+                     AutomationProperties.AutomationId="SelectPackageCancelButton"
+                     Content="Cancel"
+                     Click="CancelButton_Click" />
+            <Button Name="SelectPackageConfirmButton"
+                     AutomationProperties.AutomationId="SelectPackageConfirmButton"
+                     Content="Select"
+                     Command="{Binding ConfirmCommand}" />
+        </StackPanel>
+    </StackPanel>
+</Window>

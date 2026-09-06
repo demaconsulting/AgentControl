@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:DemaConsulting.AgentControl.RepoSync"
+        mc:Ignorable="d"
+        d:DesignWidth="600" d:DesignHeight="450"
+        x:Class="DemaConsulting.AgentControl.RepoSync.ReleaseNotesViewer"
+        x:DataType="vm:ReleaseNotesViewerViewModel"
+        Name="ReleaseNotesWindow"
+        Title="{Binding Title}"
+        Width="600" Height="450"
+        MinWidth="360" MinHeight="240"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner">
+    <Grid RowDefinitions="Auto,*" Margin="12">
+        <TextBlock Grid.Row="0"
+                    Name="ReleaseNotesHeading"
+                    Text="{Binding Title}"
+                    FontSize="16"
+                    FontWeight="Bold"
+                    Margin="0,0,0,8" />
+        <TextBox Grid.Row="1"
+                  Name="ReleaseNotesTextBox"
+                  AutomationProperties.AutomationId="ReleaseNotesTextBox"
+                  Text="{Binding ReleaseNotes}"
+                  IsReadOnly="True"
+                  AcceptsReturn="True"
+                  TextWrapping="Wrap"
+                  FontFamily="Consolas,Menlo,monospace"
+                  VerticalContentAlignment="Top" />
+    </Grid>
+</Window>

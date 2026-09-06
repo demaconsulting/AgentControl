@@ -1,0 +1,64 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:DemaConsulting.AgentControl.LauncherUI"
+        mc:Ignorable="d"
+        d:DesignWidth="480" d:DesignHeight="420"
+        x:Class="DemaConsulting.AgentControl.LauncherUI.SettingsWindow"
+        x:DataType="vm:SettingsWindowViewModel"
+        Name="SettingsWindowRoot"
+        Title="AgentControl Settings"
+        Width="480" SizeToContent="Height"
+        MinWidth="380"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+    <StackPanel Margin="16" Spacing="12">
+
+        <TextBlock Text="Package source path" FontWeight="Bold" />
+        <Grid ColumnDefinitions="*,Auto">
+            <TextBox Grid.Column="0"
+                      Name="PackageSourcePathTextBox"
+                      AutomationProperties.AutomationId="PackageSourcePathTextBox"
+                      PlaceholderText="Local, mapped-drive, or UNC path"
+                      Text="{Binding PackageSourcePath}"
+                      Margin="0,0,8,0" />
+            <Button Grid.Column="1"
+                     Name="BrowsePackageSourceButton"
+                     AutomationProperties.AutomationId="BrowsePackageSourceButton"
+                     Content="Browse..."
+                     Click="BrowsePackageSourceButton_Click" />
+        </Grid>
+
+        <TextBlock Text="Git executable path override (blank = use PATH)" FontWeight="Bold" />
+        <TextBox Name="GitExecutablePathTextBox"
+                  AutomationProperties.AutomationId="GitExecutablePathTextBox"
+                  PlaceholderText="git"
+                  Text="{Binding GitExecutablePath}" />
+
+        <TextBlock Text="Agentic CLI tool" FontWeight="Bold" />
+        <ComboBox Name="AgentToolComboBox"
+                   AutomationProperties.AutomationId="AgentToolComboBox"
+                   ItemsSource="{x:Static vm:SettingsWindowViewModel.AvailableAgentTools}"
+                   SelectedItem="{Binding AgentTool}"
+                   HorizontalAlignment="Stretch" />
+
+        <TextBox Name="CustomAgentCommandTextBox"
+                  AutomationProperties.AutomationId="CustomAgentCommandTextBox"
+                  PlaceholderText="Custom command line"
+                  IsVisible="{Binding IsCustomAgentToolSelected}"
+                  Text="{Binding CustomAgentCommand}" />
+
+        <TextBlock Text="Shell/terminal preference (blank = auto-detect)" FontWeight="Bold" />
+        <TextBox Name="ShellPreferenceTextBox"
+                  AutomationProperties.AutomationId="ShellPreferenceTextBox"
+                  PlaceholderText="Auto-detect"
+                  Text="{Binding ShellPreference}" />
+
+        <Button Name="SaveSettingsButton"
+                 AutomationProperties.AutomationId="SaveSettingsButton"
+                 Content="Save"
+                 Command="{Binding SaveCommand}"
+                 HorizontalAlignment="Right" />
+    </StackPanel>
+</Window>

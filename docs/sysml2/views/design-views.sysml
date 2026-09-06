@@ -12,12 +12,40 @@ package AgentControl {
         expose AgentControlSystem;
     }
 
-    view CliView {
-        expose CliSubsystem;
+    view LauncherUIView {
+        expose LauncherUISubsystem;
     }
 
-    view SelfTestView {
-        expose SelfTestSubsystem;
+    view AgentPackageManagementView {
+        expose AgentPackageManagementSubsystem;
+    }
+
+    view RepoSyncView {
+        expose RepoSyncSubsystem;
+    }
+
+    view RepoConfigView {
+        expose RepoConfigSubsystem;
+    }
+
+    view AgentToolLauncherView {
+        expose AgentToolLauncherSubsystem;
+    }
+
+    view GitIntegrationView {
+        expose GitIntegrationSubsystem;
+    }
+
+    view SettingsView {
+        expose SettingsSubsystem;
+    }
+
+    view LoggingView {
+        expose LoggingSubsystem;
+    }
+
+    view StartupView {
+        expose StartupSubsystem;
     }
 
     view UtilitiesView {

@@ -1,0 +1,78 @@
+---
+# Software Unit Requirements for the MainWindowViewModel Class
+#
+# MainWindowViewModel backs the main recent-repos window: it owns the collection of
+# RepoCardViewModel instances, applies search filtering and sort ordering, and mediates
+# add/remove of tracked repos and settings changes.
+
+sections:
+  - title: MainWindowViewModel Unit Requirements
+    requirements:
+      - id: AgentControl-MainWindowViewModel-PopulateRecentRepos
+        title: >-
+          The MainWindowViewModel class shall create a repo card for every recent repo
+          recorded in settings on construction.
+        justification: |
+          The main window must reflect the developer's previously tracked repos immediately
+          on startup, without requiring any manual re-add step.
+        tests:
+          - MainWindowViewModel_Constructor_SettingsHaveRecentRepos_PopulatesRepoCards
+          - MainWindowViewModel_Constructor_DoesNotInvokeWorkingTreeDirtyCheckSubprocess
+
+      - id: AgentControl-MainWindowViewModel-AddRepo
+        title: >-
+          The MainWindowViewModel class shall add a new repo card and persist it to settings
+          when given an existing, not-already-tracked folder path, and shall reject
+          nonexistent or duplicate paths.
+        justification: |
+          Prevents the recent-repos list from accumulating invalid or duplicate entries while
+          still letting the developer register new repos.
+        tests:
+          - MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings
+          - MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse
+          - MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse
+
+      - id: AgentControl-MainWindowViewModel-RemoveRepo
+        title: >-
+          The MainWindowViewModel class shall remove a repo card from its collections and
+          persist the updated settings.
+        justification: |
+          Once removal is confirmed by the user, the repo must no longer appear in the
+          recent-repos list on this or any future launch.
+        tests:
+          - MainWindowViewModel_RemoveRepo_RemovesFromCollectionsAndPersistsSettings
+          - MainWindowViewModel_CardRaisesRemoveRequested_DoesNotRemoveCardWithoutConfirmation
+
+      - id: AgentControl-MainWindowViewModel-SearchFilter
+        title: >-
+          The MainWindowViewModel class shall filter displayed repo cards by a
+          case-insensitive match against the repo's name or path.
+        justification: |
+          Lets the developer narrow a long list to the repo they are looking for by typing
+          any recognizable substring of its name or path.
+        tests:
+          - MainWindowViewModel_FilterText_MatchesRepoNameCaseInsensitive_FiltersDisplayedRepoCards
+          - MainWindowViewModel_FilterText_MatchesRepoPath_FiltersDisplayedRepoCards
+
+      - id: AgentControl-MainWindowViewModel-SortOrder
+        title: >-
+          The MainWindowViewModel class shall order displayed repo cards with favorites
+          first, then by most-recently-launched, with never-launched repos last.
+        justification: |
+          Surfaces the repos most relevant to the developer's current work without requiring
+          manual reordering.
+        tests:
+          - MainWindowViewModel_DisplayedRepoCards_SortsFavoritesAboveNonFavorites
+          - MainWindowViewModel_DisplayedRepoCards_SortsByLastLaunchedUtcDescendingWithNullsLast
+
+      - id: AgentControl-MainWindowViewModel-ApplySettings
+        title: >-
+          The MainWindowViewModel class shall apply updated settings by persisting the new
+          values while preserving the existing recent-repos list, and shall invalidate any
+          cached package version data.
+        justification: |
+          A settings change (e.g. a new package source path) must take effect immediately for
+          subsequent upgrade checks, without discarding the developer's tracked repos.
+        tests:
+          - MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields
+          - MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache

@@ -1,0 +1,77 @@
+---
+# Software Unit Requirements for the GitClient Class
+#
+# GitClient invokes the configured git executable to query working-tree cleanliness, pull
+# commits, read the HEAD commit hash, detect committed agent files, and resolve the current
+# branch (using a fast path that reads .git/HEAD directly before falling back to a subprocess).
+
+sections:
+  - title: GitClient Unit Requirements
+    requirements:
+      - id: AgentControl-GitClient-CheckWorkingTree
+        title: >-
+          The GitClient class shall report whether a repo's working tree is clean, and shall
+          raise a clear error when the git executable cannot be found or the status command
+          fails.
+        justification: |
+          Pull gating and other status computation depend on an accurate, reliably-erroring
+          clean/dirty determination rather than a silent false negative.
+        tests:
+          - GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue
+          - GitClient_IsWorkingTreeClean_DirtyRepo_ReturnsFalse
+          - GitClient_IsWorkingTreeClean_StatusCommandFails_ThrowsInvalidOperationException
+          - GitClient_IsWorkingTreeClean_ExecutableNotFound_ThrowsInvalidOperationException
+
+      - id: AgentControl-GitClient-Pull
+        title: >-
+          The GitClient class shall pull a repo's latest commits and report success or
+          failure without throwing on a failed pull.
+        justification: |
+          A failed pull (e.g. no network, diverged history) is an expected, user-facing
+          outcome that must be reported as a result value, not an unhandled exception.
+        tests:
+          - GitClient_Pull_Succeeds_ReturnsSucceededResult
+          - GitClient_Pull_Fails_ReturnsNonSucceededResultWithoutThrowing
+
+      - id: AgentControl-GitClient-DetectCommittedFiles
+        title: >-
+          The GitClient class shall report whether a repo has any committed agent files, and
+          shall raise a clear error when the underlying query fails.
+        justification: |
+          Distinguishes repos where agent files are tracked in git (a deliberate team
+          decision) from ones where they remain purely local/gitignored, driving the
+          committed-agent-files badge.
+        tests:
+          - GitClient_HasCommittedAgentFiles_LsFilesReportsFiles_ReturnsTrue
+          - GitClient_HasCommittedAgentFiles_LsFilesReportsNothing_ReturnsFalse
+          - GitClient_HasCommittedAgentFiles_LsFilesFails_ThrowsInvalidOperationException
+
+      - id: AgentControl-GitClient-CurrentBranch
+        title: >-
+          The GitClient class shall resolve a repo's current branch name, reading `.git/HEAD`
+          directly as a fast path (recognizing a normal branch, a detached HEAD, and a
+          worktree indirection) and falling back to invoking git when the fast path cannot
+          determine an answer.
+        justification: |
+          Displaying the current branch on every repo card must be fast even across many
+          repos, while still producing a correct answer for the less-common cases a direct
+          file read cannot resolve alone.
+        tests:
+          - GitClient_GetCurrentBranch_FastPathNormalBranch_ReturnsBranchNameWithoutInvokingGit
+          - GitClient_GetCurrentBranch_FastPathDetachedHead_ReturnsDetachedMarker
+          - GitClient_GetCurrentBranch_FastPathWorktreeIndirection_ReturnsBranchName
+          - GitClient_GetCurrentBranch_NoGitDirectory_FallsBackToSubprocess
+          - GitClient_GetCurrentBranch_UnrecognizedHeadContent_FallsBackToSubprocess
+          - GitClient_GetCurrentBranch_FallbackFails_ThrowsInvalidOperationException
+
+      - id: AgentControl-GitClient-HeadHash
+        title: >-
+          The GitClient class shall read a repo's current HEAD commit hash, trimmed, and
+          raise a clear error when the query fails.
+        justification: |
+          The HEAD commit hash is the cache key for the committed-agent-files-changed check,
+          so it must be resolved reliably and in a normalized (trimmed) form.
+        tests:
+          - GitClient_GetHeadCommitHash_Succeeds_ReturnsTrimmedHash
+          - GitClient_GetHeadCommitHash_Fails_ThrowsInvalidOperationException
+          - GitClient_Constructor_EmptyExecutablePath_ThrowsArgumentException

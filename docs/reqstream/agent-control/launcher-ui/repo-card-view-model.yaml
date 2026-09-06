@@ -1,0 +1,166 @@
+---
+# Software Unit Requirements for the RepoCardViewModel Class
+#
+# RepoCardViewModel backs a single repo's card in the main window: it tracks the repo's pin,
+# git status, and upgrade availability, and drives launch/pull/upgrade/select-package/favorite/
+# remove actions for that repo.
+
+sections:
+  - title: RepoCardViewModel Unit Requirements
+    requirements:
+      - id: AgentControl-RepoCardViewModel-DisplayInfo
+        title: >-
+          The RepoCardViewModel class shall expose the repo's leaf folder name as its display
+          name, and its pinned package name/version when a pin file exists.
+        justification: |
+          A developer identifies a repo card primarily by its folder name; the pinned
+          package/version tells them at a glance which agent package version is installed.
+        tests:
+          - RepoCardViewModel_RepoName_ReturnsLeafFolderName
+          - RepoCardViewModel_Refresh_PinFileExists_PopulatesPinnedFields
+
+      - id: AgentControl-RepoCardViewModel-UpgradeBadge
+        title: >-
+          The RepoCardViewModel class shall indicate an upgrade is available only when the
+          package source has a version newer than the repo's pinned version.
+        justification: |
+          Prevents the upgrade badge from appearing when the repo is already current, or when
+          no package source is configured to compare against.
+        tests:
+          - RepoCardViewModel_Refresh_NewerVersionAtSource_SetsUpgradeAvailableTrue
+          - RepoCardViewModel_Refresh_AlreadyOnLatestVersion_SetsUpgradeAvailableFalse
+          - RepoCardViewModel_Refresh_NoPackageSourceConfigured_SetsUpgradeAvailableFalse
+
+      - id: AgentControl-RepoCardViewModel-PullGating
+        title: >-
+          The RepoCardViewModel class shall permit pulling only when the repo's working tree
+          is clean, and shall treat a git status failure as pull-not-permitted without
+          throwing.
+        justification: |
+          Pulling into a dirty working tree risks merge conflicts AgentControl cannot resolve;
+          a git failure (e.g. not a repo, git not found) must degrade gracefully rather than
+          crash the UI.
+        tests:
+          - RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue
+          - RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse
+          - RepoCardViewModel_Refresh_GitStatusFails_SetsCanPullFalseWithoutThrowing
+
+      - id: AgentControl-RepoCardViewModel-Pull
+        title: >-
+          The RepoCardViewModel class shall pull the repo's latest commits and report
+          success or failure via a status message.
+        justification: |
+          The developer needs immediate feedback on whether the pull succeeded, and if not,
+          why, without needing to inspect a terminal.
+        tests:
+          - RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage
+          - RepoCardViewModel_PullCommand_FailedPull_SetsFailureStatusMessage
+
+      - id: AgentControl-RepoCardViewModel-Launch
+        title: >-
+          The RepoCardViewModel class shall launch the configured agent tool in the repo's
+          working directory, recording the launch timestamp on success, and shall raise an
+          error when no agent tool command is configured.
+        justification: |
+          Launch is the primary action of AgentControl; the launch timestamp feeds the
+          most-recently-launched sort order, and a missing configuration must be surfaced
+          rather than silently doing nothing.
+        tests:
+          - RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded
+          - RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred
+
+      - id: AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch
+        title: >-
+          The RepoCardViewModel class shall ensure the repo's agent files match its pinned
+          package version before launch, re-extracting them only when they are missing, and
+          shall fail without launching if the pinned version is no longer available at the
+          source.
+        justification: |
+          Guarantees the agent tool always sees the pinned agent files, while avoiding
+          unnecessary re-extraction work when the files are already correctly in place.
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoPin_ReturnsFalseAndRaisesErrorOccurred
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedButFoldersMissing_ReExtractsPinnedVersionOnly
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedVersionMissingFromSource_ReturnsFalse
+
+      - id: AgentControl-RepoCardViewModel-Upgrade
+        title: >-
+          The RepoCardViewModel class shall, when a newer package version is available,
+          update the repo's pin and extract the new version's agent files, then signal that
+          release notes are ready to display.
+        justification: |
+          Upgrading must both update the persisted pin and physically sync the new agent
+          files, and must alert the developer to review what changed in the new version.
+        tests:
+          - RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesPinAndRaisesReleaseNotesReady
+          - RepoCardViewModel_UpgradeCommand_NoPackageSourceConfigured_RaisesErrorOccurred
+
+      - id: AgentControl-RepoCardViewModel-SelectPackage
+        title: >-
+          The RepoCardViewModel class shall offer package selection only when the repo has no
+          existing pin and is not missing, and shall require a configured package source
+          before requesting selection.
+        justification: |
+          Selecting an initial package only makes sense for a repo that is present on disk and
+          not already pinned; without a configured source there is nothing to select from.
+        tests:
+          - RepoCardViewModel_IsPackageSelectionNeeded_ReflectsPinState
+          - RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CannotExecute
+          - RepoCardViewModel_SelectPackageCommand_RepoIsMissing_CannotExecute
+          - RepoCardViewModel_SelectPackageCommand_NoPackageSourceConfigured_RaisesErrorOccurredOnly
+          - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourcePath
+
+      - id: AgentControl-RepoCardViewModel-ApplySelectedPackage
+        title: >-
+          The RepoCardViewModel class shall, given a chosen package name and version, set the
+          repo's pin and extract that version's agent files, and shall reject a version no
+          longer available at the source without mutating the existing pin.
+        justification: |
+          Applies the outcome of the package-selection window while protecting the repo's
+          existing pin state from a stale or now-invalid selection.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady
+          - RepoCardViewModel_ApplySelectedPackage_VersionNoLongerAtSource_RaisesErrorOccurredWithoutMutatingPin
+
+      - id: AgentControl-RepoCardViewModel-MissingRepo
+        title: >-
+          The RepoCardViewModel class shall mark the repo as missing, and suppress other
+          status computation, when the repo's folder no longer exists on disk.
+        justification: |
+          A repo folder can be deleted or moved outside AgentControl's knowledge; the card
+          must reflect that rather than show stale or misleading status information.
+        tests:
+          - RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState
+
+      - id: AgentControl-RepoCardViewModel-CommittedFilesBadge
+        title: >-
+          The RepoCardViewModel class shall reuse a cached committed-agent-files-changed
+          result when the repo's git HEAD hash is unchanged since the previous check, and
+          shall resolve the repo's current branch as part of its lightweight refresh.
+        justification: |
+          Recomputing the committed-agent-files diff on every refresh (which the main window
+          performs frequently) would be wasteful when the repo has not changed since the last
+          check.
+        tests:
+          - RepoCardViewModel_RefreshCheap_UnchangedHeadHash_CommittedFilesBadgeIsCached
+          - RepoCardViewModel_RefreshCheap_ResolvesCurrentBranch
+          - RepoCardViewModel_RefreshCheap_DoesNotRunWorkingTreeDirtyCheck
+
+      - id: AgentControl-RepoCardViewModel-Favorite
+        title: The RepoCardViewModel class shall let the user toggle the repo's favorite status.
+        justification: |
+          Marking a repo as a favorite is how a developer promotes it to the top of the
+          sorted recent-repos list.
+        tests:
+          - RepoCardViewModel_FavoriteToggleCommand_TogglesIsFavoriteAndRaisesFavoriteChanged
+
+      - id: AgentControl-RepoCardViewModel-RemoveRequest
+        title: >-
+          The RepoCardViewModel class shall raise a removal request without mutating any of
+          its own state, deferring the actual removal decision to its owner.
+        justification: |
+          Removal requires user confirmation at the main-window level; the card itself must
+          not unilaterally remove itself or change state before that confirmation occurs.
+        tests:
+          - RepoCardViewModel_RemoveCommand_RaisesRemoveRequestedWithoutMutatingState

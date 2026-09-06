@@ -10,13 +10,34 @@ includes:
   - docs/reqstream/quality.yaml
   - docs/reqstream/agent-control.yaml
   - docs/reqstream/agent-control/program.yaml
-  - docs/reqstream/agent-control/cli.yaml
-  - docs/reqstream/agent-control/cli/context.yaml
-  - docs/reqstream/agent-control/self-test.yaml
-  - docs/reqstream/agent-control/self-test/validation.yaml
+  - docs/reqstream/agent-control/platform-requirements.yaml
+  - docs/reqstream/agent-control/launcher-ui.yaml
+  - docs/reqstream/agent-control/launcher-ui/main-window-view-model.yaml
+  - docs/reqstream/agent-control/launcher-ui/repo-card-view-model.yaml
+  - docs/reqstream/agent-control/launcher-ui/select-package-window-view-model.yaml
+  - docs/reqstream/agent-control/launcher-ui/settings-window-view-model.yaml
+  - docs/reqstream/agent-control/agent-package-management.yaml
+  - docs/reqstream/agent-control/agent-package-management/package-source.yaml
+  - docs/reqstream/agent-control/agent-package-management/package-version.yaml
+  - docs/reqstream/agent-control/agent-package-management/package-version-cache.yaml
+  - docs/reqstream/agent-control/repo-sync.yaml
+  - docs/reqstream/agent-control/repo-sync/package-zip-extractor.yaml
+  - docs/reqstream/agent-control/repo-sync/release-notes-viewer-view-model.yaml
+  - docs/reqstream/agent-control/repo-config.yaml
+  - docs/reqstream/agent-control/repo-config/repo-pin-store.yaml
+  - docs/reqstream/agent-control/agent-tool-launcher.yaml
+  - docs/reqstream/agent-control/agent-tool-launcher/shell-detector.yaml
+  - docs/reqstream/agent-control/agent-tool-launcher/agent-tool-launcher.yaml
+  - docs/reqstream/agent-control/git-integration.yaml
+  - docs/reqstream/agent-control/git-integration/git-client.yaml
+  - docs/reqstream/agent-control/git-integration/committed-agent-files-cache.yaml
+  - docs/reqstream/agent-control/settings.yaml
+  - docs/reqstream/agent-control/settings/settings-store.yaml
+  - docs/reqstream/agent-control/logging.yaml
+  - docs/reqstream/agent-control/startup.yaml
+  - docs/reqstream/agent-control/startup/startup-options.yaml
   - docs/reqstream/agent-control/utilities.yaml
   - docs/reqstream/agent-control/utilities/path-helpers.yaml
-  - docs/reqstream/agent-control/platform-requirements.yaml
   - docs/reqstream/ots/xunit.yaml
   - docs/reqstream/ots/reqstream.yaml
   - docs/reqstream/ots/buildmark.yaml
@@ -28,3 +49,7 @@ includes:
   - docs/reqstream/ots/weasyprint.yaml
   - docs/reqstream/ots/fileassert.yaml
   - docs/reqstream/ots/sysml2tools.yaml
+  - docs/reqstream/ots/avalonia.yaml
+  - docs/reqstream/ots/serilog.yaml
+  - docs/reqstream/ots/flaui.yaml
+  - docs/reqstream/ots/wixtoolset.yaml

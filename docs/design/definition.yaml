@@ -2,8 +2,14 @@
 resource-path:
   - docs/design
   - docs/design/agent-control
-  - docs/design/agent-control/cli
-  - docs/design/agent-control/self-test
+  - docs/design/agent-control/launcher-ui
+  - docs/design/agent-control/agent-package-management
+  - docs/design/agent-control/repo-sync
+  - docs/design/agent-control/repo-config
+  - docs/design/agent-control/agent-tool-launcher
+  - docs/design/agent-control/git-integration
+  - docs/design/agent-control/settings
+  - docs/design/agent-control/startup
   - docs/design/agent-control/utilities
   - docs/design/ots
   - docs/template
@@ -13,23 +19,48 @@ input-files:
   - docs/design/introduction.md
   - docs/design/agent-control.md
   - docs/design/agent-control/program.md
-  - docs/design/agent-control/cli.md
-  - docs/design/agent-control/cli/context.md
-  - docs/design/agent-control/self-test.md
-  - docs/design/agent-control/self-test/validation.md
+  - docs/design/agent-control/launcher-ui.md
+  - docs/design/agent-control/launcher-ui/main-window-view-model.md
+  - docs/design/agent-control/launcher-ui/repo-card-view-model.md
+  - docs/design/agent-control/launcher-ui/select-package-window-view-model.md
+  - docs/design/agent-control/launcher-ui/settings-window-view-model.md
+  - docs/design/agent-control/agent-package-management.md
+  - docs/design/agent-control/agent-package-management/package-source.md
+  - docs/design/agent-control/agent-package-management/package-version.md
+  - docs/design/agent-control/agent-package-management/package-version-cache.md
+  - docs/design/agent-control/repo-sync.md
+  - docs/design/agent-control/repo-sync/package-zip-extractor.md
+  - docs/design/agent-control/repo-sync/release-notes-viewer-view-model.md
+  - docs/design/agent-control/repo-config.md
+  - docs/design/agent-control/repo-config/repo-pin-store.md
+  - docs/design/agent-control/agent-tool-launcher.md
+  - docs/design/agent-control/agent-tool-launcher/shell-detector.md
+  - docs/design/agent-control/agent-tool-launcher/agent-tool-launcher.md
+  - docs/design/agent-control/git-integration.md
+  - docs/design/agent-control/git-integration/git-client.md
+  - docs/design/agent-control/git-integration/committed-agent-files-cache.md
+  - docs/design/agent-control/settings.md
+  - docs/design/agent-control/settings/settings-store.md
+  - docs/design/agent-control/logging.md
+  - docs/design/agent-control/startup.md
+  - docs/design/agent-control/startup/startup-options.md
   - docs/design/agent-control/utilities.md
   - docs/design/agent-control/utilities/path-helpers.md
   - docs/design/ots.md
+  - docs/design/ots/avalonia.md
   - docs/design/ots/buildmark.md
   - docs/design/ots/fileassert.md
+  - docs/design/ots/flaui.md
   - docs/design/ots/pandoc.md
   - docs/design/ots/reqstream.md
   - docs/design/ots/reviewmark.md
   - docs/design/ots/sarifmark.md
+  - docs/design/ots/serilog.md
   - docs/design/ots/sonarmark.md
   - docs/design/ots/sysml2tools.md
   - docs/design/ots/versionmark.md
   - docs/design/ots/weasyprint.md
+  - docs/design/ots/wixtoolset.md
   - docs/design/ots/xunit.md
 template: template.html
 table-of-contents: true

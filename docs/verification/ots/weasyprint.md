@@ -26,7 +26,7 @@ at least one page, and includes expected document content.
 
 **Expected**: FileAssert exits 0 for the build-notes PDF document.
 
-**Requirement coverage**: `Template-OTS-WeasyPrint`.
+**Requirement coverage**: `AgentControl-OTS-WeasyPrint`.
 
 #### WeasyPrint_CodeQualityPdf
 
@@ -35,7 +35,7 @@ at least one page, and includes expected document content.
 
 **Expected**: FileAssert exits 0 for the code-quality PDF document.
 
-**Requirement coverage**: `Template-OTS-WeasyPrint`.
+**Requirement coverage**: `AgentControl-OTS-WeasyPrint`.
 
 #### WeasyPrint_ReviewPlanPdf
 
@@ -44,7 +44,7 @@ at least one page, and includes expected document content.
 
 **Expected**: FileAssert exits 0 for the review plan PDF document.
 
-**Requirement coverage**: `Template-OTS-WeasyPrint`.
+**Requirement coverage**: `AgentControl-OTS-WeasyPrint`.
 
 #### WeasyPrint_ReviewReportPdf
 
@@ -53,7 +53,7 @@ at least one page, and includes expected document content.
 
 **Expected**: FileAssert exits 0 for the review report PDF document.
 
-**Requirement coverage**: `Template-OTS-WeasyPrint`.
+**Requirement coverage**: `AgentControl-OTS-WeasyPrint`.
 
 #### WeasyPrint_DesignPdf
 
@@ -62,7 +62,7 @@ contains at least one page, and includes expected document content.
 
 **Expected**: FileAssert exits 0 for the design document PDF.
 
-**Requirement coverage**: `Template-OTS-WeasyPrint`.
+**Requirement coverage**: `AgentControl-OTS-WeasyPrint`.
 
 #### WeasyPrint_VerificationPdf
 
@@ -71,7 +71,7 @@ at least one page, and includes expected verification document content.
 
 **Expected**: FileAssert exits 0 for the verification PDF.
 
-**Requirement coverage**: `Template-OTS-WeasyPrint`.
+**Requirement coverage**: `AgentControl-OTS-WeasyPrint`.
 
 #### WeasyPrint_UserGuidePdf
 
@@ -80,4 +80,4 @@ at least one page, and includes expected document content.
 
 **Expected**: FileAssert exits 0 for the user guide PDF document.
 
-**Requirement coverage**: `Template-OTS-WeasyPrint`.
+**Requirement coverage**: `AgentControl-OTS-WeasyPrint`.

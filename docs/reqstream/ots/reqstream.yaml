@@ -8,7 +8,7 @@ sections:
     sections:
       - title: ReqStream Requirements
         requirements:
-          - id: Template-OTS-ReqStream
+          - id: AgentControl-OTS-ReqStream
             title: ReqStream shall enforce that every requirement is linked to passing test evidence.
             justification: |
               DemaConsulting.ReqStream processes requirements.yaml and the TRX test-result files to

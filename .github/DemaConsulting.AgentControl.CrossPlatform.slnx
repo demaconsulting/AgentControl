@@ -1,0 +1,44 @@
+<!--
+  Cross-platform-safe subset of the root DemaConsulting.AgentControl.slnx solution.
+
+  Lists only the four projects that are safe to restore/build/test on every CI OS
+  (ubuntu-latest, macos-latest, windows-latest): the main app, the unit test project, the
+  FlaUI-based UiTests project (restorable everywhere via EnableWindowsTargeting, though its
+  Windows-only tests self-skip off-Windows), and the ArgLoggerStub helper. It deliberately
+  excludes DemaConsulting.AgentControl.Msi.wixproj, which needs Windows-only MSI tooling and
+  would fail restore/build on non-Windows runners.
+
+  Used by build.yaml's cross-platform "build" (matrix) and "codeql" jobs instead of a bare/
+  auto-discovered .slnx restore-build-test, so the wixproj is never attempted on
+  ubuntu-latest/macos-latest; it is instead built exactly once, in the dedicated Windows-only
+  "package-msi" job, directly against the wixproj file.
+
+  DELIBERATELY PLACED UNDER .github/, NOT THE REPO ROOT: verified locally that adding a second
+  .slnx file directly at the repo root causes every bare (unfiltered) "dotnet build"/
+  "dotnet restore"/"dotnet test" invocation run from the repo root to fail with
+  MSB1011 ("this folder contains more than one project or solution file"), because the .NET
+  SDK's solution auto-discovery matches any *.sln/*.slnx file in the current working directory.
+  That directly breaks the protected lint.ps1's bare "dotnet restore" step and build.ps1's bare
+  "dotnet build"/"dotnet test" steps, neither of which can be modified to add an explicit
+  solution argument (lint.ps1 is protected; build.ps1's modification policy restricts edits to
+  its designated extension points). Placing this file under .github/ - alongside the
+  build.yaml/release.yaml workflows that are its only consumers - keeps it out of the repo
+  root's auto-discovery scope entirely, so lint.ps1/build.ps1 keep resolving unambiguously to
+  the single root DemaConsulting.AgentControl.slnx exactly as before.
+
+  Maintenance note: this file must be kept manually in sync with the root .slnx - if a new
+  cross-platform-safe project is added to the solution, add it here too, or it will silently
+  be excluded from the "build"/"codeql" jobs' restore-build-test coverage (though not from
+  lint.ps1 itself, which still restores/builds the root .slnx).
+-->
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="../src/DemaConsulting.AgentControl/DemaConsulting.AgentControl.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="../test/DemaConsulting.AgentControl.Tests/DemaConsulting.AgentControl.Tests.csproj" />
+    <Project Path="../test/DemaConsulting.AgentControl.UiTests/DemaConsulting.AgentControl.UiTests.csproj" />
+    <Project Path="../test/DemaConsulting.AgentControl.ArgLoggerStub/DemaConsulting.AgentControl.ArgLoggerStub.csproj" />
+  </Folder>
+</Solution>
+
