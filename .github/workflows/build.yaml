@@ -316,12 +316,25 @@ jobs:
       # single-file publish output of DemaConsulting.AgentControl.
       # Downstream projects: Add any additional MSI build steps here.
 
+      # MSI ProductVersion must be a strictly numeric "major.minor.build" string (WiX's
+      # ICE24 validation rejects any pre-release suffix/metadata, e.g. NuGet-style
+      # "0.0.0-run.7" used for non-release push builds - see build_on_push.yaml). Release
+      # builds already pass a clean numeric semver (e.g. "1.2.3") with no suffix, so this
+      # strips only what push builds actually add, leaving release versions unchanged.
+      - name: Compute MSI-safe ProductVersion
+        id: msi-version
+        shell: bash
+        run: |
+          MSI_VERSION="$(echo "${{ inputs.version }}" | cut -d'-' -f1)"
+          echo "Using MSI ProductVersion: ${MSI_VERSION} (from input version: ${{ inputs.version }})"
+          echo "value=${MSI_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Build MSI
         run: >
           dotnet build
           src/DemaConsulting.AgentControl.Msi/DemaConsulting.AgentControl.Msi.wixproj
           --configuration Release
-          --property:ProductVersion=${{ inputs.version }}
+          --property:ProductVersion=${{ steps.msi-version.outputs.value }}
 
       # === UPLOAD ARTIFACTS ===
       # This section uploads all generated artifacts for use by downstream jobs.
