@@ -159,13 +159,55 @@ tests:
         xml:
           - query: "//*[local-name()='svg']"
             count: 1
-      - pattern: "docs/design/generated/CliView.svg"
+      - pattern: "docs/design/generated/LauncherUIView.svg"
         count: 1
         min-size: 100
         xml:
           - query: "//*[local-name()='svg']"
             count: 1
-      - pattern: "docs/design/generated/SelfTestView.svg"
+      - pattern: "docs/design/generated/AgentPackageManagementView.svg"
+        count: 1
+        min-size: 100
+        xml:
+          - query: "//*[local-name()='svg']"
+            count: 1
+      - pattern: "docs/design/generated/RepoSyncView.svg"
+        count: 1
+        min-size: 100
+        xml:
+          - query: "//*[local-name()='svg']"
+            count: 1
+      - pattern: "docs/design/generated/RepoConfigView.svg"
+        count: 1
+        min-size: 100
+        xml:
+          - query: "//*[local-name()='svg']"
+            count: 1
+      - pattern: "docs/design/generated/AgentToolLauncherView.svg"
+        count: 1
+        min-size: 100
+        xml:
+          - query: "//*[local-name()='svg']"
+            count: 1
+      - pattern: "docs/design/generated/GitIntegrationView.svg"
+        count: 1
+        min-size: 100
+        xml:
+          - query: "//*[local-name()='svg']"
+            count: 1
+      - pattern: "docs/design/generated/SettingsView.svg"
+        count: 1
+        min-size: 100
+        xml:
+          - query: "//*[local-name()='svg']"
+            count: 1
+      - pattern: "docs/design/generated/LoggingView.svg"
+        count: 1
+        min-size: 100
+        xml:
+          - query: "//*[local-name()='svg']"
+            count: 1
+      - pattern: "docs/design/generated/StartupView.svg"
         count: 1
         min-size: 100
         xml:
