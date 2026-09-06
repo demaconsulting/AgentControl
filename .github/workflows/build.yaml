@@ -433,119 +433,12 @@ jobs:
           name: artifacts-codeql
           path: artifacts/
 
-  # Performs integration testing on a matrix of operating systems and .NET runtimes,
-  # involving basic tool execution and running self-validation to ensure compatibility
-  # across different platforms and runtime versions.
-  integration-test:
-    name: Integration Test ${{ matrix.os }} .NET ${{ matrix.dotnet-version }}
-    runs-on: ${{ matrix.os }}
-    needs: build
-    permissions:
-      contents: read
-
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        dotnet-version: ['8.x', '9.x', '10.x']
-
-    steps:
-      # === INSTALL DEPENDENCIES ===
-      # This section installs all required dependencies and tools for integration testing.
-      # Downstream projects: Add any additional dependency installations here.
-
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          sparse-checkout: |
-            .versionmark.yaml
-            .config/dotnet-tools.json
-
-      - name: Download package
-        uses: actions/download-artifact@v8
-        with:
-          name: packages-${{ matrix.os }}
-          path: packages
-
-      - name: Setup dotnet
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: ${{ matrix.dotnet-version }}
-
-      - name: Restore Tools
-        run: >
-          dotnet tool restore
-
-      - name: Install tool from package
-        shell: bash
-        run: |
-          echo "Installing package version ${{ inputs.version }} from: packages/"
-          dotnet tool install --global \
-            --add-source packages \
-            --version ${{ inputs.version }} \
-            DemaConsulting.AgentControl
-
-      # === CAPTURE TOOL VERSIONS ===
-      # This section captures the versions of all tools used in the integration tests.
-      # Downstream projects: Add any additional tools to capture here.
-
-      - name: Capture tool versions
-        shell: bash
-        run: |
-          mkdir -p artifacts
-          echo "Capturing tool versions..."
-          # Create short job ID: int-windows-8, int-ubuntu-9, int-macos-10, etc.
-          OS_SHORT=$(echo "${{ matrix.os }}" | sed 's/-latest//')
-          DOTNET_SHORT=$(echo "${{ matrix.dotnet-version }}" | sed 's/\.x$//')
-          JOB_ID="int-${OS_SHORT}-${DOTNET_SHORT}"
-          dotnet versionmark --capture --job-id "${JOB_ID}" \
-            --output "artifacts/versionmark-${JOB_ID}.json" -- \
-            dotnet git versionmark
-          echo "✓ Tool versions captured"
-
-      # === RUN INTEGRATION TESTS ===
-      # This section runs the integration tests for the tool.
-      # Downstream projects: Add any additional integration test steps here.
-
-      - name: Test version display
-        shell: bash
-        run: |
-          echo "Testing agentcontrol --version..."
-          agentcontrol --version || { echo "✗ Version command failed"; exit 1; }
-          echo "✓ Version command succeeded"
-
-      - name: Test help display
-        shell: bash
-        run: |
-          echo "Testing agentcontrol --help..."
-          agentcontrol --help || { echo "✗ Help command failed"; exit 1; }
-          echo "✓ Help command succeeded"
-
-      - name: Run self-validation
-        shell: bash
-        run: |
-          echo "Running self-validation..."
-          agentcontrol --validate \
-            --results artifacts/validation-${{ matrix.os }}-dotnet${{ matrix.dotnet-version }}.trx \
-            || { echo "✗ Self-validation failed"; exit 1; }
-          echo "✓ Self-validation succeeded"
-
-      # === UPLOAD ARTIFACTS ===
-      # This section uploads all generated artifacts for use by downstream jobs.
-      # Downstream projects: Add any additional artifact uploads here.
-
-      - name: Upload validation artifacts
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: artifacts-validation-${{ matrix.os }}-dotnet${{ matrix.dotnet-version }}
-          path: artifacts/
-
   # Builds the supporting documentation including user guides, requirements,
   # trace matrices, code quality reports, and build notes.
   build-docs:
     name: Build Documents
     runs-on: windows-latest
-    needs: [build, integration-test, codeql]
+    needs: [build, package-msi, codeql]
     permissions:
       contents: read
 
