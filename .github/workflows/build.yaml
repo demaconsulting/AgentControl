@@ -184,10 +184,34 @@ jobs:
           --configuration Release
           --property:Version=${{ inputs.version }}
 
+      # UiTests targets "net10.0-windows" (EnableWindowsTargeting lets it restore/build on
+      # every OS, but its test host still requires the Microsoft.WindowsDesktop.App runtime to
+      # even *launch* - that requirement is enforced by the .NET host itself before any C# code
+      # (including this project's own OperatingSystem.IsWindows()/Assert.Skip runtime guards)
+      # gets a chance to run, so it cannot execute on ubuntu-latest/macos-latest regardless of
+      # those guards). Testing the whole solution there would therefore fail at process launch,
+      # not at the test-skip logic - so non-Windows legs test only the cross-platform-safe
+      # DemaConsulting.AgentControl.Tests project, while windows-latest still tests everything
+      # (including UiTests, which is where those FlaUI-based UI tests actually run).
       - name: Test
+        if: matrix.os == 'windows-latest'
         run: >
           dotnet test
           .github/DemaConsulting.AgentControl.CrossPlatform.slnx
+          --no-build
+          --configuration Release
+          --property:Version=${{ inputs.version }}
+          --coverlet
+          --coverlet-output-format opencover
+          --report-trx
+          --report-trx-filename "${{ matrix.os }}_{asm}_{tfm}_{arch}.trx"
+          --results-directory artifacts
+
+      - name: Test (cross-platform-safe projects only)
+        if: matrix.os != 'windows-latest'
+        run: >
+          dotnet test
+          test/DemaConsulting.AgentControl.Tests/DemaConsulting.AgentControl.Tests.csproj
           --no-build
           --configuration Release
           --property:Version=${{ inputs.version }}
