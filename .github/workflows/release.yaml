@@ -15,7 +15,6 @@ on:
         options:
           - none
           - release
-          - publish
 
 jobs:
   # Calls the reusable build workflow to build, test, and generate documentation
@@ -33,8 +32,8 @@ jobs:
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-  # Cuts and publishes the release, creating a GitHub release with artifacts
-  # and optionally publishing the NuGet package.
+  # Cuts and publishes the release, creating a GitHub release with artifacts.
+  # This GUI app is never published to NuGet.org.
   release:
     name: Release
     runs-on: ubuntu-latest
@@ -70,19 +69,10 @@ jobs:
           path: msi
 
       - name: Create GitHub Release
-        if: inputs.publish == 'release' || inputs.publish == 'publish'
+        if: inputs.publish == 'release'
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ inputs.version }}
           artifacts: artifacts/*,msi/*.msi
           bodyFile: artifacts/build_notes.md
           generateReleaseNotes: false
-
-      - name: Publish to NuGet.org
-        if: inputs.publish == 'publish'
-        run: |-
-          set -e
-          dotnet nuget push artifacts/*.nupkg \
-            --api-key ${{ secrets.DEMACONSULTINGNUGETKEY }} \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
