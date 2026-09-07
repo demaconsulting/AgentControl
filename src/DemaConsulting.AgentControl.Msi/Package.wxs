@@ -39,6 +39,15 @@
 
     <MajorUpgrade DowngradeErrorMessage="A newer version of AgentControl is already installed." />
 
+    <!-- Windows Installer requires Package/@Version (ProductVersion) to be strictly numeric
+         "major.minor.build" (ICE24), so any semver pre-release suffix (e.g. "-beta.1") is
+         stripped before it reaches here (see build.yaml's "Compute MSI-safe ProductVersion"
+         step). ARPDISPLAYVERSION is the standard MSI property that overrides only the version
+         string shown in "Add or Remove Programs", independent of the numeric ProductVersion, so
+         users see the real release version (including any pre-release suffix) there instead of
+         the silently-stripped one. -->
+    <Property Id="ARPDISPLAYVERSION" Value="$(MsiPackageVersion)" />
+
     <!-- Embed all generated cabinets directly into the .msi so the installer is a single,
          self-contained file - without this, WiX's default splits the published payload into
          external cab1.cab/cab2.cab/... files that must be shipped alongside the .msi for

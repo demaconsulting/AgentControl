@@ -22,7 +22,6 @@
     <SelfContained>true</SelfContained>
     <Platform>x64</Platform>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
-    <DefineConstants>ProductVersion=$(ProductVersion)</DefineConstants>
     <!-- Distributed installer file name: "AgentControl-{version}.msi" rather than the
          default project-name-derived "DemaConsulting.AgentControl.Msi.msi". MsiPackageVersion
          is deliberately a custom property name (not the well-known "Version"/"ProductVersion"
@@ -33,6 +32,11 @@
          command-line /property:TargetName=, keeps the rename scoped to this project only). -->
     <MsiPackageVersion Condition="'$(MsiPackageVersion)' == ''">$(ProductVersion)</MsiPackageVersion>
     <TargetName>AgentControl-$(MsiPackageVersion)</TargetName>
+    <!-- Exposes both versions to Package.wxs: ProductVersion (numeric-only, ICE24-safe) drives
+         the MSI's actual Package/@Version, while MsiPackageVersion (the full semver, including
+         any pre-release suffix like "-beta.1") drives the separate ARPDISPLAYVERSION property so
+         Add/Remove Programs shows the real release version rather than the ICE24-stripped one. -->
+    <DefineConstants>ProductVersion=$(ProductVersion);MsiPackageVersion=$(MsiPackageVersion)</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -107,7 +111,7 @@
          (an even count, which argv parsing resolves to one literal backslash plus a real,
          unescaped closing quote) so BaseIntermediateOutputPath/BaseOutputPath still end in a
          proper path separator for the SDK's own path concatenation. -->
-    <Exec Command="dotnet publish &quot;$(AgentControlProjectDir)DemaConsulting.AgentControl.csproj&quot; --configuration $(Configuration) --runtime win-x64 --self-contained true --output &quot;$(AgentControlPublishDir.TrimEnd('\'))&quot; -p:BaseIntermediateOutputPath=&quot;$(AgentControlIsolatedObj.TrimEnd('\'))\\&quot; -p:BaseOutputPath=&quot;$(AgentControlIsolatedBin.TrimEnd('\'))\\&quot; /nodeReuse:false" />
+    <Exec Command="dotnet publish &quot;$(AgentControlProjectDir)DemaConsulting.AgentControl.csproj&quot; --configuration $(Configuration) --runtime win-x64 --self-contained true --output &quot;$(AgentControlPublishDir.TrimEnd('\'))&quot; -p:BaseIntermediateOutputPath=&quot;$(AgentControlIsolatedObj.TrimEnd('\'))\\&quot; -p:BaseOutputPath=&quot;$(AgentControlIsolatedBin.TrimEnd('\'))\\&quot; -p:Version=$(MsiPackageVersion) /nodeReuse:false" />
   </Target>
 
   <!-- Note: the isolation mechanism above (dedicated obj/bin/publish folders plus
