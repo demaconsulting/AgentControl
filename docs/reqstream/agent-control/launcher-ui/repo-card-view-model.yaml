@@ -71,18 +71,26 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch
         title: >-
-          The RepoCardViewModel class shall ensure the repo's agent files match its pinned
-          package version before launch, re-extracting them only when they are missing, and
-          shall fail without launching if the pinned version is no longer available at the
-          source.
+          The RepoCardViewModel class shall make a best-effort attempt to sync the repo's
+          agent files with its pinned package version before launch, re-extracting them only
+          when they are missing, but shall never prevent the launch from proceeding: it shall
+          skip the sync attempt entirely when the repo has committed agent files or has no
+          pinned package, and shall treat a failed re-extraction as a non-blocking warning
+          rather than a launch-blocking error.
         justification: |
-          Guarantees the agent tool always sees the pinned agent files, while avoiding
-          unnecessary re-extraction work when the files are already correctly in place.
+          Launching the configured agentic CLI tool must never be blocked by agent-package
+          sync state - a user may want the tool's help migrating away from committed agent
+          files, or may simply find the tool useful with no managed agent files present at
+          all. Sync remains a best-effort, informational side action that keeps the agent
+          tool's files current when it safely can, without ever standing in the way of the
+          launch itself.
         tests:
-          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoPin_ReturnsFalseAndRaisesErrorOccurred
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoPin_ReturnsTrueWithInformationalStatusMessage
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HasCommittedAgentFiles_SkipsSyncEntirelyAndReturnsTrue
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedButFoldersMissing_ReExtractsPinnedVersionOnly
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedVersionMissingFromSource_ReturnsFalse
+          - RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches
 
       - id: AgentControl-RepoCardViewModel-Upgrade
         title: >-

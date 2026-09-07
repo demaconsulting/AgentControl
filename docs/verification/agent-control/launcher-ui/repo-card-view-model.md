@@ -19,7 +19,7 @@ invocations are not parallelized with other tests using real process launches).
 - All unit tests pass with zero failures.
 - Display fields, badges, and gating conditions reflect the correct underlying pin/git/source
   state for every tested input.
-- Launch never proceeds without a successful ensure-synced check.
+- Launch is never blocked by the outcome of the best-effort ensure-synced check.
 - Upgrade and select-package flows never mutate the pin when their preconditions are not met.
 - Remove requests never mutate state on their own.
 
@@ -63,17 +63,23 @@ scenario is tested by
 `RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred`, covering
 `AgentControl-RepoCardViewModel-Launch`.
 
-**RepoCardViewModel_EnsureSyncedBeforeLaunch_ReExtractsOnlyWhenNeeded**: The ensure-synced
-check returns false and raises an error with no pin, returns true without re-extracting when
-folders are already present, re-extracts only the pinned version when folders are missing, and
-returns false when the pinned version is no longer available at the source. This scenario is
-tested by
-`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoPin_ReturnsFalseAndRaisesErrorOccurred`,
+**RepoCardViewModel_EnsureSyncedBeforeLaunch_NeverBlocksLaunchOnBestEffortSyncOutcome**: The
+ensure-synced check is a best-effort, non-blocking side action: it returns true with an
+informational status message (no `ErrorOccurred`) when no pin exists, skips touching the
+managed folders entirely and returns true with an informational status message when the repo
+has committed agent files (even when a pin exists and folders are missing), returns true
+without re-extracting when folders are already present, re-extracts only the pinned version
+when folders are missing, and returns false (a non-blocking warning) when the pinned version is
+no longer available at the source. A separate `Launch()`-level scenario confirms the agent-tool
+process is still spawned regardless of whether the sync attempt found no pin or failed
+outright. This scenario is tested by
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoPin_ReturnsTrueWithInformationalStatusMessage`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HasCommittedAgentFiles_SkipsSyncEntirelyAndReturnsTrue`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedButFoldersMissing_ReExtractsPinnedVersionOnly`,
-and
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedVersionMissingFromSource_ReturnsFalse`,
-covering `AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`.
+and `RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches`, covering
+`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`.
 
 **RepoCardViewModel_Upgrade_UpdatesPinOnlyWhenNewerVersionExists**: `UpgradeCommand` updates
 the pin and raises `ReleaseNotesReady` when a newer version is available, and raises

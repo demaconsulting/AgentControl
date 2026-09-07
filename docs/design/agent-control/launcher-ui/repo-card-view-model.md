@@ -65,21 +65,28 @@ refresh.
 - *Postconditions*: On success, `StatusMessage` is set and `LaunchRecorded` is raised
   (`AgentControl-RepoCardViewModel-Launch`); on failure, `ErrorOccurred` is raised.
 
-First calls `EnsureAgentFilesSyncedBeforeLaunch` and aborts entirely — without resolving the
-shell/agent command or spawning any process — if that check reports the launch should not
-proceed.
+Calls `EnsureAgentFilesSyncedBeforeLaunch` purely for its best-effort sync side effect, then
+always proceeds to resolve the shell/agent command and spawn the process regardless of that
+call's outcome — the agent-package sync state (missing pin, missing managed folders, failed
+re-extraction) never gates the launch.
 
-**EnsureAgentFilesSyncedBeforeLaunch** (internal): Ensures the repo's four managed agent
-folders match the pinned package version before `Launch` proceeds.
+**EnsureAgentFilesSyncedBeforeLaunch** (internal): Best-effort attempt to sync the repo's four
+managed agent folders with the pinned package version before `Launch` spawns the process. This
+is an informational side action only — it never blocks `Launch`.
 
 - *Parameters*: None.
-- *Returns*: `bool` — `true` if the launch may proceed.
-- *Postconditions*: If `PinnedPackageName` is `null`, raises `ErrorOccurred` directing the
-  user to "Select Package..." first and returns `false`. If
-  `PackageZipExtractor.AllManagedFoldersExist` is already `true`, returns `true` immediately
-  with no extra I/O. Otherwise resolves the *currently pinned* package at the configured
-  source (never the latest) and re-extracts it directly via `PackageZipExtractor.Extract`,
-  without displaying release notes (`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`).
+- *Returns*: `bool` — informational only; `true` if no sync action was needed/attempted or a
+  sync succeeded, `false` if a sync attempt was made and failed. Either way `Launch` proceeds.
+- *Postconditions*: If `HasCommittedAgentFiles` is `true`, the managed folders are never
+  touched (no delete, no extract) even if a pin exists and folders are missing; a non-blocking
+  `StatusMessage` notes that sync was skipped. Otherwise, if `PinnedPackageName` is `null`, this
+  is treated as an acceptable state (not an error) and a non-blocking `StatusMessage` notes that
+  launch is proceeding without managed agent files. If `PackageZipExtractor.AllManagedFoldersExist`
+  is already `true`, returns `true` immediately with no extra I/O. Otherwise resolves the
+  *currently pinned* package at the configured source (never the latest) and re-extracts it
+  directly via `PackageZipExtractor.Extract`, without displaying release notes; if this
+  re-extraction attempt fails for any reason, `ErrorOccurred` is raised as a non-blocking
+  warning (`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`).
 - Marked `internal` rather than `private` so it can be unit-tested directly, separated from
   `Launch`'s process-spawning side effect, mirroring `AgentToolLauncher.BuildProcessStartInfo`'s
   own precedent.
@@ -114,16 +121,16 @@ with the new package's release notes.
 `Launch` catches `InvalidOperationException`/`ArgumentException` from
 `AgentToolLauncher.BuildProcessStartInfo`/`Launch` and raises `ErrorOccurred`.
 `EnsureAgentFilesSyncedBeforeLaunch` catches `InvalidOperationException` (extraction failure)
-and `DirectoryNotFoundException` (unreachable source), raising `ErrorOccurred` for each rather
-than propagating. `Pull` catches `InvalidOperationException` from `GitClient.Pull` and reports
-it via `ErrorOccurred`. `RefreshGitStatus`/`RefreshBranchAndCommittedFiles` catch
-`InvalidOperationException` from `GitClient` and degrade to "unknown"/`false` rather than
-propagating, since these run as part of routine, frequent UI refreshes.
-`ApplyPackageAndShowReleaseNotes` catches `InvalidOperationException` and
-`DirectoryNotFoundException`, raising `ErrorOccurred` without applying a partial pin update.
-The constructor throws `ArgumentNullException` for a null `recentRepo`, `getSettings`, or
-`packageVersionCache`. `ApplySelectedPackage` throws `ArgumentNullException` for a null
-`packageName` or `version`.
+and `DirectoryNotFoundException` (unreachable source), raising `ErrorOccurred` as a
+non-blocking warning for each rather than propagating or blocking the launch. `Pull` catches
+`InvalidOperationException` from `GitClient.Pull` and reports it via `ErrorOccurred`.
+`RefreshGitStatus`/`RefreshBranchAndCommittedFiles` catch `InvalidOperationException` from
+`GitClient` and degrade to "unknown"/`false` rather than propagating, since these run as part
+of routine, frequent UI refreshes. `ApplyPackageAndShowReleaseNotes` catches
+`InvalidOperationException` and `DirectoryNotFoundException`, raising `ErrorOccurred` without
+applying a partial pin update. The constructor throws `ArgumentNullException` for a null
+`recentRepo`, `getSettings`, or `packageVersionCache`. `ApplySelectedPackage` throws
+`ArgumentNullException` for a null `packageName` or `version`.
 
 #### Dependencies
 

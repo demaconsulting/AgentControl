@@ -100,18 +100,21 @@ sections:
 
       - id: AgentControl-LauncherUI-Launch
         title: >-
-          The LauncherUI subsystem shall launch the configured agent tool for a repo once its
-          agent files are confirmed synced.
+          The LauncherUI subsystem shall launch the configured agent tool for a repo,
+          attempting a best-effort agent-package sync beforehand without ever letting the
+          sync outcome block the launch.
         justification: |
-          The whole purpose of AgentControl is to guarantee the agent tool sees up-to-date
-          instructions/standards before the developer starts working; launch must not proceed
-          if that sync could not be confirmed.
+          Launching the configured agentic CLI tool is AgentControl's primary purpose, and
+          must never be blocked by agent-package sync state - a user may want the tool's help
+          migrating away from committed agent files, or may find it useful even with zero
+          managed agent files present. Sync remains a best-effort, informational side action.
         children:
           - AgentControl-RepoCardViewModel-Launch
           - AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch
         tests:
           - RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting
+          - RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches
 
       - id: AgentControl-LauncherUI-Pull
         title: >-

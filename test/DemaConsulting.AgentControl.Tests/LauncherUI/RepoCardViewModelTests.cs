@@ -704,11 +704,13 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that EnsureAgentFilesSyncedBeforeLaunch returns false and raises ErrorOccurred
-    ///     mentioning "Select Package" when no pin exists at all.
+    ///     Test that EnsureAgentFilesSyncedBeforeLaunch returns true with a non-blocking
+    ///     informational StatusMessage (and never raises ErrorOccurred) when no pin exists at
+    ///     all - per the amended never-blocks-launch contract, having no pin is an acceptable
+    ///     state, not an error.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoPin_ReturnsFalseAndRaisesErrorOccurred()
+    public void RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoPin_ReturnsTrueWithInformationalStatusMessage()
     {
         // Arrange: a never-pinned repo
         var repoRoot = CreateTempDirectory();
@@ -719,10 +721,47 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Act
         var result = card.EnsureAgentFilesSyncedBeforeLaunch();
 
-        // Assert
-        Assert.False(result);
-        Assert.NotNull(capturedError);
-        Assert.Contains("Select Package", capturedError, StringComparison.Ordinal);
+        // Assert: no error raised, launch may proceed, status message is informational
+        Assert.True(result);
+        Assert.Null(capturedError);
+        Assert.NotNull(card.StatusMessage);
+        Assert.Contains("no agent package is pinned", card.StatusMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that EnsureAgentFilesSyncedBeforeLaunch never touches the managed folders (no
+    ///     delete, no extract) and returns true when the repo has committed agent files, even
+    ///     when a pin exists and the managed folders are missing on disk - blindly deleting or
+    ///     overwriting committed files would be far worse than leaving them alone.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HasCommittedAgentFiles_SkipsSyncEntirelyAndReturnsTrue()
+    {
+        // Arrange: a git stub reporting a tracked agent file (so HasCommittedAgentFiles becomes
+        // true after a refresh), a pin to a package whose source would otherwise be extractable,
+        // and no managed folders present on disk yet
+        var stub = GitStub.Create(revParseHeadOutput: "abc123", lsFilesOutput: ".github/agents/copilot.md");
+        _tempPaths.Add(stub.Path);
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        var settings = new AppSettings { GitExecutablePath = stub.Path, PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings);
+        card.RefreshCheap();
+        Assert.True(card.HasCommittedAgentFiles);
+        string? capturedError = null;
+        card.ErrorOccurred += (_, message) => capturedError = message;
+
+        // Act
+        var result = card.EnsureAgentFilesSyncedBeforeLaunch();
+
+        // Assert: no extraction occurred (folders remain absent), no error raised, launch may
+        // proceed, status message is informational
+        Assert.True(result);
+        Assert.Null(capturedError);
+        Assert.False(PackageZipExtractor.AllManagedFoldersExist(repoRoot));
+        Assert.NotNull(card.StatusMessage);
+        Assert.Contains("committed agent files", card.StatusMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -775,8 +814,12 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that EnsureAgentFilesSyncedBeforeLaunch returns false and raises ErrorOccurred
-    ///     when the pinned version is no longer resolvable at the configured source.
+    ///     Test that EnsureAgentFilesSyncedBeforeLaunch returns false and raises ErrorOccurred as
+    ///     a non-blocking warning when the pinned version is no longer resolvable at the
+    ///     configured source. A <see langword="false"/> result here is informational only - it no
+    ///     longer means the launch itself is blocked; see
+    ///     <see cref="RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches"/> for
+    ///     confirmation that <c>Launch()</c> still spawns the process in this scenario.
     /// </summary>
     [Fact]
     public void RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedVersionMissingFromSource_ReturnsFalse()
@@ -797,6 +840,43 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.False(result);
         Assert.NotNull(capturedError);
         Assert.False(PackageZipExtractor.AllManagedFoldersExist(repoRoot));
+    }
+
+    /// <summary>
+    ///     Test that LaunchCommand still spawns the agent-tool process (raising LaunchRecorded)
+    ///     even when the best-effort agent-package sync attempt has no pin to work with, or is
+    ///     attempted and fails outright - per the never-blocks-launch contract, sync state must
+    ///     never prevent Launch from proceeding.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches(bool withPin, bool withUnreachableSource)
+    {
+        // Arrange: a resolvable custom agent-tool command using a real executable (cmd/sh), and a
+        // repo whose ensure-synced-before-launch check will either find no pin at all, or a pin
+        // whose package is not resolvable at the configured source
+        var repoRoot = CreateTempDirectory();
+        var settings = new AppSettings
+        {
+            AgentTool = AgentToolKind.Custom,
+            CustomAgentCommand = OperatingSystem.IsWindows() ? "cmd /c exit 0" : "true",
+            PackageSourcePath = withUnreachableSource ? CreateTempDirectory() : null
+        };
+        var card = withPin
+            ? CreateCard(repoRoot, "contoso-agents", "1.0.0", settings)
+            : CreateCard(repoRoot, null, null, settings);
+        var raised = false;
+        card.LaunchRecorded += (_, _) => raised = true;
+        Assert.Null(card.LastLaunchedUtc);
+
+        // Act
+        card.LaunchCommand.Execute(null);
+
+        // Assert: the process was still spawned and the launch recorded, despite the sync attempt
+        // finding nothing to do (no pin) or failing outright (pinned package missing from source)
+        Assert.True(raised);
+        Assert.NotNull(card.LastLaunchedUtc);
     }
 
     /// <summary>

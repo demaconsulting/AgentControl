@@ -27,10 +27,12 @@ in that repo's working directory.
 - **Status badges**: each repo card shows an upgrade-available badge, a committed-agent-files
   warning (advisory only — flags when the managed folders were accidentally committed to
   git), and a missing-repo indicator when the path no longer exists on disk
-- **Ensure-synced-before-launch**: clicking Launch verifies the four managed agent folders
-  are present before starting the agent tool; if they are missing (for example, a fresh
-  clone) it silently re-extracts the currently pinned version first — it never auto-upgrades
-  to a newer version on your behalf
+- **Ensure-synced-before-launch**: clicking Launch attempts a best-effort sync of the four
+  managed agent folders before starting the agent tool; if they are missing (for example, a
+  fresh clone) it silently re-extracts the currently pinned version first — it never
+  auto-upgrades to a newer version on your behalf. This sync attempt is purely informational
+  and never blocks the launch: repos with committed agent files skip it entirely, repos with
+  no pin launch anyway, and a failed re-extraction only surfaces a warning
 - **Git integration**: pull the latest commits for a repo directly from its card (offered
   only when the working tree is clean), with a configurable git executable override
 - **Configurable agent tool**: choose GitHub Copilot CLI, Cursor, Claude Code, or a custom
@@ -82,10 +84,13 @@ same validate → delete → extract → pin sequence and then shows the new pac
 ### Launching
 
 Click **Launch** to start your configured agentic CLI tool in the repo's working directory.
-Before launching, AgentControl verifies the four managed agent folders exist on disk for a
-pinned repo; if any are missing, it silently re-extracts the *currently pinned* version first
-(never a newer one). If the repo has no pin yet, Launch tells you to use
-**Select Package...** first instead of starting the agent tool with no agent files present.
+Launch is never blocked by agent-package sync state — before launching, AgentControl makes a
+best-effort attempt to sync the four managed agent folders for a pinned repo (silently
+re-extracting the *currently pinned* version, never a newer one, if any are missing), but this
+is purely an informational side action. A repo with committed agent files skips the sync
+entirely (the managed folders are never touched), and a repo with no pin at all still launches
+— an agentic CLI tool remains useful even with zero managed agent files present, and can help
+with migrating away from committed agent files.
 
 ### Pulling changes
 

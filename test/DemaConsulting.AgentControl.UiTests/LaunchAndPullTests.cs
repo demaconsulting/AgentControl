@@ -41,11 +41,12 @@ public sealed class LaunchAndPullTests
     ///     <c>AgentToolLauncher.BuildProcessStartInfo</c>'s <c>WorkingDirectory</c>.
     /// </remarks>
     /// <remarks>
-    ///     Per architecture.md's "ensure-synced-before-launch" behavior, <c>Launch()</c> now
-    ///     blocks entirely for a never-pinned repo, so this context is seeded with a pin and the
-    ///     four managed folders are pre-created directly on disk (bypassing any package source)
-    ///     so <c>EnsureAgentFilesSyncedBeforeLaunch</c> finds them already synced and proceeds
-    ///     straight to launching, without needing a configured package source to re-extract from.
+    ///     Per architecture.md's "ensure-synced-before-launch" behavior (as amended, launch is
+    ///     never blocked by sync state), this context is seeded with a pin and the four managed
+    ///     folders are pre-created directly on disk (bypassing any package source) purely to
+    ///     exercise the "already synced" fast path - not to avoid a block, since a never-pinned
+    ///     repo now launches successfully too (see
+    ///     <see cref="LaunchButton_Click_NoPin_StillInvokesConfiguredAgentTool"/>).
     /// </remarks>
     [Fact]
     public void LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory()
@@ -69,6 +70,39 @@ public sealed class LaunchAndPullTests
 
         // Assert: the arg-logger stub (launched inside a shell by AgentToolLauncher) recorded an
         // invocation whose working directory is the repo path.
+        var invocation = ArgLoggerLog.WaitForInvocation(
+            context.ArgLoggerOutputFile,
+            record => PathsEqual(record.WorkingDirectory, context.RepoPath),
+            TimeSpan.FromSeconds(15));
+
+        Assert.NotNull(invocation);
+    }
+
+    /// <summary>
+    ///     Clicking "Launch" on a repo card with no pinned package at all must still invoke the
+    ///     configured agent-tool command - per the amended "ensure-synced-before-launch" contract,
+    ///     an agentic CLI tool remains useful even with zero managed agent files present, so the
+    ///     lack of a pin must never block the launch.
+    /// </summary>
+    [Fact]
+    public void LaunchButton_Click_NoPin_StillInvokesConfiguredAgentTool()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        using var context = new AgentControlTestContext();
+        var mainWindow = context.Launch();
+
+        // Act
+        var launchButton = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("LaunchButton"))?.AsButton();
+        Assert.NotNull(launchButton);
+        launchButton.Invoke();
+
+        // Assert: the arg-logger stub recorded an invocation whose working directory is the repo
+        // path, despite this repo never having had a package pinned.
         var invocation = ArgLoggerLog.WaitForInvocation(
             context.ArgLoggerOutputFile,
             record => PathsEqual(record.WorkingDirectory, context.RepoPath),

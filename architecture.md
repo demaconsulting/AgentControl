@@ -46,14 +46,16 @@ day as a quick-launch utility for AI-assisted development sessions.
   names discoverable at the configured source, lets the user pick one (and,
   within it, a version — defaulting to latest), then performs the same
   extract-and-pin sequence as an upgrade
-- **Ensure-synced-before-launch:** clicking Launch first verifies the four
-  known agent folders are actually present on disk for a repo that already
-  has a pin; if any are missing (e.g. a fresh clone, or a `.gitignore`'d
-  folder that was never unpacked on this machine), it re-extracts the
-  *currently pinned* version (never silently jumps to latest) before
-  proceeding to launch the agent tool. If no pin exists yet at Launch time,
-  the user is prompted to use "Select Package..." first rather than the
-  launch silently proceeding with no agent files
+- **Ensure-synced-before-launch:** clicking Launch first attempts a best-effort
+  sync of the four known agent folders for a repo that already has a pin; if
+  any are missing (e.g. a fresh clone, or a `.gitignore`'d folder that was
+  never unpacked on this machine), it re-extracts the *currently pinned*
+  version (never silently jumps to latest). This sync attempt is purely
+  informational and never blocks the launch: a repo with committed agent
+  files skips the sync entirely (its managed folders are never touched), a
+  repo with no pin at all launches anyway with an informational message, and
+  a failed re-extraction surfaces a non-blocking warning while the launch
+  still proceeds
 - A simple About dialog (app version, copyright, license) reachable from the
   main window, so the running build can be identified without inspecting
   file properties
@@ -298,12 +300,38 @@ to this document's own Purpose statement. The following closes that gap:
   before proceeding to launch the agent tool. This covers the common case of
   a freshly cloned repo whose `.gitignore`'d agent folders were never
   unpacked on this machine. If no pin exists at all when Launch is clicked,
-  the launch is stopped with a message directing the user to
-  "Select Package..." first, rather than silently launching the agent tool
-  with no agent files present.
+  the launch proceeds anyway with an informational status message, rather
+  than silently launching the agent tool with no agent files present.
 - **About dialog:** a simple, non-modal "About AgentControl" window
   (app version via the existing `Program.Version`, copyright, license text)
   reachable via a new toolbar/menu entry next to Settings.
+
+## Launch must never be blocked by agent-package sync state
+
+A product-owner report identified that `Launch` blocking entirely when no pin
+existed (directing the user to "Select Package..." first, per the section
+above) was itself a defect, not a safety feature: a user running with
+committed agent files (already warned about via the committed-files badge)
+may still want their agentic CLI tool to help with migrating away from those
+committed files, and an agentic CLI tool remains useful even with zero
+managed agent files present. Agent-package sync is a best-effort,
+informational side action only, and must never gate the launch itself. This
+amends the "Ensure-synced-before-launch" bullet above:
+
+- `Launch` always calls `EnsureAgentFilesSyncedBeforeLaunch` for its
+  best-effort sync side effect, but never gates on its return value — the
+  agent tool is always launched afterward (assuming a resolvable agent
+  command; the pre-existing "no command configured"/shell-detection/
+  process-start failure checks are unaffected and still block as before).
+- If the repo has committed agent files, the four managed folders are never
+  touched — no delete, no extract — even if a pin exists and the folders are
+  missing; a non-blocking status message notes that sync was skipped.
+- If no pin exists at all, this is treated as an acceptable state, not an
+  error; a non-blocking status message notes that launch is proceeding
+  without managed agent files.
+- If a pin exists but re-extraction is attempted and fails (source
+  unreachable, pinned version missing, extraction I/O failure), this now
+  surfaces as a non-blocking warning rather than a launch-blocking error.
 
 ## Open Concerns
 

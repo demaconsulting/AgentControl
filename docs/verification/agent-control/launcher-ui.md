@@ -79,13 +79,16 @@ last. This scenario is tested by
 `MainWindowViewModel_DisplayedRepoCards_SortsByLastLaunchedUtcDescendingWithNullsLast`,
 covering `AgentControl-LauncherUI-SortOrder`.
 
-**LauncherUI_Launch_SucceedsOnlyAfterAgentFilesConfirmedSynced**: The Launch command is
-executed for a card whose agent files are already synced, recording the launch timestamp; and
-the ensure-synced check is exercised confirming it returns true without re-extracting when
-folders are already present. This scenario is tested by
-`RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded` and
+**LauncherUI_Launch_NeverBlockedByAgentPackageSyncState**: The Launch command is executed for
+a card whose agent files are already synced, recording the launch timestamp; the ensure-synced
+check is exercised confirming it returns true without re-extracting when folders are already
+present; and a separate scenario confirms the agent-tool process still launches (raising
+`LaunchRecorded`) when the best-effort sync attempt has no pin to work with, or is attempted
+and fails outright. This scenario is tested by
+`RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting`,
-covering `AgentControl-LauncherUI-Launch`.
+and `RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches`, covering
+`AgentControl-LauncherUI-Launch`.
 
 **LauncherUI_Pull_EnabledOnlyForCleanWorkingTree**: A card with a clean working tree reports
 pull as enabled, a card with a dirty working tree reports it disabled, and executing

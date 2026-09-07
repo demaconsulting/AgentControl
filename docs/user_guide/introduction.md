@@ -120,18 +120,28 @@ previous package's contents.
 # Launching
 
 Click **Launch** on a repo card to start your configured agentic CLI tool in that repo's
-working directory.
+working directory. Launching is **never blocked** by agent-package sync state — an agentic
+CLI tool remains useful whether or not any agent files are present, and may even help you
+migrate away from agent files you've committed to the repo.
 
-Before starting the tool, Launch first checks that the repo is actually synced:
+Before starting the tool, Launch makes a best-effort attempt to keep the repo synced, purely
+as an informational side action:
 
-- If the repo has **no pin yet**, Launch stops and tells you to use **Select Package...**
-  first, rather than silently starting the agent tool with no agent files present.
-- If the repo **has a pin**, Launch verifies all four managed agent folders
+- If the repo has **committed agent files** (see the warning badge above), the four managed
+  folders are never touched — no delete, no extract — and Launch proceeds straight to
+  starting the tool with an informational status message.
+- Otherwise, if the repo has **no pin yet**, Launch proceeds anyway with an informational
+  status message noting that no managed agent files are present, rather than blocking the
+  launch.
+- Otherwise, if the repo **has a pin**, Launch verifies all four managed agent folders
   (`.github/agents`, `.github/standards`, `.github/templates`, `.github/skills`) exist on
   disk. If any are missing — the common case for a freshly cloned repo whose `.gitignore`'d
   agent folders were never unpacked on this machine — AgentControl silently re-extracts the
   **currently pinned** version before proceeding. It never auto-upgrades to a newer version
-  during this check; upgrading always remains a separate, deliberate action.
+  during this check; upgrading always remains a separate, deliberate action. If this
+  re-extraction attempt fails (for example, the package source is unreachable, or the pinned
+  version is no longer available), a non-blocking warning is shown, but the tool is still
+  launched.
 
 # Pulling Changes
 

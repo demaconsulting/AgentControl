@@ -538,16 +538,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     ///     Per architecture.md's "Initial package selection and ensure-synced-before-launch"
-    ///     decision, this first calls <see cref="EnsureAgentFilesSyncedBeforeLaunch"/> and aborts
-    ///     the launch entirely (without resolving the shell/agent command or spawning any
-    ///     process) if that check reports the launch should not proceed.
+    ///     decision (as amended - launch must never be blocked by agent-package sync state),
+    ///     this first calls <see cref="EnsureAgentFilesSyncedBeforeLaunch"/> purely for its
+    ///     best-effort sync side effect (it may extract missing managed folders, or surface an
+    ///     informational status message/warning), then always proceeds to resolve the shell/agent
+    ///     command and spawn the process regardless of that call's outcome. A user may want to
+    ///     launch their agentic CLI tool to help with agent-package migration, or simply because
+    ///     an agentic tool is useful even with zero agent files present - either way, sync state
+    ///     must never stand in the way of launching.
     /// </remarks>
     private void Launch()
     {
-        if (!EnsureAgentFilesSyncedBeforeLaunch())
-        {
-            return;
-        }
+        EnsureAgentFilesSyncedBeforeLaunch();
 
         try
         {
@@ -572,22 +574,36 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Ensures this repo's four managed agent folders match the currently pinned package
-    ///     version before <see cref="Launch"/> is allowed to proceed, per architecture.md's
-    ///     "ensure-synced-before-launch" decision.
+    ///     Best-effort attempt to sync this repo's four managed agent folders with the currently
+    ///     pinned package version, as an informational side action that runs before
+    ///     <see cref="Launch"/> spawns the agent tool. Per architecture.md's
+    ///     "ensure-synced-before-launch" decision (as amended), this <b>never</b> blocks the
+    ///     launch - it only ever attempts to help keep the managed folders in sync, surfacing a
+    ///     non-blocking status message or warning when it cannot.
     /// </summary>
     /// <returns>
-    ///     <see langword="true"/> if the launch may proceed (either the managed folders were
-    ///     already present, or a missing set was silently re-extracted successfully);
-    ///     <see langword="false"/> if the launch must be aborted, in which case
-    ///     <see cref="ErrorOccurred"/> has already been raised with a message explaining why.
+    ///     <see langword="true"/> if no sync action was needed or attempted (the repo has
+    ///     committed agent files, has no pin, or the managed folders were already present), or a
+    ///     missing set was silently re-extracted successfully; <see langword="false"/> if a sync
+    ///     attempt was made and failed, in which case <see cref="ErrorOccurred"/> has already been
+    ///     raised as a non-blocking warning explaining why. Either way, <see cref="Launch"/>
+    ///     proceeds to spawn the agent tool regardless of this return value.
     /// </returns>
     /// <remarks>
     ///     <para>
-    ///     If no pin exists at all (<see cref="PinnedPackageName"/> is <see langword="null"/>),
-    ///     this raises <see cref="ErrorOccurred"/> directing the user to "Select Package..." first
-    ///     and returns <see langword="false"/> - launching the agent tool with no agent files
-    ///     present at all would be worse than blocking with a clear message.
+    ///     If this repo has committed agent files (<see cref="HasCommittedAgentFiles"/> is
+    ///     <see langword="true"/>), the four managed folders are never touched - no delete, no
+    ///     extract - even if a pin exists and the folders are missing or stale. Blindly deleting
+    ///     or overwriting files the user has deliberately committed to their repo would be far
+    ///     worse than leaving them alone; this instead raises a non-blocking <see cref="StatusMessage"/>
+    ///     noting that sync was skipped, and returns <see langword="true"/>.
+    ///     </para>
+    ///     <para>
+    ///     Otherwise, if no pin exists at all (<see cref="PinnedPackageName"/> is
+    ///     <see langword="null"/>), this is treated as an acceptable, unremarkable state - not an
+    ///     error - since an agentic CLI tool remains useful even with zero managed agent files
+    ///     present. A non-blocking <see cref="StatusMessage"/> notes that launch is proceeding
+    ///     without managed agent files, and this returns <see langword="true"/>.
     ///     </para>
     ///     <para>
     ///     If a pin exists and <see cref="PackageZipExtractor.AllManagedFoldersExist"/> is
@@ -604,7 +620,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     through <see cref="ApplyPackageAndShowReleaseNotes"/> - architecture.md's
     ///     ensure-synced-before-launch bullet never mentions showing release notes, unlike its
     ///     Select-Package bullet, so a silent background repair must not pop a release-notes
-    ///     window on every launch.
+    ///     window on every launch. If this re-extraction attempt fails for any reason (source
+    ///     unreachable, pinned version missing, extraction I/O failure), <see cref="ErrorOccurred"/>
+    ///     is raised as a non-blocking warning and this returns <see langword="false"/> - but the
+    ///     launch still proceeds regardless.
     ///     </para>
     ///     <para>
     ///     Marked <see langword="internal"/> (not <see langword="private"/>) rather than tested
@@ -615,10 +634,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </remarks>
     internal bool EnsureAgentFilesSyncedBeforeLaunch()
     {
+        if (HasCommittedAgentFiles)
+        {
+            StatusMessage = "This repo has committed agent files; skipping agent-package sync.";
+            return true;
+        }
+
         if (PinnedPackageName is null)
         {
-            ErrorOccurred?.Invoke(this, "This repo has no agent package selected yet. Use \"Select Package...\" first.");
-            return false;
+            StatusMessage = "No agent package is pinned for this repo; launching without managed agent files.";
+            return true;
         }
 
         if (PackageZipExtractor.AllManagedFoldersExist(RepoPath))
@@ -631,7 +656,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             var settings = _getSettings();
             if (string.IsNullOrWhiteSpace(settings.PackageSourcePath))
             {
-                ErrorOccurred?.Invoke(this, "No package source is configured for this repo.");
+                ErrorOccurred?.Invoke(this, "No package source is configured for this repo. Launching without syncing agent files.");
                 return false;
             }
 
@@ -641,7 +666,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 ErrorOccurred?.Invoke(
                     this,
-                    $"Pinned package '{PinnedPackageName} {PinnedPackageVersion}' was not found at the configured source.");
+                    $"Pinned package '{PinnedPackageName} {PinnedPackageVersion}' was not found at the configured source. Launching without syncing agent files.");
                 return false;
             }
 
@@ -650,12 +675,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
         catch (InvalidOperationException ex)
         {
-            ErrorOccurred?.Invoke(this, $"Failed to sync agent files: {ex.Message}");
+            ErrorOccurred?.Invoke(this, $"Failed to sync agent files: {ex.Message} Launching anyway.");
             return false;
         }
         catch (DirectoryNotFoundException ex)
         {
-            ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message}");
+            ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message} Launching anyway.");
             return false;
         }
     }
