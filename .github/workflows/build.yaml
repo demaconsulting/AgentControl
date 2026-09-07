@@ -234,32 +234,18 @@ jobs:
           end
           /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
 
-      - name: Create Dotnet Tool
-        run: >
-          dotnet pack
-          .github/DemaConsulting.AgentControl.CrossPlatform.slnx
-          --no-build
-          --no-restore
-          --configuration Release
-          --property:PackageVersion=${{ inputs.version }}
-
       # === UPLOAD ARTIFACTS ===
       # This section uploads all generated artifacts for use by downstream jobs.
       # Downstream projects: Add any additional artifact uploads here.
+      # Note: this app is a GUI desktop app (IsPackable=false) - it is never packed/published as
+      # a NuGet package, so there is no "dotnet pack"/nupkg upload step here. Distribution is via
+      # the Windows MSI installer (see the "package-msi" job) attached to the GitHub Release.
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
           name: artifacts-build-${{ matrix.os }}
           path: artifacts/
-
-      - name: Upload packages
-        uses: actions/upload-artifact@v7
-        with:
-          name: packages-${{ matrix.os }}
-          path: |
-            src/DemaConsulting.AgentControl/bin/Release/*.nupkg
-            src/DemaConsulting.AgentControl/bin/Release/*.snupkg
 
   # Builds the Windows MSI installer package from the self-contained, single-file publish
   # output of DemaConsulting.AgentControl (see DemaConsulting.AgentControl.Msi.wixproj's
