@@ -23,6 +23,16 @@
     <Platform>x64</Platform>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
     <DefineConstants>ProductVersion=$(ProductVersion)</DefineConstants>
+    <!-- Distributed installer file name: "AgentControl-{version}.msi" rather than the
+         default project-name-derived "DemaConsulting.AgentControl.Msi.msi". MsiPackageVersion
+         is deliberately a custom property name (not the well-known "Version"/"ProductVersion"
+         MSBuild properties) so passing it on the command line does not become a global
+         property that leaks into - and renames the output of - the referenced
+         DemaConsulting.AgentControl.csproj's own build (TargetName is a well-known reserved
+         property; setting it here, in this project's own PropertyGroup rather than via a
+         command-line /property:TargetName=, keeps the rename scoped to this project only). -->
+    <MsiPackageVersion Condition="'$(MsiPackageVersion)' == ''">$(ProductVersion)</MsiPackageVersion>
+    <TargetName>AgentControl-$(MsiPackageVersion)</TargetName>
   </PropertyGroup>
 
   <ItemGroup>

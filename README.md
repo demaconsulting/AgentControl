@@ -49,7 +49,7 @@ See [architecture.md](architecture.md) for the full system design.
 AgentControl is distributed as a Windows MSI installer, built from
 [`src/DemaConsulting.AgentControl.Msi/`](src/DemaConsulting.AgentControl.Msi/README.md).
 
-1. Download the latest `DemaConsulting.AgentControl.Msi.msi` from the
+1. Download the latest `AgentControl-{version}.msi` from the
    [releases][link-build] for this repository.
 2. Run the installer and follow the prompts.
 3. Launch **AgentControl** from the Start menu.

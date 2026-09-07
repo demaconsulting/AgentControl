@@ -340,6 +340,7 @@ jobs:
           src/DemaConsulting.AgentControl.Msi/DemaConsulting.AgentControl.Msi.wixproj
           --configuration Release
           --property:ProductVersion=${{ steps.msi-version.outputs.value }}
+          --property:MsiPackageVersion=${{ inputs.version }}
 
       # Asserts the built MSI file exists and is a non-trivial size, producing a
       # TRX-backed test result cited by AgentControl-OTS-WixToolset-BuildInstaller

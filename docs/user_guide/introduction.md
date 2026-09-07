@@ -32,7 +32,7 @@ This user guide covers:
 AgentControl is distributed as a Windows MSI installer, built from
 `src/DemaConsulting.AgentControl.Msi/`.
 
-1. Download the latest `DemaConsulting.AgentControl.Msi.msi` release.
+1. Download the latest `AgentControl-{version}.msi` release.
 2. Run the installer and follow the prompts.
 3. Launch **AgentControl** from the Start menu.
 
