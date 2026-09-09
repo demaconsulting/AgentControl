@@ -55,6 +55,8 @@ the `GitIgnoreEnsurer` unit tests (see the `GitIgnoreEnsurer` unit verification 
 `GitIgnoreEnsurer_Ensure_NoGitIgnoreFile_CreatesFileWithManagedFoldersBlock`,
 `GitIgnoreEnsurer_Ensure_ExistingContentWithoutMarker_AppendsBlockPreservingExistingLines`,
 `GitIgnoreEnsurer_Ensure_ExistingContentEndsWithBlankLine_AppendsBlockWithoutExtraBlankLine`,
-and `GitIgnoreEnsurer_Ensure_PathIsDirectory_ThrowsInvalidOperationException` cited directly at
+`GitIgnoreEnsurer_Ensure_ExistingContentUsesCrLf_AppendsBlockWithCrLf`,
+`GitIgnoreEnsurer_Ensure_ExistingFileHasUtf8Bom_PreservesBomOnWrite`, and
+`GitIgnoreEnsurer_Ensure_PathIsDirectory_ThrowsInvalidOperationException` cited directly at
 the subsystem level, covering `AgentControl-RepoSync-GitIgnorePrevention` (children:
 `AgentControl-GitIgnoreEnsurer-Ensure`).

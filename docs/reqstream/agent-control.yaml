@@ -119,6 +119,7 @@ sections:
           - AgentControl-LauncherUI-Upgrade
           - AgentControl-RepoSync-Sync
           - AgentControl-RepoSync-ReleaseNotes
+          - AgentControl-RepoSync-GitIgnorePrevention
           - AgentControl-AgentPackageManagement-UpgradeDetection
         tests:
           - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes

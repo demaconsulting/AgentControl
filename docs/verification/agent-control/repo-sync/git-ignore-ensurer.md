@@ -19,6 +19,10 @@ N/A - standard test environment.
 - Existing `.gitignore` content is never edited, reordered, or removed — only appended to.
 - A blank-line separator is added only when the existing content needs one, never a redundant
   extra blank line.
+- Appended lines match the existing file's newline style (CRLF or LF) rather than always using
+  the current OS's convention.
+- The file's existing encoding (including a UTF-8 byte-order mark, if present) is preserved
+  when the file is rewritten.
 - A write failure surfaces as `InvalidOperationException` naming the `.gitignore` path.
 
 #### Test Scenarios
@@ -37,6 +41,13 @@ separator only when the existing content does not already end in one. This scena
 by `GitIgnoreEnsurer_Ensure_ExistingContentWithoutMarker_AppendsBlockPreservingExistingLines`
 and `GitIgnoreEnsurer_Ensure_ExistingContentEndsWithBlankLine_AppendsBlockWithoutExtraBlankLine`,
 covering `AgentControl-GitIgnoreEnsurer-Ensure`.
+
+**GitIgnoreEnsurer_Ensure_PreservesNewlineStyleAndEncoding**: Appending to a CRLF-only
+`.gitignore` uses CRLF (not the current OS's `Environment.NewLine`) for the separator and
+appended block, and rewriting a `.gitignore` with a UTF-8 byte-order mark preserves that BOM.
+This scenario is tested by `GitIgnoreEnsurer_Ensure_ExistingContentUsesCrLf_AppendsBlockWithCrLf`
+and `GitIgnoreEnsurer_Ensure_ExistingFileHasUtf8Bom_PreservesBomOnWrite`, covering
+`AgentControl-GitIgnoreEnsurer-Ensure`.
 
 **GitIgnoreEnsurer_Ensure_PathIsDirectory_ThrowsInvalidOperationException**: A `.gitignore`
 target path that is actually a directory forces a real I/O failure, wrapped in

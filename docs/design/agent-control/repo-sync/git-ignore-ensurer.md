@@ -46,7 +46,12 @@ the four managed agent folders, creating the file if it does not yet exist.
   separator only when needed (existing content is non-empty and does not already end in a
   blank line), so the appended block never visually runs into existing content. No
   pre-existing line is ever edited, reordered, or removed — the change is purely additive
-  (`AgentControl-GitIgnoreEnsurer-Ensure`).
+  (`AgentControl-GitIgnoreEnsurer-Ensure`). The appended lines match the existing file's
+  newline style (CRLF/LF) rather than always using the current OS's convention, and the file
+  is rewritten using its existing encoding (detected via a byte-order mark, if present) rather
+  than always normalizing to UTF-8. The update is written atomically via a temp file in the
+  same directory followed by an atomic replace/move, so a mid-write failure can never leave a
+  truncated or corrupted `.gitignore` behind.
 
 #### Error Handling
 
@@ -69,4 +74,6 @@ initial read.
 - **RepoCardViewModel** — calls `Ensure` (via its private `EnsureGitIgnoreCoversManagedFolders`
   non-blocking wrapper) immediately after every successful `PackageZipExtractor.Extract` call
   in `ApplyPackageAndShowReleaseNotes`, covering both the "Select Package..." and "Upgrade"
-  flows.
+  flows. `Ensure` is stateless but performs an unsynchronized read-modify-write of the repo's
+  `.gitignore`, so it is not safe to invoke concurrently against the same repo; callers are
+  expected to invoke it sequentially per repo, as `RepoCardViewModel` already does.
