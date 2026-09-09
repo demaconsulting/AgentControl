@@ -281,6 +281,20 @@ reviews:
       - "src/**/RepoSync/ReleaseNotesViewerViewModel.cs"
       - "test/**/RepoSync/ReleaseNotesViewerViewModelTests.cs"
 
+  - id: AgentControl-RepoSync-GitIgnoreEnsurer
+    title: Review of Agent Control GitIgnoreEnsurer unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/repo-sync.md
+      - docs/reqstream/agent-control/repo-sync.yaml
+    paths:
+      - "docs/reqstream/agent-control/repo-sync/git-ignore-ensurer.yaml"
+      - "docs/design/agent-control/repo-sync/git-ignore-ensurer.md"
+      - "docs/verification/agent-control/repo-sync/git-ignore-ensurer.md"
+      - "src/**/RepoSync/GitIgnoreEnsurer.cs"
+      - "test/**/RepoSync/GitIgnoreEnsurerTests.cs"
+
   # AgentControl - RepoConfig
   - id: AgentControl-RepoConfig
     title: Review of Agent Control RepoConfig subsystem architecture and interfaces

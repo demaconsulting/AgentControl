@@ -1,0 +1,27 @@
+---
+# Software Unit Requirements for the GitIgnoreEnsurer Class
+#
+# GitIgnoreEnsurer proactively ensures a repo's root .gitignore covers the four managed
+# agent-file folders, appending a marker-delimited block unless a fixed marker comment is
+# already present, and never disturbs any pre-existing .gitignore content.
+
+sections:
+  - title: GitIgnoreEnsurer Unit Requirements
+    requirements:
+      - id: AgentControl-GitIgnoreEnsurer-Ensure
+        title: >-
+          The GitIgnoreEnsurer class shall append a marker-delimited block covering the four
+          managed agent-file folders to a repo's .gitignore (creating the file if absent)
+          unless the marker is already present, and shall never modify or remove any
+          pre-existing line.
+        justification: |
+          Guarantees a repo's .gitignore always covers the four managed agent-file folders
+          after a sync, without risking damage to any content a developer already added to
+          that file; the marker-comment-only idempotency check keeps the behavior simple and
+          predictable rather than attempting fragile gitignore-pattern/glob analysis.
+        tests:
+          - GitIgnoreEnsurer_Ensure_MarkerAlreadyPresent_DoesNotModifyFile
+          - GitIgnoreEnsurer_Ensure_NoGitIgnoreFile_CreatesFileWithManagedFoldersBlock
+          - GitIgnoreEnsurer_Ensure_ExistingContentWithoutMarker_AppendsBlockPreservingExistingLines
+          - GitIgnoreEnsurer_Ensure_ExistingContentEndsWithBlankLine_AppendsBlockWithoutExtraBlankLine
+          - GitIgnoreEnsurer_Ensure_PathIsDirectory_ThrowsInvalidOperationException

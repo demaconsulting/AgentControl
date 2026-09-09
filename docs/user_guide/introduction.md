@@ -59,7 +59,11 @@ Each repo card shows:
   - **Committed agent files** — one or more of `.github/agents`, `.github/standards`,
     `.github/templates`, `.github/skills` are tracked by git at `HEAD` in this repo. This is
     purely advisory: AgentControl does not modify git tracking state itself, it only warns
-    that content meant to stay untracked (via `.gitignore`) appears to have been committed
+    that content meant to stay untracked (via `.gitignore`) appears to have been committed.
+    Separately, AgentControl proactively ensures your `.gitignore` covers these four folders
+    immediately after every Select-Package/Upgrade (see below), which makes this situation
+    much less likely to occur going forward — but this badge itself remains unchanged and
+    still purely advisory
   - **Missing** — the repo path no longer exists on disk (for example, a deleted folder or an
     unmounted network/removable drive). This suppresses the card's other badges and actions,
     and offers a "Remove from list" action instead (the card is never auto-removed, since the
@@ -94,8 +98,9 @@ shows **Select Package...**. Choosing it opens a dialog that:
 2. Once you pick a name, lists that package's discoverable versions in descending order,
    defaulting the selection to the latest.
 3. On confirm, runs the same extract-and-pin sequence as an upgrade: validate the zip, delete
-   the four managed folders if present, extract the new files, write the
-   `.agentcontrol.json` pin, then show the release notes.
+   the four managed folders if present, extract the new files, ensure your `.gitignore`
+   covers the four managed folders, write the `.agentcontrol.json` pin, then show the release
+   notes.
 
 ## Upgrading an Already-Pinned Repo
 
@@ -107,8 +112,10 @@ upgrade-available badge). Upgrading:
    assumed good — no checksum or signature verification is performed.
 2. Deletes the four managed agent folders under the repo root, if present.
 3. Extracts the new files into those same four folders.
-4. Rewrites the `.agentcontrol.json` pin to the new package name and version.
-5. Shows the new package's `release-notes.md` (when the package includes one) in a
+4. Ensures your `.gitignore` covers the four managed folders (adding them if not already
+   covered), so they are far less likely to be committed by accident.
+5. Rewrites the `.agentcontrol.json` pin to the new package name and version.
+6. Shows the new package's `release-notes.md` (when the package includes one) in a
    non-modal, resizable window.
 
 There is no rollback if a step fails partway through — a message box reports the error, and
