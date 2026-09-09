@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Text;
 using DemaConsulting.AgentControl.RepoSync;
 
 namespace DemaConsulting.AgentControl.Tests.RepoSync;
@@ -176,6 +177,76 @@ public class GitIgnoreEnsurerTests
             // wrapped in InvalidOperationException naming the path
             var ex = Assert.Throws<InvalidOperationException>(() => GitIgnoreEnsurer.Ensure(repoRoot));
             Assert.Contains(gitIgnorePath, ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that when a .gitignore's existing content uses CRLF line endings, Ensure appends
+    ///     the separator and managed-folders block using CRLF too, rather than the LF the
+    ///     previous tests exercise or the current OS's <see cref="Environment.NewLine"/> -
+    ///     protecting <c>DetectNewLine</c>/<c>BuildSeparator</c> from a Windows-created
+    ///     .gitignore regressing to mixed line endings.
+    /// </summary>
+    [Fact]
+    public void GitIgnoreEnsurer_Ensure_ExistingContentUsesCrLf_AppendsBlockWithCrLf()
+    {
+        // Arrange: a .gitignore with unrelated CRLF-only content, no trailing blank line, no
+        // marker
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var gitIgnorePath = Path.Combine(repoRoot, ".gitignore");
+            const string original = "bin/\r\nobj/\r\n";
+            File.WriteAllText(gitIgnorePath, original);
+
+            // Act: ensure
+            GitIgnoreEnsurer.Ensure(repoRoot);
+
+            // Assert: original lines are preserved unchanged, followed by a blank-line separator
+            // and the new marker-delimited block, all using the file's existing CRLF newline
+            // style
+            var content = File.ReadAllText(gitIgnorePath);
+            Assert.StartsWith(original, content, StringComparison.Ordinal);
+            const string expected = original + "\r\n" + Marker + "\r\n"
+                + ".github/agents/" + "\r\n" + ".github/standards/" + "\r\n"
+                + ".github/templates/" + "\r\n" + ".github/skills/" + "\r\n";
+            Assert.Equal(expected, content);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that when an existing .gitignore has a UTF-8 byte-order mark, Ensure preserves
+    ///     that encoding (including the BOM) when writing the updated content back, rather than
+    ///     silently normalizing a user-owned file to a different encoding as a side effect of a
+    ///     purely additive update.
+    /// </summary>
+    [Fact]
+    public void GitIgnoreEnsurer_Ensure_ExistingFileHasUtf8Bom_PreservesBomOnWrite()
+    {
+        // Arrange: a .gitignore written with a UTF-8 BOM
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var gitIgnorePath = Path.Combine(repoRoot, ".gitignore");
+            const string original = "bin/\nobj/\n";
+            File.WriteAllText(gitIgnorePath, original, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+            // Act: ensure
+            GitIgnoreEnsurer.Ensure(repoRoot);
+
+            // Assert: the rewritten file still begins with a UTF-8 BOM
+            var bytes = File.ReadAllBytes(gitIgnorePath);
+            var utf8Bom = Encoding.UTF8.GetPreamble();
+            Assert.True(bytes.Length >= utf8Bom.Length);
+            Assert.Equal(utf8Bom, bytes[..utf8Bom.Length]);
         }
         finally
         {

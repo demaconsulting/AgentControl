@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Text;
 using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.RepoSync;
@@ -87,7 +88,7 @@ internal static class GitIgnoreEnsurer
 
         try
         {
-            var existingContent = File.Exists(gitIgnorePath) ? File.ReadAllText(gitIgnorePath) : string.Empty;
+            var (existingContent, encoding) = ReadExistingFile(gitIgnorePath);
 
             // Idempotency gate: a marker-comment scan only, never a gitignore-pattern/glob
             // analysis and never git check-ignore - see the class remarks for rationale.
@@ -98,13 +99,36 @@ internal static class GitIgnoreEnsurer
 
             var newLine = DetectNewLine(existingContent);
             var newContent = existingContent + BuildSeparator(existingContent, newLine) + BuildManagedFoldersBlock(newLine);
-            File.WriteAllText(gitIgnorePath, newContent);
+            File.WriteAllText(gitIgnorePath, newContent, encoding);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new InvalidOperationException(
                 $"Failed to update '{gitIgnorePath}' with the managed agent-folder entries: {ex.Message}", ex);
         }
+    }
+
+    /// <summary>
+    ///     Reads a possibly-missing file's existing content and encoding, so
+    ///     <see cref="Ensure"/> can write the updated content back using the same encoding the
+    ///     file already had (preserving a BOM/non-UTF8 encoding rather than silently normalizing
+    ///     it to UTF-8) - a user-owned file should not have its encoding changed as a side effect
+    ///     of a purely additive update.
+    /// </summary>
+    /// <param name="path">Absolute path to the file.</param>
+    /// <returns>The file's text content and detected encoding, or an empty string and UTF-8
+    ///     (no BOM) - the conventional default for a newly created <c>.gitignore</c> - when the
+    ///     file does not yet exist.</returns>
+    private static (string Content, Encoding Encoding) ReadExistingFile(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return (string.Empty, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        }
+
+        using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var content = reader.ReadToEnd();
+        return (content, reader.CurrentEncoding);
     }
 
     /// <summary>
