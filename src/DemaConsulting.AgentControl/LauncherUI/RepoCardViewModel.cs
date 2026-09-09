@@ -844,7 +844,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
         catch (InvalidOperationException ex)
         {
-            ErrorOccurred?.Invoke(this, $"Failed to update .gitignore for managed agent folders: {ex.Message}");
+            ErrorOccurred?.Invoke(this, ex.Message);
         }
     }
 

@@ -96,7 +96,8 @@ internal static class GitIgnoreEnsurer
                 return;
             }
 
-            var newContent = existingContent + BuildSeparator(existingContent) + BuildManagedFoldersBlock();
+            var newLine = DetectNewLine(existingContent);
+            var newContent = existingContent + BuildSeparator(existingContent, newLine) + BuildManagedFoldersBlock(newLine);
             File.WriteAllText(gitIgnorePath, newContent);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -107,13 +108,36 @@ internal static class GitIgnoreEnsurer
     }
 
     /// <summary>
+    ///     Detects the newline style already used by <paramref name="existingContent"/>, so
+    ///     appended lines match the file's existing convention instead of always using the
+    ///     current OS's <see cref="Environment.NewLine"/> (which would produce mixed line
+    ///     endings, e.g. appending LF-only lines to a CRLF file when running on Linux/macOS).
+    /// </summary>
+    /// <param name="existingContent">The <c>.gitignore</c> file's content before appending.</param>
+    /// <returns><c>"\r\n"</c> or <c>"\n"</c> when detected from the first line break in
+    ///     <paramref name="existingContent"/>; otherwise <see cref="Environment.NewLine"/> for a
+    ///     new or line-break-free file.</returns>
+    private static string DetectNewLine(string existingContent)
+    {
+        var index = existingContent.IndexOf('\n');
+        if (index < 0)
+        {
+            return Environment.NewLine;
+        }
+
+        return index > 0 && existingContent[index - 1] == '\r' ? "\r\n" : "\n";
+    }
+
+    /// <summary>
     ///     Builds a sensible, simple blank-line separator to place before the appended block, so
     ///     it never visually runs into any pre-existing content.
     /// </summary>
     /// <param name="existingContent">The <c>.gitignore</c> file's content before appending.</param>
+    /// <param name="newLine">The newline style to use, as detected by
+    ///     <see cref="DetectNewLine"/>.</param>
     /// <returns>An empty string when <paramref name="existingContent"/> is empty or already ends
     ///     in a blank line; otherwise a newline pair providing one blank-line separator.</returns>
-    private static string BuildSeparator(string existingContent)
+    private static string BuildSeparator(string existingContent, string newLine)
     {
         if (existingContent.Length == 0)
         {
@@ -135,13 +159,15 @@ internal static class GitIgnoreEnsurer
             return string.Empty;
         }
 
-        return normalized.EndsWith('\n') ? Environment.NewLine : Environment.NewLine + Environment.NewLine;
+        return normalized.EndsWith('\n') ? newLine : newLine + newLine;
     }
 
     /// <summary>
     ///     Builds the marker comment plus the four managed-folder lines to append.
     /// </summary>
+    /// <param name="newLine">The newline style to use, as detected by
+    ///     <see cref="DetectNewLine"/>.</param>
     /// <returns>The marker-delimited managed-folders block text.</returns>
-    private static string BuildManagedFoldersBlock() =>
-        MarkerComment + Environment.NewLine + string.Join(Environment.NewLine, ManagedFolderPatterns) + Environment.NewLine;
+    private static string BuildManagedFoldersBlock(string newLine) =>
+        MarkerComment + newLine + string.Join(newLine, ManagedFolderPatterns) + newLine;
 }

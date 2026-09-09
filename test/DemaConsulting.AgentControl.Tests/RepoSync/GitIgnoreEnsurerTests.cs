@@ -91,12 +91,13 @@ public class GitIgnoreEnsurerTests
     /// <summary>
     ///     Test that when a .gitignore has existing content without a trailing blank line and no
     ///     marker, Ensure appends the block after a separating blank line, leaving the original
-    ///     lines untouched and unreordered.
+    ///     lines untouched and unreordered, using the file's own (LF) newline style rather than
+    ///     the current OS's <see cref="Environment.NewLine"/>.
     /// </summary>
     [Fact]
     public void GitIgnoreEnsurer_Ensure_ExistingContentWithoutMarker_AppendsBlockPreservingExistingLines()
     {
-        // Arrange: a .gitignore with unrelated content, no trailing blank line, no marker
+        // Arrange: a .gitignore with unrelated LF-only content, no trailing blank line, no marker
         var repoRoot = CreateTempDirectory();
         try
         {
@@ -108,12 +109,12 @@ public class GitIgnoreEnsurerTests
             GitIgnoreEnsurer.Ensure(repoRoot);
 
             // Assert: original lines are preserved unchanged, followed by a blank-line separator
-            // and the new marker-delimited block
+            // and the new marker-delimited block, all using the file's existing LF newline style
             var content = File.ReadAllText(gitIgnorePath);
             Assert.StartsWith(original, content, StringComparison.Ordinal);
-            var expected = original + Environment.NewLine + Marker + Environment.NewLine
-                + ".github/agents/" + Environment.NewLine + ".github/standards/" + Environment.NewLine
-                + ".github/templates/" + Environment.NewLine + ".github/skills/" + Environment.NewLine;
+            const string expected = original + "\n" + Marker + "\n"
+                + ".github/agents/" + "\n" + ".github/standards/" + "\n"
+                + ".github/templates/" + "\n" + ".github/skills/" + "\n";
             Assert.Equal(expected, content);
         }
         finally
@@ -124,27 +125,30 @@ public class GitIgnoreEnsurerTests
 
     /// <summary>
     ///     Test that when a .gitignore's existing content already ends in a blank line, Ensure
-    ///     does not introduce a redundant extra blank line before the appended block.
+    ///     does not introduce a redundant extra blank line before the appended block, using the
+    ///     file's own (LF) newline style rather than the current OS's
+    ///     <see cref="Environment.NewLine"/>.
     /// </summary>
     [Fact]
     public void GitIgnoreEnsurer_Ensure_ExistingContentEndsWithBlankLine_AppendsBlockWithoutExtraBlankLine()
     {
-        // Arrange: a .gitignore whose content already ends with a blank line
+        // Arrange: a .gitignore whose LF-only content already ends with a blank line
         var repoRoot = CreateTempDirectory();
         try
         {
             var gitIgnorePath = Path.Combine(repoRoot, ".gitignore");
-            var original = "bin/\nobj/\n" + Environment.NewLine;
+            const string original = "bin/\nobj/\n\n";
             File.WriteAllText(gitIgnorePath, original);
 
             // Act: ensure
             GitIgnoreEnsurer.Ensure(repoRoot);
 
-            // Assert: no additional blank line was introduced beyond the one already present
+            // Assert: no additional blank line was introduced beyond the one already present, and
+            // the appended block uses the file's existing LF newline style
             var content = File.ReadAllText(gitIgnorePath);
-            var expected = original + Marker + Environment.NewLine
-                + ".github/agents/" + Environment.NewLine + ".github/standards/" + Environment.NewLine
-                + ".github/templates/" + Environment.NewLine + ".github/skills/" + Environment.NewLine;
+            const string expected = original + Marker + "\n"
+                + ".github/agents/" + "\n" + ".github/standards/" + "\n"
+                + ".github/templates/" + "\n" + ".github/skills/" + "\n";
             Assert.Equal(expected, content);
         }
         finally
