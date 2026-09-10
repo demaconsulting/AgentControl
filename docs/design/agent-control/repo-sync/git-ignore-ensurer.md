@@ -58,8 +58,9 @@ the four managed agent folders, creating the file if it does not yet exist.
 `Ensure` throws `ArgumentNullException` for a `null` `repoRoot`, and `InvalidOperationException`
 when the `.gitignore` file cannot be read or written for an I/O reason — wrapping the
 underlying `IOException`/`UnauthorizedAccessException` with a message naming the `.gitignore`
-path. The marker-already-present no-op path never throws, since it performs no I/O beyond the
-initial read.
+path. The marker-already-present no-op path still performs the initial read (to scan for the
+marker) and so can still throw `InvalidOperationException` if that read fails; it simply never
+writes.
 
 #### Dependencies
 

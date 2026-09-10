@@ -63,7 +63,7 @@ Each repo card shows:
     Separately, AgentControl proactively ensures your `.gitignore` covers these four folders
     immediately after every Select-Package/Upgrade (see below), which makes this situation
     much less likely to occur going forward — but this badge itself remains unchanged and
-    still purely advisory
+    still purely advisory.
   - **Missing** — the repo path no longer exists on disk (for example, a deleted folder or an
     unmounted network/removable drive). This suppresses the card's other badges and actions,
     and offers a "Remove from list" action instead (the card is never auto-removed, since the
