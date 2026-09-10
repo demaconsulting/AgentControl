@@ -26,7 +26,10 @@ in that repo's working directory.
   so upgrades are always a deliberate, visible action
 - **Status badges**: each repo card shows an upgrade-available badge, a committed-agent-files
   warning (advisory only — flags when the managed folders were accidentally committed to
-  git), and a missing-repo indicator when the path no longer exists on disk
+  git), and a missing-repo indicator when the path no longer exists on disk. Separately,
+  AgentControl now proactively ensures the repo's `.gitignore` covers the four managed
+  folders immediately after every "Select Package..."/Upgrade, making an accidental commit
+  much less likely in the first place
 - **Ensure-synced-before-launch**: clicking Launch attempts a best-effort sync of the four
   managed agent folders before starting the agent tool; if they are missing (for example, a
   fresh clone) it silently re-extracts the currently pinned version first — it never

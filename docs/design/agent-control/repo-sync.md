@@ -5,11 +5,13 @@
 ### Overview
 
 The `RepoSync` subsystem spans `PackageZipExtractor.cs` (extracts a package zip's managed
-folders into a repo, blind delete-replace) and `ReleaseNotesViewerViewModel.cs` (backs the
-release-notes dialog shown after a sync); the `ReleaseNotesViewer.axaml` view has no dedicated
-test file and is folded into this subsystem-level description. The subsystem provides the
-observable behavior of syncing a repo's agent files to a package's contents. It contains two
-units: `PackageZipExtractor` and `ReleaseNotesViewerViewModel`.
+folders into a repo, blind delete-replace), `ReleaseNotesViewerViewModel.cs` (backs the
+release-notes dialog shown after a sync), and `GitIgnoreEnsurer.cs` (proactively ensures a
+repo's `.gitignore` covers the four managed folders immediately after a successful sync); the
+`ReleaseNotesViewer.axaml` view has no dedicated test file and is folded into this
+subsystem-level description. The subsystem provides the observable behavior of syncing a
+repo's agent files to a package's contents. It contains three units: `PackageZipExtractor`,
+`ReleaseNotesViewerViewModel`, and `GitIgnoreEnsurer`.
 
 ### Interfaces
 
@@ -54,6 +56,18 @@ present on disk.
   (`AgentControl-ReleaseNotesViewerViewModel-Display`).
 - *Constraints*: Rejects a null repo name or release notes value in its constructor.
 
+**GitIgnoreEnsurer.Ensure**: Ensures a repo's root `.gitignore` covers the four managed
+agent-file folders.
+
+- *Type*: In-process .NET static method.
+- *Role*: Provider.
+- *Contract*: Appends a marker-delimited block covering the four managed folders (creating the
+  file if absent) unless the fixed marker comment is already present, and never modifies or
+  removes any pre-existing line (`AgentControl-GitIgnoreEnsurer-Ensure`).
+- *Constraints*: Idempotency is a marker-comment scan only — never `git check-ignore`, never a
+  gitignore-pattern/glob analysis, and no git dependency of any kind. Throws
+  `InvalidOperationException` for an I/O failure.
+
 ### Design
 
 `PackageZipExtractor` implements the upgrade/sync sequence from architecture.md's
@@ -73,3 +87,15 @@ never `ShowDialog`, so the main window remains usable while the developer reads 
 — a non-modal presentation is an explicit design requirement, not merely a style preference,
 since a modal dialog would block launching the agent tool while release notes are open
 (`AgentControl-RepoSync-ReleaseNotes`).
+
+`GitIgnoreEnsurer` runs from `RepoCardViewModel` rather than from inside
+`PackageZipExtractor.Extract` itself: `Extract` stays a pure file-sync operation with a single
+responsibility (replacing the managed folders' contents), while ensuring `.gitignore` coverage
+is a distinct post-extraction side effect — following the same architectural precedent as the
+pin-file write, which also happens in the caller immediately after a successful extraction,
+not inside `Extract`. This keeps `GitIgnoreEnsurer` independently testable and independently
+skippable (its own non-blocking try/catch) without complicating `PackageZipExtractor`'s error
+handling. Per architecture.md's "Committed agent files" badge description, AgentControl does
+not modify git tracking state itself; `GitIgnoreEnsurer` is a deliberate, narrow exception
+limited to `.gitignore` *content* (never git tracking state) and does not contradict that
+stance (`AgentControl-RepoSync-GitIgnorePrevention`).

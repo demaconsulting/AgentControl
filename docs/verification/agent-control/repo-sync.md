@@ -3,11 +3,13 @@
 ### Verification Approach
 
 The `RepoSync` subsystem is verified indirectly through its constituent units' test suites
-(`PackageZipExtractorTests.cs` and `ReleaseNotesViewerViewModelTests.cs`), each documented in
-its own unit-level verification design. The `ReleaseNotesViewerView` Avalonia view has no
-dedicated test file and is covered only by the FlaUI end-to-end release-notes-dialog check
-described at the system level (see the `AgentControl` system-level verification design). All
-`PackageZipExtractor` tests operate on real temporary directories and real zip files.
+(`PackageZipExtractorTests.cs`, `ReleaseNotesViewerViewModelTests.cs`, and
+`GitIgnoreEnsurerTests.cs`), each documented in its own unit-level verification design. The
+`ReleaseNotesViewerView` Avalonia view has no dedicated test file and is covered only by the
+FlaUI end-to-end release-notes-dialog check described at the system level (see the
+`AgentControl` system-level verification design). All `PackageZipExtractor` and
+`GitIgnoreEnsurer` tests operate on real temporary directories and real files (zip archives
+and `.gitignore` files respectively).
 
 ### Test Environment
 
@@ -15,12 +17,14 @@ N/A - standard test environment; no external services or hardware required.
 
 ### Acceptance Criteria
 
-- All unit tests for `PackageZipExtractor` and `ReleaseNotesViewerViewModel` pass with zero
-  failures.
+- All unit tests for `PackageZipExtractor`, `ReleaseNotesViewerViewModel`, and
+  `GitIgnoreEnsurer` pass with zero failures.
 - A sync fully replaces a repo's managed agent-file folders and never partially extracts an
   invalid zip.
 - The release-notes dialog always has coherent content, even for a package with no release
   notes.
+- A repo's `.gitignore` covers the four managed agent folders after every successful sync,
+  without disturbing any pre-existing `.gitignore` content.
 
 ### Test Scenarios
 
@@ -43,3 +47,16 @@ respective unit verification designs), with
 directly at the subsystem level, covering `AgentControl-RepoSync-ReleaseNotes` (children:
 `AgentControl-PackageZipExtractor-ReadReleaseNotes`,
 `AgentControl-ReleaseNotesViewerViewModel-Display`).
+
+**RepoSync_GitIgnorePrevention_UnitTestsCoverMarkerScanCreateAppendAndWriteFailure**:
+Proactively ensuring a repo's `.gitignore` covers the four managed agent folders is verified by
+the `GitIgnoreEnsurer` unit tests (see the `GitIgnoreEnsurer` unit verification design), with
+`GitIgnoreEnsurer_Ensure_MarkerAlreadyPresent_DoesNotModifyFile`,
+`GitIgnoreEnsurer_Ensure_NoGitIgnoreFile_CreatesFileWithManagedFoldersBlock`,
+`GitIgnoreEnsurer_Ensure_ExistingContentWithoutMarker_AppendsBlockPreservingExistingLines`,
+`GitIgnoreEnsurer_Ensure_ExistingContentEndsWithBlankLine_AppendsBlockWithoutExtraBlankLine`,
+`GitIgnoreEnsurer_Ensure_ExistingContentUsesCrLf_AppendsBlockWithCrLf`,
+`GitIgnoreEnsurer_Ensure_ExistingFileHasUtf8Bom_PreservesBomOnWrite`, and
+`GitIgnoreEnsurer_Ensure_PathIsDirectory_ThrowsInvalidOperationException` cited directly at
+the subsystem level, covering `AgentControl-RepoSync-GitIgnorePrevention` (children:
+`AgentControl-GitIgnoreEnsurer-Ensure`).

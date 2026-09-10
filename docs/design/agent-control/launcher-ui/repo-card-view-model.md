@@ -109,8 +109,17 @@ configured source, then applies it via `ApplyPackageAndShowReleaseNotes`.
 
 **ApplyPackageAndShowReleaseNotes** (private): Shared extract-and-pin sequence reused by
 `Upgrade` and `ApplySelectedPackage`: extracts the package (blind-delete-and-replace),
+proactively ensures the repo's `.gitignore` covers the four managed agent folders (via
+`EnsureGitIgnoreCoversManagedFolders`, its own non-blocking step — see Error Handling),
 rewrites the pin file, refreshes pin/upgrade-status properties, and raises `ReleaseNotesReady`
 with the new package's release notes.
+
+**EnsureGitIgnoreCoversManagedFolders** (private): Best-effort, non-blocking wrapper around
+`GitIgnoreEnsurer.Ensure` called immediately after every successful extraction in
+`ApplyPackageAndShowReleaseNotes`, before the pin-file write. Deliberately wrapped in its own
+try/catch, separate from `ApplyPackageAndShowReleaseNotes`'s outer catch, so a `.gitignore` I/O
+failure can never abort the pin write or release-notes display that follow it — mirroring the
+non-blocking idiom already established by `EnsureAgentFilesSyncedBeforeLaunch`.
 
 **SelectPackage** (private): Validates a package source is configured, then raises
 `SelectPackageRequested` for the view layer to show the dialog
@@ -128,7 +137,11 @@ non-blocking warning for each rather than propagating or blocking the launch. `P
 `GitClient` and degrade to "unknown"/`false` rather than propagating, since these run as part
 of routine, frequent UI refreshes. `ApplyPackageAndShowReleaseNotes` catches
 `InvalidOperationException` and `DirectoryNotFoundException`, raising `ErrorOccurred` without
-applying a partial pin update. The constructor throws `ArgumentNullException` for a null
+applying a partial pin update. `EnsureGitIgnoreCoversManagedFolders` catches
+`InvalidOperationException` from `GitIgnoreEnsurer.Ensure` separately, in its own nested
+try/catch, raising `ErrorOccurred` as a non-blocking warning without ever propagating — a
+`.gitignore` I/O failure never aborts the pin write or release-notes display. The constructor
+throws `ArgumentNullException` for a null
 `recentRepo`, `getSettings`, or `packageVersionCache`. `ApplySelectedPackage` throws
 `ArgumentNullException` for a null `packageName` or `version`.
 
@@ -138,6 +151,8 @@ applying a partial pin update. The constructor throws `ArgumentNullException` fo
 - **PackageSource**, **PackageVersionCache** (`AgentPackageManagement` subsystem) — package
   discovery and upgrade-availability checks.
 - **PackageZipExtractor** (`RepoSync` subsystem) — extracts a package into the repo.
+- **GitIgnoreEnsurer** (`RepoSync` subsystem) — proactively ensures the repo's `.gitignore`
+  covers the four managed agent folders after a successful extraction.
 - **GitClient**, **CommittedAgentFilesCache** (`GitIntegration` subsystem) — git status,
   branch, and committed-files queries.
 - **ShellDetector**, **AgentToolLauncher** (`AgentToolLauncher` subsystem) — shell detection

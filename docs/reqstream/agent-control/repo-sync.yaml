@@ -4,9 +4,11 @@
 # PURPOSE:
 # - Define requirements for the AgentControl RepoSync subsystem
 # - RepoSync spans PackageZipExtractor.cs (extracts a package zip's managed folders into a
-#   repo, blind delete-replace) and ReleaseNotesViewerViewModel.cs (backs the release-notes
-#   dialog shown after a sync); the ReleaseNotesViewerView .axaml has no dedicated test file
-#   and is folded into this subsystem-level description
+#   repo, blind delete-replace), ReleaseNotesViewerViewModel.cs (backs the release-notes
+#   dialog shown after a sync), and GitIgnoreEnsurer.cs (proactively ensures a repo's
+#   .gitignore covers the four managed folders after a successful sync); the
+#   ReleaseNotesViewerView .axaml has no dedicated test file and is folded into this
+#   subsystem-level description
 # - Subsystem requirements describe the observable behavior of syncing a repo's agent files
 #   to a package's contents
 
@@ -47,3 +49,25 @@ sections:
           - PackageZipExtractor_ReadReleaseNotes_EntryPresent_ReturnsContentWithoutExtracting
           - PackageZipExtractor_ReadReleaseNotes_NoEntry_ReturnsNull
           - ReleaseNotesViewerViewModel_Constructor_EmptyReleaseNotes_UsesPlaceholderMessage
+
+      - id: AgentControl-RepoSync-GitIgnorePrevention
+        title: >-
+          The RepoSync subsystem shall ensure a repo's .gitignore covers the four managed
+          agent-file folders after every successful sync, without disturbing any pre-existing
+          .gitignore content.
+        justification: |
+          Prevents an agentic tool (or a developer) from accidentally committing
+          package-managed agent files into a repo meant to keep them untracked, proactively -
+          before an accidental commit can happen - as an additive, narrow exception to the
+          otherwise purely advisory "Committed agent files" badge documented in
+          architecture.md.
+        children:
+          - AgentControl-GitIgnoreEnsurer-Ensure
+        tests:
+          - GitIgnoreEnsurer_Ensure_MarkerAlreadyPresent_DoesNotModifyFile
+          - GitIgnoreEnsurer_Ensure_NoGitIgnoreFile_CreatesFileWithManagedFoldersBlock
+          - GitIgnoreEnsurer_Ensure_ExistingContentWithoutMarker_AppendsBlockPreservingExistingLines
+          - GitIgnoreEnsurer_Ensure_ExistingContentEndsWithBlankLine_AppendsBlockWithoutExtraBlankLine
+          - GitIgnoreEnsurer_Ensure_ExistingContentUsesCrLf_AppendsBlockWithCrLf
+          - GitIgnoreEnsurer_Ensure_ExistingFileHasUtf8Bom_PreservesBomOnWrite
+          - GitIgnoreEnsurer_Ensure_PathIsDirectory_ThrowsInvalidOperationException

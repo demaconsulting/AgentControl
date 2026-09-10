@@ -21,6 +21,7 @@ includes:
   - docs/reqstream/agent-control/agent-package-management/package-version.yaml
   - docs/reqstream/agent-control/agent-package-management/package-version-cache.yaml
   - docs/reqstream/agent-control/repo-sync.yaml
+  - docs/reqstream/agent-control/repo-sync/git-ignore-ensurer.yaml
   - docs/reqstream/agent-control/repo-sync/package-zip-extractor.yaml
   - docs/reqstream/agent-control/repo-sync/release-notes-viewer-view-model.yaml
   - docs/reqstream/agent-control/repo-config.yaml

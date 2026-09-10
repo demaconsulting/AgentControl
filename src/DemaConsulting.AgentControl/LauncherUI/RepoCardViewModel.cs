@@ -36,7 +36,8 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     All business logic (upgrade detection, launch orchestration, pull-eligibility checks) is
 ///     implemented here or delegated to the Phase 1 subsystems (<see cref="GitClient"/>,
 ///     <see cref="PackageSource"/>, <see cref="PackageZipExtractor"/>,
-///     <see cref="RepoPinStore"/>, <see cref="AgentLauncher"/>) rather than in any view
+///     <see cref="GitIgnoreEnsurer"/>, <see cref="RepoPinStore"/>, <see cref="AgentLauncher"/>)
+///     rather than in any view
 ///     code-behind, so this class is fully unit-testable without an Avalonia window. Not
 ///     thread-safe; every member is expected to be called from the UI thread, consistent with
 ///     <see cref="ViewModelBase"/>.
@@ -786,7 +787,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <summary>
     ///     Shared extract-and-pin sequence reused by both <see cref="Upgrade"/> (after resolving
     ///     the latest version) and <see cref="ApplySelectedPackage"/> (after resolving the exact
-    ///     user-selected version): extracts the package (blind-delete-and-replace), rewrites the
+    ///     user-selected version): extracts the package (blind-delete-and-replace), proactively
+    ///     ensures the repo's <c>.gitignore</c> covers the managed agent folders, rewrites the
     ///     pin file, refreshes this card's pin/upgrade-status properties, and raises
     ///     <see cref="ReleaseNotesReady"/> with the new package's release notes.
     /// </summary>
@@ -799,6 +801,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         try
         {
             PackageZipExtractor.Extract(package.FilePath, RepoPath);
+            EnsureGitIgnoreCoversManagedFolders();
             RepoPinStore.Save(RepoPath, new RepoPin { PackageName = package.PackageName, Version = package.Version.ToString() });
 
             var releaseNotes = PackageZipExtractor.ReadReleaseNotes(package.FilePath) ?? string.Empty;
@@ -815,6 +818,33 @@ internal sealed class RepoCardViewModel : ViewModelBase
         catch (DirectoryNotFoundException ex)
         {
             ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    ///     Proactively ensures this repo's root <c>.gitignore</c> covers the four managed agent
+    ///     folders immediately after a successful extraction, so they are far less likely to be
+    ///     accidentally committed. Purely a non-blocking, best-effort side effect: deliberately
+    ///     wrapped in its own try/catch, separate from <see cref="ApplyPackageAndShowReleaseNotes"/>'s
+    ///     outer catch, so a <c>.gitignore</c> I/O failure can never abort the pin write or
+    ///     release-notes display that follow it.
+    /// </summary>
+    /// <remarks>
+    ///     Never touches git tracking state itself and never invokes git - see
+    ///     <see cref="GitIgnoreEnsurer"/>'s remarks for the marker-comment-only idempotency
+    ///     rationale. This is a deliberate, narrow exception to the "Committed agent files"
+    ///     badge's advisory-only stance (architecture.md), not a contradiction of it: the badge
+    ///     remains purely advisory and unaffected by this method.
+    /// </remarks>
+    private void EnsureGitIgnoreCoversManagedFolders()
+    {
+        try
+        {
+            GitIgnoreEnsurer.Ensure(RepoPath);
+        }
+        catch (InvalidOperationException ex)
+        {
+            ErrorOccurred?.Invoke(this, ex.Message);
         }
     }
 

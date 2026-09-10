@@ -203,6 +203,17 @@ AgentControl
     git at `HEAD` (i.e. accidentally committed into a repo that's meant to
     gitignore them). This is purely advisory — AgentControl does not modify
     git tracking state itself.
+
+  Separately from this advisory badge, immediately after every successful
+  "Select Package..."/"Upgrade" extraction, AgentControl now also proactively
+  ensures the repo's root `.gitignore` covers the four managed folders (via a
+  fixed marker-comment idempotency check only — never `git check-ignore`, and
+  never a gitignore-pattern/glob analysis). This is purely additive to any
+  existing `.gitignore` content, never blocks the extraction on failure, and
+  never touches git tracking state — a deliberate, narrow exception to the
+  "AgentControl does not modify git tracking state itself" stance above (that
+  stance still holds), not a contradiction of it. The committed-agent-files
+  badge above remains unchanged and still purely advisory.
   - ❌ **Missing** — the repo path no longer exists on disk (deleted or an
     unmounted network/removable drive). Suppresses all other badges/actions
     for that card; offers a "Remove from list" action (never auto-removed,

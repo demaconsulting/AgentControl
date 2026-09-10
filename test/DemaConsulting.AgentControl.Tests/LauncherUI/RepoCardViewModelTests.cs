@@ -314,6 +314,36 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that Upgrade proactively ensures the repo's .gitignore covers the four managed
+    ///     agent folders immediately after a successful extraction.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesGitIgnoreWithManagedFoldersBlock()
+    {
+        // Arrange: a repo pinned to 1.0.0, no pre-existing .gitignore, and a source with a
+        // newer package
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings);
+        card.Refresh();
+
+        // Act: upgrade
+        card.UpgradeCommand.Execute(null);
+
+        // Assert: the repo's .gitignore now covers the four managed agent folders
+        var gitIgnorePath = Path.Combine(repoRoot, ".gitignore");
+        Assert.True(File.Exists(gitIgnorePath));
+        var content = File.ReadAllText(gitIgnorePath);
+        Assert.Contains("# Added by AgentControl - agent package folders", content, StringComparison.Ordinal);
+        Assert.Contains(".github/agents/", content, StringComparison.Ordinal);
+        Assert.Contains(".github/standards/", content, StringComparison.Ordinal);
+        Assert.Contains(".github/templates/", content, StringComparison.Ordinal);
+        Assert.Contains(".github/skills/", content, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that Upgrade raises ErrorOccurred rather than throwing when no package source is
     ///     configured.
     /// </summary>
@@ -675,6 +705,72 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.Equal("1.0.0", card.PinnedPackageVersion);
         Assert.False(card.IsPackageSelectionNeeded);
         Assert.True(File.Exists(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
+        Assert.Equal("## 1.0.0\n\nInitial release.", capturedReleaseNotes);
+    }
+
+    /// <summary>
+    ///     Test that ApplySelectedPackage proactively ensures the repo's .gitignore covers the
+    ///     four managed agent folders immediately after a successful extraction.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_CreatesGitIgnoreWithManagedFoldersBlock()
+    {
+        // Arrange: a never-pinned repo with no pre-existing .gitignore, and a source with a
+        // valid package
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, null, null, settings);
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert: the repo's .gitignore now covers the four managed agent folders
+        var gitIgnorePath = Path.Combine(repoRoot, ".gitignore");
+        Assert.True(File.Exists(gitIgnorePath));
+        var content = File.ReadAllText(gitIgnorePath);
+        Assert.Contains("# Added by AgentControl - agent package folders", content, StringComparison.Ordinal);
+        Assert.Contains(".github/agents/", content, StringComparison.Ordinal);
+        Assert.Contains(".github/standards/", content, StringComparison.Ordinal);
+        Assert.Contains(".github/templates/", content, StringComparison.Ordinal);
+        Assert.Contains(".github/skills/", content, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that when the .gitignore-ensure step fails for an I/O reason (the target path is
+    ///     forced to be a directory rather than a file), ApplySelectedPackage still raises
+    ///     ErrorOccurred as a non-blocking warning while completing the pin write and
+    ///     ReleaseNotesReady sequence - the .gitignore failure never blocks the otherwise-
+    ///     successful apply.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_GitIgnoreWriteFails_StillUpdatesPinAndRaisesReleaseNotesReady()
+    {
+        // Arrange: a never-pinned repo whose ".gitignore" path is forced to be a directory, and
+        // a source with a valid package containing release notes
+        var repoRoot = CreateTempDirectory();
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".gitignore"));
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0", "## 1.0.0\n\nInitial release.");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, null, null, settings);
+        string? capturedError = null;
+        card.ErrorOccurred += (_, message) => capturedError = message;
+        string? capturedReleaseNotes = null;
+        card.ReleaseNotesReady += (_, notes) => capturedReleaseNotes = notes;
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert: a non-blocking warning was raised, but the pin write and release notes still
+        // completed as if the .gitignore-ensure step had never run
+        Assert.NotNull(capturedError);
+        Assert.Contains(".gitignore", capturedError, StringComparison.OrdinalIgnoreCase);
+        var pin = RepoPinStore.Load(repoRoot);
+        Assert.NotNull(pin);
+        Assert.Equal("contoso-agents", pin.PackageName);
+        Assert.Equal("1.0.0", pin.Version);
         Assert.Equal("## 1.0.0\n\nInitial release.", capturedReleaseNotes);
     }
 
