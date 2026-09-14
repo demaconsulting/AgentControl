@@ -226,6 +226,43 @@ public class PackageZipExtractorTests
     }
 
     /// <summary>
+    ///     Test that AllManagedFoldersExist returns false when a managed folder itself (not an
+    ///     ancestor such as <c>.github</c>) is a junction, distinguishing this case from
+    ///     <see cref="PackageZipExtractor_AllManagedFoldersExist_AncestorIsJunctionWithRealFolders_ReturnsFalse"/>.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_AllManagedFoldersExist_ManagedFolderItselfIsJunction_ReturnsFalse()
+    {
+        // NTFS directory junctions are a Windows-only concept; skip on other CI runners.
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Directory junctions are a Windows-only filesystem feature.");
+        }
+
+        // Arrange: a repo root with three genuine managed folders, and a fourth
+        // (".github/agents") that is itself a junction to a separate, isolated directory with
+        // real content - so the naive Directory.Exists-based check alone would (incorrectly)
+        // report it as present.
+        var repoRoot = CreateTempDirectory();
+        var linkTarget = CreateTempDirectory();
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".github", "standards"));
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".github", "templates"));
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".github", "skills"));
+        try
+        {
+            CreateJunction(Path.Combine(repoRoot, ".github", "agents"), linkTarget);
+
+            Assert.False(PackageZipExtractor.AllManagedFoldersExist(repoRoot));
+        }
+        finally
+        {
+            Directory.Delete(Path.Combine(repoRoot, ".github", "agents"));
+            Directory.Delete(repoRoot, recursive: true);
+            Directory.Delete(linkTarget, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that a zip entry whose name textually starts with a managed-folder prefix but
     ///     uses ".." components to resolve to a location outside every managed folder (while
     ///     still remaining under the repo root) is not extracted anywhere - closing the traversal
@@ -429,6 +466,102 @@ public class PackageZipExtractorTests
             Directory.Delete(Path.Combine(agentsDir, "linked"));
             Directory.Delete(repoRoot, recursive: true);
             Directory.Delete(linkTarget, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a *dangling* symlink/junction ancestor (one whose target no longer exists) is
+    ///     still rejected, exercising the <see cref="File.GetAttributes(string)"/>-based reparse
+    ///     check regardless of whether the link's target exists - unlike the former
+    ///     <see cref="Directory.Exists(string)"/>-based check, which follows the link to test for
+    ///     the target's existence and would silently report "not a directory" (skipping the
+    ///     guard entirely) for a dangling link. Runs on every platform: real symbolic links on
+    ///     Linux/macOS via <see cref="Directory.CreateSymbolicLink(string, string)"/>, and NTFS
+    ///     junctions on Windows (created against a real target, then made dangling by deleting
+    ///     that target, since <c>mklink /J</c> itself requires an existing target).
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_ManagedFolderAncestorIsDanglingLink_ThrowsAndDoesNotBypassGuard()
+    {
+        var zipPath = CreatePackageZip(("agents/copilot.md", "should not be extracted"));
+        var repoRoot = CreateTempDirectory();
+        var githubPath = Path.Combine(repoRoot, ".github");
+        try
+        {
+            CreateDanglingLink(githubPath);
+
+            // Act / Assert: extraction is refused, not silently allowed through the dangling link
+            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            // The dangling link entry itself must be removed (non-recursively - there is no
+            // real target content behind it) before the repo root can be deleted.
+            Directory.Delete(githubPath);
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that <see cref="PackageZipExtractor.AllManagedFoldersExist"/> refuses to trust a
+    ///     managed folder that is only reachable through a reparse-point ancestor, rather than
+    ///     silently reporting it as present (which would let a caller such as
+    ///     <c>RepoCardViewModel.EnsureAgentFilesSyncedBeforeLaunch</c> skip <c>Extract</c>
+    ///     entirely and launch using files outside the repo root).
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_AllManagedFoldersExist_AncestorIsJunctionWithRealFolders_ReturnsFalse()
+    {
+        // NTFS directory junctions are a Windows-only concept; skip on other CI runners.
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Directory junctions are a Windows-only filesystem feature.");
+        }
+
+        // Arrange: a repo root whose ".github" entry is a junction to a separate, isolated
+        // directory that genuinely has all four managed folders - so the naive
+        // Directory.Exists-based check alone would (incorrectly) report every folder as present.
+        var repoRoot = CreateTempDirectory();
+        var linkTarget = CreateTempDirectory();
+        foreach (var folder in new[] { "agents", "standards", "templates", "skills" })
+        {
+            Directory.CreateDirectory(Path.Combine(linkTarget, folder));
+        }
+
+        try
+        {
+            CreateJunction(Path.Combine(repoRoot, ".github"), linkTarget);
+
+            Assert.False(PackageZipExtractor.AllManagedFoldersExist(repoRoot));
+        }
+        finally
+        {
+            Directory.Delete(Path.Combine(repoRoot, ".github"));
+            Directory.Delete(repoRoot, recursive: true);
+            Directory.Delete(linkTarget, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Creates a dangling directory symlink/junction at <paramref name="linkPath"/> - one
+    ///     whose target does not exist - using a real symbolic link on Linux/macOS (created
+    ///     without any target validation) or an NTFS junction on Windows (created against a real
+    ///     temporary target that is deleted immediately afterward).
+    /// </summary>
+    /// <param name="linkPath">The link's path; its parent must exist and it must not already
+    ///     exist.</param>
+    private static void CreateDanglingLink(string linkPath)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var target = CreateTempDirectory();
+            CreateJunction(linkPath, target);
+            Directory.Delete(target);
+        }
+        else
+        {
+            Directory.CreateSymbolicLink(linkPath, Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
         }
     }
 

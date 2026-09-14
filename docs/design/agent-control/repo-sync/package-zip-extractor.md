@@ -41,7 +41,11 @@ a repo root.
 - *Returns*: `bool`.
 - *Postconditions*: Does not inspect folder contents — a managed folder that exists but is
   empty (or only partially populated) still counts as "existing"
-  (`AgentControl-PackageZipExtractor-AllManagedFoldersExist`). Consulted by
+  (`AgentControl-PackageZipExtractor-AllManagedFoldersExist`). A managed folder reached through
+  a reparse-point (symlink/junction) repo root, ancestor, or the folder itself is treated as
+  **not** existing, using the same `EnsureNoSymlinkAncestors` check `Extract` relies on — this
+  prevents a caller from trusting content reached through a link and skipping `Extract`'s own
+  reparse-point protections entirely. Consulted by
   `RepoCardViewModel.EnsureAgentFilesSyncedBeforeLaunch` to decide whether a silent
   re-extraction is needed before launch.
 

@@ -25,14 +25,20 @@ sections:
       - id: AgentControl-PackageZipExtractor-AllManagedFoldersExist
         title: >-
           The PackageZipExtractor class shall report whether all of a repo's managed agent-file
-          folders are present, returning false if any are missing.
+          folders are present, returning false if any are missing, and shall also treat a
+          managed folder as absent when it is only reachable through a reparse point
+          (symlink/junction) repo root, ancestor, or the folder itself.
         justification: |
           Used by the ensure-synced-before-launch check to decide whether a re-extraction is
-          needed without re-scanning file contents.
+          needed without re-scanning file contents. Trusting a reparse-point-reached folder as
+          "present" would let this check skip Extract entirely and let a launch proceed using
+          files outside the repo root, bypassing Extract's own symlink/junction protections.
         tests:
           - PackageZipExtractor_AllManagedFoldersExist_AllFourPresent_ReturnsTrue
           - PackageZipExtractor_AllManagedFoldersExist_SomeMissing_ReturnsFalse
           - PackageZipExtractor_AllManagedFoldersExist_NoneExist_ReturnsFalse
+          - PackageZipExtractor_AllManagedFoldersExist_AncestorIsJunctionWithRealFolders_ReturnsFalse
+          - PackageZipExtractor_AllManagedFoldersExist_ManagedFolderItselfIsJunction_ReturnsFalse
 
       - id: AgentControl-PackageZipExtractor-ReadReleaseNotes
         title: >-

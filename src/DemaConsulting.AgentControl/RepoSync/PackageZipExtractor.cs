@@ -120,7 +120,12 @@ internal static class PackageZipExtractor
     ///     so the managed-folder list has a single source of truth - callers (e.g.
     ///     <c>RepoCardViewModel</c>'s ensure-synced-before-launch check) never need to duplicate
     ///     it. Does not inspect folder contents; a managed folder that exists but is empty (or
-    ///     only partially populated) still counts as "existing" here.
+    ///     only partially populated) still counts as "existing" here. A managed folder that is
+    ///     only reachable through a reparse-point (symlink/junction) repo root or ancestor - e.g.
+    ///     a symlinked <c>.github</c> - is deliberately treated as <b>not</b> existing: trusting
+    ///     it here would let a caller (such as <c>RepoCardViewModel.EnsureAgentFilesSyncedBeforeLaunch</c>)
+    ///     skip <see cref="Extract"/> entirely and launch using files outside <paramref name="repoRoot"/>
+    ///     without any of <see cref="Extract"/>'s reparse-point protections ever running.
     /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> is
     ///     <see langword="null"/>.</exception>
@@ -128,7 +133,54 @@ internal static class PackageZipExtractor
     {
         ArgumentNullException.ThrowIfNull(repoRoot);
 
-        return ManagedFolders.All(folder => Directory.Exists(PathHelpers.SafePathCombine(repoRoot, folder)));
+        var normalizedRoot = Path.GetFullPath(repoRoot);
+        return ManagedFolders.All(folder => ManagedFolderGenuinelyExists(normalizedRoot, folder));
+    }
+
+    /// <summary>
+    ///     Determines whether a single managed folder exists under a repo root without being
+    ///     reached through a reparse point (symlink/junction) repo root, ancestor, or the folder
+    ///     itself.
+    /// </summary>
+    /// <param name="normalizedRoot">The already-resolved (<see cref="Path.GetFullPath(string)"/>)
+    ///     repo root.</param>
+    /// <param name="relativeFolder">The managed folder's path relative to the repo root.</param>
+    /// <returns><see langword="true"/> if the folder exists and no reparse point sits between it
+    ///     and <paramref name="normalizedRoot"/> (inclusive); otherwise <see langword="false"/>.</returns>
+    /// <remarks>
+    ///     Deliberately swallows (as "not genuinely present") both the documented reparse-point
+    ///     rejection and any I/O failure while walking the ancestor chain - e.g. an
+    ///     <see cref="UnauthorizedAccessException"/> from an ACL-restricted ancestor, which
+    ///     <see cref="EnsureNoSymlinkAncestors"/> does not itself catch. This keeps
+    ///     <see cref="AllManagedFoldersExist"/>'s contract to only ever throw
+    ///     <see cref="ArgumentNullException"/> (its callers, e.g.
+    ///     <c>RepoCardViewModel.EnsureAgentFilesSyncedBeforeLaunch</c>, only guard against
+    ///     <see cref="Extract"/>'s own documented exceptions and do not expect this read-only
+    ///     check to throw anything else).
+    /// </remarks>
+    private static bool ManagedFolderGenuinelyExists(string normalizedRoot, string relativeFolder)
+    {
+        var folderPath = PathHelpers.SafePathCombine(normalizedRoot, relativeFolder);
+        if (!Directory.Exists(folderPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            EnsureNoSymlinkAncestors(normalizedRoot, folderPath, relativeFolder);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            // A reparse-point root/ancestor/self, or an inability to even inspect one (e.g. an
+            // ACL-restricted ancestor), means this folder cannot be confirmed as genuinely
+            // present under normalizedRoot; treat it the same as missing so callers fall back to
+            // Extract, which will itself surface the underlying failure as a hard error instead
+            // of silently trusting - or crashing on - content reached through a symlink/junction.
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
