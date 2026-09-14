@@ -35,6 +35,9 @@ words:
   - mklink
   - NTFS
   - Postconditions
+  - preflight
+  - preflighted
+  - preflights
   - buildmark
   - buildtransitive
   - contentfiles
