@@ -57,13 +57,18 @@ entry without extracting it to disk.
 `Extract` throws `ArgumentNullException` for a null `zipPath`/`repoRoot`, and
 `InvalidOperationException` when the zip cannot be opened/is not a valid archive, a managed
 folder cannot be deleted, extraction fails partway through, a zip entry would resolve outside
-`repoRoot`, or a managed-folder ancestor (e.g. `.github`) is itself a symlink/junction — wrapping
-the underlying `IOException`/`UnauthorizedAccessException`/`InvalidDataException` with a
-message naming the zip path and repo root. The symlink-ancestor check (`EnsureNoSymlinkAncestors`)
-runs before both the blind-delete step and each entry's extraction, so a reparse-point ancestor
-is rejected before either destructive operation can follow it outside `repoRoot`. `ReadReleaseNotes`
-throws the same `InvalidOperationException` pattern for a zip that cannot be opened or whose
-release-notes entry cannot be read.
+`repoRoot`, or the repo root itself, an ancestor, a managed folder, or any of its descendants is
+a symlink/junction — wrapping the underlying `IOException`/`UnauthorizedAccessException`/
+`InvalidDataException` with a message naming the zip path and repo root. The symlink check
+(`EnsureNoSymlinkAncestors`) walks from the affected path up to *and including* the repo root
+itself (not just its ancestors) before both the blind-delete step and each entry's extraction,
+using `File.GetAttributes` rather than `Directory.Exists` so a *dangling* symlink/junction (whose
+target does not currently exist) is still detected. The blind-delete step additionally uses
+`DeleteDirectoryRejectingReparsePoints`, a recursive delete that fails closed the moment it finds
+a reparse point nested *inside* a managed folder, rather than a plain recursive
+`Directory.Delete` that would otherwise follow such a link. `ReadReleaseNotes` throws the same
+`InvalidOperationException` pattern for a zip that cannot be opened or whose release-notes entry
+cannot be read.
 
 #### Dependencies
 

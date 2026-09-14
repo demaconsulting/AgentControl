@@ -350,6 +350,89 @@ public class PackageZipExtractorTests
     }
 
     /// <summary>
+    ///     Test that a repo root which is itself a junction to another location is refused, since
+    ///     every managed-folder operation would otherwise silently write through it.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_RepoRootIsJunction_ThrowsAndDoesNotWriteThroughLink()
+    {
+        // NTFS directory junctions are a Windows-only concept; skip on other CI runners.
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Directory junctions are a Windows-only filesystem feature.");
+        }
+
+        // Arrange: a "repo root" that is itself nothing but a junction to a separate, isolated
+        // directory - simulating a caller-supplied path that resolves through a link before any
+        // managed-folder segment is even appended.
+        var zipPath = CreatePackageZip(("agents/copilot.md", "should not be extracted"));
+        var linkTarget = CreateTempDirectory();
+        var repoRootParent = CreateTempDirectory();
+        var repoRoot = Path.Combine(repoRootParent, "repo-root-link");
+        try
+        {
+            CreateJunction(repoRoot, linkTarget);
+
+            // Act / Assert: extraction is refused, and nothing was written through the link
+            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.False(File.Exists(Path.Combine(linkTarget, ".github", "agents", "copilot.md")));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            // The repo-root junction entry itself must be removed (not recursively, since that
+            // would delete the link target's contents) before the parent can be deleted.
+            Directory.Delete(repoRoot);
+            Directory.Delete(repoRootParent, recursive: true);
+            Directory.Delete(linkTarget, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a junction/symlink nested *inside* a managed folder (not just an ancestor of
+    ///     it) is rejected during the blind-delete step, since a plain recursive
+    ///     <see cref="Directory.Delete(string, bool)"/> would otherwise follow it and delete
+    ///     content outside the repo root.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_ManagedFolderContainsNestedJunction_ThrowsAndDoesNotDeleteThroughLink()
+    {
+        // NTFS directory junctions are a Windows-only concept; skip on other CI runners.
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Directory junctions are a Windows-only filesystem feature.");
+        }
+
+        // Arrange: a normal (non-linked) ".github/agents" managed folder that itself contains a
+        // nested junction pointing to a separate, isolated directory with content that must
+        // survive.
+        var zipPath = CreatePackageZip(("agents/copilot.md", "should not be extracted"));
+        var repoRoot = CreateTempDirectory();
+        var linkTarget = CreateTempDirectory();
+        var keepFilePath = Path.Combine(linkTarget, "keepme.md");
+        File.WriteAllText(keepFilePath, "must survive");
+        var agentsDir = Path.Combine(repoRoot, ".github", "agents");
+        Directory.CreateDirectory(agentsDir);
+        try
+        {
+            CreateJunction(Path.Combine(agentsDir, "linked"), linkTarget);
+
+            // Act / Assert: the blind delete is refused, and the linked content was never deleted
+            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.Equal("must survive", File.ReadAllText(keepFilePath));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            // The nested junction entry itself must be removed (not recursively) before the repo
+            // root can be deleted.
+            Directory.Delete(Path.Combine(agentsDir, "linked"));
+            Directory.Delete(repoRoot, recursive: true);
+            Directory.Delete(linkTarget, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Creates an NTFS directory junction at <paramref name="linkPath"/> pointing to
     ///     <paramref name="targetPath"/>, using <c>mklink /J</c> since junctions (unlike symbolic
     ///     links) do not require elevated privileges or Developer Mode on Windows.

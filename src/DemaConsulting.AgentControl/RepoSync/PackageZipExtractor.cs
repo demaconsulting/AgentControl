@@ -194,32 +194,71 @@ internal static class PackageZipExtractor
     /// <param name="repoRoot">Absolute path to the repository root.</param>
     /// <param name="relativeFolder">The managed folder's path relative to the repo root.</param>
     /// <exception cref="InvalidOperationException">Thrown when the folder exists but cannot be
-    ///     deleted, or when an ancestor between <paramref name="repoRoot"/> and the folder is a
-    ///     reparse point (symlink/junction).</exception>
+    ///     deleted, or when the repo root, an ancestor, the folder itself, or any descendant of
+    ///     the folder is a reparse point (symlink/junction).</exception>
     private static void DeleteManagedFolder(string repoRoot, string relativeFolder)
     {
         var folderPath = PathHelpers.SafePathCombine(repoRoot, relativeFolder);
 
-        // Reject a reparse-point ancestor (e.g. a symlinked/junctioned '.github') before the
-        // blind delete below: Directory.Delete(recursive: true) follows filesystem links, so
-        // without this guard a crafted/pre-existing junction could cause content outside
-        // repoRoot to be deleted before extraction's own EnsureNoSymlinkAncestors check is ever
-        // reached.
-        EnsureNoSymlinkAncestors(Path.GetFullPath(repoRoot), folderPath, relativeFolder);
-
-        if (!Directory.Exists(folderPath))
-        {
-            return;
-        }
-
         try
         {
-            Directory.Delete(folderPath, recursive: true);
+            // Reject a reparse-point repo root/ancestor (e.g. a symlinked/junctioned '.github')
+            // before the blind delete below: Directory.Delete(recursive: true) follows filesystem
+            // links, so without this guard a crafted/pre-existing junction could cause content
+            // outside repoRoot to be deleted before extraction's own EnsureNoSymlinkAncestors check
+            // is ever reached. Wrapped alongside the delete itself so an UnauthorizedAccessException
+            // from an ACL-restricted ancestor surfaces as the same documented InvalidOperationException,
+            // consistent with ExtractEntryIfManaged's equivalent call (protected by Extract's step-3
+            // try/catch).
+            EnsureNoSymlinkAncestors(Path.GetFullPath(repoRoot), folderPath, relativeFolder);
+
+            if (!Directory.Exists(folderPath))
+            {
+                return;
+            }
+
+            // A plain Directory.Delete(folderPath, recursive: true) would also follow any
+            // reparse point nested *inside* the managed folder (not just its ancestors),
+            // potentially deleting content outside repoRoot. DeleteDirectoryRejectingReparsePoints
+            // walks the tree itself and fails closed the moment it finds one.
+            DeleteDirectoryRejectingReparsePoints(folderPath, relativeFolder);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new InvalidOperationException($"Failed to delete folder '{folderPath}': {ex.Message}", ex);
         }
+    }
+
+    /// <summary>
+    ///     Recursively deletes <paramref name="directoryPath"/>, rejecting the delete if it or any
+    ///     descendant directory is itself a reparse point (symlink/junction) - unlike
+    ///     <see cref="Directory.Delete(string, bool)"/>'s recursive mode, which follows such links
+    ///     and can delete content outside the directory being cleaned up.
+    /// </summary>
+    /// <param name="directoryPath">The directory to delete.</param>
+    /// <param name="context">A short description of the folder being deleted, for the exception
+    ///     message.</param>
+    /// <exception cref="InvalidOperationException">Thrown when a nested reparse point is
+    ///     encountered.</exception>
+    private static void DeleteDirectoryRejectingReparsePoints(string directoryPath, string context)
+    {
+        if (File.GetAttributes(directoryPath).HasFlag(FileAttributes.ReparsePoint))
+        {
+            throw new InvalidOperationException(
+                $"'{context}' contains a symlinked directory '{directoryPath}'; refusing to delete through it.");
+        }
+
+        foreach (var filePath in Directory.GetFiles(directoryPath))
+        {
+            File.Delete(filePath);
+        }
+
+        foreach (var subdirectoryPath in Directory.GetDirectories(directoryPath))
+        {
+            DeleteDirectoryRejectingReparsePoints(subdirectoryPath, context);
+        }
+
+        Directory.Delete(directoryPath, recursive: false);
     }
 
     /// <summary>
@@ -229,6 +268,9 @@ internal static class PackageZipExtractor
     /// </summary>
     /// <param name="entry">The zip entry to consider.</param>
     /// <param name="repoRoot">Absolute path to the repository root.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the entry's path is invalid
+    ///     (including resolving outside <paramref name="repoRoot"/>), or when the repo root, an
+    ///     ancestor, or the destination directory itself is a reparse point (symlink/junction).</exception>
     private static void ExtractEntryIfManaged(ZipArchiveEntry entry, string repoRoot)
     {
         // Directory entries have an empty Name (only FullName ends with '/'); skip them, as
@@ -242,17 +284,19 @@ internal static class PackageZipExtractor
         var relativePath = entry.FullName.Replace('/', Path.DirectorySeparatorChar);
 
         // PathHelpers.SafePathCombine is the single source of truth for containment validation
-        // (see its own doc remarks); it throws ArgumentException if the entry's path would
-        // resolve outside repoRoot, so it is not re-derived here by hand.
+        // (see its own doc remarks); it throws ArgumentException/NotSupportedException both when
+        // the entry's path would resolve outside repoRoot and for other malformed-path failures,
+        // so the original message is preserved here rather than assuming every failure is a
+        // traversal attempt.
         string destinationPath;
         try
         {
             destinationPath = PathHelpers.SafePathCombine(repoRoot, relativePath);
         }
-        catch (ArgumentException ex)
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
         {
             throw new InvalidOperationException(
-                $"Zip entry '{entry.FullName}' resolves outside the repository root.", ex);
+                $"Zip entry '{entry.FullName}' has an invalid destination path: {ex.Message}", ex);
         }
 
         // The managed-folder membership check must run against the *canonical* (".."-resolved)
@@ -284,38 +328,68 @@ internal static class PackageZipExtractor
     }
 
     /// <summary>
-    ///     Walks upward from <paramref name="path"/> to <paramref name="repoRoot"/>, rejecting the
-    ///     operation if any existing ancestor directory in between (or <paramref name="path"/>
-    ///     itself) is itself a reparse point (symlink/junction).
+    ///     Walks upward from <paramref name="path"/> to (and including) <paramref name="repoRoot"/>
+    ///     itself, rejecting the operation if any existing path in the walk is itself a reparse
+    ///     point (symlink/junction).
     /// </summary>
     /// <param name="repoRoot">The already-resolved (<see cref="Path.GetFullPath(string)"/>) repo
-    ///     root; the walk stops here.</param>
+    ///     root; also checked, since a symlinked/junctioned repo root would otherwise let every
+    ///     managed-folder operation write through it undetected.</param>
     /// <param name="path">The path whose ancestry is being validated - either a zip entry's
     ///     destination directory (before extraction) or a managed folder about to be blind-deleted.</param>
     /// <param name="context">A short description of the path/entry, for the exception message.</param>
     /// <remarks>
     ///     <see cref="Path.GetFullPath(string)"/> is purely lexical - it never resolves
     ///     filesystem links - so the earlier relative-path containment check alone cannot detect
-    ///     a symlinked ancestor redirecting a nominally-contained path outside the repo root. This
-    ///     only guards against ancestors that already exist at the time of the check; it does not
-    ///     eliminate a race where an ancestor is replaced with a symlink between this check and
+    ///     a symlinked ancestor redirecting a nominally-contained path outside the repo root.
+    ///     Reparse-point status is queried via <see cref="File.GetAttributes(string)"/> guarded by
+    ///     a not-found catch, rather than <see cref="Directory.Exists(string)"/>: the latter
+    ///     resolves the link's target to decide existence and so returns <see langword="false"/>
+    ///     (silently skipping the check) for a *dangling* symlink/junction, whereas
+    ///     <see cref="File.GetAttributes(string)"/> reports the reparse point's own attributes
+    ///     without requiring its target to exist. This only guards against paths that already
+    ///     exist at the time of the check; it does not eliminate a race where a path is replaced
+    ///     with a symlink between this check and
     ///     <see cref="Directory.CreateDirectory(string)"/>/<see cref="ZipFileExtensions.ExtractToFile(ZipArchiveEntry, string, bool)"/>/
     ///     <see cref="Directory.Delete(string, bool)"/>.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">Thrown when an ancestor directory is a
-    ///     reparse point.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when a path in the walk is a reparse
+    ///     point.</exception>
     private static void EnsureNoSymlinkAncestors(string repoRoot, string path, string context)
     {
         var current = Path.TrimEndingDirectorySeparator(path);
         var normalizedRoot = Path.TrimEndingDirectorySeparator(repoRoot);
 
-        while (!string.IsNullOrEmpty(current)
-               && !string.Equals(current, normalizedRoot, StringComparison.OrdinalIgnoreCase))
+        while (!string.IsNullOrEmpty(current))
         {
-            if (Directory.Exists(current) && File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+            FileAttributes attributes;
+            try
+            {
+                attributes = File.GetAttributes(current);
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // This path segment does not exist yet (e.g. a destination directory that will
+                // be created by this same operation) - nothing to reject here, keep walking
+                // upward.
+                if (string.Equals(current, normalizedRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
+                }
+
+                current = Path.GetDirectoryName(current);
+                continue;
+            }
+
+            if (attributes.HasFlag(FileAttributes.ReparsePoint))
             {
                 throw new InvalidOperationException(
                     $"'{context}' resolves through a symlinked directory '{current}'.");
+            }
+
+            if (string.Equals(current, normalizedRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
             }
 
             current = Path.GetDirectoryName(current);
