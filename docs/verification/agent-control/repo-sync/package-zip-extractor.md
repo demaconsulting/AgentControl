@@ -16,6 +16,9 @@ N/A - standard test environment.
 - All unit tests pass with zero failures.
 - Extraction fully replaces managed folder contents and creates them when absent.
 - An invalid zip file is rejected with a clear exception rather than a partial extraction.
+- A zip entry that escapes the repo root, or resolves inside the repo root but outside every
+  managed folder, is rejected/skipped without ever writing outside a managed folder, and
+  without leaving pre-existing managed folders blind-deleted ahead of a rejected extraction.
 - Folder-presence and release-notes checks reflect genuine filesystem/archive state.
 
 #### Test Scenarios
@@ -27,6 +30,16 @@ throws `InvalidOperationException`. This scenario is tested by
 `PackageZipExtractor_Extract_FreshRepo_CreatesManagedFoldersOnly`,
 `PackageZipExtractor_Extract_ExistingManagedFolder_ReplacesOldContents`, and
 `PackageZipExtractor_Extract_InvalidZipFile_ThrowsInvalidOperationException`, covering
+`AgentControl-PackageZipExtractor-Extract`.
+
+**PackageZipExtractor_Extract_RejectsPathTraversalWithoutPartialUpgrade**: A zip entry that
+textually starts with a managed-folder prefix but uses ".." to resolve outside every managed
+folder (while staying under the repo root) is silently skipped rather than extracted. A zip
+entry that escapes the repo root entirely is rejected with `InvalidOperationException` before
+any managed folder is deleted, leaving a pre-existing managed folder's contents untouched.
+This scenario is tested by
+`PackageZipExtractor_Extract_TraversalEntryWithinRepoRoot_DoesNotEscapeManagedFolders` and
+`PackageZipExtractor_Extract_EntryEscapesRepoRoot_ThrowsBeforeDeletingManagedFolders`, covering
 `AgentControl-PackageZipExtractor-Extract`.
 
 **PackageZipExtractor_AllManagedFoldersExist_ReflectsActualPresence**: The check returns true
