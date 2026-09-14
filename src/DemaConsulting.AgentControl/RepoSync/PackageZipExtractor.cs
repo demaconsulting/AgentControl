@@ -237,27 +237,72 @@ internal static class PackageZipExtractor
             return;
         }
 
-        var destinationPath = PathHelpers.SafePathCombine(repoRoot, relativePath);
-
-        // Zip-slip defense: re-verify (in addition to SafePathCombine's own check) that the
-        // entry's resolved destination is still contained within the repo root before any
-        // directory is created or file written, so this is visibly safe at the write site itself
-        // rather than relying solely on the called helper.
-        var resolvedRepoRoot = Path.GetFullPath(repoRoot);
-        var resolvedDestinationPath = Path.GetFullPath(destinationPath);
-        if (!resolvedDestinationPath.StartsWith(resolvedRepoRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        // PathHelpers.SafePathCombine is the single source of truth for containment validation
+        // (see its own doc remarks); it throws ArgumentException if the entry's path would
+        // resolve outside repoRoot, so it is not re-derived here by hand.
+        string destinationPath;
+        try
+        {
+            destinationPath = PathHelpers.SafePathCombine(repoRoot, relativePath);
+        }
+        catch (ArgumentException ex)
         {
             throw new InvalidOperationException(
-                $"Zip entry '{entry.FullName}' resolves outside the repository root.");
+                $"Zip entry '{entry.FullName}' resolves outside the repository root.", ex);
         }
 
         var destinationDirectory = Path.GetDirectoryName(destinationPath);
         if (!string.IsNullOrEmpty(destinationDirectory))
         {
+            // Path.GetFullPath (used internally by SafePathCombine) performs lexical
+            // normalization only - it does not resolve filesystem links - so a symlinked
+            // ancestor directory could otherwise still cause extraction to escape the repo root
+            // despite the containment check above passing. Reject any ancestor between the repo
+            // root and the destination that is itself a reparse point (symlink/junction) before
+            // creating anything.
+            EnsureNoSymlinkAncestors(Path.GetFullPath(repoRoot), destinationDirectory, entry.FullName);
+
             Directory.CreateDirectory(destinationDirectory);
         }
 
         entry.ExtractToFile(destinationPath, overwrite: true);
+    }
+
+    /// <summary>
+    ///     Walks upward from <paramref name="destinationDirectory"/> to <paramref name="repoRoot"/>,
+    ///     rejecting extraction if any existing ancestor directory in between is itself a
+    ///     reparse point (symlink/junction).
+    /// </summary>
+    /// <param name="repoRoot">The already-resolved (<see cref="Path.GetFullPath(string)"/>) repo
+    ///     root; the walk stops here.</param>
+    /// <param name="destinationDirectory">The zip entry's destination directory.</param>
+    /// <param name="entryName">The zip entry's name, for the exception message.</param>
+    /// <remarks>
+    ///     <see cref="Path.GetFullPath(string)"/> is purely lexical - it never resolves
+    ///     filesystem links - so the earlier relative-path containment check alone cannot detect
+    ///     a symlinked ancestor redirecting a nominally-contained path outside the repo root. This
+    ///     only guards against ancestors that already exist at the time of the check; it does not
+    ///     eliminate a race where an ancestor is replaced with a symlink between this check and
+    ///     <see cref="Directory.CreateDirectory(string)"/>/<see cref="ZipFileExtensions.ExtractToFile(ZipArchiveEntry, string, bool)"/>.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Thrown when an ancestor directory is a
+    ///     reparse point.</exception>
+    private static void EnsureNoSymlinkAncestors(string repoRoot, string destinationDirectory, string entryName)
+    {
+        var current = Path.TrimEndingDirectorySeparator(destinationDirectory);
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(repoRoot);
+
+        while (!string.IsNullOrEmpty(current)
+               && !string.Equals(current, normalizedRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            if (Directory.Exists(current) && File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+            {
+                throw new InvalidOperationException(
+                    $"Zip entry '{entryName}' extracts through a symlinked directory '{current}'.");
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
     }
 
     /// <summary>

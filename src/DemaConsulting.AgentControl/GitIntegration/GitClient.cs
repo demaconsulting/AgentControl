@@ -362,13 +362,14 @@ internal sealed class GitClient
 
         // Logged before the process starts so a crash/hang mid-invocation still leaves a record
         // of exactly what was about to run and where - the key data point missing from prior
-        // occurrences of the intermittent exit-code -1 failure.
-        var argumentsText = string.Join(' ', arguments);
+        // occurrences of the intermittent exit-code -1 failure. Lazily computed so the join is
+        // only ever performed once, and only if some enabled log statement actually needs it.
+        var argumentsText = new Lazy<string>(() => string.Join(' ', arguments));
         if (_logger.IsEnabled(LogLevel.Debug))
         {
             _logger.LogDebug(
                 "Starting git process '{GitExecutable}' with arguments '{Arguments}' in working directory '{WorkingDirectory}'",
-                _gitExecutablePath, argumentsText, repositoryPath);
+                _gitExecutablePath, argumentsText.Value, repositoryPath);
         }
 
         var stopwatch = Stopwatch.StartNew();
@@ -390,7 +391,7 @@ internal sealed class GitClient
             {
                 _logger.LogWarning(
                     "git process '{GitExecutable} {Arguments}' took an unexpectedly long {ElapsedMilliseconds}ms to exit",
-                    _gitExecutablePath, argumentsText, stopwatch.ElapsedMilliseconds);
+                    _gitExecutablePath, argumentsText.Value, stopwatch.ElapsedMilliseconds);
             }
 
             var stdout = stdoutTask.GetAwaiter().GetResult();
@@ -400,14 +401,14 @@ internal sealed class GitClient
             {
                 _logger.LogInformation(
                     "git process '{GitExecutable} {Arguments}' exited with code {ExitCode} after {ElapsedMilliseconds}ms",
-                    _gitExecutablePath, argumentsText, process.ExitCode, stopwatch.ElapsedMilliseconds);
+                    _gitExecutablePath, argumentsText.Value, process.ExitCode, stopwatch.ElapsedMilliseconds);
             }
 
             if (process.ExitCode != 0)
             {
                 _logger.LogWarning(
                     "git process '{GitExecutable} {Arguments}' failed with exit code {ExitCode}; stderr: {StandardError}",
-                    _gitExecutablePath, argumentsText, process.ExitCode, stderr);
+                    _gitExecutablePath, argumentsText.Value, process.ExitCode, stderr);
             }
 
             return new GitCommandResult(process.ExitCode, stdout, stderr);
@@ -426,10 +427,10 @@ internal sealed class GitClient
             _logger.LogError(
                 ex,
                 "Failed to run '{GitExecutable} {Arguments}' after {ElapsedMilliseconds}ms (Win32 NativeErrorCode={NativeErrorCode})",
-                _gitExecutablePath, argumentsText, stopwatch.ElapsedMilliseconds, nativeErrorCode);
+                _gitExecutablePath, argumentsText.Value, stopwatch.ElapsedMilliseconds, nativeErrorCode);
 
             throw new InvalidOperationException(
-                $"Failed to run '{_gitExecutablePath} {argumentsText}': {ex.Message}", ex);
+                $"Failed to run '{_gitExecutablePath} {argumentsText.Value}': {ex.Message}", ex);
         }
     }
 }
