@@ -387,7 +387,7 @@ internal sealed class GitClient
 
             // A long WaitForExit points at a hung/slow process rather than a fast failure -
             // exactly the ambiguity the flaky-test investigation could not previously resolve.
-            if (stopwatch.Elapsed > SlowExitWarningThreshold)
+            if (stopwatch.Elapsed > SlowExitWarningThreshold && _logger.IsEnabled(LogLevel.Warning))
             {
                 _logger.LogWarning(
                     "git process '{GitExecutable} {Arguments}' took an unexpectedly long {ElapsedMilliseconds}ms to exit",
@@ -404,7 +404,7 @@ internal sealed class GitClient
                     _gitExecutablePath, argumentsText.Value, process.ExitCode, stopwatch.ElapsedMilliseconds);
             }
 
-            if (process.ExitCode != 0)
+            if (process.ExitCode != 0 && _logger.IsEnabled(LogLevel.Warning))
             {
                 _logger.LogWarning(
                     "git process '{GitExecutable} {Arguments}' failed with exit code {ExitCode}; stderr: {StandardError}",

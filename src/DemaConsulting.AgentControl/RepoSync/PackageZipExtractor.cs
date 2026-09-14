@@ -229,13 +229,8 @@ internal static class PackageZipExtractor
             return;
         }
 
-        // Zip entries always use '/' regardless of platform; normalize before comparing against
-        // the OS-specific managed folder prefixes.
+        // Zip entries always use '/' regardless of platform; normalize before combining.
         var relativePath = entry.FullName.Replace('/', Path.DirectorySeparatorChar);
-        if (!IsInsideManagedFolder(relativePath))
-        {
-            return;
-        }
 
         // PathHelpers.SafePathCombine is the single source of truth for containment validation
         // (see its own doc remarks); it throws ArgumentException if the entry's path would
@@ -249,6 +244,17 @@ internal static class PackageZipExtractor
         {
             throw new InvalidOperationException(
                 $"Zip entry '{entry.FullName}' resolves outside the repository root.", ex);
+        }
+
+        // The managed-folder membership check must run against the *canonical* (".."-resolved)
+        // relative path, not the raw entry-supplied one: a crafted entry such as
+        // ".github/agents/../../outside.txt" textually starts with a managed-folder prefix but
+        // resolves elsewhere. Deriving the relative path from the already-validated
+        // destinationPath closes that gap.
+        var canonicalRelativePath = Path.GetRelativePath(Path.GetFullPath(repoRoot), destinationPath);
+        if (!IsInsideManagedFolder(canonicalRelativePath))
+        {
+            return;
         }
 
         var destinationDirectory = Path.GetDirectoryName(destinationPath);

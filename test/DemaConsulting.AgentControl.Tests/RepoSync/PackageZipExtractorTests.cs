@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Diagnostics;
 using System.IO.Compression;
 using DemaConsulting.AgentControl.RepoSync;
 
@@ -221,6 +222,111 @@ public class PackageZipExtractorTests
         finally
         {
             Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a zip entry whose name textually starts with a managed-folder prefix but
+    ///     uses ".." components to resolve to a location outside every managed folder (while
+    ///     still remaining under the repo root) is not extracted anywhere - closing the traversal
+    ///     bypass where the managed-folder membership check ran against the raw, unnormalized
+    ///     entry path instead of its canonical (".."-resolved) form.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_TraversalEntryWithinRepoRoot_DoesNotEscapeManagedFolders()
+    {
+        // Arrange: an entry that textually starts with ".github/agents/" but resolves (via "..")
+        // to a repo-root-level file outside every managed folder
+        var zipPath = Path.Combine(Path.GetTempPath(), "agentcontrol_package_" + Guid.NewGuid() + ".zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry(".github/agents/../../outside.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("should not be extracted");
+        }
+
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            // Act: extract the crafted package
+            PackageZipExtractor.Extract(zipPath, repoRoot);
+
+            // Assert: the traversal entry was skipped, not extracted to the repo root
+            Assert.False(File.Exists(Path.Combine(repoRoot, "outside.txt")));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that extracting into a repo whose <c>.github</c> folder is a junction (reparse
+    ///     point) pointing outside the repo root is refused, rather than silently writing through
+    ///     the junction to the linked-to location.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_ManagedFolderAncestorIsJunction_ThrowsAndDoesNotWriteThroughLink()
+    {
+        // NTFS directory junctions (and the 'mklink /J' tool used to create them) are a
+        // Windows-only concept; this test project also runs on Linux/macOS CI runners, so skip
+        // there rather than shelling out to a nonexistent 'cmd.exe'.
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Directory junctions are a Windows-only filesystem feature.");
+        }
+
+        // Arrange: a repo root whose ".github" entry is a junction to a separate, isolated
+        // directory standing in for a location outside the repo
+        var zipPath = CreatePackageZip(("agents/copilot.md", "should not be extracted"));
+        var repoRoot = CreateTempDirectory();
+        var linkTarget = CreateTempDirectory();
+        try
+        {
+            CreateJunction(Path.Combine(repoRoot, ".github"), linkTarget);
+
+            // Act / Assert: extraction is refused rather than writing through the junction
+            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.False(File.Exists(Path.Combine(linkTarget, "agents", "copilot.md")));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+
+            // The ".github" junction entry itself must be removed (not recursively, since that
+            // would delete the link target's contents) before the repo root can be deleted.
+            Directory.Delete(Path.Combine(repoRoot, ".github"));
+            Directory.Delete(repoRoot, recursive: true);
+            Directory.Delete(linkTarget, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Creates an NTFS directory junction at <paramref name="linkPath"/> pointing to
+    ///     <paramref name="targetPath"/>, using <c>mklink /J</c> since junctions (unlike symbolic
+    ///     links) do not require elevated privileges or Developer Mode on Windows.
+    /// </summary>
+    /// <param name="linkPath">The junction's path; its parent must exist and it must not already
+    ///     exist.</param>
+    /// <param name="targetPath">The existing directory the junction points to.</param>
+    private static void CreateJunction(string linkPath, string targetPath)
+    {
+        var startInfo = new ProcessStartInfo("cmd.exe", $"/c mklink /J \"{linkPath}\" \"{targetPath}\"")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(startInfo)
+                             ?? throw new InvalidOperationException("Failed to start 'cmd.exe' to create junction.");
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"Failed to create junction '{linkPath}' -> '{targetPath}': {process.StandardError.ReadToEnd()}");
         }
     }
 
