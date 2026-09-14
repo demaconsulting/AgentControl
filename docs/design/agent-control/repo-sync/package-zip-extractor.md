@@ -56,10 +56,14 @@ entry without extracting it to disk.
 
 `Extract` throws `ArgumentNullException` for a null `zipPath`/`repoRoot`, and
 `InvalidOperationException` when the zip cannot be opened/is not a valid archive, a managed
-folder cannot be deleted, or extraction fails partway through — wrapping the underlying
-`IOException`/`UnauthorizedAccessException`/`InvalidDataException` with a message naming the
-zip path and repo root. `ReadReleaseNotes` throws the same `InvalidOperationException` pattern
-for a zip that cannot be opened or whose release-notes entry cannot be read.
+folder cannot be deleted, extraction fails partway through, a zip entry would resolve outside
+`repoRoot`, or a managed-folder ancestor (e.g. `.github`) is itself a symlink/junction — wrapping
+the underlying `IOException`/`UnauthorizedAccessException`/`InvalidDataException` with a
+message naming the zip path and repo root. The symlink-ancestor check (`EnsureNoSymlinkAncestors`)
+runs before both the blind-delete step and each entry's extraction, so a reparse-point ancestor
+is rejected before either destructive operation can follow it outside `repoRoot`. `ReadReleaseNotes`
+throws the same `InvalidOperationException` pattern for a zip that cannot be opened or whose
+release-notes entry cannot be read.
 
 #### Dependencies
 

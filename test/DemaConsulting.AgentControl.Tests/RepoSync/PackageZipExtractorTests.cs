@@ -278,7 +278,9 @@ public class PackageZipExtractorTests
         }
 
         // Arrange: a repo root whose ".github" entry is a junction to a separate, isolated
-        // directory standing in for a location outside the repo
+        // directory standing in for a location outside the repo. The link target starts empty so
+        // this test exercises the extraction-step guard specifically (DeleteManagedFolder is a
+        // no-op here since no managed folder exists through the junction yet).
         var zipPath = CreatePackageZip(("agents/copilot.md", "should not be extracted"));
         var repoRoot = CreateTempDirectory();
         var linkTarget = CreateTempDirectory();
@@ -293,7 +295,52 @@ public class PackageZipExtractorTests
         finally
         {
             File.Delete(zipPath);
+            // The ".github" junction entry itself must be removed (not recursively, since that
+            // would delete the link target's contents) before the repo root can be deleted.
+            Directory.Delete(Path.Combine(repoRoot, ".github"));
+            Directory.Delete(repoRoot, recursive: true);
+            Directory.Delete(linkTarget, recursive: true);
+        }
+    }
 
+    /// <summary>
+    ///     Test that the blind-delete step itself refuses to recurse through a junctioned
+    ///     <c>.github</c> ancestor, so pre-existing content at the link's target survives even
+    ///     though it happens to be reachable at a path that lexically looks like a managed folder.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_ManagedFolderAncestorIsJunctionWithExistingContent_DoesNotBlindDeleteThroughLink()
+    {
+        // NTFS directory junctions are a Windows-only concept; skip on other CI runners.
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Directory junctions are a Windows-only filesystem feature.");
+        }
+
+        // Arrange: a repo root whose ".github" entry is a junction to a separate, isolated
+        // directory that *already* has a real "agents" folder with content - so
+        // Directory.Exists(folderPath) is true through the junction, and without the
+        // DeleteManagedFolder symlink-ancestor guard, Extract's blind-delete step 2 would recurse
+        // through the junction and remove it before extraction's own guard is ever reached.
+        var zipPath = CreatePackageZip(("agents/copilot.md", "should not be extracted"));
+        var repoRoot = CreateTempDirectory();
+        var linkTarget = CreateTempDirectory();
+        var linkTargetAgentsDir = Path.Combine(linkTarget, "agents");
+        Directory.CreateDirectory(linkTargetAgentsDir);
+        var keepFilePath = Path.Combine(linkTargetAgentsDir, "keepme.md");
+        File.WriteAllText(keepFilePath, "must survive");
+        try
+        {
+            CreateJunction(Path.Combine(repoRoot, ".github"), linkTarget);
+
+            // Act / Assert: extraction is refused, and the pre-existing content behind the
+            // junction was never blind-deleted
+            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.Equal("must survive", File.ReadAllText(keepFilePath));
+        }
+        finally
+        {
+            File.Delete(zipPath);
             // The ".github" junction entry itself must be removed (not recursively, since that
             // would delete the link target's contents) before the repo root can be deleted.
             Directory.Delete(Path.Combine(repoRoot, ".github"));
