@@ -586,9 +586,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see langword="true"/> if no sync action was needed or attempted (the repo has
     ///     committed agent files, has no pin, or the managed folders were already present), or a
     ///     missing set was silently re-extracted successfully; <see langword="false"/> if a sync
-    ///     attempt was made and failed, in which case <see cref="ErrorOccurred"/> has already been
-    ///     raised as a non-blocking warning explaining why. Either way, <see cref="Launch"/>
-    ///     proceeds to spawn the agent tool regardless of this return value.
+    ///     attempt was made and failed for an ordinary reason (source unreachable, pinned version
+    ///     missing, an I/O failure), in which case <see cref="ErrorOccurred"/> has already been
+    ///     raised as a non-blocking warning explaining why and <see cref="Launch"/> proceeds to
+    ///     spawn the agent tool regardless of this return value.
     /// </returns>
     /// <remarks>
     ///     <para>
@@ -621,8 +622,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     through <see cref="ApplyPackageAndShowReleaseNotes"/> - architecture.md's
     ///     ensure-synced-before-launch bullet never mentions showing release notes, unlike its
     ///     Select-Package bullet, so a silent background repair must not pop a release-notes
-    ///     window on every launch. If this re-extraction attempt fails for any reason (source
-    ///     unreachable, pinned version missing, extraction I/O failure), <see cref="ErrorOccurred"/>
+    ///     window on every launch. If this re-extraction attempt fails, <see cref="ErrorOccurred"/>
     ///     is raised as a non-blocking warning and this returns <see langword="false"/> - but the
     ///     launch still proceeds regardless.
     ///     </para>

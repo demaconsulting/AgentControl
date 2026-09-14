@@ -86,12 +86,12 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         // Assert: the card was added at the front, and settings were persisted
         Assert.True(added);
-        Assert.Single(viewModel.RepoCards);
-        Assert.Equal(newRepo, viewModel.RepoCards[0].RepoPath);
+        var card = Assert.Single(viewModel.RepoCards);
+        Assert.Equal(newRepo, card.RepoPath);
 
         var reloaded = SettingsStore.Load(configDir);
-        Assert.Single(reloaded.RecentRepos);
-        Assert.Equal(newRepo, reloaded.RecentRepos[0].Path);
+        var recentRepo = Assert.Single(reloaded.RecentRepos);
+        Assert.Equal(newRepo, recentRepo.Path);
     }
 
     /// <summary>
@@ -151,14 +151,14 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         // Assert: the recent-repos list survived, the new field was adopted, and both were
         // persisted to disk
-        Assert.Single(viewModel.RepoCards);
-        Assert.Equal(repoPath, viewModel.RepoCards[0].RepoPath);
+        var card = Assert.Single(viewModel.RepoCards);
+        Assert.Equal(repoPath, card.RepoPath);
         Assert.Equal(@"\\share\packages", viewModel.Settings.PackageSourcePath);
 
         var reloaded = SettingsStore.Load(configDir);
         Assert.Equal(@"\\share\packages", reloaded.PackageSourcePath);
-        Assert.Single(reloaded.RecentRepos);
-        Assert.Equal(repoPath, reloaded.RecentRepos[0].Path);
+        var recentRepo = Assert.Single(reloaded.RecentRepos);
+        Assert.Equal(repoPath, recentRepo.Path);
     }
 
     /// <summary>
@@ -178,8 +178,8 @@ public sealed class MainWindowViewModelTests : IDisposable
         viewModel.FilterText = "aLpHa";
 
         // Assert: only the alpha repo remains displayed
-        Assert.Single(viewModel.DisplayedRepoCards);
-        Assert.Equal(alphaRepo, viewModel.DisplayedRepoCards[0].RepoPath);
+        var displayed = Assert.Single(viewModel.DisplayedRepoCards);
+        Assert.Equal(alphaRepo, displayed.RepoPath);
     }
 
     /// <summary>

@@ -137,12 +137,9 @@ public class UtilitiesSubsystemTests
         finally
         {
             // Cleanup: delete only the root directories created by this test
-            foreach (var rootDir in new[] { rootDir1, rootDir2 })
+            foreach (var rootDir in new[] { rootDir1, rootDir2 }.Where(Directory.Exists))
             {
-                if (Directory.Exists(rootDir))
-                {
-                    Directory.Delete(rootDir, true);
-                }
+                Directory.Delete(rootDir, true);
             }
         }
     }

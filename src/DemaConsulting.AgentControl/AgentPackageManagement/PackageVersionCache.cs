@@ -46,20 +46,20 @@ internal sealed class PackageVersionCache
     ///     name. A cached <see langword="null"/> value (no package found) is a valid, distinct
     ///     cache entry from "not yet queried".
     /// </summary>
-    private readonly Dictionary<(string SourceDirectory, string PackageName), DiscoveredPackage?> _cache = new();
+    private readonly Dictionary<(string SourceDirectory, string PackageName), DiscoveredPackage?> _cache = [];
 
     /// <summary>
     ///     The cached distinct package base names discoverable at a source directory, keyed by
     ///     source directory.
     /// </summary>
-    private readonly Dictionary<string, IReadOnlyList<string>> _packageNamesCache = new();
+    private readonly Dictionary<string, IReadOnlyList<string>> _packageNamesCache = [];
 
     /// <summary>
     ///     The cached descending-by-version package list for a given <c>(sourceDirectory,
     ///     packageName)</c> pair.
     /// </summary>
     private readonly Dictionary<(string SourceDirectory, string PackageName), IReadOnlyList<DiscoveredPackage>>
-        _versionsDescendingCache = new();
+        _versionsDescendingCache = [];
 
     /// <summary>
     ///     Enumerates the distinct package base names discoverable at a source directory,

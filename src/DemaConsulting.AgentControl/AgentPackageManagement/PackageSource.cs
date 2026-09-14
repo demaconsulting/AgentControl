@@ -161,10 +161,10 @@ internal static class PackageSource
 
         var names = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var filePath in Directory.EnumerateFiles(sourceDirectory, "*" + ZipExtension))
+        foreach (var fileName in Directory.EnumerateFiles(sourceDirectory, "*" + ZipExtension)
+                     .Select(Path.GetFileNameWithoutExtension))
         {
-            var fileName = Path.GetFileNameWithoutExtension(filePath);
-            var name = TrySplitNameAndVersion(fileName);
+            var name = TrySplitNameAndVersion(fileName!);
             if (name is not null)
             {
                 names.Add(name);

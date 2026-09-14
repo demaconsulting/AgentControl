@@ -225,6 +225,84 @@ public class PackageZipExtractorTests
     }
 
     /// <summary>
+    ///     Test that a zip entry whose name textually starts with a managed-folder prefix but
+    ///     uses ".." components to resolve to a location outside every managed folder (while
+    ///     still remaining under the repo root) is not extracted anywhere - closing the traversal
+    ///     bypass where the managed-folder membership check ran against the raw, unnormalized
+    ///     entry path instead of its canonical (".."-resolved) form.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_TraversalEntryWithinRepoRoot_DoesNotEscapeManagedFolders()
+    {
+        // Arrange: an entry that textually starts with ".github/agents/" but resolves (via "..")
+        // to a repo-root-level file outside every managed folder
+        var zipPath = Path.Combine(Path.GetTempPath(), "agentcontrol_package_" + Guid.NewGuid() + ".zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry(".github/agents/../../outside.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("should not be extracted");
+        }
+
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            // Act: extract the crafted package
+            PackageZipExtractor.Extract(zipPath, repoRoot);
+
+            // Assert: the traversal entry was skipped, not extracted to the repo root
+            Assert.False(File.Exists(Path.Combine(repoRoot, "outside.txt")));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a zip entry whose ".."-resolved path escapes the repo root entirely (the
+    ///     classic zip-slip payload) is rejected before any managed folder is deleted, leaving a
+    ///     pre-existing managed folder's contents untouched rather than blind-deleted ahead of a
+    ///     failed extraction.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_EntryEscapesRepoRoot_ThrowsBeforeDeletingManagedFolders()
+    {
+        // Arrange: a repo with a pre-existing, populated managed folder, and a package whose
+        // first entry resolves outside the repo root entirely
+        var zipPath = Path.Combine(Path.GetTempPath(), "agentcontrol_package_" + Guid.NewGuid() + ".zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry(".github/agents/../../../outside.txt");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("must not be extracted");
+        }
+
+        var repoRoot = CreateTempDirectory();
+        var agentsDir = Path.Combine(repoRoot, ".github", "agents");
+        Directory.CreateDirectory(agentsDir);
+        File.WriteAllText(Path.Combine(agentsDir, "existing.md"), "pre-existing content");
+        try
+        {
+            // Act / Assert: extraction is refused
+            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+
+            // Assert: the pre-existing managed folder was never blind-deleted, since the bad
+            // entry is rejected during up-front validation, before any deletion occurs
+            Assert.Equal("pre-existing content", File.ReadAllText(Path.Combine(agentsDir, "existing.md")));
+
+            // Assert: nothing was written outside the repo root
+            Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(repoRoot)!, "outside.txt")));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Creates a temporary package zip with the four managed folders populated from the
     ///     given (relative-path-under-.github, content) pairs, plus a root-level file that must
     ///     never be extracted.

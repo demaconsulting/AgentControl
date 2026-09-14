@@ -60,7 +60,7 @@ internal sealed partial class SelectPackageWindow : Window
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         DataContext = viewModel;
-        viewModel.Confirmed += (_, result) => Close(((string Name, string Version)?)result);
+        viewModel.Confirmed += (_, result) => Close(result);
     }
 
     /// <summary>
@@ -70,6 +70,6 @@ internal sealed partial class SelectPackageWindow : Window
     /// <param name="e">Routed event arguments (unused).</param>
     private void CancelButton_Click(object? sender, RoutedEventArgs e)
     {
-        Close(((string Name, string Version)?)null);
+        Close(null);
     }
 }

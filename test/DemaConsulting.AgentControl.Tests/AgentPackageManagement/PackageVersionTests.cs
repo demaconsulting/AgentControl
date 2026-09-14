@@ -87,8 +87,8 @@ public class PackageVersionTests
     public void PackageVersion_CompareTo_HigherNumericVersion_ComparesGreater()
     {
         // Arrange: two release versions
-        PackageVersion.TryParse("2.0.0", out var higher);
-        PackageVersion.TryParse("1.9.9", out var lower);
+        Assert.True(PackageVersion.TryParse("2.0.0", out var higher));
+        Assert.True(PackageVersion.TryParse("1.9.9", out var lower));
         Assert.NotNull(higher);
         Assert.NotNull(lower);
 
@@ -105,8 +105,8 @@ public class PackageVersionTests
     public void PackageVersion_CompareTo_ReleaseVsPrereleaseSameNumeric_ReleaseIsGreater()
     {
         // Arrange: a release and a prerelease sharing the same major.minor.patch
-        PackageVersion.TryParse("1.0.0", out var release);
-        PackageVersion.TryParse("1.0.0-beta", out var prerelease);
+        Assert.True(PackageVersion.TryParse("1.0.0", out var release));
+        Assert.True(PackageVersion.TryParse("1.0.0-beta", out var prerelease));
         Assert.NotNull(release);
 
         // Act / Assert: the release outranks the prerelease
@@ -120,8 +120,8 @@ public class PackageVersionTests
     public void PackageVersion_Equals_SameVersionString_ReturnsTrue()
     {
         // Arrange: two independently parsed instances of the same version
-        PackageVersion.TryParse("3.4.5", out var first);
-        PackageVersion.TryParse("3.4.5", out var second);
+        Assert.True(PackageVersion.TryParse("3.4.5", out var first));
+        Assert.True(PackageVersion.TryParse("3.4.5", out var second));
         Assert.NotNull(first);
 
         // Act / Assert: they compare equal via both Equals and ==
@@ -139,7 +139,7 @@ public class PackageVersionTests
     public void PackageVersion_ToString_ParsedVersion_RoundTripsThroughParse(string input)
     {
         // Arrange: parse the input
-        PackageVersion.TryParse(input, out var version);
+        Assert.True(PackageVersion.TryParse(input, out var version));
         Assert.NotNull(version);
 
         // Act: format it back to a string

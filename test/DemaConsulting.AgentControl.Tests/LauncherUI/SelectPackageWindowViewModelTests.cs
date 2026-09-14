@@ -128,9 +128,9 @@ public sealed class SelectPackageWindowViewModelTests : IDisposable
         viewModel.ConfirmCommand.Execute(null);
 
         // Assert
-        Assert.Single(raised);
-        Assert.Equal("contoso-agents", raised[0].Name);
-        Assert.Equal("1.0.0", raised[0].Version);
+        var confirmed = Assert.Single(raised);
+        Assert.Equal("contoso-agents", confirmed.Name);
+        Assert.Equal("1.0.0", confirmed.Version);
     }
 
     /// <summary>

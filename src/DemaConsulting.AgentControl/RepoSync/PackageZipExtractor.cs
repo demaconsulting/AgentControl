@@ -41,15 +41,20 @@ namespace DemaConsulting.AgentControl.RepoSync;
 internal static class PackageZipExtractor
 {
     /// <summary>
+    ///     Name of the root <c>.github</c> folder under which every managed agent folder lives.
+    /// </summary>
+    private const string GitHubFolderName = ".github";
+
+    /// <summary>
     ///     The four agent folders (relative to a repo root) that are blind-deleted and replaced
     ///     on every sync/upgrade, per architecture.md.
     /// </summary>
     private static readonly string[] ManagedFolders =
     [
-        Path.Combine(".github", "agents"),
-        Path.Combine(".github", "standards"),
-        Path.Combine(".github", "templates"),
-        Path.Combine(".github", "skills")
+        Path.Combine(GitHubFolderName, "agents"),
+        Path.Combine(GitHubFolderName, "standards"),
+        Path.Combine(GitHubFolderName, "templates"),
+        Path.Combine(GitHubFolderName, "skills")
     ];
 
     /// <summary>
@@ -59,19 +64,22 @@ internal static class PackageZipExtractor
     private const string ReleaseNotesEntryName = "release-notes.md";
 
     /// <summary>
-    ///     Opens/validates the package zip, deletes the four managed folders under
-    ///     <paramref name="repoRoot"/> if present, and extracts the same four folders from the
-    ///     zip into the repo.
+    ///     Opens/validates the package zip, validates every entry's destination path, deletes the
+    ///     four managed folders under <paramref name="repoRoot"/> if present, and extracts the
+    ///     same four folders from the zip into the repo.
     /// </summary>
     /// <param name="zipPath">Path to the agent package zip file.</param>
     /// <param name="repoRoot">Absolute path to the repository root to sync.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="zipPath"/> or
     ///     <paramref name="repoRoot"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
-    ///     Thrown when the zip cannot be opened/is not a valid zip archive, when a managed folder
-    ///     cannot be deleted, or when extraction fails partway through. Per the class remarks,
-    ///     there is no rollback: a partially-applied change is possible and must be resolved
-    ///     manually by the caller.
+    ///     Thrown when the zip cannot be opened/is not a valid zip archive, when an entry's
+    ///     destination path is invalid (including resolving outside <paramref name="repoRoot"/>),
+    ///     when a managed folder cannot be deleted, or when extraction fails partway through. An
+    ///     invalid entry path is rejected before any managed folder is deleted, so that failure
+    ///     mode never leaves the repo partially upgraded; a delete or extraction failure can
+    ///     still do so, and per the class remarks there is no rollback for that case — it must be
+    ///     resolved manually by the caller.
     /// </exception>
     public static void Extract(string zipPath, string repoRoot)
     {
@@ -82,19 +90,36 @@ internal static class PackageZipExtractor
         // good per architecture.md — no checksum/signature verification is performed.
         using var archive = OpenArchive(zipPath);
 
-        // Step 2: blind-delete the four known folders (if present)
+        // Step 2: resolve and validate every entry's destination path up front, before anything
+        // is deleted. A malformed or path-traversing entry (one that fails SafePathCombine's
+        // containment check) must reject the whole upgrade before any managed folder is
+        // touched — otherwise a malicious/corrupt zip could blind-delete the existing managed
+        // folders and then fail partway through extraction, leaving the repo unsynced while
+        // still reporting only an "ordinary" failure to callers such as RepoCardViewModel's
+        // best-effort, never-block-launch sync path.
+        var managedEntries = new List<(ZipArchiveEntry Entry, string DestinationPath)>();
+        foreach (var entry in archive.Entries)
+        {
+            var destinationPath = ResolveManagedDestination(entry, repoRoot);
+            if (destinationPath is not null)
+            {
+                managedEntries.Add((entry, destinationPath));
+            }
+        }
+
+        // Step 3: blind-delete the four known folders (if present)
         foreach (var folder in ManagedFolders)
         {
             DeleteManagedFolder(repoRoot, folder);
         }
 
-        // Step 3: extract only the same four folders from the zip, skipping root-level files
-        // such as release-notes.md
+        // Step 4: extract the already-validated managed entries, skipping any non-managed/root-
+        // level files such as release-notes.md (those were never added to managedEntries above)
         try
         {
-            foreach (var entry in archive.Entries)
+            foreach (var (entry, destinationPath) in managedEntries)
             {
-                ExtractEntryIfManaged(entry, repoRoot);
+                ExtractEntry(entry, destinationPath);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -193,6 +218,7 @@ internal static class PackageZipExtractor
     private static void DeleteManagedFolder(string repoRoot, string relativeFolder)
     {
         var folderPath = PathHelpers.SafePathCombine(repoRoot, relativeFolder);
+
         if (!Directory.Exists(folderPath))
         {
             return;
@@ -209,30 +235,66 @@ internal static class PackageZipExtractor
     }
 
     /// <summary>
-    ///     Extracts a single zip entry into the repo root, but only if it falls within one of the
-    ///     four managed folders; entries elsewhere (including root-level files like
-    ///     <c>release-notes.md</c>) are skipped.
+    ///     Resolves a single zip entry's destination path if it falls within one of the four
+    ///     managed folders, validating that path but not yet writing anything to disk.
     /// </summary>
     /// <param name="entry">The zip entry to consider.</param>
     /// <param name="repoRoot">Absolute path to the repository root.</param>
-    private static void ExtractEntryIfManaged(ZipArchiveEntry entry, string repoRoot)
+    /// <returns>
+    ///     The entry's absolute destination path if it falls within a managed folder; otherwise
+    ///     <see langword="null"/> (a directory entry, or a file entry that does not resolve
+    ///     inside any managed folder, including root-level files like <c>release-notes.md</c>).
+    /// </returns>
+    /// <exception cref="InvalidOperationException">Thrown when the entry's path is invalid,
+    ///     including resolving outside <paramref name="repoRoot"/>.</exception>
+    private static string? ResolveManagedDestination(ZipArchiveEntry entry, string repoRoot)
     {
         // Directory entries have an empty Name (only FullName ends with '/'); skip them, as
-        // CreateDirectory below (driven by file entries) recreates any needed structure.
+        // CreateDirectory in ExtractEntry (driven by file entries) recreates any needed structure.
         if (string.IsNullOrEmpty(entry.Name))
         {
-            return;
+            return null;
         }
 
-        // Zip entries always use '/' regardless of platform; normalize before comparing against
-        // the OS-specific managed folder prefixes.
+        // Zip entries always use '/' regardless of platform; normalize before combining.
         var relativePath = entry.FullName.Replace('/', Path.DirectorySeparatorChar);
-        if (!IsInsideManagedFolder(relativePath))
+
+        // PathHelpers.SafePathCombine is the single source of truth for containment validation
+        // (see its own doc remarks); it throws ArgumentException/NotSupportedException both when
+        // the entry's path would resolve outside repoRoot and for other malformed-path failures,
+        // so the original message is preserved here rather than assuming every failure is a
+        // traversal attempt.
+        string destinationPath;
+        try
         {
-            return;
+            destinationPath = PathHelpers.SafePathCombine(repoRoot, relativePath);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            throw new InvalidOperationException(
+                $"Zip entry '{entry.FullName}' has an invalid destination path: {ex.Message}", ex);
         }
 
-        var destinationPath = PathHelpers.SafePathCombine(repoRoot, relativePath);
+        // The managed-folder membership check must run against the *canonical* (".."-resolved)
+        // relative path, not the raw entry-supplied one: a crafted entry such as
+        // ".github/agents/../../outside.txt" textually starts with a managed-folder prefix but
+        // resolves elsewhere. Deriving the relative path from the already-validated
+        // destinationPath closes that gap.
+        var canonicalRelativePath = Path.GetRelativePath(Path.GetFullPath(repoRoot), destinationPath);
+        return IsInsideManagedFolder(canonicalRelativePath) ? destinationPath : null;
+    }
+
+    /// <summary>
+    ///     Extracts a single zip entry to an already-validated destination path, creating any
+    ///     missing parent directories first.
+    /// </summary>
+    /// <param name="entry">The zip entry to extract.</param>
+    /// <param name="destinationPath">
+    ///     The entry's destination path, as previously resolved and validated by
+    ///     <see cref="ResolveManagedDestination"/>.
+    /// </param>
+    private static void ExtractEntry(ZipArchiveEntry entry, string destinationPath)
+    {
         var destinationDirectory = Path.GetDirectoryName(destinationPath);
         if (!string.IsNullOrEmpty(destinationDirectory))
         {
@@ -249,17 +311,7 @@ internal static class PackageZipExtractor
     ///     separators.</param>
     /// <returns><see langword="true"/> if the path is inside a managed folder; otherwise
     ///     <see langword="false"/>.</returns>
-    private static bool IsInsideManagedFolder(string relativePath)
-    {
-        foreach (var folder in ManagedFolders)
-        {
-            var prefix = folder + Path.DirectorySeparatorChar;
-            if (relativePath.StartsWith(prefix, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private static bool IsInsideManagedFolder(string relativePath) =>
+        ManagedFolders.Any(folder =>
+            relativePath.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.Ordinal));
 }

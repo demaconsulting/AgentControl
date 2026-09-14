@@ -137,16 +137,19 @@ internal static class LoggingSetup
     ///     cannot be recovered, so the handler only logs - it never attempts to suppress
     ///     termination.
     /// </remarks>
-    private static void InstallUnhandledExceptionSafetyNet(ILoggerFactory factory)
+    private static void InstallUnhandledExceptionSafetyNet(SerilogLoggerFactory factory)
     {
         var logger = factory.CreateLogger("DemaConsulting.AgentControl.UnhandledException");
 
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
-            logger.LogCritical(
-                e.ExceptionObject as Exception,
-                "Unhandled exception reached AppDomain.UnhandledException (IsTerminating={IsTerminating})",
-                e.IsTerminating);
+            if (logger.IsEnabled(LogLevel.Critical))
+            {
+                logger.LogCritical(
+                    e.ExceptionObject as Exception,
+                    "Unhandled exception reached AppDomain.UnhandledException (IsTerminating={IsTerminating})",
+                    e.IsTerminating);
+            }
 
             // The process is terminating regardless; flush now so the entry is not lost.
             Log.CloseAndFlush();
