@@ -2,10 +2,15 @@
 
 #### Verification Approach
 
-`PathHelpers` is verified with unit tests defined in `PathHelpersTests.cs`. Because `PathHelpers`
-performs pure path manipulation using only .NET BCL types, no mocking or test doubles are
-required. Tests call `PathHelpers.SafePathCombine` directly with controlled base and relative
-path arguments and assert on the returned string or the thrown exception type and message.
+`PathHelpers` is verified with unit tests defined in `PathHelpersTests.cs`. The lexical
+`SafePathCombine` method is verified using only .NET BCL types, with no mocking or test doubles
+required - tests call it directly with controlled base and relative path arguments and assert
+on the returned string or the thrown exception type and message. The filesystem-aware
+`FindReparsePointInAncestry` and `FindReparsePointInDescendants` methods are verified against
+real temporary directories, using real NTFS junctions on Windows (created via `mklink /J`,
+which - unlike symbolic links - require neither elevated privileges nor Developer Mode) or real
+directory symbolic links on Linux/macOS (which do not require an existing target at creation
+time, letting a dangling-link scenario be constructed directly).
 
 #### Test Environment
 
@@ -20,6 +25,10 @@ N/A - standard test environment.
 - Absolute paths supplied as the relative argument cause `ArgumentException`.
 - Null inputs cause `ArgumentNullException`.
 - A filename beginning with `".."` that is not a traversal sequence is accepted correctly.
+- `FindReparsePointInAncestry` and `FindReparsePointInDescendants` return `null` when no
+  reparse point exists, and the offending path when one does - including when the root/
+  directory itself is the reparse point, and including a dangling link whose target does not
+  currently exist.
 
 #### Test Scenarios
 
@@ -74,3 +83,35 @@ the `basePath` argument; an `ArgumentNullException` is thrown, confirming the nu
 as the `relativePath` argument; an `ArgumentNullException` is thrown, confirming the null guard
 on `relativePath`. This scenario is tested by
 `PathHelpers_SafePathCombine_NullRelativePath_ThrowsArgumentNullException`.
+
+**PathHelpers_FindReparsePointInAncestry_ReportsClosestLinkOrNone**: An ordinary nested
+directory tree with no links reports `null`; a junction/symbolic-link ancestor between the
+root and the checked path reports that link's own path; a root that is itself a junction
+reports the root; and a dangling junction/symbolic-link ancestor (whose target no longer
+exists) is still reported, confirming detection uses `File.GetAttributes` rather than
+`Directory.Exists`. This scenario is tested by
+`PathHelpers_FindReparsePointInAncestry_NoReparsePoints_ReturnsNull`,
+`PathHelpers_FindReparsePointInAncestry_AncestorIsJunction_ReturnsJunctionPath`,
+`PathHelpers_FindReparsePointInAncestry_RootIsJunction_ReturnsRoot`, and
+`PathHelpers_FindReparsePointInAncestry_AncestorIsDanglingLink_ReturnsLinkPath`, covering
+`AgentControl-PathHelpers-FindReparsePointInAncestry`.
+
+**PathHelpers_FindReparsePointInAncestry_NullArguments_ThrowArgumentNullException**: A `null`
+`root` or `null` `path` argument each throw `ArgumentNullException`. This scenario is tested by
+`PathHelpers_FindReparsePointInAncestry_NullRoot_ThrowsArgumentNullException` and
+`PathHelpers_FindReparsePointInAncestry_NullPath_ThrowsArgumentNullException`, covering
+`AgentControl-PathHelpers-FindReparsePointInAncestry`.
+
+**PathHelpers_FindReparsePointInDescendants_ReportsNestedOrSelfLinkOrNone**: An ordinary nested
+directory tree with no links reports `null`; a junction nested two levels deep anywhere in the
+tree is found and its path reported; and a directory that is itself a junction reports that
+same directory. This scenario is tested by
+`PathHelpers_FindReparsePointInDescendants_NoReparsePoints_ReturnsNull`,
+`PathHelpers_FindReparsePointInDescendants_NestedJunction_ReturnsJunctionPath`, and
+`PathHelpers_FindReparsePointInDescendants_DirectoryItselfIsJunction_ReturnsDirectory`, covering
+`AgentControl-PathHelpers-FindReparsePointInDescendants`.
+
+**PathHelpers_FindReparsePointInDescendants_NullDirectory_ThrowsArgumentNullException**: A
+`null` `directory` argument throws `ArgumentNullException`. This scenario is tested by
+`PathHelpers_FindReparsePointInDescendants_NullDirectory_ThrowsArgumentNullException`, covering
+`AgentControl-PathHelpers-FindReparsePointInDescendants`.

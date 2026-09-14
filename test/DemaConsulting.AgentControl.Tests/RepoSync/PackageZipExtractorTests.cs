@@ -326,7 +326,7 @@ public class PackageZipExtractorTests
             CreateJunction(Path.Combine(repoRoot, ".github"), linkTarget);
 
             // Act / Assert: extraction is refused rather than writing through the junction
-            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.Throws<UnsafeRepositoryStateException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
             Assert.False(File.Exists(Path.Combine(linkTarget, "agents", "copilot.md")));
         }
         finally
@@ -372,7 +372,7 @@ public class PackageZipExtractorTests
 
             // Act / Assert: extraction is refused, and the pre-existing content behind the
             // junction was never blind-deleted
-            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.Throws<UnsafeRepositoryStateException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
             Assert.Equal("must survive", File.ReadAllText(keepFilePath));
         }
         finally
@@ -411,7 +411,7 @@ public class PackageZipExtractorTests
             CreateJunction(repoRoot, linkTarget);
 
             // Act / Assert: extraction is refused, and nothing was written through the link
-            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.Throws<UnsafeRepositoryStateException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
             Assert.False(File.Exists(Path.Combine(linkTarget, ".github", "agents", "copilot.md")));
         }
         finally
@@ -455,7 +455,7 @@ public class PackageZipExtractorTests
             CreateJunction(Path.Combine(agentsDir, "linked"), linkTarget);
 
             // Act / Assert: the blind delete is refused, and the linked content was never deleted
-            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.Throws<UnsafeRepositoryStateException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
             Assert.Equal("must survive", File.ReadAllText(keepFilePath));
         }
         finally
@@ -491,14 +491,27 @@ public class PackageZipExtractorTests
             CreateDanglingLink(githubPath);
 
             // Act / Assert: extraction is refused, not silently allowed through the dangling link
-            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.Throws<UnsafeRepositoryStateException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
         }
         finally
         {
             File.Delete(zipPath);
-            // The dangling link entry itself must be removed (non-recursively - there is no
-            // real target content behind it) before the repo root can be deleted.
-            Directory.Delete(githubPath);
+            // The dangling link entry itself must be removed before the repo root can be
+            // deleted. Directory.Delete follows the link (via stat/lstat) to confirm it is a
+            // directory before removing it, which fails with DirectoryNotFoundException for a
+            // *dangling* link whose target no longer exists - this only works here because
+            // Windows junction metadata lives on the link entry itself, independent of target
+            // validity. On Linux/macOS, a dangling symlink must instead be removed with
+            // File.Delete, which unlinks the directory entry directly without following it.
+            if (OperatingSystem.IsWindows())
+            {
+                Directory.Delete(githubPath);
+            }
+            else
+            {
+                File.Delete(githubPath);
+            }
+
             Directory.Delete(repoRoot, recursive: true);
         }
     }

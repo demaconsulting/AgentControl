@@ -975,6 +975,91 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that LaunchCommand does <b>not</b> spawn the agent-tool process, and raises
+    ///     <see cref="RepoCardViewModel.ErrorOccurred"/> instead, when the ensure-synced-before-launch
+    ///     check detects that a managed folder is only reachable through a reparse point
+    ///     (symlink/junction) - the one deliberate, narrow exception to the "sync state never
+    ///     blocks launch" policy exercised by <see cref="RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches"/>.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_LaunchCommand_ManagedFolderAncestorIsJunction_DoesNotLaunch()
+    {
+        // Arrange: a repo whose '.github' folder is a junction, so AllManagedFoldersExist treats
+        // the managed folders as missing and EnsureAgentFilesSyncedBeforeLaunch attempts to
+        // re-extract into it - which PackageZipExtractor refuses, since deleting/writing through
+        // the junction could affect content outside repoRoot.
+        var repoRoot = CreateTempDirectory();
+        var linkTarget = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        CreateJunction(Path.Combine(repoRoot, ".github"), linkTarget);
+        var settings = new AppSettings
+        {
+            AgentTool = AgentToolKind.Custom,
+            CustomAgentCommand = OperatingSystem.IsWindows() ? "cmd /c exit 0" : "true",
+            PackageSourcePath = sourceDir
+        };
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings);
+        var raised = false;
+        card.LaunchRecorded += (_, _) => raised = true;
+        string? capturedError = null;
+        card.ErrorOccurred += (_, message) => capturedError = message;
+
+        try
+        {
+            // Act
+            card.LaunchCommand.Execute(null);
+
+            // Assert: no process was spawned, and the error explains why
+            Assert.False(raised);
+            Assert.Null(card.LastLaunchedUtc);
+            Assert.NotNull(capturedError);
+            Assert.Contains("Refusing to launch", capturedError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            // Remove the junction entry itself (not its target's contents) before the temp
+            // directories tracked in _tempPaths are recursively deleted in Dispose - avoids
+            // Directory.Delete(recursive: true) following the still-live link during cleanup.
+            Directory.Delete(Path.Combine(repoRoot, ".github"), recursive: false);
+        }
+    }
+
+    /// <summary>
+    ///     Creates an NTFS directory junction at <paramref name="linkPath"/> pointing to
+    ///     <paramref name="targetPath"/> (Windows), or a real directory symbolic link
+    ///     (Linux/macOS) - both are reparse points for the purposes of this test, and symbolic
+    ///     links require neither an existing target nor elevated privileges on non-Windows
+    ///     platforms.
+    /// </summary>
+    private static void CreateJunction(string linkPath, string targetPath)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{linkPath}\" \"{targetPath}\"")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = System.Diagnostics.Process.Start(startInfo)
+                                 ?? throw new InvalidOperationException("Failed to start 'cmd.exe' to create junction.");
+            process.WaitForExit();
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to create junction '{linkPath}' -> '{targetPath}': {process.StandardError.ReadToEnd()}");
+            }
+        }
+        else
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+        }
+    }
+
+    /// <summary>
     ///     Creates a <see cref="RepoCardViewModel"/> for the given repo path, cached pin fields,
     ///     and settings snapshot. When a package name is supplied, the corresponding pin file is
     ///     also written to <paramref name="repoPath"/> so that a subsequent <c>Refresh()</c> (which

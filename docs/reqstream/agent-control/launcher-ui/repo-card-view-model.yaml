@@ -92,6 +92,23 @@ sections:
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedVersionMissingFromSource_ReturnsFalse
           - RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches
 
+      - id: AgentControl-RepoCardViewModel-Launch-UnsafeState
+        title: >-
+          The RepoCardViewModel class shall refuse to launch the configured agent tool,
+          raising an error instead, when the ensure-synced-before-launch sync attempt detects
+          that a managed agent-file folder is reachable only through a reparse point
+          (symlink/junction).
+        justification: |
+          Unlike an ordinary sync failure (missing pin, unreachable source, an I/O failure),
+          a managed folder reached only through an unexpected symlink or junction is a genuine
+          security concern: launching could run the agentic CLI tool against content outside
+          the repo root. This is a deliberate, narrow exception to the "sync state never
+          blocks launch" rule established by AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch,
+          justified because it protects the developer from an attacker-controlled or
+          accidentally-misconfigured filesystem link rather than merely missing content.
+        tests:
+          - RepoCardViewModel_LaunchCommand_ManagedFolderAncestorIsJunction_DoesNotLaunch
+
       - id: AgentControl-RepoCardViewModel-Upgrade
         title: >-
           The RepoCardViewModel class shall, when a newer package version is available,

@@ -68,15 +68,26 @@ refresh.
 Calls `EnsureAgentFilesSyncedBeforeLaunch` purely for its best-effort sync side effect, then
 always proceeds to resolve the shell/agent command and spawn the process regardless of that
 call's outcome — the agent-package sync state (missing pin, missing managed folders, failed
-re-extraction) never gates the launch.
+re-extraction) never gates the launch. The one deliberate exception: if
+`EnsureAgentFilesSyncedBeforeLaunch` propagates `UnsafeRepositoryStateException` (a managed
+folder is reachable only through a reparse point — symlink/junction), `Launch` catches it
+specifically, raises `ErrorOccurred`, and returns without spawning the process — a narrow,
+documented amendment to the "sync state never blocks launch" rule, justified because this
+represents a security concern (launching against content reached through an unexpected link)
+rather than a mere missing-content situation
+(`AgentControl-RepoCardViewModel-Launch-UnsafeState`).
 
 **EnsureAgentFilesSyncedBeforeLaunch** (internal): Best-effort attempt to sync the repo's four
 managed agent folders with the pinned package version before `Launch` spawns the process. This
-is an informational side action only — it never blocks `Launch`.
+is an informational side action only for every failure mode except one — it never blocks
+`Launch` for an ordinary sync failure, but deliberately lets `UnsafeRepositoryStateException`
+propagate uncaught (see `Launch`, above).
 
 - *Parameters*: None.
 - *Returns*: `bool` — informational only; `true` if no sync action was needed/attempted or a
-  sync succeeded, `false` if a sync attempt was made and failed. Either way `Launch` proceeds.
+  sync succeeded, `false` if a sync attempt was made and failed for an ordinary reason. Either
+  way `Launch` proceeds, *except* when `UnsafeRepositoryStateException` propagates instead of a
+  `bool` being returned at all.
 - *Postconditions*: If `HasCommittedAgentFiles` is `true`, the managed folders are never
   touched (no delete, no extract) even if a pin exists and folders are missing; a non-blocking
   `StatusMessage` notes that sync was skipped. Otherwise, if `PinnedPackageName` is `null`, this
@@ -85,8 +96,11 @@ is an informational side action only — it never blocks `Launch`.
   is already `true`, returns `true` immediately with no extra I/O. Otherwise resolves the
   *currently pinned* package at the configured source (never the latest) and re-extracts it
   directly via `PackageZipExtractor.Extract`, without displaying release notes; if this
-  re-extraction attempt fails for any reason, `ErrorOccurred` is raised as a non-blocking
-  warning (`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`).
+  re-extraction attempt fails for an ordinary reason, `ErrorOccurred` is raised as a non-blocking
+  warning (`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`); if it instead fails
+  because a managed folder is reachable only through a reparse point, the resulting
+  `UnsafeRepositoryStateException` is deliberately left uncaught rather than absorbed into this
+  best-effort return value.
 - Marked `internal` rather than `private` so it can be unit-tested directly, separated from
   `Launch`'s process-spawning side effect, mirroring `AgentToolLauncher.BuildProcessStartInfo`'s
   own precedent.
@@ -128,10 +142,17 @@ non-blocking idiom already established by `EnsureAgentFilesSyncedBeforeLaunch`.
 #### Error Handling
 
 `Launch` catches `InvalidOperationException`/`ArgumentException` from
-`AgentToolLauncher.BuildProcessStartInfo`/`Launch` and raises `ErrorOccurred`.
+`AgentToolLauncher.BuildProcessStartInfo`/`Launch`, and `UnsafeRepositoryStateException`
+(specifically, before the general `InvalidOperationException` case would otherwise apply) from
+`EnsureAgentFilesSyncedBeforeLaunch`, raising `ErrorOccurred` in every case; only the
+`UnsafeRepositoryStateException` case aborts before a process is spawned.
 `EnsureAgentFilesSyncedBeforeLaunch` catches `InvalidOperationException` (extraction failure)
 and `DirectoryNotFoundException` (unreachable source), raising `ErrorOccurred` as a
-non-blocking warning for each rather than propagating or blocking the launch. `Pull` catches
+non-blocking warning for each rather than propagating or blocking the launch — but re-throws
+`UnsafeRepositoryStateException` unchanged (a `catch (UnsafeRepositoryStateException) { throw; }`
+clause precedes the general `InvalidOperationException` catch, since it derives from that type
+and C# evaluates catch clauses in source order) so `Launch`'s dedicated handling above actually
+gets exercised. `Pull` catches
 `InvalidOperationException` from `GitClient.Pull` and reports it via `ErrorOccurred`.
 `RefreshGitStatus`/`RefreshBranchAndCommittedFiles` catch `InvalidOperationException` from
 `GitClient` and degrade to "unknown"/`false` rather than propagating, since these run as part
@@ -150,7 +171,9 @@ throws `ArgumentNullException` for a null
 - **RepoPinStore** (`RepoConfig` subsystem) — reads/writes the repo's pin.
 - **PackageSource**, **PackageVersionCache** (`AgentPackageManagement` subsystem) — package
   discovery and upgrade-availability checks.
-- **PackageZipExtractor** (`RepoSync` subsystem) — extracts a package into the repo.
+- **PackageZipExtractor** (`RepoSync` subsystem) — extracts a package into the repo, and may
+  throw `UnsafeRepositoryStateException` if a managed folder is reachable only through a
+  reparse point, which `Launch` catches specifically to abort without spawning a process.
 - **GitIgnoreEnsurer** (`RepoSync` subsystem) — proactively ensures the repo's `.gitignore`
   covers the four managed agent folders after a successful extraction.
 - **GitClient**, **CommittedAgentFilesCache** (`GitIntegration` subsystem) — git status,

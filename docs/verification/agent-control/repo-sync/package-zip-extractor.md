@@ -53,10 +53,12 @@ be read from or written/deleted outside the repo root: a managed-folder ancestor
 linked `.github`), whether empty or already containing real content that must survive; the
 repo root itself; a reparse point nested *inside* a managed folder (not just above it); and a
 *dangling* link (whose target no longer exists), which a naive `Directory.Exists`-based check
-would silently miss. This scenario is tested by
+would silently miss. Every case throws `UnsafeRepositoryStateException` (a dedicated
+`InvalidOperationException` subtype distinguishing this security concern from an ordinary
+extraction failure) and leaves the affected content untouched. This scenario is tested by
 `PackageZipExtractor_Extract_ManagedFolderAncestorIsJunction_ThrowsAndDoesNotWriteThroughLink`,
 `PackageZipExtractor_Extract_ManagedFolderAncestorIsJunctionWithExistingContent_DoesNotBlindDeleteThroughLink`,
 `PackageZipExtractor_Extract_RepoRootIsJunction_ThrowsAndDoesNotWriteThroughLink`,
 `PackageZipExtractor_Extract_ManagedFolderContainsNestedJunction_ThrowsAndDoesNotDeleteThroughLink`,
 and `PackageZipExtractor_Extract_ManagedFolderAncestorIsDanglingLink_ThrowsAndDoesNotBypassGuard`,
-covering `AgentControl-PackageZipExtractor-Extract`.
+covering `AgentControl-PackageZipExtractor-RejectsReparsePoints`.

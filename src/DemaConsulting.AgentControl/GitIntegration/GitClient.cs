@@ -424,10 +424,13 @@ internal sealed class GitClient
                 ? win32Exception.NativeErrorCode
                 : (int?)null;
 
-            _logger.LogError(
-                ex,
-                "Failed to run '{GitExecutable} {Arguments}' after {ElapsedMilliseconds}ms (Win32 NativeErrorCode={NativeErrorCode})",
-                _gitExecutablePath, argumentsText.Value, stopwatch.ElapsedMilliseconds, nativeErrorCode);
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to run '{GitExecutable} {Arguments}' after {ElapsedMilliseconds}ms (Win32 NativeErrorCode={NativeErrorCode})",
+                    _gitExecutablePath, argumentsText.Value, stopwatch.ElapsedMilliseconds, nativeErrorCode);
+            }
 
             throw new InvalidOperationException(
                 $"Failed to run '{_gitExecutablePath} {argumentsText.Value}': {ex.Message}", ex);

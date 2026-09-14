@@ -1,9 +1,11 @@
 ---
 # Software Unit Requirements for the PathHelpers Class
 #
-# The PathHelpers class provides safe path-combination utilities that protect
-# against path-traversal attacks by rejecting relative paths containing ".."
-# or absolute paths when a relative path is expected.
+# The PathHelpers class provides path-safety utilities with two complementary halves: purely
+# lexical safe path-combination (protecting against path-traversal attacks by rejecting
+# relative paths containing ".." or absolute paths when a relative path is expected), and
+# filesystem-aware reparse-point (symlink/junction) detection, which a lexical check alone
+# cannot see.
 
 sections:
   - title: PathHelpers Unit Requirements
@@ -25,3 +27,41 @@ sections:
           - PathHelpers_SafePathCombine_DotDotPrefixedName_CombinesCorrectly
           - PathHelpers_SafePathCombine_NullBasePath_ThrowsArgumentNullException
           - PathHelpers_SafePathCombine_NullRelativePath_ThrowsArgumentNullException
+
+      - id: AgentControl-PathHelpers-FindReparsePointInAncestry
+        title: >-
+          The PathHelpers class shall report the closest reparse point (symlink/junction)
+          between a given path and a root boundary (inclusive of both), or report none if no
+          such reparse point exists, without following any link target to make that
+          determination.
+        justification: |
+          A purely lexical path-containment check (as performed by SafePathCombine) cannot
+          detect a symlinked or junctioned ancestor directory silently redirecting a
+          nominally-contained path outside its intended root. Detecting reparse points via
+          File.GetAttributes (rather than Directory.Exists, which follows a link to test its
+          target) also correctly detects a dangling link whose target no longer exists.
+        tests:
+          - PathHelpers_FindReparsePointInAncestry_NoReparsePoints_ReturnsNull
+          - PathHelpers_FindReparsePointInAncestry_AncestorIsJunction_ReturnsJunctionPath
+          - PathHelpers_FindReparsePointInAncestry_RootIsJunction_ReturnsRoot
+          - PathHelpers_FindReparsePointInAncestry_AncestorIsDanglingLink_ReturnsLinkPath
+          - PathHelpers_FindReparsePointInAncestry_NullRoot_ThrowsArgumentNullException
+          - PathHelpers_FindReparsePointInAncestry_NullPath_ThrowsArgumentNullException
+
+      - id: AgentControl-PathHelpers-FindReparsePointInDescendants
+        title: >-
+          The PathHelpers class shall report the first reparse point (symlink/junction) found
+          anywhere within a directory tree (including the directory itself), or report none if
+          no such reparse point exists anywhere in the tree.
+        justification: |
+          A caller recursively deleting, copying, or otherwise walking a directory tree must
+          be able to detect a reparse point nested anywhere inside it before acting, since
+          Directory.Delete's recursive mode (and similar recursive BCL operations) follow such
+          links and can affect content outside the tree being processed. Searching the whole
+          tree up front (rather than interleaving detection with per-file processing) lets a
+          caller fail closed before touching any part of the tree.
+        tests:
+          - PathHelpers_FindReparsePointInDescendants_NoReparsePoints_ReturnsNull
+          - PathHelpers_FindReparsePointInDescendants_NestedJunction_ReturnsJunctionPath
+          - PathHelpers_FindReparsePointInDescendants_DirectoryItselfIsJunction_ReturnsDirectory
+          - PathHelpers_FindReparsePointInDescendants_NullDirectory_ThrowsArgumentNullException

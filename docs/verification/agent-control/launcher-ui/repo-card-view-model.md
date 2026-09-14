@@ -19,7 +19,9 @@ invocations are not parallelized with other tests using real process launches).
 - All unit tests pass with zero failures.
 - Display fields, badges, and gating conditions reflect the correct underlying pin/git/source
   state for every tested input.
-- Launch is never blocked by the outcome of the best-effort ensure-synced check.
+- Launch is never blocked by the outcome of the best-effort ensure-synced check, except when
+  that check detects a managed folder reachable only through a reparse point (symlink/
+  junction), which is a deliberate, narrow exception.
 - Upgrade and select-package flows never mutate the pin when their preconditions are not met.
 - Remove requests never mutate state on their own.
 
@@ -80,6 +82,14 @@ outright. This scenario is tested by
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedVersionMissingFromSource_ReturnsFalse`,
 and `RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches`, covering
 `AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`.
+
+**RepoCardViewModel_Launch_RefusesWhenManagedFolderIsUnsafe**: `LaunchCommand` does not spawn
+the agent-tool process, and raises `ErrorOccurred` instead, when the ensure-synced-before-launch
+sync attempt detects that a managed agent-file folder is reachable only through a reparse point
+(symlink/junction) - the one deliberate exception to the "sync state never blocks launch"
+policy verified by the previous scenario. This scenario is tested by
+`RepoCardViewModel_LaunchCommand_ManagedFolderAncestorIsJunction_DoesNotLaunch`, covering
+`AgentControl-RepoCardViewModel-Launch-UnsafeState`.
 
 **RepoCardViewModel_Upgrade_UpdatesPinOnlyWhenNewerVersionExists**: `UpgradeCommand` updates
 the pin and raises `ReleaseNotesReady` when a newer version is available, and raises

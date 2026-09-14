@@ -22,6 +22,31 @@ sections:
           - PackageZipExtractor_Extract_ExistingManagedFolder_ReplacesOldContents
           - PackageZipExtractor_Extract_InvalidZipFile_ThrowsInvalidOperationException
 
+      - id: AgentControl-PackageZipExtractor-RejectsReparsePoints
+        title: >-
+          The PackageZipExtractor class shall refuse to extract into, or delete through, a
+          managed folder that is reachable only through a reparse point (symlink/junction) -
+          whether the repo root itself, an ancestor of a managed folder, the managed folder
+          itself, or a directory nested inside it - throwing UnsafeRepositoryStateException
+          and leaving the affected content untouched.
+        justification: |
+          Extract's blind-delete-and-replace sequence uses recursive filesystem operations
+          that would otherwise follow a symlink/junction, letting a crafted or accidentally
+          misconfigured link redirect a delete or write outside the intended repo root. This
+          is treated as a distinct security concern (UnsafeRepositoryStateException, a
+          dedicated InvalidOperationException subtype) rather than an ordinary extraction
+          failure, so callers that must react differently to it can do so. Detection uses
+          File.GetAttributes rather than Directory.Exists so a dangling link (whose target no
+          longer exists) is still caught, and the managed-folder tree is fully preflighted for
+          nested reparse points before any deletion begins, so a partial delete cannot occur
+          before the guard fires.
+        tests:
+          - windows@PackageZipExtractor_Extract_ManagedFolderAncestorIsJunction_ThrowsAndDoesNotWriteThroughLink
+          - windows@PackageZipExtractor_Extract_ManagedFolderAncestorIsJunctionWithExistingContent_DoesNotBlindDeleteThroughLink
+          - windows@PackageZipExtractor_Extract_RepoRootIsJunction_ThrowsAndDoesNotWriteThroughLink
+          - windows@PackageZipExtractor_Extract_ManagedFolderContainsNestedJunction_ThrowsAndDoesNotDeleteThroughLink
+          - PackageZipExtractor_Extract_ManagedFolderAncestorIsDanglingLink_ThrowsAndDoesNotBypassGuard
+
       - id: AgentControl-PackageZipExtractor-AllManagedFoldersExist
         title: >-
           The PackageZipExtractor class shall report whether all of a repo's managed agent-file
@@ -37,8 +62,8 @@ sections:
           - PackageZipExtractor_AllManagedFoldersExist_AllFourPresent_ReturnsTrue
           - PackageZipExtractor_AllManagedFoldersExist_SomeMissing_ReturnsFalse
           - PackageZipExtractor_AllManagedFoldersExist_NoneExist_ReturnsFalse
-          - PackageZipExtractor_AllManagedFoldersExist_AncestorIsJunctionWithRealFolders_ReturnsFalse
-          - PackageZipExtractor_AllManagedFoldersExist_ManagedFolderItselfIsJunction_ReturnsFalse
+          - windows@PackageZipExtractor_AllManagedFoldersExist_AncestorIsJunctionWithRealFolders_ReturnsFalse
+          - windows@PackageZipExtractor_AllManagedFoldersExist_ManagedFolderItselfIsJunction_ReturnsFalse
 
       - id: AgentControl-PackageZipExtractor-ReadReleaseNotes
         title: >-

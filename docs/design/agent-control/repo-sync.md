@@ -25,7 +25,11 @@ zip's contents.
   and extracts the new files excluding root-level files such as `release-notes.md`
   (`AgentControl-PackageZipExtractor-Extract`).
 - *Constraints*: Throws `InvalidOperationException` for a file that is not a valid zip
-  archive; per architecture.md's "blind delete of the four known folders" decision, any local
+  archive; throws `UnsafeRepositoryStateException` (a dedicated `InvalidOperationException`
+  subtype) if the repo root, a managed folder, an ancestor of one, or anything nested inside
+  one is reachable only through a reparse point (symlink/junction), leaving the affected
+  content untouched (`AgentControl-PackageZipExtractor-RejectsReparsePoints`); per
+  architecture.md's "blind delete of the four known folders" decision, any local
   customizations a developer added inside those folders are silently removed — an accepted
   risk, not a defect (see architecture.md's Open Concerns #3).
 
@@ -34,8 +38,9 @@ present on disk.
 
 - *Type*: In-process .NET static method.
 - *Role*: Provider.
-- *Contract*: Returns `false` if any of the four folders is missing
-  (`AgentControl-PackageZipExtractor-AllManagedFoldersExist`); used by
+- *Contract*: Returns `false` if any of the four folders is missing, and also treats a folder
+  as absent when it is only reachable through a reparse point (repo root, an ancestor, or the
+  folder itself) (`AgentControl-PackageZipExtractor-AllManagedFoldersExist`); used by
   `RepoCardViewModel`'s ensure-synced-before-launch check to decide whether a re-extraction is
   needed without re-scanning file contents.
 - *Constraints*: Performs only existence checks, not content verification.
@@ -77,7 +82,11 @@ the new files, excluding root-level files like `release-notes.md`. It is a stati
 no persistent state; the pin-file rewrite and release-notes display happen in the calling
 `RepoCardViewModel`, deliberately *after* a successful extraction, so a failure partway
 through extraction never leaves a repo pinned to a version whose files were not actually
-applied (`AgentControl-RepoSync-Sync`).
+applied (`AgentControl-RepoSync-Sync`). `UnsafeRepositoryStateException` is a small,
+purpose-built exception type owned by this subsystem with no dedicated unit-level design/
+reqstream/verification docs of its own; it is documented here, folded into
+`PackageZipExtractor`'s description, because its only role is signaling the reparse-point
+rejection behavior described above.
 
 `ReleaseNotesViewerViewModel` is a simple, stateless-beyond-construction display view model:
 it is constructed once per shown dialog with the repo name, package title, and release notes

@@ -176,10 +176,13 @@ internal static class AgentToolLauncher
             // NativeErrorCode is the actual OS error code behind a Win32Exception - the same
             // critical diagnostic data highlighted as missing for GitClient's intermittent
             // failures; captured here too since this is another real-process-spawning path.
-            effectiveLogger.LogError(
-                ex,
-                "Failed to start shell process '{FileName} {Arguments}' after {ElapsedMilliseconds}ms (Win32 NativeErrorCode={NativeErrorCode})",
-                startInfo.FileName, argumentsText.Value, stopwatch.ElapsedMilliseconds, ex.NativeErrorCode);
+            if (effectiveLogger.IsEnabled(LogLevel.Error))
+            {
+                effectiveLogger.LogError(
+                    ex,
+                    "Failed to start shell process '{FileName} {Arguments}' after {ElapsedMilliseconds}ms (Win32 NativeErrorCode={NativeErrorCode})",
+                    startInfo.FileName, argumentsText.Value, stopwatch.ElapsedMilliseconds, ex.NativeErrorCode);
+            }
 
             throw new InvalidOperationException(
                 $"Failed to start shell process '{startInfo.FileName} {argumentsText.Value}': {ex.Message}", ex);
