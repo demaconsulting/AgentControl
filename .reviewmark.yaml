@@ -265,7 +265,6 @@ reviews:
       - "docs/design/agent-control/repo-sync/package-zip-extractor.md"
       - "docs/verification/agent-control/repo-sync/package-zip-extractor.md"
       - "src/**/RepoSync/PackageZipExtractor.cs"
-      - "src/**/RepoSync/UnsafeRepositoryStateException.cs"
       - "test/**/RepoSync/PackageZipExtractorTests.cs"
 
   - id: AgentControl-RepoSync-ReleaseNotesViewerViewModel

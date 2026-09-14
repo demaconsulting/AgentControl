@@ -546,26 +546,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     command and spawn the process regardless of that call's outcome. A user may want to
     ///     launch their agentic CLI tool to help with agent-package migration, or simply because
     ///     an agentic tool is useful even with zero agent files present - either way, sync state
-    ///     must never stand in the way of launching. The sole exception is
-    ///     <see cref="UnsafeRepositoryStateException"/>, which
-    ///     <see cref="EnsureAgentFilesSyncedBeforeLaunch"/> deliberately does not catch: unlike an
-    ///     ordinary sync failure (missing source, missing pinned version, a locked file), it means
-    ///     a managed folder is reachable only through a reparse point (symlink/junction), so
-    ///     launching could run the agentic tool against content outside the repo root. That
-    ///     specific failure mode blocks the launch instead - <see cref="ErrorOccurred"/> is still
-    ///     raised explaining why, but no process is spawned.
+    ///     must never stand in the way of launching.
     /// </remarks>
     private void Launch()
     {
-        try
-        {
-            EnsureAgentFilesSyncedBeforeLaunch();
-        }
-        catch (UnsafeRepositoryStateException ex)
-        {
-            ErrorOccurred?.Invoke(this, $"Refusing to launch: {ex.Message}");
-            return;
-        }
+        EnsureAgentFilesSyncedBeforeLaunch();
 
         try
         {
@@ -606,14 +591,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     raised as a non-blocking warning explaining why and <see cref="Launch"/> proceeds to
     ///     spawn the agent tool regardless of this return value.
     /// </returns>
-    /// <exception cref="UnsafeRepositoryStateException">
-    ///     Thrown (not caught here) when <see cref="PackageZipExtractor.Extract"/> detects that a
-    ///     managed folder is reachable only through a reparse point (symlink/junction). Unlike
-    ///     every other failure this method absorbs, this represents a genuine security concern -
-    ///     launching could run the agentic tool against content outside the repo root - so
-    ///     <see cref="Launch"/> deliberately does not proceed when this propagates, breaking the
-    ///     "sync state never blocks launch" policy described above for this one case only.
-    /// </exception>
     /// <remarks>
     ///     <para>
     ///     If this repo has committed agent files (<see cref="HasCommittedAgentFiles"/> is
@@ -634,9 +611,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     If a pin exists and <see cref="PackageZipExtractor.AllManagedFoldersExist"/> is
     ///     already <see langword="true"/>, this returns <see langword="true"/> immediately with no
     ///     re-extraction - the common "already synced" case must not pay any extra I/O cost on
-    ///     every launch. <see cref="PackageZipExtractor.AllManagedFoldersExist"/> itself treats a
-    ///     folder reached through a reparse point as not present, so this case only applies to
-    ///     genuinely present, unlinked managed folders.
+    ///     every launch.
     ///     </para>
     ///     <para>
     ///     If a pin exists but one or more managed folders are missing (e.g. a freshly cloned
@@ -647,13 +622,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     through <see cref="ApplyPackageAndShowReleaseNotes"/> - architecture.md's
     ///     ensure-synced-before-launch bullet never mentions showing release notes, unlike its
     ///     Select-Package bullet, so a silent background repair must not pop a release-notes
-    ///     window on every launch. If this re-extraction attempt fails for an ordinary reason
-    ///     (source unreachable, pinned version missing, extraction I/O failure),
-    ///     <see cref="ErrorOccurred"/> is raised as a non-blocking warning and this returns
-    ///     <see langword="false"/> - but the launch still proceeds regardless. If it instead fails
-    ///     because a managed folder is reachable only through a reparse point, the resulting
-    ///     <see cref="UnsafeRepositoryStateException"/> is deliberately left uncaught (see the
-    ///     exception list above) rather than absorbed into this best-effort return value.
+    ///     window on every launch. If this re-extraction attempt fails, <see cref="ErrorOccurred"/>
+    ///     is raised as a non-blocking warning and this returns <see langword="false"/> - but the
+    ///     launch still proceeds regardless.
     ///     </para>
     ///     <para>
     ///     Marked <see langword="internal"/> (not <see langword="private"/>) rather than tested
@@ -702,12 +673,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             PackageZipExtractor.Extract(pinnedPackage.FilePath, RepoPath);
             return true;
-        }
-        catch (UnsafeRepositoryStateException)
-        {
-            // Deliberately not absorbed into the best-effort false/ErrorOccurred pattern below -
-            // Launch must treat this as a hard stop, not a "launching anyway" warning.
-            throw;
         }
         catch (InvalidOperationException ex)
         {

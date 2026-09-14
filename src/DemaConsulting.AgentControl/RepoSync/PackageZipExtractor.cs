@@ -78,13 +78,6 @@ internal static class PackageZipExtractor
     ///     there is no rollback: a partially-applied change is possible and must be resolved
     ///     manually by the caller.
     /// </exception>
-    /// <exception cref="UnsafeRepositoryStateException">
-    ///     Thrown (derives from <see cref="InvalidOperationException"/>) when the repo root, a
-    ///     managed folder's ancestor, the folder itself, or any descendant of it is a reparse
-    ///     point (symlink/junction) - callers that must react differently to this specific
-    ///     security concern (rather than an ordinary extraction failure) can catch it before the
-    ///     general <see cref="InvalidOperationException"/> case.
-    /// </exception>
     public static void Extract(string zipPath, string repoRoot)
     {
         ArgumentNullException.ThrowIfNull(zipPath);
@@ -127,12 +120,7 @@ internal static class PackageZipExtractor
     ///     so the managed-folder list has a single source of truth - callers (e.g.
     ///     <c>RepoCardViewModel</c>'s ensure-synced-before-launch check) never need to duplicate
     ///     it. Does not inspect folder contents; a managed folder that exists but is empty (or
-    ///     only partially populated) still counts as "existing" here. A managed folder that is
-    ///     only reachable through a reparse-point (symlink/junction) repo root or ancestor - e.g.
-    ///     a symlinked <c>.github</c> - is deliberately treated as <b>not</b> existing: trusting
-    ///     it here would let a caller (such as <c>RepoCardViewModel.EnsureAgentFilesSyncedBeforeLaunch</c>)
-    ///     skip <see cref="Extract"/> entirely and launch using files outside <paramref name="repoRoot"/>
-    ///     without any of <see cref="Extract"/>'s reparse-point protections ever running.
+    ///     only partially populated) still counts as "existing" here.
     /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> is
     ///     <see langword="null"/>.</exception>
@@ -140,52 +128,7 @@ internal static class PackageZipExtractor
     {
         ArgumentNullException.ThrowIfNull(repoRoot);
 
-        var normalizedRoot = Path.GetFullPath(repoRoot);
-        return ManagedFolders.All(folder => ManagedFolderGenuinelyExists(normalizedRoot, folder));
-    }
-
-    /// <summary>
-    ///     Determines whether a single managed folder exists under a repo root without being
-    ///     reached through a reparse point (symlink/junction) repo root, ancestor, or the folder
-    ///     itself.
-    /// </summary>
-    /// <param name="normalizedRoot">The already-resolved (<see cref="Path.GetFullPath(string)"/>)
-    ///     repo root.</param>
-    /// <param name="relativeFolder">The managed folder's path relative to the repo root.</param>
-    /// <returns><see langword="true"/> if the folder exists and no reparse point sits between it
-    ///     and <paramref name="normalizedRoot"/> (inclusive); otherwise <see langword="false"/>.</returns>
-    /// <remarks>
-    ///     Deliberately swallows (as "not genuinely present") both a found reparse point and any
-    ///     I/O failure while inspecting the ancestor chain - e.g. an
-    ///     <see cref="UnauthorizedAccessException"/> from an ACL-restricted ancestor, which
-    ///     <see cref="PathHelpers.FindReparsePointInAncestry"/> does not itself catch. This keeps
-    ///     <see cref="AllManagedFoldersExist"/>'s contract to only ever throw
-    ///     <see cref="ArgumentNullException"/> (its callers, e.g.
-    ///     <c>RepoCardViewModel.EnsureAgentFilesSyncedBeforeLaunch</c>, only guard against
-    ///     <see cref="Extract"/>'s own documented exceptions and do not expect this read-only
-    ///     check to throw anything else).
-    /// </remarks>
-    private static bool ManagedFolderGenuinelyExists(string normalizedRoot, string relativeFolder)
-    {
-        var folderPath = PathHelpers.SafePathCombine(normalizedRoot, relativeFolder);
-        if (!Directory.Exists(folderPath))
-        {
-            return false;
-        }
-
-        try
-        {
-            return PathHelpers.FindReparsePointInAncestry(normalizedRoot, folderPath) is null;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // An inability to even inspect an ancestor (e.g. an ACL-restricted directory) means
-            // this folder cannot be confirmed as genuinely present under normalizedRoot; treat it
-            // the same as missing so callers fall back to Extract, which will itself surface the
-            // underlying failure as a hard error instead of silently trusting - or crashing on -
-            // content reached through a symlink/junction.
-            return false;
-        }
+        return ManagedFolders.All(folder => Directory.Exists(PathHelpers.SafePathCombine(repoRoot, folder)));
     }
 
     /// <summary>
@@ -252,97 +195,23 @@ internal static class PackageZipExtractor
     /// <param name="relativeFolder">The managed folder's path relative to the repo root.</param>
     /// <exception cref="InvalidOperationException">Thrown when the folder exists but cannot be
     ///     deleted.</exception>
-    /// <exception cref="UnsafeRepositoryStateException">Thrown when the repo root, an ancestor,
-    ///     the folder itself, or any descendant of the folder is a reparse point
-    ///     (symlink/junction).</exception>
     private static void DeleteManagedFolder(string repoRoot, string relativeFolder)
     {
         var folderPath = PathHelpers.SafePathCombine(repoRoot, relativeFolder);
 
+        if (!Directory.Exists(folderPath))
+        {
+            return;
+        }
+
         try
         {
-            // Reject a reparse-point repo root/ancestor (e.g. a symlinked/junctioned '.github')
-            // before the blind delete below: Directory.Delete(recursive: true) follows filesystem
-            // links, so without this guard a crafted/pre-existing junction could cause content
-            // outside repoRoot to be deleted before extraction's own EnsureNoSymlinkAncestors check
-            // is ever reached. Wrapped alongside the delete itself so an UnauthorizedAccessException
-            // from an ACL-restricted ancestor surfaces as the same documented InvalidOperationException,
-            // consistent with ExtractEntryIfManaged's equivalent call (protected by Extract's step-3
-            // try/catch).
-            EnsureNoSymlinkAncestors(Path.GetFullPath(repoRoot), folderPath, relativeFolder);
-
-            if (!Directory.Exists(folderPath))
-            {
-                return;
-            }
-
-            // A plain Directory.Delete(folderPath, recursive: true) would also follow any
-            // reparse point nested *inside* the managed folder (not just its ancestors),
-            // potentially deleting content outside repoRoot. DeleteDirectoryRejectingReparsePoints
-            // walks the tree itself and fails closed the moment it finds one.
-            DeleteDirectoryRejectingReparsePoints(folderPath, relativeFolder);
+            Directory.Delete(folderPath, recursive: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new InvalidOperationException($"Failed to delete folder '{folderPath}': {ex.Message}", ex);
         }
-    }
-
-    /// <summary>
-    ///     Recursively deletes <paramref name="directoryPath"/>, rejecting the delete if it or any
-    ///     descendant directory is itself a reparse point (symlink/junction) - unlike
-    ///     <see cref="Directory.Delete(string, bool)"/>'s recursive mode, which follows such links
-    ///     and can delete content outside the directory being cleaned up.
-    /// </summary>
-    /// <param name="directoryPath">The directory to delete.</param>
-    /// <param name="context">A short description of the folder being deleted, for the exception
-    ///     message.</param>
-    /// <remarks>
-    ///     The entire tree is preflighted for reparse points (<see cref="PathHelpers.FindReparsePointInDescendants"/>)
-    ///     <b>before</b> anything is deleted. Interleaving the reparse-point check with the actual
-    ///     delete (checking each directory immediately before deleting its files) would still let
-    ///     an ordinary sibling file be permanently deleted before a reparse point discovered
-    ///     later in the same tree aborts the operation, leaving the managed folder partially
-    ///     destroyed instead of untouched.
-    /// </remarks>
-    /// <exception cref="UnsafeRepositoryStateException">Thrown when a nested reparse point is
-    ///     encountered anywhere in the tree; nothing is deleted in this case.</exception>
-    private static void DeleteDirectoryRejectingReparsePoints(string directoryPath, string context)
-    {
-        var reparsePoint = PathHelpers.FindReparsePointInDescendants(directoryPath);
-        if (reparsePoint is not null)
-        {
-            throw new UnsafeRepositoryStateException(
-                $"'{context}' contains a symlinked directory '{reparsePoint}'; refusing to delete through it.");
-        }
-
-        DeleteDirectoryTree(directoryPath);
-    }
-
-    /// <summary>
-    ///     Recursively deletes every file and subdirectory under <paramref name="directoryPath"/>,
-    ///     then the now-empty directory itself.
-    /// </summary>
-    /// <param name="directoryPath">The directory to delete.</param>
-    /// <remarks>
-    ///     Assumes <see cref="PathHelpers.FindReparsePointInDescendants"/> has already verified the
-    ///     whole tree contains no reparse points; this method performs no such check itself, since
-    ///     re-checking here would re-introduce the same interleaved check-then-delete race the
-    ///     two-phase split in <see cref="DeleteDirectoryRejectingReparsePoints"/> exists to avoid.
-    /// </remarks>
-    private static void DeleteDirectoryTree(string directoryPath)
-    {
-        foreach (var filePath in Directory.GetFiles(directoryPath))
-        {
-            File.Delete(filePath);
-        }
-
-        foreach (var subdirectoryPath in Directory.GetDirectories(directoryPath))
-        {
-            DeleteDirectoryTree(subdirectoryPath);
-        }
-
-        Directory.Delete(directoryPath, recursive: false);
     }
 
     /// <summary>
@@ -354,8 +223,6 @@ internal static class PackageZipExtractor
     /// <param name="repoRoot">Absolute path to the repository root.</param>
     /// <exception cref="InvalidOperationException">Thrown when the entry's path is invalid,
     ///     including resolving outside <paramref name="repoRoot"/>.</exception>
-    /// <exception cref="UnsafeRepositoryStateException">Thrown when the repo root, an ancestor, or
-    ///     the destination directory itself is a reparse point (symlink/junction).</exception>
     private static void ExtractEntryIfManaged(ZipArchiveEntry entry, string repoRoot)
     {
         // Directory entries have an empty Name (only FullName ends with '/'); skip them, as
@@ -398,53 +265,10 @@ internal static class PackageZipExtractor
         var destinationDirectory = Path.GetDirectoryName(destinationPath);
         if (!string.IsNullOrEmpty(destinationDirectory))
         {
-            // Path.GetFullPath (used internally by SafePathCombine) performs lexical
-            // normalization only - it does not resolve filesystem links - so a symlinked
-            // ancestor directory could otherwise still cause extraction to escape the repo root
-            // despite the containment check above passing. Reject any ancestor between the repo
-            // root and the destination that is itself a reparse point (symlink/junction) before
-            // creating anything.
-            EnsureNoSymlinkAncestors(Path.GetFullPath(repoRoot), destinationDirectory, entry.FullName);
-
             Directory.CreateDirectory(destinationDirectory);
         }
 
         entry.ExtractToFile(destinationPath, overwrite: true);
-    }
-
-    /// <summary>
-    ///     Rejects the operation if <paramref name="repoRoot"/> or any path segment between it and
-    ///     <paramref name="path"/> (inclusive of both ends) is itself a reparse point
-    ///     (symlink/junction), throwing a domain-specific <see cref="UnsafeRepositoryStateException"/>
-    ///     with a message naming <paramref name="context"/> and the offending path.
-    /// </summary>
-    /// <param name="repoRoot">The already-resolved (<see cref="Path.GetFullPath(string)"/>) repo
-    ///     root; also checked, since a symlinked/junctioned repo root would otherwise let every
-    ///     managed-folder operation write through it undetected.</param>
-    /// <param name="path">The path whose ancestry is being validated - either a zip entry's
-    ///     destination directory (before extraction) or a managed folder about to be blind-deleted.</param>
-    /// <param name="context">A short description of the path/entry, for the exception message.</param>
-    /// <remarks>
-    ///     A thin, exception-throwing policy wrapper around
-    ///     <see cref="PathHelpers.FindReparsePointInAncestry"/>, which owns the actual
-    ///     filesystem-aware detection logic (see its own doc remarks for why a lexical-only check
-    ///     is insufficient and why <see cref="File.GetAttributes(string)"/> is used over
-    ///     <see cref="Directory.Exists(string)"/>). This only guards against paths that already
-    ///     exist at the time of the check; it does not eliminate a race where a path is replaced
-    ///     with a symlink between this check and
-    ///     <see cref="Directory.CreateDirectory(string)"/>/<see cref="ZipFileExtensions.ExtractToFile(ZipArchiveEntry, string, bool)"/>/
-    ///     <see cref="Directory.Delete(string, bool)"/>.
-    /// </remarks>
-    /// <exception cref="UnsafeRepositoryStateException">Thrown when a path in the walk is a
-    ///     reparse point.</exception>
-    private static void EnsureNoSymlinkAncestors(string repoRoot, string path, string context)
-    {
-        var reparsePoint = PathHelpers.FindReparsePointInAncestry(repoRoot, path);
-        if (reparsePoint is not null)
-        {
-            throw new UnsafeRepositoryStateException(
-                $"'{context}' resolves through a symlinked directory '{reparsePoint}'.");
-        }
     }
 
     /// <summary>

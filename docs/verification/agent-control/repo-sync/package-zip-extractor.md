@@ -30,14 +30,11 @@ throws `InvalidOperationException`. This scenario is tested by
 `AgentControl-PackageZipExtractor-Extract`.
 
 **PackageZipExtractor_AllManagedFoldersExist_ReflectsActualPresence**: The check returns true
-when all four managed folders are present, and false when some or none are present, or when a
-managed folder is only reachable through a reparse-point (symlink/junction) repo root,
-ancestor, or the folder itself. This scenario is tested by
+when all four managed folders are present, and false when some or none are present. This
+scenario is tested by
 `PackageZipExtractor_AllManagedFoldersExist_AllFourPresent_ReturnsTrue`,
-`PackageZipExtractor_AllManagedFoldersExist_SomeMissing_ReturnsFalse`,
-`PackageZipExtractor_AllManagedFoldersExist_NoneExist_ReturnsFalse`,
-`PackageZipExtractor_AllManagedFoldersExist_AncestorIsJunctionWithRealFolders_ReturnsFalse`, and
-`PackageZipExtractor_AllManagedFoldersExist_ManagedFolderItselfIsJunction_ReturnsFalse`, covering
+`PackageZipExtractor_AllManagedFoldersExist_SomeMissing_ReturnsFalse`, and
+`PackageZipExtractor_AllManagedFoldersExist_NoneExist_ReturnsFalse`, covering
 `AgentControl-PackageZipExtractor-AllManagedFoldersExist`.
 
 **PackageZipExtractor_ReadReleaseNotes_ReturnsContentOrNullWithoutExtracting**: Reading
@@ -46,19 +43,3 @@ the archive, and reading from a zip with no such entry returns null. This scenar
 by `PackageZipExtractor_ReadReleaseNotes_EntryPresent_ReturnsContentWithoutExtracting` and
 `PackageZipExtractor_ReadReleaseNotes_NoEntry_ReturnsNull`, covering
 `AgentControl-PackageZipExtractor-ReadReleaseNotes`.
-
-**PackageZipExtractor_Extract_RejectsReparsePointsAtEveryVulnerablePoint**: Extraction refuses
-to operate through a reparse point (symlink/junction) wherever one could otherwise let content
-be read from or written/deleted outside the repo root: a managed-folder ancestor (e.g. a
-linked `.github`), whether empty or already containing real content that must survive; the
-repo root itself; a reparse point nested *inside* a managed folder (not just above it); and a
-*dangling* link (whose target no longer exists), which a naive `Directory.Exists`-based check
-would silently miss. Every case throws `UnsafeRepositoryStateException` (a dedicated
-`InvalidOperationException` subtype distinguishing this security concern from an ordinary
-extraction failure) and leaves the affected content untouched. This scenario is tested by
-`PackageZipExtractor_Extract_ManagedFolderAncestorIsJunction_ThrowsAndDoesNotWriteThroughLink`,
-`PackageZipExtractor_Extract_ManagedFolderAncestorIsJunctionWithExistingContent_DoesNotBlindDeleteThroughLink`,
-`PackageZipExtractor_Extract_RepoRootIsJunction_ThrowsAndDoesNotWriteThroughLink`,
-`PackageZipExtractor_Extract_ManagedFolderContainsNestedJunction_ThrowsAndDoesNotDeleteThroughLink`,
-and `PackageZipExtractor_Extract_ManagedFolderAncestorIsDanglingLink_ThrowsAndDoesNotBypassGuard`,
-covering `AgentControl-PackageZipExtractor-RejectsReparsePoints`.
