@@ -93,7 +93,10 @@ public sealed class LoggingSetupTests
 
         // Act: write a log entry through the same Serilog pipeline the fixture initialized via
         // LoggingSetup.Initialize
-        logger.LogInformation("Test marker: {Marker}", marker);
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            logger.LogInformation("Test marker: {Marker}", marker);
+        }
 
         // Assert: exactly one rolling log file exists under the documented "logs" subfolder
         // (Serilog's daily rolling has not yet rolled a second file within this test run), and

@@ -41,15 +41,20 @@ namespace DemaConsulting.AgentControl.RepoSync;
 internal static class PackageZipExtractor
 {
     /// <summary>
+    ///     Name of the root <c>.github</c> folder under which every managed agent folder lives.
+    /// </summary>
+    private const string GitHubFolderName = ".github";
+
+    /// <summary>
     ///     The four agent folders (relative to a repo root) that are blind-deleted and replaced
     ///     on every sync/upgrade, per architecture.md.
     /// </summary>
     private static readonly string[] ManagedFolders =
     [
-        Path.Combine(".github", "agents"),
-        Path.Combine(".github", "standards"),
-        Path.Combine(".github", "templates"),
-        Path.Combine(".github", "skills")
+        Path.Combine(GitHubFolderName, "agents"),
+        Path.Combine(GitHubFolderName, "standards"),
+        Path.Combine(GitHubFolderName, "templates"),
+        Path.Combine(GitHubFolderName, "skills")
     ];
 
     /// <summary>
@@ -233,6 +238,19 @@ internal static class PackageZipExtractor
         }
 
         var destinationPath = PathHelpers.SafePathCombine(repoRoot, relativePath);
+
+        // Zip-slip defense: re-verify (in addition to SafePathCombine's own check) that the
+        // entry's resolved destination is still contained within the repo root before any
+        // directory is created or file written, so this is visibly safe at the write site itself
+        // rather than relying solely on the called helper.
+        var resolvedRepoRoot = Path.GetFullPath(repoRoot);
+        var resolvedDestinationPath = Path.GetFullPath(destinationPath);
+        if (!resolvedDestinationPath.StartsWith(resolvedRepoRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Zip entry '{entry.FullName}' resolves outside the repository root.");
+        }
+
         var destinationDirectory = Path.GetDirectoryName(destinationPath);
         if (!string.IsNullOrEmpty(destinationDirectory))
         {
@@ -249,17 +267,7 @@ internal static class PackageZipExtractor
     ///     separators.</param>
     /// <returns><see langword="true"/> if the path is inside a managed folder; otherwise
     ///     <see langword="false"/>.</returns>
-    private static bool IsInsideManagedFolder(string relativePath)
-    {
-        foreach (var folder in ManagedFolders)
-        {
-            var prefix = folder + Path.DirectorySeparatorChar;
-            if (relativePath.StartsWith(prefix, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private static bool IsInsideManagedFolder(string relativePath) =>
+        ManagedFolders.Any(folder =>
+            relativePath.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.Ordinal));
 }

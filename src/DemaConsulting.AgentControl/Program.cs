@@ -111,7 +111,10 @@ internal static class Program
 
         try
         {
-            logger.LogInformation("Starting AgentControl {Version}", Version);
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                logger.LogInformation("Starting AgentControl {Version}", Version);
+            }
 
             // Attach the parsed options for App.OnFrameworkInitializationCompleted to consume,
             // then hand off to Avalonia's classic desktop lifetime for the remainder of the

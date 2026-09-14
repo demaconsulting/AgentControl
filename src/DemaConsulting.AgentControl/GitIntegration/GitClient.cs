@@ -364,9 +364,12 @@ internal sealed class GitClient
         // of exactly what was about to run and where - the key data point missing from prior
         // occurrences of the intermittent exit-code -1 failure.
         var argumentsText = string.Join(' ', arguments);
-        _logger.LogDebug(
-            "Starting git process '{GitExecutable}' with arguments '{Arguments}' in working directory '{WorkingDirectory}'",
-            _gitExecutablePath, argumentsText, repositoryPath);
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug(
+                "Starting git process '{GitExecutable}' with arguments '{Arguments}' in working directory '{WorkingDirectory}'",
+                _gitExecutablePath, argumentsText, repositoryPath);
+        }
 
         var stopwatch = Stopwatch.StartNew();
         try
@@ -393,9 +396,12 @@ internal sealed class GitClient
             var stdout = stdoutTask.GetAwaiter().GetResult();
             var stderr = stderrTask.GetAwaiter().GetResult();
 
-            _logger.LogInformation(
-                "git process '{GitExecutable} {Arguments}' exited with code {ExitCode} after {ElapsedMilliseconds}ms",
-                _gitExecutablePath, argumentsText, process.ExitCode, stopwatch.ElapsedMilliseconds);
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    "git process '{GitExecutable} {Arguments}' exited with code {ExitCode} after {ElapsedMilliseconds}ms",
+                    _gitExecutablePath, argumentsText, process.ExitCode, stopwatch.ElapsedMilliseconds);
+            }
 
             if (process.ExitCode != 0)
             {

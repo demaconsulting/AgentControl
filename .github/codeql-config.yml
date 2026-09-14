@@ -4,8 +4,18 @@
 
 name: "Agent Control CodeQL Config"
 
+# Globally ignore build output and generated files
+paths-ignore:
+  - '**/obj/**'
+  - '**/bin/**'
+
 # Query filters to disable specific queries for certain paths
 query-filters:
+  # Suppress warnings in all generated build output under obj/ (belt-and-suspenders
+  # alongside the global paths-ignore above)
+  - exclude:
+      id: cs/missed-ternary-operator
+    paths: ['**/obj/**/*.cs']
   - exclude:
       id: cs/catch-of-all-exceptions
     paths:

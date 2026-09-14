@@ -38,6 +38,12 @@ namespace DemaConsulting.AgentControl.UiTests;
 internal static class TestSettingsWriter
 {
     /// <summary>
+    ///     Shared options instance for the JSON serialization performed by this writer, avoiding
+    ///     a fresh <see cref="JsonSerializerOptions"/> allocation on every call.
+    /// </summary>
+    private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+
+    /// <summary>
     ///     Writes a <c>settings.json</c> file under <paramref name="configDirectory"/> pointing
     ///     the git executable and the (custom) agent-tool command at the arg-logger stub, and
     ///     pre-populating the recent-repos list with a single repo.
@@ -64,13 +70,17 @@ internal static class TestSettingsWriter
     {
         Directory.CreateDirectory(configDirectory);
 
+        // Never set by this test helper; a typed local (rather than a cast null literal) gives
+        // the anonymous type property below a type without an unnecessary upcast.
+        string? shellPreference = null;
+
         var settings = new
         {
             PackageSourcePath = packageSourcePath,
             GitExecutablePath = argLoggerStubExePath,
             AgentTool = 3, // AgentToolKind.Custom
             CustomAgentCommand = $"\"{argLoggerStubExePath}\"",
-            ShellPreference = (string?)null,
+            ShellPreference = shellPreference,
             RecentRepos = new[]
             {
                 new
@@ -82,7 +92,7 @@ internal static class TestSettingsWriter
             }
         };
 
-        var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(settings, SerializerOptions);
         File.WriteAllText(Path.Combine(configDirectory, "settings.json"), json);
     }
 }

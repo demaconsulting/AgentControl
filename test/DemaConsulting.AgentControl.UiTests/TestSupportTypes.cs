@@ -29,6 +29,12 @@ namespace DemaConsulting.AgentControl.UiTests;
 internal static class TestRepoPinWriter
 {
     /// <summary>
+    ///     Shared options instance for the JSON serialization performed by this writer, avoiding
+    ///     a fresh <see cref="JsonSerializerOptions"/> allocation on every call.
+    /// </summary>
+    private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+
+    /// <summary>
     ///     Writes <c>.agentcontrol.json</c> at the root of <paramref name="repoPath"/>.
     /// </summary>
     /// <param name="repoPath">Absolute path to the repository root; must already exist.</param>
@@ -37,7 +43,7 @@ internal static class TestRepoPinWriter
     public static void Write(string repoPath, string packageName, string version)
     {
         var pin = new { PackageName = packageName, Version = version };
-        var json = JsonSerializer.Serialize(pin, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(pin, SerializerOptions);
         File.WriteAllText(Path.Combine(repoPath, ".agentcontrol.json"), json);
     }
 }

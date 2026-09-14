@@ -139,11 +139,13 @@ internal static class AgentToolLauncher
         ArgumentNullException.ThrowIfNull(startInfo);
 
         var effectiveLogger = logger ?? AppLogging.Factory.CreateLogger(LoggerCategoryName);
-        var argumentsText = string.Join(' ', startInfo.ArgumentList);
 
-        effectiveLogger.LogDebug(
-            "Starting shell process '{FileName}' with arguments '{Arguments}' in working directory '{WorkingDirectory}'",
-            startInfo.FileName, argumentsText, startInfo.WorkingDirectory);
+        if (effectiveLogger.IsEnabled(LogLevel.Debug))
+        {
+            effectiveLogger.LogDebug(
+                "Starting shell process '{FileName}' with arguments '{Arguments}' in working directory '{WorkingDirectory}'",
+                startInfo.FileName, string.Join(' ', startInfo.ArgumentList), startInfo.WorkingDirectory);
+        }
 
         var stopwatch = Stopwatch.StartNew();
         try
@@ -153,9 +155,12 @@ internal static class AgentToolLauncher
                                $"Failed to start shell process '{startInfo.FileName}'.");
 
             stopwatch.Stop();
-            effectiveLogger.LogInformation(
-                "Started shell process '{FileName} {Arguments}' as PID {ProcessId} after {ElapsedMilliseconds}ms",
-                startInfo.FileName, argumentsText, process.Id, stopwatch.ElapsedMilliseconds);
+            if (effectiveLogger.IsEnabled(LogLevel.Information))
+            {
+                effectiveLogger.LogInformation(
+                    "Started shell process '{FileName} {Arguments}' as PID {ProcessId} after {ElapsedMilliseconds}ms",
+                    startInfo.FileName, string.Join(' ', startInfo.ArgumentList), process.Id, stopwatch.ElapsedMilliseconds);
+            }
 
             return process;
         }
@@ -166,6 +171,7 @@ internal static class AgentToolLauncher
             // NativeErrorCode is the actual OS error code behind a Win32Exception - the same
             // critical diagnostic data highlighted as missing for GitClient's intermittent
             // failures; captured here too since this is another real-process-spawning path.
+            var argumentsText = string.Join(' ', startInfo.ArgumentList);
             effectiveLogger.LogError(
                 ex,
                 "Failed to start shell process '{FileName} {Arguments}' after {ElapsedMilliseconds}ms (Win32 NativeErrorCode={NativeErrorCode})",

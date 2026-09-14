@@ -440,7 +440,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     Reads the lines appended by a <see cref="GitStub"/> created with an invocation-log
     ///     path, tolerating the log file not existing yet.
     /// </summary>
-    private static IReadOnlyList<string> ReadInvocationLog(string path) =>
+    private static string[] ReadInvocationLog(string path) =>
         File.Exists(path) ? File.ReadAllLines(path) : [];
 
     /// <summary>
@@ -569,8 +569,7 @@ public sealed class RepoCardViewModelTests : IDisposable
 
         // Assert: the event fired exactly once, with this card as the sender, and nothing else
         // was mutated (there is no collection for this view model to mutate directly).
-        Assert.Single(raisedWith);
-        Assert.Same(card, raisedWith[0]);
+        Assert.Same(card, Assert.Single(raisedWith));
     }
 
     /// <summary>
@@ -671,8 +670,8 @@ public sealed class RepoCardViewModelTests : IDisposable
         card.SelectPackageCommand.Execute(null);
 
         // Assert
-        Assert.Single(raisedWith);
-        Assert.Equal(sourceDir, raisedWith[0]);
+        var raisedSource = Assert.Single(raisedWith);
+        Assert.Equal(sourceDir, raisedSource);
     }
 
     /// <summary>

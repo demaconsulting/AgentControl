@@ -40,7 +40,7 @@ internal sealed class CommittedAgentFilesCache
     ///     The cached results, keyed by a normalized repo path and its <c>HEAD</c> commit hash at
     ///     the time the result was recorded.
     /// </summary>
-    private readonly Dictionary<(string RepoPath, string HeadHash), bool> _cache = new();
+    private readonly Dictionary<(string RepoPath, string HeadHash), bool> _cache = [];
 
     /// <summary>
     ///     Attempts to retrieve a cached result for a repo at a specific <c>HEAD</c> commit hash.

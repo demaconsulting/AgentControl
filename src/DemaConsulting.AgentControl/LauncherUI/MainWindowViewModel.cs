@@ -90,9 +90,8 @@ internal sealed class MainWindowViewModel : ViewModelBase
 
         RepoCards = [];
         DisplayedRepoCards = [];
-        foreach (var recentRepo in settings.RecentRepos)
+        foreach (var card in settings.RecentRepos.Select(CreateCard))
         {
-            var card = CreateCard(recentRepo);
             AttachCardEvents(card);
             RepoCards.Add(card);
         }
