@@ -23,6 +23,7 @@ using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
+using DemaConsulting.AgentControl.Utilities;
 using AgentLauncher = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
@@ -54,6 +55,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
         [AgentToolKind.Cursor] = "cursor",
         [AgentToolKind.ClaudeCode] = "claude"
     };
+
+    /// <summary>
+    ///     File name of the optional, user-customizable root-level AGENTS.md template a package
+    ///     may offer to place at a repo's root - never one of the four managed folders.
+    /// </summary>
+    private const string AgentsMdFileName = "AGENTS.md";
 
     /// <summary>
     ///     The shared recent-repos settings entry this card represents. Held by reference (not
@@ -450,6 +457,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public event EventHandler<string>? SelectPackageRequested;
 
     /// <summary>
+    ///     Raised after a successful extraction when the repo has no root-level <c>AGENTS.md</c>
+    ///     file, the just-applied package includes an <c>AGENTS.md</c> template, and the user has
+    ///     not previously declined this offer for this repo - carries the template's text content
+    ///     so the view layer can show a modal Yes/No prompt. Does not itself show any dialog -
+    ///     that is a view-layer concern handled by <c>MainWindow</c>'s code-behind via the
+    ///     <see cref="ConfirmationWindow"/> pattern, exactly like <see cref="RemoveRequested"/>.
+    ///     The user's choice is reported back via <see cref="AcceptAgentsMdTemplate"/> or
+    ///     <see cref="DeclineAgentsMdTemplate"/>.
+    /// </summary>
+    public event EventHandler<string>? AgentsMdTemplateOfferRequested;
+
+    /// <summary>
     ///     Re-reads the repo's pin file, git working-tree status, and upgrade availability from
     ///     the filesystem/git/package source, updating every bindable property.
     /// </summary>
@@ -672,6 +691,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             }
 
             PackageZipExtractor.Extract(pinnedPackage.FilePath, RepoPath);
+            MaybeOfferAgentsMdTemplate(pinnedPackage.FilePath);
             return true;
         }
         catch (InvalidOperationException ex)
@@ -802,7 +822,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             PackageZipExtractor.Extract(package.FilePath, RepoPath);
             EnsureGitIgnoreCoversManagedFolders();
-            RepoPinStore.Save(RepoPath, new RepoPin { PackageName = package.PackageName, Version = package.Version.ToString() });
+
+            // Preserve a prior AGENTS.md template decline across re-pinning: this field is
+            // orthogonal to the selected package/version and must never be silently reset.
+            var agentsMdTemplateDeclined = RepoPinStore.Load(RepoPath)?.AgentsMdTemplateDeclined ?? false;
+            RepoPinStore.Save(
+                RepoPath,
+                new RepoPin
+                {
+                    PackageName = package.PackageName,
+                    Version = package.Version.ToString(),
+                    AgentsMdTemplateDeclined = agentsMdTemplateDeclined,
+                });
 
             var releaseNotes = PackageZipExtractor.ReadReleaseNotes(package.FilePath) ?? string.Empty;
 
@@ -810,6 +841,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             RefreshUpgradeStatus();
             StatusMessage = successMessage;
             ReleaseNotesReady?.Invoke(this, releaseNotes);
+            MaybeOfferAgentsMdTemplate(package.FilePath);
         }
         catch (InvalidOperationException ex)
         {
@@ -818,6 +850,108 @@ internal sealed class RepoCardViewModel : ViewModelBase
         catch (DirectoryNotFoundException ex)
         {
             ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    ///     Decides whether to offer placing the just-applied package's optional root-level
+    ///     <c>AGENTS.md</c> template into this repo's root, raising
+    ///     <see cref="AgentsMdTemplateOfferRequested"/> when all three conditions hold: the repo
+    ///     has no root-level <c>AGENTS.md</c> file yet, the package zip includes an
+    ///     <c>AGENTS.md</c> template, and the user has not previously declined this offer for
+    ///     this repo (<see cref="RepoPin.AgentsMdTemplateDeclined"/>).
+    /// </summary>
+    /// <param name="packageFilePath">Path to the package zip that was just successfully applied
+    ///     (extracted) to this repo.</param>
+    /// <remarks>
+    ///     Called only from call sites that already have a <paramref name="packageFilePath"/> in
+    ///     hand immediately after a successful <see cref="PackageZipExtractor.Extract"/> call
+    ///     (<see cref="ApplyPackageAndShowReleaseNotes"/> and the re-extraction branch of
+    ///     <see cref="EnsureAgentFilesSyncedBeforeLaunch"/>) - never as an independent, standing
+    ///     per-launch check, so the offer only ever fires when a sync genuinely just happened.
+    ///     Wrapped in its own non-blocking try/catch, mirroring
+    ///     <see cref="EnsureGitIgnoreCoversManagedFolders"/>'s precedent, so a pin-read or
+    ///     zip-read failure here can never disrupt an already-successful sync.
+    /// </remarks>
+    private void MaybeOfferAgentsMdTemplate(string packageFilePath)
+    {
+        try
+        {
+            if (File.Exists(PathHelpers.SafePathCombine(RepoPath, AgentsMdFileName)))
+            {
+                return;
+            }
+
+            var pin = RepoPinStore.Load(RepoPath);
+            if (pin is { AgentsMdTemplateDeclined: true })
+            {
+                return;
+            }
+
+            var template = PackageZipExtractor.ReadAgentsMdTemplate(packageFilePath);
+            if (template is null)
+            {
+                return;
+            }
+
+            AgentsMdTemplateOfferRequested?.Invoke(this, template);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            ErrorOccurred?.Invoke(this, ex.Message);
+        }
+    }
+
+    /// <summary>
+    ///     Writes the package's offered <c>AGENTS.md</c> template to this repo's root, in
+    ///     response to the user accepting the <see cref="AgentsMdTemplateOfferRequested"/> prompt.
+    /// </summary>
+    /// <param name="templateContent">The template's text content, as previously carried by
+    ///     <see cref="AgentsMdTemplateOfferRequested"/>.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="templateContent"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <remarks>
+    ///     Writes directly to the repo root - never into any of the four managed folders - since
+    ///     a root-level <c>AGENTS.md</c> is a starting point the user is expected to customize
+    ///     themselves, not a file blind-deleted/replaced on every subsequent sync.
+    /// </remarks>
+    public void AcceptAgentsMdTemplate(string templateContent)
+    {
+        ArgumentNullException.ThrowIfNull(templateContent);
+
+        try
+        {
+            File.WriteAllText(PathHelpers.SafePathCombine(RepoPath, AgentsMdFileName), templateContent);
+            StatusMessage = "Added a starting AGENTS.md template - please review and customize it for this repo.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            ErrorOccurred?.Invoke(this, $"Failed to write AGENTS.md: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    ///     Persists that the user declined the <c>AGENTS.md</c> template offer for this repo, so
+    ///     <see cref="MaybeOfferAgentsMdTemplate"/> never raises
+    ///     <see cref="AgentsMdTemplateOfferRequested"/> again for it.
+    /// </summary>
+    /// <remarks>
+    ///     Loads the existing pin (if any) rather than constructing a fresh one, so the repo's
+    ///     already-persisted package name/version are preserved alongside the new decline flag.
+    ///     There is deliberately no corresponding "reset" method - the decision is sticky for this
+    ///     repo, per the feature's explicit scope.
+    /// </remarks>
+    public void DeclineAgentsMdTemplate()
+    {
+        try
+        {
+            var pin = RepoPinStore.Load(RepoPath) ?? new RepoPin { PackageName = PinnedPackageName ?? string.Empty, Version = PinnedPackageVersion ?? string.Empty };
+            pin.AgentsMdTemplateDeclined = true;
+            RepoPinStore.Save(RepoPath, pin);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            ErrorOccurred?.Invoke(this, $"Failed to record your AGENTS.md decision: {ex.Message}");
         }
     }
 

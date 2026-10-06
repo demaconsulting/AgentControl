@@ -30,8 +30,11 @@ namespace DemaConsulting.AgentControl.RepoSync;
 /// <remarks>
 ///     Per architecture.md's "Upgrade sequence and failure handling" decision, this performs:
 ///     (1) open/validate the zip; (2) delete the four known folders if present; (3) extract only
-///     those same four folders from the zip (root-level files such as <c>release-notes.md</c> are
-///     never extracted to disk). Rewriting the <c>.agentcontrol.json</c> pin is the caller's
+///     those same four folders from the zip (root-level files such as <c>release-notes.md</c> and
+///     the optional <c>AGENTS.md</c> template are never extracted to disk - see
+///     <see cref="IsInsideManagedFolder"/>, whose managed-folder-prefix check already excludes any
+///     root-level entry regardless of name, so no change to the skip logic itself was needed to
+///     add the <c>AGENTS.md</c> template entry). Rewriting the <c>.agentcontrol.json</c> pin is the caller's
 ///     responsibility (see the <c>RepoConfig</c> subsystem) so this class stays focused on file
 ///     operations alone. There is intentionally no rollback on failure — per architecture.md, a
 ///     failed upgrade is surfaced to the caller (Phase 2 will show a message box) and the
@@ -62,6 +65,13 @@ internal static class PackageZipExtractor
     ///     disk, only readable via <see cref="ReadReleaseNotes"/>.
     /// </summary>
     private const string ReleaseNotesEntryName = "release-notes.md";
+
+    /// <summary>
+    ///     Name of the optional root-level AGENTS.md template entry within a package zip; never
+    ///     extracted to disk by <see cref="Extract"/> (it is a root-level entry, same as
+    ///     <see cref="ReleaseNotesEntryName"/>), only readable via <see cref="ReadAgentsMdTemplate"/>.
+    /// </summary>
+    private const string AgentsMdEntryName = "AGENTS.md";
 
     /// <summary>
     ///     Opens/validates the package zip, validates every entry's destination path, deletes the
@@ -186,6 +196,52 @@ internal static class PackageZipExtractor
         {
             throw new InvalidOperationException(
                 $"Failed to read '{ReleaseNotesEntryName}' from '{zipPath}': {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    ///     Reads the content of the package zip's optional root-level <c>AGENTS.md</c> template
+    ///     entry without extracting it to disk.
+    /// </summary>
+    /// <param name="zipPath">Path to the agent package zip file.</param>
+    /// <returns>
+    ///     The template's text, or <see langword="null"/> if the zip has no root-level
+    ///     <c>AGENTS.md</c> entry.
+    /// </returns>
+    /// <remarks>
+    ///     Mirrors <see cref="ReadReleaseNotes"/> exactly: the <c>AGENTS.md</c> entry is a second,
+    ///     optional root-level zip entry that is never extracted by <see cref="Extract"/> (the
+    ///     same managed-folder-exclusion mechanism that skips <c>release-notes.md</c> already
+    ///     skips any root-level entry). Callers (e.g. <c>RepoCardViewModel</c>) decide whether to
+    ///     offer writing this content to a repo's root, based on whether the repo already has an
+    ///     <c>AGENTS.md</c> file and whether the user previously declined the offer.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="zipPath"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the zip cannot be opened or the
+    ///     <c>AGENTS.md</c> entry cannot be read.</exception>
+    public static string? ReadAgentsMdTemplate(string zipPath)
+    {
+        ArgumentNullException.ThrowIfNull(zipPath);
+
+        using var archive = OpenArchive(zipPath);
+
+        var entry = archive.GetEntry(AgentsMdEntryName);
+        if (entry is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = entry.Open();
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
+        {
+            throw new InvalidOperationException(
+                $"Failed to read '{AgentsMdEntryName}' from '{zipPath}': {ex.Message}", ex);
         }
     }
 

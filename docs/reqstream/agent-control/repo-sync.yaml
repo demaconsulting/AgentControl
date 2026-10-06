@@ -71,3 +71,20 @@ sections:
           - GitIgnoreEnsurer_Ensure_ExistingContentUsesCrLf_AppendsBlockWithCrLf
           - GitIgnoreEnsurer_Ensure_ExistingFileHasUtf8Bom_PreservesBomOnWrite
           - GitIgnoreEnsurer_Ensure_PathIsDirectory_ThrowsInvalidOperationException
+
+      - id: AgentControl-RepoSync-AgentsMdTemplate
+        title: >-
+          The RepoSync subsystem shall read a package's optional root-level AGENTS.md
+          template from its zip without extracting the package, and shall never extract that
+          entry into any managed folder.
+        justification: |
+          Per the same root-level-entry convention as release-notes.md, a package may want to
+          seed a repo with a starting AGENTS.md; the template must be readable for the
+          LauncherUI subsystem to offer it, without ever being silently applied as part of the
+          blind-delete-and-replace managed-folder sync.
+        children:
+          - AgentControl-PackageZipExtractor-ReadAgentsMdTemplate
+        tests:
+          - PackageZipExtractor_ReadAgentsMdTemplate_EntryPresent_ReturnsContentWithoutExtracting
+          - PackageZipExtractor_ReadAgentsMdTemplate_NoEntry_ReturnsNull
+          - PackageZipExtractor_Extract_FreshRepoWithAgentsMdEntry_DoesNotExtractAgentsMdRootEntry

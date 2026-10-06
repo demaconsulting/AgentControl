@@ -25,6 +25,8 @@ N/A - standard test environment; no external services or hardware required.
   notes.
 - A repo's `.gitignore` covers the four managed agent folders after every successful sync,
   without disturbing any pre-existing `.gitignore` content.
+- An optional root-level AGENTS.md template is readable without extraction, and is never
+  written as part of the managed-folder extraction itself.
 
 ### Test Scenarios
 
@@ -60,3 +62,13 @@ the `GitIgnoreEnsurer` unit tests (see the `GitIgnoreEnsurer` unit verification 
 `GitIgnoreEnsurer_Ensure_PathIsDirectory_ThrowsInvalidOperationException` cited directly at
 the subsystem level, covering `AgentControl-RepoSync-GitIgnorePrevention` (children:
 `AgentControl-GitIgnoreEnsurer-Ensure`).
+
+**RepoSync_AgentsMdTemplate_UnitTestsCoverReadWithoutExtractAndNeverExtractedToManagedFolders**:
+Reading the optional root-level AGENTS.md template without extracting, and confirming it is
+never written as part of a managed-folder extraction, is verified by the
+`PackageZipExtractor` unit tests (see the `PackageZipExtractor` unit verification design),
+with `PackageZipExtractor_ReadAgentsMdTemplate_EntryPresent_ReturnsContentWithoutExtracting`,
+`PackageZipExtractor_ReadAgentsMdTemplate_NoEntry_ReturnsNull`, and
+`PackageZipExtractor_Extract_FreshRepoWithAgentsMdEntry_DoesNotExtractAgentsMdRootEntry` cited
+directly at the subsystem level, covering `AgentControl-RepoSync-AgentsMdTemplate` (children:
+`AgentControl-PackageZipExtractor-ReadAgentsMdTemplate`).

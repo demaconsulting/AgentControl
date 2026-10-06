@@ -76,6 +76,11 @@ folders into a repo and displaying release notes, `RepoConfig` for persisting ea
 pin, `GitIntegration` for status/pull/branch queries, and `AgentToolLauncher` for detecting a
 shell and launching the configured agentic CLI tool in it. `Utilities` provides shared,
 independently testable helpers (currently safe path combination) consumed across subsystems.
+After a genuine sync (Select Package, Upgrade, or Launch's best-effort re-extraction),
+`RepoCardViewModel` may also offer to place a package's optional root-level `AGENTS.md`
+template at the repo's root via a modal confirmation, never overwriting a pre-existing
+`AGENTS.md` and remembering a decline so the user is not re-prompted for that repo again
+(`AgentControl-System-AgentsMdTemplate`).
 See `docs/design/agent-control/{subsystem}.md` for each subsystem's own design, and
 `docs/design/agent-control/program.md` for `Program`'s design (which also documents
 Avalonia's `App` bootstrap responsibility, per program.sysml's documented exception for units
@@ -177,7 +182,11 @@ override for hermetic testing).
 N/A - not a safety-classified software item. The main accepted risk is the blind-delete
 sync trade-off documented in `docs/design/agent-control/repo-sync.md` and architecture.md's
 Open Concerns #3 (local customizations inside the four managed folders are silently removed
-on the next sync/upgrade); this is a disclosed, accepted trade-off, not a defect.
+on the next sync/upgrade); this is a disclosed, accepted trade-off, not a defect. The AGENTS.md
+template-offer feature (`AgentControl-System-AgentsMdTemplate`) is gated by an explicit modal
+yes/no confirmation before any write to a repo's working directory, never overwrites a
+pre-existing `AGENTS.md`, and the decline is permanent (never reset) — mitigating the risk of
+an unwanted or repeated file write.
 
 ## Data Flow
 
@@ -204,7 +213,11 @@ on the next sync/upgrade); this is a disclosed, accepted trade-off, not a defect
    `PackageSource.FindLatest` followed by the same extract/pin/`ReleaseNotesViewerViewModel`
    display sequence (`AgentControl-System-Upgrade`); Settings to
    `SettingsWindowViewModel.Save`, applied back through `MainWindowViewModel.ApplySettings`
-   (`AgentControl-System-Settings`).
+   (`AgentControl-System-Settings`); and, after a Select Package, Upgrade, or Launch-time
+   re-extraction genuinely occurs, `RepoCardViewModel` decides whether to offer the package's
+   optional root-level `AGENTS.md` template (`PackageZipExtractor.ReadAgentsMdTemplate`),
+   writes it via `AcceptAgentsMdTemplate`, or persists a decline via `RepoPinStore.Save`
+   (`AgentControl-System-AgentsMdTemplate`).
 5. Throughout, `Utilities.PathHelpers.SafePathCombine` validates any caller-supplied path
    component before file-system use, and `Logging` records process-launch and
    git-integration detail to the diagnostic log file.

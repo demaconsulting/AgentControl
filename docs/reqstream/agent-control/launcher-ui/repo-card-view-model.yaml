@@ -131,6 +131,61 @@ sections:
           - RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady
           - RepoCardViewModel_ApplySelectedPackage_VersionNoLongerAtSource_RaisesErrorOccurredWithoutMutatingPin
 
+      - id: AgentControl-RepoCardViewModel-AgentsMdTemplateOffer
+        title: >-
+          The RepoCardViewModel class shall, after a successful extraction during package
+          selection, upgrade, or the ensure-synced-before-launch re-extraction, offer the
+          package's optional root-level AGENTS.md template to the user only when the repo has
+          no AGENTS.md file of its own, the package has a template to offer, and the user has
+          not previously declined the offer for this repo; shall write the accepted template
+          verbatim to the repo root without extracting it into any managed folder; and shall
+          persist a decline so the user is never re-prompted for that repo again.
+        justification: |
+          A package may ship a starting AGENTS.md template for a repo that lacks one, but
+          AgentControl must never overwrite a developer's own AGENTS.md, must never nag a user
+          who has already declined, and must only ever prompt when a genuine sync just
+          happened - never as a standing per-launch check - so the prompt stays rare,
+          predictable, and tied to an action the user already initiated.
+        children:
+          - AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate
+          - AgentControl-RepoCardViewModel-DeclineAgentsMdTemplate
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent
+          - RepoCardViewModel_ApplySelectedPackage_AgentsMdAlreadyExists_DoesNotRaiseAgentsMdTemplateOfferRequested
+          - RepoCardViewModel_ApplySelectedPackage_PackageHasNoAgentsMdTemplate_DoesNotRaiseAgentsMdTemplateOfferRequested
+          - RepoCardViewModel_ApplySelectedPackage_PreviouslyDeclined_DoesNotRaiseAgentsMdTemplateOfferRequestedAgain
+          - RepoCardViewModel_UpgradeCommand_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ReExtractsAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequested
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FoldersAlreadyPresent_NeverReadsZipOrRaisesOffer
+
+      - id: AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate
+        title: >-
+          The RepoCardViewModel class shall write a user-accepted AGENTS.md template verbatim
+          to the repo root, and shall raise an error rather than throwing if the file cannot be
+          written.
+        justification: |
+          The user explicitly asked AgentControl to place the starting template, so it must be
+          written exactly as offered, at the repo root, not inside any managed folder; a write
+          failure must degrade gracefully like every other non-blocking sync side effect in this
+          class.
+        tests:
+          - RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent
+          - RepoCardViewModel_AcceptAgentsMdTemplate_WriteFails_RaisesErrorOccurred
+
+      - id: AgentControl-RepoCardViewModel-DeclineAgentsMdTemplate
+        title: >-
+          The RepoCardViewModel class shall persist a declined AGENTS.md template offer in the
+          repo's pin file without writing an AGENTS.md file, and shall raise an error rather
+          than throwing if the pin cannot be saved.
+        justification: |
+          Declining must be remembered so the user is not re-prompted on every subsequent
+          sync, and a pin-write failure must degrade gracefully like every other non-blocking
+          sync side effect in this class.
+        tests:
+          - RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile
+          - RepoCardViewModel_DeclineAgentsMdTemplate_SubsequentApplySelectedPackage_DoesNotReprompt
+          - RepoCardViewModel_DeclineAgentsMdTemplate_PinWriteFails_RaisesErrorOccurred
+
       - id: AgentControl-RepoCardViewModel-MissingRepo
         title: >-
           The RepoCardViewModel class shall mark the repo as missing, and suppress other

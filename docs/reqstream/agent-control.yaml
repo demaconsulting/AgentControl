@@ -138,6 +138,33 @@ sections:
         tests:
           - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
 
+      - id: AgentControl-System-AgentsMdTemplate
+        title: >-
+          The tool shall offer to place a package's optional root-level AGENTS.md template at
+          a repo's root when the repo has no AGENTS.md of its own and the package has a
+          template to offer, shall never overwrite a pre-existing AGENTS.md, and shall
+          remember a user's decline so they are not re-prompted for that repo again.
+        tags: [system]
+        justification: |
+          A package author may want to seed a repo with a starting AGENTS.md (the same
+          root-level-entry convention as release-notes.md), but AgentControl must never
+          clobber a developer's own AGENTS.md, and must not nag a user who has already said no,
+          so the offer is a one-time, reversible-by-the-user-only prompt tied to a sync the
+          user already initiated (Select Package, Upgrade, or Launch's best-effort sync).
+        children:
+          - AgentControl-LauncherUI-AgentsMdTemplateOffer
+          - AgentControl-RepoSync-AgentsMdTemplate
+          - AgentControl-RepoConfig-AgentsMdDeclinedPersistence
+        tests:
+          # No dedicated FlaUI end-to-end test drives the AGENTS.md template offer's modal
+          # ConfirmationWindow dialog; this system requirement is therefore verified via the
+          # underlying view-model's own unit tests - a disclosed granularity limitation,
+          # consistent with AgentControl-System-Settings above, not a fabricated end-to-end
+          # claim.
+          - RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent
+          - RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent
+          - RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile
+
       - id: AgentControl-System-Settings
         title: >-
           The tool shall let the user configure the package source path, a git executable

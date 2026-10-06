@@ -101,6 +101,17 @@ persistence it depends on. This scenario is tested by
 `windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes`, covering
 `AgentControl-System-Upgrade` and `AgentControl-System-PinFile`.
 
+**AgentControl_AgentsMdTemplate_ApplySelectedPackage_OffersWritesAndRemembersDecline**: No
+dedicated FlaUI end-to-end scenario drives the AGENTS.md template offer's modal
+`ConfirmationWindow` dialog; this system requirement is therefore verified via
+`RepoCardViewModel`'s own unit tests — a disclosed granularity limitation, consistent with
+`AgentControl-System-Settings` and `AgentControl-System-DiagnosticLogging` below. This
+scenario is tested by
+`RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent`,
+`RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent`, and
+`RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile`, covering
+`AgentControl-System-AgentsMdTemplate`.
+
 **AgentControl_Settings_SaveCommand_PersistsEditedPreferences**: `SettingsWindowViewModel`'s
 `SaveCommand` is executed with edited package-source path, git/agent-tool overrides, and shell
 preference; the `onSave` callback receives the current values and `Saved` is raised, proving

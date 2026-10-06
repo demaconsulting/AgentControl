@@ -99,8 +99,9 @@ shows **Select Package...**. Choosing it opens a dialog that:
    defaulting the selection to the latest.
 3. On confirm, runs the same extract-and-pin sequence as an upgrade: validate the zip, delete
    the four managed folders if present, extract the new files, ensure your `.gitignore`
-   covers the four managed folders, write the `.agentcontrol.json` pin, then show the release
-   notes.
+   covers the four managed folders, write the `.agentcontrol.json` pin, show the release
+   notes, then offer the `AGENTS.md` template if applicable (see
+   [AGENTS.md Template Offer](#agentsmd-template-offer) below).
 
 ## Upgrading an Already-Pinned Repo
 
@@ -117,6 +118,8 @@ upgrade-available badge). Upgrading:
 5. Rewrites the `.agentcontrol.json` pin to the new package name and version.
 6. Shows the new package's `release-notes.md` (when the package includes one) in a
    non-modal, resizable window.
+7. Offers the package's `AGENTS.md` template if applicable (see
+   [AGENTS.md Template Offer](#agentsmd-template-offer) below).
 
 There is no rollback if a step fails partway through — a message box reports the error, and
 you are expected to resolve it manually. Any local customizations you may have added inside
@@ -148,7 +151,9 @@ as an informational side action:
   during this check; upgrading always remains a separate, deliberate action. If this
   re-extraction attempt fails (for example, the package source is unreachable, or the pinned
   version is no longer available), a non-blocking warning is shown, but the tool is still
-  launched.
+  launched. A successful re-extraction here also offers the package's `AGENTS.md` template if
+  applicable, consistent with Select Package and Upgrade (see
+  [AGENTS.md Template Offer](#agentsmd-template-offer) below).
 
 # Pulling Changes
 
@@ -275,6 +280,30 @@ directly from the zip and displays it in a non-modal window after a successful e
 upgrade. A package with no `release-notes.md` entry is still extracted successfully — the
 release-notes display is simply skipped.
 
+## AGENTS.md Template Offer
+
+A package zip may also optionally include a root-level `AGENTS.md` entry, following the same
+convention as `release-notes.md`: it is never extracted into any of the four managed folders,
+and it is never deleted or overwritten by a sync.
+
+Whenever a package is extracted — Select Package, Upgrade, or the best-effort
+sync-before-launch — AgentControl checks whether the repo already has its own root-level
+`AGENTS.md` file:
+
+- If the repo **already has** an `AGENTS.md` file, nothing happens: it is never touched,
+  overwritten, or even read.
+- If the repo **has no** `AGENTS.md` file, and the package being applied **has** an
+  `AGENTS.md` template to offer, AgentControl shows a modal Yes/No dialog explaining that the
+  package includes a starting `AGENTS.md` template, that the repo doesn't have one yet, and
+  that you are responsible for customizing it afterward — it is a starting point, not a
+  finished file.
+  - Choosing **Yes** writes the package's template verbatim to the repo's root as
+    `AGENTS.md`.
+  - Choosing **No** records that decision for the repo so you are **not** asked again on a
+    later sync; this preference does not reset automatically — for example, deleting the
+    repo's `AGENTS.md` later does not revive the prompt.
+- If the package has **no** `AGENTS.md` template at all, no prompt is ever shown.
+
 ## Worked Example
 
 A package named `contoso-agents` at version `1.2.0` would be published as a single zip file:
@@ -282,6 +311,7 @@ A package named `contoso-agents` at version `1.2.0` would be published as a sing
 ```text
 contoso-agents-1.2.0.zip
 ├── release-notes.md
+├── AGENTS.md
 ├── .github/
 │   ├── agents/
 │   │   └── ...
@@ -295,7 +325,8 @@ contoso-agents-1.2.0.zip
 
 Only the four `.github/agents`, `.github/standards`, `.github/templates`, and
 `.github/skills` subtrees are extracted into a repo; `release-notes.md` is shown to the user
-but never written to the repo's working directory.
+but never written to the repo's working directory, and `AGENTS.md` is only ever written to
+the repo root if the repo lacks one and the user accepts the offer.
 
 ## Publishing a Package
 

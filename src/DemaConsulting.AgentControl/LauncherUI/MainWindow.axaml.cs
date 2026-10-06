@@ -105,10 +105,13 @@ internal sealed partial class MainWindow : Window
 
     /// <summary>
     ///     Subscribes to a repo card's <see cref="RepoCardViewModel.ErrorOccurred"/>,
-    ///     <see cref="RepoCardViewModel.ReleaseNotesReady"/>, and
-    ///     <see cref="RepoCardViewModel.RemoveRequested"/> events so failures show a message
-    ///     box, successful upgrades open a non-modal <see cref="ReleaseNotesViewer"/>, and a
-    ///     remove request shows a confirmation dialog before actually removing the card.
+    ///     <see cref="RepoCardViewModel.ReleaseNotesReady"/>,
+    ///     <see cref="RepoCardViewModel.RemoveRequested"/>, and
+    ///     <see cref="RepoCardViewModel.AgentsMdTemplateOfferRequested"/> events so failures show
+    ///     a message box, successful upgrades open a non-modal <see cref="ReleaseNotesViewer"/>, a
+    ///     remove request shows a confirmation dialog before actually removing the card, and an
+    ///     AGENTS.md template offer shows a modal <see cref="ConfirmationWindow"/> before writing
+    ///     the template or recording a decline.
     /// </summary>
     /// <param name="card">The card to subscribe to.</param>
     private void AttachCardHandlers(RepoCardViewModel card)
@@ -118,6 +121,7 @@ internal sealed partial class MainWindow : Window
             new ReleaseNotesViewer(new ReleaseNotesViewerViewModel(card.RepoName, releaseNotes)).Show();
         card.RemoveRequested += async (_, _) => await ConfirmAndRemoveCard(card);
         card.SelectPackageRequested += async (_, sourceDirectory) => await ShowSelectPackageDialog(card, sourceDirectory);
+        card.AgentsMdTemplateOfferRequested += async (_, templateContent) => await ShowAgentsMdTemplateOfferDialog(card, templateContent);
     }
 
     /// <summary>
@@ -160,6 +164,35 @@ internal sealed partial class MainWindow : Window
         if (confirmed)
         {
             viewModel.RemoveRepo(card);
+        }
+    }
+
+    /// <summary>
+    ///     Shows the <see cref="ConfirmationWindow"/> offering to place the package's optional
+    ///     <c>AGENTS.md</c> template at <paramref name="card"/>'s repo root, and calls back into
+    ///     <see cref="RepoCardViewModel.AcceptAgentsMdTemplate"/> or
+    ///     <see cref="RepoCardViewModel.DeclineAgentsMdTemplate"/> depending on the user's choice.
+    /// </summary>
+    /// <param name="card">The card that just completed a sync offering the template.</param>
+    /// <param name="templateContent">The template's text content, as carried by
+    ///     <see cref="RepoCardViewModel.AgentsMdTemplateOfferRequested"/>.</param>
+    private async Task ShowAgentsMdTemplateOfferDialog(RepoCardViewModel card, string templateContent)
+    {
+        var confirmed = await new ConfirmationWindow(
+                $"The '{card.RepoName}' agent package includes a starting AGENTS.md template, " +
+                "and this repo does not have one yet.\n\n" +
+                "Would you like AgentControl to add it to the repo root?\n\n" +
+                "This is only a starting point - you are responsible for reviewing and " +
+                "customizing it for this repo afterward.")
+            .ShowDialog<bool>(this);
+
+        if (confirmed)
+        {
+            card.AcceptAgentsMdTemplate(templateContent);
+        }
+        else
+        {
+            card.DeclineAgentsMdTemplate();
         }
     }
 

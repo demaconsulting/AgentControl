@@ -11,10 +11,10 @@ known folders" decision (see `docs/design/agent-control/repo-sync.md`), it perfo
 validate the zip; (2) validate every entry's destination path up front, before anything is
 deleted; (3) delete the four known folders if present; (4) extract only the already-validated
 entries that fall within those same four folders — root-level files such as `release-notes.md`
-are never extracted to disk. Validating every entry before the delete step means an invalid or
-path-traversing entry rejects the whole upgrade without ever touching the existing managed
-folders. Rewriting the `.agentcontrol.json` pin is the caller's responsibility (the
-`RepoConfig` subsystem), so this class stays focused on file operations alone.
+and `AGENTS.md` are never extracted to disk. Validating every entry before the delete step
+means an invalid or path-traversing entry rejects the whole upgrade without ever touching the
+existing managed folders. Rewriting the `.agentcontrol.json` pin is the caller's responsibility
+(the `RepoConfig` subsystem), so this class stays focused on file operations alone.
 
 #### Data Model
 
@@ -57,6 +57,13 @@ entry without extracting it to disk.
 - *Returns*: `string?` — the release notes text, or `null` if the zip has no such entry
   (`AgentControl-PackageZipExtractor-ReadReleaseNotes`).
 
+**ReadAgentsMdTemplate**: Reads the content of the package zip's root-level `AGENTS.md`
+template entry without extracting it to disk, mirroring `ReadReleaseNotes`.
+
+- *Parameters*: `string zipPath`.
+- *Returns*: `string?` — the template text, or `null` if the zip has no such entry
+  (`AgentControl-PackageZipExtractor-ReadAgentsMdTemplate`).
+
 #### Error Handling
 
 `Extract` throws `ArgumentNullException` for a null `zipPath`/`repoRoot`, and
@@ -65,8 +72,9 @@ destination path is invalid (including resolving outside `repoRoot`), a managed 
 be deleted, or extraction fails partway through — wrapping the underlying
 `IOException`/`UnauthorizedAccessException`/`InvalidDataException`/`ArgumentException`/
 `NotSupportedException` with a message naming the zip path and repo root (or the offending
-entry). `ReadReleaseNotes` throws the same `InvalidOperationException` pattern for a zip that
-cannot be opened or whose release-notes entry cannot be read.
+entry). `ReadReleaseNotes` and `ReadAgentsMdTemplate` throw the same
+`InvalidOperationException` pattern for a zip that cannot be opened or whose entry cannot be
+read.
 
 #### Dependencies
 
@@ -78,5 +86,6 @@ cannot be opened or whose release-notes entry cannot be read.
 
 - **RepoCardViewModel** — calls `Extract` (via `ApplyPackageAndShowReleaseNotes`) after a
   Select-Package or Upgrade action, calls `AllManagedFoldersExist` and, on a miss, `Extract`
-  directly during `EnsureAgentFilesSyncedBeforeLaunch`, and calls `ReadReleaseNotes` to obtain
-  the text shown via `ReleaseNotesViewerViewModel`.
+  directly during `EnsureAgentFilesSyncedBeforeLaunch`, calls `ReadReleaseNotes` to obtain
+  the text shown via `ReleaseNotesViewerViewModel`, and calls `ReadAgentsMdTemplate` (after any
+  successful `Extract`) to decide whether to raise its `AgentsMdTemplateOfferRequested` event.
