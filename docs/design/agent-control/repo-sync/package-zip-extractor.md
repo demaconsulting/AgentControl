@@ -29,15 +29,22 @@ consulted by both `Extract` and `AllManagedFoldersExist`.
 **Extract**: Opens/validates the zip, validates every entry's destination path, deletes the
 four managed folders if present, and extracts the already-validated entries into the repo.
 
-- *Parameters*: `string zipPath`, `string repoRoot`.
+- *Parameters*: `string zipPath`, `string repoRoot`, `ILogger? logger = null` (defaults to a
+  fresh `AppLogging.Factory`-resolved logger per call, mirroring `AgentToolLauncher.Launch`'s
+  pattern rather than a cached static field, so logging configured after this class is first
+  touched is never missed for the rest of the process).
 - *Returns*: `void`.
-- *Preconditions*: Neither parameter `null`.
+- *Preconditions*: `zipPath`/`repoRoot` not `null`.
 - *Postconditions*: The four managed folders under `repoRoot` match the zip's contents exactly
   (`AgentControl-PackageZipExtractor-Extract`). An entry with an invalid destination path is
   rejected before any managed folder is deleted, so that failure mode never leaves the repo
   partially upgraded. A delete or extraction I/O failure can still do so — there is
   intentionally no rollback for that case, and it must be resolved manually by the caller, per
-  architecture.md's "Upgrade sequence and failure handling" decision.
+  architecture.md's "Upgrade sequence and failure handling" decision. Logs at `Debug` before
+  starting and `Information` on successful completion (entry count); delete/extraction
+  failures are not separately logged here, since the caller (`RepoCardViewModel`) already logs
+  the wrapped `InvalidOperationException` with repo/package context, and double-logging the
+  same event was avoided.
 
 **AllManagedFoldersExist**: Determines whether all four managed folders currently exist under
 a repo root.
@@ -80,6 +87,11 @@ read.
 
 - **PathHelpers** (`Utilities` subsystem) — `SafePathCombine` resolves every managed-folder
   and zip-entry destination path safely relative to the repo root.
+- **AppLogging**, **ILogger** (`Logging` subsystem) — `Extract` logs its own extraction/delete
+  operations for operational diagnostics, using a string logger category name (rather than the
+  generic `ILogger<PackageZipExtractor>` form used by non-static classes) because a static
+  class cannot be used as a generic type argument — the same convention already established
+  by `AgentToolLauncher`.
 - **.NET BCL** — `System.IO.Compression.ZipFile`/`ZipArchive`.
 
 #### Callers

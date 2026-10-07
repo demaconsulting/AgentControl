@@ -156,11 +156,8 @@ sections:
           - AgentControl-RepoSync-AgentsMdTemplate
           - AgentControl-RepoConfig-AgentsMdDeclinedPersistence
         tests:
-          # No dedicated FlaUI end-to-end test drives the AGENTS.md template offer's modal
-          # ConfirmationWindow dialog; this system requirement is therefore verified via the
-          # underlying view-model's own unit tests - a disclosed granularity limitation,
-          # consistent with AgentControl-System-Settings above, not a fabricated end-to-end
-          # claim.
+          - windows@AgentsMdTemplateOffer_Accept_WritesTemplateToRepoRoot
+          - windows@AgentsMdTemplateOffer_Decline_DoesNotWriteFileAndDoesNotReprompt
           - RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent
           - RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent
           - RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile

@@ -123,3 +123,16 @@ read from `Program.Version` (`AgentControl-LauncherUI-About`). Adding a repo
 (`AgentControl-LauncherUI-AddRepo`) is likewise driven directly by `MainWindowViewModel`
 rather than a dedicated unit, since its logic (path-existence and duplicate-path validation)
 is simple enough not to warrant a separate class.
+
+`MainWindow` explicitly tracks every non-modal child window it opens (`ReleaseNotesViewer`,
+`AboutWindow`) in an `_openChildWindows` list via a `ShowTrackedChildWindow(Window)` helper,
+which also subscribes to each window's `Closed` event to remove it from the list, and force-
+closes any still-open entries from a `MainWindow_Closing` handler before the main window
+itself finishes closing. This deliberately does *not* use Avalonia/Win32 window ownership
+(`Show(owner)`): an earlier attempt at that approach caused an owned child window to actively
+block its owner's own close on Windows, a worse regression than the one being fixed. Without
+either mechanism, these non-owned `.Show()` windows can outlive the main window under
+Avalonia's default `ShutdownMode.OnLastWindowClose`, keeping the process alive and forcing
+slow process-kill fallbacks in automated UI tests that close the main window. Both the
+tracked-window-open and forced-close events are logged (`Debug`/`Information`) via
+`MainWindow`'s `_logger`.

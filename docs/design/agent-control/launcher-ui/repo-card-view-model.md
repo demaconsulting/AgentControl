@@ -38,6 +38,11 @@ with the committed-files result consulting the per-card `CommittedAgentFilesCach
 
 **IsPackageSelectionNeeded**: `bool` (derived) — `PinnedPackageName is null`.
 
+**_logger**: `ILogger<RepoCardViewModel>` (private, via `AppLogging.Factory.CreateLogger<RepoCardViewModel>()`)
+— Used to log the real work this view model performs (launch, pull, upgrade/apply-package,
+AGENTS.md accept/decline), mirroring the logging convention already established by `GitClient`
+and `AgentToolLauncher`. Every call site is guarded by `_logger.IsEnabled(...)`.
+
 **LaunchCommand, PullCommand, UpgradeCommand, SelectPackageCommand, RefreshCommand,
 FavoriteToggleCommand, RemoveCommand**: `RelayCommand` — see Interfaces in
 `docs/design/agent-control/launcher-ui.md`.
@@ -113,9 +118,11 @@ configured source, then applies it via `ApplyPackageAndShowReleaseNotes`.
 `Upgrade` and `ApplySelectedPackage`: extracts the package (blind-delete-and-replace),
 proactively ensures the repo's `.gitignore` covers the four managed agent folders (via
 `EnsureGitIgnoreCoversManagedFolders`, its own non-blocking step — see Error Handling),
-rewrites the pin file (preserving any pre-existing `AgentsMdTemplateDeclined` value), refreshes
-pin/upgrade-status properties, raises `ReleaseNotesReady` with the new package's release
-notes, and finally calls `MaybeOfferAgentsMdTemplate`.
+rewrites the pin file (preserving any pre-existing `AgentsMdTemplateDeclined` value — read via
+its own try/catch that tolerates a corrupt/unreadable existing pin file by defaulting to
+`false` rather than aborting the apply; see Error Handling), refreshes pin/upgrade-status
+properties, raises `ReleaseNotesReady` with the new package's release notes, and finally calls
+`MaybeOfferAgentsMdTemplate`.
 
 **MaybeOfferAgentsMdTemplate** (private): Decides whether to offer the package's optional
 root-level `AGENTS.md` template, called immediately after every successful extraction in both
@@ -139,10 +146,16 @@ prompt.
 
 - *Parameters*: `string templateContent`.
 - *Returns*: `void`.
-- *Postconditions*: Writes `templateContent` verbatim to `AGENTS.md` at the repo root
-  (`AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate`); never writes into any of the four
-  managed folders. On success, sets `StatusMessage`; on failure, raises `ErrorOccurred` rather
-  than throwing.
+- *Postconditions*: Writes `templateContent` verbatim to `AGENTS.md` at the repo root via a
+  create-new (never-overwrite) file write, never into any of the four managed folders
+  (`AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate`). Race-safe against the gap between
+  `MaybeOfferAgentsMdTemplate`'s existence check and this write: opening the file with
+  `FileMode.CreateNew` is isolated into its own try/catch, separate from the subsequent write,
+  so that only a failure to *create* the file (because it already exists) is ever reported as
+  the non-destructive "AGENTS.md already exists" outcome; a failure during the write/flush step
+  that follows a successful create is always reported via `ErrorOccurred` as a genuine error,
+  never misclassified as a pre-existing file. On success or the non-destructive outcome, logs
+  at `Information`; on a genuine failure, logs at `Error`.
 
 **DeclineAgentsMdTemplate**: Persists the user's decision not to adopt the template, called by
 the view layer after the user answers "No".
@@ -179,16 +192,27 @@ non-blocking warning for each rather than propagating or blocking the launch. `P
 `GitClient` and degrade to "unknown"/`false` rather than propagating, since these run as part
 of routine, frequent UI refreshes. `ApplyPackageAndShowReleaseNotes` catches
 `InvalidOperationException` and `DirectoryNotFoundException`, raising `ErrorOccurred` without
-applying a partial pin update. `EnsureGitIgnoreCoversManagedFolders` catches
+applying a partial pin update; its read of a prior pin's `AgentsMdTemplateDeclined` value is
+guarded by its own inner try/catch that treats an `InvalidOperationException` (corrupt/unreadable
+existing pin file) as "no persisted decline" (defaults to `false`) rather than letting it
+propagate to the outer catch and abort the apply after extraction has already succeeded; the
+subsequent `RepoPinStore.Save` call's own failure handling is unchanged. `EnsureGitIgnoreCoversManagedFolders` catches
 `InvalidOperationException` from `GitIgnoreEnsurer.Ensure` separately, in its own nested
 try/catch, raising `ErrorOccurred` as a non-blocking warning without ever propagating — a
 `.gitignore` I/O failure never aborts the pin write or release-notes display. `MaybeOfferAgentsMdTemplate`
 catches `InvalidOperationException`/`ArgumentException`/`NotSupportedException` (covering both
 `PackageZipExtractor.ReadAgentsMdTemplate` and `PathHelpers.SafePathCombine` failure modes) in
 its own non-blocking try/catch, logging nothing further and never propagating.
-`AcceptAgentsMdTemplate` catches `IOException`/`UnauthorizedAccessException`/`ArgumentException`/
-`NotSupportedException` from the file write and raises `ErrorOccurred` rather than throwing
-(it never calls `RepoPinStore`, so `InvalidOperationException` cannot occur on this path).
+`AcceptAgentsMdTemplate` writes via `FileMode.CreateNew` in a step isolated from the
+subsequent write/flush; only that creation step's `IOException` is guarded by a check that the
+target file now exists (another user/process created it after the offer was raised but before
+this call ran) to report a non-destructive, informational `StatusMessage` rather than an
+error. A failure during the write/flush step that follows a successful create is always a
+genuine error (e.g. disk full) and is never misreported as "already exists", since it is
+handled by a separate, later catch. Any `IOException`/`UnauthorizedAccessException`/
+`ArgumentException`/`NotSupportedException` from either step (other than the guarded
+create-time "already exists" case) raises `ErrorOccurred` rather than throwing (it never calls
+`RepoPinStore`, so `InvalidOperationException` cannot occur on this path).
 `DeclineAgentsMdTemplate` catches those same four exception types plus
 `InvalidOperationException` from `RepoPinStore.Load`/`Save` and likewise raises
 `ErrorOccurred` rather than throwing. The constructor
@@ -212,6 +236,10 @@ throws `ArgumentNullException` for a null
   branch, and committed-files queries.
 - **ShellDetector**, **AgentToolLauncher** (`AgentToolLauncher` subsystem) — shell detection
   and process launch.
+- **AppLogging**, **ILogger** (`Logging` subsystem) — `_logger` logs the real business
+  operations this view model performs (launch, pull, upgrade/apply-package, AGENTS.md
+  accept/decline), mirroring the convention already established by `GitClient` and
+  `AgentToolLauncher`.
 - **SelectPackageWindowViewModel** (`LauncherUI` subsystem) — constructed by the view layer
   in response to `SelectPackageRequested`; its `Confirmed` event is wired to
   `ApplySelectedPackage`.

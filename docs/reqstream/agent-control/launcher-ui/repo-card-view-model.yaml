@@ -126,10 +126,13 @@ sections:
           longer available at the source without mutating the existing pin.
         justification: |
           Applies the outcome of the package-selection window while protecting the repo's
-          existing pin state from a stale or now-invalid selection.
+          existing pin state from a stale or now-invalid selection. A corrupt/unreadable
+          existing pin file must not abort an otherwise-successful apply, since the extraction
+          it guards against aborting has already completed by the time the pin is rewritten.
         tests:
           - RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady
           - RepoCardViewModel_ApplySelectedPackage_VersionNoLongerAtSource_RaisesErrorOccurredWithoutMutatingPin
+          - RepoCardViewModel_ApplySelectedPackage_CorruptExistingPinFile_StillAppliesAndWritesNewPin
 
       - id: AgentControl-RepoCardViewModel-AgentsMdTemplateOffer
         title: >-
@@ -161,16 +164,20 @@ sections:
       - id: AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate
         title: >-
           The RepoCardViewModel class shall write a user-accepted AGENTS.md template verbatim
-          to the repo root, and shall raise an error rather than throwing if the file cannot be
-          written.
+          to the repo root without overwriting a pre-existing AGENTS.md file, and shall raise
+          an error rather than throwing if the file cannot be written.
         justification: |
           The user explicitly asked AgentControl to place the starting template, so it must be
           written exactly as offered, at the repo root, not inside any managed folder; a write
           failure must degrade gracefully like every other non-blocking sync side effect in this
-          class.
+          class. Since another user/process may create AGENTS.md in the gap between the offer
+          being raised and the user accepting it, the write must never silently overwrite a
+          file that appeared in that window - doing so would violate the "never touch a
+          pre-existing AGENTS.md" guarantee.
         tests:
           - RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent
           - RepoCardViewModel_AcceptAgentsMdTemplate_WriteFails_RaisesErrorOccurred
+          - RepoCardViewModel_AcceptAgentsMdTemplate_FileCreatedConcurrently_PreservesExistingContentAndReportsNonDestructiveOutcome
 
       - id: AgentControl-RepoCardViewModel-DeclineAgentsMdTemplate
         title: >-

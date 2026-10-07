@@ -20,10 +20,12 @@
 
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.GitIntegration;
+using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
 using DemaConsulting.AgentControl.Utilities;
+using Microsoft.Extensions.Logging;
 using AgentLauncher = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
@@ -105,6 +107,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private bool _hasCommittedAgentFiles;
     private bool _canPull;
     private string? _statusMessage;
+
+    /// <summary>
+    ///     Logs the actual work this card performs on behalf of the user - fetching/applying
+    ///     packages, pulling the repo, and launching the agent tool - so an operator can audit
+    ///     what happened (and when) from the log file, not just from transient UI status text.
+    /// </summary>
+    private readonly ILogger<RepoCardViewModel> _logger = AppLogging.Factory.CreateLogger<RepoCardViewModel>();
 
     /// <summary>
     ///     Initializes a new <see cref="RepoCardViewModel"/> for a single recent repo.
@@ -581,6 +590,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return;
             }
 
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    "Launching agent tool for repo '{RepoName}' ('{RepoPath}') with command '{Command}'",
+                    RepoName, RepoPath, command);
+            }
+
             var shell = new AgentControl.AgentToolLauncher.ShellDetector().Detect();
             var startInfo = AgentLauncher.BuildProcessStartInfo(shell, command, RepoPath);
             AgentLauncher.Launch(startInfo);
@@ -589,6 +605,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
         {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Failed to launch the agent tool for repo '{RepoName}'", RepoName);
+            }
+
             ErrorOccurred?.Invoke(this, $"Failed to launch the agent tool: {ex.Message}");
         }
     }
@@ -690,17 +711,35 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return false;
             }
 
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    "Re-syncing missing managed agent folders for repo '{RepoName}' from pinned package '{PackageName} {Version}'",
+                    RepoName, pinnedPackage.PackageName, pinnedPackage.Version);
+            }
+
             PackageZipExtractor.Extract(pinnedPackage.FilePath, RepoPath);
             MaybeOfferAgentsMdTemplate(pinnedPackage.FilePath);
             return true;
         }
         catch (InvalidOperationException ex)
         {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Failed to sync agent files for repo '{RepoName}' before launch", RepoName);
+            }
+
             ErrorOccurred?.Invoke(this, $"Failed to sync agent files: {ex.Message} Launching anyway.");
             return false;
         }
         catch (DirectoryNotFoundException ex)
         {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(
+                    ex, "Package source is unreachable while syncing repo '{RepoName}' before launch", RepoName);
+            }
+
             ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message} Launching anyway.");
             return false;
         }
@@ -711,6 +750,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     private void Pull()
     {
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation("Pulling repo '{RepoName}' ('{RepoPath}')", RepoName, RepoPath);
+        }
+
         try
         {
             var settings = _getSettings();
@@ -719,10 +763,29 @@ internal sealed class RepoCardViewModel : ViewModelBase
             StatusMessage = result.Succeeded
                 ? "Pull succeeded."
                 : $"Pull failed: {result.StandardError.Trim()}";
+
+            if (result.Succeeded)
+            {
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation("Pull succeeded for repo '{RepoName}'", RepoName);
+                }
+            }
+            else if (_logger.IsEnabled(LogLevel.Warning))
+            {
+                _logger.LogWarning(
+                    "Pull failed for repo '{RepoName}': {StandardError}", RepoName, result.StandardError.Trim());
+            }
+
             RefreshGitStatus();
         }
         catch (InvalidOperationException ex)
         {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Failed to pull repo '{RepoName}'", RepoName);
+            }
+
             ErrorOccurred?.Invoke(this, $"Failed to pull: {ex.Message}");
         }
     }
@@ -740,6 +803,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return;
         }
 
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation(
+                "Checking for an upgrade to package '{PackageName}' for repo '{RepoName}' at source '{PackageSourcePath}'",
+                PinnedPackageName, RepoName, settings.PackageSourcePath);
+        }
+
         DiscoveredPackage? latest;
         try
         {
@@ -747,14 +817,33 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
         catch (DirectoryNotFoundException ex)
         {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Package source is unreachable while upgrading repo '{RepoName}'", RepoName);
+            }
+
             ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message}");
             return;
         }
 
         if (latest is null)
         {
+            if (_logger.IsEnabled(LogLevel.Warning))
+            {
+                _logger.LogWarning(
+                    "No package named '{PackageName}' was found at the configured source for repo '{RepoName}'",
+                    PinnedPackageName, RepoName);
+            }
+
             ErrorOccurred?.Invoke(this, $"No package named '{PinnedPackageName}' was found at the configured source.");
             return;
+        }
+
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation(
+                "Upgrading repo '{RepoName}' to package '{PackageName} {Version}'",
+                RepoName, latest.PackageName, latest.Version);
         }
 
         ApplyPackageAndShowReleaseNotes(latest, $"Upgraded to {latest.Version}.", "Upgrade");
@@ -796,9 +885,23 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         if (selected is null)
         {
+            if (_logger.IsEnabled(LogLevel.Warning))
+            {
+                _logger.LogWarning(
+                    "Package '{PackageName} {Version}' was not found at the configured source for repo '{RepoName}'",
+                    packageName, version, RepoName);
+            }
+
             ErrorOccurred?.Invoke(
                 this, $"Package '{packageName} {version}' was not found at the configured source.");
             return;
+        }
+
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation(
+                "Selecting package '{PackageName} {Version}' for repo '{RepoName}'",
+                packageName, version, RepoName);
         }
 
         ApplyPackageAndShowReleaseNotes(selected, $"Package selected: {packageName} {version}.", "Select Package");
@@ -809,15 +912,35 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     the latest version) and <see cref="ApplySelectedPackage"/> (after resolving the exact
     ///     user-selected version): extracts the package (blind-delete-and-replace), proactively
     ///     ensures the repo's <c>.gitignore</c> covers the managed agent folders, rewrites the
-    ///     pin file, refreshes this card's pin/upgrade-status properties, and raises
-    ///     <see cref="ReleaseNotesReady"/> with the new package's release notes.
+    ///     pin file (tolerating a corrupt/unreadable existing pin file when reading its prior
+    ///     <see cref="RepoPin.AgentsMdTemplateDeclined"/> value - see remarks), refreshes this
+    ///     card's pin/upgrade-status properties, and raises <see cref="ReleaseNotesReady"/> with
+    ///     the new package's release notes.
     /// </summary>
+    /// <remarks>
+    ///     The read of any existing pin file's <see cref="RepoPin.AgentsMdTemplateDeclined"/>
+    ///     value is wrapped in its own try/catch, separate from this method's outer catch: a
+    ///     corrupt/unreadable existing <c>.agentcontrol.json</c> must not abort the apply after
+    ///     extraction has already succeeded, since the pre-feature behavior unconditionally wrote
+    ///     a fresh pin regardless of what (if anything) existed before. A read failure here
+    ///     defaults to "no persisted decline" and the new pin is still written via
+    ///     <see cref="RepoPinStore.Save"/> below; that <c>Save</c> call's own failure handling is
+    ///     unchanged - a genuine write failure there is still reported via the outer
+    ///     <see cref="ErrorOccurred"/> handler.
+    /// </remarks>
     /// <param name="package">The resolved package to apply.</param>
     /// <param name="successMessage">The <see cref="StatusMessage"/> text to set on success.</param>
     /// <param name="failureVerb">A short verb phrase (e.g. <c>"Upgrade"</c>, <c>"Select Package"</c>)
     ///     used to prefix any <see cref="ErrorOccurred"/> message raised on failure.</param>
     private void ApplyPackageAndShowReleaseNotes(DiscoveredPackage package, string successMessage, string failureVerb)
     {
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation(
+                "Fetching and applying package '{PackageName} {Version}' from '{PackageFilePath}' to repo '{RepoName}' ('{RepoPath}')",
+                package.PackageName, package.Version, package.FilePath, RepoName, RepoPath);
+        }
+
         try
         {
             PackageZipExtractor.Extract(package.FilePath, RepoPath);
@@ -825,7 +948,20 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             // Preserve a prior AGENTS.md template decline across re-pinning: this field is
             // orthogonal to the selected package/version and must never be silently reset.
-            var agentsMdTemplateDeclined = RepoPinStore.Load(RepoPath)?.AgentsMdTemplateDeclined ?? false;
+            // A corrupt/unreadable existing pin file must not abort the apply - the extraction
+            // above has already succeeded, so this defaults to "no persisted decline" and lets
+            // the Save below still happen, rather than leaving the repo with newly-extracted
+            // files but a stale pin.
+            bool agentsMdTemplateDeclined;
+            try
+            {
+                agentsMdTemplateDeclined = RepoPinStore.Load(RepoPath)?.AgentsMdTemplateDeclined ?? false;
+            }
+            catch (InvalidOperationException)
+            {
+                agentsMdTemplateDeclined = false;
+            }
+
             RepoPinStore.Save(
                 RepoPath,
                 new RepoPin
@@ -840,15 +976,37 @@ internal sealed class RepoCardViewModel : ViewModelBase
             RefreshPin();
             RefreshUpgradeStatus();
             StatusMessage = successMessage;
+
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    "Applied package '{PackageName} {Version}' to repo '{RepoName}'",
+                    package.PackageName, package.Version, RepoName);
+            }
+
             ReleaseNotesReady?.Invoke(this, releaseNotes);
             MaybeOfferAgentsMdTemplate(package.FilePath);
         }
         catch (InvalidOperationException ex)
         {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(
+                    ex,
+                    "{FailureVerb} failed for package '{PackageName} {Version}' on repo '{RepoName}'",
+                    failureVerb, package.PackageName, package.Version, RepoName);
+            }
+
             ErrorOccurred?.Invoke(this, $"{failureVerb} failed: {ex.Message}");
         }
         catch (DirectoryNotFoundException ex)
         {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(
+                    ex, "Package source is unreachable while applying a package to repo '{RepoName}'", RepoName);
+            }
+
             ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message}");
         }
     }
@@ -911,21 +1069,91 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="templateContent"/> is
     ///     <see langword="null"/>.</exception>
     /// <remarks>
+    ///     <para>
     ///     Writes directly to the repo root - never into any of the four managed folders - since
     ///     a root-level <c>AGENTS.md</c> is a starting point the user is expected to customize
     ///     themselves, not a file blind-deleted/replaced on every subsequent sync.
+    ///     </para>
+    ///     <para>
+    ///     Race-safe against the gap between <see cref="MaybeOfferAgentsMdTemplate"/>'s
+    ///     <c>File.Exists</c> check (which runs before the modal offer is shown) and the user
+    ///     actually accepting the offer: this writes via <see cref="FileMode.CreateNew"/> rather
+    ///     than an unconditional overwrite, so if a user or another process creates
+    ///     <c>AGENTS.md</c> while the dialog is open, this never silently overwrites it. That
+    ///     outcome is treated as a distinct, non-destructive result - reported via
+    ///     <see cref="StatusMessage"/>, not <see cref="ErrorOccurred"/> - rather than a generic
+    ///     failure, mirroring how <see cref="EnsureAgentFilesSyncedBeforeLaunch"/> distinguishes
+    ///     informational outcomes from genuine errors.
+    ///     </para>
     /// </remarks>
     public void AcceptAgentsMdTemplate(string templateContent)
     {
         ArgumentNullException.ThrowIfNull(templateContent);
 
+        var agentsMdPath = PathHelpers.SafePathCombine(RepoPath, AgentsMdFileName);
+
+        // Opening with FileMode.CreateNew is the atomic, race-safe check for "does AGENTS.md
+        // already exist" - but only *this* step can mean "another process created it concurrently
+        // between the offer being raised and now". It is deliberately isolated from the write
+        // below: if CreateNew succeeds and a *later* write/flush step then fails (e.g. disk full),
+        // AGENTS.md now exists only because this call just created it, and that failure must be
+        // reported as a genuine error - not misreported as the benign "already exists" outcome,
+        // which would otherwise happen if both steps shared one File.Exists-guarded catch.
+        FileStream stream;
         try
         {
-            File.WriteAllText(PathHelpers.SafePathCombine(RepoPath, AgentsMdFileName), templateContent);
-            StatusMessage = "Added a starting AGENTS.md template - please review and customize it for this repo.";
+            stream = new FileStream(agentsMdPath, FileMode.CreateNew, FileAccess.Write);
+        }
+        catch (IOException ex) when (File.Exists(agentsMdPath))
+        {
+            // Another user/process created AGENTS.md after the offer was raised but before this
+            // open ran - never overwrite it; this is a non-destructive, informational outcome,
+            // not a failure.
+            StatusMessage = "AGENTS.md already exists for this repo - nothing was written.";
+
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    ex,
+                    "AGENTS.md was created concurrently for repo '{RepoName}'; the offered template was not written",
+                    RepoName);
+            }
+
+            return;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Failed to create AGENTS.md template for repo '{RepoName}'", RepoName);
+            }
+
+            ErrorOccurred?.Invoke(this, $"Failed to write AGENTS.md: {ex.Message}");
+            return;
+        }
+
+        try
+        {
+            using (stream)
+            using (var writer = new StreamWriter(stream))
+            {
+                writer.Write(templateContent);
+            }
+
+            StatusMessage = "Added a starting AGENTS.md template - please review and customize it for this repo.";
+
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation("Wrote a starting AGENTS.md template to repo '{RepoName}'", RepoName);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Failed to write AGENTS.md template for repo '{RepoName}'", RepoName);
+            }
+
             ErrorOccurred?.Invoke(this, $"Failed to write AGENTS.md: {ex.Message}");
         }
     }
@@ -948,9 +1176,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
             var pin = RepoPinStore.Load(RepoPath) ?? new RepoPin { PackageName = PinnedPackageName ?? string.Empty, Version = PinnedPackageVersion ?? string.Empty };
             pin.AgentsMdTemplateDeclined = true;
             RepoPinStore.Save(RepoPath, pin);
+
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation("Recorded AGENTS.md template decline for repo '{RepoName}'", RepoName);
+            }
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Failed to record AGENTS.md template decline for repo '{RepoName}'", RepoName);
+            }
+
             ErrorOccurred?.Invoke(this, $"Failed to record your AGENTS.md decision: {ex.Message}");
         }
     }

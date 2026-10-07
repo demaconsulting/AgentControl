@@ -799,6 +799,47 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that ApplySelectedPackage still completes the apply (extraction and new pin
+    ///     write) when an existing <c>.agentcontrol.json</c> is corrupt/unreadable, instead of
+    ///     aborting with the extracted files left on disk but the stale/corrupt pin in place.
+    ///     Regression test: previously, reading the prior pin's AgentsMdTemplateDeclined value
+    ///     was unguarded, so a corrupt pin file's InvalidOperationException propagated to the
+    ///     method's outer catch and aborted the whole apply after extraction had already
+    ///     succeeded.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_CorruptExistingPinFile_StillAppliesAndWritesNewPin()
+    {
+        // Arrange: a repo whose existing .agentcontrol.json is corrupt/unreadable, and a source
+        // with a package to apply
+        var repoRoot = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(repoRoot, ".agentcontrol.json"), "{ this is not valid json");
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, null, null, settings);
+        string? capturedError = null;
+        card.ErrorOccurred += (_, message) => capturedError = message;
+        string? capturedReleaseNotes = null;
+        card.ReleaseNotesReady += (_, notes) => capturedReleaseNotes = notes;
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert: the apply completed - no error, files extracted, and a fresh pin was written
+        // (defaulting AgentsMdTemplateDeclined to false, since the prior corrupt pin's value
+        // could not be read)
+        Assert.Null(capturedError);
+        Assert.NotNull(capturedReleaseNotes);
+        Assert.True(File.Exists(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
+        var pin = RepoPinStore.Load(repoRoot);
+        Assert.NotNull(pin);
+        Assert.Equal("contoso-agents", pin.PackageName);
+        Assert.Equal("1.0.0", pin.Version);
+        Assert.False(pin.AgentsMdTemplateDeclined);
+    }
+
+    /// <summary>
     ///     Test that ApplySelectedPackage raises AgentsMdTemplateOfferRequested with the
     ///     package's AGENTS.md template content when the repo has no AGENTS.md file and the
     ///     package includes a template.
@@ -960,6 +1001,37 @@ public sealed class RepoCardViewModelTests : IDisposable
 
         // Assert
         Assert.NotNull(capturedError);
+    }
+
+    /// <summary>
+    ///     Test that AcceptAgentsMdTemplate never overwrites an AGENTS.md file that was created
+    ///     (e.g. by the user or another process) after the offer would have been raised but
+    ///     before the user actually accepted it - the race this method's <c>FileMode.CreateNew</c>
+    ///     write guards against. The pre-existing file's content must be preserved, and the
+    ///     outcome must be reported as a non-destructive, informational status rather than a
+    ///     generic error or a silent success.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_AcceptAgentsMdTemplate_FileCreatedConcurrently_PreservesExistingContentAndReportsNonDestructiveOutcome()
+    {
+        // Arrange: a repo with no AGENTS.md at offer time, then another process/user creates one
+        // before the user's "Accept" click is processed
+        var repoRoot = CreateTempDirectory();
+        var card = CreateCard(repoRoot, null, null, new AppSettings());
+        var agentsMdPath = Path.Combine(repoRoot, "AGENTS.md");
+        File.WriteAllText(agentsMdPath, "someone else's content");
+        string? capturedError = null;
+        card.ErrorOccurred += (_, message) => capturedError = message;
+
+        // Act
+        card.AcceptAgentsMdTemplate("# AGENTS\n\nCustomize me.");
+
+        // Assert: the pre-existing file's content survives untouched, no generic error is
+        // raised, and StatusMessage explains the non-destructive outcome
+        Assert.Equal("someone else's content", File.ReadAllText(agentsMdPath));
+        Assert.Null(capturedError);
+        Assert.NotNull(card.StatusMessage);
+        Assert.Contains("already exists", card.StatusMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

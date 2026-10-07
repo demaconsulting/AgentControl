@@ -101,12 +101,14 @@ persistence it depends on. This scenario is tested by
 `windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes`, covering
 `AgentControl-System-Upgrade` and `AgentControl-System-PinFile`.
 
-**AgentControl_AgentsMdTemplate_ApplySelectedPackage_OffersWritesAndRemembersDecline**: No
+**AgentControl_AgentsMdTemplate_ApplySelectedPackage_OffersWritesAndRemembersDecline**: A
 dedicated FlaUI end-to-end scenario drives the AGENTS.md template offer's modal
-`ConfirmationWindow` dialog; this system requirement is therefore verified via
-`RepoCardViewModel`'s own unit tests — a disclosed granularity limitation, consistent with
-`AgentControl-System-Settings` and `AgentControl-System-DiagnosticLogging` below. This
-scenario is tested by
+`ConfirmationWindow` dialog end-to-end (accept writes the template verbatim to the repo root;
+decline neither writes the file nor re-prompts on a later sync, even after a fresh app
+session), exercising the real `MainWindow` event subscription/dialog-routing wiring in
+addition to the `RepoCardViewModel` unit tests that verify the same behavior in isolation.
+These scenarios are tested by `windows@AgentsMdTemplateOffer_Accept_WritesTemplateToRepoRoot`
+and `windows@AgentsMdTemplateOffer_Decline_DoesNotWriteFileAndDoesNotReprompt`, plus
 `RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent`,
 `RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent`, and
 `RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile`, covering

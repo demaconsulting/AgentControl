@@ -19,7 +19,9 @@
 // SOFTWARE.
 
 using System.IO.Compression;
+using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.Utilities;
+using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.RepoSync;
 
@@ -43,6 +45,15 @@ namespace DemaConsulting.AgentControl.RepoSync;
 /// </remarks>
 internal static class PackageZipExtractor
 {
+    /// <summary>
+    ///     Fully qualified logger category name used for this static class's diagnostics.
+    /// </summary>
+    /// <remarks>
+    ///     A string category is used (rather than the generic <c>ILogger&lt;PackageZipExtractor&gt;</c>
+    ///     form) because a static class cannot be used as a generic type argument.
+    /// </remarks>
+    private const string LoggerCategoryName = "DemaConsulting.AgentControl.RepoSync.PackageZipExtractor";
+
     /// <summary>
     ///     Name of the root <c>.github</c> folder under which every managed agent folder lives.
     /// </summary>
@@ -80,6 +91,13 @@ internal static class PackageZipExtractor
     /// </summary>
     /// <param name="zipPath">Path to the agent package zip file.</param>
     /// <param name="repoRoot">Absolute path to the repository root to sync.</param>
+    /// <param name="logger">
+    ///     Logger for extraction diagnostics, or <see langword="null"/> to fall back to
+    ///     <see cref="AppLogging.Factory"/>. Resolved fresh per call (mirroring
+    ///     <see cref="AgentToolLauncher.AgentToolLauncher.Launch"/>'s pattern) rather than a
+    ///     cached static field, so tests that configure logging after this class is first touched
+    ///     are never stuck with a stale no-op logger for the rest of the process.
+    /// </param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="zipPath"/> or
     ///     <paramref name="repoRoot"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
@@ -91,10 +109,17 @@ internal static class PackageZipExtractor
     ///     still do so, and per the class remarks there is no rollback for that case — it must be
     ///     resolved manually by the caller.
     /// </exception>
-    public static void Extract(string zipPath, string repoRoot)
+    public static void Extract(string zipPath, string repoRoot, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(zipPath);
         ArgumentNullException.ThrowIfNull(repoRoot);
+
+        var effectiveLogger = logger ?? AppLogging.Factory.CreateLogger(LoggerCategoryName);
+
+        if (effectiveLogger.IsEnabled(LogLevel.Debug))
+        {
+            effectiveLogger.LogDebug("Extracting package '{ZipPath}' into repo '{RepoRoot}'", zipPath, repoRoot);
+        }
 
         // Step 1: open/validate the zip. If it opens without error, its contents are assumed
         // good per architecture.md — no checksum/signature verification is performed.
@@ -120,11 +145,14 @@ internal static class PackageZipExtractor
         // Step 3: blind-delete the four known folders (if present)
         foreach (var folder in ManagedFolders)
         {
-            DeleteManagedFolder(repoRoot, folder);
+            DeleteManagedFolder(repoRoot, folder, effectiveLogger);
         }
 
         // Step 4: extract the already-validated managed entries, skipping any non-managed/root-
-        // level files such as release-notes.md (those were never added to managedEntries above)
+        // level files such as release-notes.md (those were never added to managedEntries above).
+        // A failure here is reported to the caller (e.g. RepoCardViewModel, which already logs
+        // it with repo/package context) rather than re-logged here, to avoid double-logging the
+        // same event.
         try
         {
             foreach (var (entry, destinationPath) in managedEntries)
@@ -136,6 +164,13 @@ internal static class PackageZipExtractor
         {
             throw new InvalidOperationException(
                 $"Failed to extract package '{zipPath}' into '{repoRoot}': {ex.Message}", ex);
+        }
+
+        if (effectiveLogger.IsEnabled(LogLevel.Information))
+        {
+            effectiveLogger.LogInformation(
+                "Extracted {EntryCount} managed file(s) from package '{ZipPath}' into repo '{RepoRoot}'",
+                managedEntries.Count, zipPath, repoRoot);
         }
     }
 
@@ -269,9 +304,10 @@ internal static class PackageZipExtractor
     /// </summary>
     /// <param name="repoRoot">Absolute path to the repository root.</param>
     /// <param name="relativeFolder">The managed folder's path relative to the repo root.</param>
+    /// <param name="logger">Logger for delete diagnostics, already resolved by the caller.</param>
     /// <exception cref="InvalidOperationException">Thrown when the folder exists but cannot be
     ///     deleted.</exception>
-    private static void DeleteManagedFolder(string repoRoot, string relativeFolder)
+    private static void DeleteManagedFolder(string repoRoot, string relativeFolder, ILogger logger)
     {
         var folderPath = PathHelpers.SafePathCombine(repoRoot, relativeFolder);
 
@@ -283,9 +319,18 @@ internal static class PackageZipExtractor
         try
         {
             Directory.Delete(folderPath, recursive: true);
+
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug("Deleted managed folder '{FolderPath}'", folderPath);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Not re-logged here at Error level: the caller (Extract) wraps and rethrows this as
+            // an InvalidOperationException, and its own caller (e.g. RepoCardViewModel) already
+            // logs that failure with richer repo/package context, so logging it again here would
+            // double-log the same event.
             throw new InvalidOperationException($"Failed to delete folder '{folderPath}': {ex.Message}", ex);
         }
     }

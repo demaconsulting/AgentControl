@@ -106,10 +106,13 @@ covering `AgentControl-RepoCardViewModel-SelectPackage`.
 **RepoCardViewModel_ApplySelectedPackage_RejectsStaleVersionWithoutMutatingPin**: Applying a
 valid chosen name/version updates the pin, extracts files, and raises `ReleaseNotesReady`; a
 version no longer available at the source raises `ErrorOccurred` without mutating the existing
-pin. This scenario is tested by
-`RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady`
-and
+pin; and a corrupt/unreadable existing pin file does not abort the apply - the extraction and
+new pin write still complete, defaulting the carried-over `AgentsMdTemplateDeclined` value to
+`false`. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady`,
 `RepoCardViewModel_ApplySelectedPackage_VersionNoLongerAtSource_RaisesErrorOccurredWithoutMutatingPin`,
+and
+`RepoCardViewModel_ApplySelectedPackage_CorruptExistingPinFile_StillAppliesAndWritesNewPin`,
 covering `AgentControl-RepoCardViewModel-ApplySelectedPackage`.
 
 **RepoCardViewModel_AgentsMdTemplateOffer_FiresOnlyWhenAbsentAndTemplateAvailableAndNotDeclined**:
@@ -132,9 +135,14 @@ covering `AgentControl-RepoCardViewModel-AgentsMdTemplateOffer`.
 
 **RepoCardViewModel_AcceptAgentsMdTemplate_WritesTemplateVerbatimToRepoRoot**: Accepting the
 offer writes the given template content verbatim to `AGENTS.md` at the repo root (never into
-a managed folder). This scenario is tested by
-`RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent`, covering
-`AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate`.
+a managed folder), using a create-new (never-overwrite) write; if `AGENTS.md` was created by
+another user/process in the gap between the offer being raised and being accepted, the
+pre-existing file's content is preserved and the outcome is reported via `StatusMessage` as a
+non-destructive, informational result rather than a generic error. This scenario is tested by
+`RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent`,
+`RepoCardViewModel_AcceptAgentsMdTemplate_WriteFails_RaisesErrorOccurred`, and
+`RepoCardViewModel_AcceptAgentsMdTemplate_FileCreatedConcurrently_PreservesExistingContentAndReportsNonDestructiveOutcome`,
+covering `AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate`.
 
 **RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclineWithoutWritingFileAndDegradesOnFailure**:
 Declining the offer persists the decline in the repo's pin file without writing an

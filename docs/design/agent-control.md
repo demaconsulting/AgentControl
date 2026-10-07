@@ -149,8 +149,9 @@ Copilot CLI), launched inside a detected shell.
 - *Type*: File.
 - *Role*: Provider (`Logging` writes to it via Serilog).
 - *Contract*: Captures process-launch and git-integration detail (exit codes, timing,
-  stderr, Win32 error codes) for troubleshooting; daily files with 14-day retention
-  (`AgentControl-System-DiagnosticLogging`).
+  stderr, Win32 error codes), plus window lifecycle, package fetch/extract, repo pull/upgrade,
+  and AGENTS.md template accept/decline outcomes, for troubleshooting; daily files with
+  14-day retention (`AgentControl-System-DiagnosticLogging`).
 - *Constraints*: Supplements, not replaces, message-box error surfacing; see
   `docs/design/agent-control/logging.md`.
 

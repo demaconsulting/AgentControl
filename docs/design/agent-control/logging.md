@@ -52,9 +52,10 @@ here.
 - *Contract*: Defaults to `NullLoggerFactory` (a safe no-op) so unit tests and any code path
   that runs before `LoggingSetup.Initialize` never null-reference; `LoggingSetup.Initialize`
   overwrites it with the real Serilog-backed factory during application startup. Subsystem
-  classes (e.g. `GitClient`, `AgentToolLauncher`) that were not given an explicit logger fall
-  back to this factory, keeping them coupled only to the portable
-  `Microsoft.Extensions.Logging` abstraction, never to Serilog directly.
+  classes (e.g. `GitClient`, `AgentToolLauncher`, `PackageZipExtractor`, `MainWindow`,
+  `RepoCardViewModel`) that were not given an explicit logger fall back to this factory,
+  keeping them coupled only to the portable `Microsoft.Extensions.Logging` abstraction, never
+  to Serilog directly.
 - *Constraints*: Set exactly once, early in `Program.Main`, before any subsystem is
   constructed; not safe to mutate concurrently with reads that expect a stable factory
   instance for a long-lived logger.
@@ -64,10 +65,16 @@ here.
 `LoggingSetup.Initialize` is the subsystem's sole entry point, realizing architecture.md's
 "Diagnostic file logging via Serilog" decision: message boxes remain the primary in-the-moment
 error surface for users, but a rolling diagnostic log under `<config-dir>\logs\` additionally
-captures process-launch and git-integration detail (exit codes, timing, stderr, Win32 error
-codes) that a message box alone cannot show. This decision superseded the original "no
-application logging" scope exclusion after real-world flaky-process-launch troubleshooting
-proved a message box alone was insufficient to root-cause intermittent failures.
+captures the application's real operational work (process-launch and git-integration detail -
+exit codes, timing, stderr, Win32 error codes - plus window lifecycle, package fetch/extract,
+repo pull/upgrade, and AGENTS.md template accept/decline outcomes) that a message box alone
+cannot show. This decision superseded the original "no application logging" scope exclusion
+after real-world flaky-process-launch troubleshooting proved a message box alone was
+insufficient to root-cause intermittent failures, and was later extended from
+`GitClient`/`AgentToolLauncher` to every subsystem performing real user-visible work
+(`MainWindow`'s window lifecycle, `RepoCardViewModel`'s launch/pull/upgrade/apply-package/
+AGENTS.md orchestration, and `PackageZipExtractor`'s extraction/delete operations) so a stall
+or failure anywhere in that chain is traceable from the log file alone.
 
 `AppLogging` exists purely so production call sites with no convenient path to thread a
 logger through from `Program.Main` (e.g. view models constructed deep inside the Avalonia UI

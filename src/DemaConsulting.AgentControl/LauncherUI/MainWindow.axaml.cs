@@ -26,7 +26,9 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.RepoSync;
+using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
 
@@ -53,12 +55,80 @@ internal sealed partial class MainWindow : Window
     private readonly HashSet<RepoCardViewModel> _dirtyStatusRefreshedCards = [];
 
     /// <summary>
+    ///     Tracks every non-modal <see cref="ReleaseNotesViewer"/>/<see cref="AboutWindow"/>
+    ///     opened from this window, so they can be explicitly closed when this window closes
+    ///     (see <see cref="MainWindow_Closing"/>). These are deliberately opened without an
+    ///     Avalonia owner: owned non-modal windows have been observed to block this window's own
+    ///     close on Windows (the owner cannot finish closing while an owned window remains open),
+    ///     so this window instead takes responsibility for closing them itself.
+    /// </summary>
+    private readonly List<Window> _openChildWindows = [];
+
+    /// <summary>
+    ///     Logs window lifecycle events (child windows opened/closed, this window closing) so an
+    ///     operator can diagnose orphaned-window or shutdown-timing issues from the log file
+    ///     rather than only from live observation.
+    /// </summary>
+    private readonly ILogger<MainWindow> _logger = AppLogging.Factory.CreateLogger<MainWindow>();
+
+    /// <summary>
     ///     Initializes a new <see cref="MainWindow"/>, loading its compiled XAML.
     /// </summary>
     public MainWindow()
     {
         AvaloniaXamlLoader.Load(this);
         DataContextChanged += OnDataContextChanged;
+        Closing += MainWindow_Closing;
+    }
+
+    /// <summary>
+    ///     Opens <paramref name="window"/> non-modally, tracking it in
+    ///     <see cref="_openChildWindows"/> so <see cref="MainWindow_Closing"/> can close it
+    ///     alongside this window, rather than leaving it orphaned.
+    /// </summary>
+    /// <param name="window">The window to open and track.</param>
+    private void ShowTrackedChildWindow(Window window)
+    {
+        _openChildWindows.Add(window);
+        window.Closed += (_, _) =>
+        {
+            _openChildWindows.Remove(window);
+            if (_logger.IsEnabled(LogLevel.Debug))
+            {
+                _logger.LogDebug("Child window {WindowType} closed", window.GetType().Name);
+            }
+        };
+
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug("Opening tracked child window {WindowType}", window.GetType().Name);
+        }
+
+        window.Show();
+    }
+
+    /// <summary>
+    ///     Closes every still-open tracked child window (see <see cref="_openChildWindows"/>)
+    ///     when this window closes, so a <see cref="ReleaseNotesViewer"/>/<see cref="AboutWindow"/>
+    ///     never outlives the main window.
+    /// </summary>
+    /// <param name="sender">This window.</param>
+    /// <param name="e">Closing event arguments (unused).</param>
+    private void MainWindow_Closing(object? sender, WindowClosingEventArgs e)
+    {
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation(
+                "Main window closing; force-closing {ChildWindowCount} open tracked child window(s)",
+                _openChildWindows.Count);
+        }
+
+        // Close() mutates _openChildWindows via each window's Closed handler, so close over a
+        // snapshot rather than the live list.
+        foreach (var window in _openChildWindows.ToArray())
+        {
+            window.Close();
+        }
     }
 
     /// <summary>
@@ -108,17 +178,19 @@ internal sealed partial class MainWindow : Window
     ///     <see cref="RepoCardViewModel.ReleaseNotesReady"/>,
     ///     <see cref="RepoCardViewModel.RemoveRequested"/>, and
     ///     <see cref="RepoCardViewModel.AgentsMdTemplateOfferRequested"/> events so failures show
-    ///     a message box, successful upgrades open a non-modal <see cref="ReleaseNotesViewer"/>, a
-    ///     remove request shows a confirmation dialog before actually removing the card, and an
-    ///     AGENTS.md template offer shows a modal <see cref="ConfirmationWindow"/> before writing
-    ///     the template or recording a decline.
+    ///     a message box, successful upgrades open a non-modal <see cref="ReleaseNotesViewer"/>
+    ///     tracked by this window (see <see cref="ShowTrackedChildWindow"/>, so it closes when
+    ///     this window does, rather than outliving it), a remove request shows a confirmation
+    ///     dialog before actually removing the card, and an AGENTS.md template offer shows a
+    ///     modal <see cref="ConfirmationWindow"/> before writing the template or recording a
+    ///     decline.
     /// </summary>
     /// <param name="card">The card to subscribe to.</param>
     private void AttachCardHandlers(RepoCardViewModel card)
     {
         card.ErrorOccurred += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
         card.ReleaseNotesReady += (_, releaseNotes) =>
-            new ReleaseNotesViewer(new ReleaseNotesViewerViewModel(card.RepoName, releaseNotes)).Show();
+            ShowTrackedChildWindow(new ReleaseNotesViewer(new ReleaseNotesViewerViewModel(card.RepoName, releaseNotes)));
         card.RemoveRequested += async (_, _) => await ConfirmAndRemoveCard(card);
         card.SelectPackageRequested += async (_, sourceDirectory) => await ShowSelectPackageDialog(card, sourceDirectory);
         card.AgentsMdTemplateOfferRequested += async (_, templateContent) => await ShowAgentsMdTemplateOfferDialog(card, templateContent);
@@ -324,12 +396,14 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Opens the non-modal <see cref="AboutWindow"/>.
+    ///     Opens the non-modal <see cref="AboutWindow"/>, tracked by this window (see
+    ///     <see cref="ShowTrackedChildWindow"/>) so it closes when this window does, rather than
+    ///     outliving it.
     /// </summary>
     /// <param name="sender">The clicked "About" button.</param>
     /// <param name="e">Routed event arguments (unused).</param>
-    private static void OpenAboutButton_Click(object? sender, RoutedEventArgs e)
+    private void OpenAboutButton_Click(object? sender, RoutedEventArgs e)
     {
-        new AboutWindow().Show();
+        ShowTrackedChildWindow(new AboutWindow());
     }
 }
