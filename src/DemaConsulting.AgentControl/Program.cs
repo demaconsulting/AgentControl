@@ -121,6 +121,14 @@ internal static class Program
             // process.
             App.Options = options;
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+
+            // Log successful normal termination once the desktop lifetime returns, mirroring
+            // the startup log entry above.
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                logger.LogInformation("AgentControl terminating normally");
+            }
+
             return 0;
         }
         catch (Exception ex)

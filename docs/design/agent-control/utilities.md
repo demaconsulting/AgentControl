@@ -32,6 +32,8 @@ tool units or subsystems; it uses only .NET BCL types (`Path`, `ArgumentNullExce
 `PathHelpers.SafePathCombine` is a pure utility method: it performs no file-system I/O, holds
 no state, and throws immediately on invalid input. All calls to `SafePathCombine` in the
 codebase originate from the `RepoConfig` subsystem (`RepoPinStore`, resolving the per-repo
-`.agentcontrol.json` pin file path) and the `RepoSync` subsystem (`PackageZipExtractor`,
-resolving managed-folder and zip-entry destination paths), each using it to keep a
-caller-supplied repo root from being escaped by a malformed relative path.
+`.agentcontrol.json` pin file path), the `RepoSync` subsystem (`PackageZipExtractor`,
+resolving managed-folder and zip-entry destination paths, and `GitIgnoreEnsurer`, resolving
+the repo-root `.gitignore` path), and the `LauncherUI` subsystem (`RepoCardViewModel`,
+resolving the repo-root `AGENTS.md` path), each using it to keep a caller-supplied repo root
+from being escaped by a malformed relative path.

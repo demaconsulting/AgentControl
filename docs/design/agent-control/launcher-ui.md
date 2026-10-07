@@ -39,10 +39,10 @@ shown in the main window.
   (`GitIntegration`, `RepoSync`, `AgentToolLauncher`, `RepoConfig`) — Launch only once agent
   files are confirmed synced (`AgentControl-LauncherUI-Launch`), Upgrade only when a newer
   version exists at the source (`AgentControl-LauncherUI-Upgrade`) — and raises a view-model
-  event (`LaunchRecorded`, `SelectPackageRequested`, `ReleaseNotesReady`, `ErrorOccurred`,
-  `RemoveRequested`) reporting the outcome. Status badges (upgrade-available, missing-repo,
-  committed-agent-files) are refreshed alongside these actions
-  (`AgentControl-LauncherUI-StatusBadges`).
+  event (`LaunchRecorded`, `SelectPackageRequested`, `ReleaseNotesReady`,
+  `AgentsMdTemplateOfferRequested`, `ErrorOccurred`, `RemoveRequested`) reporting the outcome.
+  Status badges (upgrade-available, missing-repo, committed-agent-files) are refreshed
+  alongside these actions (`AgentControl-LauncherUI-StatusBadges`).
 - *Constraints*: Never mutates state before a required confirmation (see `RemoveRequest`
   below); never launches without a successful ensure-synced check.
 
@@ -92,17 +92,47 @@ name's versions in descending order (defaulting to latest) once a name is chosen
 construction and exposes `IsCustomAgentToolSelected` to drive the settings window's
 custom-command entry field visibility.
 
+`RepoCardViewModel` reuses the existing modal `ConfirmationWindow` (the same Yes/No dialog
+shown for Remove confirmation) to offer a package's optional root-level `AGENTS.md` template
+when the repo has none of its own: `MainWindow` subscribes to
+`AgentsMdTemplateOfferRequested`, shows `ConfirmationWindow` with explanatory text, and calls
+back into `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` depending on the user's answer
+(`AgentControl-LauncherUI-AgentsMdTemplateOffer`). This mirrors the non-modal
+`ReleaseNotesViewer` pattern's event-raise/subscribe structure but intentionally uses a
+*modal* dialog instead, since this prompt requires an explicit yes/no decision before
+proceeding, unlike release notes which are purely informational.
+
 `ViewModelBase` supplies a minimal hand-rolled `INotifyPropertyChanged` implementation (not a
 source-generator package, to keep the dependency surface minimal) used by every view model in
 this subsystem. `RelayCommand` is a minimal hand-rolled `ICommand` used for every command
 property. `FavoriteIconConverter` binds `RepoCardViewModel.IsFavorite` to a filled or outlined
 star `MaterialIconKind` on the repo card's favorite toggle, per architecture.md's "UI icon
-convention" decision. The `.axaml` Views (`MainWindow`, `AboutWindow`, `ConfirmationWindow`,
-`MessageBoxWindow`, `SelectPackageWindow`, `SettingsWindow`) contain no logic beyond Avalonia's
-XAML-loading boilerplate and `AutomationProperties.AutomationId` assignments that let FlaUI
-locate controls; all behavior lives in the view models above. `AboutWindow` (opened via a
+convention" decision. The `.axaml` Views other than `MainWindow`
+(`AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`,
+`SettingsWindow`) contain no logic beyond Avalonia's XAML-loading boilerplate and
+`AutomationProperties.AutomationId` assignments that let FlaUI locate controls; all behavior
+lives in the view models above. `MainWindow`'s code-behind is the one exception: it owns
+dialog-orchestration, view-layer plumbing that requires a live Avalonia `Window` — subscribing
+to each `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`,
+`ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ErrorOccurred`) and deciding which
+dialog/window to show and how to route the user's response back into the view model (e.g.
+calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the `ConfirmationWindow` shown
+for the AGENTS.md template offer). `AboutWindow` (opened via a
 toolbar command with no dedicated view model) shows the application version and copyright
 read from `Program.Version` (`AgentControl-LauncherUI-About`). Adding a repo
 (`AgentControl-LauncherUI-AddRepo`) is likewise driven directly by `MainWindowViewModel`
 rather than a dedicated unit, since its logic (path-existence and duplicate-path validation)
 is simple enough not to warrant a separate class.
+
+`MainWindow` explicitly tracks every non-modal child window it opens (`ReleaseNotesViewer`,
+`AboutWindow`) in an `_openChildWindows` list via a `ShowTrackedChildWindow(Window)` helper,
+which also subscribes to each window's `Closed` event to remove it from the list, and force-
+closes any still-open entries from a `MainWindow_Closing` handler before the main window
+itself finishes closing. This deliberately does *not* use Avalonia/Win32 window ownership
+(`Show(owner)`): an earlier attempt at that approach caused an owned child window to actively
+block its owner's own close on Windows, a worse regression than the one being fixed. Without
+either mechanism, these non-owned `.Show()` windows can outlive the main window under
+Avalonia's default `ShutdownMode.OnLastWindowClose`, keeping the process alive and forcing
+slow process-kill fallbacks in automated UI tests that close the main window. Both the
+tracked-window-open and forced-close events are logged (`Debug`/`Information`) via
+`MainWindow`'s `_logger`.

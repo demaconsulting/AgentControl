@@ -58,3 +58,8 @@ callers receive exceptions directly.
 - **PackageZipExtractor** — calls `SafePathCombine` to construct managed-folder paths for
   `AllManagedFoldersExist` and zip-entry destination paths during `Extract`, so a malicious or
   malformed zip-entry name cannot write outside the target repo.
+- **RepoCardViewModel** (`LauncherUI` subsystem) — calls `SafePathCombine` in
+  `MaybeOfferAgentsMdTemplate` and `AcceptAgentsMdTemplate` to construct the repo-root
+  `AGENTS.md` path, so a malformed repo root cannot escape the repo directory.
+- **GitIgnoreEnsurer** (`RepoSync` subsystem) — calls `SafePathCombine` in `Ensure` to
+  construct the repo-root `.gitignore` path.

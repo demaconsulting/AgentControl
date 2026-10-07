@@ -132,6 +132,61 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
+    ///     Test that AgentsMdTemplateDeclined round-trips through save and load when set true.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_SaveThenLoad_AgentsMdTemplateDeclinedTrue_RoundTrips()
+    {
+        // Arrange: a temp repo root and a pin with the decline flag set
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var pin = new RepoPin { PackageName = "contoso-agents", Version = "1.0.0", AgentsMdTemplateDeclined = true };
+
+            // Act: save then reload from the same repo root
+            RepoPinStore.Save(repoRoot, pin);
+            var loaded = RepoPinStore.Load(repoRoot);
+
+            // Assert: the decline flag round-trips exactly
+            Assert.NotNull(loaded);
+            Assert.True(loaded.AgentsMdTemplateDeclined);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that loading a legacy pin file (written before AgentsMdTemplateDeclined existed)
+    ///     defaults the new field to false rather than throwing or leaving it unset.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_Load_LegacyPinFileMissingAgentsMdTemplateDeclinedField_DefaultsToFalse()
+    {
+        // Arrange: a hand-written legacy .agentcontrol.json with no AgentsMdTemplateDeclined field
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(repoRoot, ".agentcontrol.json"),
+                """{ "PackageName": "contoso-agents", "Version": "1.0.0" }""");
+
+            // Act: load the legacy pin file
+            var loaded = RepoPinStore.Load(repoRoot);
+
+            // Assert: the new field defaults to false (not yet declined), not an exception
+            Assert.NotNull(loaded);
+            Assert.Equal("contoso-agents", loaded.PackageName);
+            Assert.False(loaded.AgentsMdTemplateDeclined);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Creates a unique temporary directory for test isolation.
     /// </summary>
     /// <returns>The created directory's path.</returns>

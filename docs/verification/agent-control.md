@@ -101,6 +101,19 @@ persistence it depends on. This scenario is tested by
 `windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes`, covering
 `AgentControl-System-Upgrade` and `AgentControl-System-PinFile`.
 
+**AgentControl_AgentsMdTemplate_ApplySelectedPackage_OffersWritesAndRemembersDecline**: A
+dedicated FlaUI end-to-end scenario drives the AGENTS.md template offer's modal
+`ConfirmationWindow` dialog end-to-end (accept writes the template verbatim to the repo root;
+decline neither writes the file nor re-prompts on a later sync, even after a fresh app
+session), exercising the real `MainWindow` event subscription/dialog-routing wiring in
+addition to the `RepoCardViewModel` unit tests that verify the same behavior in isolation.
+These scenarios are tested by `windows@AgentsMdTemplateOffer_Accept_WritesTemplateToRepoRoot`
+and `windows@AgentsMdTemplateOffer_Decline_DoesNotWriteFileAndDoesNotReprompt`, plus
+`RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent`,
+`RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent`, and
+`RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile`, covering
+`AgentControl-System-AgentsMdTemplate`.
+
 **AgentControl_Settings_SaveCommand_PersistsEditedPreferences**: `SettingsWindowViewModel`'s
 `SaveCommand` is executed with edited package-source path, git/agent-tool overrides, and shell
 preference; the `onSave` callback receives the current values and `Saved` is raised, proving

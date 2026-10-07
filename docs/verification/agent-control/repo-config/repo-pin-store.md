@@ -35,3 +35,11 @@ overwrites it with the new values, and saving a null pin throws `ArgumentNullExc
 scenario is tested by `RepoPinStore_Save_ExistingPinFile_OverwritesWithNewValues` and
 `RepoPinStore_Save_NullPin_ThrowsArgumentNullException`, covering
 `AgentControl-RepoPinStore-Save`.
+
+**RepoPinStore_AgentsMdTemplateDeclinedRoundTripsAndDefaultsForLegacyFiles**: Saving a pin
+with the `AgentsMdTemplateDeclined` flag set to `true` and reloading it returns the flag
+unchanged, and loading a hand-written legacy pin file that lacks this field entirely returns
+it defaulted to `false` rather than throwing. This scenario is tested by
+`RepoPinStore_SaveThenLoad_AgentsMdTemplateDeclinedTrue_RoundTrips` and
+`RepoPinStore_Load_LegacyPinFileMissingAgentsMdTemplateDeclinedField_DefaultsToFalse`,
+covering `AgentControl-RepoPinStore-Load` and `AgentControl-RepoPinStore-Save`.

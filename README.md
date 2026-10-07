@@ -84,6 +84,19 @@ version of the pinned package is discoverable at the package source. Upgrading r
 same validate → delete → extract → pin sequence and then shows the new package's
 `release-notes.md` (when present) in a non-modal window.
 
+### AGENTS.md template offer
+
+An agent package may optionally include a root-level `AGENTS.md` entry — a starting template,
+not a finished file (the same convention as the existing root-level `release-notes.md` entry:
+it lives outside the four managed folders, so it's never touched by the blind-delete-and-replace
+sync). Whenever a package is extracted (Select Package, Upgrade, or the best-effort
+sync-before-launch) and the repo has no root-level `AGENTS.md` of its own, and the package
+being applied has a template to offer, AgentControl shows a modal Yes/No dialog asking whether
+to place the template at the repo root, clearly noting that you are responsible for
+customizing it afterward. A pre-existing `AGENTS.md` is never touched or overwritten, and if
+you decline, AgentControl remembers that choice for the repo so you're not asked again on
+every subsequent sync.
+
 ### Launching
 
 Click **Launch** to start your configured agentic CLI tool in the repo's working directory.

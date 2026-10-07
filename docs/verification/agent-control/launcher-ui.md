@@ -31,6 +31,8 @@ executable.
 - Removal requires explicit confirmation; no test path removes a card without it.
 - Status badges (upgrade-available, missing-repo, committed-files) reflect the correct
   underlying state for both normal and boundary conditions.
+- The AGENTS.md template offer fires at most once per repo, never overwrites an existing
+  `AGENTS.md`, and a decline is honored on every subsequent sync for that repo.
 
 ### Test Scenarios
 
@@ -114,6 +116,18 @@ source is configured (raising an error instead). This scenario is tested by
 `RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesPinAndRaisesReleaseNotesReady`
 and `RepoCardViewModel_UpgradeCommand_NoPackageSourceConfigured_RaisesErrorOccurred`, covering
 `AgentControl-LauncherUI-Upgrade`.
+
+**LauncherUI_AgentsMdTemplateOffer_OfferedOnceAndNeverOverwritesExistingFile**: After a
+genuine sync (package selection, upgrade, or ensure-synced-before-launch re-extraction), the
+offer is raised with the package's template content when the repo lacks an `AGENTS.md`;
+accepting writes the template verbatim to the repo root; declining persists the decision in
+the pin file without writing a file, and a subsequent sync for the same repo does not
+re-raise the offer. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent`,
+`RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent`,
+`RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile`, and
+`RepoCardViewModel_DeclineAgentsMdTemplate_SubsequentApplySelectedPackage_DoesNotReprompt`,
+covering `AgentControl-LauncherUI-AgentsMdTemplateOffer`.
 
 **LauncherUI_Settings_SaveAndApplyPreservesRecentReposAndUpdatesFields**: The settings
 dialog's `SaveCommand` invokes its `onSave` callback and raises `Saved` with the current

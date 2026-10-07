@@ -165,6 +165,29 @@ sections:
           - RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesPinAndRaisesReleaseNotesReady
           - RepoCardViewModel_UpgradeCommand_NoPackageSourceConfigured_RaisesErrorOccurred
 
+      - id: AgentControl-LauncherUI-AgentsMdTemplateOffer
+        title: >-
+          The LauncherUI subsystem shall offer, via a modal confirmation dialog, to place a
+          package's optional root-level AGENTS.md template at a repo's root whenever a sync
+          genuinely occurs (package selection, upgrade, or the best-effort
+          sync-before-launch) and the repo has no AGENTS.md of its own, shall never show the
+          offer again once the user has declined it for that repo, and shall never overwrite
+          a pre-existing AGENTS.md.
+        justification: |
+          A package may want to seed a repo with a starting AGENTS.md (mirroring the existing
+          release-notes.md root-level-entry convention), but the user must make an explicit,
+          informed choice - reusing the same modal Yes/No dialog pattern already established
+          for destructive/consequential confirmations (e.g. repo removal) - rather than
+          AgentControl silently writing or never offering the file.
+        children:
+          - AgentControl-RepoCardViewModel-AgentsMdTemplateOffer
+          - AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate
+          - AgentControl-RepoCardViewModel-DeclineAgentsMdTemplate
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent
+          - RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent
+          - RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile
+
       - id: AgentControl-LauncherUI-Settings
         title: >-
           The LauncherUI subsystem shall let the user view and edit the package source path,

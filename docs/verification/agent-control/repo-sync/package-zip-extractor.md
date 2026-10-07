@@ -56,3 +56,14 @@ the archive, and reading from a zip with no such entry returns null. This scenar
 by `PackageZipExtractor_ReadReleaseNotes_EntryPresent_ReturnsContentWithoutExtracting` and
 `PackageZipExtractor_ReadReleaseNotes_NoEntry_ReturnsNull`, covering
 `AgentControl-PackageZipExtractor-ReadReleaseNotes`.
+
+**PackageZipExtractor_ReadAgentsMdTemplate_ReturnsContentOrNullWithoutExtractingOrWritingToManagedFolders**:
+Reading the optional root-level AGENTS.md template from a zip that has one returns its
+content without extracting the archive; reading from a zip with no such entry returns null;
+and extracting a zip that has a root-level AGENTS.md entry into a fresh repo never writes an
+AGENTS.md file anywhere under the repo (only the four managed folders are populated). This
+scenario is tested by
+`PackageZipExtractor_ReadAgentsMdTemplate_EntryPresent_ReturnsContentWithoutExtracting`,
+`PackageZipExtractor_ReadAgentsMdTemplate_NoEntry_ReturnsNull`, and
+`PackageZipExtractor_Extract_FreshRepoWithAgentsMdEntry_DoesNotExtractAgentsMdRootEntry`,
+covering `AgentControl-PackageZipExtractor-ReadAgentsMdTemplate`.

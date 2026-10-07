@@ -303,6 +303,92 @@ public class PackageZipExtractorTests
     }
 
     /// <summary>
+    ///     Test that ReadAgentsMdTemplate returns the root-level AGENTS.md template content
+    ///     without extracting anything to disk.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_ReadAgentsMdTemplate_EntryPresent_ReturnsContentWithoutExtracting()
+    {
+        // Arrange: a package zip containing a root-level AGENTS.md entry
+        var zipPath = CreatePackageZipWithAgentsMdTemplate("# AGENTS\n\nCustomize me.");
+        try
+        {
+            // Act: read the AGENTS.md template
+            var template = PackageZipExtractor.ReadAgentsMdTemplate(zipPath);
+
+            // Assert: the content is returned as a string
+            Assert.Equal("# AGENTS\n\nCustomize me.", template);
+        }
+        finally
+        {
+            File.Delete(zipPath);
+        }
+    }
+
+    /// <summary>
+    ///     Test that ReadAgentsMdTemplate returns null when the zip has no root-level AGENTS.md
+    ///     entry.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_ReadAgentsMdTemplate_NoEntry_ReturnsNull()
+    {
+        // Arrange: a package zip with no AGENTS.md entry
+        var zipPath = CreatePackageZip(("agents/copilot.md", "agents v1"));
+        try
+        {
+            // Act: attempt to read the AGENTS.md template
+            var template = PackageZipExtractor.ReadAgentsMdTemplate(zipPath);
+
+            // Assert: no entry means null, not an exception
+            Assert.Null(template);
+        }
+        finally
+        {
+            File.Delete(zipPath);
+        }
+    }
+
+    /// <summary>
+    ///     Test that extracting a package whose zip includes a root-level AGENTS.md entry never
+    ///     writes that entry to the repo root - it is a root-level file, excluded from
+    ///     extraction by the same managed-folder check that excludes release-notes.md.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_FreshRepoWithAgentsMdEntry_DoesNotExtractAgentsMdRootEntry()
+    {
+        // Arrange: a package zip with the four managed folders plus a root-level AGENTS.md entry
+        var zipPath = Path.Combine(Path.GetTempPath(), "agentcontrol_package_" + Guid.NewGuid() + ".zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            var agentsEntry = archive.CreateEntry(".github/agents/copilot.md");
+            using (var writer = new StreamWriter(agentsEntry.Open()))
+            {
+                writer.Write("agents v1");
+            }
+
+            var agentsMdEntry = archive.CreateEntry("AGENTS.md");
+            using var agentsMdWriter = new StreamWriter(agentsMdEntry.Open());
+            agentsMdWriter.Write("# AGENTS\n\nCustomize me.");
+        }
+
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            // Act: extract the package into the repo
+            PackageZipExtractor.Extract(zipPath, repoRoot);
+
+            // Assert: the managed folder content is extracted, but AGENTS.md is not
+            Assert.Equal("agents v1", File.ReadAllText(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
+            Assert.False(File.Exists(Path.Combine(repoRoot, "AGENTS.md")));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Creates a temporary package zip with the four managed folders populated from the
     ///     given (relative-path-under-.github, content) pairs, plus a root-level file that must
     ///     never be extracted.
@@ -341,6 +427,24 @@ public class PackageZipExtractorTests
         using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
         {
             var entry = archive.CreateEntry("release-notes.md");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write(content);
+        }
+
+        return zipPath;
+    }
+
+    /// <summary>
+    ///     Creates a temporary package zip containing only a root-level AGENTS.md entry.
+    /// </summary>
+    /// <param name="content">The AGENTS.md template content.</param>
+    /// <returns>The path to the created zip file.</returns>
+    private static string CreatePackageZipWithAgentsMdTemplate(string content)
+    {
+        var zipPath = Path.Combine(Path.GetTempPath(), "agentcontrol_package_" + Guid.NewGuid() + ".zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("AGENTS.md");
             using var writer = new StreamWriter(entry.Open());
             writer.Write(content);
         }

@@ -2,8 +2,8 @@
 # Software Unit Requirements for the PackageZipExtractor Class
 #
 # PackageZipExtractor extracts a package zip's managed folders into a repo, fully replacing
-# any existing managed-folder contents, and can read a package's release notes without
-# extracting the archive.
+# any existing managed-folder contents, and can read a package's release notes or optional
+# root-level AGENTS.md template without extracting the archive.
 
 sections:
   - title: PackageZipExtractor Unit Requirements
@@ -11,16 +11,23 @@ sections:
       - id: AgentControl-PackageZipExtractor-Extract
         title: >-
           The PackageZipExtractor class shall extract a package zip's managed folders into a
-          repo, creating them when absent and replacing their prior contents when present, and
-          shall reject a file that is not a valid zip archive.
+          repo, creating them when absent and replacing their prior contents when present;
+          shall reject a file that is not a valid zip archive; and shall reject any zip entry
+          that would resolve outside the repo root or outside the four managed folders,
+          without having deleted any pre-existing managed folder beforehand.
         justification: |
           Guarantees the repo's agent files are always an exact match for the pinned
           package's contents, whether this is the first extraction or replacing an older
-          version, and fails clearly on a corrupt input rather than partially extracting it.
+          version, and fails clearly on a corrupt input rather than partially extracting it;
+          a malicious or malformed zip entry (path-traversal/zip-slip) must never write
+          outside a managed folder, and must never leave a repo with its existing managed
+          folders deleted but the replacement files not applied.
         tests:
           - PackageZipExtractor_Extract_FreshRepo_CreatesManagedFoldersOnly
           - PackageZipExtractor_Extract_ExistingManagedFolder_ReplacesOldContents
           - PackageZipExtractor_Extract_InvalidZipFile_ThrowsInvalidOperationException
+          - PackageZipExtractor_Extract_TraversalEntryWithinRepoRoot_DoesNotEscapeManagedFolders
+          - PackageZipExtractor_Extract_EntryEscapesRepoRoot_ThrowsBeforeDeletingManagedFolders
 
       - id: AgentControl-PackageZipExtractor-AllManagedFoldersExist
         title: >-
@@ -45,3 +52,19 @@ sections:
         tests:
           - PackageZipExtractor_ReadReleaseNotes_EntryPresent_ReturnsContentWithoutExtracting
           - PackageZipExtractor_ReadReleaseNotes_NoEntry_ReturnsNull
+
+      - id: AgentControl-PackageZipExtractor-ReadAgentsMdTemplate
+        title: >-
+          The PackageZipExtractor class shall read a package's optional root-level AGENTS.md
+          template entry from its zip without extracting the archive, shall return none when
+          the package has no such entry, and shall never extract a root-level AGENTS.md entry
+          into any of the four managed folders.
+        justification: |
+          Lets the UI offer a starting AGENTS.md template to a repo that lacks one, mirroring
+          the existing release-notes precedent, while keeping the entry out of the
+          blind-delete-and-replace managed folders so it is never silently discarded on a
+          later sync.
+        tests:
+          - PackageZipExtractor_ReadAgentsMdTemplate_EntryPresent_ReturnsContentWithoutExtracting
+          - PackageZipExtractor_ReadAgentsMdTemplate_NoEntry_ReturnsNull
+          - PackageZipExtractor_Extract_FreshRepoWithAgentsMdEntry_DoesNotExtractAgentsMdRootEntry

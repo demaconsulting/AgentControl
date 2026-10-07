@@ -7,7 +7,7 @@
 #   the RepoPin.cs data record, which is folded into this subsystem-level description as it
 #   has no dedicated test file
 # - Subsystem requirements describe the observable behavior of persisting a repo's pinned
-#   package name/version
+#   package name/version and whether the user has declined the AGENTS.md template offer
 
 sections:
   - title: RepoConfig Subsystem Requirements
@@ -26,3 +26,17 @@ sections:
         tests:
           - RepoPinStore_SaveThenLoad_RoundTripsAllFields
           - RepoPinStore_Load_NoPinFile_ReturnsNull
+
+      - id: AgentControl-RepoConfig-AgentsMdDeclinedPersistence
+        title: >-
+          The RepoConfig subsystem shall persist, per repo, whether the user has declined the
+          offer to place the package's AGENTS.md template at the repo root, shall default this
+          flag to false for a pin file written before the flag existed, and shall never reset
+          an already-declined flag back to false.
+        justification: |
+          Ensures the user is prompted at most once per repo for the AGENTS.md template offer,
+          without requiring a migration step for pin files written by an earlier AgentControl
+          version that predates this field.
+        tests:
+          - RepoPinStore_SaveThenLoad_AgentsMdTemplateDeclinedTrue_RoundTrips
+          - RepoPinStore_Load_LegacyPinFileMissingAgentsMdTemplateDeclinedField_DefaultsToFalse

@@ -48,9 +48,12 @@ Marked `[STAThread]` because Windows OLE clipboard operations (cut/copy/paste in
 parsed configuration-directory override — before the Avalonia app builder runs, so
 startup-time failures are also captured on disk — then sets `App.Options` and calls
 `BuildAvaloniaApp().StartWithClassicDesktopLifetime(args)` (`AgentControl-Program-Bootstrap`).
-Any unhandled exception escaping the desktop lifetime is logged at `Critical` and wrapped in
-an `InvalidOperationException` before being rethrown; a `finally` block always calls
-`Log.CloseAndFlush()` so buffered log entries are not lost.
+Once `StartWithClassicDesktopLifetime` returns (i.e. the desktop lifetime has shut down
+normally), logs an `Information`-level "AgentControl terminating normally" entry, symmetric
+with the startup log entry, before returning 0. Any unhandled exception escaping the desktop
+lifetime is logged at `Critical` and wrapped in an `InvalidOperationException` before being
+rethrown; a `finally` block always calls `Log.CloseAndFlush()` so buffered log entries are
+not lost.
 
 **BuildAvaloniaApp**: Configures the Avalonia `AppBuilder` used to run `App`.
 

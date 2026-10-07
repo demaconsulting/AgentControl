@@ -799,6 +799,364 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that ApplySelectedPackage still completes the apply (extraction and new pin
+    ///     write) when an existing <c>.agentcontrol.json</c> is corrupt/unreadable, instead of
+    ///     aborting with the extracted files left on disk but the stale/corrupt pin in place.
+    ///     Regression test: previously, reading the prior pin's AgentsMdTemplateDeclined value
+    ///     was unguarded, so a corrupt pin file's InvalidOperationException propagated to the
+    ///     method's outer catch and aborted the whole apply after extraction had already
+    ///     succeeded.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_CorruptExistingPinFile_StillAppliesAndWritesNewPin()
+    {
+        // Arrange: a repo whose existing .agentcontrol.json is corrupt/unreadable, and a source
+        // with a package to apply
+        var repoRoot = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(repoRoot, ".agentcontrol.json"), "{ this is not valid json");
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, null, null, settings);
+        string? capturedError = null;
+        card.ErrorOccurred += (_, message) => capturedError = message;
+        string? capturedReleaseNotes = null;
+        card.ReleaseNotesReady += (_, notes) => capturedReleaseNotes = notes;
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert: the apply completed - no error, files extracted, and a fresh pin was written
+        // (defaulting AgentsMdTemplateDeclined to false, since the prior corrupt pin's value
+        // could not be read)
+        Assert.Null(capturedError);
+        Assert.NotNull(capturedReleaseNotes);
+        Assert.True(File.Exists(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
+        var pin = RepoPinStore.Load(repoRoot);
+        Assert.NotNull(pin);
+        Assert.Equal("contoso-agents", pin.PackageName);
+        Assert.Equal("1.0.0", pin.Version);
+        Assert.False(pin.AgentsMdTemplateDeclined);
+    }
+
+    /// <summary>
+    ///     Test that ApplySelectedPackage raises AgentsMdTemplateOfferRequested with the
+    ///     package's AGENTS.md template content when the repo has no AGENTS.md file and the
+    ///     package includes a template.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent()
+    {
+        // Arrange: a never-pinned repo with no AGENTS.md, and a package with an AGENTS.md template
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0", agentsMdTemplate: "# AGENTS\n\nCustomize me.");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, null, null, settings);
+        string? capturedTemplate = null;
+        card.AgentsMdTemplateOfferRequested += (_, template) => capturedTemplate = template;
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert: the offer is raised with the template's content
+        Assert.Equal("# AGENTS\n\nCustomize me.", capturedTemplate);
+    }
+
+    /// <summary>
+    ///     Test that ApplySelectedPackage never raises AgentsMdTemplateOfferRequested when the
+    ///     repo already has a root-level AGENTS.md file, and never overwrites its content.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_AgentsMdAlreadyExists_DoesNotRaiseAgentsMdTemplateOfferRequested()
+    {
+        // Arrange: a repo with a pre-existing, user-authored AGENTS.md file, and a package with
+        // a template that must never overwrite it
+        var repoRoot = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(repoRoot, "AGENTS.md"), "my own content");
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0", agentsMdTemplate: "# AGENTS\n\nCustomize me.");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, null, null, settings);
+        var offerRaised = false;
+        card.AgentsMdTemplateOfferRequested += (_, _) => offerRaised = true;
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert: no offer, and the existing file is untouched
+        Assert.False(offerRaised);
+        Assert.Equal("my own content", File.ReadAllText(Path.Combine(repoRoot, "AGENTS.md")));
+    }
+
+    /// <summary>
+    ///     Test that ApplySelectedPackage never raises AgentsMdTemplateOfferRequested when the
+    ///     package zip has no root-level AGENTS.md entry at all.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_PackageHasNoAgentsMdTemplate_DoesNotRaiseAgentsMdTemplateOfferRequested()
+    {
+        // Arrange: a never-pinned repo with no AGENTS.md, and a package with no AGENTS.md template
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, null, null, settings);
+        var offerRaised = false;
+        card.AgentsMdTemplateOfferRequested += (_, _) => offerRaised = true;
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert: no template to offer, so no offer is raised
+        Assert.False(offerRaised);
+    }
+
+    /// <summary>
+    ///     Test that ApplySelectedPackage never raises AgentsMdTemplateOfferRequested again once
+    ///     the user has previously declined the offer for this repo.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_PreviouslyDeclined_DoesNotRaiseAgentsMdTemplateOfferRequestedAgain()
+    {
+        // Arrange: a never-pinned repo with no AGENTS.md but a pre-existing pin file recording a
+        // prior decline, and a package with an AGENTS.md template
+        var repoRoot = CreateTempDirectory();
+        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = string.Empty, Version = string.Empty, AgentsMdTemplateDeclined = true });
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0", agentsMdTemplate: "# AGENTS\n\nCustomize me.");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, null, null, settings);
+        var offerRaised = false;
+        card.AgentsMdTemplateOfferRequested += (_, _) => offerRaised = true;
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert: the prior decline is honored - no re-prompt
+        Assert.False(offerRaised);
+    }
+
+    /// <summary>
+    ///     Test that UpgradeCommand (the other ApplyPackageAndShowReleaseNotes call site) also
+    ///     raises AgentsMdTemplateOfferRequested when applicable, consistent with
+    ///     ApplySelectedPackage.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_UpgradeCommand_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent()
+    {
+        // Arrange: a repo pinned to an older version, with no AGENTS.md, and a newer package at
+        // the source that includes an AGENTS.md template
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0", agentsMdTemplate: "# AGENTS\n\nCustomize me.");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings);
+        string? capturedTemplate = null;
+        card.AgentsMdTemplateOfferRequested += (_, template) => capturedTemplate = template;
+
+        // Act
+        card.UpgradeCommand.Execute(null);
+
+        // Assert: the offer is raised with the template's content
+        Assert.Equal("# AGENTS\n\nCustomize me.", capturedTemplate);
+    }
+
+    /// <summary>
+    ///     Test that AcceptAgentsMdTemplate writes the given content to the repo root as
+    ///     AGENTS.md.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent()
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        var card = CreateCard(repoRoot, null, null, new AppSettings());
+
+        // Act
+        card.AcceptAgentsMdTemplate("# AGENTS\n\nCustomize me.");
+
+        // Assert: the file now exists at the repo root with the given content
+        var agentsMdPath = Path.Combine(repoRoot, "AGENTS.md");
+        Assert.True(File.Exists(agentsMdPath));
+        Assert.Equal("# AGENTS\n\nCustomize me.", File.ReadAllText(agentsMdPath));
+    }
+
+    /// <summary>
+    ///     Test that AcceptAgentsMdTemplate raises ErrorOccurred when the AGENTS.md file cannot be
+    ///     written (the target path is forced to be a directory rather than a file).
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_AcceptAgentsMdTemplate_WriteFails_RaisesErrorOccurred()
+    {
+        // Arrange: a repo whose "AGENTS.md" path is forced to be a directory
+        var repoRoot = CreateTempDirectory();
+        Directory.CreateDirectory(Path.Combine(repoRoot, "AGENTS.md"));
+        var card = CreateCard(repoRoot, null, null, new AppSettings());
+        string? capturedError = null;
+        card.ErrorOccurred += (_, message) => capturedError = message;
+
+        // Act
+        card.AcceptAgentsMdTemplate("# AGENTS\n\nCustomize me.");
+
+        // Assert
+        Assert.NotNull(capturedError);
+    }
+
+    /// <summary>
+    ///     Test that AcceptAgentsMdTemplate never overwrites an AGENTS.md file that was created
+    ///     (e.g. by the user or another process) after the offer would have been raised but
+    ///     before the user actually accepted it - the race this method's <c>FileMode.CreateNew</c>
+    ///     write guards against. The pre-existing file's content must be preserved, and the
+    ///     outcome must be reported as a non-destructive, informational status rather than a
+    ///     generic error or a silent success.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_AcceptAgentsMdTemplate_FileCreatedConcurrently_PreservesExistingContentAndReportsNonDestructiveOutcome()
+    {
+        // Arrange: a repo with no AGENTS.md at offer time, then another process/user creates one
+        // before the user's "Accept" click is processed
+        var repoRoot = CreateTempDirectory();
+        var card = CreateCard(repoRoot, null, null, new AppSettings());
+        var agentsMdPath = Path.Combine(repoRoot, "AGENTS.md");
+        File.WriteAllText(agentsMdPath, "someone else's content");
+        string? capturedError = null;
+        card.ErrorOccurred += (_, message) => capturedError = message;
+
+        // Act
+        card.AcceptAgentsMdTemplate("# AGENTS\n\nCustomize me.");
+
+        // Assert: the pre-existing file's content survives untouched, no generic error is
+        // raised, and StatusMessage explains the non-destructive outcome
+        Assert.Equal("someone else's content", File.ReadAllText(agentsMdPath));
+        Assert.Null(capturedError);
+        Assert.NotNull(card.StatusMessage);
+        Assert.Contains("already exists", card.StatusMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that DeclineAgentsMdTemplate persists the declined flag in the repo's pin file,
+    ///     without writing an AGENTS.md file, and that a subsequent sync does not re-prompt.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile()
+    {
+        // Arrange: a repo with an existing pin (so the decline is recorded against it)
+        var repoRoot = CreateTempDirectory();
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", new AppSettings());
+
+        // Act
+        card.DeclineAgentsMdTemplate();
+
+        // Assert: the pin file now records the decline, and no AGENTS.md was written
+        var pin = RepoPinStore.Load(repoRoot);
+        Assert.NotNull(pin);
+        Assert.True(pin.AgentsMdTemplateDeclined);
+        Assert.Equal("contoso-agents", pin.PackageName);
+        Assert.False(File.Exists(Path.Combine(repoRoot, "AGENTS.md")));
+    }
+
+    /// <summary>
+    ///     Test that a declined offer, once persisted, is not repeated on a subsequent sync call
+    ///     for the same repo.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_DeclineAgentsMdTemplate_SubsequentApplySelectedPackage_DoesNotReprompt()
+    {
+        // Arrange: a never-pinned repo, a package with an AGENTS.md template, and a first apply
+        // that raises the offer and is then declined
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0", agentsMdTemplate: "# AGENTS\n\nCustomize me.");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, null, null, settings);
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+        card.DeclineAgentsMdTemplate();
+
+        // Act: apply the same package again (e.g. a subsequent sync) and check for a re-prompt
+        var offerRaisedAgain = false;
+        card.AgentsMdTemplateOfferRequested += (_, _) => offerRaisedAgain = true;
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert: no re-prompt
+        Assert.False(offerRaisedAgain);
+    }
+
+    /// <summary>
+    ///     Test that EnsureAgentFilesSyncedBeforeLaunch's re-extraction branch also raises
+    ///     AgentsMdTemplateOfferRequested when applicable, consistent with the Select-Package and
+    ///     Upgrade call sites, since it is the third of the three sync call sites.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ReExtractsAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequested()
+    {
+        // Arrange: a repo pinned to 1.0.0, with no managed folders present on disk yet (so a
+        // re-extraction occurs), no AGENTS.md, and a source whose pinned package includes an
+        // AGENTS.md template
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0", agentsMdTemplate: "# AGENTS\n\nCustomize me.");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings);
+        string? capturedTemplate = null;
+        card.AgentsMdTemplateOfferRequested += (_, template) => capturedTemplate = template;
+
+        // Act
+        var result = card.EnsureAgentFilesSyncedBeforeLaunch();
+
+        // Assert: the re-extraction occurred and the offer was raised
+        Assert.True(result);
+        Assert.Equal("# AGENTS\n\nCustomize me.", capturedTemplate);
+    }
+
+    /// <summary>
+    ///     Test that EnsureAgentFilesSyncedBeforeLaunch never raises AgentsMdTemplateOfferRequested
+    ///     (and never reads the pinned package's zip at all) when the managed folders already
+    ///     exist - the offer must only ever fire when a sync genuinely happens, not as a standing
+    ///     per-launch check.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FoldersAlreadyPresent_NeverReadsZipOrRaisesOffer()
+    {
+        // Arrange: a pinned repo with all four managed folders already present, and no
+        // configured package source at all (so a zip read, if attempted, would fail/throw -
+        // proving this path never even tries to resolve or read the pinned package's zip)
+        var repoRoot = CreateTempDirectory();
+        CreateManagedFolders(repoRoot);
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", new AppSettings());
+        var offerRaised = false;
+        card.AgentsMdTemplateOfferRequested += (_, _) => offerRaised = true;
+
+        // Act
+        var result = card.EnsureAgentFilesSyncedBeforeLaunch();
+
+        // Assert: no offer raised
+        Assert.True(result);
+        Assert.False(offerRaised);
+    }
+
+    /// <summary>
+    ///     Test that DeclineAgentsMdTemplate raises ErrorOccurred when the pin file cannot be
+    ///     written (the pin file path is forced to be a directory rather than a file).
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_DeclineAgentsMdTemplate_PinWriteFails_RaisesErrorOccurred()
+    {
+        // Arrange: a repo whose ".agentcontrol.json" path is forced to be a directory
+        var repoRoot = CreateTempDirectory();
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".agentcontrol.json"));
+        var card = CreateCard(repoRoot, null, null, new AppSettings());
+        string? capturedError = null;
+        card.ErrorOccurred += (_, message) => capturedError = message;
+
+        // Act
+        card.DeclineAgentsMdTemplate();
+
+        // Assert
+        Assert.NotNull(capturedError);
+    }
+
+    /// <summary>
     ///     Test that EnsureAgentFilesSyncedBeforeLaunch returns true with a non-blocking
     ///     informational StatusMessage (and never raises ErrorOccurred) when no pin exists at
     ///     all - per the amended never-blocks-launch contract, having no pin is an acceptable
@@ -1015,7 +1373,8 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     Creates a minimal package zip named <c>{packageName}-{version}.zip</c> at
     ///     <paramref name="sourceDir"/>, populating all four managed folders (so
     ///     <see cref="PackageZipExtractor.AllManagedFoldersExist"/> is true after extraction) and
-    ///     optionally including a root-level release notes entry.
+    ///     optionally including a root-level release notes entry and/or a root-level AGENTS.md
+    ///     template entry.
     /// </summary>
     /// <param name="sourceDir">The package-source directory to create the zip in.</param>
     /// <param name="packageName">The package base name.</param>
@@ -1024,8 +1383,11 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     to omit the entry entirely.</param>
     /// <param name="marker">The content written to <c>.github/agents/copilot.md</c>, used by
     ///     tests to distinguish which package version was actually extracted.</param>
+    /// <param name="agentsMdTemplate">The root-level AGENTS.md template content, or
+    ///     <see langword="null"/> to omit the entry entirely.</param>
     private void CreatePackageZip(
-        string sourceDir, string packageName, string version, string? releaseNotes = null, string marker = "agents content")
+        string sourceDir, string packageName, string version, string? releaseNotes = null,
+        string marker = "agents content", string? agentsMdTemplate = null)
     {
         var zipPath = Path.Combine(sourceDir, $"{packageName}-{version}.zip");
         using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
@@ -1037,6 +1399,11 @@ public sealed class RepoCardViewModelTests : IDisposable
         if (releaseNotes is not null)
         {
             AddZipEntry(archive, "release-notes.md", releaseNotes);
+        }
+
+        if (agentsMdTemplate is not null)
+        {
+            AddZipEntry(archive, "AGENTS.md", agentsMdTemplate);
         }
 
         _tempPaths.Add(zipPath);

@@ -22,14 +22,27 @@ day as a quick-launch utility for AI-assisted development sessions.
 
 - Recent-repos list with per-repo launch, git-pull, and agent-package
   sync/upgrade actions
-- Reading/writing a per-repo `.agentcontrol.json` pin file (package name +
-  pinned semantic version)
+- Reading/writing a per-repo `.agentcontrol.json` pin file (package name,
+  pinned semantic version, and whether the user has declined the AGENTS.md
+  template offer for this repo)
 - Fetching agent package zip files from a configurable filesystem path (local
   drive, mapped drive, or UNC path)
 - Detecting when a newer agent package version is available and prompting the
   user to upgrade
 - Blind-delete-and-replace sync of the four known agent folders
 - Displaying package release notes in a non-modal window after upgrade
+- **AGENTS.md template offer:** an agent package zip may optionally contain a
+  root-level `AGENTS.md` entry (same convention as the existing root-level
+  `release-notes.md` entry — outside the four managed folders, so it is never
+  blind-deleted/replaced on sync). When a sync/extract happens (initial
+  package selection, upgrade, or the ensure-synced-before-launch best-effort
+  sync) and the repo has no root-level `AGENTS.md` of its own, and the
+  package being applied has a template to offer, the user is shown a modal
+  Yes/No dialog asking whether to place the template at the repo root,
+  clearly noting they are responsible for customizing it afterward. A
+  pre-existing `AGENTS.md` is never touched or overwritten, and a user's
+  decline is persisted in `.agentcontrol.json` so they are never re-prompted
+  for that repo again
 - Launching a configurable agentic CLI tool in a configurable/auto-detected
   shell, in the repo's working directory
 - Per-user settings (package source path, git executable override, agent tool
@@ -45,7 +58,8 @@ day as a quick-launch utility for AI-assisted development sessions.
   yet: a "Select Package..." action that lists the distinct package base
   names discoverable at the configured source, lets the user pick one (and,
   within it, a version — defaulting to latest), then performs the same
-  extract-and-pin sequence as an upgrade
+  extract-and-pin sequence as an upgrade (including the AGENTS.md template
+  offer described above)
 - **Ensure-synced-before-launch:** clicking Launch first attempts a best-effort
   sync of the four known agent folders for a repo that already has a pin; if
   any are missing (e.g. a fresh clone, or a `.gitignore`'d folder that was
@@ -55,7 +69,8 @@ day as a quick-launch utility for AI-assisted development sessions.
   files skips the sync entirely (its managed folders are never touched), a
   repo with no pin at all launches anyway with an informational message, and
   a failed re-extraction surfaces a non-blocking warning while the launch
-  still proceeds
+  still proceeds. A re-extraction here also triggers the AGENTS.md template
+  offer described above, consistent with the other two sync call sites
 - A simple About dialog (app version, copyright, license) reachable from the
   main window, so the running build can be identified without inspecting
   file properties
@@ -102,12 +117,15 @@ AgentControl
 │   ├── PackageZipExtractor - opens/validates the new zip, updates the pin
 │   │                         file, deletes the 4 known folders, extracts the
 │   │                         new files (excluding root-level files such as
-│   │                         release-notes.md)
+│   │                         release-notes.md and AGENTS.md), and can read
+│   │                         either root-level file's content without
+│   │                         extracting it
 │   └── ReleaseNotesViewer - non-modal, resizable dialog displaying the new
 │                            package's release-notes.md after a successful
 │                            upgrade
 ├── RepoConfig - reads/writes the per-repo .agentcontrol.json pin file
-│                (package name + pinned version; no "latest"/unpinned mode)
+│                (package name + pinned version + whether the user declined
+│                the AGENTS.md template offer; no "latest"/unpinned mode)
 ├── AgentToolLauncher - detects installed shells (prefers highest available
 │                       PowerShell/pwsh, falls back to Windows PowerShell 5,
 │                       falls back to cmd; uses the default shell on
@@ -288,8 +306,9 @@ to this document's own Purpose statement. The following closes that gap:
      (descending), defaulting the selection to the latest.
   3. On confirm, runs the same extract-and-pin sequence as `Upgrade()`
      (validate zip → delete four folders if present → extract → write pin →
-     show release notes), reusing `PackageZipExtractor`/`RepoPinStore`
-     rather than duplicating that logic.
+     show release notes → offer the AGENTS.md template if applicable),
+     reusing `PackageZipExtractor`/`RepoPinStore` rather than duplicating
+     that logic.
 - **Package name/version splitting algorithm** (needed because
   `PackageSource` today only matches versions for an *already-known* name):
   for each `*.zip` file's base name, scan its hyphens left-to-right; for each

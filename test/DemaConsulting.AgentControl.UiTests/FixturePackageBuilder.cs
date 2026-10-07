@@ -39,12 +39,15 @@ internal static class FixturePackageBuilder
     /// <param name="packageName">The package base name, e.g. <c>"contoso-agents"</c>.</param>
     /// <param name="version">The package's semantic version, e.g. <c>"1.0.0"</c>.</param>
     /// <param name="releaseNotes">The content of the root-level <c>release-notes.md</c> entry.</param>
+    /// <param name="agentsMdTemplate">The content of a root-level <c>AGENTS.md</c> template
+    ///     entry, or <see langword="null"/> (the default) to omit the entry entirely.</param>
     /// <returns>The absolute path to the created zip file.</returns>
     public static string Create(
         string sourceDirectory,
         string packageName,
         string version,
-        string releaseNotes = "# Release Notes\n\nInitial fixture package.\n")
+        string releaseNotes = "# Release Notes\n\nInitial fixture package.\n",
+        string? agentsMdTemplate = null)
     {
         Directory.CreateDirectory(sourceDirectory);
 
@@ -61,6 +64,11 @@ internal static class FixturePackageBuilder
         AddTextEntry(archive, ".github/templates/test.md", "# Test Template\n");
         AddTextEntry(archive, ".github/skills/test.md", "# Test Skill\n");
         AddTextEntry(archive, "release-notes.md", releaseNotes);
+
+        if (agentsMdTemplate is not null)
+        {
+            AddTextEntry(archive, "AGENTS.md", agentsMdTemplate);
+        }
 
         return zipPath;
     }

@@ -22,6 +22,10 @@ invocations are not parallelized with other tests using real process launches).
 - Launch is never blocked by the outcome of the best-effort ensure-synced check.
 - Upgrade and select-package flows never mutate the pin when their preconditions are not met.
 - Remove requests never mutate state on their own.
+- The AGENTS.md template offer fires only when the repo genuinely has no AGENTS.md and the
+  package genuinely has a template to offer, never re-fires after a decline is persisted, and
+  never fires when the ensure-synced-before-launch check found the managed folders already
+  present.
 
 #### Test Scenarios
 
@@ -102,11 +106,52 @@ covering `AgentControl-RepoCardViewModel-SelectPackage`.
 **RepoCardViewModel_ApplySelectedPackage_RejectsStaleVersionWithoutMutatingPin**: Applying a
 valid chosen name/version updates the pin, extracts files, and raises `ReleaseNotesReady`; a
 version no longer available at the source raises `ErrorOccurred` without mutating the existing
-pin. This scenario is tested by
-`RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady`
-and
+pin; and a corrupt/unreadable existing pin file does not abort the apply - the extraction and
+new pin write still complete, defaulting the carried-over `AgentsMdTemplateDeclined` value to
+`false`. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady`,
 `RepoCardViewModel_ApplySelectedPackage_VersionNoLongerAtSource_RaisesErrorOccurredWithoutMutatingPin`,
+and
+`RepoCardViewModel_ApplySelectedPackage_CorruptExistingPinFile_StillAppliesAndWritesNewPin`,
 covering `AgentControl-RepoCardViewModel-ApplySelectedPackage`.
+
+**RepoCardViewModel_AgentsMdTemplateOffer_FiresOnlyWhenAbsentAndTemplateAvailableAndNotDeclined**:
+After a successful extraction during package selection, upgrade, or the
+ensure-synced-before-launch re-extraction, the offer fires with the template's content when
+the repo has no `AGENTS.md` and the package has a template; it does not fire when the repo
+already has an `AGENTS.md` (which is left untouched), when the package has no template, when
+a prior decline is on record for the repo, or when the ensure-synced-before-launch check found
+all four managed folders already present (so no re-extraction, and no zip read, occurred at
+all). This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent`,
+`RepoCardViewModel_ApplySelectedPackage_AgentsMdAlreadyExists_DoesNotRaiseAgentsMdTemplateOfferRequested`,
+`RepoCardViewModel_ApplySelectedPackage_PackageHasNoAgentsMdTemplate_DoesNotRaiseAgentsMdTemplateOfferRequested`,
+`RepoCardViewModel_ApplySelectedPackage_PreviouslyDeclined_DoesNotRaiseAgentsMdTemplateOfferRequestedAgain`,
+`RepoCardViewModel_UpgradeCommand_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ReExtractsAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequested`,
+and
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FoldersAlreadyPresent_NeverReadsZipOrRaisesOffer`,
+covering `AgentControl-RepoCardViewModel-AgentsMdTemplateOffer`.
+
+**RepoCardViewModel_AcceptAgentsMdTemplate_WritesTemplateVerbatimToRepoRoot**: Accepting the
+offer writes the given template content verbatim to `AGENTS.md` at the repo root (never into
+a managed folder), using a create-new (never-overwrite) write; if `AGENTS.md` was created by
+another user/process in the gap between the offer being raised and being accepted, the
+pre-existing file's content is preserved and the outcome is reported via `StatusMessage` as a
+non-destructive, informational result rather than a generic error. This scenario is tested by
+`RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent`,
+`RepoCardViewModel_AcceptAgentsMdTemplate_WriteFails_RaisesErrorOccurred`, and
+`RepoCardViewModel_AcceptAgentsMdTemplate_FileCreatedConcurrently_PreservesExistingContentAndReportsNonDestructiveOutcome`,
+covering `AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate`.
+
+**RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclineWithoutWritingFileAndDegradesOnFailure**:
+Declining the offer persists the decline in the repo's pin file without writing an
+`AGENTS.md` file, a subsequent sync for the same repo does not re-raise the offer, and a
+pin-write failure raises `ErrorOccurred` rather than throwing. This scenario is tested by
+`RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile`,
+`RepoCardViewModel_DeclineAgentsMdTemplate_SubsequentApplySelectedPackage_DoesNotReprompt`, and
+`RepoCardViewModel_DeclineAgentsMdTemplate_PinWriteFails_RaisesErrorOccurred`, covering
+`AgentControl-RepoCardViewModel-DeclineAgentsMdTemplate`.
 
 **RepoCardViewModel_MissingRepo_SuppressesOtherStatusWhenFolderAbsent**: A lightweight refresh
 against a repo path that no longer exists sets `IsMissing` and suppresses other status

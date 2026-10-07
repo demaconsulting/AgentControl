@@ -41,4 +41,19 @@ internal sealed class RepoPin
     ///     Gets or sets the pinned agent package's exact semantic version (e.g. <c>"1.2.3"</c>).
     /// </summary>
     public string Version { get; set; } = string.Empty;
+
+    /// <summary>
+    ///     Gets or sets whether the user has already been offered, and declined, the package's
+    ///     optional root-level <c>AGENTS.md</c> template for this repo.
+    /// </summary>
+    /// <remarks>
+    ///     Defaults to <see langword="false"/> ("not yet declined"), which is also what a
+    ///     pre-existing pin file written before this field existed deserializes to — a missing
+    ///     JSON property is left at the C# property's default by
+    ///     <see cref="System.Text.Json.JsonSerializer"/>, so no migration code is needed. Once set
+    ///     to <see langword="true"/>, the offer is never repeated for this repo; there is
+    ///     deliberately no mechanism to reset it back to <see langword="false"/> (e.g. if the
+    ///     user later deletes their <c>AGENTS.md</c> file), per the feature's explicit scope.
+    /// </remarks>
+    public bool AgentsMdTemplateDeclined { get; set; }
 }

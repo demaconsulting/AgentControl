@@ -22,8 +22,8 @@ zip's contents.
 - *Role*: Provider.
 - *Contract*: Opens/validates the zip, deletes the four known managed folders
   (`.github/agents`, `.github/standards`, `.github/templates`, `.github/skills`) if present,
-  and extracts the new files excluding root-level files such as `release-notes.md`
-  (`AgentControl-PackageZipExtractor-Extract`).
+  and extracts the new files excluding root-level files such as `release-notes.md` and
+  `AGENTS.md` (`AgentControl-PackageZipExtractor-Extract`).
 - *Constraints*: Throws `InvalidOperationException` for a file that is not a valid zip
   archive; per architecture.md's "blind delete of the four known folders" decision, any local
   customizations a developer added inside those folders are silently removed — an accepted
@@ -48,7 +48,18 @@ present on disk.
   (`AgentControl-PackageZipExtractor-ReadReleaseNotes`).
 - *Constraints*: Does not modify the repo or the zip.
 
-**ReleaseNotesViewerViewModel**'s display properties (`RepoName`, `Title`, `ReleaseNotes`).
+**PackageZipExtractor.ReadAgentsMdTemplate**: Reads a package's optional root-level
+`AGENTS.md` template without extracting, mirroring `ReadReleaseNotes`.
+
+- *Type*: In-process .NET static method.
+- *Role*: Provider.
+- *Contract*: Returns the `AGENTS.md` entry's content if present, `null` otherwise
+  (`AgentControl-PackageZipExtractor-ReadAgentsMdTemplate`); consulted by
+  `RepoCardViewModel` after every successful `Extract` to decide whether to offer the
+  template to the user.
+- *Constraints*: Does not modify the repo or the zip.
+
+**ReleaseNotesViewerViewModel**'s display properties (`Title`, `ReleaseNotes`).
 
 - *Type*: In-process .NET properties, data-bound to `ReleaseNotesViewer`.
 - *Role*: Provider.
@@ -73,11 +84,15 @@ agent-file folders.
 `PackageZipExtractor` implements the upgrade/sync sequence from architecture.md's
 "Upgrade sequence and failure handling": (1) open/validate the new zip — if it opens without
 error, its contents are assumed good; (2) delete the four old folders if present; (3) extract
-the new files, excluding root-level files like `release-notes.md`. It is a static class with
-no persistent state; the pin-file rewrite and release-notes display happen in the calling
-`RepoCardViewModel`, deliberately *after* a successful extraction, so a failure partway
-through extraction never leaves a repo pinned to a version whose files were not actually
-applied (`AgentControl-RepoSync-Sync`).
+the new files, excluding root-level files like `release-notes.md` and `AGENTS.md`. It is a
+static class with no persistent state; the pin-file rewrite, release-notes display, and
+AGENTS.md template offer happen in the calling `RepoCardViewModel`, deliberately *after* a
+successful extraction, so a failure partway through extraction never leaves a repo pinned to
+a version whose files were not actually applied (`AgentControl-RepoSync-Sync`).
+`PackageZipExtractor` also exposes `ReadAgentsMdTemplate`, reading a package's optional
+root-level `AGENTS.md` template without extracting it, so `RepoCardViewModel` can decide
+whether to offer it to the user after a successful sync
+(`AgentControl-RepoSync-AgentsMdTemplate`).
 
 `ReleaseNotesViewerViewModel` is a simple, stateless-beyond-construction display view model:
 it is constructed once per shown dialog with the repo name, package title, and release notes
