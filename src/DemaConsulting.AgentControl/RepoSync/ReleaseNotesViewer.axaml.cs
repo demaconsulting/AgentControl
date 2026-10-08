@@ -89,7 +89,11 @@ internal sealed partial class ReleaseNotesViewer : Window
     /// <returns>A <see cref="TextBlock"/> ready to add to <c>ReleaseNotesPanel</c>.</returns>
     private static TextBlock BuildBlockTextBlock(MarkdownBlock block)
     {
-        var textBlock = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+        var textBlock = new TextBlock
+        {
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+            Inlines = []
+        };
 
         if (block.HeadingLevel > 0)
         {
@@ -104,11 +108,9 @@ internal sealed partial class ReleaseNotesViewer : Window
 
         if (block.IsBullet)
         {
-            textBlock.Inlines ??= [];
             textBlock.Inlines.Add(new Run("• "));
         }
 
-        textBlock.Inlines ??= [];
         foreach (var run in block.Runs)
         {
             textBlock.Inlines.Add(new Run(run.Text)

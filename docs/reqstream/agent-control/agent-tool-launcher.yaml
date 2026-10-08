@@ -30,6 +30,7 @@ sections:
         children:
           - AgentControl-ShellDetector-DetectWindows
           - AgentControl-ShellDetector-DetectPosix
+          - AgentControl-ShellDetector-ShellPreference
           - AgentControl-AgentToolLauncher-BuildCommand
           - AgentControl-AgentToolLauncher-Validation
         tests:
