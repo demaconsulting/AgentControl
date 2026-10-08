@@ -64,7 +64,8 @@ internal sealed class FavoriteColorConverter : IValueConverter
         return value is true ? FavoriteBrush : AvaloniaProperty.UnsetValue;
     }
 
-    /// <summary>    ///     Not supported: this converter is used one-way (color reflects state; the
+    /// <summary>
+    ///     Not supported: this converter is used one-way (color reflects state; the
     ///     <c>ToggleButton</c>'s own <c>IsChecked</c> binding, not the color, drives state
     ///     changes).
     /// </summary>

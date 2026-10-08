@@ -53,11 +53,13 @@ false without throwing. This scenario is tested by
 `AgentControl-RepoCardViewModel-PullGating`.
 
 **RepoCardViewModel_PullDisabledExplanation_DirtyAndMissingExposeReasonNotJustHiding**:
-`IsWorkingTreeDirty` is false for a clean tree, a missing repo, and a git-status failure, and
-true only for a confirmed dirty tree; `PullTooltip` explains the specific reason
-(missing-folder, uncommitted-changes, or status-undeterminable text) rather than Pull simply
-disappearing with no explanation, and a status-check failure is not misreported as a dirty
-working tree. This scenario is tested by
+`IsWorkingTreeDirty` is false for a clean tree, a missing repo, a git-status failure, and a
+card whose git status has not yet been checked, and true only for a confirmed dirty tree;
+`PullTooltip` explains the specific reason (missing-folder, not-yet-checked,
+status-undeterminable, or uncommitted-changes text) rather than Pull simply disappearing with
+no explanation, and neither a status-check failure nor a not-yet-checked card is misreported
+as a confirmed dirty working tree. This scenario is tested by
+`RepoCardViewModel_BeforeFirstGitStatusCheck_DoesNotReportDirty`,
 `RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue`,
 `RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse`,
 `RepoCardViewModel_Refresh_GitStatusFails_SetsCanPullFalseWithoutThrowing`, and

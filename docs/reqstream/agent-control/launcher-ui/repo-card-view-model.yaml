@@ -50,10 +50,11 @@ sections:
       - id: AgentControl-RepoCardViewModel-PullDisabledExplanation
         title: >-
           The RepoCardViewModel class shall expose why the Pull action is currently disabled
-          (a confirmed dirty working tree, a missing repo, or a git status check that could
-          not be completed) via a tooltip and a dedicated "dirty working tree" indicator that
-          is shown only for a confirmed dirty working tree, rather than silently hiding the
-          Pull action with no explanation or conflating a status-check failure with a dirty
+          (a confirmed dirty working tree, a missing repo, a git status check that could not
+          be completed, or a git status check that has not yet run) via a tooltip and a
+          dedicated "dirty working tree" indicator that is shown only for a confirmed dirty
+          working tree, rather than silently hiding the Pull action with no explanation or
+          conflating a status-check failure or a not-yet-checked status with a confirmed dirty
           working tree.
         justification: |
           A Pull button that disappears with no on-screen explanation whenever the repo has
@@ -62,9 +63,12 @@ sections:
           is missing, broken, or merely disabled for a reason - the same "stay visible,
           disable, explain" pattern already used for Launch/Upgrade/Select-Package when the
           repo is missing. Telling a user to "commit or discard changes" when git status could
-          not actually be read (e.g. the folder is not a git repository) would be misleading,
-          so that case is tracked and explained separately.
+          not actually be read (e.g. the folder is not a git repository), or before the
+          working-tree check has even run once (it is lazy/deferred by design), would be
+          misleading, so both cases are tracked and explained separately from a confirmed
+          dirty working tree.
         tests:
+          - RepoCardViewModel_BeforeFirstGitStatusCheck_DoesNotReportDirty
           - RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue
           - RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse
           - RepoCardViewModel_Refresh_GitStatusFails_SetsCanPullFalseWithoutThrowing

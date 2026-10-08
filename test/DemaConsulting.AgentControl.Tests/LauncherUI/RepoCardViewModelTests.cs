@@ -154,6 +154,25 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a freshly constructed card does not report a false "dirty working tree"
+    ///     badge/tooltip before its first git-status check has actually run (RefreshDirtyStatus
+    ///     is lazy/deferred by design).
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_BeforeFirstGitStatusCheck_DoesNotReportDirty()
+    {
+        // Arrange: a card whose git status has not yet been checked
+        var repoRoot = CreateTempDirectory();
+        var settings = new AppSettings();
+        var card = CreateCard(repoRoot, null, null, settings);
+
+        // Assert: no false-positive dirty state before RefreshDirtyStatus/RefreshGitStatus runs
+        Assert.False(card.GitStatusChecked);
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.Equal("This repo's Git status has not been checked yet.", card.PullTooltip);
+    }
+
+    /// <summary>
     ///     Test that CanPull is true when the configured git stub reports a clean working tree.
     /// </summary>
     [Fact]

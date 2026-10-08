@@ -107,6 +107,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private bool _hasCommittedAgentFiles;
     private bool _canPull;
     private bool _gitStatusUnavailable;
+    private bool _gitStatusChecked;
     private string? _statusMessage;
 
     /// <summary>
@@ -393,6 +394,32 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Gets a value indicating whether <see cref="RefreshGitStatus"/> has completed at least
+    ///     once for this card (successfully or not), as opposed to <see cref="CanPull"/> and
+    ///     <see cref="GitStatusUnavailable"/> simply holding their shared <see langword="false"/>
+    ///     default because no check has run yet.
+    /// </summary>
+    /// <remarks>
+    ///     Without this, a card would briefly report <see cref="IsWorkingTreeDirty"/> as
+    ///     <see langword="true"/> (and <see cref="PullTooltip"/> would claim uncommitted changes)
+    ///     between construction/startup and the first deferred <see cref="RefreshDirtyStatus"/>
+    ///     call - a false "confirmed dirty" signal for a repo that simply hasn't been checked
+    ///     yet. Gating on this flag instead gives an honest "not yet checked" neutral state.
+    /// </remarks>
+    public bool GitStatusChecked
+    {
+        get => _gitStatusChecked;
+        private set
+        {
+            if (SetField(ref _gitStatusChecked, value))
+            {
+                OnPropertyChanged(nameof(IsWorkingTreeDirty));
+                OnPropertyChanged(nameof(PullTooltip));
+            }
+        }
+    }
+
+    /// <summary>
     ///     Gets a value indicating whether the repo's working tree currently has uncommitted
     ///     changes (the reason <see cref="PullCommand"/> is disabled), for the card's "Dirty
     ///     working tree" badge.
@@ -402,14 +429,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     dedicated "Missing" badge, and showing both for the same card would be redundant (a
     ///     missing repo's working tree can't meaningfully be "clean" or "dirty"). Also excludes
     ///     <see cref="GitStatusUnavailable"/> repos, since a failed status check is not the same
-    ///     as a confirmed dirty working tree. Before <see cref="RefreshDirtyStatus"/> has run at
-    ///     least once for this card (see its lazy, deferred-by-design evaluation), <see cref="CanPull"/>
-    ///     defaults to <see langword="false"/> and <see cref="GitStatusUnavailable"/> defaults to
-    ///     <see langword="false"/>, so this is briefly <see langword="true"/> until the first
-    ///     git-status check completes - an accepted, momentary false positive rather than a third
-    ///     loading state.
+    ///     as a confirmed dirty working tree, and requires <see cref="GitStatusChecked"/> to be
+    ///     <see langword="true"/>, so a repo whose status simply hasn't been checked yet (see
+    ///     <see cref="RefreshDirtyStatus"/>'s lazy, deferred-by-design evaluation) is never
+    ///     reported as dirty before a status check has actually completed.
     /// </remarks>
-    public bool IsWorkingTreeDirty => !CanPull && !IsMissing && !GitStatusUnavailable;
+    public bool IsWorkingTreeDirty => GitStatusChecked && !CanPull && !IsMissing && !GitStatusUnavailable;
 
     /// <summary>
     ///     Gets the tooltip text for the card's "Pull" button, explaining why Pull is currently
@@ -419,6 +444,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     {
         { IsMissing: true } => "This repo's folder could not be found on disk.",
         { CanPull: true } => "Pull the latest commits for this repo",
+        { GitStatusChecked: false } => "This repo's Git status has not been checked yet.",
         { GitStatusUnavailable: true } => "This repo's Git status could not be determined (it may not be a " +
                                            "Git repository, or git could not be run), so Pull is disabled.",
         _ => "This repo has uncommitted changes, so Pull is disabled. Commit or discard them (e.g. the " +
@@ -1326,11 +1352,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Re-checks the repo's working-tree cleanliness via <see cref="GitClient"/>, updating
-    ///     <see cref="CanPull"/> and <see cref="GitStatusUnavailable"/>. Any failure (not a git
-    ///     repo, git not installed, etc.) is treated as "pull not offered" rather than propagated,
-    ///     but is distinguished from a successful check that found a dirty working tree so the
-    ///     "Dirty working tree" badge and <see cref="PullTooltip"/> aren't shown for repos whose
-    ///     status simply couldn't be determined.
+    ///     <see cref="CanPull"/>, <see cref="GitStatusUnavailable"/>, and
+    ///     <see cref="GitStatusChecked"/>. Any failure (not a git repo, git not installed, etc.)
+    ///     is treated as "pull not offered" rather than propagated, but is distinguished from a
+    ///     successful check that found a dirty working tree so the "Dirty working tree" badge
+    ///     and <see cref="PullTooltip"/> aren't shown for repos whose status simply couldn't be
+    ///     determined.
     /// </summary>
     private void RefreshGitStatus()
     {
@@ -1345,6 +1372,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             CanPull = false;
             GitStatusUnavailable = true;
+        }
+        finally
+        {
+            GitStatusChecked = true;
         }
     }
 

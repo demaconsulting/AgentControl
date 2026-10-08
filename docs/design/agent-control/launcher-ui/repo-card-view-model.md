@@ -42,20 +42,27 @@ successful check that found uncommitted changes. Both disable `CanPull`, but are
 so the "Dirty working tree" badge/tooltip aren't shown for a status that simply couldn't be
 determined (`AgentControl-RepoCardViewModel-PullDisabledExplanation`).
 
-**IsWorkingTreeDirty**: `bool` (derived) — `!CanPull && !IsMissing && !GitStatusUnavailable`;
-drives the card's "Dirty working tree" badge. Deliberately excludes `IsMissing` repos, which
-already get their own dedicated "Missing" badge instead, and `GitStatusUnavailable` repos,
-since a failed status check is not the same as a confirmed dirty working tree
+**GitStatusChecked**: `bool` — Set once `RefreshGitStatus` has completed at least once for
+this card (successfully or not). Defaults to `false`, so a card constructed but not yet
+refreshed (`RefreshDirtyStatus` is lazy/deferred by design) is never misreported as having a
+confirmed dirty working tree before its first status check actually runs
+(`AgentControl-RepoCardViewModel-PullDisabledExplanation`).
+
+**IsWorkingTreeDirty**: `bool` (derived) — `GitStatusChecked && !CanPull && !IsMissing &&
+!GitStatusUnavailable`; drives the card's "Dirty working tree" badge. Deliberately excludes
+`IsMissing` repos, which already get their own dedicated "Missing" badge instead,
+`GitStatusUnavailable` repos, since a failed status check is not the same as a confirmed dirty
+working tree, and any repo for which `GitStatusChecked` is still `false`
 (`AgentControl-RepoCardViewModel-PullDisabledExplanation`).
 
 **PullTooltip**: `string` (derived) — The `PullCommand` button's tooltip text, explaining why
-Pull is currently disabled (missing repo, dirty working tree, or an undeterminable git status)
-instead of leaving the button to silently disappear or disable with no explanation; when Pull
-is enabled, returns the original neutral "Pull the latest commits for this repo" text
-(`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The Pull button itself always
-stays visible in the view (never hidden via `IsVisible`), consistent with the "stay visible,
-disable, explain" pattern already used for Launch/Upgrade/Select-Package when the repo is
-missing.
+Pull is currently disabled (missing repo, not yet checked, an undeterminable git status, or
+dirty working tree) instead of leaving the button to silently disappear or disable with no
+explanation; when Pull is enabled, returns the original neutral "Pull the latest commits for
+this repo" text (`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The Pull button
+itself always stays visible in the view (never hidden via `IsVisible`), consistent with the
+"stay visible, disable, explain" pattern already used for Launch/Upgrade/Select-Package when
+the repo is missing.
 
 **IsPackageSelectionNeeded**: `bool` (derived) — `PinnedPackageName is null`.
 
@@ -76,9 +83,10 @@ working-tree dirty check, which is not cacheable and is deferred/lazy per archit
 repo-fact caching strategy, so this method is safe to call eagerly for every recent repo at
 app launch (`AgentControl-RepoCardViewModel-CommittedFilesBadge`).
 
-**RefreshDirtyStatus**: Re-checks working-tree cleanliness via `GitClient`, updating `CanPull`
-and `GitStatusUnavailable`. Not called by `RefreshCheap` or the constructor — computed lazily
-instead, on demand via `RefreshCommand` or once when a card first becomes visible.
+**RefreshDirtyStatus**: Re-checks working-tree cleanliness via `GitClient`, updating `CanPull`,
+`GitStatusUnavailable`, and `GitStatusChecked`. Not called by `RefreshCheap` or the
+constructor — computed lazily instead, on demand via `RefreshCommand` or once when a card
+first becomes visible.
 
 **Refresh**: Convenience entry point equivalent to `RefreshCheap` followed by
 `RefreshDirtyStatus`, for callers (e.g. adding a brand-new repo) wanting an immediate full

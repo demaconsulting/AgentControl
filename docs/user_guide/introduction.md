@@ -158,9 +158,11 @@ as an informational side action:
 # Pulling Changes
 
 The **Pull** button on a repo card runs `git pull` in that repo's working directory. It stays
-visible but is disabled (with a tooltip explaining why) whenever the repo's working tree is
-dirty or the repo is missing; the "Dirty working tree" badge, if shown, is the same condition
-that disables Pull for that card.
+visible but is disabled (with a tooltip explaining why) whenever the repo's working tree has
+uncommitted changes, the repo is missing, or the repo's Git status could not be determined
+(for example, the folder is not a Git repository, or git could not be run). The "Dirty working
+tree" badge, if shown, specifically denotes a confirmed dirty working tree - it is not shown
+when Pull is disabled because of a missing repo or an undetermined status.
 
 # Settings
 
