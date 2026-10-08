@@ -157,9 +157,10 @@ as an informational side action:
 
 # Pulling Changes
 
-The **Pull** button on a repo card runs `git pull` in that repo's working directory. It is
-only offered when the repo's working tree is clean (the "Dirty working tree" badge, if
-shown, disables Pull for that card).
+The **Pull** button on a repo card runs `git pull` in that repo's working directory. It stays
+visible but is disabled (with a tooltip explaining why) whenever the repo's working tree is
+dirty or the repo is missing; the "Dirty working tree" badge, if shown, is the same condition
+that disables Pull for that card.
 
 # Settings
 

@@ -123,6 +123,29 @@ internal sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<RepoCardViewModel> DisplayedRepoCards { get; }
 
     /// <summary>
+    ///     Gets a value indicating whether <see cref="DisplayedRepoCards"/> is currently empty,
+    ///     so the view can swap the repo-card list for an explanatory empty-state placeholder
+    ///     instead of just rendering nothing.
+    /// </summary>
+    /// <remarks>
+    ///     Recomputed (and its change notified) every time <see cref="UpdateDisplayedRepoCards"/>
+    ///     runs, which covers every path that can change the displayed set: adding/removing a
+    ///     repo, filtering, and favorite-toggling.
+    /// </remarks>
+    public bool HasNoDisplayedRepos => DisplayedRepoCards.Count == 0;
+
+    /// <summary>
+    ///     Gets the message shown by the empty-state placeholder when
+    ///     <see cref="HasNoDisplayedRepos"/> is <see langword="true"/>, distinguishing "no repos
+    ///     added yet" from "no repos match the current filter" so the user knows which action
+    ///     (add a repo, or clear the filter) would resolve it.
+    /// </summary>
+    public string EmptyStateMessage =>
+        RepoCards.Count == 0
+            ? "No repos yet. Click the folder icon above to add your first repository."
+            : $"No repos match \"{FilterText}\". Try a different filter.";
+
+    /// <summary>
     ///     Gets or sets the current filter text typed into the recent-repos search box.
     /// </summary>
     public string? FilterText
@@ -279,6 +302,9 @@ internal sealed class MainWindowViewModel : ViewModelBase
         {
             DisplayedRepoCards.Add(card);
         }
+
+        OnPropertyChanged(nameof(HasNoDisplayedRepos));
+        OnPropertyChanged(nameof(EmptyStateMessage));
     }
 
     /// <summary>

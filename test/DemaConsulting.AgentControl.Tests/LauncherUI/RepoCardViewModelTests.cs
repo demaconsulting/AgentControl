@@ -172,6 +172,8 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Assert: pull is offered
         Assert.True(card.CanPull);
         Assert.True(card.PullCommand.CanExecute(null));
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.Equal("Pull the latest commits for this repo", card.PullTooltip);
     }
 
     /// <summary>
@@ -190,9 +192,11 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Act: refresh
         card.Refresh();
 
-        // Assert: pull is not offered
+        // Assert: pull is not offered, and the "dirty working tree" badge/tooltip explain why
         Assert.False(card.CanPull);
         Assert.False(card.PullCommand.CanExecute(null));
+        Assert.True(card.IsWorkingTreeDirty);
+        Assert.Contains("uncommitted changes", card.PullTooltip, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -402,6 +406,11 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.False(card.PullCommand.CanExecute(null));
         Assert.False(card.UpgradeCommand.CanExecute(null));
         Assert.False(card.RefreshCommand.CanExecute(null));
+
+        // A missing repo gets its own dedicated badge/tooltip - the "dirty working tree" badge
+        // must not also fire for it (its working tree can't meaningfully be "clean" or "dirty").
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.Equal("This repo's folder could not be found on disk.", card.PullTooltip);
     }
 
     /// <summary>

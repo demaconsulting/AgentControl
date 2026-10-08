@@ -190,6 +190,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 UpgradeCommand.RaiseCanExecuteChanged();
                 SelectPackageCommand.RaiseCanExecuteChanged();
                 RefreshCommand.RaiseCanExecuteChanged();
+                OnPropertyChanged(nameof(IsWorkingTreeDirty));
+                OnPropertyChanged(nameof(PullTooltip));
             }
         }
     }
@@ -357,9 +359,39 @@ internal sealed class RepoCardViewModel : ViewModelBase
             if (SetField(ref _canPull, value))
             {
                 PullCommand.RaiseCanExecuteChanged();
+                OnPropertyChanged(nameof(IsWorkingTreeDirty));
+                OnPropertyChanged(nameof(PullTooltip));
             }
         }
     }
+
+    /// <summary>
+    ///     Gets a value indicating whether the repo's working tree currently has uncommitted
+    ///     changes (the reason <see cref="PullCommand"/> is disabled), for the card's "Dirty
+    ///     working tree" badge.
+    /// </summary>
+    /// <remarks>
+    ///     Deliberately excludes <see cref="IsMissing"/> repos - those already get their own
+    ///     dedicated "Missing" badge, and showing both for the same card would be redundant (a
+    ///     missing repo's working tree can't meaningfully be "clean" or "dirty"). Before
+    ///     <see cref="RefreshDirtyStatus"/> has run at least once for this card (see its lazy,
+    ///     deferred-by-design evaluation), <see cref="CanPull"/> defaults to <see langword="false"/>,
+    ///     so this is briefly <see langword="true"/> until the first git-status check completes -
+    ///     an accepted, momentary false positive rather than a third loading state.
+    /// </remarks>
+    public bool IsWorkingTreeDirty => !CanPull && !IsMissing;
+
+    /// <summary>
+    ///     Gets the tooltip text for the card's "Pull" button, explaining why Pull is currently
+    ///     disabled (if it is) instead of leaving the user to guess.
+    /// </summary>
+    public string PullTooltip => this switch
+    {
+        { IsMissing: true } => "This repo's folder could not be found on disk.",
+        { CanPull: true } => "Pull the latest commits for this repo",
+        _ => "This repo has uncommitted changes, so Pull is disabled. Commit or discard them (e.g. the " +
+             ".agentcontrol.json pin file after a Select Package/Upgrade) to re-enable Pull."
+    };
 
     /// <summary>
     ///     Gets the most recent status/result message from a Launch/Pull/Upgrade action, for

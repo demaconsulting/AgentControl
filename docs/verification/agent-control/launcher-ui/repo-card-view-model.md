@@ -52,6 +52,15 @@ false without throwing. This scenario is tested by
 `RepoCardViewModel_Refresh_GitStatusFails_SetsCanPullFalseWithoutThrowing`, covering
 `AgentControl-RepoCardViewModel-PullGating`.
 
+**RepoCardViewModel_PullDisabledExplanation_DirtyAndMissingExposeReasonNotJustHiding**:
+`IsWorkingTreeDirty` is false for both a clean tree and a missing repo, and true for a dirty
+tree; `PullTooltip` explains the specific reason (missing-folder or uncommitted-changes text)
+rather than Pull simply disappearing with no explanation. This scenario is tested by
+`RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue`,
+`RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse`, and
+`RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState`,
+covering `AgentControl-RepoCardViewModel-PullDisabledExplanation`.
+
 **RepoCardViewModel_Pull_ReportsSuccessOrFailureViaStatusMessage**: `PullCommand` is executed
 against a stub reporting success (status message updated) and a stub reporting failure (a
 failure status message is set instead). This scenario is tested by

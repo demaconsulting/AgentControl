@@ -50,9 +50,26 @@ sections:
         justification: |
           Lets the developer narrow a long list to the repo they are looking for by typing
           any recognizable substring of its name or path.
+        children:
+          - AgentControl-MainWindowViewModel-EmptyState
         tests:
           - MainWindowViewModel_FilterText_MatchesRepoNameCaseInsensitive_FiltersDisplayedRepoCards
           - MainWindowViewModel_FilterText_MatchesRepoPath_FiltersDisplayedRepoCards
+
+      - id: AgentControl-MainWindowViewModel-EmptyState
+        title: >-
+          The MainWindowViewModel class shall indicate when no repo cards are currently
+          displayed, and shall distinguish an empty recent-repos list from a filter that
+          matches none of the tracked repos.
+        justification: |
+          A blank list area gives the user no indication of whether there is simply nothing
+          tracked yet, or whether their filter text is too narrow; an explicit empty-state
+          flag and context-specific message let the view show the right next action (add a
+          repo, or adjust the filter) instead of an unexplained gap.
+        tests:
+          - MainWindowViewModel_NoRepoCardsAtAll_HasNoDisplayedReposTrueWithAddRepoMessage
+          - MainWindowViewModel_FilterMatchesNoRepos_HasNoDisplayedReposTrueWithFilterMessage
+          - MainWindowViewModel_HasDisplayedRepos_HasNoDisplayedReposFalse
 
       - id: AgentControl-MainWindowViewModel-SortOrder
         title: >-

@@ -59,6 +59,16 @@ is tested by
 `MainWindowViewModel_FilterText_MatchesRepoPath_FiltersDisplayedRepoCards`, covering
 `AgentControl-MainWindowViewModel-SearchFilter`.
 
+**MainWindowViewModel_EmptyState_DistinguishesNoReposFromNoFilterMatches**:
+`HasNoDisplayedRepos`/`EmptyStateMessage` are checked with no recent repos configured at all
+(message prompts adding a repo), with a tracked repo excluded by a non-matching filter
+(message references the filter text), and with at least one displayed card
+(`HasNoDisplayedRepos` is false). This scenario is tested by
+`MainWindowViewModel_NoRepoCardsAtAll_HasNoDisplayedReposTrueWithAddRepoMessage`,
+`MainWindowViewModel_FilterMatchesNoRepos_HasNoDisplayedReposTrueWithFilterMessage`, and
+`MainWindowViewModel_HasDisplayedRepos_HasNoDisplayedReposFalse`, covering
+`AgentControl-MainWindowViewModel-EmptyState`.
+
 **MainWindowViewModel_SortOrder_FavoritesFirstThenRecencyWithNullsLast**: A favorite repo
 launched longer ago sorts above a more-recently-launched non-favorite; among non-favorites, a
 recently-launched repo sorts above an earlier-launched one, which sorts above a never-launched

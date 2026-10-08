@@ -40,10 +40,30 @@ sections:
           Pulling into a dirty working tree risks merge conflicts AgentControl cannot resolve;
           a git failure (e.g. not a repo, git not found) must degrade gracefully rather than
           crash the UI.
+        children:
+          - AgentControl-RepoCardViewModel-PullDisabledExplanation
         tests:
           - RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue
           - RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse
           - RepoCardViewModel_Refresh_GitStatusFails_SetsCanPullFalseWithoutThrowing
+
+      - id: AgentControl-RepoCardViewModel-PullDisabledExplanation
+        title: >-
+          The RepoCardViewModel class shall expose why the Pull action is currently disabled
+          (a dirty working tree, or a missing repo) via a tooltip and a dedicated "dirty
+          working tree" indicator, rather than silently hiding the Pull action with no
+          explanation.
+        justification: |
+          A Pull button that disappears with no on-screen explanation whenever the repo has
+          routine untracked/uncommitted content (such as a freshly-committed
+          .agentcontrol.json pin file) leaves the developer unable to tell whether the feature
+          is missing, broken, or merely disabled for a reason - the same "stay visible,
+          disable, explain" pattern already used for Launch/Upgrade/Select-Package when the
+          repo is missing.
+        tests:
+          - RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue
+          - RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse
+          - RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState
 
       - id: AgentControl-RepoCardViewModel-Pull
         title: >-

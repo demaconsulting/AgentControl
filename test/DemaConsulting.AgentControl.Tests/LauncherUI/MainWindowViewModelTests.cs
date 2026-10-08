@@ -204,6 +204,55 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that HasNoDisplayedRepos is true and EmptyStateMessage prompts adding a repo
+    ///     when no repos have ever been added (as opposed to a filter excluding all of them).
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_NoRepoCardsAtAll_HasNoDisplayedReposTrueWithAddRepoMessage()
+    {
+        // Arrange / Act: a view model with no recent repos configured
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory());
+
+        // Assert
+        Assert.True(viewModel.HasNoDisplayedRepos);
+        Assert.Contains("add your first repository", viewModel.EmptyStateMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that HasNoDisplayedRepos is true and EmptyStateMessage references the filter
+    ///     text when repos exist but the current filter matches none of them.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_FilterMatchesNoRepos_HasNoDisplayedReposTrueWithFilterMessage()
+    {
+        // Arrange: a repo that exists, but a filter that cannot match it
+        var repoPath = CreateTempDirectory();
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = repoPath }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+
+        // Act
+        viewModel.FilterText = "no-such-repo-exists";
+
+        // Assert
+        Assert.True(viewModel.HasNoDisplayedRepos);
+        Assert.Contains("no-such-repo-exists", viewModel.EmptyStateMessage, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that HasNoDisplayedRepos is false whenever at least one card is displayed.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_HasDisplayedRepos_HasNoDisplayedReposFalse()
+    {
+        // Arrange / Act
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = CreateTempDirectory() }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+
+        // Assert
+        Assert.False(viewModel.HasNoDisplayedRepos);
+    }
+
+    /// <summary>
     ///     Test that DisplayedRepoCards sorts favorites above non-favorites regardless of
     ///     LastLaunchedUtc.
     /// </summary>

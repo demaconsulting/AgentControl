@@ -36,6 +36,19 @@ with the committed-files result consulting the per-card `CommittedAgentFilesCach
 **CanPull**: `bool` — Reflects working-tree cleanliness, refreshed lazily
 (`AgentControl-RepoCardViewModel-PullGating`).
 
+**IsWorkingTreeDirty**: `bool` (derived) — `!CanPull && !IsMissing`; drives the card's "Dirty
+working tree" badge. Deliberately excludes `IsMissing` repos, which already get their own
+dedicated "Missing" badge instead (`AgentControl-RepoCardViewModel-PullDisabledExplanation`).
+
+**PullTooltip**: `string` (derived) — The `PullCommand` button's tooltip text, explaining why
+Pull is currently disabled (missing repo, or dirty working tree) instead of leaving the button
+to silently disappear or disable with no explanation; when Pull is enabled, returns the
+original neutral "Pull the latest commits for this repo" text
+(`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The Pull button itself always
+stays visible in the view (never hidden via `IsVisible`), consistent with the "stay visible,
+disable, explain" pattern already used for Launch/Upgrade/Select-Package when the repo is
+missing.
+
 **IsPackageSelectionNeeded**: `bool` (derived) — `PinnedPackageName is null`.
 
 **_logger**: `ILogger<RepoCardViewModel>` (private, via `AppLogging.Factory.CreateLogger<RepoCardViewModel>()`)

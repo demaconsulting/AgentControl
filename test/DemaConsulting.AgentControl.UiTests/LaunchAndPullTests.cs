@@ -128,14 +128,21 @@ public sealed class LaunchAndPullTests
         using var context = new AgentControlTestContext();
         var mainWindow = context.Launch();
 
-        // The "Pull" button is only rendered (IsVisible="{Binding CanPull}") once
+        // The "Pull" button is always rendered, but only becomes enabled once
         // RefreshGitStatus() has run "git status --porcelain" (via the arg-logger stub, which
         // always exits 0 with no output - i.e. a clean working tree) during startup; wait for it
-        // to appear in the automation tree before clicking.
-        var pullButton = Retry.WhileNull(
+        // to appear and become enabled before clicking.
+        var pullButtonElement = Retry.WhileNull(
             () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("PullButton")),
             timeout: TimeSpan.FromSeconds(10),
-            interval: TimeSpan.FromMilliseconds(200)).Result?.AsButton();
+            interval: TimeSpan.FromMilliseconds(200)).Result;
+        Assert.NotNull(pullButtonElement);
+
+        var pullButton = pullButtonElement.AsButton();
+        Retry.WhileFalse(
+            () => pullButton.IsEnabled,
+            timeout: TimeSpan.FromSeconds(10),
+            interval: TimeSpan.FromMilliseconds(200));
 
         Assert.NotNull(pullButton);
 
