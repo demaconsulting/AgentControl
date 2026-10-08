@@ -224,6 +224,7 @@
                                      AutomationProperties.AutomationId="PullButton"
                                      Command="{Binding PullCommand}"
                                      ToolTip.Tip="{Binding PullTooltip}"
+                                     ToolTip.ShowOnDisabled="True"
                                      VerticalAlignment="Center"
                                      Margin="0,0,8,0">
                                 <StackPanel Orientation="Horizontal" Spacing="4">

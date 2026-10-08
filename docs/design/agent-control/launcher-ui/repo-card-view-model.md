@@ -62,7 +62,10 @@ explanation; when Pull is enabled, returns the original neutral "Pull the latest
 this repo" text (`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The Pull button
 itself always stays visible in the view (never hidden via `IsVisible`), consistent with the
 "stay visible, disable, explain" pattern already used for Launch/Upgrade/Select-Package when
-the repo is missing.
+the repo is missing. `MainWindow.axaml` sets `ToolTip.ShowOnDisabled="True"` on the Pull
+button so this explanatory text remains reachable while the button is disabled via
+`PullCommand`'s `CanExecute` - Avalonia suppresses tooltips on disabled controls by default,
+which would otherwise hide the explanation precisely when it is most needed.
 
 **IsPackageSelectionNeeded**: `bool` (derived) — `PinnedPackageName is null`.
 
@@ -81,7 +84,14 @@ FavoriteToggleCommand, RemoveCommand**: `RelayCommand` — see Interfaces in
 committed-files badge via `HEAD`-hash cache, upgrade status). Deliberately excludes the
 working-tree dirty check, which is not cacheable and is deferred/lazy per architecture.md's
 repo-fact caching strategy, so this method is safe to call eagerly for every recent repo at
-app launch (`AgentControl-RepoCardViewModel-CommittedFilesBadge`).
+app launch (`AgentControl-RepoCardViewModel-CommittedFilesBadge`). When the repo is found to be
+missing, also invalidates `GitStatusChecked`/`GitStatusUnavailable` (not just `CanPull`), since
+a cached Git-status result from before the repo disappeared is no longer trustworthy once it
+reappears; when a repo transitions from missing back to present, forces an immediate
+`RefreshDirtyStatus()` call instead of relying on the one-time-per-card lazy trigger (which
+would not fire again for an already-realized card), so the card never shows a stale "Dirty
+working tree" badge/tooltip carried over from before the repo disappeared
+(`AgentControl-RepoCardViewModel-PullDisabledExplanation`).
 
 **RefreshDirtyStatus**: Re-checks working-tree cleanliness via `GitClient`, updating `CanPull`,
 `GitStatusUnavailable`, and `GitStatusChecked`. Not called by `RefreshCheap` or the

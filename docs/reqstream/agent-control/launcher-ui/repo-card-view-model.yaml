@@ -55,7 +55,8 @@ sections:
           dedicated "dirty working tree" indicator that is shown only for a confirmed dirty
           working tree, rather than silently hiding the Pull action with no explanation or
           conflating a status-check failure or a not-yet-checked status with a confirmed dirty
-          working tree.
+          working tree; this status must never go stale after a repo temporarily disappears
+          and reappears.
         justification: |
           A Pull button that disappears with no on-screen explanation whenever the repo has
           routine untracked/uncommitted content (such as a freshly-committed
@@ -66,13 +67,17 @@ sections:
           not actually be read (e.g. the folder is not a git repository), or before the
           working-tree check has even run once (it is lazy/deferred by design), would be
           misleading, so both cases are tracked and explained separately from a confirmed
-          dirty working tree.
+          dirty working tree. A repo that disappears and reappears (e.g. a removable drive
+          being disconnected and reconnected) must not keep reporting its pre-disappearance
+          Git status as current, since the working tree could have changed while the card was
+          unable to check it.
         tests:
           - RepoCardViewModel_BeforeFirstGitStatusCheck_DoesNotReportDirty
           - RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue
           - RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse
           - RepoCardViewModel_Refresh_GitStatusFails_SetsCanPullFalseWithoutThrowing
           - RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState
+          - RepoCardViewModel_RepoReappearsAfterBeingMissing_RefreshesGitStatusInsteadOfReportingStale
 
       - id: AgentControl-RepoCardViewModel-Pull
         title: >-

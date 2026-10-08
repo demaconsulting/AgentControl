@@ -599,6 +599,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </remarks>
     public void RefreshCheap()
     {
+        var wasMissing = IsMissing;
         IsMissing = !Directory.Exists(RepoPath);
         if (IsMissing)
         {
@@ -607,12 +608,27 @@ internal sealed class RepoCardViewModel : ViewModelBase
             CanPull = false;
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
+
+            // The repo just disappeared (or was already missing): any previously-cached Git
+            // status is no longer trustworthy, so invalidate it rather than let it linger and
+            // potentially be reported (stale) once the repo reappears.
+            GitStatusChecked = false;
+            GitStatusUnavailable = false;
             return;
         }
 
         RefreshPin();
         RefreshBranchAndCommittedFiles();
         RefreshUpgradeStatus();
+
+        // The repo just reappeared after being missing: its cached Git status was invalidated
+        // above when it disappeared, so force an immediate fresh check here instead of relying
+        // on the one-time-per-card lazy trigger in MainWindow.axaml.cs, which won't fire again
+        // for an already-realized card.
+        if (wasMissing)
+        {
+            RefreshDirtyStatus();
+        }
     }
 
     /// <summary>
