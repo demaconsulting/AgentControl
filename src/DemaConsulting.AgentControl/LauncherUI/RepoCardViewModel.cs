@@ -636,12 +636,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see cref="CanPull"/>.
     /// </summary>
     /// <remarks>
-    ///     Deliberately not called by <see cref="RefreshCheap"/> or the constructor - per
-    ///     architecture.md's repo-fact caching strategy, working-tree dirty/clean state is not
-    ///     cacheable by <c>HEAD</c> hash (it reflects uncommitted local edits), so it is computed
-    ///     lazily instead: on demand via <see cref="RefreshCommand"/>, or once when a card first
-    ///     becomes visible (see <c>MainWindow.axaml.cs</c>), rather than eagerly for every recent
-    ///     repo at app launch.
+    ///     Not called by the constructor or by <see cref="RefreshCheap"/> for an
+    ///     already-present repo - per architecture.md's repo-fact caching strategy, working-tree
+    ///     dirty/clean state is not cacheable by <c>HEAD</c> hash (it reflects uncommitted local
+    ///     edits), so it is computed lazily instead: on demand via <see cref="RefreshCommand"/>,
+    ///     or once when a card first becomes visible (see <c>MainWindow.axaml.cs</c>), rather
+    ///     than eagerly for every recent repo at app launch. The one exception is
+    ///     <see cref="RefreshCheap"/>'s missing-to-present transition, which calls this method
+    ///     immediately to replace the Git status it invalidated while the repo was missing,
+    ///     since the one-time-per-card lazy trigger in <c>MainWindow.axaml.cs</c> would not fire
+    ///     again for an already-realized card.
     /// </remarks>
     public void RefreshDirtyStatus()
     {
