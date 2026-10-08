@@ -18,6 +18,8 @@ N/A - standard test environment.
 - The custom-agent-tool indicator reflects only whether the selected tool is a well-known
   built-in tool.
 - Saving invokes the owner's callback with the current values and raises `Saved`.
+- `AvailableShellPreferences` is non-empty, has no duplicate entries, starts with a blank
+  auto-detect entry, and contains the expected OS-appropriate preset names.
 
 #### Test Scenarios
 
@@ -40,3 +42,12 @@ settings value with `ArgumentNullException`. This scenario is tested by
 tested by
 `SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved`,
 covering `AgentControl-SettingsWindowViewModel-Save`.
+
+**SettingsWindowViewModel_ShellPreferencePresets_NonEmptyBlankFirstNoDuplicatesAndOsAppropriate**:
+`AvailableShellPreferences` is checked for being non-empty with a blank first entry, for having
+no duplicate entries, and for matching the expected preset names for the OS the test runs on
+(`pwsh`/`powershell`/`cmd` on Windows, `bash`/`zsh`/`sh` elsewhere). This scenario is tested by
+`SettingsWindowViewModel_AvailableShellPreferences_IsNonEmptyWithBlankFirstEntry`,
+`SettingsWindowViewModel_AvailableShellPreferences_NoDuplicateEntries`, and
+`SettingsWindowViewModel_AvailableShellPreferences_CurrentOs_ContainsExpectedPresets`, covering
+`AgentControl-SettingsWindowViewModel-ShellPreferencePresets`.

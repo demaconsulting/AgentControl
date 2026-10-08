@@ -6,9 +6,10 @@
 # - LauncherUI spans the recent-repos main window, per-repo cards, the package-selection
 #   window, and the settings window (MainWindowViewModel, RepoCardViewModel,
 #   SelectPackageWindowViewModel, SettingsWindowViewModel), plus their Avalonia .axaml Views
-#   and shared MVVM support types (RelayCommand, ViewModelBase, FavoriteIconConverter), which
-#   have no dedicated test files and are folded into this subsystem-level description rather
-#   than given separate unit files
+#   and shared MVVM support types (RelayCommand, ViewModelBase, FavoriteIconConverter,
+#   ThirdPartyDependencies), which are folded into this subsystem-level description rather
+#   than given separate unit files (ThirdPartyDependencies is the one exception with a
+#   dedicated test file, ThirdPartyDependenciesTests.cs)
 # - Subsystem requirements describe the aggregate UI behavior a user experiences
 
 sections:
@@ -200,6 +201,7 @@ sections:
           - AgentControl-SettingsWindowViewModel-Seed
           - AgentControl-SettingsWindowViewModel-CustomAgentTool
           - AgentControl-SettingsWindowViewModel-Save
+          - AgentControl-SettingsWindowViewModel-ShellPreferencePresets
           - AgentControl-MainWindowViewModel-ApplySettings
         tests:
           - SettingsWindowViewModel_Constructor_SeedsPropertiesFromInitialSettings
@@ -209,10 +211,20 @@ sections:
       - id: AgentControl-LauncherUI-About
         title: >-
           The LauncherUI subsystem shall provide an About command that opens a dialog showing
-          the application version and copyright.
+          the application logo, a short mission tagline, the application version, copyright,
+          and a scrollable list of this application's direct third-party dependencies with
+          their license information.
         justification: |
-          Lets a developer confirm exactly which AgentControl build they are running.
+          Lets a developer confirm exactly which AgentControl build they are running, briefly
+          reminds them what the application is for, and lets them review the open-source
+          dependencies bundled with the application.
         tests:
-          # No unit test targets the About dialog directly (it has no dedicated view-model
-          # class); real coverage is end-to-end only, via the FlaUI UiTests project.
+          # The About dialog itself has no dedicated view-model class, so its rendering is
+          # verified end-to-end only, via the FlaUI UiTests project; the dependency list's
+          # underlying data source has direct unit coverage.
           - windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright
+          - ThirdPartyDependencies_All_MatchesCsprojDirectRuntimeDependencies
+          - ThirdPartyDependencies_All_NoDuplicateNames
+          - ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense
+          - ThirdPartyDependencies_All_EveryEntryHasNonEmptyVersion
+          - DependencyInfo_ToString_RepresentativeEntry_ReturnsNameVersionLicenseFormat

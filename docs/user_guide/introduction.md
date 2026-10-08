@@ -174,8 +174,10 @@ Open Settings from the gear icon on the toolbar to configure:
   `git` from the process `PATH`.
 - **Agent tool selection** — which agentic CLI tool Launch starts: GitHub Copilot CLI,
   Cursor, Claude Code, or a custom command line that you supply yourself.
-- **Shell/terminal preference** — the shell AgentControl launches the agent tool in. Leave
-  this unset to let AgentControl auto-detect the best available shell (it prefers the
+- **Shell/terminal preference** — the shell AgentControl launches the agent tool in, chosen
+  from an editable dropdown of OS-appropriate presets (`pwsh`/`powershell`/`cmd` on Windows,
+  `bash`/`zsh`/`sh` on macOS/Linux) or a custom path you type in. Leave this unset (the blank
+  "auto-detect" entry) to let AgentControl auto-detect the best available shell (it prefers the
   highest available PowerShell/`pwsh`, falls back to Windows PowerShell 5, then to `cmd`, on
   Windows; the platform default shell is used on macOS/Linux).
 
@@ -183,7 +185,8 @@ Open Settings from the gear icon on the toolbar to configure:
 
 The About dialog, reachable from an info icon on the main window's toolbar, is a simple,
 non-modal window showing the running build's application version, copyright, and license
-text, so you can identify the running build without inspecting file properties.
+text, so you can identify the running build without inspecting file properties, along with a
+scrollable list of this application's direct third-party dependencies and their licenses.
 
 # Authoring Agent Packages
 

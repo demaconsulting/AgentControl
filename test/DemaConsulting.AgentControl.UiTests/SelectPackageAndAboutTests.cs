@@ -126,8 +126,9 @@ public sealed class SelectPackageAndAboutTests
     }
 
     /// <summary>
-    ///     Clicking "About" must open a non-modal window showing the app name, its
-    ///     <c>Program.Version</c>, and a copyright/license summary.
+    ///     Clicking "About" must open a non-modal window showing the app name, its tagline, its
+    ///     <c>Program.Version</c>, a copyright/license summary, and a non-empty third-party
+    ///     dependency list.
     /// </summary>
     [Fact]
     public void AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright()
@@ -150,6 +151,10 @@ public sealed class SelectPackageAndAboutTests
             TimeSpan.FromSeconds(15));
         Assert.NotNull(aboutWindow);
 
+        var taglineText = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutTaglineText"))?.AsLabel();
+        Assert.NotNull(taglineText);
+        Assert.False(string.IsNullOrWhiteSpace(taglineText.Text));
+
         var versionText = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutVersionText"))?.AsLabel();
         Assert.NotNull(versionText);
         Assert.False(string.IsNullOrWhiteSpace(versionText.Text));
@@ -161,6 +166,13 @@ public sealed class SelectPackageAndAboutTests
         var licenseText = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutLicenseText"))?.AsLabel();
         Assert.NotNull(licenseText);
         Assert.False(string.IsNullOrWhiteSpace(licenseText.Text));
+
+        // The dependency list must be present and populated with at least one entry; this does
+        // not assert on specific entry content/order (covered by ThirdPartyDependenciesTests.cs),
+        // only that the control exists and rendered a non-empty item list end-to-end.
+        var dependenciesList = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutDependenciesList"));
+        Assert.NotNull(dependenciesList);
+        Assert.NotEmpty(dependenciesList.FindAllChildren());
 
         // The window must not be modal: the main window should remain usable while the About
         // window is open (verified by locating the main window's own toolbar button still

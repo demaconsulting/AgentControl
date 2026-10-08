@@ -10,8 +10,10 @@ window, and the settings window (`MainWindowViewModel`, `RepoCardViewModel`,
 `SelectPackageWindowViewModel`, `SettingsWindowViewModel`), plus their `.axaml` Views
 (`MainWindow`, `AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`,
 `SettingsWindow`) and shared MVVM support types (`RelayCommand`, `ViewModelBase`,
-`FavoriteIconConverter`), which have no dedicated test files and are folded into this
-subsystem-level description rather than given separate unit files. The subsystem contains
+`FavoriteIconConverter`, `ThirdPartyDependencies`), which are folded into this subsystem-level
+description rather than given separate unit files; `ThirdPartyDependencies` is the one
+exception with a dedicated test file (`ThirdPartyDependenciesTests.cs`), since it is a plain
+static data source independent of any Avalonia control. The subsystem contains
 four units: `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`, and
 `SettingsWindowViewModel`.
 
@@ -118,8 +120,13 @@ to each `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`,
 dialog/window to show and how to route the user's response back into the view model (e.g.
 calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the `ConfirmationWindow` shown
 for the AGENTS.md template offer). `AboutWindow` (opened via a
-toolbar command with no dedicated view model) shows the application version and copyright
-read from `Program.Version` (`AgentControl-LauncherUI-About`). Adding a repo
+toolbar command with no dedicated view model) shows the application logo (reused from
+`Assets/AppIcon.ico`, the same icon already used for the main window/taskbar - no new binary
+image asset was added), a short mission tagline, the running version and copyright read
+from `Program.Version`, and a scrollable list of this application's direct runtime third-party
+dependencies and their SPDX license identifiers, sourced from a static
+`ThirdPartyDependencies` list rather than parsed at runtime from the project file
+(`AgentControl-LauncherUI-About`). Adding a repo
 (`AgentControl-LauncherUI-AddRepo`) is likewise driven directly by `MainWindowViewModel`
 rather than a dedicated unit, since its logic (path-existence and duplicate-path validation)
 is simple enough not to warrant a separate class.

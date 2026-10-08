@@ -44,8 +44,9 @@ in that repo's working directory.
   path (local drive, mapped drive, or UNC share)
 - **Upgrade notifications**: a badge and release-notes viewer let you see when a newer agent
   package version is available and what changed before you apply it
-- **About dialog**: reachable from the main window, shows the running app's version,
-  copyright, and license
+- **About dialog**: reachable from the main window, shows the application logo, a short
+  mission tagline, the running app's version, copyright, license, and a scrollable list of
+  this application's direct third-party dependencies and their licenses
 
 See [architecture.md](architecture.md) for the full system design.
 
@@ -122,13 +123,17 @@ The Settings window lets you configure:
 - **Git executable override** — a specific `git` executable to use instead of resolving it
   from `PATH`
 - **Agent tool selection** — GitHub Copilot CLI, Cursor, Claude Code, or a custom command
-- **Shell/terminal preference** — which shell to launch the agent tool in, or leave unset to
-  let AgentControl auto-detect the best available shell
+- **Shell/terminal preference** — which shell to launch the agent tool in, picked from an
+  OS-appropriate dropdown (`pwsh`/`powershell`/`cmd` on Windows, `bash`/`zsh`/`sh` elsewhere)
+  or typed in directly for a custom shell; leave unset to let AgentControl auto-detect the
+  best available shell
 
 ### About
 
-The About dialog (reachable from the main window) shows the running build's version,
-copyright, and license, so it can be identified without inspecting file properties.
+The About dialog (reachable from the main window) shows the application logo, a short mission
+tagline, and the running build's version, copyright, and license, so it can be identified
+without inspecting file properties, along with a scrollable list of this application's direct
+third-party dependencies and their licenses.
 
 ## Authoring agent packages
 

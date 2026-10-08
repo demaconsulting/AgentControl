@@ -18,19 +18,42 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Text;
 using DemaConsulting.AgentControl.LauncherUI;
 
 namespace DemaConsulting.AgentControl.RepoSync;
 
 /// <summary>
+///     A single inline run of release-notes text, carrying the bold/italic emphasis (if any)
+///     parsed from <c>**bold**</c>/<c>*italic*</c> Markdown syntax.
+/// </summary>
+/// <param name="Text">The run's literal text, with emphasis markers already stripped.</param>
+/// <param name="Bold">Whether the run was wrapped in <c>**double asterisks**</c>.</param>
+/// <param name="Italic">Whether the run was wrapped in <c>*single asterisks*</c>.</param>
+internal sealed record MarkdownRun(string Text, bool Bold, bool Italic);
+
+/// <summary>
+///     A single rendered line of release notes: either a heading, a bullet-list item, or a plain
+///     paragraph line, made up of one or more <see cref="MarkdownRun"/>s.
+/// </summary>
+/// <param name="Runs">The line's inline runs, in display order.</param>
+/// <param name="HeadingLevel">The Markdown heading level (1 for <c>#</c>, 2 for <c>##</c>, etc.),
+///     or 0 if the line is not a heading.</param>
+/// <param name="IsBullet">Whether the line is a <c>- </c>/<c>* </c> bullet-list item.</param>
+internal sealed record MarkdownBlock(IReadOnlyList<MarkdownRun> Runs, int HeadingLevel, bool IsBullet);
+
+/// <summary>
 ///     View model for <see cref="ReleaseNotesViewer"/>: holds the window title and the release
-///     notes text to display after a successful package upgrade.
+///     notes text (both as raw text and as parsed <see cref="MarkdownBlock"/>s) to display after
+///     a successful package upgrade.
 /// </summary>
 /// <remarks>
-///     Deliberately trivial - <c>PackageZipExtractor.ReadReleaseNotes</c> already does the only
-///     real work (reading the zip entry), so this view model exists purely to give the view a
-///     bindable, testable surface rather than reading fields directly off a plain string.
-///     Immutable and thread-safe once constructed.
+///     <c>PackageZipExtractor.ReadReleaseNotes</c> already does the only I/O (reading the zip
+///     entry); this view model's own job is the lightweight line-by-line Markdown parsing in
+///     <see cref="ParseBlocks"/> that turns that raw text into headings/bold/italic/bullet runs
+///     for <see cref="ReleaseNotesViewer"/> to render - not a full CommonMark implementation,
+///     just the handful of constructs release notes actually use. Immutable and thread-safe once
+///     constructed.
 /// </remarks>
 internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
 {
@@ -49,6 +72,7 @@ internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
 
         Title = $"Release Notes - {repoName}";
         ReleaseNotes = string.IsNullOrEmpty(releaseNotes) ? "(This package has no release notes.)" : releaseNotes;
+        Blocks = ParseBlocks(ReleaseNotes);
     }
 
     /// <summary>
@@ -57,8 +81,125 @@ internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
     public string Title { get; }
 
     /// <summary>
-    ///     Gets the release notes text to display, rendered as plain text (v1 does not require a
-    ///     full Markdown renderer per the Phase 2 task scope).
+    ///     Gets the raw release notes text (unparsed), kept for callers/tests that only need the
+    ///     original content rather than its parsed rendering.
     /// </summary>
     public string ReleaseNotes { get; }
+
+    /// <summary>
+    ///     Gets the release notes parsed into renderable <see cref="MarkdownBlock"/>s (headings,
+    ///     bullet items, and plain paragraph lines with bold/italic runs), one per non-blank
+    ///     source line.
+    /// </summary>
+    public IReadOnlyList<MarkdownBlock> Blocks { get; }
+
+    /// <summary>
+    ///     Parses release-notes Markdown text into a sequence of <see cref="MarkdownBlock"/>s,
+    ///     recognizing <c>#</c>/<c>##</c>/<c>###</c> headings, <c>- </c>/<c>* </c> bullet items,
+    ///     and <c>**bold**</c>/<c>*italic*</c> inline emphasis. Blank lines are skipped rather
+    ///     than rendered as empty blocks.
+    /// </summary>
+    /// <param name="markdown">The raw Markdown text to parse.</param>
+    /// <returns>The parsed blocks, in source order.</returns>
+    private static IReadOnlyList<MarkdownBlock> ParseBlocks(string markdown)
+    {
+        var blocks = new List<MarkdownBlock>();
+
+        foreach (var rawLine in markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        {
+            if (string.IsNullOrWhiteSpace(rawLine))
+            {
+                continue;
+            }
+
+            var line = rawLine;
+            var headingLevel = 0;
+            while (headingLevel < line.Length && line[headingLevel] == '#')
+            {
+                headingLevel++;
+            }
+
+            var isBullet = false;
+            if (headingLevel > 0 && headingLevel < line.Length && line[headingLevel] == ' ')
+            {
+                line = line[(headingLevel + 1)..];
+            }
+            else
+            {
+                headingLevel = 0;
+                var trimmed = line.TrimStart();
+                if (trimmed.StartsWith("- ", StringComparison.Ordinal) ||
+                    trimmed.StartsWith("* ", StringComparison.Ordinal))
+                {
+                    isBullet = true;
+                    line = trimmed[2..];
+                }
+            }
+
+            blocks.Add(new MarkdownBlock(ParseInlineRuns(line), headingLevel, isBullet));
+        }
+
+        return blocks;
+    }
+
+    /// <summary>
+    ///     Parses a single line's text into <see cref="MarkdownRun"/>s, recognizing
+    ///     <c>**bold**</c> and <c>*italic*</c> spans. Unterminated markers (no matching closing
+    ///     <c>*</c>/<c>**</c>) are treated as literal text rather than emphasis.
+    /// </summary>
+    /// <param name="text">The line text (with any heading/bullet prefix already stripped).</param>
+    /// <returns>The parsed inline runs, in source order.</returns>
+    private static IReadOnlyList<MarkdownRun> ParseInlineRuns(string text)
+    {
+        var runs = new List<MarkdownRun>();
+        var plain = new StringBuilder();
+        var index = 0;
+
+        while (index < text.Length)
+        {
+            if (text[index] == '*' && index + 1 < text.Length && text[index + 1] == '*')
+            {
+                var end = text.IndexOf("**", index + 2, StringComparison.Ordinal);
+                if (end > index + 1)
+                {
+                    FlushPlain(runs, plain);
+                    runs.Add(new MarkdownRun(text[(index + 2)..end], Bold: true, Italic: false));
+                    index = end + 2;
+                    continue;
+                }
+            }
+            else if (text[index] == '*')
+            {
+                var end = text.IndexOf('*', index + 1);
+                if (end > index)
+                {
+                    FlushPlain(runs, plain);
+                    runs.Add(new MarkdownRun(text[(index + 1)..end], Bold: false, Italic: true));
+                    index = end + 1;
+                    continue;
+                }
+            }
+
+            plain.Append(text[index]);
+            index++;
+        }
+
+        FlushPlain(runs, plain);
+        return runs;
+    }
+
+    /// <summary>
+    ///     Appends <paramref name="plain"/>'s accumulated text as a plain (non-bold, non-italic)
+    ///     run, if any, then clears it for the next span.
+    /// </summary>
+    private static void FlushPlain(List<MarkdownRun> runs, StringBuilder plain)
+    {
+        if (plain.Length == 0)
+        {
+            return;
+        }
+
+        runs.Add(new MarkdownRun(plain.ToString(), Bold: false, Italic: false));
+        plain.Clear();
+    }
 }

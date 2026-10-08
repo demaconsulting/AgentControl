@@ -50,10 +50,13 @@
                   Text="{Binding CustomAgentCommand}" />
 
         <TextBlock Text="Shell/terminal preference (blank = auto-detect)" FontWeight="Bold" />
-        <TextBox Name="ShellPreferenceTextBox"
-                  AutomationProperties.AutomationId="ShellPreferenceTextBox"
-                  PlaceholderText="Auto-detect"
-                  Text="{Binding ShellPreference}" />
+        <ComboBox Name="ShellPreferenceComboBox"
+                   AutomationProperties.AutomationId="ShellPreferenceComboBox"
+                   IsEditable="True"
+                   PlaceholderText="Auto-detect"
+                   ItemsSource="{x:Static vm:SettingsWindowViewModel.AvailableShellPreferences}"
+                   Text="{Binding ShellPreference}"
+                   HorizontalAlignment="Stretch" />
 
         <Button Name="SaveSettingsButton"
                  AutomationProperties.AutomationId="SaveSettingsButton"

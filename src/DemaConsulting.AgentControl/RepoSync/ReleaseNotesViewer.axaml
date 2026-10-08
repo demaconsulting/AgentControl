@@ -20,14 +20,10 @@
                     FontSize="16"
                     FontWeight="Bold"
                     Margin="0,0,0,8" />
-        <TextBox Grid.Row="1"
-                  Name="ReleaseNotesTextBox"
-                  AutomationProperties.AutomationId="ReleaseNotesTextBox"
-                  Text="{Binding ReleaseNotes}"
-                  IsReadOnly="True"
-                  AcceptsReturn="True"
-                  TextWrapping="Wrap"
-                  FontFamily="Consolas,Menlo,monospace"
-                  VerticalContentAlignment="Top" />
+        <ScrollViewer Grid.Row="1">
+            <StackPanel Name="ReleaseNotesPanel"
+                         AutomationProperties.AutomationId="ReleaseNotesPanel"
+                         Spacing="4" />
+        </ScrollViewer>
     </Grid>
 </Window>

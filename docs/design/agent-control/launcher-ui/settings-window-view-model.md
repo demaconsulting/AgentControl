@@ -26,6 +26,14 @@ notification for `IsCustomAgentToolSelected`.
 (`CopilotCli`, `Cursor`, `ClaudeCode`, `Custom`), per architecture.md's "Configurable agent
 tool and shell" decision.
 
+**AvailableShellPreferences**: `static IReadOnlyList<string>` — The OS-conditional
+shell/terminal preset choices offered by the picker: `pwsh`, `powershell`, `cmd` on Windows, or
+`bash`, `zsh`, `sh` on other platforms, per architecture.md's "Configurable agent tool and
+shell" decision. Each list is prefixed with a blank (`string.Empty`) entry representing the
+"auto-detect" default, matching the executables `ShellDetector` recognizes for the current OS.
+The backing control is an editable `ComboBox`, so a user may still type a custom shell path not
+present in this list (`AgentControl-SettingsWindowViewModel-ShellPreferencePresets`).
+
 Notably absent: the recent-repos list is intentionally not exposed here — it is owned
 exclusively by `MainWindowViewModel` and is preserved by `MainWindowViewModel.ApplySettings`
 when the `AppSettings` built by `Save` is applied.

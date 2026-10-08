@@ -10,10 +10,15 @@ constructing an Avalonia `Window`. At the subsystem boundary, collaborating subs
 (`AgentPackageManagement`, `RepoSync`, `RepoConfig`, `GitIntegration`, `AgentToolLauncher`,
 `Settings`) are exercised through their real implementations against real temporary
 directories and package-zip fixtures, and git is substituted with a stub script (`GitStub`,
-shared with `GitClientTests`) so no test depends on a real git installation. The one
-end-to-end path not covered by any unit test — the About command, which has no dedicated
-view-model class — is verified only via the FlaUI `DemaConsulting.AgentControl.UiTests`
-project.
+shared with `GitClientTests`) so no test depends on a real git installation. The About
+command's dependency-list data source has direct unit coverage
+(`ThirdPartyDependenciesTests.cs`), since it is a plain static data source independent of any
+Avalonia control; the About dialog itself still has no dedicated view-model class, so its
+end-to-end rendering (opening the window and showing the tagline, version, copyright, license,
+and a non-empty dependency list) is verified only via the FlaUI
+`DemaConsulting.AgentControl.UiTests` project. The logo image itself is not asserted by any
+automated test (it has no bound text content to check) and remains a visual-inspection-only
+element.
 
 ### Test Environment
 
@@ -137,8 +142,18 @@ existing recent-repos list while adopting the new field values. This scenario is
 `MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields`, covering
 `AgentControl-LauncherUI-Settings`.
 
-**LauncherUI_About_EndToEndOnly_OpensAboutWindow**: No unit test targets the About dialog
-directly, since it has no dedicated view-model class; real coverage is end-to-end only,
-verifying the About window opens showing the application version and copyright. This scenario
-is tested by `windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright`, covering
+**LauncherUI_About_EndToEndOnly_OpensAboutWindow**: The About dialog itself has no dedicated
+view-model class, so its end-to-end rendering is verified via the FlaUI project: opening the
+window and confirming the mission tagline, version, copyright, and license text are all
+present and non-empty, and that the third-party dependency list control is present and
+rendered with at least one entry. The application logo image is not automated-asserted (it has
+no text content to check) and remains a visual-inspection-only element. The dependency list's
+underlying data source (name/version/license entries, no duplicates, no empty fields, and the
+expected display format) has direct unit coverage. This scenario is tested by
+`windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright`,
+`ThirdPartyDependencies_All_MatchesCsprojDirectRuntimeDependencies`,
+`ThirdPartyDependencies_All_NoDuplicateNames`,
+`ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense`,
+`ThirdPartyDependencies_All_EveryEntryHasNonEmptyVersion`, and
+`DependencyInfo_ToString_RepresentativeEntry_ReturnsNameVersionLicenseFormat`, covering
 `AgentControl-LauncherUI-About`.

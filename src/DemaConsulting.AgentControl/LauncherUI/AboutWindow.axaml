@@ -5,12 +5,26 @@
         x:Class="DemaConsulting.AgentControl.LauncherUI.AboutWindow"
         Name="AboutWindowRoot"
         Title="About AgentControl"
-        Width="360" SizeToContent="Height"
+        Width="440" SizeToContent="Height"
+        MaxHeight="600"
         MinWidth="280"
         CanResize="False"
         WindowStartupLocation="CenterOwner">
     <StackPanel Margin="16" Spacing="8">
-        <TextBlock Text="AgentControl" FontWeight="Bold" FontSize="16" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+            <!-- The AppIcon.ico logo has a black "D" on a transparent background, which
+                 disappears against the app's dark theme; a light backing panel keeps the
+                 full logo visible regardless of theme. -->
+            <Border Background="White" CornerRadius="6" Padding="4" Width="48" Height="48">
+                <Image Source="avares://DemaConsulting.AgentControl/Assets/AppIcon.ico"
+                        Width="40" Height="40" />
+            </Border>
+            <TextBlock Text="AgentControl" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" />
+        </StackPanel>
+        <TextBlock Name="AboutTaglineText"
+                    AutomationProperties.AutomationId="AboutTaglineText"
+                    FontStyle="Italic"
+                    TextWrapping="Wrap" />
         <TextBlock Name="AboutVersionText"
                     AutomationProperties.AutomationId="AboutVersionText" />
         <TextBlock Name="AboutCopyrightText"
@@ -18,6 +32,11 @@
         <TextBlock Name="AboutLicenseText"
                     AutomationProperties.AutomationId="AboutLicenseText"
                     TextWrapping="Wrap" />
+        <TextBlock Text="Third-Party Dependencies" FontWeight="Bold" />
+        <ScrollViewer MaxHeight="220">
+            <ItemsControl Name="AboutDependenciesList"
+                          AutomationProperties.AutomationId="AboutDependenciesList" />
+        </ScrollViewer>
         <Button Name="AboutCloseButton"
                  AutomationProperties.AutomationId="AboutCloseButton"
                  Content="Close"

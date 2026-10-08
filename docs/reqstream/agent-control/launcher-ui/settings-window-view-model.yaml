@@ -41,3 +41,18 @@ sections:
           versions) after a save.
         tests:
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
+
+      - id: AgentControl-SettingsWindowViewModel-ShellPreferencePresets
+        title: >-
+          The SettingsWindowViewModel class shall expose an OS-appropriate, non-empty list of
+          shell/terminal preference presets with a blank auto-detect entry first and no
+          duplicate entries, while continuing to accept a freeform custom entry.
+        justification: |
+          Presenting the recognized shell executables for the developer's current OS lets them
+          pick a valid preference without having to know or type an exact executable name,
+          while the blank first entry preserves the existing auto-detect default and the
+          control remaining editable preserves support for a shell not in the preset list.
+        tests:
+          - SettingsWindowViewModel_AvailableShellPreferences_IsNonEmptyWithBlankFirstEntry
+          - SettingsWindowViewModel_AvailableShellPreferences_NoDuplicateEntries
+          - SettingsWindowViewModel_AvailableShellPreferences_CurrentOs_ContainsExpectedPresets

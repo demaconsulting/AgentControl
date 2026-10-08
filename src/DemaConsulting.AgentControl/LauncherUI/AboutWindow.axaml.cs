@@ -25,26 +25,44 @@ using Avalonia.Markup.Xaml;
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     Non-modal "About AgentControl" window showing the app name, <see cref="Program.Version"/>,
-///     copyright, and a short license summary.
+///     Non-modal "About AgentControl" window showing the app name, logo, a short mission
+///     tagline, <see cref="Program.Version"/>, copyright, a short license summary, and a
+///     scrollable list of this application's direct third-party runtime dependencies with their
+///     SPDX license identifiers.
 /// </summary>
 /// <remarks>
 ///     Callers MUST use <see cref="Window.Show()"/>, never <c>ShowDialog</c>, mirroring
 ///     <c>ReleaseNotesViewer</c>'s non-modal convention - the main window remains fully usable
-///     while this informational window is open. Content is entirely static (no view model is
-///     needed); this code-behind only sets the version/copyright/license text once at
-///     construction.
+///     while this informational window is open. This window remains code-behind only (no view
+///     model is needed); this code-behind sets the tagline/version/copyright/license text once at
+///     construction, and populates the dependency list's <c>ItemsSource</c> from the static
+///     <see cref="ThirdPartyDependencies"/> list rather than from a view model or by parsing the
+///     project file at runtime. The logo reuses the existing <c>Assets/AppIcon.ico</c> (the same
+///     icon already used for the main window's title bar and the Windows taskbar/exe icon)
+///     rather than adding a new binary image asset.
 /// </remarks>
 internal sealed partial class AboutWindow : Window
 {
     /// <summary>
-    ///     Initializes a new <see cref="AboutWindow"/>, populating its version/copyright/license
-    ///     text.
+    ///     Short mission tagline shown below the app name, adapted (condensed, not verbatim)
+    ///     from the lead paragraph of docs/design/introduction.md (and README.md's opening
+    ///     sentence, which conveys the same idea).
+    /// </summary>
+    private const string Tagline =
+        "Distribute proprietary AI-agent configuration alongside public repositories, "
+        + "without ever committing that proprietary content to source control.";
+
+    /// <summary>
+    ///     Initializes a new <see cref="AboutWindow"/>, populating its tagline/version/copyright/
+    ///     license text.
     /// </summary>
     public AboutWindow()
     {
         AvaloniaXamlLoader.Load(this);
 
+        var taglineText = this.FindControl<TextBlock>("AboutTaglineText")
+                           ?? throw new InvalidOperationException(
+                               "AboutTaglineText control not found in AboutWindow.axaml.");
         var versionText = this.FindControl<TextBlock>("AboutVersionText")
                            ?? throw new InvalidOperationException(
                                "AboutVersionText control not found in AboutWindow.axaml.");
@@ -54,10 +72,15 @@ internal sealed partial class AboutWindow : Window
         var licenseText = this.FindControl<TextBlock>("AboutLicenseText")
                            ?? throw new InvalidOperationException(
                                "AboutLicenseText control not found in AboutWindow.axaml.");
+        var dependenciesList = this.FindControl<ItemsControl>("AboutDependenciesList")
+                                ?? throw new InvalidOperationException(
+                                    "AboutDependenciesList control not found in AboutWindow.axaml.");
 
+        taglineText.Text = Tagline;
         versionText.Text = $"AgentControl {Program.Version}";
         copyrightText.Text = "Copyright (c) DEMA Consulting";
         licenseText.Text = "Licensed under the MIT License. See LICENSE for details.";
+        dependenciesList.ItemsSource = ThirdPartyDependencies.All;
     }
 
     /// <summary>
