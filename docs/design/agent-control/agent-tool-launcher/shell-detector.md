@@ -29,11 +29,20 @@ the test machine.
 `PATH`-scanning, `File.Exists`, the `$SHELL` environment variable, and
 `OperatingSystem.IsWindows()` respectively.
 
-**Detect**: Detects the best available shell.
+**Detect**: Detects the shell to use.
 
-- *Parameters*: None.
-- *Returns*: `DetectedShell` — the detected `ShellKind` and executable path to launch.
-- *Postconditions*: On Windows, follows the PowerShell 7+ → PowerShell 5.x → `cmd.exe`
+- *Parameters*: `string? shellPreference` — the user's configured shell preference (from
+  `AppSettings.ShellPreference`), or `null`/omitted for auto-detection.
+- *Returns*: `DetectedShell` — the detected/resolved `ShellKind` and executable path to launch.
+- *Postconditions*: When `shellPreference` is blank or all-whitespace, follows the
+  auto-detection behavior below. Otherwise, a recognized keyword for the current OS
+  (`pwsh`/`powershell`/`cmd` on Windows, `bash`/`zsh`/`sh` elsewhere, matched
+  case-insensitively) is resolved to its installed path where possible; any other value is
+  treated as a custom shell executable name/path and launched using POSIX `-c` invocation
+  semantics (`AgentControl-ShellDetector-ShellPreference`). The POSIX keyword is normalized
+  to lowercase before `PATH` lookup/fallback, so a differently-cased preference (e.g. `BASH`)
+  still resolves/launches the lowercase executable, matching case-sensitive POSIX filesystems.
+- *Auto-detection*: On Windows, follows the PowerShell 7+ → PowerShell 5.x → `cmd.exe`
   fallback chain (`AgentControl-ShellDetector-DetectWindows`); elsewhere, returns the `$SHELL`
   environment variable's value or `/bin/sh` if unset
   (`AgentControl-ShellDetector-DetectPosix`).
@@ -53,5 +62,6 @@ characters) rather than treating them as a detection failure.
 
 #### Callers
 
-- **RepoCardViewModel.Launch** — constructs a `ShellDetector` and calls `Detect` immediately
-  before building the process start info for a launch.
+- **RepoCardViewModel.Launch** — constructs a `ShellDetector` and calls `Detect`, passing the
+  current `AppSettings.ShellPreference`, immediately before building the process start info for
+  a launch.

@@ -130,4 +130,50 @@ public class SettingsWindowViewModelTests
         // Act / Assert: a null initial settings object is rejected
         Assert.Throws<ArgumentNullException>(() => new SettingsWindowViewModel(null!, _ => { }));
     }
+
+    /// <summary>
+    ///     Test that AvailableShellPreferences is non-empty and its first entry is the blank
+    ///     "auto-detect" default.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_AvailableShellPreferences_IsNonEmptyWithBlankFirstEntry()
+    {
+        // Assert: the list is non-empty, and the first entry is the blank auto-detect default
+        Assert.NotEmpty(SettingsWindowViewModel.AvailableShellPreferences);
+        Assert.Equal(string.Empty, SettingsWindowViewModel.AvailableShellPreferences[0]);
+    }
+
+    /// <summary>
+    ///     Test that AvailableShellPreferences has no duplicate entries.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_AvailableShellPreferences_NoDuplicateEntries()
+    {
+        // Assert: every entry is unique
+        var distinctCount = SettingsWindowViewModel.AvailableShellPreferences.Distinct().Count();
+        Assert.Equal(SettingsWindowViewModel.AvailableShellPreferences.Count, distinctCount);
+    }
+
+    /// <summary>
+    ///     Test that AvailableShellPreferences contains the shell presets recognized for the
+    ///     current OS: pwsh/powershell/cmd on Windows, bash/zsh/sh elsewhere.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_AvailableShellPreferences_CurrentOs_ContainsExpectedPresets()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // Assert: the Windows preset list
+            Assert.Equal(
+                [string.Empty, "pwsh", "powershell", "cmd"],
+                SettingsWindowViewModel.AvailableShellPreferences);
+        }
+        else
+        {
+            // Assert: the non-Windows preset list
+            Assert.Equal(
+                [string.Empty, "bash", "zsh", "sh"],
+                SettingsWindowViewModel.AvailableShellPreferences);
+        }
+    }
 }

@@ -35,3 +35,23 @@ sections:
         tests:
           - ShellDetector_Detect_NonWindowsWithShellVariableSet_ReturnsPosixShell
           - ShellDetector_Detect_NonWindowsWithShellVariableUnset_ReturnsDefaultPosixShell
+
+      - id: AgentControl-ShellDetector-ShellPreference
+        title: >-
+          The ShellDetector class shall, when given a non-blank shell preference, launch that
+          preferred shell instead of auto-detecting: resolving a recognized keyword for the
+          current OS (pwsh/powershell/cmd on Windows, bash/zsh/sh elsewhere) to its installed
+          path where possible, and otherwise launching the preference text itself as a custom
+          shell executable name/path using POSIX "-c" invocation semantics. A blank or
+          whitespace-only preference falls back to auto-detection.
+        justification: |
+          SettingsWindowViewModel.AvailableShellPreferences lets the user pick (or type) a
+          specific shell; that choice must actually be honored when launching the agent tool,
+          not merely stored, otherwise the setting is misleading.
+        tests:
+          - ShellDetector_Detect_WithPwshPreference_ReturnsPowerShellCore
+          - ShellDetector_Detect_WithPowershellPreference_ReturnsWindowsPowerShell
+          - ShellDetector_Detect_WithCmdPreference_ReturnsCmd
+          - ShellDetector_Detect_WithPosixKeywordPreference_ReturnsPosixShell
+          - ShellDetector_Detect_WithCustomShellPreference_ReturnsPosixShellWithThatPath
+          - ShellDetector_Detect_WithBlankPreference_FallsBackToAutoDetection

@@ -31,6 +31,9 @@ words:
   - Mvvm
   - MVVM
   - Postconditions
+  - Inlines
+  - inlines
+  - renderable
   - buildmark
   - buildtransitive
   - contentfiles

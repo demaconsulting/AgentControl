@@ -136,12 +136,72 @@ internal sealed class ShellDetector
     }
 
     /// <summary>
-    ///     Detects the best available shell to launch the agent tool in.
+    ///     Detects the shell to launch the agent tool in: either the user's configured
+    ///     <paramref name="shellPreference"/> (from <c>AppSettings.ShellPreference</c> /
+    ///     <c>SettingsWindowViewModel.AvailableShellPreferences</c>), or - when that is
+    ///     <see langword="null"/>, empty, or all-whitespace (the "auto-detect" choice) - the best
+    ///     available shell for the current OS.
     /// </summary>
+    /// <param name="shellPreference">
+    ///     The user's shell preference: blank/<see langword="null"/> for auto-detection, one of
+    ///     the recognized keywords for the current OS (<c>pwsh</c>/<c>powershell</c>/<c>cmd</c>
+    ///     on Windows, <c>bash</c>/<c>zsh</c>/<c>sh</c> elsewhere - matched case-insensitively),
+    ///     or an arbitrary custom shell executable name/path (e.g. a Git Bash install not on
+    ///     <c>PATH</c>), which is launched using POSIX <c>-c</c> invocation semantics since that
+    ///     is the broadly compatible convention for an arbitrary shell executable.
+    /// </param>
     /// <returns>The detected shell and the path used to launch it.</returns>
-    public DetectedShell Detect()
+    public DetectedShell Detect(string? shellPreference = null)
     {
+        if (!string.IsNullOrWhiteSpace(shellPreference))
+        {
+            return DetectFromPreference(shellPreference.Trim());
+        }
+
         return _isWindows ? DetectWindowsShell() : DetectPosixShell();
+    }
+
+    /// <summary>
+    ///     Resolves a non-blank user shell preference to a <see cref="DetectedShell"/>, honoring
+    ///     the recognized keywords for the current OS and falling back to launching the raw
+    ///     preference text as a custom shell command for anything else.
+    /// </summary>
+    /// <param name="preference">The trimmed, non-blank shell preference text.</param>
+    /// <returns>The resolved shell.</returns>
+    private DetectedShell DetectFromPreference(string preference)
+    {
+        if (_isWindows)
+        {
+            if (string.Equals(preference, "pwsh", StringComparison.OrdinalIgnoreCase))
+            {
+                return new DetectedShell(ShellKind.PowerShellCore, ResolvePwshPath() ?? "pwsh.exe");
+            }
+
+            if (string.Equals(preference, "powershell", StringComparison.OrdinalIgnoreCase))
+            {
+                return new DetectedShell(ShellKind.WindowsPowerShell, ResolveWindowsPowerShellPath() ?? "powershell.exe");
+            }
+
+            if (string.Equals(preference, "cmd", StringComparison.OrdinalIgnoreCase))
+            {
+                return new DetectedShell(ShellKind.Cmd, _resolveOnPath(DefaultCmdExecutable) ?? DefaultCmdExecutable);
+            }
+        }
+        else if (string.Equals(preference, "bash", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(preference, "zsh", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(preference, "sh", StringComparison.OrdinalIgnoreCase))
+        {
+            // Normalize to the lowercase keyword before PATH lookup/fallback: on case-sensitive
+            // POSIX systems the executable is lowercase (e.g. "bash"), so a differently-cased
+            // preference like "BASH" must not be searched for/launched verbatim.
+            var normalized = preference.ToLowerInvariant();
+            return new DetectedShell(ShellKind.Posix, _resolveOnPath(normalized) ?? normalized);
+        }
+
+        // An unrecognized preference is treated as a custom shell executable name/path supplied
+        // directly by the user (the combo box remains editable for this reason), launched with
+        // POSIX "-c" invocation semantics.
+        return new DetectedShell(ShellKind.Posix, preference);
     }
 
     /// <summary>
@@ -151,38 +211,40 @@ internal sealed class ShellDetector
     /// <returns>The detected shell.</returns>
     private DetectedShell DetectWindowsShell()
     {
-        // Prefer PowerShell 7+ resolvable on PATH
-        var pwshOnPath = _resolveOnPath("pwsh.exe");
-        if (pwshOnPath is not null)
+        // Prefer PowerShell 7+, whether resolvable on PATH or at a well-known install location
+        var pwsh = ResolvePwshPath();
+        if (pwsh is not null)
         {
-            return new DetectedShell(ShellKind.PowerShellCore, pwshOnPath);
+            return new DetectedShell(ShellKind.PowerShellCore, pwsh);
         }
 
-        // Fall back to well-known PowerShell 7+ install locations
-        var pwshWellKnown = WellKnownPwshPaths.FirstOrDefault(_fileExists);
-        if (pwshWellKnown is not null)
+        // Fall back to Windows PowerShell 5.x, whether resolvable on PATH or well-known
+        var legacy = ResolveWindowsPowerShellPath();
+        if (legacy is not null)
         {
-            return new DetectedShell(ShellKind.PowerShellCore, pwshWellKnown);
-        }
-
-        // Fall back to Windows PowerShell 5.x resolvable on PATH
-        var legacyOnPath = _resolveOnPath("powershell.exe");
-        if (legacyOnPath is not null)
-        {
-            return new DetectedShell(ShellKind.WindowsPowerShell, legacyOnPath);
-        }
-
-        // Fall back to the well-known Windows PowerShell 5.x install location
-        var legacyWellKnown = WellKnownWindowsPowerShellPaths.FirstOrDefault(_fileExists);
-        if (legacyWellKnown is not null)
-        {
-            return new DetectedShell(ShellKind.WindowsPowerShell, legacyWellKnown);
+            return new DetectedShell(ShellKind.WindowsPowerShell, legacy);
         }
 
         // Final fallback: cmd.exe, which ships with every supported Windows version
         var cmdOnPath = _resolveOnPath(DefaultCmdExecutable);
         return new DetectedShell(ShellKind.Cmd, cmdOnPath ?? DefaultCmdExecutable);
     }
+
+    /// <summary>
+    ///     Resolves PowerShell 7+'s path, preferring <c>PATH</c> resolution and falling back to
+    ///     <see cref="WellKnownPwshPaths"/>.
+    /// </summary>
+    /// <returns>The resolved path, or <see langword="null"/> if not found anywhere.</returns>
+    private string? ResolvePwshPath() =>
+        _resolveOnPath("pwsh.exe") ?? WellKnownPwshPaths.FirstOrDefault(_fileExists);
+
+    /// <summary>
+    ///     Resolves Windows PowerShell 5.x's path, preferring <c>PATH</c> resolution and falling
+    ///     back to <see cref="WellKnownWindowsPowerShellPaths"/>.
+    /// </summary>
+    /// <returns>The resolved path, or <see langword="null"/> if not found anywhere.</returns>
+    private string? ResolveWindowsPowerShellPath() =>
+        _resolveOnPath("powershell.exe") ?? WellKnownWindowsPowerShellPaths.FirstOrDefault(_fileExists);
 
     /// <summary>
     ///     Uses the user's default POSIX shell (<c>$SHELL</c>, falling back to <c>/bin/sh</c>).

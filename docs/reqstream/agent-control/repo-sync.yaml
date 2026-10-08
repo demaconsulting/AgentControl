@@ -45,10 +45,13 @@ sections:
         children:
           - AgentControl-PackageZipExtractor-ReadReleaseNotes
           - AgentControl-ReleaseNotesViewerViewModel-Display
+          - AgentControl-ReleaseNotesViewerViewModel-MarkdownParsing
         tests:
           - PackageZipExtractor_ReadReleaseNotes_EntryPresent_ReturnsContentWithoutExtracting
           - PackageZipExtractor_ReadReleaseNotes_NoEntry_ReturnsNull
           - ReleaseNotesViewerViewModel_Constructor_EmptyReleaseNotes_UsesPlaceholderMessage
+          - ReleaseNotesViewer_BuildBlockTextBlock_HeadingBlock_RendersAllRunsBold
+          - ReleaseNotesViewer_BuildBlockTextBlock_BodyBlock_OnlyBoldsMarkedRuns
 
       - id: AgentControl-RepoSync-GitIgnorePrevention
         title: >-

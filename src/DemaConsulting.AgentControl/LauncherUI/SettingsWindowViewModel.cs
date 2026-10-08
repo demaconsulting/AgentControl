@@ -85,6 +85,29 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
     ];
 
     /// <summary>
+    ///     Gets the shell/terminal preference choices offered by the picker, matching the
+    ///     executables <c>ShellDetector</c> recognizes for the current OS. The first entry is
+    ///     always the blank "auto-detect" option. The combo box remains editable so users can
+    ///     still type a custom shell path not listed here.
+    /// </summary>
+    public static IReadOnlyList<string> AvailableShellPreferences { get; } =
+        OperatingSystem.IsWindows()
+            ?
+            [
+                string.Empty,
+                "pwsh",
+                "powershell",
+                "cmd"
+            ]
+            :
+            [
+                string.Empty,
+                "bash",
+                "zsh",
+                "sh"
+            ];
+
+    /// <summary>
     ///     Gets or sets the filesystem path agent package zips are enumerated from.
     /// </summary>
     public string? PackageSourcePath

@@ -202,4 +202,170 @@ public class ShellDetectorTests
         Assert.Equal(ShellKind.Posix, shell.Kind);
         Assert.Equal("/bin/sh", shell.ExecutablePath);
     }
+
+    /// <summary>
+    ///     Test that a "pwsh" shell preference resolves PowerShell Core on Windows, overriding
+    ///     auto-detection.
+    /// </summary>
+    [Fact]
+    public void ShellDetector_Detect_WithPwshPreference_ReturnsPowerShellCore()
+    {
+        // Arrange: pwsh resolves on PATH; nothing else matters since the preference is explicit
+        var detector = new ShellDetector(
+            resolveOnPath: name => name == "pwsh.exe" ? @"C:\Users\test\AppData\pwsh.exe" : null,
+            fileExists: _ => false,
+            getShellEnvironmentVariable: () => null,
+            isWindows: true);
+
+        // Act: detect with an explicit "pwsh" preference (mixed case, to also verify
+        // case-insensitive matching)
+        var shell = detector.Detect("Pwsh");
+
+        // Assert: PowerShell Core is used
+        Assert.Equal(ShellKind.PowerShellCore, shell.Kind);
+        Assert.Equal(@"C:\Users\test\AppData\pwsh.exe", shell.ExecutablePath);
+    }
+
+    /// <summary>
+    ///     Test that a "powershell" shell preference resolves Windows PowerShell 5.x, even when
+    ///     pwsh would otherwise have been auto-detected.
+    /// </summary>
+    [Fact]
+    public void ShellDetector_Detect_WithPowershellPreference_ReturnsWindowsPowerShell()
+    {
+        // Arrange: both pwsh and powershell.exe resolve on PATH
+        var detector = new ShellDetector(
+            resolveOnPath: name => name switch
+            {
+                "pwsh.exe" => @"C:\pwsh.exe",
+                "powershell.exe" => @"C:\Windows\powershell.exe",
+                _ => null
+            },
+            fileExists: _ => false,
+            getShellEnvironmentVariable: () => null,
+            isWindows: true);
+
+        // Act: detect with an explicit "powershell" preference
+        var shell = detector.Detect("powershell");
+
+        // Assert: Windows PowerShell 5.x is used despite pwsh being available
+        Assert.Equal(ShellKind.WindowsPowerShell, shell.Kind);
+        Assert.Equal(@"C:\Windows\powershell.exe", shell.ExecutablePath);
+    }
+
+    /// <summary>
+    ///     Test that a "cmd" shell preference resolves the Command shell, even when PowerShell
+    ///     would otherwise have been auto-detected.
+    /// </summary>
+    [Fact]
+    public void ShellDetector_Detect_WithCmdPreference_ReturnsCmd()
+    {
+        // Arrange: pwsh resolves on PATH, but the preference explicitly asks for cmd
+        var detector = new ShellDetector(
+            resolveOnPath: name => name switch
+            {
+                "pwsh.exe" => @"C:\pwsh.exe",
+                "cmd.exe" => @"C:\Windows\System32\cmd.exe",
+                _ => null
+            },
+            fileExists: _ => false,
+            getShellEnvironmentVariable: () => null,
+            isWindows: true);
+
+        // Act: detect with an explicit "cmd" preference
+        var shell = detector.Detect("cmd");
+
+        // Assert: cmd.exe is used despite pwsh being available
+        Assert.Equal(ShellKind.Cmd, shell.Kind);
+        Assert.Equal(@"C:\Windows\System32\cmd.exe", shell.ExecutablePath);
+    }
+
+    /// <summary>
+    ///     Test that a recognized POSIX keyword preference (e.g. "zsh") resolves via PATH on
+    ///     non-Windows platforms.
+    /// </summary>
+    [Fact]
+    public void ShellDetector_Detect_WithPosixKeywordPreference_ReturnsPosixShell()
+    {
+        // Arrange: zsh resolves on PATH
+        var detector = new ShellDetector(
+            resolveOnPath: name => name == "zsh" ? "/usr/bin/zsh" : null,
+            fileExists: _ => false,
+            getShellEnvironmentVariable: () => "/bin/bash",
+            isWindows: false);
+
+        // Act: detect with an explicit "zsh" preference, overriding $SHELL
+        var shell = detector.Detect("zsh");
+
+        // Assert: zsh is used instead of the $SHELL-configured bash
+        Assert.Equal(ShellKind.Posix, shell.Kind);
+        Assert.Equal("/usr/bin/zsh", shell.ExecutablePath);
+    }
+
+    /// <summary>
+    ///     Test that a recognized POSIX keyword preference in a different case (e.g. "BASH") is
+    ///     normalized to lowercase before PATH lookup/fallback, since the installed executable on
+    ///     case-sensitive POSIX systems is lowercase.
+    /// </summary>
+    [Fact]
+    public void ShellDetector_Detect_WithMixedCasePosixKeywordPreference_NormalizesToLowercase()
+    {
+        // Arrange: only the lowercase "bash" resolves on PATH
+        var detector = new ShellDetector(
+            resolveOnPath: name => name == "bash" ? "/usr/bin/bash" : null,
+            fileExists: _ => false,
+            getShellEnvironmentVariable: () => "/bin/sh",
+            isWindows: false);
+
+        // Act: detect with a mixed-case "BASH" preference
+        var shell = detector.Detect("BASH");
+
+        // Assert: the lowercase "bash" is looked up and used, not the literal "BASH"
+        Assert.Equal(ShellKind.Posix, shell.Kind);
+        Assert.Equal("/usr/bin/bash", shell.ExecutablePath);
+    }
+
+    /// <summary>
+    ///     Test that an unrecognized custom shell preference is launched directly, using POSIX
+    ///     invocation semantics, rather than being rejected.
+    /// </summary>
+    [Fact]
+    public void ShellDetector_Detect_WithCustomShellPreference_ReturnsPosixShellWithThatPath()
+    {
+        // Arrange: a custom shell path not matching any recognized keyword
+        var detector = new ShellDetector(
+            resolveOnPath: _ => null,
+            fileExists: _ => false,
+            getShellEnvironmentVariable: () => null,
+            isWindows: true);
+
+        // Act: detect with a custom Git Bash path as the preference
+        var shell = detector.Detect(@"C:\Program Files\Git\bin\bash.exe");
+
+        // Assert: the custom path is launched verbatim with POSIX "-c" semantics
+        Assert.Equal(ShellKind.Posix, shell.Kind);
+        Assert.Equal(@"C:\Program Files\Git\bin\bash.exe", shell.ExecutablePath);
+    }
+
+    /// <summary>
+    ///     Test that a blank/whitespace-only shell preference falls back to ordinary
+    ///     auto-detection rather than being treated as a custom shell.
+    /// </summary>
+    [Fact]
+    public void ShellDetector_Detect_WithBlankPreference_FallsBackToAutoDetection()
+    {
+        // Arrange: pwsh resolves on PATH, auto-detection should find it
+        var detector = new ShellDetector(
+            resolveOnPath: name => name == "pwsh.exe" ? @"C:\pwsh.exe" : null,
+            fileExists: _ => false,
+            getShellEnvironmentVariable: () => null,
+            isWindows: true);
+
+        // Act: detect with a whitespace-only preference
+        var shell = detector.Detect("   ");
+
+        // Assert: auto-detection still runs and finds pwsh
+        Assert.Equal(ShellKind.PowerShellCore, shell.Kind);
+        Assert.Equal(@"C:\pwsh.exe", shell.ExecutablePath);
+    }
 }

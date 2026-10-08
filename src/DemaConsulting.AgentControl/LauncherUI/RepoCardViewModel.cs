@@ -597,7 +597,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     RepoName, RepoPath, command);
             }
 
-            var shell = new AgentControl.AgentToolLauncher.ShellDetector().Detect();
+            var shell = new AgentControl.AgentToolLauncher.ShellDetector().Detect(settings.ShellPreference);
             var startInfo = AgentLauncher.BuildProcessStartInfo(shell, command, RepoPath);
             AgentLauncher.Launch(startInfo);
             StatusMessage = "Launched.";
