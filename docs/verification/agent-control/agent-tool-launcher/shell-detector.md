@@ -49,12 +49,16 @@ POSIX shell when it is unset. This scenario is tested by
 **ShellDetector_Detect_HonorsShellPreferenceOverride**: A non-blank shell preference overrides
 auto-detection - recognized keywords (`pwsh`, `powershell`, `cmd` on Windows; a POSIX keyword
 like `zsh` elsewhere) resolve to the matching shell even when auto-detection would have chosen
-differently, an unrecognized value is launched directly as a custom shell with POSIX
-semantics, and a blank/whitespace-only preference falls back to ordinary auto-detection. This
-scenario is tested by `ShellDetector_Detect_WithPwshPreference_ReturnsPowerShellCore`,
+differently, matched case-insensitively and normalized to lowercase before `PATH`
+lookup/fallback (so a differently-cased preference like `BASH` still resolves/launches the
+lowercase executable on case-sensitive POSIX systems), an unrecognized value is launched
+directly as a custom shell with POSIX semantics, and a blank/whitespace-only preference falls
+back to ordinary auto-detection. This scenario is tested by
+`ShellDetector_Detect_WithPwshPreference_ReturnsPowerShellCore`,
 `ShellDetector_Detect_WithPowershellPreference_ReturnsWindowsPowerShell`,
 `ShellDetector_Detect_WithCmdPreference_ReturnsCmd`,
 `ShellDetector_Detect_WithPosixKeywordPreference_ReturnsPosixShell`,
+`ShellDetector_Detect_WithMixedCasePosixKeywordPreference_NormalizesToLowercase`,
 `ShellDetector_Detect_WithCustomShellPreference_ReturnsPosixShellWithThatPath`, and
 `ShellDetector_Detect_WithBlankPreference_FallsBackToAutoDetection`, covering
 `AgentControl-ShellDetector-ShellPreference`.

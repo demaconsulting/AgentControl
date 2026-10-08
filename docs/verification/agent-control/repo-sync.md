@@ -4,10 +4,13 @@
 
 The `RepoSync` subsystem is verified indirectly through its constituent units' test suites
 (`PackageZipExtractorTests.cs`, `ReleaseNotesViewerViewModelTests.cs`, and
-`GitIgnoreEnsurerTests.cs`), each documented in its own unit-level verification design. The
-`ReleaseNotesViewerView` Avalonia view has no dedicated test file and is covered only by the
-FlaUI end-to-end release-notes-dialog check described at the system level (see the
-`AgentControl` system-level verification design). All `PackageZipExtractor` and
+`GitIgnoreEnsurerTests.cs`), each documented in its own unit-level verification design.
+`ReleaseNotesViewerViewModelTests.cs` also directly exercises `ReleaseNotesViewer`'s internal
+`BuildBlockTextBlock` rendering helper (via `InternalsVisibleTo`), constructing `MarkdownBlock`
+values and asserting on the resulting `TextBlock`'s `Run` styling, without constructing the
+`Window` itself. End-to-end window display is covered only by the FlaUI
+release-notes-dialog check described at the system level (see the `AgentControl` system-level
+verification design). All `PackageZipExtractor` and
 `GitIgnoreEnsurer` tests operate on real temporary directories and real files (zip archives
 and `.gitignore` files respectively).
 
@@ -23,6 +26,8 @@ N/A - standard test environment; no external services or hardware required.
   invalid zip.
 - The release-notes dialog always has coherent content, even for a package with no release
   notes.
+- Heading blocks render every inline run bold, regardless of whether the Markdown source
+  explicitly marked them `**bold**`; non-heading blocks bold only explicitly-marked runs.
 - A repo's `.gitignore` covers the four managed agent folders after every successful sync,
   without disturbing any pre-existing `.gitignore` content.
 - An optional root-level AGENTS.md template is readable without extraction, and is never
@@ -46,7 +51,10 @@ respective unit verification designs), with
 `PackageZipExtractor_ReadReleaseNotes_EntryPresent_ReturnsContentWithoutExtracting`,
 `PackageZipExtractor_ReadReleaseNotes_NoEntry_ReturnsNull`, and
 `ReleaseNotesViewerViewModel_Constructor_EmptyReleaseNotes_UsesPlaceholderMessage` cited
-directly at the subsystem level, covering `AgentControl-RepoSync-ReleaseNotes` (children:
+directly at the subsystem level, plus `ReleaseNotesViewer_BuildBlockTextBlock_HeadingBlock_RendersAllRunsBold`
+and `ReleaseNotesViewer_BuildBlockTextBlock_BodyBlock_OnlyBoldsMarkedRuns` covering the
+heading/body bold-rendering distinction, covering `AgentControl-RepoSync-ReleaseNotes`
+(children:
 `AgentControl-PackageZipExtractor-ReadReleaseNotes`,
 `AgentControl-ReleaseNotesViewerViewModel-Display`).
 

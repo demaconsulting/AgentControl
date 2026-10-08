@@ -101,7 +101,11 @@ text, and exposes them (with a placeholder substituted for an empty release-note
 never `ShowDialog`, so the main window remains usable while the developer reads release notes
 — a non-modal presentation is an explicit design requirement, not merely a style preference,
 since a modal dialog would block launching the agent tool while release notes are open
-(`AgentControl-RepoSync-ReleaseNotes`).
+(`AgentControl-RepoSync-ReleaseNotes`). `ReleaseNotesViewer`'s code-behind renders each parsed
+`MarkdownBlock` into a `TextBlock`: heading blocks render every inline run bold (in addition to
+their larger font size), regardless of whether individual runs were themselves marked
+`**bold**`, so the heading's visual weight matches its larger size; non-heading (body) blocks
+bold only the runs the Markdown source explicitly marked `**bold**`.
 
 `GitIgnoreEnsurer` runs from `RepoCardViewModel` rather than from inside
 `PackageZipExtractor.Extract` itself: `Extract` stays a pure file-sync operation with a single

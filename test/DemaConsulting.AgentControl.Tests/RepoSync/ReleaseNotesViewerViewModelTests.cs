@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using Avalonia.Controls.Documents;
+using Avalonia.Media;
 using DemaConsulting.AgentControl.RepoSync;
 
 namespace DemaConsulting.AgentControl.Tests.RepoSync;
@@ -168,5 +170,51 @@ public class ReleaseNotesViewerViewModelTests
         Assert.Equal("Price: $5 * 2 = $10", run.Text);
         Assert.False(run.Bold);
         Assert.False(run.Italic);
+    }
+
+    /// <summary>
+    ///     Test that <see cref="ReleaseNotesViewer.BuildBlockTextBlock"/> renders every inline run
+    ///     of a heading block as bold, even runs that weren't themselves marked
+    ///     <c>**bold**</c> in the source Markdown, so the heading's visual weight matches its
+    ///     larger font size.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewer_BuildBlockTextBlock_HeadingBlock_RendersAllRunsBold()
+    {
+        // Arrange: a level-1 heading with a plain run and an explicitly-italic run
+        var block = new MarkdownBlock(
+            [new MarkdownRun("Release ", false, false), new MarkdownRun("1.0.0", false, true)],
+            HeadingLevel: 1,
+            IsBullet: false);
+
+        // Act: build the rendered TextBlock
+        var textBlock = ReleaseNotesViewer.BuildBlockTextBlock(block);
+
+        // Assert: both runs are rendered bold, matching the heading's bold TextBlock-level style
+        var inlines = Assert.IsAssignableFrom<InlineCollection>(textBlock.Inlines);
+        Assert.All(inlines.OfType<Run>(), run => Assert.Equal(FontWeight.Bold, run.FontWeight));
+    }
+
+    /// <summary>
+    ///     Test that <see cref="ReleaseNotesViewer.BuildBlockTextBlock"/> only bolds runs
+    ///     explicitly marked <c>**bold**</c> for non-heading (body) blocks.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewer_BuildBlockTextBlock_BodyBlock_OnlyBoldsMarkedRuns()
+    {
+        // Arrange: a non-heading block with one plain run and one bold run
+        var block = new MarkdownBlock(
+            [new MarkdownRun("Plain ", false, false), new MarkdownRun("bold", true, false)],
+            HeadingLevel: 0,
+            IsBullet: false);
+
+        // Act: build the rendered TextBlock
+        var textBlock = ReleaseNotesViewer.BuildBlockTextBlock(block);
+
+        // Assert: only the explicitly-bold run is rendered bold
+        var runs = textBlock.Inlines?.OfType<Run>().ToList();
+        Assert.NotNull(runs);
+        Assert.Equal(FontWeight.Normal, runs[0].FontWeight);
+        Assert.Equal(FontWeight.Bold, runs[1].FontWeight);
     }
 }

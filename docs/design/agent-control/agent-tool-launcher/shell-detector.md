@@ -39,7 +39,9 @@ the test machine.
   (`pwsh`/`powershell`/`cmd` on Windows, `bash`/`zsh`/`sh` elsewhere, matched
   case-insensitively) is resolved to its installed path where possible; any other value is
   treated as a custom shell executable name/path and launched using POSIX `-c` invocation
-  semantics (`AgentControl-ShellDetector-ShellPreference`).
+  semantics (`AgentControl-ShellDetector-ShellPreference`). The POSIX keyword is normalized
+  to lowercase before `PATH` lookup/fallback, so a differently-cased preference (e.g. `BASH`)
+  still resolves/launches the lowercase executable, matching case-sensitive POSIX filesystems.
 - *Auto-detection*: On Windows, follows the PowerShell 7+ → PowerShell 5.x → `cmd.exe`
   fallback chain (`AgentControl-ShellDetector-DetectWindows`); elsewhere, returns the `$SHELL`
   environment variable's value or `/bin/sh` if unset

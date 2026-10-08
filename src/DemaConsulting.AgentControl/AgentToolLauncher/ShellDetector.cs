@@ -191,7 +191,11 @@ internal sealed class ShellDetector
                  string.Equals(preference, "zsh", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(preference, "sh", StringComparison.OrdinalIgnoreCase))
         {
-            return new DetectedShell(ShellKind.Posix, _resolveOnPath(preference) ?? preference);
+            // Normalize to the lowercase keyword before PATH lookup/fallback: on case-sensitive
+            // POSIX systems the executable is lowercase (e.g. "bash"), so a differently-cased
+            // preference like "BASH" must not be searched for/launched verbatim.
+            var normalized = preference.ToLowerInvariant();
+            return new DetectedShell(ShellKind.Posix, _resolveOnPath(normalized) ?? normalized);
         }
 
         // An unrecognized preference is treated as a custom shell executable name/path supplied

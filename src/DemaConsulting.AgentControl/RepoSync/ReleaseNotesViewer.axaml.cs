@@ -87,7 +87,11 @@ internal sealed partial class ReleaseNotesViewer : Window
     /// </summary>
     /// <param name="block">The parsed block to render.</param>
     /// <returns>A <see cref="TextBlock"/> ready to add to <c>ReleaseNotesPanel</c>.</returns>
-    private static TextBlock BuildBlockTextBlock(MarkdownBlock block)
+    /// <remarks>
+    ///     Internal (rather than private) so <c>DemaConsulting.AgentControl.Tests</c> can verify
+    ///     the rendered run styling directly, via <c>InternalsVisibleTo</c>.
+    /// </remarks>
+    internal static TextBlock BuildBlockTextBlock(MarkdownBlock block)
     {
         var textBlock = new TextBlock
         {
@@ -111,11 +115,12 @@ internal sealed partial class ReleaseNotesViewer : Window
             textBlock.Inlines.Add(new Run("• "));
         }
 
+        var isHeading = block.HeadingLevel > 0;
         foreach (var run in block.Runs)
         {
             textBlock.Inlines.Add(new Run(run.Text)
             {
-                FontWeight = run.Bold ? FontWeight.Bold : FontWeight.Normal,
+                FontWeight = isHeading || run.Bold ? FontWeight.Bold : FontWeight.Normal,
                 FontStyle = run.Italic ? FontStyle.Italic : FontStyle.Normal
             });
         }

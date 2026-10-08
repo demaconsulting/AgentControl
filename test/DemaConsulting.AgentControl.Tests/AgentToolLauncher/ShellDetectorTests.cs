@@ -303,6 +303,29 @@ public class ShellDetectorTests
     }
 
     /// <summary>
+    ///     Test that a recognized POSIX keyword preference in a different case (e.g. "BASH") is
+    ///     normalized to lowercase before PATH lookup/fallback, since the installed executable on
+    ///     case-sensitive POSIX systems is lowercase.
+    /// </summary>
+    [Fact]
+    public void ShellDetector_Detect_WithMixedCasePosixKeywordPreference_NormalizesToLowercase()
+    {
+        // Arrange: only the lowercase "bash" resolves on PATH
+        var detector = new ShellDetector(
+            resolveOnPath: name => name == "bash" ? "/usr/bin/bash" : null,
+            fileExists: _ => false,
+            getShellEnvironmentVariable: () => "/bin/sh",
+            isWindows: false);
+
+        // Act: detect with a mixed-case "BASH" preference
+        var shell = detector.Detect("BASH");
+
+        // Assert: the lowercase "bash" is looked up and used, not the literal "BASH"
+        Assert.Equal(ShellKind.Posix, shell.Kind);
+        Assert.Equal("/usr/bin/bash", shell.ExecutablePath);
+    }
+
+    /// <summary>
     ///     Test that an unrecognized custom shell preference is launched directly, using POSIX
     ///     invocation semantics, rather than being rejected.
     /// </summary>
