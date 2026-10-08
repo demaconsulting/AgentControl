@@ -47,8 +47,8 @@ internal sealed class FavoriteColorConverter : IValueConverter
 
     /// <summary>
     ///     Converts a favorite <see langword="bool"/> to <see cref="FavoriteBrush"/> (favorited)
-    ///     or <see langword="null"/> (not favorited, so the glyph falls back to its default
-    ///     theme foreground).
+    ///     or <see cref="AvaloniaProperty.UnsetValue"/> (not favorited, so the glyph falls back
+    ///     to its default theme foreground).
     /// </summary>
     /// <param name="value">The bound <see langword="bool"/> value (expected to be
     ///     <see cref="RepoCardViewModel.IsFavorite"/>).</param>

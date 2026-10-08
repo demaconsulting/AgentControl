@@ -109,6 +109,8 @@
                 <!-- A subtle lift on hover (accented border plus a soft shadow nudged upward)
                      makes the (otherwise flat) card list feel interactive. -->
                 <Style Selector="Border.RepoCard">
+                    <Setter Property="BorderBrush" Value="Gray" />
+                    <Setter Property="Background" Value="#0DFFFFFF" />
                     <Setter Property="Transitions">
                         <Transitions>
                             <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
@@ -125,8 +127,7 @@
             <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:RepoCardViewModel">
                     <Border Classes="RepoCard"
-                             BorderBrush="Gray" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,8"
-                             Background="#0DFFFFFF"
+                             BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,8"
                              AttachedToVisualTree="RepoCard_AttachedToVisualTree">
                         <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
 

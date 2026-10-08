@@ -216,9 +216,14 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Act: refresh (must not throw)
         var exception = Record.Exception(card.Refresh);
 
-        // Assert: no exception, and pull is not offered
+        // Assert: no exception, pull is not offered, and the status-unknown case is
+        // distinguished from a confirmed dirty working tree so the badge/tooltip don't
+        // mislead the user into thinking there are uncommitted changes to resolve.
         Assert.Null(exception);
         Assert.False(card.CanPull);
+        Assert.True(card.GitStatusUnavailable);
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.Contains("could not be determined", card.PullTooltip, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
