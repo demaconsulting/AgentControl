@@ -18,7 +18,10 @@ end-to-end rendering (opening the window and showing the tagline, version, copyr
 and a non-empty dependency list) is verified only via the FlaUI
 `DemaConsulting.AgentControl.UiTests` project. The logo image itself is not asserted by any
 automated test (it has no bound text content to check) and remains a visual-inspection-only
-element.
+element. `FavoriteIconConverter`/`FavoriteColorConverter`, the favorite-star glyph's
+shape/color converters, are likewise visual-only value converters with no bound text content
+to assert and remain visual-inspection-only elements; `RepoCardViewModel.IsFavorite` itself
+(the state they render) is covered indirectly by the sort-order scenario below.
 
 ### Test Environment
 
