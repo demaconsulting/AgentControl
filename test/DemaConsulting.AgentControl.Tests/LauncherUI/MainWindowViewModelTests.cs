@@ -480,6 +480,43 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that ApplySettings refreshes a present card's Git status when
+    ///     <see cref="AppSettings.GitExecutablePath"/> itself changes, even though the repo was
+    ///     never missing - a previously-cached clean/dirty result computed against the old
+    ///     executable must not keep being shown once a different executable is configured.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus()
+    {
+        // Arrange: a card for a present repo whose cached Git status (from the first, "clean"
+        // executable) is already checked
+        var repoPath = CreateTempDirectory();
+        var cleanStub = GitStub.Create(statusOutput: "", statusExitCode: 0);
+        _tempPaths.Add(cleanStub.Path);
+        var settings = new AppSettings
+        {
+            GitExecutablePath = cleanStub.Path,
+            RecentRepos = [new RecentRepo { Path = repoPath }]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        viewModel.RepoCards[0].RefreshDirtyStatus();
+        Assert.True(viewModel.RepoCards[0].CanPull);
+
+        // Act: settings are reapplied pointing at a different Git executable that reports a
+        // dirty working tree
+        var dirtyStub = GitStub.Create(statusOutput: " M file.txt", statusExitCode: 0);
+        _tempPaths.Add(dirtyStub.Path);
+        var updated = new AppSettings { GitExecutablePath = dirtyStub.Path };
+        viewModel.ApplySettings(updated);
+
+        // Assert: the card reflects the new executable's status immediately, not the stale
+        // result cached against the old one
+        Assert.True(viewModel.RepoCards[0].GitStatusChecked);
+        Assert.False(viewModel.RepoCards[0].CanPull);
+        Assert.True(viewModel.RepoCards[0].IsWorkingTreeDirty);
+    }
+
+    /// <summary>
     ///     Counts how many "status" subcommand invocations are recorded in a
     ///     <see cref="GitStub"/> invocation log file.
     /// </summary>

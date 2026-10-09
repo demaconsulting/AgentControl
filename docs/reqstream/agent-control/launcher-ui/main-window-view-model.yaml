@@ -87,10 +87,11 @@ sections:
           The MainWindowViewModel class shall apply updated settings by persisting the new
           values while preserving the existing recent-repos list, shall invalidate any cached
           package version data, shall perform a cheap refresh for every card, and shall
-          additionally perform a fresh Git status check only for a card that reappeared (was
-          missing, now present) since it was last checked, so it is not left showing a stale or
-          indefinitely "not yet checked" Pull-disabled state, without re-checking the Git
-          status of every other already-present repo.
+          additionally perform a fresh Git status check for a present card that either
+          reappeared (was missing, now present) since it was last checked or whose
+          GitExecutablePath setting changed, so it is not left showing a stale, indefinitely
+          "not yet checked", or wrong-executable Pull-disabled state, without re-checking the
+          Git status of every other already-present, unchanged-executable repo.
         justification: |
           A settings change (e.g. a new package source path) must take effect immediately for
           subsequent upgrade checks, without discarding the developer's tracked repos. Because
@@ -98,11 +99,16 @@ sections:
           again, a settings change is the next opportunity to recover a card whose repo
           disappeared and reappeared while visible; a cheap-only refresh here would leave such
           a card's Pull button showing "not yet checked" until the user manually refreshes it.
-          However, GitClient's git status check is synchronous and un-timed, so eagerly
-          re-checking every tracked repo's status on every settings save (rather than only the
-          reappeared ones) could block the UI thread for a large or slow/networked repo list.
+          Likewise, a cached clean/dirty result computed against the previously configured Git
+          executable must not keep being shown once the user has pointed AgentControl at a
+          different executable, since subsequent Pull operations will use the new one. However,
+          GitClient's git status check is synchronous and un-timed, so eagerly re-checking
+          every tracked repo's status on every settings save (rather than only the repos that
+          actually need a recheck) could block the UI thread for a large or slow/networked repo
+          list.
         tests:
           - MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields
           - MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache
           - MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately
           - MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus
+          - MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus

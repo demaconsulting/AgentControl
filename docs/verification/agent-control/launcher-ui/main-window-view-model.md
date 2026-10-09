@@ -83,11 +83,15 @@ field values are adopted and persisted, and the shared `PackageVersionCache` is 
 a changed package-source path is reflected immediately rather than served from a stale cache.
 A repo that reappeared since its last check gets an immediate fresh Git status (`RefreshCheap`
 followed by `RefreshDirtyStatus`), rather than being left showing a stale or indefinitely
-"not yet checked" Pull-disabled state. A repo that was already present and already checked
-only gets the cheap refresh, so re-saving settings does not re-run a synchronous `git status`
-for every tracked repo. This scenario is tested by
+"not yet checked" Pull-disabled state. A present repo also gets an immediate fresh Git status
+when `GitExecutablePath` itself changed, so a clean/dirty result cached against the previously
+configured executable is not kept showing once a different executable is in effect. A repo
+that was already present, already checked, and whose executable path did not change only gets
+the cheap refresh, so re-saving settings does not re-run a synchronous `git status` for every
+tracked repo. This scenario is tested by
 `MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields`,
 `MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache`,
-`MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately`, and
-`MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus`,
+`MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately`,
+`MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus`, and
+`MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus`,
 covering `AgentControl-MainWindowViewModel-ApplySettings`.

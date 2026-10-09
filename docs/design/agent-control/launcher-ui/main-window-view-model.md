@@ -88,12 +88,14 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
 - *Preconditions*: `updated` is not null.
 - *Postconditions*: The live settings instance is replaced (preserving the existing recent-
   repos list, since `SettingsWindowViewModel` never owns it), persisted, the shared
-  `PackageVersionCache` is invalidated, and every card's cheap refresh re-runs. A card is only
-  given a fresh Git status check (via `RefreshDirtyStatus`) in addition to the cheap refresh
-  when it reappeared (was missing, now present) during this call, so it is not left showing a
-  "not yet checked" state indefinitely; cards that were already present only get the cheap
-  refresh, avoiding a synchronous `git status` call — which `GitClient` runs with no timeout —
-  for every tracked repo on every settings save
+  `PackageVersionCache` is invalidated, and every card's cheap refresh re-runs. A present card
+  is additionally given a fresh Git status check (via `RefreshDirtyStatus`) when either it
+  reappeared (was missing, now present) during this call, so it is not left showing a "not yet
+  checked" state indefinitely, or `GitExecutablePath` itself changed, so a clean/dirty result
+  cached against the previously configured executable is not kept showing once a different
+  executable is in effect; a present card that was already checked and whose executable path
+  did not change only gets the cheap refresh, avoiding a synchronous `git status` call — which
+  `GitClient` runs with no timeout — for every tracked repo on every settings save
   (`AgentControl-MainWindowViewModel-ApplySettings`).
 
 **UpdateDisplayedRepoCards** (private): Recomputes `DisplayedRepoCards` from `RepoCards` — a

@@ -251,10 +251,13 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     dirty status on the UI thread could freeze the window for a large or slow/networked
     ///     repo list. A fresh Git status check is instead requested only for the cards that
     ///     actually need one - those that reappeared (were missing, now present) since they were
-    ///     last checked - so they do not get left showing a "not yet checked" state indefinitely
-    ///     (unlike a newly-constructed card, an already-realized card's one-time lazy
-    ///     <see cref="RepoCardViewModel.RefreshDirtyStatus"/> trigger in
-    ///     <c>MainWindow.axaml.cs</c> will not fire again for it).
+    ///     last checked (unlike a newly-constructed card, an already-realized card's one-time
+    ///     lazy <see cref="RepoCardViewModel.RefreshDirtyStatus"/> trigger in
+    ///     <c>MainWindow.axaml.cs</c> will not fire again for it), or every present card when
+    ///     <see cref="AppSettings.GitExecutablePath"/> itself changed - a previously-cached
+    ///     <see cref="RepoCardViewModel.CanPull"/>/<see cref="RepoCardViewModel.PullTooltip"/>
+    ///     computed against the old executable could otherwise keep being shown even though
+    ///     subsequent Pull operations use the newly configured one.
     /// </remarks>
     /// <param name="updated">The updated settings, typically built by
     ///     <see cref="SettingsWindowViewModel.Save"/>.</param>
@@ -263,6 +266,9 @@ internal sealed class MainWindowViewModel : ViewModelBase
     public void ApplySettings(AppSettings updated)
     {
         ArgumentNullException.ThrowIfNull(updated);
+
+        var gitExecutablePathChanged = !string.Equals(
+            _settings.GitExecutablePath, updated.GitExecutablePath, StringComparison.Ordinal);
 
         updated.RecentRepos = _settings.RecentRepos;
         _settings = updated;
@@ -275,7 +281,7 @@ internal sealed class MainWindowViewModel : ViewModelBase
         {
             var wasMissing = card.IsMissing;
             card.RefreshCheap();
-            if (wasMissing && !card.IsMissing)
+            if ((wasMissing && !card.IsMissing) || (gitExecutablePathChanged && !card.IsMissing))
             {
                 card.RefreshDirtyStatus();
             }
