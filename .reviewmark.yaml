@@ -130,6 +130,7 @@ reviews:
       - "src/**/LauncherUI/RelayCommand.cs"
       - "src/**/LauncherUI/ViewModelBase.cs"
       - "src/**/LauncherUI/FavoriteIconConverter.cs"
+      - "src/**/LauncherUI/FavoriteColorConverter.cs"
 
   - id: AgentControl-LauncherUI-MainWindowViewModel
     title: Review of Agent Control MainWindowViewModel unit implementation

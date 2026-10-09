@@ -154,6 +154,25 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a freshly constructed card does not report a false "dirty working tree"
+    ///     badge/tooltip before its first git-status check has actually run (RefreshDirtyStatus
+    ///     is lazy/deferred by design).
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_BeforeFirstGitStatusCheck_DoesNotReportDirty()
+    {
+        // Arrange: a card whose git status has not yet been checked
+        var repoRoot = CreateTempDirectory();
+        var settings = new AppSettings();
+        var card = CreateCard(repoRoot, null, null, settings);
+
+        // Assert: no false-positive dirty state before RefreshDirtyStatus/RefreshGitStatus runs
+        Assert.False(card.GitStatusChecked);
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.Equal("This repo's Git status has not been checked yet.", card.PullTooltip);
+    }
+
+    /// <summary>
     ///     Test that CanPull is true when the configured git stub reports a clean working tree.
     /// </summary>
     [Fact]
@@ -172,6 +191,58 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Assert: pull is offered
         Assert.True(card.CanPull);
         Assert.True(card.PullCommand.CanExecute(null));
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.Equal("Pull the latest commits for this repo", card.PullTooltip);
+    }
+
+    /// <summary>
+    ///     Test that a repo which temporarily disappears and then reappears does not report a
+    ///     stale "dirty working tree" badge/tooltip carried over from before it disappeared -
+    ///     its cached Git status must be invalidated while missing (reporting "not yet checked"
+    ///     rather than stale, until an explicit fresh check is performed), never the pre-
+    ///     disappearance result.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_RepoReappearsAfterBeingMissing_InvalidatesStaleGitStatusInsteadOfReportingIt()
+    {
+        // Arrange: a card with a dirty working tree, confirmed via a real refresh
+        var stub = GitStub.Create(statusOutput: " M file.txt", statusExitCode: 0);
+        _tempPaths.Add(stub.Path);
+        var repoRoot = CreateTempDirectory();
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var card = CreateCard(repoRoot, null, null, settings);
+        card.Refresh();
+        Assert.True(card.IsWorkingTreeDirty);
+
+        // Act: the repo folder disappears, then reappears with a now-clean working tree
+        Directory.Delete(repoRoot, recursive: true);
+        card.RefreshCheap();
+        Assert.True(card.IsMissing);
+        Assert.False(card.IsWorkingTreeDirty);
+
+        Directory.CreateDirectory(repoRoot);
+        var cleanStub = GitStub.Create(statusOutput: "", statusExitCode: 0);
+        _tempPaths.Add(cleanStub.Path);
+        settings.GitExecutablePath = cleanStub.Path;
+        card.RefreshCheap();
+
+        // Assert: RefreshCheap alone (deliberately not re-checking Git status itself, to avoid
+        // duplicating the check a caller's own RefreshDirtyStatus call would perform) leaves the
+        // card correctly reporting "not yet checked" - never the stale pre-disappearance dirty
+        // result - until a fresh check actually runs
+        Assert.False(card.IsMissing);
+        Assert.False(card.GitStatusChecked);
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.Equal("This repo's Git status has not been checked yet.", card.PullTooltip);
+
+        // Act: an explicit fresh check (as RefreshCommand/Refresh perform)
+        card.RefreshDirtyStatus();
+
+        // Assert: the recovered card now reflects the fresh (clean) check, not the stale dirty
+        // state cached from before it disappeared
+        Assert.True(card.GitStatusChecked);
+        Assert.True(card.CanPull);
+        Assert.False(card.IsWorkingTreeDirty);
     }
 
     /// <summary>
@@ -190,9 +261,11 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Act: refresh
         card.Refresh();
 
-        // Assert: pull is not offered
+        // Assert: pull is not offered, and the "dirty working tree" badge/tooltip explain why
         Assert.False(card.CanPull);
         Assert.False(card.PullCommand.CanExecute(null));
+        Assert.True(card.IsWorkingTreeDirty);
+        Assert.Contains("uncommitted changes", card.PullTooltip, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -212,9 +285,14 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Act: refresh (must not throw)
         var exception = Record.Exception(card.Refresh);
 
-        // Assert: no exception, and pull is not offered
+        // Assert: no exception, pull is not offered, and the status-unknown case is
+        // distinguished from a confirmed dirty working tree so the badge/tooltip don't
+        // mislead the user into thinking there are uncommitted changes to resolve.
         Assert.Null(exception);
         Assert.False(card.CanPull);
+        Assert.True(card.GitStatusUnavailable);
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.Contains("could not be determined", card.PullTooltip, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -402,6 +480,11 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.False(card.PullCommand.CanExecute(null));
         Assert.False(card.UpgradeCommand.CanExecute(null));
         Assert.False(card.RefreshCommand.CanExecute(null));
+
+        // A missing repo gets its own dedicated badge/tooltip - the "dirty working tree" badge
+        // must not also fire for it (its working tree can't meaningfully be "clean" or "dirty").
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.Equal("This repo's folder could not be found on disk.", card.PullTooltip);
     }
 
     /// <summary>

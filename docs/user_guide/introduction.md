@@ -157,9 +157,15 @@ as an informational side action:
 
 # Pulling Changes
 
-The **Pull** button on a repo card runs `git pull` in that repo's working directory. It is
-only offered when the repo's working tree is clean (the "Dirty working tree" badge, if
-shown, disables Pull for that card).
+The **Pull** button on a repo card runs `git pull` in that repo's working directory. It stays
+visible but is disabled (with a tooltip explaining why) whenever the repo's working tree has
+uncommitted changes, the repo is missing, or the repo's Git status could not be determined
+(for example, the folder is not a Git repository, or git could not be run). It also starts
+disabled, with a "Git status has not been checked yet" tooltip, briefly while a repo card is
+first realized, before its initial (deferred) Git status check has completed. The "Dirty
+working tree" badge, if shown, specifically denotes a confirmed dirty working tree - it is not
+shown when Pull is disabled because of a missing repo, an undetermined status, or a status
+check that simply hasn't run yet.
 
 # Settings
 

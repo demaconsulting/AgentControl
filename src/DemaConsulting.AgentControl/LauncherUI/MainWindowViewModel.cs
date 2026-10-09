@@ -123,6 +123,29 @@ internal sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<RepoCardViewModel> DisplayedRepoCards { get; }
 
     /// <summary>
+    ///     Gets a value indicating whether <see cref="DisplayedRepoCards"/> is currently empty,
+    ///     so the view can swap the repo-card list for an explanatory empty-state placeholder
+    ///     instead of just rendering nothing.
+    /// </summary>
+    /// <remarks>
+    ///     Recomputed (and its change notified) every time <see cref="UpdateDisplayedRepoCards"/>
+    ///     runs, which covers every path that can change the displayed set: adding/removing a
+    ///     repo, filtering, and favorite-toggling.
+    /// </remarks>
+    public bool HasNoDisplayedRepos => DisplayedRepoCards.Count == 0;
+
+    /// <summary>
+    ///     Gets the message shown by the empty-state placeholder when
+    ///     <see cref="HasNoDisplayedRepos"/> is <see langword="true"/>, distinguishing "no repos
+    ///     added yet" from "no repos match the current filter" so the user knows which action
+    ///     (add a repo, or clear the filter) would resolve it.
+    /// </summary>
+    public string EmptyStateMessage =>
+        RepoCards.Count == 0
+            ? "No repos yet. Click the folder icon above to add your first repository."
+            : $"No repos match \"{FilterText}\". Try a different filter.";
+
+    /// <summary>
     ///     Gets or sets the current filter text typed into the recent-repos search box.
     /// </summary>
     public string? FilterText
@@ -217,9 +240,25 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     recent-repos list, which is only ever mutated via <see cref="AddRepo"/>/
     ///     <see cref="RemoveRepo"/>), persists them, invalidates the shared
     ///     <see cref="PackageVersionCache"/> (the package-source path may have changed), and
-    ///     re-runs each card's cheap refresh so upgrade badges and pull eligibility reflect any
-    ///     changed package-source/git-path settings immediately.
+    ///     re-runs each card's cheap refresh (pin file, branch, committed-files badge, upgrade
+    ///     availability) so those properties reflect any changed package-source/git-path
+    ///     settings immediately.
     /// </summary>
+    /// <remarks>
+    ///     Deliberately uses <see cref="RepoCardViewModel.RefreshCheap"/> rather than a full
+    ///     <see cref="RepoCardViewModel.Refresh"/> for every card: <c>GitClient</c>'s
+    ///     synchronous, un-timed <c>git status</c> call means refreshing every tracked repo's
+    ///     dirty status on the UI thread could freeze the window for a large or slow/networked
+    ///     repo list. A fresh Git status check is instead requested only for the cards that
+    ///     actually need one - those that reappeared (were missing, now present) since they were
+    ///     last checked (unlike a newly-constructed card, an already-realized card's one-time
+    ///     lazy <see cref="RepoCardViewModel.RefreshDirtyStatus"/> trigger in
+    ///     <c>MainWindow.axaml.cs</c> will not fire again for it), or every present card when
+    ///     <see cref="AppSettings.GitExecutablePath"/> itself changed - a previously-cached
+    ///     <see cref="RepoCardViewModel.CanPull"/>/<see cref="RepoCardViewModel.PullTooltip"/>
+    ///     computed against the old executable could otherwise keep being shown even though
+    ///     subsequent Pull operations use the newly configured one.
+    /// </remarks>
     /// <param name="updated">The updated settings, typically built by
     ///     <see cref="SettingsWindowViewModel.Save"/>.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="updated"/> is
@@ -227,6 +266,9 @@ internal sealed class MainWindowViewModel : ViewModelBase
     public void ApplySettings(AppSettings updated)
     {
         ArgumentNullException.ThrowIfNull(updated);
+
+        var gitExecutablePathChanged = !string.Equals(
+            _settings.GitExecutablePath, updated.GitExecutablePath, StringComparison.Ordinal);
 
         updated.RecentRepos = _settings.RecentRepos;
         _settings = updated;
@@ -237,7 +279,12 @@ internal sealed class MainWindowViewModel : ViewModelBase
         _packageVersionCache.Invalidate();
         foreach (var card in RepoCards)
         {
+            var wasMissing = card.IsMissing;
             card.RefreshCheap();
+            if ((wasMissing && !card.IsMissing) || (gitExecutablePathChanged && !card.IsMissing))
+            {
+                card.RefreshDirtyStatus();
+            }
         }
 
         UpdateDisplayedRepoCards();
@@ -279,6 +326,9 @@ internal sealed class MainWindowViewModel : ViewModelBase
         {
             DisplayedRepoCards.Add(card);
         }
+
+        OnPropertyChanged(nameof(HasNoDisplayedRepos));
+        OnPropertyChanged(nameof(EmptyStateMessage));
     }
 
     /// <summary>

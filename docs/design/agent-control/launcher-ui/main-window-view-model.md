@@ -23,6 +23,17 @@ of `RepoCards` that the main window's list actually binds to.
 **FilterText**: `string?` — The current filter text typed into the recent-repos search box;
 setting it recomputes `DisplayedRepoCards`.
 
+**HasNoDisplayedRepos**: `bool` (derived) — `true` when `DisplayedRepoCards` is empty, so the
+view can swap the card list for an empty-state placeholder instead of rendering nothing;
+recomputed (with its change notified, alongside `EmptyStateMessage`) every time
+`UpdateDisplayedRepoCards` runs (`AgentControl-MainWindowViewModel-EmptyState`).
+
+**EmptyStateMessage**: `string` (derived) — The message shown by the empty-state placeholder:
+distinguishes "no repos tracked yet" (`RepoCards` itself is empty) from "no repos match the
+current filter" (`RepoCards` has entries, but none passed the filter), so the user knows
+whether to add a repo or adjust their filter text
+(`AgentControl-MainWindowViewModel-EmptyState`).
+
 **Settings**: `AppSettings` (read-only property over an internal mutable field) — The current
 application settings, exposed for building a `SettingsWindowViewModel` from the main window's
 code-behind.
@@ -77,14 +88,23 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
 - *Preconditions*: `updated` is not null.
 - *Postconditions*: The live settings instance is replaced (preserving the existing recent-
   repos list, since `SettingsWindowViewModel` never owns it), persisted, the shared
-  `PackageVersionCache` is invalidated, and every card's cheap refresh re-runs
+  `PackageVersionCache` is invalidated, and every card's cheap refresh re-runs. A present card
+  is additionally given a fresh Git status check (via `RefreshDirtyStatus`) when either it
+  reappeared (was missing, now present) during this call, so it is not left showing a "not yet
+  checked" state indefinitely, or `GitExecutablePath` itself changed, so a clean/dirty result
+  cached against the previously configured executable is not kept showing once a different
+  executable is in effect; a present card that was already checked and whose executable path
+  did not change only gets the cheap refresh, avoiding a synchronous `git status` call — which
+  `GitClient` runs with no timeout — for every tracked repo on every settings save
   (`AgentControl-MainWindowViewModel-ApplySettings`).
 
 **UpdateDisplayedRepoCards** (private): Recomputes `DisplayedRepoCards` from `RepoCards` — a
 case-insensitive substring match against `FilterText` on repo name or path
 (`AgentControl-MainWindowViewModel-SearchFilter`), sorted by favorite status descending then
 by `LastLaunchedUtc` descending with nulls last, stable otherwise
-(`AgentControl-MainWindowViewModel-SortOrder`).
+(`AgentControl-MainWindowViewModel-SortOrder`). Also re-raises change notifications for
+`HasNoDisplayedRepos`/`EmptyStateMessage`, since every path that can change the displayed set
+(add/remove, filter, favorite-toggle re-sort) runs through this method.
 
 #### Error Handling
 

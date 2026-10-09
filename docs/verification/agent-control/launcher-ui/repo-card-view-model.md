@@ -52,6 +52,24 @@ false without throwing. This scenario is tested by
 `RepoCardViewModel_Refresh_GitStatusFails_SetsCanPullFalseWithoutThrowing`, covering
 `AgentControl-RepoCardViewModel-PullGating`.
 
+**RepoCardViewModel_PullDisabledExplanation_DirtyAndMissingExposeReasonNotJustHiding**:
+`IsWorkingTreeDirty` is false for a clean tree, a missing repo, a git-status failure, and a
+card whose git status has not yet been checked, and true only for a confirmed dirty tree;
+`PullTooltip` explains the specific reason (missing-folder, not-yet-checked,
+status-undeterminable, or uncommitted-changes text) rather than Pull simply disappearing with
+no explanation, and neither a status-check failure nor a not-yet-checked card is misreported
+as a confirmed dirty working tree. A repo that temporarily disappears and then reappears gets
+its cached Git status invalidated while missing, correctly reporting "not yet checked" rather
+than the stale pre-disappearance result until an explicit fresh check (`RefreshDirtyStatus`)
+actually runs. This scenario is tested by
+`RepoCardViewModel_BeforeFirstGitStatusCheck_DoesNotReportDirty`,
+`RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue`,
+`RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse`,
+`RepoCardViewModel_Refresh_GitStatusFails_SetsCanPullFalseWithoutThrowing`,
+`RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState`, and
+`RepoCardViewModel_RepoReappearsAfterBeingMissing_InvalidatesStaleGitStatusInsteadOfReportingIt`,
+covering `AgentControl-RepoCardViewModel-PullDisabledExplanation`.
+
 **RepoCardViewModel_Pull_ReportsSuccessOrFailureViaStatusMessage**: `PullCommand` is executed
 against a stub reporting success (status message updated) and a stub reporting failure (a
 failure status message is set instead). This scenario is tested by

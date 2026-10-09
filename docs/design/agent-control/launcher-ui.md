@@ -10,10 +10,10 @@ window, and the settings window (`MainWindowViewModel`, `RepoCardViewModel`,
 `SelectPackageWindowViewModel`, `SettingsWindowViewModel`), plus their `.axaml` Views
 (`MainWindow`, `AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`,
 `SettingsWindow`) and shared MVVM support types (`RelayCommand`, `ViewModelBase`,
-`FavoriteIconConverter`, `ThirdPartyDependencies`), which are folded into this subsystem-level
-description rather than given separate unit files; `ThirdPartyDependencies` is the one
-exception with a dedicated test file (`ThirdPartyDependenciesTests.cs`), since it is a plain
-static data source independent of any Avalonia control. The subsystem contains
+`FavoriteIconConverter`, `FavoriteColorConverter`, `ThirdPartyDependencies`), which are folded
+into this subsystem-level description rather than given separate unit files; `ThirdPartyDependencies`
+is the one exception with a dedicated test file (`ThirdPartyDependenciesTests.cs`), since it is
+a plain static data source independent of any Avalonia control. The subsystem contains
 four units: `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`, and
 `SettingsWindowViewModel`.
 
@@ -109,7 +109,11 @@ source-generator package, to keep the dependency surface minimal) used by every 
 this subsystem. `RelayCommand` is a minimal hand-rolled `ICommand` used for every command
 property. `FavoriteIconConverter` binds `RepoCardViewModel.IsFavorite` to a filled or outlined
 star `MaterialIconKind` on the repo card's favorite toggle, per architecture.md's "UI icon
-convention" decision. The `.axaml` Views other than `MainWindow`
+convention" decision. `FavoriteColorConverter` complements it, binding the same `IsFavorite`
+value to the star glyph's color (gold when favorited, otherwise the icon's default theme
+foreground via `AvaloniaProperty.UnsetValue`), so a favorited repo's star also reads as
+"activated" through color rather than relying solely on the filled-vs-outline glyph shape.
+The `.axaml` Views other than `MainWindow`
 (`AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`,
 `SettingsWindow`) contain no logic beyond Avalonia's XAML-loading boilerplate and
 `AutomationProperties.AutomationId` assignments that let FlaUI locate controls; all behavior

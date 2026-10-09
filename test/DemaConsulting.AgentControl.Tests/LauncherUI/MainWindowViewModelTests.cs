@@ -204,6 +204,55 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that HasNoDisplayedRepos is true and EmptyStateMessage prompts adding a repo
+    ///     when no repos have ever been added (as opposed to a filter excluding all of them).
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_NoRepoCardsAtAll_HasNoDisplayedReposTrueWithAddRepoMessage()
+    {
+        // Arrange / Act: a view model with no recent repos configured
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory());
+
+        // Assert
+        Assert.True(viewModel.HasNoDisplayedRepos);
+        Assert.Contains("add your first repository", viewModel.EmptyStateMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that HasNoDisplayedRepos is true and EmptyStateMessage references the filter
+    ///     text when repos exist but the current filter matches none of them.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_FilterMatchesNoRepos_HasNoDisplayedReposTrueWithFilterMessage()
+    {
+        // Arrange: a repo that exists, but a filter that cannot match it
+        var repoPath = CreateTempDirectory();
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = repoPath }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+
+        // Act
+        viewModel.FilterText = "no-such-repo-exists";
+
+        // Assert
+        Assert.True(viewModel.HasNoDisplayedRepos);
+        Assert.Contains("no-such-repo-exists", viewModel.EmptyStateMessage, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that HasNoDisplayedRepos is false whenever at least one card is displayed.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_HasDisplayedRepos_HasNoDisplayedReposFalse()
+    {
+        // Arrange / Act
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = CreateTempDirectory() }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+
+        // Assert
+        Assert.False(viewModel.HasNoDisplayedRepos);
+    }
+
+    /// <summary>
     ///     Test that DisplayedRepoCards sorts favorites above non-favorites regardless of
     ///     LastLaunchedUtc.
     /// </summary>
@@ -360,6 +409,121 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.True(viewModel.RepoCards[0].IsUpgradeAvailable);
         Assert.Equal("2.0.0", viewModel.RepoCards[0].LatestAvailableVersion);
     }
+
+    /// <summary>
+    ///     Test that ApplySettings requests a fresh Git status check specifically for a card that
+    ///     reappeared (was missing, now present) since it was last checked, so it is not left
+    ///     showing a stale or indefinitely "not yet checked" Pull-disabled state - an
+    ///     already-realized card's one-time lazy Git-status-check trigger will not fire again for
+    ///     it. Cards that were already present only get the cheap refresh, avoiding a redundant
+    ///     synchronous <c>git status</c> call for every repo on every settings save.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately()
+    {
+        // Arrange: a card for a repo that currently does not exist on disk
+        var repoPath = Path.Combine(Path.GetTempPath(), "agentcontrol_reappear_" + Guid.NewGuid());
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = repoPath }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        Assert.True(viewModel.RepoCards[0].IsMissing);
+
+        // Act: the repo path now exists with a clean working tree, and settings are reapplied
+        // (e.g. the user just saved the Settings dialog)
+        Directory.CreateDirectory(repoPath);
+        _tempPaths.Add(repoPath);
+        var stub = GitStub.Create(statusOutput: "", statusExitCode: 0);
+        _tempPaths.Add(stub.Path);
+        var updated = new AppSettings { GitExecutablePath = stub.Path };
+        viewModel.ApplySettings(updated);
+
+        // Assert: the card immediately reflects a fresh (clean) Git status, not a stale or
+        // "not yet checked" state
+        Assert.False(viewModel.RepoCards[0].IsMissing);
+        Assert.True(viewModel.RepoCards[0].GitStatusChecked);
+        Assert.True(viewModel.RepoCards[0].CanPull);
+        Assert.False(viewModel.RepoCards[0].IsWorkingTreeDirty);
+    }
+
+    /// <summary>
+    ///     Test that ApplySettings does not re-run a <c>git status</c> check for a card whose repo
+    ///     was already present (never missing) and already had a Git status check completed -
+    ///     only reappeared repos need an eager recheck, so re-saving Settings does not block the
+    ///     UI thread with a synchronous status check for every tracked repo.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus()
+    {
+        // Arrange: a card for a repo that exists on disk and already has a completed Git status
+        // check (simulating the one-time lazy trigger having already fired)
+        var repoPath = CreateTempDirectory();
+        var invocationLog = Path.Combine(Path.GetTempPath(), "agentcontrol_invocations_" + Guid.NewGuid() + ".log");
+        _tempPaths.Add(invocationLog);
+        var stub = GitStub.Create(statusOutput: "", statusExitCode: 0, invocationLogPath: invocationLog);
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings
+        {
+            GitExecutablePath = stub.Path,
+            RecentRepos = [new RecentRepo { Path = repoPath }]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        viewModel.RepoCards[0].RefreshDirtyStatus();
+        Assert.True(viewModel.RepoCards[0].GitStatusChecked);
+        var statusCallsBeforeApply = CountStatusInvocations(invocationLog);
+
+        // Act: settings are reapplied without the repo ever having gone missing
+        var updated = new AppSettings { GitExecutablePath = stub.Path };
+        viewModel.ApplySettings(updated);
+
+        // Assert: no additional "git status" invocation was made for the already-checked,
+        // still-present repo
+        Assert.Equal(statusCallsBeforeApply, CountStatusInvocations(invocationLog));
+    }
+
+    /// <summary>
+    ///     Test that ApplySettings refreshes a present card's Git status when
+    ///     <see cref="AppSettings.GitExecutablePath"/> itself changes, even though the repo was
+    ///     never missing - a previously-cached clean/dirty result computed against the old
+    ///     executable must not keep being shown once a different executable is configured.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus()
+    {
+        // Arrange: a card for a present repo whose cached Git status (from the first, "clean"
+        // executable) is already checked
+        var repoPath = CreateTempDirectory();
+        var cleanStub = GitStub.Create(statusOutput: "", statusExitCode: 0);
+        _tempPaths.Add(cleanStub.Path);
+        var settings = new AppSettings
+        {
+            GitExecutablePath = cleanStub.Path,
+            RecentRepos = [new RecentRepo { Path = repoPath }]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        viewModel.RepoCards[0].RefreshDirtyStatus();
+        Assert.True(viewModel.RepoCards[0].CanPull);
+
+        // Act: settings are reapplied pointing at a different Git executable that reports a
+        // dirty working tree
+        var dirtyStub = GitStub.Create(statusOutput: " M file.txt", statusExitCode: 0);
+        _tempPaths.Add(dirtyStub.Path);
+        var updated = new AppSettings { GitExecutablePath = dirtyStub.Path };
+        viewModel.ApplySettings(updated);
+
+        // Assert: the card reflects the new executable's status immediately, not the stale
+        // result cached against the old one
+        Assert.True(viewModel.RepoCards[0].GitStatusChecked);
+        Assert.False(viewModel.RepoCards[0].CanPull);
+        Assert.True(viewModel.RepoCards[0].IsWorkingTreeDirty);
+    }
+
+    /// <summary>
+    ///     Counts how many "status" subcommand invocations are recorded in a
+    ///     <see cref="GitStub"/> invocation log file.
+    /// </summary>
+    private static int CountStatusInvocations(string invocationLogPath) =>
+        File.Exists(invocationLogPath)
+            ? File.ReadAllLines(invocationLogPath).Count(line => line.StartsWith("status", StringComparison.Ordinal))
+            : 0;
 
     /// <summary>
     ///     Creates a minimal package zip named <c>{packageName}-{version}.zip</c> at

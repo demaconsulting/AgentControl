@@ -15,8 +15,32 @@
         MinWidth="480" MinHeight="320">
     <Window.Resources>
         <vm:FavoriteIconConverter x:Key="FavoriteIconConverter" />
+        <vm:FavoriteColorConverter x:Key="FavoriteColorConverter" />
     </Window.Resources>
     <DockPanel Margin="12">
+
+        <!-- Branding header: reuses the About window's logo treatment (white backing panel so
+             the icon's black "D" stays visible against the dark theme) to give the window body
+             its own identity beyond the native title bar. -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+            <Border Background="White" CornerRadius="6" Padding="3" Width="32" Height="32">
+                <Image Source="avares://DemaConsulting.AgentControl/Assets/AppIcon.ico"
+                        Width="26" Height="26" />
+            </Border>
+            <StackPanel VerticalAlignment="Center" Spacing="0">
+                <TextBlock Text="AgentControl" FontWeight="Bold" FontSize="16" />
+                <TextBlock Text="Distribute proprietary AI-agent configuration alongside public repositories"
+                            FontSize="11" Opacity="0.65" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- A thin accent-colored divider ties the header's brand identity to the accented
+             Launch button and badges below, instead of the header floating disconnected from
+             the rest of the UI. -->
+        <Border DockPanel.Dock="Top"
+                 Height="2"
+                 Background="{DynamicResource SystemAccentColor}"
+                 Margin="0,0,0,12" />
 
         <!-- Combined toolbar: filter box on the left, add-repo/settings/about icons on the right -->
         <Grid DockPanel.Dock="Top"
@@ -55,17 +79,63 @@
             </Button>
         </Grid>
 
-        <!-- Recent-repos list -->
-        <ListBox Name="RepoListBox"
-                  AutomationProperties.AutomationId="RepoListBox"
-                  ItemsSource="{Binding DisplayedRepoCards}">
+        <!-- Recent-repos list, with an empty-state placeholder shown instead when there is
+             nothing to display (no repos added yet, or the filter matches none). -->
+        <Grid>
+            <StackPanel Name="EmptyStatePanel"
+                         AutomationProperties.AutomationId="EmptyStatePanel"
+                         IsVisible="{Binding HasNoDisplayedRepos}"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"
+                         Spacing="8"
+                         Opacity="0.6">
+                <materialIcons:MaterialIcon Kind="FolderSearchOutline"
+                                              Width="48" Height="48"
+                                              HorizontalAlignment="Center" />
+                <TextBlock Name="EmptyStateText"
+                            AutomationProperties.AutomationId="EmptyStateText"
+                            Text="{Binding EmptyStateMessage}"
+                            HorizontalAlignment="Center"
+                            TextAlignment="Center"
+                            TextWrapping="Wrap"
+                            MaxWidth="320" />
+            </StackPanel>
+
+            <ListBox Name="RepoListBox"
+                      AutomationProperties.AutomationId="RepoListBox"
+                      IsVisible="{Binding !HasNoDisplayedRepos}"
+                      ItemsSource="{Binding DisplayedRepoCards}">
+            <ListBox.Styles>
+                <!-- A subtle lift on hover (accented border plus a soft shadow nudged upward)
+                     makes the (otherwise flat) card list feel interactive. -->
+                <Style Selector="Border.RepoCard">
+                    <Setter Property="BorderBrush" Value="Gray" />
+                    <Setter Property="Background" Value="#0DFFFFFF" />
+                    <Setter Property="Transitions">
+                        <Transitions>
+                            <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                            <BoxShadowsTransition Property="BoxShadow" Duration="0:0:0.15" />
+                        </Transitions>
+                    </Setter>
+                </Style>
+                <Style Selector="Border.RepoCard:pointerover">
+                    <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}" />
+                    <Setter Property="Background" Value="#1AFFFFFF" />
+                    <Setter Property="BoxShadow" Value="0 4 12 0 #40000000" />
+                </Style>
+            </ListBox.Styles>
             <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:RepoCardViewModel">
-                    <Border BorderBrush="Gray" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,8"
+                    <Border Classes="RepoCard"
+                             BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,8"
                              AttachedToVisualTree="RepoCard_AttachedToVisualTree">
                         <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
 
                             <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                                <materialIcons:MaterialIcon Kind="Folder"
+                                                              Width="16" Height="16"
+                                                              Opacity="0.6"
+                                                              VerticalAlignment="Center" />
                                 <TextBlock Name="RepoNameText"
                                             AutomationProperties.AutomationId="RepoNameText"
                                             Text="{Binding RepoName}"
@@ -76,6 +146,8 @@
                                          IsVisible="{Binding IsUpgradeAvailable}"
                                          ToolTip.Tip="{Binding UpgradeTooltip}"
                                          Background="Orange"
+                                         BorderBrush="{DynamicResource SystemAccentColor}"
+                                         BorderThickness="1"
                                          CornerRadius="8"
                                          Padding="6,1">
                                     <TextBlock Text="Update available" FontSize="10" />
@@ -85,6 +157,12 @@
                                             IsVisible="{Binding HasCommittedAgentFiles}"
                                             ToolTip.Tip="This repo has committed agent files (.github/agents, .github/standards, .github/templates, or .github/skills) tracked at HEAD."
                                             Text="⚠️"
+                                            FontSize="14" />
+                                <TextBlock Name="DirtyWorkingTreeBadge"
+                                            AutomationProperties.AutomationId="DirtyWorkingTreeBadge"
+                                            IsVisible="{Binding IsWorkingTreeDirty}"
+                                            ToolTip.Tip="{Binding PullTooltip}"
+                                            Text="📝"
                                             FontSize="14" />
                                 <TextBlock Name="MissingRepoBadge"
                                             AutomationProperties.AutomationId="MissingRepoBadge"
@@ -123,12 +201,14 @@
                                      Command="{Binding FavoriteToggleCommand}"
                                      VerticalAlignment="Center"
                                      Margin="0,0,8,0">
-                                <materialIcons:MaterialIcon Kind="{Binding IsFavorite, Converter={StaticResource FavoriteIconConverter}}" />
+                                <materialIcons:MaterialIcon Kind="{Binding IsFavorite, Converter={StaticResource FavoriteIconConverter}}"
+                                                              Foreground="{Binding IsFavorite, Converter={StaticResource FavoriteColorConverter}}" />
                             </ToggleButton>
 
                             <Button Grid.Row="0" Grid.RowSpan="4" Grid.Column="2"
                                      Name="LaunchButton"
                                      AutomationProperties.AutomationId="LaunchButton"
+                                     Classes="accent"
                                      Command="{Binding LaunchCommand}"
                                      ToolTip.Tip="Launch the configured agent tool in this repo"
                                      VerticalAlignment="Center"
@@ -143,8 +223,8 @@
                                      Name="PullButton"
                                      AutomationProperties.AutomationId="PullButton"
                                      Command="{Binding PullCommand}"
-                                     IsVisible="{Binding CanPull}"
-                                     ToolTip.Tip="Pull the latest commits for this repo"
+                                     ToolTip.Tip="{Binding PullTooltip}"
+                                     ToolTip.ShowOnDisabled="True"
                                      VerticalAlignment="Center"
                                      Margin="0,0,8,0">
                                 <StackPanel Orientation="Horizontal" Spacing="4">
@@ -206,6 +286,7 @@
                     </Border>
                 </DataTemplate>
             </ListBox.ItemTemplate>
-        </ListBox>
+            </ListBox>
+        </Grid>
     </DockPanel>
 </Window>

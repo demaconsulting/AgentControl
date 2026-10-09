@@ -59,6 +59,16 @@ is tested by
 `MainWindowViewModel_FilterText_MatchesRepoPath_FiltersDisplayedRepoCards`, covering
 `AgentControl-MainWindowViewModel-SearchFilter`.
 
+**MainWindowViewModel_EmptyState_DistinguishesNoReposFromNoFilterMatches**:
+`HasNoDisplayedRepos`/`EmptyStateMessage` are checked with no recent repos configured at all
+(message prompts adding a repo), with a tracked repo excluded by a non-matching filter
+(message references the filter text), and with at least one displayed card
+(`HasNoDisplayedRepos` is false). This scenario is tested by
+`MainWindowViewModel_NoRepoCardsAtAll_HasNoDisplayedReposTrueWithAddRepoMessage`,
+`MainWindowViewModel_FilterMatchesNoRepos_HasNoDisplayedReposTrueWithFilterMessage`, and
+`MainWindowViewModel_HasDisplayedRepos_HasNoDisplayedReposFalse`, covering
+`AgentControl-MainWindowViewModel-EmptyState`.
+
 **MainWindowViewModel_SortOrder_FavoritesFirstThenRecencyWithNullsLast**: A favorite repo
 launched longer ago sorts above a more-recently-launched non-favorite; among non-favorites, a
 recently-launched repo sorts above an earlier-launched one, which sorts above a never-launched
@@ -71,7 +81,17 @@ covering `AgentControl-MainWindowViewModel-SortOrder`.
 is called with an updated `AppSettings`; the existing recent-repos list survives, the new
 field values are adopted and persisted, and the shared `PackageVersionCache` is invalidated so
 a changed package-source path is reflected immediately rather than served from a stale cache.
-This scenario is tested by
-`MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields` and
-`MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache`, covering
-`AgentControl-MainWindowViewModel-ApplySettings`.
+A repo that reappeared since its last check gets an immediate fresh Git status (`RefreshCheap`
+followed by `RefreshDirtyStatus`), rather than being left showing a stale or indefinitely
+"not yet checked" Pull-disabled state. A present repo also gets an immediate fresh Git status
+when `GitExecutablePath` itself changed, so a clean/dirty result cached against the previously
+configured executable is not kept showing once a different executable is in effect. A repo
+that was already present, already checked, and whose executable path did not change only gets
+the cheap refresh, so re-saving settings does not re-run a synchronous `git status` for every
+tracked repo. This scenario is tested by
+`MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields`,
+`MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache`,
+`MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately`,
+`MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus`, and
+`MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus`,
+covering `AgentControl-MainWindowViewModel-ApplySettings`.
