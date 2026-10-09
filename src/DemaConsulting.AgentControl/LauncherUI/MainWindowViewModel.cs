@@ -240,16 +240,22 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     recent-repos list, which is only ever mutated via <see cref="AddRepo"/>/
     ///     <see cref="RemoveRepo"/>), persists them, invalidates the shared
     ///     <see cref="PackageVersionCache"/> (the package-source path may have changed), and
-    ///     re-runs each card's full refresh (cheap checks plus a fresh Git status check) so
-    ///     upgrade badges and pull eligibility reflect any changed package-source/git-path
-    ///     settings immediately - a full <see cref="RepoCardViewModel.Refresh"/> (rather than
-    ///     just <see cref="RepoCardViewModel.RefreshCheap"/>) is needed here specifically so a
-    ///     repo that reappeared since it was last checked gets an immediate fresh Git status
-    ///     instead of being left showing a "not yet checked" state indefinitely - unlike a
-    ///     newly-constructed card, an already-realized card's one-time lazy
-    ///     <see cref="RepoCardViewModel.RefreshDirtyStatus"/> trigger (see
-    ///     <c>MainWindow.axaml.cs</c>) will not fire again for it.
+    ///     re-runs each card's cheap refresh (pin file, branch, committed-files badge, upgrade
+    ///     availability) so those properties reflect any changed package-source/git-path
+    ///     settings immediately.
     /// </summary>
+    /// <remarks>
+    ///     Deliberately uses <see cref="RepoCardViewModel.RefreshCheap"/> rather than a full
+    ///     <see cref="RepoCardViewModel.Refresh"/> for every card: <c>GitClient</c>'s
+    ///     synchronous, un-timed <c>git status</c> call means refreshing every tracked repo's
+    ///     dirty status on the UI thread could freeze the window for a large or slow/networked
+    ///     repo list. A fresh Git status check is instead requested only for the cards that
+    ///     actually need one - those that reappeared (were missing, now present) since they were
+    ///     last checked - so they do not get left showing a "not yet checked" state indefinitely
+    ///     (unlike a newly-constructed card, an already-realized card's one-time lazy
+    ///     <see cref="RepoCardViewModel.RefreshDirtyStatus"/> trigger in
+    ///     <c>MainWindow.axaml.cs</c> will not fire again for it).
+    /// </remarks>
     /// <param name="updated">The updated settings, typically built by
     ///     <see cref="SettingsWindowViewModel.Save"/>.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="updated"/> is
@@ -267,7 +273,12 @@ internal sealed class MainWindowViewModel : ViewModelBase
         _packageVersionCache.Invalidate();
         foreach (var card in RepoCards)
         {
-            card.Refresh();
+            var wasMissing = card.IsMissing;
+            card.RefreshCheap();
+            if (wasMissing && !card.IsMissing)
+            {
+                card.RefreshDirtyStatus();
+            }
         }
 
         UpdateDisplayedRepoCards();

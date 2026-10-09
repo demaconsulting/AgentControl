@@ -411,11 +411,12 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that ApplySettings performs a full per-card refresh (cheap checks plus a fresh
-    ///     Git status check), not just the cheap checks, so a repo that reappeared since it was
-    ///     last checked is not left showing a stale or indefinitely "not yet checked"
-    ///     Pull-disabled state - an already-realized card's one-time lazy Git-status-check
-    ///     trigger will not fire again for it.
+    ///     Test that ApplySettings requests a fresh Git status check specifically for a card that
+    ///     reappeared (was missing, now present) since it was last checked, so it is not left
+    ///     showing a stale or indefinitely "not yet checked" Pull-disabled state - an
+    ///     already-realized card's one-time lazy Git-status-check trigger will not fire again for
+    ///     it. Cards that were already present only get the cheap refresh, avoiding a redundant
+    ///     synchronous <c>git status</c> call for every repo on every settings save.
     /// </summary>
     [Fact]
     public void MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately()
@@ -442,6 +443,50 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.True(viewModel.RepoCards[0].CanPull);
         Assert.False(viewModel.RepoCards[0].IsWorkingTreeDirty);
     }
+
+    /// <summary>
+    ///     Test that ApplySettings does not re-run a <c>git status</c> check for a card whose repo
+    ///     was already present (never missing) and already had a Git status check completed -
+    ///     only reappeared repos need an eager recheck, so re-saving Settings does not block the
+    ///     UI thread with a synchronous status check for every tracked repo.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus()
+    {
+        // Arrange: a card for a repo that exists on disk and already has a completed Git status
+        // check (simulating the one-time lazy trigger having already fired)
+        var repoPath = CreateTempDirectory();
+        var invocationLog = Path.Combine(Path.GetTempPath(), "agentcontrol_invocations_" + Guid.NewGuid() + ".log");
+        _tempPaths.Add(invocationLog);
+        var stub = GitStub.Create(statusOutput: "", statusExitCode: 0, invocationLogPath: invocationLog);
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings
+        {
+            GitExecutablePath = stub.Path,
+            RecentRepos = [new RecentRepo { Path = repoPath }]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        viewModel.RepoCards[0].RefreshDirtyStatus();
+        Assert.True(viewModel.RepoCards[0].GitStatusChecked);
+        var statusCallsBeforeApply = CountStatusInvocations(invocationLog);
+
+        // Act: settings are reapplied without the repo ever having gone missing
+        var updated = new AppSettings { GitExecutablePath = stub.Path };
+        viewModel.ApplySettings(updated);
+
+        // Assert: no additional "git status" invocation was made for the already-checked,
+        // still-present repo
+        Assert.Equal(statusCallsBeforeApply, CountStatusInvocations(invocationLog));
+    }
+
+    /// <summary>
+    ///     Counts how many "status" subcommand invocations are recorded in a
+    ///     <see cref="GitStub"/> invocation log file.
+    /// </summary>
+    private static int CountStatusInvocations(string invocationLogPath) =>
+        File.Exists(invocationLogPath)
+            ? File.ReadAllLines(invocationLogPath).Count(line => line.StartsWith("status", StringComparison.Ordinal))
+            : 0;
 
     /// <summary>
     ///     Creates a minimal package zip named <c>{packageName}-{version}.zip</c> at

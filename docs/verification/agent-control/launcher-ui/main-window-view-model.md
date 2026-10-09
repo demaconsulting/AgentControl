@@ -81,10 +81,13 @@ covering `AgentControl-MainWindowViewModel-SortOrder`.
 is called with an updated `AppSettings`; the existing recent-repos list survives, the new
 field values are adopted and persisted, and the shared `PackageVersionCache` is invalidated so
 a changed package-source path is reflected immediately rather than served from a stale cache.
-A repo that reappeared since its last check gets an immediate fresh Git status (a full
-`Refresh`, not just `RefreshCheap`), rather than being left showing a stale or indefinitely
-"not yet checked" Pull-disabled state. This scenario is tested by
+A repo that reappeared since its last check gets an immediate fresh Git status (`RefreshCheap`
+followed by `RefreshDirtyStatus`), rather than being left showing a stale or indefinitely
+"not yet checked" Pull-disabled state. A repo that was already present and already checked
+only gets the cheap refresh, so re-saving settings does not re-run a synchronous `git status`
+for every tracked repo. This scenario is tested by
 `MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields`,
-`MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache`, and
-`MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately`, covering
-`AgentControl-MainWindowViewModel-ApplySettings`.
+`MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache`,
+`MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately`, and
+`MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus`,
+covering `AgentControl-MainWindowViewModel-ApplySettings`.
