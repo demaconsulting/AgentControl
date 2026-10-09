@@ -87,10 +87,12 @@ repo-fact caching strategy, so this method is safe to call eagerly for every rec
 app launch (`AgentControl-RepoCardViewModel-CommittedFilesBadge`). When the repo is found to be
 missing, also invalidates `GitStatusChecked`/`GitStatusUnavailable` (not just `CanPull`), since
 a cached Git-status result from before the repo disappeared is no longer trustworthy once it
-reappears; when a repo transitions from missing back to present, forces an immediate
-`RefreshDirtyStatus()` call instead of relying on the one-time-per-card lazy trigger (which
-would not fire again for an already-realized card), so the card never shows a stale "Dirty
-working tree" badge/tooltip carried over from before the repo disappeared
+reappears; this method itself never re-checks Git status on a missing-to-present transition
+(that would duplicate the check already performed by `RefreshCommand`/`Refresh`'s subsequent
+`RefreshDirtyStatus` call), so a caller that invokes `RefreshCheap` alone for an
+already-realized card (see `MainWindowViewModel.ApplySettings`) must call `RefreshDirtyStatus`
+itself afterward to get an immediate fresh check instead of leaving the card in a "not yet
+checked" state until its next manual refresh
 (`AgentControl-RepoCardViewModel-PullDisabledExplanation`).
 
 **RefreshDirtyStatus**: Re-checks working-tree cleanliness via `GitClient`, updating `CanPull`,

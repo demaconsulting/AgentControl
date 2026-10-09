@@ -77,7 +77,7 @@ sections:
           - RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse
           - RepoCardViewModel_Refresh_GitStatusFails_SetsCanPullFalseWithoutThrowing
           - RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState
-          - RepoCardViewModel_RepoReappearsAfterBeingMissing_RefreshesGitStatusInsteadOfReportingStale
+          - RepoCardViewModel_RepoReappearsAfterBeingMissing_InvalidatesStaleGitStatusInsteadOfReportingIt
 
       - id: AgentControl-RepoCardViewModel-Pull
         title: >-

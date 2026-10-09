@@ -198,11 +198,12 @@ public sealed class RepoCardViewModelTests : IDisposable
     /// <summary>
     ///     Test that a repo which temporarily disappears and then reappears does not report a
     ///     stale "dirty working tree" badge/tooltip carried over from before it disappeared -
-    ///     its cached Git status must be invalidated while missing, and a fresh check performed
-    ///     once it reappears.
+    ///     its cached Git status must be invalidated while missing (reporting "not yet checked"
+    ///     rather than stale, until an explicit fresh check is performed), never the pre-
+    ///     disappearance result.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_RepoReappearsAfterBeingMissing_RefreshesGitStatusInsteadOfReportingStale()
+    public void RepoCardViewModel_RepoReappearsAfterBeingMissing_InvalidatesStaleGitStatusInsteadOfReportingIt()
     {
         // Arrange: a card with a dirty working tree, confirmed via a real refresh
         var stub = GitStub.Create(statusOutput: " M file.txt", statusExitCode: 0);
@@ -225,9 +226,20 @@ public sealed class RepoCardViewModelTests : IDisposable
         settings.GitExecutablePath = cleanStub.Path;
         card.RefreshCheap();
 
-        // Assert: the recovered card reflects the fresh (clean) check, not the stale dirty state
-        // cached from before it disappeared
+        // Assert: RefreshCheap alone (deliberately not re-checking Git status itself, to avoid
+        // duplicating the check a caller's own RefreshDirtyStatus call would perform) leaves the
+        // card correctly reporting "not yet checked" - never the stale pre-disappearance dirty
+        // result - until a fresh check actually runs
         Assert.False(card.IsMissing);
+        Assert.False(card.GitStatusChecked);
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.Equal("This repo's Git status has not been checked yet.", card.PullTooltip);
+
+        // Act: an explicit fresh check (as RefreshCommand/Refresh perform)
+        card.RefreshDirtyStatus();
+
+        // Assert: the recovered card now reflects the fresh (clean) check, not the stale dirty
+        // state cached from before it disappeared
         Assert.True(card.GitStatusChecked);
         Assert.True(card.CanPull);
         Assert.False(card.IsWorkingTreeDirty);

@@ -411,6 +411,39 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that ApplySettings performs a full per-card refresh (cheap checks plus a fresh
+    ///     Git status check), not just the cheap checks, so a repo that reappeared since it was
+    ///     last checked is not left showing a stale or indefinitely "not yet checked"
+    ///     Pull-disabled state - an already-realized card's one-time lazy Git-status-check
+    ///     trigger will not fire again for it.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately()
+    {
+        // Arrange: a card for a repo that currently does not exist on disk
+        var repoPath = Path.Combine(Path.GetTempPath(), "agentcontrol_reappear_" + Guid.NewGuid());
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = repoPath }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        Assert.True(viewModel.RepoCards[0].IsMissing);
+
+        // Act: the repo path now exists with a clean working tree, and settings are reapplied
+        // (e.g. the user just saved the Settings dialog)
+        Directory.CreateDirectory(repoPath);
+        _tempPaths.Add(repoPath);
+        var stub = GitStub.Create(statusOutput: "", statusExitCode: 0);
+        _tempPaths.Add(stub.Path);
+        var updated = new AppSettings { GitExecutablePath = stub.Path };
+        viewModel.ApplySettings(updated);
+
+        // Assert: the card immediately reflects a fresh (clean) Git status, not a stale or
+        // "not yet checked" state
+        Assert.False(viewModel.RepoCards[0].IsMissing);
+        Assert.True(viewModel.RepoCards[0].GitStatusChecked);
+        Assert.True(viewModel.RepoCards[0].CanPull);
+        Assert.False(viewModel.RepoCards[0].IsWorkingTreeDirty);
+    }
+
+    /// <summary>
     ///     Creates a minimal package zip named <c>{packageName}-{version}.zip</c> at
     ///     <paramref name="sourceDir"/>.
     /// </summary>

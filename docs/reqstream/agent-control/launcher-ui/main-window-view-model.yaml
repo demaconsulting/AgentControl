@@ -85,11 +85,18 @@ sections:
       - id: AgentControl-MainWindowViewModel-ApplySettings
         title: >-
           The MainWindowViewModel class shall apply updated settings by persisting the new
-          values while preserving the existing recent-repos list, and shall invalidate any
-          cached package version data.
+          values while preserving the existing recent-repos list, shall invalidate any cached
+          package version data, and shall perform a full per-card refresh (cheap checks plus a
+          fresh Git status check) so a repo that reappeared since it was last checked is not
+          left showing a stale or indefinitely "not yet checked" Pull-disabled state.
         justification: |
           A settings change (e.g. a new package source path) must take effect immediately for
-          subsequent upgrade checks, without discarding the developer's tracked repos.
+          subsequent upgrade checks, without discarding the developer's tracked repos. Because
+          an already-realized card's one-time lazy Git-status-check trigger will not fire
+          again, a settings change is the next opportunity to recover a card whose repo
+          disappeared and reappeared while visible; a cheap-only refresh here would leave such
+          a card's Pull button showing "not yet checked" until the user manually refreshes it.
         tests:
           - MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields
           - MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache
+          - MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately

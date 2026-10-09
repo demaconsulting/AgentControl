@@ -59,15 +59,15 @@ card whose git status has not yet been checked, and true only for a confirmed di
 status-undeterminable, or uncommitted-changes text) rather than Pull simply disappearing with
 no explanation, and neither a status-check failure nor a not-yet-checked card is misreported
 as a confirmed dirty working tree. A repo that temporarily disappears and then reappears gets
-its cached Git status invalidated while missing and a fresh check performed once it reappears,
-rather than reporting a stale dirty/clean state carried over from before it disappeared. This
-scenario is tested by
+its cached Git status invalidated while missing, correctly reporting "not yet checked" rather
+than the stale pre-disappearance result until an explicit fresh check (`RefreshDirtyStatus`)
+actually runs. This scenario is tested by
 `RepoCardViewModel_BeforeFirstGitStatusCheck_DoesNotReportDirty`,
 `RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue`,
 `RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse`,
 `RepoCardViewModel_Refresh_GitStatusFails_SetsCanPullFalseWithoutThrowing`,
 `RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState`, and
-`RepoCardViewModel_RepoReappearsAfterBeingMissing_RefreshesGitStatusInsteadOfReportingStale`,
+`RepoCardViewModel_RepoReappearsAfterBeingMissing_InvalidatesStaleGitStatusInsteadOfReportingIt`,
 covering `AgentControl-RepoCardViewModel-PullDisabledExplanation`.
 
 **RepoCardViewModel_Pull_ReportsSuccessOrFailureViaStatusMessage**: `PullCommand` is executed

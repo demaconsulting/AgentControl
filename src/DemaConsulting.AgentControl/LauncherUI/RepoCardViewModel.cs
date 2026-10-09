@@ -599,7 +599,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </remarks>
     public void RefreshCheap()
     {
-        var wasMissing = IsMissing;
         IsMissing = !Directory.Exists(RepoPath);
         if (IsMissing)
         {
@@ -611,7 +610,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             // The repo just disappeared (or was already missing): any previously-cached Git
             // status is no longer trustworthy, so invalidate it rather than let it linger and
-            // potentially be reported (stale) once the repo reappears.
+            // potentially be reported (stale) once the repo reappears. Callers that need an
+            // immediate fresh check after a missing-to-present transition (rather than waiting
+            // for the next lazy/deferred trigger) should call RefreshDirtyStatus explicitly -
+            // see MainWindowViewModel.ApplySettings.
             GitStatusChecked = false;
             GitStatusUnavailable = false;
             return;
@@ -620,15 +622,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RefreshPin();
         RefreshBranchAndCommittedFiles();
         RefreshUpgradeStatus();
-
-        // The repo just reappeared after being missing: its cached Git status was invalidated
-        // above when it disappeared, so force an immediate fresh check here instead of relying
-        // on the one-time-per-card lazy trigger in MainWindow.axaml.cs, which won't fire again
-        // for an already-realized card.
-        if (wasMissing)
-        {
-            RefreshDirtyStatus();
-        }
     }
 
     /// <summary>
@@ -636,16 +629,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see cref="CanPull"/>.
     /// </summary>
     /// <remarks>
-    ///     Not called by the constructor or by <see cref="RefreshCheap"/> for an
-    ///     already-present repo - per architecture.md's repo-fact caching strategy, working-tree
-    ///     dirty/clean state is not cacheable by <c>HEAD</c> hash (it reflects uncommitted local
-    ///     edits), so it is computed lazily instead: on demand via <see cref="RefreshCommand"/>,
-    ///     or once when a card first becomes visible (see <c>MainWindow.axaml.cs</c>), rather
-    ///     than eagerly for every recent repo at app launch. The one exception is
-    ///     <see cref="RefreshCheap"/>'s missing-to-present transition, which calls this method
-    ///     immediately to replace the Git status it invalidated while the repo was missing,
-    ///     since the one-time-per-card lazy trigger in <c>MainWindow.axaml.cs</c> would not fire
-    ///     again for an already-realized card.
+    ///     Deliberately not called by <see cref="RefreshCheap"/> or the constructor - per
+    ///     architecture.md's repo-fact caching strategy, working-tree dirty/clean state is not
+    ///     cacheable by <c>HEAD</c> hash (it reflects uncommitted local edits), so it is computed
+    ///     lazily instead: on demand via <see cref="RefreshCommand"/>, or once when a card first
+    ///     becomes visible (see <c>MainWindow.axaml.cs</c>), rather than eagerly for every recent
+    ///     repo at app launch.
     /// </remarks>
     public void RefreshDirtyStatus()
     {

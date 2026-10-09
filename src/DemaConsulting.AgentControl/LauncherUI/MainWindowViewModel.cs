@@ -240,8 +240,15 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     recent-repos list, which is only ever mutated via <see cref="AddRepo"/>/
     ///     <see cref="RemoveRepo"/>), persists them, invalidates the shared
     ///     <see cref="PackageVersionCache"/> (the package-source path may have changed), and
-    ///     re-runs each card's cheap refresh so upgrade badges and pull eligibility reflect any
-    ///     changed package-source/git-path settings immediately.
+    ///     re-runs each card's full refresh (cheap checks plus a fresh Git status check) so
+    ///     upgrade badges and pull eligibility reflect any changed package-source/git-path
+    ///     settings immediately - a full <see cref="RepoCardViewModel.Refresh"/> (rather than
+    ///     just <see cref="RepoCardViewModel.RefreshCheap"/>) is needed here specifically so a
+    ///     repo that reappeared since it was last checked gets an immediate fresh Git status
+    ///     instead of being left showing a "not yet checked" state indefinitely - unlike a
+    ///     newly-constructed card, an already-realized card's one-time lazy
+    ///     <see cref="RepoCardViewModel.RefreshDirtyStatus"/> trigger (see
+    ///     <c>MainWindow.axaml.cs</c>) will not fire again for it.
     /// </summary>
     /// <param name="updated">The updated settings, typically built by
     ///     <see cref="SettingsWindowViewModel.Save"/>.</param>
@@ -260,7 +267,7 @@ internal sealed class MainWindowViewModel : ViewModelBase
         _packageVersionCache.Invalidate();
         foreach (var card in RepoCards)
         {
-            card.RefreshCheap();
+            card.Refresh();
         }
 
         UpdateDisplayedRepoCards();
