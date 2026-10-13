@@ -226,5 +226,4 @@ sections:
           - ThirdPartyDependencies_All_MatchesCsprojDirectRuntimeDependencies
           - ThirdPartyDependencies_All_NoDuplicateNames
           - ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense
-          - ThirdPartyDependencies_All_EveryEntryHasNonEmptyVersion
-          - DependencyInfo_ToString_RepresentativeEntry_ReturnsNameVersionLicenseFormat
+          - DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat

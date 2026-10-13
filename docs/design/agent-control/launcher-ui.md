@@ -128,7 +128,8 @@ toolbar command with no dedicated view model) shows the application logo (reused
 `Assets/AppIcon.ico`, the same icon already used for the main window/taskbar - no new binary
 image asset was added), a short mission tagline, the running version and copyright read
 from `Program.Version`, and a scrollable list of this application's direct runtime third-party
-dependencies and their SPDX license identifiers, sourced from a static
+dependencies and their SPDX license identifiers (package versions are intentionally omitted so
+dependency updates do not require edits here), sourced from a static
 `ThirdPartyDependencies` list rather than parsed at runtime from the project file
 (`AgentControl-LauncherUI-About`). Adding a repo
 (`AgentControl-LauncherUI-AddRepo`) is likewise driven directly by `MainWindowViewModel`
