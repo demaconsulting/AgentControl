@@ -151,12 +151,11 @@ window and confirming the mission tagline, version, copyright, and license text 
 present and non-empty, and that the third-party dependency list control is present and
 rendered with at least one entry. The application logo image is not automated-asserted (it has
 no text content to check) and remains a visual-inspection-only element. The dependency list's
-underlying data source (name/version/license entries, no duplicates, no empty fields, and the
-expected display format) has direct unit coverage. This scenario is tested by
+underlying data source (name/license entries matching the project file's package names, no
+duplicates, no empty fields, and the expected display format) has direct unit coverage. This scenario is tested by
 `windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright`,
 `ThirdPartyDependencies_All_MatchesCsprojDirectRuntimeDependencies`,
 `ThirdPartyDependencies_All_NoDuplicateNames`,
 `ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense`,
-`ThirdPartyDependencies_All_EveryEntryHasNonEmptyVersion`, and
-`DependencyInfo_ToString_RepresentativeEntry_ReturnsNameVersionLicenseFormat`, covering
+and `DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat`, covering
 `AgentControl-LauncherUI-About`.

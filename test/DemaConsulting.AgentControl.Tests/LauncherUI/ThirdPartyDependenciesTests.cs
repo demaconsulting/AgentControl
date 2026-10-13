@@ -41,10 +41,11 @@ public class ThirdPartyDependenciesTests
     ];
 
     /// <summary>
-    ///     Test that the dependency list's names and versions match the csproj's actual
+    ///     Test that the dependency list's names match the csproj's actual
     ///     "Logging Dependencies"/"Avalonia UI Dependencies" <c>PackageReference</c> entries
     ///     exactly, order-independent, so the hand-maintained list cannot silently drift from the
-    ///     project file it documents. The license column cannot be derived from the csproj (NuGet
+    ///     project file it documents. Versions are deliberately not compared so dependency-update
+    ///     tooling can bump them freely. The license column cannot be derived from the csproj (NuGet
     ///     package metadata, not project-file content), so it is checked only for non-emptiness by
     ///     <see cref="ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense"/>.
     /// </summary>
@@ -55,12 +56,11 @@ public class ThirdPartyDependenciesTests
         // csproj file, rather than hardcoding a second, independently-maintained copy of them
         // here (which could drift from the implementation list without either side noticing).
         var expected = ReadRuntimeDependenciesFromCsproj()
-            .Select(d => (d.Name, d.Version))
-            .OrderBy(d => d.Name, StringComparer.Ordinal)
+            .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
         var actual = ThirdPartyDependencies.All
-            .Select(d => (d.Name, d.Version))
-            .OrderBy(d => d.Name, StringComparer.Ordinal)
+            .Select(d => d.Name)
+            .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
 
         // Act / Assert: the hand-maintained list matches the csproj's actual package references
@@ -94,39 +94,29 @@ public class ThirdPartyDependenciesTests
     }
 
     /// <summary>
-    ///     Test that every entry has a non-empty, non-whitespace version string.
-    /// </summary>
-    [Fact]
-    public void ThirdPartyDependencies_All_EveryEntryHasNonEmptyVersion()
-    {
-        // Act / Assert
-        Assert.All(ThirdPartyDependencies.All, d => Assert.False(string.IsNullOrWhiteSpace(d.Version)));
-    }
-
-    /// <summary>
     ///     Test that DependencyInfo's ToString() override renders the expected display format.
     /// </summary>
     [Fact]
-    public void DependencyInfo_ToString_RepresentativeEntry_ReturnsNameVersionLicenseFormat()
+    public void DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat()
     {
         // Arrange
-        var dependency = new DependencyInfo("Serilog", "4.4.0", "Apache-2.0");
+        var dependency = new DependencyInfo("Serilog", "Apache-2.0");
 
         // Act
         var text = dependency.ToString();
 
         // Assert
-        Assert.Equal("Serilog 4.4.0 — Apache-2.0", text);
+        Assert.Equal("Serilog — Apache-2.0", text);
     }
 
     /// <summary>
-    ///     Reads the <c>PackageReference</c> <c>Include</c>/<c>Version</c> pairs from the
+    ///     Reads the <c>PackageReference</c> <c>Include</c> names from the
     ///     <c>ItemGroup</c>s immediately preceded by one of
     ///     <see cref="RuntimeDependencyItemGroupComments"/> in
     ///     <c>DemaConsulting.AgentControl.csproj</c>.
     /// </summary>
-    /// <returns>The direct runtime dependencies' names and versions, as declared in the csproj.</returns>
-    private static IEnumerable<(string Name, string Version)> ReadRuntimeDependenciesFromCsproj()
+    /// <returns>The direct runtime dependencies' names, as declared in the csproj.</returns>
+    private static IEnumerable<string> ReadRuntimeDependenciesFromCsproj()
     {
         var csprojPath = FindAgentControlCsproj();
         var document = XDocument.Load(csprojPath);
@@ -141,10 +131,9 @@ public class ThirdPartyDependenciesTests
             foreach (var packageReference in itemGroup.Elements("PackageReference"))
             {
                 var name = packageReference.Attribute("Include")?.Value;
-                var version = packageReference.Attribute("Version")?.Value;
-                if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(version))
+                if (!string.IsNullOrWhiteSpace(name))
                 {
-                    yield return (name, version);
+                    yield return name;
                 }
             }
         }
