@@ -88,6 +88,40 @@ public class PackageZipExtractorTests
     }
 
     /// <summary>
+    ///     Test that extraction refuses to write through a symbolic link that redirects a parent
+    ///     folder outside the repository.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_ParentIsSymlinkOutsideRepo_ThrowsAndWritesNothingOutside()
+    {
+        // Arrange: ".github" inside the repo is a symlink to a directory outside it
+        var zipPath = CreatePackageZip(("agents/copilot.md", "agents v2"));
+        var repoRoot = CreateTempDirectory();
+        var outside = CreateTempDirectory();
+        try
+        {
+            try
+            {
+                Directory.CreateSymbolicLink(Path.Combine(repoRoot, ".github"), outside);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                Assert.Skip("Creating symbolic links is not permitted in this environment.");
+            }
+
+            // Act / Assert: extraction is rejected and nothing lands in the outside directory
+            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.Empty(Directory.GetFileSystemEntries(outside));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            Directory.Delete(repoRoot, recursive: true);
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that opening a file that is not a valid zip archive throws an
     ///     InvalidOperationException with a clear message.
     /// </summary>

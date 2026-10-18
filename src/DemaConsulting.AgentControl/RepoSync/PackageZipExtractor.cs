@@ -400,14 +400,20 @@ internal static class PackageZipExtractor
     ///     <see cref="ResolveManagedDestination"/>).</exception>
     private static void ExtractEntry(ZipArchiveEntry entry, string destinationPath, string repoRoot)
     {
-        var rootWithSeparator = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repoRoot)) +
-                                Path.DirectorySeparatorChar;
+        var fullRoot = Path.GetFullPath(repoRoot);
+        var rootWithSeparator = Path.EndsInDirectorySeparator(fullRoot)
+            ? fullRoot
+            : fullRoot + Path.DirectorySeparatorChar;
         var fullDestination = Path.GetFullPath(destinationPath);
         if (!fullDestination.StartsWith(rootWithSeparator, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"Zip entry '{entry.FullName}' resolves outside the repository root.");
         }
+
+        // A symlink/junction below the repo root could redirect the write outside it even though
+        // the path is lexically inside; refuse to write through any existing reparse point.
+        ThrowIfPathCrossesReparsePoint(entry, fullRoot, fullDestination);
 
         var destinationDirectory = Path.GetDirectoryName(fullDestination);
         if (!string.IsNullOrEmpty(destinationDirectory))
@@ -418,6 +424,33 @@ internal static class PackageZipExtractor
         using var source = entry.Open();
         using var target = new FileStream(fullDestination, FileMode.Create, FileAccess.Write);
         source.CopyTo(target);
+    }
+
+    /// <summary>
+    ///     Throws if any existing directory between <paramref name="fullRoot"/> (exclusive) and
+    ///     <paramref name="fullDestination"/> (inclusive of the file itself) is a reparse point
+    ///     (symlink or junction).
+    /// </summary>
+    /// <param name="entry">The zip entry being extracted (for the error message).</param>
+    /// <param name="fullRoot">The absolute repository root; itself allowed to be a link.</param>
+    /// <param name="fullDestination">The absolute destination file path inside the root.</param>
+    /// <exception cref="InvalidOperationException">Thrown when a reparse point is found.</exception>
+    private static void ThrowIfPathCrossesReparsePoint(ZipArchiveEntry entry, string fullRoot, string fullDestination)
+    {
+        var current = fullDestination;
+        while (!string.IsNullOrEmpty(current) &&
+               !string.Equals(Path.TrimEndingDirectorySeparator(current),
+                   Path.TrimEndingDirectorySeparator(fullRoot), StringComparison.Ordinal))
+        {
+            if ((File.Exists(current) || Directory.Exists(current)) &&
+                new FileInfo(current).Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                throw new InvalidOperationException(
+                    $"Zip entry '{entry.FullName}' would be written through a symbolic link or junction.");
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
     }
 
     /// <summary>

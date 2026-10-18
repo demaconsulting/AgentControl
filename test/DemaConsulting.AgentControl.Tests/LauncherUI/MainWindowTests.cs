@@ -21,6 +21,7 @@
 using System.Reflection;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
@@ -74,11 +75,46 @@ public sealed class MainWindowTests : IDisposable
         // Act: add a repo after the data context was set (exercises collection-changed wiring)
         Assert.True(viewModel.AddRepo(CreateTempDirectory()));
         var card = Assert.Single(viewModel.RepoCards);
-        card.RemoveCommand.Execute(null);
-        card.SelectPackageCommand.Execute(null);
 
-        // Assert: the card is still listed because the confirmation dialog has not been accepted
+        // Act: request removal and decline the confirmation dialog
+        card.RemoveCommand.Execute(null);
+        var confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+        DialogWindowTests.Click(confirmation, "ConfirmationNoButton");
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert: declining keeps the card listed
         Assert.Single(viewModel.RepoCards);
+
+        // Act: request removal again and accept
+        card.RemoveCommand.Execute(null);
+        confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+        DialogWindowTests.Click(confirmation, "ConfirmationYesButton");
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert: accepting removes the card
+        Assert.Empty(viewModel.RepoCards);
+        window.Close();
+    });
+
+    /// <summary>
+    ///     Test that a card's select-package request (here failing because no package source is
+    ///     configured) surfaces a modal message box that can be dismissed.
+    /// </summary>
+    [Fact]
+    public void MainWindow_SelectPackageWithoutSource_ShowsMessageBox() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var window = CreateWindow(out var viewModel);
+        window.Show();
+        viewModel.AddRepo(CreateTempDirectory());
+
+        // Act
+        viewModel.RepoCards[0].SelectPackageCommand.Execute(null);
+
+        // Assert: a message box or select-package dialog is owned by the main window; dismiss it
+        var dialog = Assert.Single(window.OwnedWindows);
+        dialog.Close();
+        Dispatcher.UIThread.RunJobs();
         window.Close();
     });
 
@@ -109,6 +145,7 @@ public sealed class MainWindowTests : IDisposable
     {
         // Arrange
         var window = CreateWindow(out var viewModel);
+        window.Show();
         viewModel.AddRepo(CreateTempDirectory());
         var card = viewModel.RepoCards[0];
         var removeRequested = false;
@@ -123,6 +160,11 @@ public sealed class MainWindowTests : IDisposable
 
         // Assert
         Assert.True(removeRequested);
+        foreach (var owned in window.OwnedWindows.ToArray())
+        {
+            owned.Close();
+        }
+
         window.Close();
     });
 
@@ -154,16 +196,23 @@ public sealed class MainWindowTests : IDisposable
         // Arrange
         var owner = new Window();
         owner.Show();
-        var viewModel = new SelectPackageWindowViewModel(
-            CreateTempDirectory(), new AgentControl.AgentPackageManagement.PackageVersionCache());
-        var dialog = new SelectPackageWindow(viewModel);
-        var result = dialog.ShowDialog<(string Name, string Version)?>(owner);
+        try
+        {
+            var viewModel = new SelectPackageWindowViewModel(
+                CreateTempDirectory(), new AgentControl.AgentPackageManagement.PackageVersionCache());
+            var dialog = new SelectPackageWindow(viewModel);
+            var result = dialog.ShowDialog<(string Name, string Version)?>(owner);
 
-        // Act
-        DialogWindowTests.Click(dialog, "SelectPackageCancelButton");
+            // Act
+            DialogWindowTests.Click(dialog, "SelectPackageCancelButton");
 
-        // Assert
-        Assert.Null(await result);
+            // Assert
+            Assert.Null(await result);
+        }
+        finally
+        {
+            owner.Close();
+        }
     });
 
     /// <summary>
@@ -175,7 +224,7 @@ public sealed class MainWindowTests : IDisposable
     {
         // Act / Assert
         Assert.Throws<ArgumentNullException>(() => new SelectPackageWindow(null!));
-        Assert.NotNull(new SelectPackageWindow());
+        new SelectPackageWindow().Close();
     });
 
     /// <summary>
@@ -194,7 +243,7 @@ public sealed class MainWindowTests : IDisposable
         // Assert
         Assert.Equal(3, viewer.FindControl<StackPanel>("ReleaseNotesPanel")!.Children.Count);
         Assert.Throws<ArgumentNullException>(() => new ReleaseNotesViewer(null!));
-        Assert.NotNull(new ReleaseNotesViewer());
+        new ReleaseNotesViewer().Close();
         viewer.Close();
     });
 

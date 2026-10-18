@@ -72,7 +72,7 @@ public class DialogWindowTests
     {
         // Act / Assert
         Assert.Throws<ArgumentNullException>(() => new MessageBoxWindow(null!));
-        Assert.NotNull(new MessageBoxWindow());
+        new MessageBoxWindow().Close();
     });
 
     /// <summary>
@@ -84,15 +84,22 @@ public class DialogWindowTests
         // Arrange
         var owner = new Window();
         owner.Show();
-        var dialog = new ConfirmationWindow("Are you sure?");
-        var result = dialog.ShowDialog<bool>(owner);
+        try
+        {
+            var dialog = new ConfirmationWindow("Are you sure?");
+            var result = dialog.ShowDialog<bool>(owner);
 
-        // Act
-        Click(dialog, "ConfirmationYesButton");
+            // Act
+            Click(dialog, "ConfirmationYesButton");
 
-        // Assert
-        Assert.True(await result);
-        Assert.Equal("Are you sure?", dialog.FindControl<TextBlock>("ConfirmationMessageText")!.Text);
+            // Assert
+            Assert.True(await result);
+            Assert.Equal("Are you sure?", dialog.FindControl<TextBlock>("ConfirmationMessageText")!.Text);
+        }
+        finally
+        {
+            owner.Close();
+        }
     });
 
     /// <summary>
@@ -104,14 +111,21 @@ public class DialogWindowTests
         // Arrange
         var owner = new Window();
         owner.Show();
-        var dialog = new ConfirmationWindow("Are you sure?");
-        var result = dialog.ShowDialog<bool>(owner);
+        try
+        {
+            var dialog = new ConfirmationWindow("Are you sure?");
+            var result = dialog.ShowDialog<bool>(owner);
 
-        // Act
-        Click(dialog, "ConfirmationNoButton");
+            // Act
+            Click(dialog, "ConfirmationNoButton");
 
-        // Assert
-        Assert.False(await result);
+            // Assert
+            Assert.False(await result);
+        }
+        finally
+        {
+            owner.Close();
+        }
     });
 
     /// <summary>
@@ -123,7 +137,7 @@ public class DialogWindowTests
     {
         // Act / Assert
         Assert.Throws<ArgumentNullException>(() => new ConfirmationWindow(null!));
-        Assert.NotNull(new ConfirmationWindow());
+        new ConfirmationWindow().Close();
     });
 
     /// <summary>
@@ -188,5 +202,6 @@ public class DialogWindowTests
         window.Show();
         Click(window, "BrowsePackageSourceButton");
         Assert.Null(window.DataContext);
+        window.Close();
     });
 }
