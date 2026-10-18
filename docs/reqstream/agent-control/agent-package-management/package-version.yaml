@@ -11,7 +11,8 @@ sections:
         title: >-
           The PackageVersion class shall parse a release or prerelease version string into its
           components, and shall report failure without throwing for a malformed or empty
-          input.
+          input, including a prerelease with empty or invalid identifiers or numeric
+          identifiers with leading zeros.
         justification: |
           Version strings are derived from zip filenames, which are not guaranteed to be
           well-formed; parsing must fail gracefully so a single bad file cannot crash package
@@ -21,19 +22,26 @@ sections:
           - PackageVersion_TryParse_PrereleaseVersion_ParsesPrereleaseIdentifier
           - PackageVersion_TryParse_MalformedInput_ReturnsFalse
           - PackageVersion_Constructor_NegativeMajor_ThrowsArgumentOutOfRangeException
+          - PackageVersion_TryParse_InvalidPrereleaseIdentifiers_ReturnsFalse
 
       - id: AgentControl-PackageVersion-Compare
         title: >-
-          The PackageVersion class shall compare versions numerically, treating a release
-          version as greater than a prerelease version with the same numeric components, and
-          shall consider two versions with the same version string equal, and round-trip
-          through its string representation.
+          The PackageVersion class shall compare versions per Semantic Versioning 2.0.0
+          precedence: numerically by major, minor, and patch; a release greater than a
+          prerelease with the same numeric components; and prerelease identifiers compared
+          left to right, with numeric identifiers compared numerically (so beta.2 precedes
+          beta.10), numeric identifiers ranking below alphanumeric ones, and a longer
+          identifier list ranking above its shorter prefix. It shall also consider two
+          versions with the same version string equal, and round-trip through its string
+          representation.
         justification: |
           Upgrade detection and version-list sorting both depend on version ordering matching
-          conventional semantic-versioning expectations, including release-over-prerelease
-          precedence.
+          the semantic-versioning specification, including release-over-prerelease precedence
+          and numeric prerelease identifiers, so the newest package is never misidentified.
         tests:
           - PackageVersion_CompareTo_HigherNumericVersion_ComparesGreater
           - PackageVersion_CompareTo_ReleaseVsPrereleaseSameNumeric_ReleaseIsGreater
+          - PackageVersion_CompareTo_PrereleaseIdentifiers_FollowSemverPrecedence
+          - PackageVersion_CompareTo_HugeNumericIdentifiers_ComparesNumerically
           - PackageVersion_Equals_SameVersionString_ReturnsTrue
           - PackageVersion_ToString_ParsedVersion_RoundTripsThroughParse

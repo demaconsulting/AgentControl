@@ -31,8 +31,10 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     grammar needed for AgentControl: numeric major/minor/patch plus an optional dot-separated
 ///     prerelease identifier list (build metadata after <c>+</c> is intentionally unsupported —
 ///     package file names never carry it). A prerelease version always compares as lower than the
-///     same numeric version without one (e.g. <c>1.0.0-beta &lt; 1.0.0</c>), matching semver's
-///     precedence rules. Immutable and thread-safe once constructed.
+///     same numeric version without one (e.g. <c>1.0.0-beta &lt; 1.0.0</c>), and prerelease
+///     identifiers follow semver precedence (numeric identifiers compare numerically, e.g.
+///     <c>beta.2 &lt; beta.10</c>; numeric ranks below alphanumeric; more identifiers rank higher).
+///     Immutable and thread-safe once constructed.
 /// </remarks>
 internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<PackageVersion>
 {
@@ -128,8 +130,9 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
             return false;
         }
 
-        // Reject an empty prerelease identifier (e.g. a trailing "-" with nothing after it)
-        if (dashIndex >= 0 && string.IsNullOrEmpty(prerelease))
+        // Reject an empty prerelease identifier (e.g. a trailing "-" with nothing after it) or
+        // one that is not valid semver (empty/invalid identifiers, numeric leading zeros)
+        if (dashIndex >= 0 && (string.IsNullOrEmpty(prerelease) || !IsValidPrerelease(prerelease)))
         {
             return false;
         }
@@ -189,8 +192,89 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
             return -1;
         }
 
-        return string.CompareOrdinal(Prerelease, other.Prerelease);
+        return ComparePrerelease(Prerelease, other.Prerelease);
     }
+
+    /// <summary>
+    ///     Compares two prerelease strings using semver precedence: identifiers are compared left
+    ///     to right; numeric identifiers compare numerically and rank below alphanumeric ones;
+    ///     alphanumeric identifiers compare in ASCII order; and when all shared identifiers are
+    ///     equal, the longer list ranks higher.
+    /// </summary>
+    /// <param name="left">The left prerelease string (dot-separated identifiers).</param>
+    /// <param name="right">The right prerelease string (dot-separated identifiers).</param>
+    /// <returns>A negative, zero, or positive value as <paramref name="left"/> precedes, equals,
+    ///     or follows <paramref name="right"/>.</returns>
+    private static int ComparePrerelease(string left, string right)
+    {
+        var leftIds = left.Split('.');
+        var rightIds = right.Split('.');
+
+        for (var i = 0; i < Math.Min(leftIds.Length, rightIds.Length); i++)
+        {
+            var result = CompareIdentifier(leftIds[i], rightIds[i]);
+            if (result != 0)
+            {
+                return result;
+            }
+        }
+
+        return leftIds.Length.CompareTo(rightIds.Length);
+    }
+
+    /// <summary>
+    ///     Compares a single prerelease identifier pair.
+    /// </summary>
+    /// <param name="left">The left identifier.</param>
+    /// <param name="right">The right identifier.</param>
+    /// <returns>A negative, zero, or positive comparison result.</returns>
+    private static int CompareIdentifier(string left, string right)
+    {
+        var leftNumeric = IsNumeric(left);
+        var rightNumeric = IsNumeric(right);
+
+        if (leftNumeric && rightNumeric)
+        {
+            // Compare as arbitrarily large integers without parsing: after trimming leading
+            // zeros, a longer digit string is larger, and equal lengths compare by character
+            var l = left.TrimStart('0');
+            var r = right.TrimStart('0');
+            return l.Length != r.Length ? l.Length.CompareTo(r.Length) : string.CompareOrdinal(l, r);
+        }
+
+        if (leftNumeric)
+        {
+            return -1;
+        }
+
+        if (rightNumeric)
+        {
+            return 1;
+        }
+
+        return string.CompareOrdinal(left, right);
+    }
+
+    /// <summary>
+    ///     Determines whether an identifier consists only of ASCII digits.
+    /// </summary>
+    /// <param name="identifier">The identifier to test.</param>
+    /// <returns><see langword="true"/> if the identifier is non-empty and all digits.</returns>
+    private static bool IsNumeric(string identifier) =>
+        identifier.Length > 0 && identifier.All(char.IsAsciiDigit);
+
+    /// <summary>
+    ///     Determines whether a prerelease string is a valid semver prerelease: dot-separated,
+    ///     non-empty identifiers of ASCII letters, digits, and hyphens, where numeric identifiers
+    ///     have no leading zeros.
+    /// </summary>
+    /// <param name="prerelease">The prerelease string to validate.</param>
+    /// <returns><see langword="true"/> if valid.</returns>
+    private static bool IsValidPrerelease(string prerelease) =>
+        prerelease.Split('.').All(id =>
+            id.Length > 0 &&
+            id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-') &&
+            !(IsNumeric(id) && id.Length > 1 && id[0] == '0'));
 
     /// <inheritdoc />
     public bool Equals(PackageVersion? other) => other is not null && CompareTo(other) == 0;

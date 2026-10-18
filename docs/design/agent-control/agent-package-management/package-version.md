@@ -35,7 +35,9 @@ The class is immutable and thread-safe once constructed; all properties are read
   malformed input — callers enumerating a directory of arbitrary file names are expected to
   skip entries that fail to parse (`AgentControl-PackageVersion-Parse`). Rejects a numeric
   part that is not exactly three dot-separated non-negative integers, and rejects an empty
-  prerelease identifier (a trailing `-` with nothing after it).
+  prerelease identifier (a trailing `-` with nothing after it) or a prerelease that is not
+  valid semver: empty identifiers, characters other than ASCII letters, digits, and hyphens,
+  or numeric identifiers with leading zeros.
 
 **CompareTo**: Compares this version to another following semver precedence.
 
@@ -43,7 +45,10 @@ The class is immutable and thread-safe once constructed; all properties are read
 - *Returns*: `int` — negative/zero/positive per `IComparable<T>` convention.
 - *Postconditions*: Compares major, minor, then patch numerically; for equal numeric
   components, a release (`Prerelease is null`) outranks any prerelease of the same numeric
-  version; two prereleases compare via ordinal string comparison
+  version; two prereleases compare identifier by identifier (split on `.`): numeric
+  identifiers compare numerically (as arbitrary-length digit strings, so there is no
+  overflow) and rank below alphanumeric identifiers, alphanumeric identifiers compare in
+  ASCII order, and when all shared identifiers are equal the longer list ranks higher
   (`AgentControl-PackageVersion-Compare`).
 
 **Equals / ToString**: `Equals` delegates to `CompareTo(other) == 0`; `ToString` round-trips

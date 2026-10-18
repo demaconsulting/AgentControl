@@ -203,6 +203,67 @@ public class PackageVersionTests
     }
 
     /// <summary>
+    ///     Test that prerelease precedence follows the semver 2.0.0 specification's canonical
+    ///     ordering, including numeric (not lexical) comparison of numeric identifiers.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_CompareTo_PrereleaseIdentifiers_FollowSemverPrecedence()
+    {
+        // Arrange: the ascending example chain from the semver 2.0.0 specification
+        string[] ascending =
+        [
+            "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta",
+            "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"
+        ];
+        var versions = ascending.Select(text =>
+        {
+            Assert.True(PackageVersion.TryParse(text, out var parsed));
+            return parsed!;
+        }).ToList();
+
+        // Assert: every earlier entry precedes every later one
+        for (var i = 0; i < versions.Count; i++)
+        {
+            for (var j = i + 1; j < versions.Count; j++)
+            {
+                Assert.True(versions[i].CompareTo(versions[j]) < 0, $"{ascending[i]} < {ascending[j]}");
+                Assert.True(versions[j].CompareTo(versions[i]) > 0, $"{ascending[j]} > {ascending[i]}");
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Test that very large numeric identifiers compare numerically without overflowing.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_CompareTo_HugeNumericIdentifiers_ComparesNumerically()
+    {
+        // Arrange: identifiers larger than any integer type
+        var small = new PackageVersion(1, 0, 0, "rc.99999999999999999999");
+        var large = new PackageVersion(1, 0, 0, "rc.100000000000000000000");
+
+        // Assert
+        Assert.True(small.CompareTo(large) < 0);
+        Assert.True(large.CompareTo(small) > 0);
+    }
+
+    /// <summary>
+    ///     Test that prerelease strings that are not valid semver fail to parse.
+    /// </summary>
+    [Theory]
+    [InlineData("1.2.3-beta..1")]
+    [InlineData("1.2.3-.beta")]
+    [InlineData("1.2.3-beta.")]
+    [InlineData("1.2.3-beta.01")]
+    [InlineData("1.2.3-be_ta")]
+    public void PackageVersion_TryParse_InvalidPrereleaseIdentifiers_ReturnsFalse(string input)
+    {
+        // Act / Assert
+        Assert.False(PackageVersion.TryParse(input, out var version));
+        Assert.Null(version);
+    }
+
+    /// <summary>
     ///     Test equality, hash code, and comparison operators.
     /// </summary>
     [Fact]
