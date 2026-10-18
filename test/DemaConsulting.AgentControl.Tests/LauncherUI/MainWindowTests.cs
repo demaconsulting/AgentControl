@@ -22,6 +22,7 @@ using System.Reflection;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
@@ -199,7 +200,7 @@ public sealed class MainWindowTests : IDisposable
         try
         {
             var viewModel = new SelectPackageWindowViewModel(
-                CreateTempDirectory(), new AgentControl.AgentPackageManagement.PackageVersionCache());
+                CreateTempDirectory(), new PackageVersionCache());
             var dialog = new SelectPackageWindow(viewModel);
             var result = dialog.ShowDialog<(string Name, string Version)?>(owner);
 

@@ -153,6 +153,14 @@ internal static class PackageZipExtractor
                 $"Managed folder '{folder}'", fullRoot, Path.GetFullPath(PathHelpers.SafePathCombine(repoRoot, folder)));
         }
 
+        // Also vet every entry's destination now, so a link nested inside a managed folder is
+        // rejected before anything is deleted rather than only when its entry is written.
+        foreach (var (entry, destinationPath) in managedEntries)
+        {
+            ThrowIfPathCrossesReparsePoint(
+                $"Zip entry '{entry.FullName}'", fullRoot, Path.GetFullPath(destinationPath));
+        }
+
         foreach (var folder in ManagedFolders)
         {
             DeleteManagedFolder(repoRoot, folder, effectiveLogger);
@@ -451,8 +459,12 @@ internal static class PackageZipExtractor
                !string.Equals(Path.TrimEndingDirectorySeparator(current),
                    Path.TrimEndingDirectorySeparator(fullRoot), StringComparison.Ordinal))
         {
-            if ((File.Exists(current) || Directory.Exists(current)) &&
-                new FileInfo(current).Attributes.HasFlag(FileAttributes.ReparsePoint))
+            // LinkTarget reads the link itself, so it also catches a dangling link whose target
+            // no longer exists (which File/Directory.Exists report as absent, yet which
+            // CreateDirectory and FileStream would still follow)
+            if (new FileInfo(current).LinkTarget is not null ||
+                ((File.Exists(current) || Directory.Exists(current)) &&
+                 new FileInfo(current).Attributes.HasFlag(FileAttributes.ReparsePoint)))
             {
                 throw new InvalidOperationException(
                     $"{description} would be accessed through a symbolic link or junction.");

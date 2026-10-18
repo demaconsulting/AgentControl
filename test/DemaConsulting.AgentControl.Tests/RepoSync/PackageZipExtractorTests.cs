@@ -132,6 +132,98 @@ public class PackageZipExtractorTests
     }
 
     /// <summary>
+    ///     Test that a link nested inside a managed folder is rejected before anything is
+    ///     deleted, so neither the link's target nor the managed folder's existing content is
+    ///     touched.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_NestedLinkInsideManagedFolder_ThrowsBeforeDeletingAnything()
+    {
+        // Arrange: ".github/agents/sub" is a link to an outside directory holding content
+        var zipPath = CreatePackageZip(("agents/sub/new.md", "v2"));
+        var repoRoot = CreateTempDirectory();
+        var outside = CreateTempDirectory();
+        var agents = Path.Combine(repoRoot, ".github", "agents");
+        var link = Path.Combine(agents, "sub");
+        try
+        {
+            Directory.CreateDirectory(agents);
+            var existing = Path.Combine(agents, "old.md");
+            File.WriteAllText(existing, "old");
+            var outsideFile = Path.Combine(outside, "keep.md");
+            File.WriteAllText(outsideFile, "must survive");
+
+            if (!TryCreateDirectoryLink(link, outside))
+            {
+                Assert.Skip("Creating symbolic links or junctions is not permitted in this environment.");
+            }
+
+            // Act / Assert: rejected up front; existing managed content and outside content intact
+            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.Equal("old", File.ReadAllText(existing));
+            Assert.Equal("must survive", File.ReadAllText(outsideFile));
+            Assert.False(File.Exists(Path.Combine(outside, "new.md")));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            RemoveLinkIfPresent(link);
+            Directory.Delete(repoRoot, recursive: true);
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a dangling link (whose target no longer exists) is still treated as a link,
+    ///     so extraction does not recreate its missing target outside the repository.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_DanglingLinkParent_ThrowsAndCreatesNothingOutside()
+    {
+        // Arrange: ".github" is a link whose target directory has been removed
+        var zipPath = CreatePackageZip(("agents/copilot.md", "agents v2"));
+        var repoRoot = CreateTempDirectory();
+        var outside = CreateTempDirectory();
+        var link = Path.Combine(repoRoot, ".github");
+        try
+        {
+            if (!TryCreateDirectoryLink(link, outside))
+            {
+                Assert.Skip("Creating symbolic links or junctions is not permitted in this environment.");
+            }
+
+            Directory.Delete(outside, recursive: true);
+
+            // Act / Assert: rejected, and the missing target is not recreated through the link
+            Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+            Assert.False(Directory.Exists(outside));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            RemoveLinkIfPresent(link);
+            Directory.Delete(repoRoot, recursive: true);
+            if (Directory.Exists(outside))
+            {
+                Directory.Delete(outside, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Removes a directory link itself (never its target's content), if one exists at the
+    ///     path - including a dangling link.
+    /// </summary>
+    /// <param name="linkPath">The path that may hold a link.</param>
+    private static void RemoveLinkIfPresent(string linkPath)
+    {
+        if (new DirectoryInfo(linkPath).LinkTarget is not null)
+        {
+            Directory.Delete(linkPath, recursive: false);
+        }
+    }
+
+    /// <summary>
     ///     Test that opening a file that is not a valid zip archive throws an
     ///     InvalidOperationException with a clear message.
     /// </summary>

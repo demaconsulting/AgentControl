@@ -44,11 +44,13 @@ This scenario is tested by
 `PackageZipExtractor_Extract_EntryEscapesRepoRoot_ThrowsBeforeDeletingManagedFolders`, covering
 `AgentControl-PackageZipExtractor-Extract`.
 
-**PackageZipExtractor_Extract_RejectsSymbolicLinkedManagedFolder**: When `.github` is a
-symbolic link or junction to a directory outside the repo that already holds managed-looking
-content, extraction throws `InvalidOperationException` and that content is left untouched. This
-scenario is tested by
+**PackageZipExtractor_Extract_RejectsSymbolicLinkedManagedFolder**: When `.github`, or a folder
+nested inside a managed folder, is a symbolic link or junction (including a dangling one whose
+target is gone), extraction throws `InvalidOperationException` before anything is deleted, and
+content behind the link is left untouched. This scenario is tested by
 `PackageZipExtractor_Extract_ParentIsSymlinkOutsideRepo_ThrowsAndWritesNothingOutside`,
+`PackageZipExtractor_Extract_NestedLinkInsideManagedFolder_ThrowsBeforeDeletingAnything`, and
+`PackageZipExtractor_Extract_DanglingLinkParent_ThrowsAndCreatesNothingOutside`,
 covering `AgentControl-PackageZipExtractor-Extract`.
 
 **PackageZipExtractor_AllManagedFoldersExist_ReflectsActualPresence**: The check returns true

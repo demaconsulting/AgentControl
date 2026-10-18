@@ -283,7 +283,18 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
     public override bool Equals(object? obj) => Equals(obj as PackageVersion);
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(Major, Minor, Patch, Prerelease);
+    public override int GetHashCode() => HashCode.Combine(Major, Minor, Patch, CanonicalPrerelease(Prerelease));
+
+    /// <summary>
+    ///     Produces the representation equality is based on: numeric identifiers with leading
+    ///     zeros removed, so versions that compare equal always hash equally.
+    /// </summary>
+    /// <param name="prerelease">The prerelease string, or <see langword="null"/>.</param>
+    /// <returns>The canonical prerelease string, or <see langword="null"/>.</returns>
+    private static string? CanonicalPrerelease(string? prerelease) =>
+        prerelease is null
+            ? null
+            : string.Join('.', prerelease.Split('.').Select(id => IsNumeric(id) ? id.TrimStart('0') : id));
 
     /// <inheritdoc />
     public override string ToString() =>

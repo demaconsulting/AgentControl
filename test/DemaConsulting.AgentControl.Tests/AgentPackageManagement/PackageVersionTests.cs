@@ -264,6 +264,22 @@ public class PackageVersionTests
     }
 
     /// <summary>
+    ///     Test that versions differing only in numeric-identifier leading zeros are equal and
+    ///     share a hash code, keeping hash-based collections consistent with equality.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_Equals_LeadingZeroNumericIdentifier_EqualVersionsShareHashCode()
+    {
+        // Arrange: the constructor accepts the non-canonical form
+        var canonical = new PackageVersion(1, 0, 0, "rc.1");
+        var padded = new PackageVersion(1, 0, 0, "rc.01");
+
+        // Assert
+        Assert.True(canonical.Equals(padded));
+        Assert.Equal(canonical.GetHashCode(), padded.GetHashCode());
+    }
+
+    /// <summary>
     ///     Test equality, hash code, and comparison operators.
     /// </summary>
     [Fact]
