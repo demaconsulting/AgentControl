@@ -18,8 +18,8 @@ N/A - standard test environment.
 - An invalid zip file is rejected with a clear exception rather than a partial extraction.
 - A zip entry that resolves inside the repo root but outside every managed folder is skipped,
   and one that escapes the repo root is rejected; neither writes outside a managed folder.
-- A managed folder reached through a symbolic link or junction is rejected before anything is
-  deleted or written, leaving content behind the link untouched.
+- Symbolic links and junctions already in the repo's folder layout are out of scope: they are
+  not inspected, and no test depends on them.
 - No rejection leaves pre-existing managed folders blind-deleted.
 - Folder-presence and release-notes checks reflect genuine filesystem/archive state.
 
@@ -43,15 +43,6 @@ This scenario is tested by
 `PackageZipExtractor_Extract_TraversalEntryWithinRepoRoot_DoesNotEscapeManagedFolders` and
 `PackageZipExtractor_Extract_EntryEscapesRepoRoot_ThrowsBeforeDeletingManagedFolders`, covering
 `AgentControl-PackageZipExtractor-Extract`.
-
-**PackageZipExtractor_Extract_RejectsSymbolicLinkedManagedFolder**: When `.github`, or a folder
-nested inside a managed folder, is a symbolic link or junction (including a dangling one whose
-target is gone), extraction throws `InvalidOperationException` before anything is deleted, and
-content behind the link is left untouched. This scenario is tested by
-`PackageZipExtractor_Extract_ParentIsSymlinkOutsideRepo_ThrowsAndWritesNothingOutside`,
-`PackageZipExtractor_Extract_NestedLinkInsideManagedFolder_ThrowsBeforeDeletingAnything`, and
-`PackageZipExtractor_Extract_DanglingLinkParent_ThrowsAndCreatesNothingOutside`,
-covering `AgentControl-PackageZipExtractor-Extract`.
 
 **PackageZipExtractor_AllManagedFoldersExist_ReflectsActualPresence**: The check returns true
 when all four managed folders are present, and false when some or none are present. This

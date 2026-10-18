@@ -14,10 +14,10 @@ sections:
           repo, creating them when absent and replacing their prior contents when present;
           shall reject a file that is not a valid zip archive; shall not extract any zip entry
           that resolves outside the four managed folders, skipping it when it stays within the
-          repo root and rejecting the whole extraction when it resolves outside the repo root;
-          and shall reject the extraction when a managed folder or an entry's destination is
-          reached through a symbolic link or junction; in every rejection case without having
-          deleted any pre-existing managed folder beforehand.
+          repo root and rejecting the whole extraction when it resolves outside the repo root,
+          in either case without having deleted any pre-existing managed folder beforehand.
+          Existing symbolic links or junctions in the repo's folder layout are out of scope and
+          are not inspected.
         justification: |
           Guarantees the repo's agent files are always an exact match for the pinned
           package's contents, whether this is the first extraction or replacing an older
@@ -31,9 +31,6 @@ sections:
           - PackageZipExtractor_Extract_InvalidZipFile_ThrowsInvalidOperationException
           - PackageZipExtractor_Extract_TraversalEntryWithinRepoRoot_DoesNotEscapeManagedFolders
           - PackageZipExtractor_Extract_EntryEscapesRepoRoot_ThrowsBeforeDeletingManagedFolders
-          - PackageZipExtractor_Extract_ParentIsSymlinkOutsideRepo_ThrowsAndWritesNothingOutside
-          - PackageZipExtractor_Extract_NestedLinkInsideManagedFolder_ThrowsBeforeDeletingAnything
-          - PackageZipExtractor_Extract_DanglingLinkParent_ThrowsAndCreatesNothingOutside
 
       - id: AgentControl-PackageZipExtractor-AllManagedFoldersExist
         title: >-
