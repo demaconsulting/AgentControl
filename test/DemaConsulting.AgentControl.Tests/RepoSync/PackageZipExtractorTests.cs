@@ -100,22 +100,32 @@ public class PackageZipExtractorTests
         var outside = CreateTempDirectory();
         try
         {
-            try
+            // Pre-existing managed content outside the repo, reachable only through the link
+            var outsideAgents = Path.Combine(outside, "agents");
+            Directory.CreateDirectory(outsideAgents);
+            var outsideFile = Path.Combine(outsideAgents, "keep.md");
+            File.WriteAllText(outsideFile, "must survive");
+
+            if (!TryCreateDirectoryLink(Path.Combine(repoRoot, ".github"), outside))
             {
-                Directory.CreateSymbolicLink(Path.Combine(repoRoot, ".github"), outside);
-            }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-            {
-                Assert.Skip("Creating symbolic links is not permitted in this environment.");
+                Assert.Skip("Creating symbolic links or junctions is not permitted in this environment.");
             }
 
-            // Act / Assert: extraction is rejected and nothing lands in the outside directory
+            // Act / Assert: extraction is rejected before anything is deleted or written outside
             Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
-            Assert.Empty(Directory.GetFileSystemEntries(outside));
+            Assert.Equal("must survive", File.ReadAllText(outsideFile));
+            Assert.Single(Directory.GetFileSystemEntries(outsideAgents));
         }
         finally
         {
             File.Delete(zipPath);
+            var link = Path.Combine(repoRoot, ".github");
+            if (Directory.Exists(link) && new DirectoryInfo(link).Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                // Remove only the link itself so the target's content is never traversed
+                Directory.Delete(link, recursive: false);
+            }
+
             Directory.Delete(repoRoot, recursive: true);
             Directory.Delete(outside, recursive: true);
         }
@@ -495,5 +505,40 @@ public class PackageZipExtractorTests
         var path = Path.Combine(Path.GetTempPath(), "agentcontrol_repo_sync_test_" + Guid.NewGuid());
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    /// <summary>
+    ///     Creates a directory symbolic link, falling back to an NTFS junction on Windows (which
+    ///     needs no special privilege).
+    /// </summary>
+    /// <param name="linkPath">The link to create.</param>
+    /// <param name="targetPath">The existing directory it points at.</param>
+    /// <returns><see langword="true"/> if a link was created.</returns>
+    private static bool TryCreateDirectoryLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return false;
+            }
+        }
+
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath },
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        });
+        process!.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return process.ExitCode == 0 && Directory.Exists(linkPath);
     }
 }
