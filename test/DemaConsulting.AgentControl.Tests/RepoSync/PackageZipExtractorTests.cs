@@ -508,7 +508,7 @@ public class PackageZipExtractorTests
     }
 
     /// <summary>
-    ///     Creates a directory symbolic link, falling back to an NTFS junction on Windows (which
+    ///     Creates a directory symbolic link, falling back to a directory junction on Windows (which
     ///     needs no special privilege).
     /// </summary>
     /// <param name="linkPath">The link to create.</param>
@@ -532,6 +532,7 @@ public class PackageZipExtractorTests
         using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
             FileName = "cmd.exe",
+            // cspell:disable-next-line
             ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath },
             CreateNoWindow = true,
             RedirectStandardOutput = true,
