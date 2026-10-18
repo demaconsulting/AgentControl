@@ -158,4 +158,149 @@ public class PackageVersionTests
         // Act / Assert: a negative major version is rejected
         Assert.Throws<ArgumentOutOfRangeException>(() => new PackageVersion(-1, 0, 0));
     }
+
+    /// <summary>
+    ///     Test that negative minor and patch components are rejected.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_Constructor_NegativeMinorOrPatch_ThrowsArgumentOutOfRangeException()
+    {
+        // Act / Assert: each negative component is rejected
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PackageVersion(0, -1, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PackageVersion(0, 0, -1));
+    }
+
+    /// <summary>
+    ///     Test that a trailing hyphen with no prerelease identifier fails to parse.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_TryParse_EmptyPrerelease_ReturnsFalse()
+    {
+        // Act / Assert: empty prerelease is invalid
+        Assert.False(PackageVersion.TryParse("1.2.3-", out var version));
+        Assert.Null(version);
+    }
+
+    /// <summary>
+    ///     Test that comparison follows semver precedence for all components and prereleases.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_CompareTo_VariousVersions_FollowsPrecedence()
+    {
+        // Arrange
+        var release = new PackageVersion(1, 2, 3);
+        var beta = new PackageVersion(1, 2, 3, "beta");
+        var alpha = new PackageVersion(1, 2, 3, "alpha");
+
+        // Assert: null, minor, patch, and prerelease ordering
+        Assert.True(release.CompareTo(null) > 0);
+        Assert.True(release.CompareTo(new PackageVersion(1, 3, 0)) < 0);
+        Assert.True(release.CompareTo(new PackageVersion(1, 2, 4)) < 0);
+        Assert.True(new PackageVersion(1, 2, 4).CompareTo(release) > 0);
+        Assert.True(release.CompareTo(beta) > 0);
+        Assert.True(beta.CompareTo(release) < 0);
+        Assert.True(beta.CompareTo(alpha) > 0);
+    }
+
+    /// <summary>
+    ///     Test that prerelease precedence follows the semver 2.0.0 specification's canonical
+    ///     ordering, including numeric (not lexical) comparison of numeric identifiers.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_CompareTo_PrereleaseIdentifiers_FollowSemverPrecedence()
+    {
+        // Arrange: the ascending example chain from the semver 2.0.0 specification
+        string[] ascending =
+        [
+            "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta",
+            "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"
+        ];
+        var versions = ascending.Select(text =>
+        {
+            Assert.True(PackageVersion.TryParse(text, out var parsed));
+            return parsed!;
+        }).ToList();
+
+        // Assert: every earlier entry precedes every later one
+        for (var i = 0; i < versions.Count; i++)
+        {
+            for (var j = i + 1; j < versions.Count; j++)
+            {
+                Assert.True(versions[i].CompareTo(versions[j]) < 0, $"{ascending[i]} < {ascending[j]}");
+                Assert.True(versions[j].CompareTo(versions[i]) > 0, $"{ascending[j]} > {ascending[i]}");
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Test that very large numeric identifiers compare numerically without overflowing.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_CompareTo_HugeNumericIdentifiers_ComparesNumerically()
+    {
+        // Arrange: identifiers larger than any integer type
+        var small = new PackageVersion(1, 0, 0, "rc.99999999999999999999");
+        var large = new PackageVersion(1, 0, 0, "rc.100000000000000000000");
+
+        // Assert
+        Assert.True(small.CompareTo(large) < 0);
+        Assert.True(large.CompareTo(small) > 0);
+    }
+
+    /// <summary>
+    ///     Test that prerelease strings that are not valid semver fail to parse.
+    /// </summary>
+    [Theory]
+    [InlineData("1.2.3-beta..1")]
+    [InlineData("1.2.3-.beta")]
+    [InlineData("1.2.3-beta.")]
+    [InlineData("1.2.3-beta.01")]
+    [InlineData("1.2.3-be_ta")]
+    public void PackageVersion_TryParse_InvalidPrereleaseIdentifiers_ReturnsFalse(string input)
+    {
+        // Act / Assert
+        Assert.False(PackageVersion.TryParse(input, out var version));
+        Assert.Null(version);
+    }
+
+    /// <summary>
+    ///     Test that versions differing only in numeric-identifier leading zeros are equal and
+    ///     share a hash code, keeping hash-based collections consistent with equality.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_Equals_LeadingZeroNumericIdentifier_EqualVersionsShareHashCode()
+    {
+        // Arrange: the constructor accepts the non-canonical form
+        var canonical = new PackageVersion(1, 0, 0, "rc.1");
+        var padded = new PackageVersion(1, 0, 0, "rc.01");
+
+        // Assert
+        Assert.True(canonical.Equals(padded));
+        Assert.Equal(canonical.GetHashCode(), padded.GetHashCode());
+    }
+
+    /// <summary>
+    ///     Test equality, hash code, and comparison operators.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_Operators_ComparisonAndEquality_Work()
+    {
+        // Arrange
+        var low = new PackageVersion(1, 0, 0);
+        var high = new PackageVersion(2, 0, 0);
+        var lowCopy = new PackageVersion(1, 0, 0);
+
+        // Assert
+        Assert.True(low == lowCopy);
+        Assert.True(low != high);
+        Assert.False(low != lowCopy);
+        Assert.True(low.Equals((object)lowCopy));
+        Assert.Equal(low.GetHashCode(), lowCopy.GetHashCode());
+        Assert.True(low < high);
+        Assert.True(low <= lowCopy);
+        Assert.True(high > low);
+        Assert.True(high >= lowCopy);
+        Assert.Throws<ArgumentNullException>(() => (null as PackageVersion)! <= low);
+        Assert.Throws<ArgumentNullException>(() => (null as PackageVersion)! >= low);
+    }
 }

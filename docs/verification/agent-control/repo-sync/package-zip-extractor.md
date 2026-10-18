@@ -16,9 +16,11 @@ N/A - standard test environment.
 - All unit tests pass with zero failures.
 - Extraction fully replaces managed folder contents and creates them when absent.
 - An invalid zip file is rejected with a clear exception rather than a partial extraction.
-- A zip entry that escapes the repo root, or resolves inside the repo root but outside every
-  managed folder, is rejected/skipped without ever writing outside a managed folder, and
-  without leaving pre-existing managed folders blind-deleted ahead of a rejected extraction.
+- A zip entry that resolves inside the repo root but outside every managed folder is skipped,
+  and one that escapes the repo root is rejected; neither writes outside a managed folder.
+- Symbolic links and junctions already in the repo's folder layout are out of scope: they are
+  not inspected, and no test depends on them.
+- No rejection leaves pre-existing managed folders blind-deleted.
 - Folder-presence and release-notes checks reflect genuine filesystem/archive state.
 
 #### Test Scenarios

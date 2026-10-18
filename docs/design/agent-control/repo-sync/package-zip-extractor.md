@@ -36,9 +36,13 @@ four managed folders if present, and extracts the already-validated entries into
 - *Returns*: `void`.
 - *Preconditions*: `zipPath`/`repoRoot` not `null`.
 - *Postconditions*: The four managed folders under `repoRoot` match the zip's contents exactly
-  (`AgentControl-PackageZipExtractor-Extract`). An entry with an invalid destination path is
-  rejected before any managed folder is deleted, so that failure mode never leaves the repo
-  partially upgraded. A delete or extraction I/O failure can still do so — there is
+  (`AgentControl-PackageZipExtractor-Extract`). An entry that resolves inside the repo but
+  outside the four managed folders is skipped, not extracted. An entry that resolves outside
+  `repoRoot` is rejected before any managed folder is deleted, so that failure mode never
+  leaves the repo partially upgraded. Symbolic links and junctions already present in the
+  repo's folder layout are the repo owner's concern and are deliberately not inspected; only
+  archive-supplied paths are validated, and this class never creates links. A delete or
+  extraction I/O failure can still leave the repo partially upgraded — there is
   intentionally no rollback for that case, and it must be resolved manually by the caller, per
   architecture.md's "Upgrade sequence and failure handling" decision. Logs at `Debug` before
   starting and `Information` on successful completion (entry count); delete/extraction

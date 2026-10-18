@@ -10,8 +10,8 @@ renderable blocks. `PackageZipExtractor.ReadReleaseNotes` already does the only 
 zip entry); this view model's own job is the lightweight line-by-line Markdown parsing that
 turns that raw text into headings, bullet items, and bold/italic inline runs for
 `ReleaseNotesViewer` to render — not a full CommonMark implementation, just the handful of
-constructs release notes actually use (`#`/`##`/`###` headings, `-`/`*` bullets, and
-`**bold**`/`*italic*` inline emphasis).
+constructs release notes actually use (`#` through `######` headings, `-`/`*` bullets, and
+`**bold**`/`*italic*` inline emphasis; a line with more than six leading `#` is plain text).
 
 #### Data Model
 

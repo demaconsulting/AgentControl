@@ -16,7 +16,9 @@ N/A - standard test environment.
 - Parsing fails gracefully (returns false) for malformed or empty input rather than throwing.
 - Construction rejects a negative major-version component.
 - Comparison treats a release version as greater than a prerelease with the same numeric
-  components.
+  components, and orders prerelease identifiers per semver (numerically for numeric
+  identifiers, so `beta.2` precedes `beta.10`).
+- Prerelease strings with empty or invalid identifiers, or numeric leading zeros, fail to parse.
 - Equality and string round-tripping behave per conventional semantic-versioning expectations.
 
 #### Test Scenarios
@@ -28,7 +30,8 @@ with a negative major version throws `ArgumentOutOfRangeException`. This scenari
 `PackageVersion_TryParse_ReleaseVersion_ParsesComponents`,
 `PackageVersion_TryParse_PrereleaseVersion_ParsesPrereleaseIdentifier`,
 `PackageVersion_TryParse_MalformedInput_ReturnsFalse`, and
-`PackageVersion_Constructor_NegativeMajor_ThrowsArgumentOutOfRangeException`, covering
+`PackageVersion_Constructor_NegativeMajor_ThrowsArgumentOutOfRangeException`, and
+`PackageVersion_TryParse_InvalidPrereleaseIdentifiers_ReturnsFalse`, covering
 `AgentControl-PackageVersion-Parse`.
 
 **PackageVersion_Compare_NumericOrderingReleasePrecedenceEqualityAndRoundTrip**: A version with
@@ -38,6 +41,8 @@ are equal; and a parsed version round-trips through its string representation ba
 `TryParse`. This scenario is tested by
 `PackageVersion_CompareTo_HigherNumericVersion_ComparesGreater`,
 `PackageVersion_CompareTo_ReleaseVsPrereleaseSameNumeric_ReleaseIsGreater`,
+`PackageVersion_CompareTo_PrereleaseIdentifiers_FollowSemverPrecedence`,
+`PackageVersion_CompareTo_HugeNumericIdentifiers_ComparesNumerically`,
 `PackageVersion_Equals_SameVersionString_ReturnsTrue`, and
 `PackageVersion_ToString_ParsedVersion_RoundTripsThroughParse`, covering
 `AgentControl-PackageVersion-Compare`.

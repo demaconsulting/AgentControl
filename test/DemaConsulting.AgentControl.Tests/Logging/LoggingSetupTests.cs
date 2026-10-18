@@ -92,26 +92,36 @@ public sealed class LoggingSetupTests
         var logsDirectory = Path.Combine(_loggingFixture.ConfigDirectory, "logs");
 
         // Act: write a log entry through the same Serilog pipeline the fixture initialized via
-        // LoggingSetup.Initialize
+        // LoggingSetup.Initialize. The date is sampled before and after the write so a run
+        // crossing local midnight still finds the rolling file the entry actually went to.
+        var dateBefore = DateTime.Now;
         if (logger.IsEnabled(LogLevel.Information))
         {
             logger.LogInformation("Test marker: {Marker}", marker);
         }
 
-        // Assert: exactly one rolling log file exists under the documented "logs" subfolder
-        // (Serilog's daily rolling has not yet rolled a second file within this test run), and
-        // that file's content proves the entry above was actually captured to disk. The file is
-        // opened with FileShare.ReadWrite because Serilog's File sink keeps its own write handle
-        // open for the lifetime of the process - a plain File.ReadAllText call (which requests
-        // only FileShare.Read) is denied access while that handle remains open.
-        var logFile = Assert.Single(Directory.GetFiles(logsDirectory, "agentcontrol-*.log"));
-        string content;
-        using (var stream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-        using (var reader = new StreamReader(stream))
-        {
-            content = reader.ReadToEnd();
-        }
+        var dateAfter = DateTime.Now;
 
-        Assert.Contains(marker, content, StringComparison.Ordinal);
+        // Assert: one of the rolling log files for those date(s) under the documented "logs"
+        // subfolder (earlier days' files may linger in the build output from previous runs, so
+        // only these are considered) contains the entry, proving it was actually captured to
+        // disk. Files are opened with FileShare.ReadWrite because Serilog's File sink keeps its
+        // own write handle open for the lifetime of the process - a plain File.ReadAllText call
+        // (which requests only FileShare.Read) is denied access while that handle remains open.
+        var logFiles = new[] { dateBefore, dateAfter }
+            .Select(date => Path.Combine(logsDirectory, $"agentcontrol-{date:yyyyMMdd}.log"))
+            .Distinct()
+            .Where(File.Exists)
+            .ToList();
+        Assert.NotEmpty(logFiles);
+
+        var found = logFiles.Any(logFile =>
+        {
+            using var stream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd().Contains(marker, StringComparison.Ordinal);
+        });
+
+        Assert.True(found);
     }
 }

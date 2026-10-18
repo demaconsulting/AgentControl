@@ -58,6 +58,11 @@ internal sealed record MarkdownBlock(IReadOnlyList<MarkdownRun> Runs, int Headin
 internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
 {
     /// <summary>
+    ///     The deepest Markdown heading level (<c>######</c>) recognized as a heading.
+    /// </summary>
+    private const int MaxHeadingLevel = 6;
+
+    /// <summary>
     ///     Initializes a new <see cref="ReleaseNotesViewerViewModel"/>.
     /// </summary>
     /// <param name="repoName">The repo's display name, used to build <see cref="Title"/>.</param>
@@ -95,13 +100,14 @@ internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
 
     /// <summary>
     ///     Parses release-notes Markdown text into a sequence of <see cref="MarkdownBlock"/>s,
-    ///     recognizing <c>#</c>/<c>##</c>/<c>###</c> headings, <c>- </c>/<c>* </c> bullet items,
-    ///     and <c>**bold**</c>/<c>*italic*</c> inline emphasis. Blank lines are skipped rather
-    ///     than rendered as empty blocks.
+    ///     recognizing <c>#</c> through <c>######</c> (levels 1-6) headings, <c>- </c>/<c>* </c>
+    ///     bullet items, and <c>**bold**</c>/<c>*italic*</c> inline emphasis. A line with more than
+    ///     six leading <c>#</c> characters is plain text, per Markdown. Blank lines are skipped
+    ///     rather than rendered as empty blocks.
     /// </summary>
     /// <param name="markdown">The raw Markdown text to parse.</param>
     /// <returns>The parsed blocks, in source order.</returns>
-    private static IReadOnlyList<MarkdownBlock> ParseBlocks(string markdown)
+    private static List<MarkdownBlock> ParseBlocks(string markdown)
     {
         var blocks = new List<MarkdownBlock>();
 
@@ -120,7 +126,7 @@ internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
             }
 
             var isBullet = false;
-            if (headingLevel > 0 && headingLevel < line.Length && line[headingLevel] == ' ')
+            if (headingLevel is > 0 and <= MaxHeadingLevel && headingLevel < line.Length && line[headingLevel] == ' ')
             {
                 line = line[(headingLevel + 1)..];
             }
@@ -149,7 +155,7 @@ internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
     /// </summary>
     /// <param name="text">The line text (with any heading/bullet prefix already stripped).</param>
     /// <returns>The parsed inline runs, in source order.</returns>
-    private static IReadOnlyList<MarkdownRun> ParseInlineRuns(string text)
+    private static List<MarkdownRun> ParseInlineRuns(string text)
     {
         var runs = new List<MarkdownRun>();
         var plain = new StringBuilder();

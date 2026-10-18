@@ -142,7 +142,9 @@ internal static class PackageZipExtractor
             }
         }
 
-        // Step 3: blind-delete the four known folders (if present)
+        // Step 3: blind-delete the four known folders (if present). Existing symbolic links or
+        // junctions in the repo's layout are the repo owner's business and are deliberately not
+        // inspected; only archive-supplied paths are validated (step 2).
         foreach (var folder in ManagedFolders)
         {
             DeleteManagedFolder(repoRoot, folder, effectiveLogger);
@@ -157,7 +159,7 @@ internal static class PackageZipExtractor
         {
             foreach (var (entry, destinationPath) in managedEntries)
             {
-                ExtractEntry(entry, destinationPath);
+                ExtractEntry(entry, destinationPath, repoRoot);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -394,15 +396,32 @@ internal static class PackageZipExtractor
     ///     The entry's destination path, as previously resolved and validated by
     ///     <see cref="ResolveManagedDestination"/>.
     /// </param>
-    private static void ExtractEntry(ZipArchiveEntry entry, string destinationPath)
+    /// <param name="repoRoot">Absolute path to the repository root.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the destination is not inside
+    ///     <paramref name="repoRoot"/> (defense in depth; already validated by
+    ///     <see cref="ResolveManagedDestination"/>).</exception>
+    private static void ExtractEntry(ZipArchiveEntry entry, string destinationPath, string repoRoot)
     {
-        var destinationDirectory = Path.GetDirectoryName(destinationPath);
+        var fullRoot = Path.GetFullPath(repoRoot);
+        var rootWithSeparator = Path.EndsInDirectorySeparator(fullRoot)
+            ? fullRoot
+            : fullRoot + Path.DirectorySeparatorChar;
+        var fullDestination = Path.GetFullPath(destinationPath);
+        if (!fullDestination.StartsWith(rootWithSeparator, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Zip entry '{entry.FullName}' resolves outside the repository root.");
+        }
+
+        var destinationDirectory = Path.GetDirectoryName(fullDestination);
         if (!string.IsNullOrEmpty(destinationDirectory))
         {
             Directory.CreateDirectory(destinationDirectory);
         }
 
-        entry.ExtractToFile(destinationPath, overwrite: true);
+        using var source = entry.Open();
+        using var target = new FileStream(fullDestination, FileMode.Create, FileAccess.Write);
+        source.CopyTo(target);
     }
 
     /// <summary>

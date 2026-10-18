@@ -102,7 +102,7 @@ internal sealed partial class ReleaseNotesViewer : Window
         if (block.HeadingLevel > 0)
         {
             textBlock.FontWeight = FontWeight.Bold;
-            textBlock.FontSize = Math.Max(BaseFontSize, 20 - (2 * (block.HeadingLevel - 1)));
+            textBlock.FontSize = Math.Max(BaseFontSize, 20.0 - (2.0 * (block.HeadingLevel - 1)));
             textBlock.Margin = new Avalonia.Thickness(0, 8, 0, 2);
         }
         else

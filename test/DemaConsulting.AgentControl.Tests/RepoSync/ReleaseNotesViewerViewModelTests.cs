@@ -99,6 +99,28 @@ public class ReleaseNotesViewerViewModelTests
     }
 
     /// <summary>
+    ///     Test that headings up to level 6 are recognized, and that a line with more than six
+    ///     leading hashes is kept as plain text, including its hashes.
+    /// </summary>
+    [Theory]
+    [InlineData("#### Fixed", 4, "Fixed")]
+    [InlineData("###### Deep", 6, "Deep")]
+    [InlineData("####### Too deep", 0, "####### Too deep")]
+    public void ReleaseNotesViewerViewModel_Blocks_HeadingDepth_RecognizesOnlyLevelsOneToSix(
+        string markdown,
+        int expectedLevel,
+        string expectedText)
+    {
+        // Act
+        var viewModel = new ReleaseNotesViewerViewModel("my-repo", markdown);
+
+        // Assert
+        var block = Assert.Single(viewModel.Blocks);
+        Assert.Equal(expectedLevel, block.HeadingLevel);
+        Assert.Equal(expectedText, Assert.Single(block.Runs).Text);
+    }
+
+    /// <summary>
     ///     Test that a bullet list line (<c>- </c>) parses into a block flagged as a bullet, with
     ///     the marker stripped from its text.
     /// </summary>
@@ -191,7 +213,7 @@ public class ReleaseNotesViewerViewModelTests
         var textBlock = ReleaseNotesViewer.BuildBlockTextBlock(block);
 
         // Assert: both runs are rendered bold, matching the heading's bold TextBlock-level style
-        var inlines = Assert.IsAssignableFrom<InlineCollection>(textBlock.Inlines);
+        var inlines = Assert.IsType<InlineCollection>(textBlock.Inlines, exactMatch: false);
         Assert.All(inlines.OfType<Run>(), run => Assert.Equal(FontWeight.Bold, run.FontWeight));
     }
 

@@ -26,15 +26,17 @@ sections:
       - id: AgentControl-ReleaseNotesViewerViewModel-MarkdownParsing
         title: >-
           The ReleaseNotesViewerViewModel class shall parse release-notes text into renderable
-          blocks, recognizing  #/##/### headings, -/* bullet-list items, and **bold**/*italic*
-          inline emphasis, skipping blank lines and treating unterminated emphasis markers as
-          literal text.
+          blocks, recognizing  #-through-###### (levels 1-6) headings, -/* bullet-list items,
+          and **bold**/*italic* inline emphasis, treating a line with more than six leading
+          # characters as plain text, skipping blank lines, and treating unterminated emphasis
+          markers as literal text.
         justification: |
           Release notes commonly use headings, bullet lists, and bold/italic emphasis; showing
           this content as raw Markdown source (literal  # and ** characters) is harder to read
           than rendering it, even without a full CommonMark implementation.
         tests:
           - ReleaseNotesViewerViewModel_Blocks_HeadingLine_ParsesHeadingLevelAndText
+          - ReleaseNotesViewerViewModel_Blocks_HeadingDepth_RecognizesOnlyLevelsOneToSix
           - ReleaseNotesViewerViewModel_Blocks_BulletLine_ParsesAsBulletWithoutMarker
           - ReleaseNotesViewerViewModel_Blocks_BoldAndItalicSpans_ParseIntoSeparateRuns
           - ReleaseNotesViewerViewModel_Blocks_BlankLines_AreSkipped
