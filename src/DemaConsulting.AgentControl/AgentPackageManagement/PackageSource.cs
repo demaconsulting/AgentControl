@@ -161,14 +161,13 @@ internal static class PackageSource
 
         var names = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var fileName in Directory.EnumerateFiles(sourceDirectory, "*" + ZipExtension)
-                     .Select(Path.GetFileNameWithoutExtension))
+        var candidateNames = Directory.EnumerateFiles(sourceDirectory, "*" + ZipExtension)
+            .Select(file => TrySplitNameAndVersion(Path.GetFileNameWithoutExtension(file)))
+            .OfType<string>();
+
+        foreach (var name in candidateNames)
         {
-            var name = TrySplitNameAndVersion(fileName!);
-            if (name is not null)
-            {
-                names.Add(name);
-            }
+            names.Add(name);
         }
 
         return names.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToList();

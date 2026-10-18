@@ -128,13 +128,13 @@ public class ThirdPartyDependenciesTests
                 continue;
             }
 
-            foreach (var packageReference in itemGroup.Elements("PackageReference"))
+            var names = itemGroup.Elements("PackageReference")
+                .Select(packageReference => packageReference.Attribute("Include")?.Value)
+                .Where(name => !string.IsNullOrWhiteSpace(name));
+
+            foreach (var name in names)
             {
-                var name = packageReference.Attribute("Include")?.Value;
-                if (!string.IsNullOrWhiteSpace(name))
-                {
-                    yield return name;
-                }
+                yield return name!;
             }
         }
     }

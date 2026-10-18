@@ -98,13 +98,15 @@ public sealed class LoggingSetupTests
             logger.LogInformation("Test marker: {Marker}", marker);
         }
 
-        // Assert: exactly one rolling log file exists under the documented "logs" subfolder
-        // (Serilog's daily rolling has not yet rolled a second file within this test run), and
-        // that file's content proves the entry above was actually captured to disk. The file is
+        // Assert: exactly one rolling log file exists for today under the documented "logs"
+        // subfolder (earlier days' files may linger in the build output from previous runs, so
+        // only today's is considered), and that file's content proves the entry above was
+        // actually captured to disk. The file is
         // opened with FileShare.ReadWrite because Serilog's File sink keeps its own write handle
         // open for the lifetime of the process - a plain File.ReadAllText call (which requests
         // only FileShare.Read) is denied access while that handle remains open.
-        var logFile = Assert.Single(Directory.GetFiles(logsDirectory, "agentcontrol-*.log"));
+        var logFile = Assert.Single(Directory.GetFiles(
+            logsDirectory, $"agentcontrol-{DateTime.Now:yyyyMMdd}.log"));
         string content;
         using (var stream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
         using (var reader = new StreamReader(stream))

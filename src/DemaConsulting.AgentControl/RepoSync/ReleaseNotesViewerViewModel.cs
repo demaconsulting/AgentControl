@@ -101,7 +101,7 @@ internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
     /// </summary>
     /// <param name="markdown">The raw Markdown text to parse.</param>
     /// <returns>The parsed blocks, in source order.</returns>
-    private static IReadOnlyList<MarkdownBlock> ParseBlocks(string markdown)
+    private static List<MarkdownBlock> ParseBlocks(string markdown)
     {
         var blocks = new List<MarkdownBlock>();
 
@@ -149,7 +149,7 @@ internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
     /// </summary>
     /// <param name="text">The line text (with any heading/bullet prefix already stripped).</param>
     /// <returns>The parsed inline runs, in source order.</returns>
-    private static IReadOnlyList<MarkdownRun> ParseInlineRuns(string text)
+    private static List<MarkdownRun> ParseInlineRuns(string text)
     {
         var runs = new List<MarkdownRun>();
         var plain = new StringBuilder();

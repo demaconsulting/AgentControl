@@ -158,4 +158,72 @@ public class PackageVersionTests
         // Act / Assert: a negative major version is rejected
         Assert.Throws<ArgumentOutOfRangeException>(() => new PackageVersion(-1, 0, 0));
     }
+
+    /// <summary>
+    ///     Test that negative minor and patch components are rejected.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_Constructor_NegativeMinorOrPatch_ThrowsArgumentOutOfRangeException()
+    {
+        // Act / Assert: each negative component is rejected
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PackageVersion(0, -1, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PackageVersion(0, 0, -1));
+    }
+
+    /// <summary>
+    ///     Test that a trailing hyphen with no prerelease identifier fails to parse.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_TryParse_EmptyPrerelease_ReturnsFalse()
+    {
+        // Act / Assert: empty prerelease is invalid
+        Assert.False(PackageVersion.TryParse("1.2.3-", out var version));
+        Assert.Null(version);
+    }
+
+    /// <summary>
+    ///     Test that comparison follows semver precedence for all components and prereleases.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_CompareTo_VariousVersions_FollowsPrecedence()
+    {
+        // Arrange
+        var release = new PackageVersion(1, 2, 3);
+        var beta = new PackageVersion(1, 2, 3, "beta");
+        var alpha = new PackageVersion(1, 2, 3, "alpha");
+
+        // Assert: null, minor, patch, and prerelease ordering
+        Assert.True(release.CompareTo(null) > 0);
+        Assert.True(release.CompareTo(new PackageVersion(1, 3, 0)) < 0);
+        Assert.True(release.CompareTo(new PackageVersion(1, 2, 4)) < 0);
+        Assert.True(new PackageVersion(1, 2, 4).CompareTo(release) > 0);
+        Assert.True(release.CompareTo(beta) > 0);
+        Assert.True(beta.CompareTo(release) < 0);
+        Assert.True(beta.CompareTo(alpha) > 0);
+    }
+
+    /// <summary>
+    ///     Test equality, hash code, and comparison operators.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_Operators_ComparisonAndEquality_Work()
+    {
+        // Arrange
+        var low = new PackageVersion(1, 0, 0);
+        var high = new PackageVersion(2, 0, 0);
+        var lowCopy = new PackageVersion(1, 0, 0);
+
+        // Assert
+        Assert.True(low == lowCopy);
+        Assert.True(low != high);
+        Assert.False(low != lowCopy);
+        Assert.True(low.Equals((object)lowCopy));
+        Assert.Equal(low.GetHashCode(), lowCopy.GetHashCode());
+        Assert.True(low < high);
+        Assert.True(low <= lowCopy);
+        Assert.True(high > low);
+        Assert.True(high >= lowCopy);
+        Assert.Throws<ArgumentNullException>(() => (null as PackageVersion)! <= low);
+        Assert.Throws<ArgumentNullException>(() => (null as PackageVersion)! >= low);
+    }
 }

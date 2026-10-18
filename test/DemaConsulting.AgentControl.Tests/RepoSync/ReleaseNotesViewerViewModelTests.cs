@@ -191,7 +191,7 @@ public class ReleaseNotesViewerViewModelTests
         var textBlock = ReleaseNotesViewer.BuildBlockTextBlock(block);
 
         // Assert: both runs are rendered bold, matching the heading's bold TextBlock-level style
-        var inlines = Assert.IsAssignableFrom<InlineCollection>(textBlock.Inlines);
+        var inlines = Assert.IsType<InlineCollection>(textBlock.Inlines, exactMatch: false);
         Assert.All(inlines.OfType<Run>(), run => Assert.Equal(FontWeight.Bold, run.FontWeight));
     }
 
