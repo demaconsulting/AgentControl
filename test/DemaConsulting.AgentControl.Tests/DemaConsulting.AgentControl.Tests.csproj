@@ -40,9 +40,9 @@
     <!-- Avalonia.Headless runs window code-behind on a headless Avalonia platform (no display needed),
          so it works on CI runners and counts toward coverage. The Avalonia.Headless.XUnit package
          targets an older xunit.v3 core, so HeadlessTestApp provides a small session helper instead. -->
-    <PackageReference Include="Avalonia.Headless" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Headless" Version="12.1.5" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
-    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.5.1" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.5.2" />
     <PackageReference Include="xunit.v3" Version="4.0.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
       <PrivateAssets>all</PrivateAssets>
