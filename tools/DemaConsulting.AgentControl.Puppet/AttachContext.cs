@@ -48,6 +48,11 @@ internal sealed class AttachContext : IDisposable
     internal const string MainWindowTitle = "AgentControl";
 
     /// <summary>
+    ///     The most windows <see cref="Roots"/> collects (a guard against a runaway tree).
+    /// </summary>
+    private const int MaxWindows = 64;
+
+    /// <summary>
     ///     How long to wait for the main window to exist.
     /// </summary>
     private static readonly TimeSpan WindowAppearTimeout = TimeSpan.FromSeconds(5);
@@ -125,23 +130,55 @@ internal sealed class AttachContext : IDisposable
         var others = UiActions.Safe(
             () => GetDesktop().FindAllChildren(cf => cf.ByProcessId(ProcessId)),
             []);
-
-        // UI Automation nests an owned window (a modal dialog, a tooltip pop-up) under its owner instead of listing it on the desktop
-        var owned = UiActions.Safe(
-            () => MainWindow.FindAllChildren(cf => cf.ByControlType(ControlType.Window).Or(cf.ByControlType(ControlType.ToolTip))),
-            []);
         var seen = new HashSet<IntPtr> { mainHandle };
-        foreach (var other in others.Concat(owned))
+
+        // UI Automation nests an owned window (a modal dialog, a tooltip pop-up) under its owner instead of listing it on the
+        // desktop, and a dialog opened from a dialog under that dialog, so the owned windows are followed down every level
+        var pending = new Queue<AutomationElement>(others.Prepend(MainWindow));
+        while (pending.Count > 0)
         {
-            var handle = UiActions.Safe(() => other.Properties.NativeWindowHandle.ValueOrDefault, IntPtr.Zero);
-            if (handle == IntPtr.Zero || seen.Add(handle))
+            var window = pending.Dequeue();
+            if (!ReferenceEquals(window, MainWindow) && !AddRoot(roots, seen, window))
             {
-                roots.Add(other);
+                continue;
+            }
+
+            if (roots.Count > MaxWindows)
+            {
+                continue;
+            }
+
+            var owned = UiActions.Safe(
+                () => window.FindAllChildren(cf => cf.ByControlType(ControlType.Window).Or(cf.ByControlType(ControlType.ToolTip))),
+                []);
+            foreach (var child in owned)
+            {
+                pending.Enqueue(child);
             }
         }
 
         return roots;
     }
+
+    /// <summary>
+    ///     Adds a window to the roots unless one with the same handle is there already.
+    /// </summary>
+    /// <param name="roots">The roots found so far.</param>
+    /// <param name="seen">The handles of the roots found so far.</param>
+    /// <param name="window">The window.</param>
+    /// <returns><see langword="true"/> when the window was added.</returns>
+    private static bool AddRoot(List<AutomationElement> roots, HashSet<IntPtr> seen, AutomationElement window)
+    {
+        var handle = UiActions.Safe(() => window.Properties.NativeWindowHandle.ValueOrDefault, IntPtr.Zero);
+        if (handle != IntPtr.Zero && !seen.Add(handle))
+        {
+            return false;
+        }
+
+        roots.Add(window);
+        return true;
+    }
+
 
     /// <summary>
     ///     Attaches to a process.

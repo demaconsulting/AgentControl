@@ -46,7 +46,8 @@ internal sealed record DialogDescription(string Title, IReadOnlyList<DialogContr
 internal static class DialogFinder
 {
     /// <summary>
-    ///     Lists the open dialogs: the titled, visible top-level windows of the process other than the main window.
+    ///     Lists the open dialogs, outer to inner: the titled, visible top-level windows of the process other than the main
+    ///     window, including a dialog opened from a dialog (at any depth).
     /// </summary>
     /// <param name="context">The attached instance.</param>
     /// <returns>Each dialog's window and description.</returns>
@@ -141,7 +142,8 @@ internal static class DialogFinder
     /// <returns>The description.</returns>
     private static DialogDescription Describe(AutomationElement dialog, string title)
     {
-        var elements = UiActions.Safe(() => dialog.FindAllDescendants(), []);
+        var elements = new List<AutomationElement>();
+        CollectOwnControls(dialog, elements);
         var controls = new List<DialogControl>();
         foreach (var element in elements)
         {
@@ -167,5 +169,25 @@ internal static class DialogFinder
         }
 
         return new DialogDescription(title, controls);
+    }
+
+    /// <summary>
+    ///     Collects the elements under a window in tree order, without entering a window nested in it: a dialog opened from
+    ///     this one is listed as a dialog of its own.
+    /// </summary>
+    /// <param name="parent">The window or element to walk.</param>
+    /// <param name="elements">Receives the elements.</param>
+    private static void CollectOwnControls(AutomationElement parent, List<AutomationElement> elements)
+    {
+        foreach (var child in UiActions.Safe(() => parent.FindAllChildren(), []))
+        {
+            if (UiActions.Safe(() => child.ControlType, ControlType.Custom) == ControlType.Window)
+            {
+                continue;
+            }
+
+            elements.Add(child);
+            CollectOwnControls(child, elements);
+        }
     }
 }

@@ -181,9 +181,11 @@ internal static partial class Commands
             return;
         }
 
-        foreach (var dialog in context.Roots().Skip(1).Where(w => w.Patterns.Window.IsSupported))
+        // Innermost first: a dialog that has a dialog open of its own (modal) does not close until that one is gone
+        foreach (var dialog in context.Roots().Skip(1).Where(w => w.Patterns.Window.IsSupported).Reverse())
         {
             _ = UiActions.Safe(() => { dialog.Patterns.Window.Pattern.Close(); return true; }, false);
+            Thread.Sleep(150);
         }
 
         Thread.Sleep(200);

@@ -29,9 +29,9 @@ namespace DemaConsulting.AgentControl.Puppet;
 ///     Renders windows to bitmaps with <c>PrintWindow</c>, so a shot shows AgentControl even when another window covers it.
 /// </summary>
 /// <remarks>
-///     Besides the main window and the dialogs UI Automation lists, a shot includes the visible native windows of the
-///     process that UI Automation does not list as windows: Avalonia draws a flyout, a combo box drop-down or a tooltip
-///     in a window of its own.
+///     Besides the main window and the dialogs UI Automation lists (at any nesting depth: a dialog opened from a dialog),
+///     a shot includes the visible native windows of the process that UI Automation does not list as windows: Avalonia
+///     draws a flyout, a combo box drop-down or a tooltip in a window of its own. All of them are composed in z-order.
 /// </remarks>
 internal static partial class WindowCapture
 {
@@ -39,6 +39,11 @@ internal static partial class WindowCapture
     ///     Asks the window to render its full content, including what DirectComposition draws (Windows 8.1+).
     /// </summary>
     private const uint RenderFullContent = 2;
+
+    /// <summary>
+    ///     The <c>GW_OWNER</c> command of <c>GetWindow</c>.
+    /// </summary>
+    private const uint GetWindowOwner = 4;
 
     /// <summary>
     ///     Renders the main window with any open dialogs and pop-ups drawn over it at their places, on a canvas covering them all.
@@ -58,8 +63,15 @@ internal static partial class WindowCapture
         var canvas = new Bitmap(Math.Max(1, area.Width), Math.Max(1, area.Height), PixelFormat.Format32bppArgb);
         using var graphics = Graphics.FromImage(canvas);
         graphics.Clear(Color.Black);
-        foreach (var window in windows)
+
+        // Every window is drawn from the bottom of the stack to the top (an owner below the windows it owns), so a nested
+        // dialog covers the dialog that opened it, as on screen
+        var mainHandle = windows[0].Handle;
+        _ = GetWindowThreadProcessId(mainHandle, out var processId);
+        var entries = windows.Select(w => new StackEntry(w.Handle, w.Handle == IntPtr.Zero ? IntPtr.Zero : OwnerOf(w.Handle))).ToList();
+        foreach (var index in WindowStacking.DrawOrder(entries, ZOrderOf((int)processId)))
         {
+            var window = windows[index];
             using var image = RenderOne(window);
             graphics.DrawImage(image, window.Bounds.X - area.X, window.Bounds.Y - area.Y);
         }
@@ -112,6 +124,36 @@ internal static partial class WindowCapture
 
         return found;
     }
+
+    /// <summary>
+    ///     Lists every top-level window of a process (visible or not) in z-order, from the top of the stack down.
+    /// </summary>
+    /// <param name="processId">The process id.</param>
+    /// <returns>The window handles, topmost first.</returns>
+    internal static IReadOnlyList<IntPtr> ZOrderOf(int processId)
+    {
+        var found = new List<IntPtr>();
+        var window = FindWindowEx(IntPtr.Zero, IntPtr.Zero, null, null);
+        while (window != IntPtr.Zero)
+        {
+            _ = GetWindowThreadProcessId(window, out var owner);
+            if (owner == (uint)processId)
+            {
+                found.Add(window);
+            }
+
+            window = FindWindowEx(IntPtr.Zero, window, null, null);
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    ///     Gets the owner window of a top-level window (the window a dialog was opened from).
+    /// </summary>
+    /// <param name="handle">The window.</param>
+    /// <returns>The owner, or zero when the window has none.</returns>
+    private static IntPtr OwnerOf(IntPtr handle) => GetWindow(handle, GetWindowOwner);
 
     /// <summary>
     ///     Gets the window's whole frame (title bar and borders included), which <c>PrintWindow</c> draws.
@@ -218,6 +260,15 @@ internal static partial class WindowCapture
     /// <returns>The thread id.</returns>
     [LibraryImport("user32.dll")]
     private static partial uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    /// <summary>
+    ///     Native <c>GetWindow</c>.
+    /// </summary>
+    /// <param name="hwnd">The window.</param>
+    /// <param name="command">The relationship to look up.</param>
+    /// <returns>The related window, or zero.</returns>
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr GetWindow(IntPtr hwnd, uint command);
 
     /// <summary>
     ///     Native <c>IsWindowVisible</c>.

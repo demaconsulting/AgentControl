@@ -73,8 +73,9 @@ All UI Automation lookups are scoped to the process id of the instance, never to
   [`fixture`](#fixture) to prepare a config folder with a package source and a repo.
 - `instances` lists the live instances (`INSTANCE alias=... pid=... title=... exe=... config=... started=...`) and
   removes the records of the ones that are gone (`PRUNED alias=... reason=NotRunning|PidReused|ConfigMismatch`).
-- `quit` closes the open dialogs, then the main window (through the UI Automation Window pattern, the same request as
-  the close button), and waits up to 10 seconds for the process to exit. `--kill` ends the whole process tree if it did
+- `quit` closes the open dialogs (innermost first), then the main window (through the UI Automation Window pattern, the
+  same request as the close button), and waits up to 10 seconds for the process to exit. `--kill` ends the whole process
+  tree if it did
   not. The record is removed. A config folder that `launch` created is left in place so settings and logs
   (`<config>\logs`) can be inspected afterwards.
 
@@ -117,7 +118,8 @@ agentcontrol-puppet place (--x <px> --y <px> --width <px> --height <px> | --work
   (or `click RefreshMenuItem`).
 - `dialogs` lists the open dialogs and their buttons, edits, check boxes, combo boxes, radio buttons, lists and
   identified texts with id, name, enabled flag and help text; the exit code is 10 while one is open. The About window
-  and the release-notes window are non-modal windows and are listed too.
+  and the release-notes window are non-modal windows and are listed too. A dialog opened from a dialog is listed as a
+  dialog of its own, after the one that opened it (outer to inner), and each dialog lists only its own controls.
 - `shot` renders the main window **and every open dialog and pop-up** (a flyout, a combo box drop-down) with
   `PrintWindow` and saves a PNG; see [Screenshots](#screenshots).
 - `place` restores the main window from the maximized state and puts its **visible** frame (the invisible resize
@@ -212,9 +214,11 @@ change what the application shows.
 
 `shot <path.png>` draws the main window **and every open dialog and pop-up** with `PrintWindow`, each window rendered by
 the window itself, so a window in front does not end up in the picture and it works on a locked desktop as well. It
-covers the windows UI Automation lists (dialogs, the non-modal About window) and the native pop-up windows of the
-process that it does not list (a flyout, a combo box drop-down, a tooltip). The output reports the size and the number
-of `windows=` and `popups=` drawn.
+covers the windows UI Automation lists (dialogs, the non-modal About window, and dialogs opened from dialogs at any
+depth, such as Settings, then a package-source editor, then a sign-in prompt) and the native pop-up windows of the
+process that it does not list (a flyout, a combo box drop-down, a tooltip). The windows are drawn in z-order from the
+bottom of the stack to the top, an owner always below the dialogs it owns, so a nested dialog covers the one that opened
+it, as on screen. The output reports the size and the number of `windows=` and `popups=` drawn.
 
 `shot --screen` copies the screen pixels of the window's frame instead, which also shows what only the compositor draws
 (a drag ghost) but needs the window on screen and uncovered (it is brought to the front first; when two instances
