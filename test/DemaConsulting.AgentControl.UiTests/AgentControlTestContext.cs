@@ -38,24 +38,21 @@ namespace DemaConsulting.AgentControl.UiTests;
 ///     <c>try</c>/<c>finally</c>) to guarantee the spawned AgentControl process, any shell process
 ///     it in turn launches for the agent-tool command (see <c>AgentToolLauncher</c>'s
 ///     <c>-NoExit</c>/<c>/K</c> "leave the window open" behavior, which this context must
-///     specifically hunt down and kill since the shell is not a direct child FlaUI tracks), and
-///     every temp directory are cleaned up even if the test fails an assertion or throws.
+///     clean up since the shell is not a child FlaUI tracks), and every temp directory are
+///     cleaned up even if the test fails an assertion or throws. Shell cleanup is strictly
+///     scoped to this context's own launch (see <see cref="LaunchedShellCleaner"/>): unrelated
+///     shells and terminal tabs are never touched.
 /// </remarks>
 internal sealed class AgentControlTestContext : IDisposable
 {
-    /// <summary>
-    ///     Candidate process names for the shell <c>AgentToolLauncher</c> may launch to run the
-    ///     configured agent-tool command; used to hunt down and kill leftover windows this
-    ///     context's own launch is responsible for.
-    /// </summary>
-    private static readonly string[] ShellProcessNames = ["pwsh", "powershell", "cmd"];
-
-    private readonly HashSet<int> _preExistingShellProcessIds;
+    private readonly LaunchedShellCleaner _shellCleaner;
+    private int? _appProcessId;
+    private DateTime _appStartTime;
     private bool _disposed;
 
     /// <summary>
     ///     Initializes a new isolated test context: creates temp directories, writes
-    ///     <c>settings.json</c>, and records a baseline of already-running shell processes.
+    ///     <c>settings.json</c>, and prepares the scoped shell cleaner.
     /// </summary>
     /// <param name="packageSourcePath">The package source directory to configure, or
     ///     <see langword="null"/> to leave it unconfigured.</param>
@@ -104,7 +101,7 @@ internal sealed class AgentControlTestContext : IDisposable
             TestRepoPinWriter.Write(RepoPath, pinnedPackageName, pinnedPackageVersion, pinnedSource);
         }
 
-        _preExistingShellProcessIds = SnapshotShellProcessIds();
+        _shellCleaner = new LaunchedShellCleaner(argLoggerStubExe, LogCleanup);
     }
 
     /// <summary>
@@ -158,8 +155,17 @@ internal sealed class AgentControlTestContext : IDisposable
         startInfo.ArgumentList.Add(ConfigDirectory);
         startInfo.EnvironmentVariables["ARGLOGGER_OUTPUT_FILE"] = ArgLoggerOutputFile;
 
-        App = Application.Launch(startInfo);
+        // Record which terminal windows already exist so only windows created by this launch
+        // can ever be considered for cleanup.
         Automation = new UIA3Automation();
+        _shellCleaner.CaptureBaseline(Automation);
+
+        App = Application.Launch(startInfo);
+        _appProcessId = App.ProcessId;
+        using (var appProcess = Process.GetProcessById(App.ProcessId))
+        {
+            _appStartTime = appProcess.StartTime;
+        }
 
         var mainWindow = Retry.WhileNull(
             () => App.GetMainWindow(Automation),
@@ -226,8 +232,9 @@ internal sealed class AgentControlTestContext : IDisposable
 
     /// <summary>
     ///     Closes/kills the launched AgentControl process, disposes the automation instance,
-    ///     kills any new shell process spawned by the agent-tool launch, and best-effort deletes
-    ///     this context's temp directory tree.
+    ///     terminates only the shell (and stub) spawned by this context's agent-tool launch,
+    ///     closes the terminal window that launch left behind, and best-effort deletes this
+    ///     context's temp directory tree.
     /// </summary>
     public void Dispose()
     {
@@ -259,7 +266,12 @@ internal sealed class AgentControlTestContext : IDisposable
         App?.Dispose();
         Automation?.Dispose();
 
-        KillNewShellProcesses();
+        // Only after the app is gone: terminate exactly the shell (and stub) it launched and
+        // close the terminal window left behind - see LaunchedShellCleaner for the rationale.
+        if (_appProcessId is { } appProcessId)
+        {
+            _shellCleaner.Cleanup(appProcessId, _appStartTime);
+        }
 
         try
         {
@@ -272,48 +284,19 @@ internal sealed class AgentControlTestContext : IDisposable
     }
 
     /// <summary>
-    ///     Kills any shell process (see <see cref="ShellProcessNames"/>) that started after this
-    ///     context's construction, i.e. one this context's AgentControl launch is responsible for
-    ///     spawning via the agent-tool "Launch" action.
+    ///     Forwards a cleanup diagnostic to the xUnit test output (visible with diagnostic
+    ///     messages enabled), never failing the test if no test context is available.
     /// </summary>
-    private void KillNewShellProcesses()
+    /// <param name="message">The diagnostic message.</param>
+    private static void LogCleanup(string message)
     {
-        foreach (var processId in SnapshotShellProcessIds())
+        try
         {
-            if (_preExistingShellProcessIds.Contains(processId))
-            {
-                continue;
-            }
-
-            try
-            {
-                using var process = Process.GetProcessById(processId);
-                process.Kill(entireProcessTree: true);
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or ArgumentException)
-            {
-                // Process may have already exited on its own, or we may lack permission to kill
-                // a process owned by another session - either way, best-effort only.
-            }
+            TestContext.Current.SendDiagnosticMessage(message);
         }
-    }
-
-    /// <summary>
-    ///     Snapshots the process IDs of every currently-running candidate shell process.
-    /// </summary>
-    /// <returns>The set of matching process IDs.</returns>
-    private static HashSet<int> SnapshotShellProcessIds()
-    {
-        var ids = new HashSet<int>();
-        foreach (var name in ShellProcessNames)
+        catch (Exception ex) when (ex is InvalidOperationException or NullReferenceException)
         {
-            foreach (var process in Process.GetProcessesByName(name))
-            {
-                ids.Add(process.Id);
-                process.Dispose();
-            }
+            // Diagnostics are a convenience only; swallow if the xUnit context is unavailable.
         }
-
-        return ids;
     }
 }

@@ -36,6 +36,8 @@ words:
   - renderable
   - buildmark
   - buildtransitive
+  - cascadia
+  - conhost
   - contentfiles
   - dcterms
   - DEMA

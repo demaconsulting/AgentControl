@@ -74,6 +74,12 @@
     <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
   </ItemGroup>
 
+  <!-- WMI (Win32_Process) access: lets LaunchedShellCleaner read process command lines/parent
+       ids so it only ever terminates the shell this test's own launch spawned. -->
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="10.0.0" />
+  </ItemGroup>
+
   <!-- Code Analysis Dependencies -->
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.403">
