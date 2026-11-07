@@ -284,6 +284,59 @@ public sealed class SelectPackageWindowViewModelTests
     }
 
     /// <summary>
+    ///     Test that the version column tells the user what to do until a package is selected, and
+    ///     stops saying so once one is.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_ShowVersionsHint_UntilPackageSelected()
+    {
+        // Arrange
+        var viewModel = CreateViewModel(new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0")));
+        await viewModel.LoadAsync(CancellationToken.None);
+
+        // Assert: no package yet
+        Assert.True(viewModel.ShowVersionsHint);
+
+        // Act
+        viewModel.SelectedPackageName = "contoso-agents";
+        await viewModel.PendingVersionsLoad;
+
+        // Assert
+        Assert.False(viewModel.ShowVersionsHint);
+
+        // Act: back to no package
+        viewModel.SelectedPackageName = null;
+
+        // Assert
+        Assert.True(viewModel.ShowVersionsHint);
+    }
+
+    /// <summary>
+    ///     Test that a source whose folder is missing is explained in words a user can act on,
+    ///     naming the folder, instead of the raw operating-system message.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_FolderMissing_ExplainsFolderNotFound()
+    {
+        // Arrange: a source whose package list throws DirectoryNotFoundException
+        var registry = new PackageSourceRegistry(
+            [new PackageSourceDefinition { Alias = "Share", Type = PackageSourceType.Zip, Location = @"Z:\missing-share" }],
+            _ => new DirectoryMissingPackageSourceProvider("Share"));
+        var viewModel = new SelectPackageWindowViewModel(registry, new PackageVersionCache());
+
+        // Act
+        await viewModel.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(viewModel.HasSourceError);
+        Assert.Contains("folder was not found", viewModel.SourceErrorMessage, StringComparison.Ordinal);
+        Assert.Contains(@"Z:\missing-share", viewModel.SourceErrorMessage, StringComparison.Ordinal);
+        Assert.False(viewModel.ShowVersionsHint);
+        Assert.Equal("Share, Zip-package folder, Unavailable", viewModel.Sources[0].AutomationName);
+        Assert.Equal(viewModel.Sources[0].AutomationName, viewModel.Sources[0].ToString());
+    }
+
+    /// <summary>
     ///     Test that changing the selected source clears the package and version selection.
     /// </summary>
     [Fact]
@@ -475,6 +528,35 @@ public sealed class SelectPackageWindowViewModelTests
         public Task<IReadOnlyList<DiscoveredPackage>> ListVersionsAsync(
             string packageId, CancellationToken cancellationToken) =>
             throw new IOException("The source went away.");
+
+        /// <inheritdoc />
+        public Task<IPackageContentReader> AcquireAsync(DiscoveredPackage package, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+    }
+
+    /// <summary>
+    ///     A source whose package list fails because its folder does not exist, like a zip or
+    ///     NuGet folder on a share that is offline.
+    /// </summary>
+    private sealed class DirectoryMissingPackageSourceProvider : IPackageSourceProvider
+    {
+        /// <summary>
+        ///     Initializes the provider.
+        /// </summary>
+        /// <param name="alias">The alias this provider reports.</param>
+        public DirectoryMissingPackageSourceProvider(string alias) => Alias = alias;
+
+        /// <inheritdoc />
+        public string Alias { get; }
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken) =>
+            throw new DirectoryNotFoundException("Could not find a part of the path 'Z:\\missing-share'.");
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<DiscoveredPackage>> ListVersionsAsync(
+            string packageId, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
 
         /// <inheritdoc />
         public Task<IPackageContentReader> AcquireAsync(DiscoveredPackage package, CancellationToken cancellationToken) =>

@@ -409,7 +409,7 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(source);
 
         var message = $"Remove the package source '{source.Alias}'?\n\n" +
-                      "Nothing is deleted from the folder itself; AgentControl only forgets the source.";
+                      "Nothing is deleted from the source itself; AgentControl only forgets it.";
         if (source.PinnedRepoCount > 0)
         {
             var repos = source.PinnedRepoCount == 1 ? "1 repo is" : $"{source.PinnedRepoCount} repos are";

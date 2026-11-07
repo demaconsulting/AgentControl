@@ -21,6 +21,7 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.Settings;
@@ -173,6 +174,43 @@ public class DialogWindowTests
 
         // Assert
         Assert.True(closed);
+    });
+
+    /// <summary>
+    ///     Test that the agent tool picker shows friendly names (not the raw enum names) and that
+    ///     choosing one still stores the enum value, so the saved setting is unchanged.
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_AgentToolPicker_ShowsFriendlyNamesAndKeepsEnumValue() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        AppSettings? saved = null;
+        var viewModel = new SettingsWindowViewModel(
+            new AppSettings { AgentTool = AgentToolKind.ClaudeCode }, updated => saved = updated);
+        var window = new SettingsWindow(viewModel);
+        window.Show();
+        try
+        {
+            var combo = window.FindControl<ComboBox>("AgentToolComboBox")!;
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the closed picker names the current tool in words
+            Assert.Equal(AgentToolKind.ClaudeCode, combo.SelectedItem);
+            var shown = combo.GetVisualDescendants().OfType<TextBlock>().Select(text => text.Text).ToList();
+            Assert.Contains("Claude Code", shown);
+            Assert.DoesNotContain("ClaudeCode", shown);
+
+            // Act: choose another tool and save
+            combo.SelectedItem = AgentToolKind.CopilotCli;
+            viewModel.SaveCommand.Execute(null);
+
+            // Assert: the stored value is the enum, not its friendly name
+            Assert.Equal(AgentToolKind.CopilotCli, saved!.AgentTool);
+        }
+        finally
+        {
+            window.Close();
+        }
     });
 
     /// <summary>

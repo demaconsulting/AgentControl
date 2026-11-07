@@ -220,6 +220,7 @@ public sealed class MultipleSourcesTests
                 timeout: TimeSpan.FromSeconds(10),
                 interval: TimeSpan.FromMilliseconds(200)).Result;
             Assert.NotNull(problemBadge);
+            Assert.Equal("Package source problem", problemBadge.Name);
             Assert.Null(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeAvailableBadge")));
             Assert.Equal(pinBefore, File.ReadAllText(pinPath));
             Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));

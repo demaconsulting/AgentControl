@@ -174,6 +174,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
             OnPropertyChanged(nameof(SourceErrorMessage));
             OnPropertyChanged(nameof(HasSourceError));
             OnPropertyChanged(nameof(HasNoPackages));
+            OnPropertyChanged(nameof(ShowVersionsHint));
             RaiseCanRetryChanged();
         }
     }
@@ -226,6 +227,8 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
                 return;
             }
 
+            OnPropertyChanged(nameof(ShowVersionsHint));
+
             // A newer selection supersedes the version load still running for the older one
             _versionsCancellation.Cancel();
             _versionsCancellation.Dispose();
@@ -243,6 +246,12 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
             ConfirmCommand.RaiseCanExecuteChanged();
         }
     }
+
+    /// <summary>
+    ///     Gets a value indicating whether no package is selected, so the version column says what
+    ///     to do instead of showing an unexplained empty list.
+    /// </summary>
+    public bool ShowVersionsHint => _selectedPackageName is null && !HasSourceError;
 
     /// <summary>
     ///     Gets the currently-selected package name's discoverable versions, descending (highest
@@ -443,7 +452,10 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         {
             // An unreachable or misconfigured source is reported on its own row; it must not
             // stop the other sources from loading
-            source.SetFailed($"This source could not be read: {SecretRedactor.SafeMessage(ex)}");
+            source.SetFailed(
+                ex is DirectoryNotFoundException
+                    ? $"This source's folder was not found: {source.Location}. Check that the folder exists and that its drive or share is connected."
+                    : $"This source could not be read: {SecretRedactor.SafeMessage(ex)}");
         }
     }
 
@@ -511,6 +523,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(SourceErrorMessage));
         OnPropertyChanged(nameof(HasSourceError));
         OnPropertyChanged(nameof(HasNoPackages));
+        OnPropertyChanged(nameof(ShowVersionsHint));
         RaiseCanRetryChanged();
     }
 

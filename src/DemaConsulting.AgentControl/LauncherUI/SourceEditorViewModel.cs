@@ -694,6 +694,14 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     public const string ForgetLabel = "Forget saved sign-in";
 
     /// <summary>
+    ///     The explanation shown in the editor's Sign-in section: when AgentControl asks for a
+    ///     sign-in and where a remembered one is kept.
+    /// </summary>
+    public const string SignInHelpText =
+        "AgentControl asks you to sign in when this server needs it. A sign-in you choose to remember is " +
+        "kept by your Git credential helper on this computer, never by AgentControl.";
+
+    /// <summary>
     ///     Gets a value indicating whether the "Forget saved sign-in" action is available: a
     ///     server source with an acceptable address, and a Git credential helper that applies to
     ///     it (without one nothing can have been saved, so there is nothing to forget).

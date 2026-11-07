@@ -25,11 +25,12 @@ in that repo's working directory.
 - **Version-pinned agent packages**: every repo names an exact agent package name and
   semantic version, and the source it came from, in its `.agentcontrol.json` pin file — there
   is no floating "latest" mode, so upgrades are always a deliberate, visible action
-- **Status chips**: each repo card shows an amber upgrade chip naming the version an upgrade
-  would move to, an uncommitted-changes warning, a committed-agent-files
+- **Status chips**: each repo card shows an amber upgrade chip ("Upgrade to" and the version an upgrade
+  would move to), an uncommitted-changes warning, a committed-agent-files
   warning (advisory only — flags when the managed folders were accidentally committed to
-  git), a missing-folder indicator when the path no longer exists on disk, and a
-  package-source-problem indicator when the pinned source is not configured. Separately,
+  git), a missing-folder indicator when the path no longer exists on disk, a
+  package-source-problem indicator when the pinned source is not configured, and a sign-in-needed indicator
+  when the pinned server needs a sign-in. Separately,
   AgentControl proactively ensures the repo's `.gitignore` covers the four managed
   folders immediately after every "Select Package..."/Upgrade, making an accidental commit
   much less likely in the first place
@@ -140,7 +141,7 @@ when you choose it; if reading a source fails, a **Retry** button appears beside
 
 ### Upgrading
 
-Once a repo is pinned, its card shows an amber upgrade chip (for example **1.1.0**) whenever a
+Once a repo is pinned, its card shows an amber upgrade chip (for example **Upgrade to 1.1.0**) whenever a
 newer version of the pinned package is available at the source the pin names, and its card's
 "..." menu offers **Upgrade**. Upgrading re-runs the
 same validate → delete → extract → pin sequence and then shows the new package's

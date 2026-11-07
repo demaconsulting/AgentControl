@@ -162,7 +162,8 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// </summary>
     public string EmptyStateMessage =>
         RepoCards.Count == 0
-            ? "No repos yet. Click the folder icon above to add your first repository."
+            ? "No repos yet. Click the folder-with-a-plus button above to add your first repository. " +
+              "Use the gear button to set up where your agent packages come from."
             : $"No repos match \"{FilterText}\". Try a different filter.";
 
     /// <summary>

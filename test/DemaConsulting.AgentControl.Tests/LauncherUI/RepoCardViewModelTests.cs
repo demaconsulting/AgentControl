@@ -339,6 +339,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Assert: the failure is surfaced via the status message
         Assert.Contains("Pull failed", card.StatusMessage, StringComparison.Ordinal);
         Assert.Contains("CONFLICT", card.StatusMessage, StringComparison.Ordinal);
+        Assert.True(card.HasStatusMessage);
     }
 
     /// <summary>
@@ -1489,9 +1490,60 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Assert: error state, no fallback to "Other"
         Assert.True(card.HasSourceProblem);
         Assert.Contains("'Gone'", card.SourceProblem, StringComparison.Ordinal);
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.Equal("Package source problem", card.SourceProblemChipText);
         Assert.False(card.IsUpgradeAvailable);
         Assert.Null(card.LatestAvailableVersion);
         Assert.Equal("Gone", card.PinnedSource);
+    }
+
+    /// <summary>
+    ///     Test that a repo whose folder is gone offers no upgrade, even when an upgrade check runs
+    ///     (the package chip is hidden for a missing repo, so an upgrade chip alone would mean
+    ///     nothing).
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshUpgradeStatusAsync_RepoFolderMissing_OffersNoUpgrade()
+    {
+        // Arrange: a pinned repo whose folder does not exist, with a newer version available
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var missingRoot = Path.Combine(CreateTempDirectory(), "gone");
+        var recentRepo = new RecentRepo
+        {
+            Path = missingRoot,
+            PinnedPackageName = "contoso-agents",
+            PinnedPackageVersion = "1.0.0",
+            PinnedSource = "Default"
+        };
+        var settings = new AppSettings { Sources = [ZipSource("Default", sourceDir)] };
+        var card = new RepoCardViewModel(recentRepo, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+
+        // Act
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.True(card.IsMissing);
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Null(card.LatestAvailableVersion);
+        Assert.False(card.HasPinnedPackage);
+    }
+
+    /// <summary>
+    ///     Test that an action's outcome is exposed for the card to show, and that there is no
+    ///     message to show before any action ran.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_StatusMessage_NoActionYet_HasNoStatusMessage()
+    {
+        // Arrange / Act
+        var card = CreateCard(CreateTempDirectory(), null, null, new AppSettings());
+
+        // Assert
+        Assert.Null(card.StatusMessage);
+        Assert.False(card.HasStatusMessage);
     }
 
     /// <summary>

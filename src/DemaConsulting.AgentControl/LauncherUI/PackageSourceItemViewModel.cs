@@ -248,6 +248,19 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Gets the text UI Automation (screen readers, tests) reads for the whole row: the alias, the
+    ///     kind of source and its status, because the row's visible parts are separate text elements.
+    /// </summary>
+    public string AutomationName => $"{Alias}, {TypeName}, {StatusText}";
+
+    /// <summary>
+    ///     Returns <see cref="AutomationName"/>: a list box names each row for UI Automation by the
+    ///     row object's text, so this is what a screen reader or a test reads for the row.
+    /// </summary>
+    /// <returns>The row's automation name.</returns>
+    public override string ToString() => AutomationName;
+
+    /// <summary>
     ///     Raises change notifications for every property derived from the status.
     /// </summary>
     private void RaiseStatusChanged()
@@ -257,5 +270,6 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(StatusIcon));
         OnPropertyChanged(nameof(StatusTooltip));
+        OnPropertyChanged(nameof(AutomationName));
     }
 }

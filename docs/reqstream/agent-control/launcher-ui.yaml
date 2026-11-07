@@ -331,6 +331,7 @@ sections:
           - SourceEditorWindow_ForgetSavedSignIn_ConfirmationDecidesAndResultIsShown
           - SourceEditorWindow_ForgetSavedSignIn_NoCredentialStore_ButtonDisabledWithTooltip
           - SourceEditorWindow_ForgetSavedSignIn_NoCredentialHelper_ButtonDisabledWithTooltip
+          - SourceEditorWindow_Sections_ServerEditorHasTitledSectionsAndForgetBelongsToSignIn
 
       - id: AgentControl-LauncherUI-SignatureOptions
         title: >-

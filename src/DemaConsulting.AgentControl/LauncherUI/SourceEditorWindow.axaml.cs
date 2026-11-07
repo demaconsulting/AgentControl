@@ -81,14 +81,18 @@ internal sealed partial class SourceEditorWindow : Window
         // screen's usable area; beyond that the form scrolls and Save/Cancel stay in view
         Opened += (_, _) => LimitHeightToScreen();
 
-        // Progress, the outcome of a connection test and the outcome of forgetting a sign-in appear
-        // at the bottom of the form; scroll them into view instead of leaving them below the fold
+        // Progress and the outcome of a connection test appear at the bottom of the form, and the
+        // outcome of forgetting a sign-in in the middle of it; scroll them into view instead of
+        // leaving them below the fold
         viewModel.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(SourceEditorViewModel.IsTesting) or nameof(SourceEditorViewModel.HasTestResult)
-                or nameof(SourceEditorViewModel.HasForgetResult))
+            if (e.PropertyName is nameof(SourceEditorViewModel.IsTesting) or nameof(SourceEditorViewModel.HasTestResult))
             {
                 Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("SourceEditorScrollViewer")?.ScrollToEnd());
+            }
+            else if (e.PropertyName is nameof(SourceEditorViewModel.HasForgetResult))
+            {
+                Dispatcher.UIThread.Post(() => this.FindControl<Control>("SourceForgetResultText")?.BringIntoView());
             }
         };
     }

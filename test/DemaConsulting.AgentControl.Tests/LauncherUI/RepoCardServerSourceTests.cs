@@ -148,6 +148,8 @@ public sealed class RepoCardServerSourceTests : IAsyncLifetime
         Assert.True(card.HasSourceProblem);
         Assert.Contains("needs a sign-in", card.SourceProblem, StringComparison.Ordinal);
         Assert.Contains("Refresh", card.SourceProblem, StringComparison.Ordinal);
+        Assert.True(card.SourceNeedsSignIn);
+        Assert.Equal("Sign-in needed", card.SourceProblemChipText);
     }
 
     /// <summary>
@@ -173,6 +175,8 @@ public sealed class RepoCardServerSourceTests : IAsyncLifetime
         Assert.Equal(1, prompt.AskCount);
         Assert.True(card.IsUpgradeAvailable);
         Assert.False(card.HasSourceProblem);
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.Equal("Package source problem", card.SourceProblemChipText);
 
         // Act: another card's background check, using a fresh version cache
         var other = CreateCard(feed, context);

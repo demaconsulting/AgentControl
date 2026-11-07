@@ -660,7 +660,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         var message = credentialRejected
             ? $"Source '{Alias}' ({_feed}) rejected the credentials (the server answered 401 or 403). " +
               "Check the user name and password or token, and that the account may read this feed."
-            : $"Source '{Alias}' ({_feed}) needs a sign-in. Use Select Package or Test connection to sign in.";
+            : $"Source '{Alias}' ({_feed}) needs a sign-in.";
         return new PackageSourceAccessException(PackageSourceFailureKind.AuthenticationFailed, message, inner);
     }
 

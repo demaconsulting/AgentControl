@@ -20,6 +20,7 @@
 
 using Avalonia.Controls;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.PackageCredentials;
@@ -123,6 +124,63 @@ public class SourceEditorSignatureWindowTests
         Assert.True(ToolTip.GetShowOnDisabled(checkBox));
         Assert.False(window.FindControl<TextBox>("SourceSignerFingerprintTextBox")!.IsEffectivelyEnabled);
         window.Close();
+    });
+
+    /// <summary>
+    ///     Test that the server editor is a stack of titled sections - Source, Packages, Sign-in,
+    ///     Package signatures, Connection test - in that order, that "Forget saved sign-in" sits in
+    ///     the Sign-in section and not beside the connection test, and that a folder editor shows
+    ///     only the sections that apply to it.
+    /// </summary>
+    [Fact]
+    public void SourceEditorWindow_Sections_ServerEditorHasTitledSectionsAndForgetBelongsToSignIn() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var window = new SourceEditorWindow(CreateServerEditor());
+        window.Show();
+        try
+        {
+            // Assert: the section headers, in order
+            var headers = window.GetVisualDescendants()
+                .OfType<TextBlock>()
+                .Where(text => text.Classes.Contains("section") && text.IsEffectivelyVisible)
+                .Select(text => text.Text)
+                .ToList();
+            Assert.Equal(["Source", "Packages", "Sign-in", "Package signatures", "Connection test"], headers);
+
+            // Assert: Forget is inside the Sign-in section, Test connection inside the test section
+            var signIn = window.FindControl<StackPanel>("SourceEditorSignInSection")!;
+            var test = window.FindControl<StackPanel>("SourceEditorTestSection")!;
+            var forget = window.FindControl<Button>("SourceForgetSignInButton")!;
+            var testButton = window.FindControl<Button>("SourceTestConnectionButton")!;
+            Assert.Contains(forget, signIn.GetVisualDescendants());
+            Assert.DoesNotContain(forget, test.GetVisualDescendants());
+            Assert.Contains(testButton, test.GetVisualDescendants());
+            Assert.Equal(SourceEditorViewModel.SignInHelpText, window.FindControl<TextBlock>("SourceSignInHelpText")!.Text);
+        }
+        finally
+        {
+            window.Close();
+        }
+
+        // Arrange: a NuGet folder has no sign-in and no connection test
+        var folderWindow = new SourceEditorWindow(
+            new SourceEditorViewModel(PackageSourceType.NuGet, null, _ => false));
+        folderWindow.Show();
+        try
+        {
+            // Assert
+            var folderHeaders = folderWindow.GetVisualDescendants()
+                .OfType<TextBlock>()
+                .Where(text => text.Classes.Contains("section") && text.IsEffectivelyVisible)
+                .Select(text => text.Text)
+                .ToList();
+            Assert.Equal(["Source", "Packages", "Package signatures"], folderHeaders);
+        }
+        finally
+        {
+            folderWindow.Close();
+        }
     });
 
     /// <summary>

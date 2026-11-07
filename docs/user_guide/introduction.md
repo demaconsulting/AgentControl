@@ -77,10 +77,11 @@ itself).
   the source's **alias** is shown as muted text next to it, so you can see where the package came
   from without hovering. The tooltip names the source in full: "Agent files: contoso-agents 1.0.0
   from source 'Default' (zip folder)". If the source is not configured, the tooltip says so.
-- **Upgrade chip** (amber, up arrow) — the version an upgrade would move to, for example
-  `1.1.0`. It appears only when the source the repo is pinned to has a newer version. Use the
-  card's "..." menu > **Upgrade** to apply it. While AgentControl is still checking the source,
-  the chip is not shown yet; a slow or unreachable source never blocks the window.
+- **Upgrade chip** (amber, up arrow) — **Upgrade to** and the version an upgrade would move to, for example
+  `Upgrade to 1.1.0`. It appears only when the source the repo is pinned to has a newer version. Click
+  it, or use the card's "..." menu > **Upgrade**, to apply it. While AgentControl is still checking the
+  source, the chip is not shown yet (the card shows "checking for updates..."); a slow or unreachable
+  source never blocks the window.
 - **No agent package chip** (grey) — the repo has no pin yet. Click it, or use "..." > **Select
   Package...**, to choose one.
 - **Branch chip** — the repo's current git branch.
@@ -98,11 +99,14 @@ itself).
   actions, and offers a "Remove from list" action instead (the card is never auto-removed, since
   the path may reappear, such as a drive being remounted).
 - **Package source problem** (red) — the source the repo is pinned to is not configured (for
-  example it was removed or renamed in Settings), or it is a server that needs a sign-in. The
-  tooltip states the problem. No upgrade is
+  example it was removed or renamed in Settings). The tooltip states the problem. No upgrade is
   offered and no other source is ever used instead; restore the source with the same alias in
-  Settings to resolve a missing source, or, for a server that needs a sign-in, use the card's
-  "..." menu > **Refresh** to sign in (see [Signing In](#signing-in)).
+  Settings to resolve it.
+- **Sign-in needed** (red) — the repo is pinned to a server that needs a sign-in, and the background check
+  never asks. Use the card's "..." menu > **Refresh** to sign in (see [Signing In](#signing-in)).
+
+Below the chips, a card shows the outcome of the last action you started on it - for example the reason a
+**Git Pull** failed - in small text under the repo's path (hover for the full text).
 
 # Package Sources
 
@@ -145,7 +149,9 @@ that could mean a wait, or a sign-in, for a window you only opened to look.
 
 ## Adding a NuGet-Package Server
 
-Click **Add NuGet-Package Server**. The dialog asks for:
+Click **Add NuGet-Package Server**. The dialog is a stack of titled sections - **Source**, **Packages**,
+**Sign-in**, **Package signatures** and **Connection test** - and scrolls when the screen is short, while its
+**Cancel** and **Save** buttons stay in view at the bottom. The **Source** section asks for:
 
 - **Alias** — as for any source.
 - **Feed address** — the address of the feed's NuGet V3 **service index**. It must start with
@@ -161,9 +167,13 @@ Click **Add NuGet-Package Server**. The dialog asks for:
   and ticking it shows a warning: anything you type into the sign-in dialog for that server would
   cross the network unprotected. Tick it only for a feed on a network you trust (for example a
   test server on your own machine).
-- **Package IDs** — the packages you want from this server, at least one. A server cannot be
+- **Package IDs** (the **Packages** section) — the packages you want from this server, at least one. A server cannot be
   listed cheaply, so you name the packages. Package IDs use the same names as the NuGet packages
   themselves.
+- **Sign-in** — explains when AgentControl asks you to sign in and holds **Forget saved sign-in** (see
+  [Remembering a Sign-In](#remembering-a-sign-in)).
+- **Package signatures** — see [Requiring Signed Packages](#requiring-signed-packages).
+- **Connection test** — see [Testing the Connection](#testing-the-connection).
 
 ## Testing the Connection
 
@@ -301,7 +311,7 @@ first.
 when you add a repo, it checks each repo's pinned source for upgrades in the background. For a server
 that needs a sign-in, that check uses a credential you already typed this session (or saved, see below)
 and otherwise does
-**not** ask: the card shows a **Package source problem** chip saying the source needs a sign-in. Use
+**not** ask: the card shows a **Sign-in needed** chip. Use
 the card's "..." menu > **Refresh** (or Select Package / Upgrade) - actions you start - to sign in.
 
 ## Remembering a Sign-In
@@ -400,10 +410,12 @@ are requested from. If you do not trust a feed's operator, do not sign in to it.
 
 ## Editing and Removing a Source
 
-Select a row and click **Edit** to change its location (a server's feed address and insecure-HTTP
+Select a row and click **Edit** (the **Edit** and **Remove** buttons sit above the list and act on the
+selected row) to change its location (a server's feed address and insecure-HTTP
 choice) or (for NuGet) its package IDs; the alias is fixed, and a server opens the same dialog as when
-adding, including **Test connection**, the signature options and **Forget saved sign-in** (see
-[Remembering a Sign-In](#remembering-a-sign-in)). **Remove** asks for confirmation. Removing a source is allowed
+adding, including the **Sign-in** section with **Forget saved sign-in** (see
+[Remembering a Sign-In](#remembering-a-sign-in)), the signature options and **Test connection**.
+**Remove** asks for confirmation. Removing a source is allowed
 even when repos are pinned to it, but the confirmation tells you how many are: those repos will show a
 **Package source problem** chip until a source with that alias is configured again.
 
@@ -455,13 +467,16 @@ never both, depending on whether the repo already has a pin.
 A repo with no `.agentcontrol.json` pin yet (for example, a repo just added to the list)
 shows **Select Package...**. Choosing it opens a dialog with three columns:
 
-1. **Source** — every configured package source, with its kind icon and alias. Each source loads
+1. **Source** — every configured package source, with its kind icon, alias, kind and the number of
+   packages it offers. Each source loads
    in the background with a progress indicator; if a source cannot be read (for example, an
-   offline share, or a server that could not be reached), its error appears in the dialog with a
+   offline share, or a server that could not be reached), it shows **Unavailable** and its error appears
+   in the dialog with a
    **Retry** button that reads just that source again, and the other sources still work. A server
    that needs a sign-in opens the [sign-in dialog](#signing-in) when you select it.
 2. **Package** — the packages the selected source offers.
-3. **Version** — once you pick a package, its versions in descending order, defaulting the
+3. **Version** — until you pick a package it reads "Select a package to see its versions."; once you
+   do, its versions in descending order, defaulting the
    selection to the latest. If the versions cannot be read, the error is shown with **Retry**
    beside it. Reading a server can take several seconds, and a cancelled or failed sign-in can be
    retried from here without closing the dialog.
@@ -555,8 +570,8 @@ Open Settings from the gear icon on the toolbar to configure:
   shared folder or server is the responsibility of whoever maintains it.
 - **Git executable path override** — a specific `git` executable to use instead of resolving
   `git` from the process `PATH`.
-- **Agent tool selection** — which agentic CLI tool Launch starts: GitHub Copilot CLI,
-  Cursor, Claude Code, or a custom command line that you supply yourself. In a custom command
+- **Agent tool selection** — which agentic CLI tool Launch starts: **GitHub Copilot CLI**,
+  **Cursor**, **Claude Code**, or a **Custom command** line that you supply yourself. In a custom command
   line, quote the executable path if it contains spaces, for example
   `"C:\Program Files\My Tool\tool.exe" --flag`. Double quotes work in every shell; single quotes
   (`'C:\Program Files\My Tool\tool.exe' --flag`) work in PowerShell and POSIX shells but not in

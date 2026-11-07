@@ -146,6 +146,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private bool _isUpgradeAvailable;
     private string? _latestAvailableVersion;
     private string? _sourceProblem;
+    private bool _sourceNeedsSignIn;
     private string? _currentBranch;
     private bool _hasCommittedAgentFiles;
     private bool _canPull;
@@ -373,6 +374,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             if (SetField(ref _sourceProblem, value))
             {
                 OnPropertyChanged(nameof(HasSourceProblem));
+                OnPropertyChanged(nameof(SourceProblemChipText));
             }
         }
     }
@@ -382,6 +384,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     card's error indicator.
     /// </summary>
     public bool HasSourceProblem => _sourceProblem is not null;
+
+    /// <summary>
+    ///     Gets a value indicating whether the source problem is that the pinned package's server
+    ///     needs a sign-in (which the background check never asks for), so the card can say so on
+    ///     the chip itself instead of the generic "Package source problem".
+    /// </summary>
+    public bool SourceNeedsSignIn => _sourceProblem is not null && _sourceNeedsSignIn;
+
+    /// <summary>
+    ///     Gets the text of the card's red source-problem chip: <c>Sign-in needed</c> when the
+    ///     server needs a sign-in, otherwise <c>Package source problem</c>.
+    /// </summary>
+    public string SourceProblemChipText => SourceNeedsSignIn ? "Sign-in needed" : "Package source problem";
 
     /// <summary>
     ///     Gets the repo's current git branch name, or <see langword="null"/> if it could not be
@@ -886,8 +901,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public string? StatusMessage
     {
         get => _statusMessage;
-        private set => SetField(ref _statusMessage, value);
+        private set
+        {
+            if (SetField(ref _statusMessage, value))
+            {
+                OnPropertyChanged(nameof(HasStatusMessage));
+            }
+        }
     }
+
+    /// <summary>
+    ///     Gets a value indicating whether there is a <see cref="StatusMessage"/> to show on the card.
+    /// </summary>
+    public bool HasStatusMessage => !string.IsNullOrWhiteSpace(_statusMessage);
 
     /// <summary>
     ///     Gets the command bound to the card's "Launch" button.
@@ -1053,7 +1079,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             CanPull = false;
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
-            SourceProblem = null;
+            SetSourceProblem(null, needsSignIn: false);
 
             // The repo just disappeared (or was already missing): any previously-cached Git
             // status is no longer trustworthy, so invalidate it rather than let it linger and
@@ -2067,6 +2093,17 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public async Task RefreshUpgradeStatusAsync(CancellationToken cancellationToken = default, bool allowPrompt = false)
     {
         var generation = ++_upgradeCheckGeneration;
+
+        // A repo whose folder is gone offers no upgrade: its package chip is hidden, so an upgrade
+        // chip on its own would be meaningless (and the upgrade command is disabled anyway)
+        if (IsMissing)
+        {
+            IsUpgradeAvailable = false;
+            LatestAvailableVersion = null;
+            IsCheckingUpgrade = false;
+            return;
+        }
+
         if (!EvaluatePinnedSource())
         {
             IsCheckingUpgrade = false;
@@ -2102,7 +2139,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 // background check must not ask: the card says what to do instead
                 if (ex is PackageSourceAccessException { Kind: PackageSourceFailureKind.AuthenticationFailed } && !allowPrompt)
                 {
-                    SourceProblem = $"{SecretRedactor.SafeMessage(ex)} Use the card's \"...\" menu > Refresh to sign in.";
+                    SetSourceProblem(
+                        $"{SecretRedactor.SafeMessage(ex)} Use the card's \"...\" menu > Refresh to sign in.",
+                        needsSignIn: true);
                 }
             }
         }
@@ -2124,7 +2163,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     fully decided here (no pin, unconfigured source, or invalid source configuration).</returns>
     private bool EvaluatePinnedSource()
     {
-        SourceProblem = null;
+        SetSourceProblem(null, needsSignIn: false);
         if (string.IsNullOrWhiteSpace(PinnedPackageName))
         {
             IsUpgradeAvailable = false;
@@ -2138,7 +2177,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             if (!CreateSourceRegistry().Contains(sourceAlias))
             {
                 // No fallback: the pin's source is simply not available, and the card says so
-                SourceProblem = new UnknownSourceException(sourceAlias).Message;
+                SetSourceProblem(new UnknownSourceException(sourceAlias).Message, needsSignIn: false);
                 IsUpgradeAvailable = false;
                 LatestAvailableVersion = null;
                 return false;
@@ -2154,6 +2193,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
 
         return true;
+    }
+
+    /// <summary>
+    ///     Sets the source problem and whether it is a missing sign-in, notifying the chip's
+    ///     bindings even when only the kind of problem changed.
+    /// </summary>
+    /// <param name="problem">The user-readable problem, or <see langword="null"/> for none.</param>
+    /// <param name="needsSignIn">Whether the problem is that the server needs a sign-in.</param>
+    private void SetSourceProblem(string? problem, bool needsSignIn)
+    {
+        var kindChanged = _sourceNeedsSignIn != needsSignIn;
+        _sourceNeedsSignIn = needsSignIn;
+        SourceProblem = problem;
+        if (kindChanged)
+        {
+            OnPropertyChanged(nameof(SourceNeedsSignIn));
+            OnPropertyChanged(nameof(SourceProblemChipText));
+        }
     }
 
     /// <summary>

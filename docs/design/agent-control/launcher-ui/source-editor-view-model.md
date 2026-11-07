@@ -197,4 +197,6 @@ credential.
   `ConfirmationWindow`) that `ForgetConfirmationRequested` asks for before calling `ForgetSavedSignInAsync`. The
   form is long for a server source, so the window limits its own height to the screen's working area, scrolls the
   form (with Save and Cancel kept in view below it) and scrolls newly shown progress, test results and forget
-  results into view.
+  results into view. The form is a stack of titled sections - Source, Packages (NuGet), Sign-in (server; holds
+  "Forget saved sign-in" and **SignInHelpText**), Package signatures (NuGet) and Connection test (server; holds
+  "Test connection" and its "Cancel test") - so each action sits beside the thing it affects.

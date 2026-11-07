@@ -13,7 +13,8 @@ window, the settings window, the package-source editor window and the sign-in di
 `SourceEditorWindow`, `CredentialPromptWindow`) and shared MVVM support types (`RelayCommand`,
 `AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
 `SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`,
-`FavoriteIconConverter`, `FavoriteColorConverter`, `ThirdPartyDependencies`), which are folded
+`FavoriteIconConverter`, `FavoriteColorConverter`, `AgentToolKindDisplayNameConverter`,
+`ThirdPartyDependencies`), which are folded
 into this subsystem-level description rather than given separate unit files; `ThirdPartyDependencies`
 and `AsyncRelayCommand` are the exceptions with dedicated test files
 (`ThirdPartyDependenciesTests.cs`, `AsyncRelayCommandTests.cs`), since each is independent of
@@ -135,10 +136,13 @@ git status/branch via `GitClient`/`CommittedAgentFilesCache`, and drives
 Launch/Pull/Upgrade/Select-Package/Favorite/Remove. The card presents its state as chips: a package
 chip (robot icon, package name and version, the source's alias as muted text beside a small icon for the
 source kind - a server has its own network-server icon - and a tooltip naming the source), an amber
-upgrade chip showing the version an upgrade would move to, a grey "No agent
+upgrade chip reading "Upgrade to" and the version an upgrade would move to, a grey "No agent
 package" chip when nothing is pinned, a branch chip, and color-coded status chips (uncommitted
-changes, committed agent files, folder missing, package source problem with the actual problem in
-its tooltip); the Launch button is labelled with a short name of the configured agent tool
+changes, committed agent files, folder missing, and a red chip for a source problem with the actual problem in
+its tooltip - "Sign-in needed" when the pinned server needs a sign-in, otherwise "Package source problem"
+(`SourceProblemChipText`)); the outcome of the last Launch/Pull/Upgrade action (`StatusMessage`) is shown
+under the repo path; a repo whose folder is missing offers no upgrade; the Launch button is labelled with a
+short name of the configured agent tool
 (falling back to plain "Launch" for a long or unknown name) and the pull button reads "Git Pull"
 (`AgentControl-LauncherUI-RepoCardChips`). A lightweight `RefreshCheap` path (branch
 resolution, cached committed-files badge, pin and source problem - it never reads a package
@@ -153,7 +157,10 @@ existing pin. It shows three columns - source, package, version. Selecting a sou
 source's package names from `PackageVersionCache` in the background, with a progress indicator
 and cancellation; a source that cannot be read shows its error inline, with a **Retry** button that reads
 only that source (or, when only a package's versions failed, only those) again, and never blocks the other
-sources (`AgentControl-LauncherUI-ResponsiveOperations`). Selecting a package lists its versions in
+sources (`AgentControl-LauncherUI-ResponsiveOperations`). A source whose folder is missing is explained in
+words, naming the folder; until a package is selected the version column says "Select a package to see its
+versions." (`ShowVersionsHint`); each source row has a UI Automation name made of its alias, kind and status
+(`AutomationName`). Selecting a package lists its versions in
 descending order (defaulting to latest), and
 confirming reports the full package reference - source alias, name and version - so the pin
 records the source. The three-column layout was chosen over a grouped single list because the
@@ -164,7 +171,8 @@ custom-command entry field visibility. It lists the configured package sources a
 `PackageSourceItemViewModel` rows (alias, kind icon from `PackageSourceIcons`, shortened
 location, and a folder-exists status computed on a background thread; a server source shows "Not checked"
 because it is never contacted merely to draw the list), offers Add Zip-Package Folder, Add NuGet-Package
-Folder, **Add NuGet-Package Server**, Edit and Remove, and asks the window to open a
+Folder and **Add NuGet-Package Server** beneath the list, with Edit and Remove (which act on the selected row) on
+the list's header line, and asks the window to open a
 `SourceEditorViewModel` dialog for adding and editing; removal asks for confirmation and warns
 that repos pinned to the source will show a source problem. `SourceEditorViewModel` validates the alias
 (required, unique ignoring case, fixed once the source exists), the location (absolute folder
@@ -248,6 +256,9 @@ convention" decision. `FavoriteColorConverter` complements it, binding the same 
 value to the star glyph's color (gold when favorited, otherwise the icon's default theme
 foreground via `AvaloniaProperty.UnsetValue`), so a favorited repo's star also reads as
 "activated" through color rather than relying solely on the filled-vs-outline glyph shape.
+`AgentToolKindDisplayNameConverter` shows each `AgentToolKind` in the Settings window's agent tool picker
+under a friendly name (`GitHub Copilot CLI`, `Cursor`, `Claude Code`, `Custom command`) while the picker's
+selected value, and therefore the persisted setting, stays the enum value.
 The `.axaml` Views other than `MainWindow`
 (`AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`,
 `SettingsWindow`, `SourceEditorWindow`, `CredentialPromptWindow`) contain no logic beyond Avalonia's XAML-loading boilerplate,

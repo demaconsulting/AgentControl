@@ -21,6 +21,24 @@
         <Style Selector="materialIcons|MaterialIcon.testFail">
             <Setter Property="Foreground" Value="#E5534B" />
         </Style>
+
+        <!-- The form is a stack of sections (Source, Packages, Sign-in, Package signatures,
+             Connection test): a section header is larger and bolder than a field label, and a thin
+             rule above it separates the sections -->
+        <Style Selector="TextBlock.section">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Margin" Value="0,0,0,2" />
+        </Style>
+        <Style Selector="Border.sectionRule">
+            <Setter Property="Height" Value="1" />
+            <Setter Property="Background" Value="Gray" />
+            <Setter Property="Opacity" Value="0.4" />
+            <Setter Property="Margin" Value="0,12,0,2" />
+        </Style>
+        <Style Selector="TextBlock.fieldLabel">
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
     </Window.Styles>
     <!-- The form scrolls when the window is taller than the screen allows (the window limits its own
          height on opening); the Save and Cancel buttons stay visible below it -->
@@ -28,11 +46,17 @@
     <ScrollViewer Grid.Row="0" Name="SourceEditorScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
     <StackPanel Spacing="6" Margin="0,0,12,0">
 
-        <!-- Alias: the name repos use to refer to this source; fixed once the source exists -->
-        <TextBlock Text="Alias" FontWeight="Bold" />
+        <!-- Section: Source. The alias is the name repos use to refer to this source, fixed once the
+             source exists; the location is a folder path with a native folder picker or - for a
+             server - the address of the feed's V3 service index. -->
+        <TextBlock Classes="section" Text="Source" />
+
+        <TextBlock Text="Alias" Classes="fieldLabel" />
         <TextBox Name="SourceAliasTextBox"
                   AutomationProperties.AutomationId="SourceAliasTextBox"
                   PlaceholderText="For example: Contoso"
+                  ToolTip.Tip="The name repos use to refer to this source; it is fixed once the source is saved"
+                  ToolTip.ShowOnDisabled="True"
                   IsEnabled="{Binding IsAliasEditable}"
                   Text="{Binding Alias}" />
         <TextBlock Name="SourceAliasHelpText"
@@ -46,11 +70,9 @@
                     Text="{Binding AliasError}"
                     Foreground="Red" FontSize="12" TextWrapping="Wrap" />
 
-        <!-- Location: a folder path with a native folder picker, or - for a server - the address of
-             the feed's V3 service index -->
         <TextBlock Name="SourceLocationLabel"
                     AutomationProperties.AutomationId="SourceLocationLabel"
-                    Text="{Binding LocationLabel}" FontWeight="Bold" Margin="0,8,0,0" />
+                    Text="{Binding LocationLabel}" Classes="fieldLabel" Margin="0,8,0,0" />
         <Grid ColumnDefinitions="*,Auto">
             <TextBox Grid.Column="0"
                       Name="SourceLocationTextBox"
@@ -95,11 +117,13 @@
                         Foreground="#D29922" FontSize="12" TextWrapping="Wrap" />
         </StackPanel>
 
-        <!-- Package IDs: a NuGet source lists the packages it offers -->
+        <!-- Section: Packages (NuGet sources). A NuGet source lists the packages it offers. -->
         <StackPanel Name="SourceEditorPackageIdsSection"
                      AutomationProperties.AutomationId="SourceEditorPackageIdsSection"
-                     IsVisible="{Binding IsNuGet}" Spacing="6" Margin="0,8,0,0">
-            <TextBlock Text="Package IDs" FontWeight="Bold" />
+                     IsVisible="{Binding IsNuGet}" Spacing="6">
+            <Border Classes="sectionRule" />
+            <TextBlock Classes="section" Text="Packages" />
+            <TextBlock Text="Package IDs" Classes="fieldLabel" />
             <TextBlock Name="SourcePackageIdsHelpText"
                         AutomationProperties.AutomationId="SourcePackageIdsHelpText"
                         Text="{Binding PackageIdsHelp}"
@@ -134,6 +158,7 @@
                           AutomationProperties.AutomationId="SourcePackageIdList"
                           ItemsSource="{Binding PackageIds}"
                           SelectedItem="{Binding SelectedPackageId, Mode=TwoWay}"
+                          BorderBrush="Gray" BorderThickness="1" CornerRadius="4"
                           MinHeight="60" MaxHeight="120"
                           Margin="0,0,8,0" />
                 <Button Grid.Column="1"
@@ -152,13 +177,44 @@
                         Foreground="Red" FontSize="12" TextWrapping="Wrap" />
         </StackPanel>
 
-        <!-- Package signatures (NuGet sources only): require a valid signature, optionally pinned to
-             one publisher's certificate. Disabled, with an explanation on hover, where the platform
-             cannot verify signatures. -->
+        <!-- Section: Sign-in (servers only). AgentControl asks when the server needs it; this is where
+             a sign-in that was saved on this computer can be forgotten again. -->
+        <StackPanel Name="SourceEditorSignInSection"
+                     AutomationProperties.AutomationId="SourceEditorSignInSection"
+                     IsVisible="{Binding IsServer}" Spacing="6">
+            <Border Classes="sectionRule" />
+            <TextBlock Classes="section" Text="Sign-in" />
+            <TextBlock Name="SourceSignInHelpText"
+                        AutomationProperties.AutomationId="SourceSignInHelpText"
+                        Text="{x:Static vm:SourceEditorViewModel.SignInHelpText}"
+                        FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Name="SourceForgetSignInButton"
+                         AutomationProperties.AutomationId="SourceForgetSignInButton"
+                         Command="{Binding ForgetSavedSignInCommand}"
+                         ToolTip.Tip="{Binding ForgetTooltip}"
+                         ToolTip.ShowOnDisabled="True">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <materialIcons:MaterialIcon Kind="KeyRemove" />
+                        <TextBlock Text="{x:Static vm:SourceEditorViewModel.ForgetLabel}" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+            <TextBlock Name="SourceForgetResultText"
+                        AutomationProperties.AutomationId="SourceForgetResultText"
+                        IsVisible="{Binding HasForgetResult}"
+                        Text="{Binding ForgetResultText}"
+                        FontSize="12" Opacity="0.85" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Section: Package signatures (NuGet sources only): require a valid signature, optionally
+             pinned to one publisher's certificate. Disabled, with an explanation on hover, where the
+             platform cannot verify signatures. -->
         <StackPanel Name="SourceEditorSignatureSection"
                      AutomationProperties.AutomationId="SourceEditorSignatureSection"
-                     IsVisible="{Binding ShowSignatureOptions}" Spacing="6" Margin="0,8,0,0">
-            <TextBlock Text="Package signatures" FontWeight="Bold" />
+                     IsVisible="{Binding ShowSignatureOptions}" Spacing="6">
+            <Border Classes="sectionRule" />
+            <TextBlock Classes="section" Text="Package signatures" />
             <CheckBox Name="SourceRequireSignedCheckBox"
                        AutomationProperties.AutomationId="SourceRequireSignedCheckBox"
                        IsEnabled="{Binding IsRequireSignedEnabled}"
@@ -170,7 +226,7 @@
                         AutomationProperties.AutomationId="SourceSignatureHelpText"
                         Text="{x:Static vm:SourceEditorViewModel.SignatureHelpText}"
                         FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-            <TextBlock Text="Trusted signer certificate fingerprint (SHA-256)" Margin="0,2,0,0" />
+            <TextBlock Text="Trusted signer certificate fingerprint (SHA-256)" Classes="fieldLabel" Margin="0,2,0,0" />
             <TextBox Name="SourceSignerFingerprintTextBox"
                       AutomationProperties.AutomationId="SourceSignerFingerprintTextBox"
                       IsEnabled="{Binding IsFingerprintEnabled}"
@@ -189,11 +245,13 @@
                         Foreground="Red" FontSize="12" TextWrapping="Wrap" />
         </StackPanel>
 
-        <!-- Test connection (servers only): try the address before saving. Shows progress with a
-             Cancel button while it runs, then the outcome in words. -->
+        <!-- Section: Connection test (servers only): try the address before saving. Shows progress with
+             a "Cancel test" button while it runs, then the outcome in words. -->
         <StackPanel Name="SourceEditorTestSection"
                      AutomationProperties.AutomationId="SourceEditorTestSection"
-                     IsVisible="{Binding IsServer}" Spacing="6" Margin="0,8,0,0">
+                     IsVisible="{Binding IsServer}" Spacing="6">
+            <Border Classes="sectionRule" />
+            <TextBlock Classes="section" Text="Connection test" />
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Name="SourceTestConnectionButton"
                          AutomationProperties.AutomationId="SourceTestConnectionButton"
@@ -211,22 +269,7 @@
                          Command="{Binding CancelTestCommand}"
                          ToolTip.Tip="Stop the connection test (this also closes a sign-in dialog it opened)"
                          Content="Cancel test" />
-                <Button Name="SourceForgetSignInButton"
-                         AutomationProperties.AutomationId="SourceForgetSignInButton"
-                         Command="{Binding ForgetSavedSignInCommand}"
-                         ToolTip.Tip="{Binding ForgetTooltip}"
-                         ToolTip.ShowOnDisabled="True">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <materialIcons:MaterialIcon Kind="KeyRemove" />
-                        <TextBlock Text="{x:Static vm:SourceEditorViewModel.ForgetLabel}" />
-                    </StackPanel>
-                </Button>
             </StackPanel>
-            <TextBlock Name="SourceForgetResultText"
-                        AutomationProperties.AutomationId="SourceForgetResultText"
-                        IsVisible="{Binding HasForgetResult}"
-                        Text="{Binding ForgetResultText}"
-                        FontSize="12" Opacity="0.85" TextWrapping="Wrap" />
 
             <!-- Progress while the test runs -->
             <StackPanel Name="SourceTestProgressPanel"

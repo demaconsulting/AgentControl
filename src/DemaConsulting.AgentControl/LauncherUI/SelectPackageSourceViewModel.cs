@@ -106,6 +106,7 @@ internal sealed class SelectPackageSourceViewModel : ViewModelBase
             if (SetField(ref _isLoading, value))
             {
                 OnPropertyChanged(nameof(StatusText));
+                OnPropertyChanged(nameof(AutomationName));
             }
         }
     }
@@ -123,6 +124,7 @@ internal sealed class SelectPackageSourceViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(HasError));
                 OnPropertyChanged(nameof(StatusText));
+                OnPropertyChanged(nameof(AutomationName));
             }
         }
     }
@@ -137,6 +139,19 @@ internal sealed class SelectPackageSourceViewModel : ViewModelBase
     ///     or how many packages it offers.
     /// </summary>
     public string StatusText => GetStatusText();
+
+    /// <summary>
+    ///     Gets the text UI Automation (screen readers, tests) reads for the whole row: the alias, the
+    ///     kind of source and its status, because the row's visible parts are separate text elements.
+    /// </summary>
+    public string AutomationName => $"{Alias}, {TypeName}, {StatusText}";
+
+    /// <summary>
+    ///     Returns <see cref="AutomationName"/>: a list box names each row for UI Automation by the
+    ///     row object's text, so this is what a screen reader or a test reads for the row.
+    /// </summary>
+    /// <returns>The row's automation name.</returns>
+    public override string ToString() => AutomationName;
 
     /// <summary>
     ///     Describes the source's loading state in a few words.
@@ -179,6 +194,7 @@ internal sealed class SelectPackageSourceViewModel : ViewModelBase
         ErrorMessage = null;
         IsLoading = false;
         OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(AutomationName));
     }
 
     /// <summary>
