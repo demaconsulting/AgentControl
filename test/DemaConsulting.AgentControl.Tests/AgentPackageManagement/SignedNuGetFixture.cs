@@ -97,6 +97,14 @@ internal static class SignedNuGetFixture
     private const string PackageSha256 = "2B6B52556E27E1B7913F33EEDEB95568110C746BD64AFFF74357F1683878323A";
 
     /// <summary>
+    ///     The offset of the byte flipped to make an altered copy of the package: it lies inside the
+    ///     compressed data of the <c>lib/net45/Newtonsoft.Json.dll</c> entry of the pinned package
+    ///     (bytes 798619 to 1063235), so the archive stays readable but its signed content no longer
+    ///     matches its signature.
+    /// </summary>
+    private const int AlteredByteOffset = 1_000_000;
+
+    /// <summary>
     ///     The package downloaded for this run (or why it could not be).
     /// </summary>
     private static readonly Lazy<(string? Path, string? SkipReason)> Download = new(DownloadPackage);
@@ -133,6 +141,21 @@ internal static class SignedNuGetFixture
     {
         var target = Path.Combine(feedFolder, $"{PackageId.ToLowerInvariant()}.{PackageVersion}.nupkg");
         File.Copy(Download.Value.Path!, target, overwrite: true);
+        return target;
+    }
+
+    /// <summary>
+    ///     Copies the signed package into a folder feed under its standard file name with one byte
+    ///     of its content flipped, so that its signature no longer matches the content it signed.
+    /// </summary>
+    /// <param name="feedFolder">The existing feed folder.</param>
+    /// <returns>The path of the altered package.</returns>
+    public static string CopyAlteredToFeed(string feedFolder)
+    {
+        var bytes = File.ReadAllBytes(Download.Value.Path!);
+        bytes[AlteredByteOffset] ^= 0xFF;
+        var target = Path.Combine(feedFolder, $"{PackageId.ToLowerInvariant()}.{PackageVersion}.nupkg");
+        File.WriteAllBytes(target, bytes);
         return target;
     }
 

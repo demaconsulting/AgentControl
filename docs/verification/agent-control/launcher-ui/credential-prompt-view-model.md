@@ -17,6 +17,8 @@ N/A - standard test environment (no window is created by these tests).
 - The origin text is the server's scheme, host and port, shown for both a secure and an insecure server; only
   the insecure one is flagged; the source alias is named; the session-only sentence is exactly "Used for this
   session only - AgentControl does not save it."
+- The previous-credential-rejected warning is set when the request says the earlier credential for the server was
+  rejected, and is clear on a first request.
 - The "Remember on this computer (saved by your Git credential helper)" choice is unticked by default; it can be
   ticked only when the question says a credential helper can keep the sign-in, and is otherwise disabled with an
   explanation and never reflected in the answer; ticking it changes the note to say that the Git credential helper
@@ -30,10 +32,20 @@ N/A - standard test environment (no window is created by these tests).
 
 **CredentialPromptViewModel_ShowsDestination**: A view model for an `https` feed with a non-default port and
 one for an `http` loopback feed show their origins, name the source in the explanation, flag only the `http`
-one as insecure, and expose the session-only sentence; a null request throws. This scenario is tested by
-`CredentialPromptViewModel_Constructor_ShowsOriginSourceAndSessionNote` and
-`CredentialPromptViewModel_Constructor_NullRequest_Throws`, covering
-`AgentControl-CredentialPromptViewModel-ShowsDestination`.
+one as insecure, and expose the session-only sentence. This scenario is tested by
+`CredentialPromptViewModel_Constructor_ShowsOriginSourceAndSessionNote` (the session-only sentence is also
+checked in the default state by
+`CredentialPromptViewModel_Remember_TickedWhenAvailable_AnswersWithRememberAndChangesTheNote`), covering
+`AgentControl-CredentialPromptViewModel-ShowsDestination`,
+`AgentControl-CredentialPromptViewModel-InsecureHttpFlag` and
+`AgentControl-CredentialPromptViewModel-SessionOnlyNote`. A null request is refused by
+`CredentialPromptViewModel_Constructor_NullRequest_Throws`, a defensive test that no requirement cites.
+
+**CredentialPromptViewModel_PreviousCredentialRejected**: A view model built from a request that says the earlier
+credential for the server was rejected shows the rejected-credential warning, and one built from a first request
+(no earlier credential rejected) does not. This scenario is tested by
+`CredentialPromptViewModel_Constructor_PreviousCredentialRejected_ShowsWarningOnlyWhenRejected`, covering
+`AgentControl-CredentialPromptViewModel-PreviousCredentialRejected`.
 
 **CredentialPromptViewModel_RememberOption**: With a request that says a credential helper is available the choice
 is enabled, unticked by default, with its enabled tooltip; ticking it changes the note to the saved-by-the-helper
@@ -42,7 +54,11 @@ is available the choice is shown disabled with the
 explanatory tooltip, setting it has no effect, and signing in completes with the flag clear. This scenario is tested
 by `CredentialPromptViewModel_Remember_TickedWhenAvailable_AnswersWithRememberAndChangesTheNote` and
 `CredentialPromptViewModel_Remember_NoCredentialHelper_IsDisabledAndNeverRemembers`, covering
-`AgentControl-CredentialPromptViewModel-RememberOption`.
+`AgentControl-CredentialPromptViewModel-RememberOption` (enabled and unticked by default),
+`AgentControl-CredentialPromptViewModel-RememberUnavailable`,
+`AgentControl-CredentialPromptViewModel-RememberNeverWithoutHelper`,
+`AgentControl-CredentialPromptViewModel-RememberAnswer` and
+`AgentControl-CredentialPromptViewModel-RememberNote`.
 
 **CredentialPromptViewModel_SignIn**: Sign in is disabled with nothing entered, with only a user name and with
 a blank user name; it is enabled with both. Signing in completes once with a credential whose user name is
@@ -51,4 +67,6 @@ nothing; cancelling completes with no credential and signing in before the form 
 scenario is tested by `CredentialPromptViewModel_CanSignIn_NeedsUserNameAndPassword`,
 `CredentialPromptViewModel_SignIn_EnteredCredential_CompletesOnceWithTrimmedUserName` and
 `CredentialPromptViewModel_Cancel_CompletesWithNoCredential`, covering
-`AgentControl-CredentialPromptViewModel-SignIn`.
+`AgentControl-CredentialPromptViewModel-SignInRequiresBoth`, `AgentControl-CredentialPromptViewModel-SignIn`,
+`AgentControl-CredentialPromptViewModel-PasswordVerbatim`, `AgentControl-CredentialPromptViewModel-Cancel` and
+`AgentControl-CredentialPromptViewModel-AnswerOnce`.

@@ -32,7 +32,10 @@ skipped). Junction tests run on Windows only (they skip elsewhere) and need no p
 - A package folder without a content folder is rejected when opened.
 - A path that escapes the repo, a path outside the content folder, and a symbolic link or junction
   at the package folder, the content folder, any directory leading to a file, or the file itself
-  are refused, with the repo's managed folders untouched.
+  are refused, with the repo's managed folders untouched; a broken link at a requested root-level
+  file is refused like any other link instead of being treated as a missing file.
+- A zip package given an invalid or unsupported path is reported as an `InvalidOperationException`
+  rather than a path exception.
 - Release notes and the AGENTS.md template are read from a folder package, or reported absent.
 - A repo whose `.github` folder, a managed folder, or a folder on a destination path is a symbolic
   link or junction is refused with nothing deleted or written (the link target is unchanged and
@@ -52,7 +55,9 @@ naming it. This scenario is tested by
 `PackageContentExtractor_Extract_DirectoryPackage_NeverModifiesPackageFolder`,
 `PackageContentExtractor_Extract_ZipAndDirectoryWithSameContent_ProduceIdenticalRepoTrees`, and
 `DirectoryPackageContentReader_Open_NoContentFolder_ThrowsInvalidOperationException`, covering
-`AgentControl-PackageContentExtractor-ExtractFromFolder`.
+`AgentControl-PackageContentExtractor-ExtractFromFolder` (a repo that has the same managed folders as the same
+content supplied as a zip), `-ReplaceManagedFolders` (the stale-file test), `-NoRootFilesCopied` (the fresh-repo test),
+`-PackageNeverModified` and `-RejectMissingContentFolder` (each prefixed `AgentControl-PackageContentExtractor`).
 
 **PackageContentExtractor_RejectLinksAndTraversal_BeforeAnyDeletion**: A reader listing a path that
 escapes the repo (two spellings) makes extraction fail while a pre-existing managed file survives;
@@ -62,7 +67,10 @@ directory, a symbolic content folder, a symbolic package folder, a symbolic pare
 ordinary file, and a symbolic release-notes file are each refused, the first with the repo's
 existing managed content surviving; the same refusals are shown on Windows with directory junctions
 as the package folder, the content folder, a parent directory of an ordinary file, and a directory
-inside the package (the last also leaving the repo's existing managed content intact). This
+inside the package (the last also leaving the repo's existing managed content intact). A broken symbolic link
+at a requested root-level file (a link to a target that does not exist, such as `AGENTS.md`) makes
+`ReadText` throw `InvalidOperationException` instead of returning none; the test skips where symbolic links cannot
+be created. This
 scenario is tested by
 `PackageContentExtractor_Extract_TraversalPathFromReader_ThrowsBeforeDeletingManagedFolders`,
 `DirectoryPackageContentReader_OpenReadAndReadText_TraversalOrMissingPath_Rejected`,
@@ -70,6 +78,7 @@ scenario is tested by
 `DirectoryPackageContentReader_ListFiles_SymlinkedDirectoryInPackage_ThrowsInvalidOperationException`,
 `DirectoryPackageContentReader_Open_ContentFolderIsSymlink_ThrowsInvalidOperationException`,
 `DirectoryPackageContentReader_ReadText_SymlinkedReleaseNotes_ThrowsInvalidOperationException`,
+`DirectoryPackageContentReader_ReadText_BrokenFileSymlinkAtRoot_ThrowsInvalidOperationException`,
 `DirectoryPackageContentReader_Open_PackageFolderIsSymlink_ThrowsInvalidOperationException`,
 `DirectoryPackageContentReader_OpenRead_LinkedParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException`,
 `PackageContentExtractor_Extract_JunctionInPackage_ThrowsBeforeDeletingManagedFolders`,
@@ -77,7 +86,10 @@ scenario is tested by
 `DirectoryPackageContentReader_Open_PackageFolderIsJunction_ThrowsInvalidOperationException`,
 `DirectoryPackageContentReader_Open_ContentFolderIsJunction_ThrowsInvalidOperationException`, and
 `DirectoryPackageContentReader_OpenRead_JunctionParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException`,
-covering `AgentControl-PackageContentExtractor-RejectLinksAndTraversal`.
+covering `AgentControl-PackageContentExtractor-RejectLinksAndTraversal` (the extraction-level tests),
+`-RejectPathOutsideContent`, `-RejectLinkedPackageFolder`, `-RejectLinkedPackageDirectory`,
+`-RejectLinkedPackageFile` and `-RejectBrokenLink` (each prefixed `AgentControl-PackageContentExtractor`; the
+mapping of test to requirement is in the requirements file).
 
 **PackageContentExtractor_RefuseLinkedRepoFolders_BeforeAnyChange**: With the repo's `.github`
 folder linked to an outside folder holding content, with one managed folder linked (while another,
@@ -98,12 +110,35 @@ and symbolic links on Linux (`ubuntu@`). This scenario is tested by
 `PackageContentExtractor_Extract_RepoRootUnderSymlink_Succeeds`,
 `PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsSymlink_ReturnsFalse`, and
 `PackageContentExtractor_AllManagedFoldersExist_AllFoldersOrdinary_ReturnsTrue`, covering
-`AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`.
+`AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders` (the three extraction tests per operating system),
+`-ManagedFoldersExist` (the `AllManagedFoldersExist` tests) and `-AcceptRepoRootThroughLink` (the repo-root tests;
+each prefixed `AgentControl-PackageContentExtractor`).
 
 **PackageContentExtractor_ReadRootFiles_ReturnsTextOrNull**: Release notes and the AGENTS.md
-template are returned from a folder package's content root, and `null` when absent; null
-arguments to `Extract` are rejected. This scenario is tested by
-`PackageContentExtractor_ReadReleaseNotes_DirectoryPackage_ReturnsContentOrNull`,
-`PackageContentExtractor_ReadAgentsMdTemplate_DirectoryPackage_ReturnsContentOrNull`, and
-`PackageContentExtractor_Extract_NullArguments_ThrowsArgumentNullException`, covering
-`AgentControl-PackageContentExtractor-ReadRootFiles`.
+template are returned from a folder package's content root, and `null` when absent. This scenario
+is tested by
+`PackageContentExtractor_ReadReleaseNotes_DirectoryPackage_ReturnsContentOrNull` and
+`PackageContentExtractor_ReadAgentsMdTemplate_DirectoryPackage_ReturnsContentOrNull`, covering
+`AgentControl-PackageContentExtractor-ReadReleaseNotes` and
+`AgentControl-PackageContentExtractor-ReadAgentsMdTemplate`. The null-argument test
+`PackageContentExtractor_Extract_NullArguments_ThrowsArgumentNullException` is a defensive test that no
+requirement cites.
+
+**PackageContentExtractor_ZipOpenFailure_InvalidPathIsReportedAsInvalidOperation**: Opening a zip
+package with an invalid path (an argument the operating system rejects as a path) throws
+`InvalidOperationException` rather than the underlying path exception. This scenario is tested by
+`ZipPackageContentReader_Open_InvalidPath_ThrowsInvalidOperationException`, covering
+`AgentControl-PackageContentExtractor-ZipOpenFailure`. Opening a missing or corrupt zip is verified through
+`PackageZipExtractor` in the `RepoSync` subsystem tests.
+
+#### Known Limitations
+
+- **Check-then-use link validation cannot be tested deterministically.** Link checks on package and repo paths
+  are followed by the file operation they guard, so a concurrent process that swaps a checked component for a
+  link in between could redirect the operation (a time-of-check-to-time-of-use race). The risk is accepted
+  and documented as a residual risk in the `PackageContentExtractor` and `RepoSync` designs (exploitation needs a
+  concurrent process of the same user, who could write there anyway; the destination chain is re-checked
+  immediately before each creation; the supported model is that the repo and package folders are not modified
+  during extraction; a no-follow open is not portable across Windows, Linux and macOS in .NET). Winning
+  such a race depends on operating-system scheduling, so no unit test can reproduce it reliably; the tests above
+  verify that a link present before the operation starts is always refused.

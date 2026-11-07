@@ -114,6 +114,13 @@ internal sealed class PackageCredentialCallback
     private IDisposable? _lease;
 
     /// <summary>
+    ///     Whether the look-up of a saved sign-in in the user's credential store failed (so
+    ///     nothing is known about what that store holds, and keeping a new sign-in there must not
+    ///     be offered). Written by the single resolution of the memoized answer.
+    /// </summary>
+    private volatile bool _savedLookupFailed;
+
+    /// <summary>
     ///     Initializes the callback for one operation against one feed.
     /// </summary>
     /// <param name="feed">The origin of the feed the operation talks to.</param>
@@ -337,8 +344,9 @@ internal sealed class PackageCredentialCallback
             return null;
         }
 
-        // Tier: ask the user, once; the option to remember is offered only when something can keep it
-        var canRemember = _remembered is not null && await IsRememberAvailableAsync(cancellationToken);
+        // Tier: ask the user, once; the option to remember is offered only when something can keep
+        // it - and not after a failed look-up, which says the user's credential store is unusable
+        var canRemember = _remembered is not null && !_savedLookupFailed && await IsRememberAvailableAsync(cancellationToken);
         WasPrompted = true;
         _logger?.LogDebug("Asking the user for a credential for {FeedOrigin}.", _feed);
         var answer = await _prompt.PromptAsync(
@@ -381,7 +389,9 @@ internal sealed class PackageCredentialCallback
 
     /// <summary>
     ///     Makes sure the user's credential store has been asked for the feed's saved sign-in this
-    ///     session. A failure to ask is not a failure to sign in: the user is simply asked instead.
+    ///     session. A failure to ask is not a failure to sign in: the user is simply asked instead,
+    ///     but without the option to remember the sign-in, because a store that could not be read
+    ///     cannot be relied on to keep anything.
     /// </summary>
     /// <param name="cancellationToken">Cancels the wait.</param>
     /// <returns>A task that completes when the lookup is done.</returns>
@@ -393,8 +403,14 @@ internal sealed class PackageCredentialCallback
         {
             await _store.EnsureRememberedLookupAsync(_feed, FillIntoSessionStoreAsync).WaitAsync(cancellationToken);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The lookup is shared, so every operation that waited for it learns of the failure
+            _savedLookupFailed = true;
             _logger?.LogWarning(ex, "Looking up a saved sign-in for {FeedOrigin} failed.", _feed);
         }
     }
@@ -403,27 +419,21 @@ internal sealed class PackageCredentialCallback
     ///     Asks the user's credential store for the feed's saved sign-in and, when it has one,
     ///     puts it into the session store. Runs at most once per feed per session and does not
     ///     depend on any one operation's cancellation, because other operations wait for it too
-    ///     (the store enforces its own time limit).
+    ///     (the store enforces its own time limit). A failure is not handled here: it faults the
+    ///     shared lookup so that every operation that waits for it sees it.
     /// </summary>
     /// <returns>A task that completes when the lookup is done.</returns>
     private async Task FillIntoSessionStoreAsync()
     {
-        try
+        var found = await _remembered!.FillAsync(_feed, CancellationToken.None);
+        if (found is not null)
         {
-            var found = await _remembered!.FillAsync(_feed, CancellationToken.None);
-            if (found is not null)
-            {
-                _store.Set(_feed, found, fromRememberedStore: true);
-                _logger?.LogInformation("A saved sign-in for {FeedOrigin} was found on this computer.", _feed);
-            }
-            else
-            {
-                _logger?.LogDebug("No saved sign-in for {FeedOrigin} was found on this computer.", _feed);
-            }
+            _store.Set(_feed, found, fromRememberedStore: true);
+            _logger?.LogInformation("A saved sign-in for {FeedOrigin} was found on this computer.", _feed);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        else
         {
-            _logger?.LogWarning(ex, "Looking up a saved sign-in for {FeedOrigin} failed.", _feed);
+            _logger?.LogDebug("No saved sign-in for {FeedOrigin} was found on this computer.", _feed);
         }
     }
 

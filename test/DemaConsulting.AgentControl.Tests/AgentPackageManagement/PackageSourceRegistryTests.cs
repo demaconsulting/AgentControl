@@ -236,6 +236,91 @@ public class PackageSourceRegistryTests
     }
 
     /// <summary>
+    ///     Test that the registry is a genuine snapshot: changing the caller's definition objects
+    ///     or the list they came in after the registry was built changes neither which aliases
+    ///     exist nor the definition a provider is created from.
+    /// </summary>
+    [Fact]
+    public void PackageSourceRegistry_Constructor_DefinitionsMutatedAfterwards_RegistryIsASnapshot()
+    {
+        // Arrange
+        var original = new PackageSourceDefinition { Alias = "A", Type = PackageSourceType.Zip, Location = "first" };
+        var list = new List<PackageSourceDefinition> { original };
+        PackageSourceDefinition? seen = null;
+        var registry = new PackageSourceRegistry(
+            list,
+            definition =>
+            {
+                seen = definition;
+                return new FakePackageSourceProvider(definition.Alias);
+            });
+
+        // Act: the caller changes its objects and its list after the registry was built
+        original.Location = "changed";
+        original.Alias = "Z";
+        original.PackageIds.Add("late-package");
+        list.Add(new PackageSourceDefinition { Alias = "B", Type = PackageSourceType.Zip, Location = "added" });
+        registry.Resolve("A");
+
+        // Assert: what the registry resolves and builds from is what it was given
+        Assert.NotNull(seen);
+        Assert.Equal("A", seen.Alias);
+        Assert.Equal("first", seen.Location);
+        Assert.Empty(seen.PackageIds);
+        Assert.True(registry.Contains("A"));
+        Assert.False(registry.Contains("Z"));
+        Assert.False(registry.Contains("B"));
+        Assert.Single(registry.Definitions);
+    }
+
+    /// <summary>
+    ///     Test that the definitions the registry reports are copies: changing them, in the list or
+    ///     in the objects, cannot change what the registry reports or resolves later.
+    /// </summary>
+    [Fact]
+    public void PackageSourceRegistry_Definitions_CallerMutatesReturnedDefinitions_RegistryIsUnaffected()
+    {
+        // Arrange
+        PackageSourceDefinition? seen = null;
+        var registry = new PackageSourceRegistry(
+            [new PackageSourceDefinition { Alias = "A", Type = PackageSourceType.Zip, Location = "first" }],
+            definition =>
+            {
+                seen = definition;
+                return new FakePackageSourceProvider(definition.Alias);
+            });
+
+        // Act: the caller changes what it was handed
+        var handedOut = registry.Definitions;
+        handedOut[0].Location = "hacked";
+        handedOut[0].PackageIds.Add("injected");
+
+        // Assert: every access is a new copy, and the registry's own data is untouched
+        Assert.NotSame(handedOut[0], registry.Definitions[0]);
+        Assert.Equal("first", registry.Definitions[0].Location);
+        Assert.Empty(registry.Definitions[0].PackageIds);
+        registry.Resolve("A");
+        Assert.Equal("first", seen!.Location);
+    }
+
+    /// <summary>
+    ///     Test that a null entry in the definitions (for example from a hand-edited settings file)
+    ///     is reported as a configuration problem rather than an incidental null reference.
+    /// </summary>
+    [Fact]
+    public void PackageSourceRegistry_Constructor_NullDefinitionEntry_ThrowsInvalidOperationException()
+    {
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => new PackageSourceRegistry(
+                [new PackageSourceDefinition { Alias = "A", Type = PackageSourceType.Zip, Location = "x" }, null!],
+                _ => new FakePackageSourceProvider("A")));
+
+        // Assert
+        Assert.Contains("missing", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Creates a registry that serves the given fake providers by their aliases.
     /// </summary>
     private static PackageSourceRegistry CreateRegistry(params FakePackageSourceProvider[] providers) =>

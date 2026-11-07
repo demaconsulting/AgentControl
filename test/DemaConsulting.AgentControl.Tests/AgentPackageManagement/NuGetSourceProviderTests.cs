@@ -21,6 +21,7 @@
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoSync;
 
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
@@ -36,6 +37,10 @@ namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 /// </remarks>
 public sealed class NuGetSourceProviderTests : IDisposable
 {
+    /// <summary>
+    ///     The temporary folders (feeds and per-source cache bases) created by the tests, deleted
+    ///     (best effort) when the test ends.
+    /// </summary>
     private readonly List<string> _tempPaths = [];
 
     /// <summary>
@@ -120,6 +125,78 @@ public sealed class NuGetSourceProviderTests : IDisposable
         // Act / Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => provider.ListVersionsAsync(id, cancellation.Token));
+    }
+
+    /// <summary>
+    ///     Test that a token that is already canceled stops a listing before any preparation: no
+    ///     missing-folder report and no cache root is created.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_ListVersions_PreCanceledToken_ThrowsOperationCanceledWithoutPreparingAnything()
+    {
+        // Arrange: a feed folder that does not exist, so any preparation would report it instead
+        var missing = Path.Combine(Path.GetTempPath(), "agentcontrol_missing_feed_" + Guid.NewGuid());
+        var provider = CreateProvider("Feed", missing);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act / Assert: cancellation wins, not DirectoryNotFoundException
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => provider.ListVersionsAsync(UniqueId(), cancellation.Token));
+        Assert.False(Directory.Exists(provider.RootFolder));
+    }
+
+    /// <summary>
+    ///     Test that a token that is already canceled stops an acquisition before any preparation:
+    ///     no missing-folder report and no cache root is created.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_Acquire_PreCanceledToken_ThrowsOperationCanceledWithoutPreparingAnything()
+    {
+        // Arrange
+        var missing = Path.Combine(Path.GetTempPath(), "agentcontrol_missing_feed_" + Guid.NewGuid());
+        var provider = CreateProvider("Feed", missing);
+        var package = new DiscoveredPackage(UniqueId(), ParseVersion("1.0.0"), "1.0.0", "Feed");
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act / Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => provider.AcquireAsync(package, cancellation.Token));
+        Assert.False(Directory.Exists(provider.RootFolder));
+    }
+
+    /// <summary>
+    ///     Test that the options every library call is made with are non-interactive - with and
+    ///     without a credential callback - so that nothing the library or a plug-in does can open a
+    ///     user interface of its own.
+    /// </summary>
+    [Fact]
+    public void NuGetSourceProvider_CreateOptions_AreNonInteractive()
+    {
+        // Arrange
+        var folder = CreateProvider("Feed", CreateTempDirectory());
+        var server = new NuGetSourceProvider(
+            new PackageSourceDefinition
+            {
+                Alias = "Server",
+                Type = PackageSourceType.NuGet,
+                Location = "https://feeds.example.com/v3/index.json"
+            },
+            CreateTempDirectory());
+        var callback = new PackageCredentialCallback(
+            FeedOrigin.Create(new Uri("https://feeds.example.com/v3/index.json")),
+            "Server",
+            new SessionCredentialStore());
+
+        // Act
+        var folderOptions = folder.CreateOptions(null);
+        var serverOptions = server.CreateOptions(callback);
+
+        // Assert
+        Assert.False(folderOptions.Interactive);
+        Assert.False(serverOptions.Interactive);
+        Assert.NotNull(serverOptions.CredentialCallback);
     }
 
     /// <summary>

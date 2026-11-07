@@ -222,7 +222,7 @@ internal static partial class SecretRedactor
 
         var message = new StringBuilder();
         AppendChain(message, exception, 0);
-        return new SanitizedException(
+        return SanitizedException.FromRedactedText(
             exception.GetType().FullName ?? exception.GetType().Name,
             message.ToString(),
             Redact(exception.StackTrace));
@@ -402,7 +402,10 @@ internal static partial class SecretRedactor
         for (; index < text.Length; index++)
         {
             var c = text[index];
-            if (!(char.IsWhiteSpace(c) || c is '&' or ';' or ',' or '\'' or '"' or ')' or ']'))
+            // A closing parenthesis or bracket ends the value only when it is plausibly the end of
+            // surrounding text; inside a value it is part of the (secret) value
+            if (!(char.IsWhiteSpace(c) || c is '&' or ';' or ',' or '\'' or '"' ||
+                  (c is ')' or ']' && IsClosingContext(text, index))))
             {
                 continue;
             }
@@ -498,10 +501,16 @@ internal static partial class SecretRedactor
     /// <param name="text">The text.</param>
     /// <param name="from">The index just after <c>://</c>.</param>
     /// <returns>The index of the first character that cannot belong to the URL. Square brackets
-    ///     are part of it only as a balanced pair, which is how an IPv6 host is written.</returns>
+    ///     are part of it only as a balanced pair, which is how an IPv6 host is written;
+    ///     parentheses are part of it when balanced (a legal path or query character, as in
+    ///     <c>/wiki/Foo_(bar)</c>), and an unmatched <c>)</c> ends it only when it is followed by
+    ///     the end of the text, whitespace or closing or sentence punctuation (see
+    ///     <see cref="IsClosingContext"/>), which is how a parenthesized or markdown-style link
+    ///     ends.</returns>
     private static int FindUrlEnd(string text, int from)
     {
         var inBrackets = false;
+        var parenthesisDepth = 0;
         var index = from;
         while (index < text.Length)
         {
@@ -543,7 +552,17 @@ internal static partial class SecretRedactor
 
                 inBrackets = false;
             }
-            else if (char.IsWhiteSpace(c) || c is '\'' or '"' or '<' or '>' or '`' or '|' or '{' or '}' || (c == ')' && !inBrackets))
+            else if (c == '(')
+            {
+                parenthesisDepth++;
+            }
+            else if (c == ')' && parenthesisDepth > 0)
+            {
+                // The partner of a '(' inside the URL (a legal path or query character)
+                parenthesisDepth--;
+            }
+            else if (char.IsWhiteSpace(c) || c is '\'' or '"' or '<' or '>' or '`' or '|' or '{' or '}' ||
+                     (c == ')' && !inBrackets && IsClosingContext(text, index)))
             {
                 break;
             }
@@ -552,6 +571,32 @@ internal static partial class SecretRedactor
         }
 
         return index;
+    }
+
+    /// <summary>
+    ///     Tells whether an unmatched closing parenthesis or bracket is the end of surrounding text
+    ///     (a parenthesized or markdown-style URL) rather than a character inside a value.
+    /// </summary>
+    /// <remarks>
+    ///     An unmatched closer followed by more value characters (<c>?a=b)c=d</c>) is treated as
+    ///     part of the value, so that the remainder of a query or secret is never left in the
+    ///     output; the cost is that a URL immediately followed by a letter after its closing
+    ///     parenthesis is reduced a little more than strictly necessary, which is the safe direction.
+    /// </remarks>
+    /// <param name="text">The text.</param>
+    /// <param name="index">The index of the closing character.</param>
+    /// <returns><see langword="true"/> when the closer is last in the text or is followed by
+    ///     whitespace, a sentence or closing punctuation, or a backslash.</returns>
+    private static bool IsClosingContext(string text, int index)
+    {
+        if (index + 1 >= text.Length)
+        {
+            return true;
+        }
+
+        var next = text[index + 1];
+        return char.IsWhiteSpace(next) || next is '.' or ',' or ';' or ':' or '!' or '?' or ')' or ']' or '}' or '>' or
+            '\'' or '"' or '\\';
     }
 
     /// <summary>
@@ -707,17 +752,50 @@ public sealed class SanitizedException : Exception
     private readonly string _stackTrace;
 
     /// <summary>
-    ///     Initializes the stand-in.
+    ///     Initializes the stand-in. Internal so that every instance comes from
+    ///     <see cref="SecretRedactor.Sanitize"/> or from a caller in this assembly; whatever text it
+    ///     is given here is redacted by the constructor, so the type's secret-free contract does not
+    ///     depend on every caller remembering to redact.
     /// </summary>
     /// <param name="originalTypeName">The type name of the original exception.</param>
+    /// <param name="message">The message chain; redacted by the constructor.</param>
+    /// <param name="stackTrace">The stack trace; redacted by the constructor.</param>
+    internal SanitizedException(string originalTypeName, string message, string stackTrace)
+        : this(originalTypeName, message, stackTrace, alreadyRedacted: false)
+    {
+    }
+
+    /// <summary>
+    ///     Initializes the stand-in, redacting the text unless it has already been redacted piece
+    ///     by piece.
+    /// </summary>
+    /// <remarks>
+    ///     A message chain is assembled from separately redacted messages; redacting the assembled
+    ///     text again would let a rest-of-line rule (an authorization header) swallow the exceptions
+    ///     that follow it on the same line, so <see cref="SecretRedactor.Sanitize"/> uses
+    ///     <see cref="FromRedactedText"/>, which skips the second pass.
+    /// </remarks>
+    /// <param name="originalTypeName">The type name of the original exception.</param>
+    /// <param name="message">The message chain.</param>
+    /// <param name="stackTrace">The stack trace.</param>
+    /// <param name="alreadyRedacted"><see langword="true"/> when the text has been redacted by the
+    ///     caller; <see langword="false"/> to redact it here.</param>
+    private SanitizedException(string originalTypeName, string message, string stackTrace, bool alreadyRedacted)
+        : base(alreadyRedacted ? message : SecretRedactor.Redact(message))
+    {
+        OriginalTypeName = alreadyRedacted ? originalTypeName : SecretRedactor.Redact(originalTypeName);
+        _stackTrace = alreadyRedacted ? stackTrace : SecretRedactor.Redact(stackTrace);
+    }
+
+    /// <summary>
+    ///     Creates the stand-in from text that the caller has already redacted piece by piece.
+    /// </summary>
+    /// <param name="originalTypeName">The redacted type name.</param>
     /// <param name="message">The redacted message chain.</param>
     /// <param name="stackTrace">The redacted stack trace.</param>
-    public SanitizedException(string originalTypeName, string message, string stackTrace)
-        : base(message)
-    {
-        OriginalTypeName = originalTypeName;
-        _stackTrace = stackTrace;
-    }
+    /// <returns>The stand-in, holding the text as given.</returns>
+    internal static SanitizedException FromRedactedText(string originalTypeName, string message, string stackTrace) =>
+        new(originalTypeName, message, stackTrace, alreadyRedacted: true);
 
     /// <summary>
     ///     Gets the type name of the exception this one stands in for.

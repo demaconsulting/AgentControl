@@ -35,12 +35,16 @@ N/A - standard test environment.
   saving an invalid editor raises nothing.
 - Editing an existing source keeps its alias and any value of it the dialog does not show.
 - The connection test needs a valid address and a package ID, lists the first package ID only, shows progress
-  and a Cancel action, reports each outcome in plain words, and drops its result when the address changes.
+  and a Cancel action, reports each outcome in plain words, drops a showing result when the address changes, and
+  never shows the result of a test that was still running when the address, the package IDs or the insecure-HTTP
+  choice changed.
 - The signature options appear for NuGet folder and server sources and not for a zip source, start off, and where
   verification is unsupported the checkbox is disabled with the explanation while an existing requiring source keeps
   its settings; the fingerprint is usable only while signatures are required, is validated and saved normalized (and
   not at all when unused); an unreadable fingerprint blocks saving.
-- "Forget saved sign-in" is available only for a usable server address with a credential store, asks for confirmation
+- "Forget saved sign-in" is available only for a server address that would be accepted for saving the source (`https`
+  unless insecure HTTP is ticked, ending in `index.json`, no embedded credential) with a credential store and a Git
+  credential helper that applies to it - the helper is never asked about any other address - asks for confirmation
   naming the server before doing anything, forgets only after the view confirms, and reports every outcome in words.
 
 #### Test Scenarios
@@ -63,7 +67,11 @@ This scenario is tested by
 `SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave`,
 `SourceEditorViewModel_AllowInsecureHttp_Toggled_AcceptsHttpAndShowsWarning`, and
 `SourceEditorViewModel_PackageIds_EmptyForServer_ReportsServerSpecificMessage`, covering
-`AgentControl-SourceEditorViewModel-Validation`.
+`AgentControl-SourceEditorViewModel-Validation`, `-AliasRules`, `-FolderLocation`, `-NoEmbeddedCredential`,
+`-CredentialNeverEchoed`, `-ServerAddressIndexJson`, `-InsecureHttpAddress`, `-PackageIdRequired`,
+`-PackageIdRequiredServerMessage` and `-NoErrorsUntilTouched` (each prefixed `AgentControl-SourceEditorViewModel`; the
+mapping of test to requirement is in the requirements file). The null-alias-callback test is defensive and is not cited
+by a requirement.
 
 **SourceEditorViewModel_ServerSource_TitleLabelExamplesAndInsecureChoice**: A new server editor has the
 server title, the "Feed address" label, the JFrog Artifactory and Azure Artifacts examples, the package ID
@@ -74,7 +82,8 @@ a server with its settings. This scenario is tested by
 `SourceEditorViewModel_Constructor_NuGetFolder_IsNotAServerAndCannotTest`,
 `SourceEditorViewModel_SaveCommand_ValidServer_SavesAddressPackageIdsAndInsecureChoice` and
 `SourceEditorViewModel_EditExistingServer_StaysAServerWithItsSettings`, covering
-`AgentControl-SourceEditorViewModel-ServerSource`.
+`AgentControl-SourceEditorViewModel-ServerSource`, `-ServerExamples`, `-InsecureHttpChoice`, `-InsecureHttpWarning`
+(the last tested by the insecure-HTTP toggle test above), `-ServerSettingsSaved` and `-ServerSettingsEdited`.
 
 **SourceEditorViewModel_TestConnection_ReportsEveryOutcomeInWords**: The test is available only with a valid
 address and a package ID (the disabled button's tooltip says what is missing). A successful test lists the
@@ -83,22 +92,32 @@ a server without the package is "Package not found"; each failure kind - sign-in
 timed out, server unreachable - gets its own headline with the provider's message; a configuration error
 raised when the provider is created and an unexpected failure are both reported in the dialog; cancelling a
 running test shows progress naming the package, ends with a neutral "canceled" result, and the test can be run
-again; a result is dropped when the address or package IDs change. This scenario is tested by
+again; a result is dropped when the address changes. A test that is still running when the address, the package IDs
+or the "Allow insecure HTTP" choice change is canceled and its eventual result is never shown: the test holds the
+fake provider at the gate, edits the input, releases the provider and observes that no result, title or error appears
+and that the dialog can test again. This scenario is tested by
 `SourceEditorViewModel_CanTestConnection_NeedsValidAddressAndPackageId`,
 `SourceEditorViewModel_TestConnection_ServerAnswers_ReportsVersionCountAndLatest`,
 `SourceEditorViewModel_TestConnection_PackageMissing_ReportsPackageNotFound`,
 `SourceEditorViewModel_TestConnection_ProviderFails_ReportsHeadlineAndMessage`,
 `SourceEditorViewModel_TestConnection_OtherFailures_AreReportedInTheDialog`,
-`SourceEditorViewModel_TestConnection_CancelWhileRunning_StopsWithCanceledResult` and
-`SourceEditorViewModel_TestConnection_ResultDroppedWhenAddressChanges`, covering
-`AgentControl-SourceEditorViewModel-TestConnection`.
+`SourceEditorViewModel_TestConnection_CancelWhileRunning_StopsWithCanceledResult`,
+`SourceEditorViewModel_TestConnection_ResultDroppedWhenAddressChanges`,
+`SourceEditorViewModel_TestConnection_LocationEditedWhileTesting_StaleResultIsNotShown`,
+`SourceEditorViewModel_TestConnection_PackageIdsEditedWhileTesting_StaleResultIsNotShown` and
+`SourceEditorViewModel_TestConnection_AllowInsecureHttpChangedWhileTesting_StaleResultIsNotShown`, covering
+`AgentControl-SourceEditorViewModel-TestConnection`, `-TestConnectionAvailability`, `-TestConnectionProgress`,
+`-TestConnectionCancel`, `-TestConnectionSuccess`, `-TestConnectionPackageNotFound`, `-TestConnectionFailureReasons`,
+`-TestConnectionOtherFailures`, `-TestConnectionResultDropped` and `-TestConnectionStaleResult` (each prefixed
+`AgentControl-SourceEditorViewModel`).
 
 **SourceEditorViewModel_PackageIds_InvalidOrDuplicateRefusedAndRemovable**: An invalid or
 duplicate package identifier cannot be added, and a listed identifier is removed by the remove
 command. This scenario is tested by
 `SourceEditorViewModel_AddPackageId_InvalidOrDuplicate_IsRefused` and
 `SourceEditorViewModel_RemovePackageId_RemovesSelectedId`, covering
-`AgentControl-SourceEditorViewModel-PackageIds`.
+`AgentControl-SourceEditorViewModel-PackageIds` (adding, evidenced by the tests that add IDs for save),
+`-PackageIdRemove`, `-PackageIdMalformed` and `-PackageIdDuplicate`.
 
 **SourceEditorViewModel_Save_ValidSourceRaisesSavedWithDefinition**: A valid zip source and a
 valid NuGet source raise `Saved` with the entered alias, location and identifiers; editing an
@@ -108,7 +127,8 @@ not raise `Saved`. This scenario is tested by
 `SourceEditorViewModel_SaveCommand_ValidNuGetSource_SavesPackageIds`,
 `SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved`, and
 `SourceEditorViewModel_SaveCommand_InvalidEditor_DoesNotRaiseSaved`, covering
-`AgentControl-SourceEditorViewModel-Save`.
+`AgentControl-SourceEditorViewModel-Save`, `-EditKeepsAlias`, `-EditKeepsHiddenSettings`, `-SourceNotModified` and
+`-SaveBlockedWhenInvalid` (each prefixed `AgentControl-SourceEditorViewModel`).
 
 **SourceEditorViewModel_SignatureOptions_OfferedForNuGetAndDisabledWhereUnsupported**: The signature options are
 offered for NuGet folders and servers and not for a zip folder, start unchecked with the fingerprint field unusable;
@@ -120,10 +140,13 @@ folder source can; a source saved with the requirement and no fingerprint pins n
 `SourceEditorViewModel_SignatureOptions_OfferedForNuGetOnlyAndOffByDefault`,
 `SourceEditorViewModel_RequireSigned_SupportedPlatform_CheckboxEnabledAndTickingEnablesTheFingerprint`,
 `SourceEditorViewModel_RequireSigned_UnsupportedPlatform_CheckboxDisabledWithExplanation`,
+`SourceEditorViewModel_RequireSigned_ProbeFails_CheckboxDisabledWithExplanationAndNoThrow`,
 `SourceEditorViewModel_EditExistingRequiringSource_UnsupportedPlatform_KeepsTheSettings`,
 `SourceEditorViewModel_Save_ZipNeverRequiresSignaturesAndFolderCan` and
 `SourceEditorViewModel_Save_RequireSignedWithoutFingerprint_PinsNothing`, covering
-`AgentControl-SourceEditorViewModel-SignatureOptions`.
+`AgentControl-SourceEditorViewModel-SignatureOptions`, `-SignatureExplanation`, `-SignatureUnsupportedPlatform`,
+`-SignatureSettingsKept`, `-SignatureChoiceSaved` and `-ZipNeverRequiresSignatures` (each prefixed
+`AgentControl-SourceEditorViewModel`).
 
 **SourceEditorViewModel_SignerFingerprint_ValidatedAndSavedNormalized**: An unreadable fingerprint is reported only
 after the user typed it and blocks saving, an empty one is fine and a readable one in any common spelling is
@@ -132,14 +155,22 @@ and a fingerprint carries it as 64 upper-case hexadecimal characters. This scena
 `SourceEditorViewModel_Fingerprint_ValidationFollowsTheRules`,
 `SourceEditorViewModel_Fingerprint_NotInUse_IsIgnoredAndNotSaved` and
 `SourceEditorViewModel_Save_RequireSignedWithFingerprint_SavesTheNormalizedFingerprint`, covering
-`AgentControl-SourceEditorViewModel-SignerFingerprint`.
+`AgentControl-SourceEditorViewModel-SignerFingerprint`, `-FingerprintOptional`, `-FingerprintSpellings`,
+`-FingerprintHelp`, `-FingerprintError`, `-FingerprintNormalized` and `-FingerprintNotSavedWhenUnused` (each prefixed
+`AgentControl-SourceEditorViewModel`). The validation test exercises a colon-separated fingerprint; the dash,
+space and lower-case spellings are covered by the same validation rule in `PackageSourceDefinition`, verified in the
+`AgentPackageManagement` subsystem.
 
 **SourceEditorViewModel_ForgetSavedSignIn_ConfirmsFirstAndReportsTheOutcome**: The action is available for a server
 with an acceptable address and a Git credential helper that applies to it, and not for a folder, an unusable
 address, no credential store or a server with no helper configured, with a tooltip that says why; while the check
 for a helper is still running the action is unavailable and the tooltip says it is checking, a check that fails counts
 as "no helper" without throwing, and the helper is asked once per server origin however the rest of the address is
-edited; the command only asks the view to confirm, naming the server, and nothing is removed until the view calls the
+edited; an address that is not acceptable for saving the source - an `https` address that does not end in
+`index.json`, a plain `http` address without the insecure-HTTP opt-in, or an address with embedded credentials - leaves
+the action unavailable and the helper is never asked, while ticking "Allow insecure HTTP" makes the `http` address
+acceptable and the action becomes available; the command only asks the view to confirm, naming the server, and
+nothing is removed until the view calls the
 forget method; the forget method reports "nothing saved", "forgotten", a credential store that refuses and a failure
 in words, and does nothing when the action is not available. This scenario is tested by
 `SourceEditorViewModel_ForgetSavedSignIn_AvailableOnlyForAUsableServerWithACredentialStore`,
@@ -148,5 +179,9 @@ in words, and does nothing when the action is not available. This scenario is te
 `SourceEditorViewModel_ForgetSavedSignIn_NotAvailable_DoesNothing`,
 `SourceEditorViewModel_ForgetSavedSignIn_NoCredentialHelper_UnavailableWithExplanation`,
 `SourceEditorViewModel_ForgetSavedSignIn_HelperCheckPendingThenAnswered_FollowsTheAnswer` and
-`SourceEditorViewModel_ForgetSavedSignIn_AddressEdits_AskTheHelperOncePerOrigin`, covering
-`AgentControl-SourceEditorViewModel-ForgetSavedSignIn`.
+`SourceEditorViewModel_ForgetSavedSignIn_AddressEdits_AskTheHelperOncePerOrigin`,
+`SourceEditorViewModel_CanForgetSavedSignIn_AddressNotAnAcceptableFeed_IsFalseAndHelperIsNeverAsked` and
+`SourceEditorViewModel_CanForgetSavedSignIn_InsecureHttpOptedIn_BecomesAvailable`, covering
+`AgentControl-SourceEditorViewModel-ForgetSavedSignIn`, `-ForgetAcceptableAddressOnly`,
+`-ForgetUnavailableExplained`, `-ForgetChecking`, `-ForgetConfirmation`, `-ForgetResultForgotten`,
+`-ForgetResultNothingSaved` and `-ForgetResultNotRemoved` (each prefixed `AgentControl-SourceEditorViewModel`).

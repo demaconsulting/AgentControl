@@ -225,10 +225,22 @@ sections:
           - AgentControl-AgentPackageManagement-NuGetFolderSource
           - AgentControl-AgentPackageManagement-NuGetServerSource
           - AgentControl-PackageCredentials-AskOncePerOperation
+          - AgentControl-PackageCredentials-AskWhenNoCredentialKnown
+          - AgentControl-PackageCredentials-DeclinedAnswerShared
           - AgentControl-LauncherUI-TestConnection
           - AgentControl-RepoSync-SyncFromFolderPackage
+          - AgentControl-OTS-NuGetCaching-FolderListing
           - AgentControl-OTS-NuGetCaching-ListAndCache
+          - AgentControl-OTS-NuGetCaching-CacheLocation
+          - AgentControl-OTS-NuGetCaching-ServerListing
+          - AgentControl-OTS-NuGetCaching-ServerDownload
           - AgentControl-OTS-NuGetCaching-ServerAccess
+          - AgentControl-OTS-NuGetCaching-ServerConfiguredCredentials
+          - AgentControl-OTS-NuGetCaching-AuthenticationTimeout
+          - AgentControl-OTS-NuGetCaching-UnauthorizedReported
+          - AgentControl-OTS-NuGetCaching-ForbiddenReported
+          - AgentControl-OTS-NuGetCaching-RejectedCredentialNotRetried
+          - AgentControl-OTS-NuGetCaching-NonInteractive
         tests:
           # End to end through the published application against a real NuGet folder feed and
           # against an in-process NuGet server (plain HTTP, explicitly allowed), plus the
@@ -339,10 +351,33 @@ sections:
           - AgentControl-Settings-PackageSources
           - AgentControl-AgentPackageManagement-SourceDefinitions
           - AgentControl-PackageCredentials-SessionOnly
+          - AgentControl-PackageCredentials-KeptOnlyAfterSuccess
+          - AgentControl-PackageCredentials-SessionCredentialReused
+          - AgentControl-PackageCredentials-RejectedCredentialForgotten
+          - AgentControl-PackageCredentials-ForgottenAtExit
           - AgentControl-PackageCredentials-ScopedToFeedOrigin
+          - AgentControl-PackageCredentials-NoPromptForOtherOrigins
           - AgentControl-PackageCredentials-SecretsNeverLogged
+          - AgentControl-PackageCredentials-SecretRedactedWhileInUse
+          - AgentControl-PackageCredentials-UrlUserInfoNeverLogged
+          - AgentControl-PackageCredentials-UrlQueryNeverLogged
+          - AgentControl-PackageCredentials-UrlFragmentNeverLogged
+          - AgentControl-PackageCredentials-AuthorizationValuesNeverLogged
+          - AgentControl-PackageCredentials-LoggedMessagesRedacted
+          - AgentControl-PackageCredentials-LoggedPropertiesRedacted
+          - AgentControl-PackageCredentials-LoggedScopesRedacted
+          - AgentControl-PackageCredentials-ExceptionsLoggedSanitized
           - AgentControl-PackageCredentials-RememberOnRequest
+          - AgentControl-PackageCredentials-NeverRememberUnasked
+          - AgentControl-PackageCredentials-RememberOnlyAfterSuccess
+          - AgentControl-PackageCredentials-RememberOfferedOnlyWhenPossible
+          - AgentControl-PackageCredentials-SavedCredentialUsedWithoutAsking
+          - AgentControl-PackageCredentials-SavedCredentialLookedUpOnce
+          - AgentControl-PackageCredentials-RejectedSavedCredentialRemoved
+          - AgentControl-PackageCredentials-NewerCredentialSurvivesLateRejection
           - AgentControl-PackageCredentials-ForgetSavedSignIn
+          - AgentControl-PackageCredentials-ForgetSessionSignIn
+          - AgentControl-PackageCredentials-ForgetSignInReportsOutcome
           - AgentControl-GitIntegration-SavedSignIns
           - AgentControl-LauncherUI-SignIn
           - AgentControl-LauncherUI-RememberSignIn
@@ -392,6 +427,15 @@ sections:
           - AgentControl-LauncherUI-SignatureOptions
           - AgentControl-LauncherUI-SignatureIndicator
           - AgentControl-OTS-NuGetCaching-SignatureVerification
+          - AgentControl-OTS-NuGetCaching-UnsignedRejected
+          - AgentControl-OTS-NuGetCaching-CachedUnsignedRejected
+          - AgentControl-OTS-NuGetCaching-InvalidSignatureRejected
+          - AgentControl-OTS-NuGetCaching-UntrustedSignerRejected
+          - AgentControl-OTS-NuGetCaching-TrustedSignerAccepted
+          - AgentControl-OTS-NuGetCaching-CachedSignerRechecked
+          - AgentControl-OTS-NuGetCaching-OtherConfigurationCannotWidenTrust
+          - AgentControl-OTS-NuGetCaching-OtherConfigurationCannotNarrowTrust
+          - AgentControl-OTS-NuGetCaching-SignatureFailureIdentified
         tests:
           # System level: with a NuGet source that requires signatures the published application
           # refuses to upgrade to an unsigned package and leaves the repo unchanged. Acceptance of

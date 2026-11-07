@@ -20,11 +20,41 @@ supporting types. The subsystem contains four units: `FeedOrigin`, `SessionCrede
 sign-in dialog that implements `ICredentialPrompt` belongs to the `LauncherUI` subsystem
 (`AgentControl-LauncherUI-SignIn`), the implementation of `IRememberedCredentialStore` belongs to the
 `GitIntegration` subsystem (`GitCredentialClient`), and the consumer of the callback is `NuGetSourceProvider` in
-the `AgentPackageManagement` subsystem. It provides `AgentControl-PackageCredentials-SessionOnly`,
-`AgentControl-PackageCredentials-ScopedToFeedOrigin`,
-`AgentControl-PackageCredentials-AskOncePerOperation`, `AgentControl-PackageCredentials-RememberOnRequest`,
-`AgentControl-PackageCredentials-ForgetSavedSignIn` and `AgentControl-PackageCredentials-SecretsNeverLogged`,
-which together support `AgentControl-System-CredentialSafety`.
+the `AgentPackageManagement` subsystem. It provides the following requirements, each of which states one
+criterion, and which together support `AgentControl-System-CredentialSafety` and
+`AgentControl-System-NuGetSources`:
+
+- *Session credentials*: `AgentControl-PackageCredentials-SessionOnly`,
+  `AgentControl-PackageCredentials-KeptOnlyAfterSuccess`,
+  `AgentControl-PackageCredentials-SessionCredentialReused`,
+  `AgentControl-PackageCredentials-AskWhenNoCredentialKnown`,
+  `AgentControl-PackageCredentials-RejectedCredentialForgotten` and
+  `AgentControl-PackageCredentials-ForgottenAtExit`.
+- *Scoping to the server*: `AgentControl-PackageCredentials-ScopedToFeedOrigin` and
+  `AgentControl-PackageCredentials-NoPromptForOtherOrigins`.
+- *Asking the user*: `AgentControl-PackageCredentials-AskOncePerOperation` and
+  `AgentControl-PackageCredentials-DeclinedAnswerShared`.
+- *Remembering in the user's own credential store*: `AgentControl-PackageCredentials-RememberOnRequest`,
+  `AgentControl-PackageCredentials-NeverRememberUnasked`,
+  `AgentControl-PackageCredentials-RememberOnlyAfterSuccess`,
+  `AgentControl-PackageCredentials-RememberOfferedOnlyWhenPossible`,
+  `AgentControl-PackageCredentials-SavedCredentialUsedWithoutAsking`,
+  `AgentControl-PackageCredentials-SavedCredentialLookedUpOnce`,
+  `AgentControl-PackageCredentials-RejectedSavedCredentialRemoved` and
+  `AgentControl-PackageCredentials-NewerCredentialSurvivesLateRejection`.
+- *Forgetting a sign-in*: `AgentControl-PackageCredentials-ForgetSavedSignIn`,
+  `AgentControl-PackageCredentials-ForgetSessionSignIn` and
+  `AgentControl-PackageCredentials-ForgetSignInReportsOutcome`.
+- *Nothing secret reaches the log*: `AgentControl-PackageCredentials-SecretsNeverLogged`,
+  `AgentControl-PackageCredentials-SecretRedactedWhileInUse`,
+  `AgentControl-PackageCredentials-UrlUserInfoNeverLogged`,
+  `AgentControl-PackageCredentials-UrlQueryNeverLogged`,
+  `AgentControl-PackageCredentials-UrlFragmentNeverLogged`,
+  `AgentControl-PackageCredentials-AuthorizationValuesNeverLogged`,
+  `AgentControl-PackageCredentials-LoggedMessagesRedacted`,
+  `AgentControl-PackageCredentials-LoggedPropertiesRedacted`,
+  `AgentControl-PackageCredentials-LoggedScopesRedacted` and
+  `AgentControl-PackageCredentials-ExceptionsLoggedSanitized`.
 
 ### Interfaces
 
@@ -37,8 +67,9 @@ which together support `AgentControl-System-CredentialSafety`.
   this operation, and `CanRemember` - whether the user's credential store can keep the sign-in) and a
   cancellation token, and returns a `CredentialPromptAnswer` (the credential and whether the user chose to
   remember it) or no answer when the user declined. An implementation shows at most one question at a time,
-  withdraws the question when the token is cancelled, offers the remember choice only when `CanRemember` is set,
-  and never logs or persists what was entered.
+  withdraws the question when the token is cancelled, never logs or persists what was entered, and shows the
+  remember choice disabled, with an explanation, when `CanRemember` is not set - such an answer is never
+  returned as remembered (`AgentControl-PackageCredentials-RememberOfferedOnlyWhenPossible`).
 - *Constraints*: Implementations are called from worker threads and marshal to the UI thread themselves.
 
 **IRememberedCredentialStore**: The user's own credential store, abstracted so the credential logic can be tested
@@ -79,7 +110,8 @@ credential callback.
   (`AgentControl-LauncherUI-BackgroundChecksDoNotPrompt`). `ForgetSavedSignInAsync(origin)` forgets the session's
   copy and the copy saved in the user's credential store (it looks up what is saved there and removes exactly
   that) and returns a `ForgetSignInResult`: `NothingSaved`, `Removed` or `Failed`
-  (`AgentControl-PackageCredentials-ForgetSavedSignIn`).
+  (`AgentControl-PackageCredentials-ForgetSavedSignIn`, `AgentControl-PackageCredentials-ForgetSessionSignIn`
+  and `AgentControl-PackageCredentials-ForgetSignInReportsOutcome`).
 - *Constraints*: None beyond immutability.
 
 **SecretRedactingLogger**: The logger the NuGet library and the repo card are given, with the redaction
@@ -92,9 +124,13 @@ engine and the secret-free exception stand-in that go with it.
   with URL user information, query strings, fragments, the complete value of every authorization header
   (whatever the scheme) and every registered secret value removed; the engine also gives the user interface
   `SafeMessage` text and gives `PackageSourceAccessException` a sanitized description of an inner exception
-  (`AgentControl-PackageCredentials-SecretsNeverLogged`).
+  (`AgentControl-PackageCredentials-SecretsNeverLogged` and the requirements for URL user information, query
+  strings and fragments, authorization values, messages, properties, scopes, exceptions and the redaction lease
+  listed in the Overview).
 - *Constraints*: An exception is forwarded only as a sanitized stand-in (redacted type, message chain and
-  stack trace); the original object, its inner exceptions and its data are never forwarded or kept.
+  stack trace); the original object, its inner exceptions and its data are never forwarded or kept. The
+  `SanitizedException` constructor is internal and redacts its inputs, so no construction path can produce a stand-in
+  that holds a secret.
 
 ### Design
 
@@ -123,9 +159,10 @@ the password into a log line, a property, a scope or an exception message.
    (`EnsureRememberedLookupAsync`), not per operation: when several operations on one server start together, one
    lookup is shared by all of them instead of each reading the store, and a feed with nothing saved costs one
    lookup per session. A failing store is logged without any secret and treated as "nothing saved".
-3. *The prompt* - only when one was supplied. "Remember on this computer" is offered only when
-   `IsAvailableAsync` says a credential helper applies to the feed, so the user is never offered a choice that
-   would silently do nothing.
+3. *The prompt* - only when one was supplied. "Remember on this computer" is available only when
+   `IsAvailableAsync` says a credential helper applies to the feed; otherwise the prompt shows it disabled, with an
+   explanation, and never answers it as remembered, so the user is never offered a choice that would silently do
+   nothing.
 
 **Remembering and forgetting.** A credential the user typed is kept in the session store only by `CommitAsync`,
 after the operation succeeded; at the same moment, and only when the user ticked "Remember on this computer", it

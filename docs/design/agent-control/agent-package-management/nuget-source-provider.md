@@ -13,19 +13,52 @@ keeps its content under the package's `content` folder (`content/.github/...`,
 path, or the address of a server's V3 service index: an absolute `https` address ending in `index.json`,
 with no user information, query string or fragment (`http` only when the source's `AllowInsecureHttp` is
 set, because a credential would cross the network unprotected). Listing versions never downloads package
-content (`AgentControl-NuGetSourceProvider-ServerListAndAcquire`). For a server the provider also signs in:
-it obtains credentials in a defined order, offers them only to the server's own origin, reports each failure
+content (`AgentControl-NuGetSourceProvider-ServerListAndAcquire`,
+`AgentControl-NuGetSourceProvider-ServerListDoesNotDownload`). For a server the provider also signs in: it
+obtains credentials in a defined order, offers them only to the server's own origin, reports each failure
 in terms the user can act on, and keeps secrets out of messages and the log
-(`AgentControl-NuGetSourceProvider-SignInOrder`, `AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin`,
-`AgentControl-NuGetSourceProvider-ServerFailures`, `AgentControl-NuGetSourceProvider-SecretsNotLogged`).
+(`AgentControl-NuGetSourceProvider-SignInOrder`, `AgentControl-NuGetSourceProvider-AskUserOnce`,
+`AgentControl-NuGetSourceProvider-CredentialRememberedAfterSuccess`,
+`AgentControl-NuGetSourceProvider-NonInteractiveLibrary`,
+`AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin`,
+`AgentControl-NuGetSourceProvider-ServerFailures`, `AgentControl-NuGetSourceProvider-RejectedCredentialForgotten`,
+`AgentControl-NuGetSourceProvider-SignInTimeLimit`,
+`AgentControl-NuGetSourceProvider-CallerCancellationNotAFailure`,
+`AgentControl-NuGetSourceProvider-SecretsNotLogged`, `AgentControl-NuGetSourceProvider-SecretsNotInExceptions`).
 A user who ticked "Remember on this computer" gets a saved sign-in used without a dialog
-(`AgentControl-NuGetSourceProvider-SavedSignIn`). A source can also require signed packages, optionally from one
-pinned publisher: the provider enforces that for folder and server sources on every acquisition, decides the
-trusted signers from the source's own description alone, and fails closed where signatures cannot be verified
-(`AgentControl-NuGetSourceProvider-RequireSigned`, `AgentControl-NuGetSourceProvider-SignerPin`,
+(`AgentControl-NuGetSourceProvider-SavedSignIn`, `AgentControl-NuGetSourceProvider-SavedSignInLookedUpOnce`,
+`AgentControl-NuGetSourceProvider-RejectedSavedSignInRemoved`,
+`AgentControl-NuGetSourceProvider-SignInSavedOnlyWhenChosen`). A source can also require signed packages,
+optionally from one pinned publisher: the provider enforces that for folder and server sources on every
+acquisition, decides the trusted signers from the source's own description alone, and fails closed where
+signatures cannot be verified (`AgentControl-NuGetSourceProvider-RequireSigned`,
+`AgentControl-NuGetSourceProvider-SignatureCheckedForCachedPackage`,
+`AgentControl-NuGetSourceProvider-SignedPackageAccepted`,
+`AgentControl-NuGetSourceProvider-UnsignedAcceptedWhenNotRequired`,
+`AgentControl-NuGetSourceProvider-SignerPin`, `AgentControl-NuGetSourceProvider-RepositoryCountersignatureNotAPin`,
+`AgentControl-NuGetSourceProvider-ChangedPinAppliesToCachedPackages`,
+`AgentControl-NuGetSourceProvider-GeneratedSignerConfiguration`,
+`AgentControl-NuGetSourceProvider-NoSignerConfigurationWithoutRequirement`,
 `AgentControl-NuGetSourceProvider-SignerTrustIsolated`, `AgentControl-NuGetSourceProvider-SignatureFailureReported`,
+`AgentControl-NuGetSourceProvider-SignatureFailureNamesPinnedPublisher`,
 `AgentControl-NuGetSourceProvider-FailClosedWithoutVerification`,
-`AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused`).
+`AgentControl-NuGetSourceProvider-UnsupportedPlatformDoesNotAffectOpenSources`,
+`AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused`). Folder listing and acquisition also satisfy
+`AgentControl-NuGetSourceProvider-ListVersions`, `AgentControl-NuGetSourceProvider-ListVersionsUnknownPackageIsEmpty`,
+`AgentControl-NuGetSourceProvider-ListVersionsMissingFolderReported`,
+`AgentControl-NuGetSourceProvider-ListPackageIds`,
+`AgentControl-NuGetSourceProvider-CancellationHonoredBeforeSideEffects`,
+`AgentControl-NuGetSourceProvider-AcquireToPrivateCache`, `AgentControl-NuGetSourceProvider-PrivateCachePerSource`,
+`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`,
+`AgentControl-NuGetSourceProvider-ServerUnknownPackageIsEmpty`, `AgentControl-NuGetSourceProvider-ServerAcquire` and
+`AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource`; location and cache-root rules satisfy
+`AgentControl-NuGetSourceProvider-ValidateLocation`, `AgentControl-NuGetSourceProvider-RejectNonNuGetDefinition`,
+`AgentControl-NuGetSourceProvider-PlainHttpRefusedUnlessAllowed`,
+`AgentControl-NuGetSourceProvider-ServerAddressMustBeServiceIndex`,
+`AgentControl-NuGetSourceProvider-CredentialInAddressRefused`,
+`AgentControl-NuGetSourceProvider-HttpsAddressAccepted`, `AgentControl-NuGetSourceProvider-ExplicitCacheRoot`,
+`AgentControl-NuGetSourceProvider-CacheRootMustBeAbsolute`, `AgentControl-NuGetSourceProvider-NoRepoNuGetConfig`
+and `AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration`.
 
 #### Data Model
 
@@ -80,7 +113,10 @@ when allowed; ends in `index.json`; no credential) and a folder location must be
 failure throws `InvalidOperationException` naming the source and never repeating the location. A non-NuGet
 definition throws `ArgumentException`, as does a supplied base folder that is not a fully qualified absolute
 path, so the root can never be resolved against the current directory or a target repo
-(`AgentControl-NuGetSourceProvider-ValidateLocation`,
+(`AgentControl-NuGetSourceProvider-ValidateLocation`, `AgentControl-NuGetSourceProvider-PlainHttpRefusedUnlessAllowed`,
+`AgentControl-NuGetSourceProvider-ServerAddressMustBeServiceIndex`,
+`AgentControl-NuGetSourceProvider-CredentialInAddressRefused`, `AgentControl-NuGetSourceProvider-HttpsAddressAccepted`,
+`AgentControl-NuGetSourceProvider-RejectNonNuGetDefinition`, `AgentControl-NuGetSourceProvider-CacheRootMustBeAbsolute`,
 `AgentControl-NuGetSourceProvider-ExplicitCacheRoot`). A signer fingerprint that cannot be read as a SHA-256
 fingerprint, on a source that requires signatures, throws `InvalidOperationException` (via
 `PackageSourceDefinition.GetSignaturePolicyProblem`): ignoring it would silently widen trust from one publisher to
@@ -88,42 +124,59 @@ any signer (`AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused`). Th
 here.
 
 **ListPackageIdsAsync**: Returns the configured package IDs, sorted
-(`AgentControl-NuGetSourceProvider-ListVersions`).
+(`AgentControl-NuGetSourceProvider-ListPackageIds`).
 
-**ListVersionsAsync**: For a folder, verifies the feed folder exists (reporting a missing folder as
-`DirectoryNotFoundException`, as the zip provider does). Prepares the root and asks the NuGet library for
-every listed version including prereleases, naming the folder or server explicitly as the only source so it
-is always queried and no other configured source is consulted. Only the version list is read: no package
-content is downloaded. Unlisted versions and versions the version type cannot represent are skipped; each
-result is stamped with the alias (`AgentControl-NuGetSourceProvider-ListVersions`,
-`AgentControl-NuGetSourceProvider-ServerListAndAcquire`). A source that requires signatures on a platform that
+**ListVersionsAsync**: First checks the cancellation token: a token that is already canceled throws
+`OperationCanceledException` before any other work, so a canceled call never reports a missing folder,
+probes signature support or creates the cache root and its configuration
+(`AgentControl-NuGetSourceProvider-CancellationHonoredBeforeSideEffects`). The preflight — for a folder,
+verifying the feed folder exists (reporting a missing folder as `DirectoryNotFoundException`, as the zip
+provider does), the signature-support probe, and the creation of the root and its configuration — then runs
+on a worker thread (`Task.Run`), so a slow or offline network folder cannot block the calling (user
+interface) thread (`AgentControl-NuGetSourceProvider-ListVersionsMissingFolderReported`). It asks the NuGet
+library for every listed version including prereleases, naming the folder or server explicitly as the only
+source so it is always queried and no other configured source is consulted. Only the version list is read: no
+package content is downloaded. Unlisted versions and versions the version type cannot represent are skipped; each
+result is stamped with the alias; a package the feed does not have yields an empty list
+(`AgentControl-NuGetSourceProvider-ListVersions`, `AgentControl-NuGetSourceProvider-ListVersionsUnknownPackageIsEmpty`,
+`AgentControl-NuGetSourceProvider-ServerListAndAcquire`, `AgentControl-NuGetSourceProvider-ServerListDoesNotDownload`,
+`AgentControl-NuGetSourceProvider-ServerUnknownPackageIsEmpty`). A source that requires signatures on a platform that
 cannot verify them refuses to list (below).
 
-**AcquireAsync**: Refuses a package from another source (`ArgumentException`), prepares the
-root, and asks the library to unpack the chosen version into the global packages folder named by
+**AcquireAsync**: Refuses a package from another source (`ArgumentException`), checks the cancellation token
+before any preflight work (the signature-support probe, the creation of the root), as listing does, prepares
+the root on a worker thread, and asks the library to unpack the
+chosen version into the global packages folder named by
 the generated configuration, with the signature requirement set when the source has one, then returns a
 `DirectoryPackageContentReader` over the unpacked
-folder. The call fails closed (`InvalidOperationException`) when the unpacked package did not land
+folder (`AgentControl-NuGetSourceProvider-AcquireToPrivateCache`,
+`AgentControl-NuGetSourceProvider-ServerAcquire`). The call fails closed (`InvalidOperationException`) when the
+unpacked package did not land
 inside this source's own `packages` folder — which happens only when the `NUGET_PACKAGES`
 environment variable overrides the generated configuration and so could serve a same-ID,
-same-version package from another source (`AgentControl-NuGetSourceProvider-AcquireToPrivateCache`,
+same-version package from another source (`AgentControl-NuGetSourceProvider-PrivateCachePerSource`,
 `AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource`). A package with no `content` folder
-is rejected by the reader. A signature failure is reported as `SignatureRejected` and nothing is returned for the
-package (`AgentControl-NuGetSourceProvider-RequireSigned`).
+is rejected by the reader (`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`). A signature failure is
+reported as `SignatureRejected` and nothing is returned for the
+package (`AgentControl-NuGetSourceProvider-RequireSigned`,
+`AgentControl-NuGetSourceProvider-SignatureCheckedForCachedPackage`).
 
 **EnsureSignatureVerificationPossible** (private): When the source requires signed packages and the platform
 cannot verify signatures, throws a `PackageSourceAccessException` of kind `SignatureRejected` whose message says
 that verification is not supported on this platform, so no package can be used from the source, and what to do.
 It runs at the start of both listing and acquiring. It _fails closed_ on purpose: the alternative - ignoring the
 requirement - would install packages the user required to be checked, and a hand-edited settings file can enable the
-requirement on any machine (`AgentControl-NuGetSourceProvider-FailClosedWithoutVerification`).
+requirement on any machine (`AgentControl-NuGetSourceProvider-FailClosedWithoutVerification`). A source that
+does not require signatures is never affected by the answer
+(`AgentControl-NuGetSourceProvider-UnsupportedPlatformDoesNotAffectOpenSources`).
 
 **DescribeSignatureFailure / SummarizeFingerprint** (private): Build the secret-free message for a refused
 package: the package and version (when known) and the source alias, then either "not validly signed, but the source
 requires signed packages" with the likely causes (unsigned, invalid signature, certificate not trusted on this
 computer) or — when a publisher is pinned — "not signed by the trusted publisher (certificate A3AF7AF1…7641)" with
 its causes. Only the first eight and last four characters of the fingerprint are shown
-(`AgentControl-NuGetSourceProvider-SignatureFailureReported`).
+(`AgentControl-NuGetSourceProvider-SignatureFailureReported`,
+`AgentControl-NuGetSourceProvider-SignatureFailureNamesPinnedPublisher`).
 
 **IsSignatureFailure** (private): Recognizes the library's signature errors — an `InvalidOperationException` whose
 message says the package failed signature verification or has no package signature, or whose inner exception is
@@ -141,13 +194,18 @@ content differs, so a changed pin is written into the same root and applies to p
 machine's and any in a parent folder of the root); without the clear, a signer configured elsewhere would widen
 what the source accepts (with a pin) or a list naming only other signers would narrow it (without one). With the
 clear, the source's own description is the only authority
-(`AgentControl-NuGetSourceProvider-SignerTrustIsolated`, `AgentControl-NuGetSourceProvider-SignerPin`). A source
-that does not require signatures gets neither the section nor the signature requirement.
+(`AgentControl-NuGetSourceProvider-GeneratedSignerConfiguration`, `AgentControl-NuGetSourceProvider-SignerTrustIsolated`,
+`AgentControl-NuGetSourceProvider-SignerPin`, `AgentControl-NuGetSourceProvider-ChangedPinAppliesToCachedPackages`).
+A source
+that does not require signatures gets neither the section nor the signature requirement
+(`AgentControl-NuGetSourceProvider-NoSignerConfigurationWithoutRequirement`).
 
 **CreateOptions**: Builds the per-call library options: the source list is exactly the one
-location, `Interactive` false (a credential plug-in may sign in silently but never opens its own
-window), the redacting logger, `RequireSignedPackages` from the source's description, and — for a server — the
-credential callback and `AuthenticationTimeout`.
+location, `Interactive` false (the library, and so any credential-provider plug-in it runs, can never
+open a window of its own; the only sign-in dialog is AgentControl's own prompt,
+`AgentControl-NuGetSourceProvider-NonInteractiveLibrary`), the redacting logger, `RequireSignedPackages` from the
+source's description, and — for a server — the
+credential callback and `AuthenticationTimeout` (`AgentControl-NuGetSourceProvider-SignInTimeLimit`).
 The library registers its credential dispatcher once for the process and applies these options to the one call
 only, so one source's callback and timeout never affect another operation.
 
@@ -161,7 +219,12 @@ HTTP 401/403 and a prompt is available does attempt 2 run with a callback that m
 succeeded - and handed to the user's credential store at that moment when the user ticked "Remember on this
 computer"; a credential the server rejected (from the stores in attempt 1, or typed in attempt 2) is forgotten and,
 when it came from the user's credential store, removed from there. The removal is not abandoned just because the
-caller cancelled (it has its own time limit). A caller's cancellation is never turned into a failure.
+caller cancelled (it has its own time limit). A caller's cancellation is never turned into a failure
+(`AgentControl-NuGetSourceProvider-AskUserOnce`, `AgentControl-NuGetSourceProvider-CredentialRememberedAfterSuccess`,
+`AgentControl-NuGetSourceProvider-RejectedCredentialForgotten`,
+`AgentControl-NuGetSourceProvider-RejectedSavedSignInRemoved`,
+`AgentControl-NuGetSourceProvider-SignInSavedOnlyWhenChosen`,
+`AgentControl-NuGetSourceProvider-CallerCancellationNotAFailure`).
 
 #### Credential Order
 
@@ -170,8 +233,12 @@ For a server source the credentials come from, in this order:
 1. **What NuGet itself knows.** A source in the user's own `nuget.config` whose address equals this source's
    address (compared ignoring case and a trailing slash — the library resolves a configured source by name
    first and otherwise by address, and AgentControl passes the address) contributes its
-   `packageSourceCredentials` up front, and installed NuGet credential-provider plug-ins (for example the Azure
-   Artifacts credential provider) run **non-interactively** when the server challenges. The configuration
+   `packageSourceCredentials` up front (`AgentControl-NuGetSourceProvider-SignInOrder`). The library is run with
+   `Interactive = false`, so that neither it nor any credential-provider plug-in it may run can open a dialog of
+   its own. AgentControl does not itself supply, install or test credential-provider plug-ins: what such a
+   plug-in does when the library runs it is the library's behavior (see the OTS integration design), and the
+   credentials AgentControl supplies are those of the user's NuGet configuration, the session store, the user's
+   own credential helper and its own prompt. The configuration
    NuGet reads is whatever its normal discovery finds starting from the AgentControl-owned root - the
    user-level NuGet configuration and any `nuget.config` in a parent folder of the root - never the
    repo's.
@@ -212,7 +279,8 @@ one preemptively.
 - Messages and logs: the NuGet library receives a `SecretRedactingLogger`-wrapped logger, and every
   exception message the provider raises names the source alias and the server's origin (scheme, host,
   port) only — never a path, a query string or a credential
-  (`AgentControl-NuGetSourceProvider-SecretsNotLogged`). The library's own exception is never kept: a
+  (`AgentControl-NuGetSourceProvider-SecretsNotLogged`,
+  `AgentControl-NuGetSourceProvider-SecretsNotInExceptions`). The library's own exception is never kept: a
   `PackageSourceAccessException` stores only a `SanitizedException` description of its cause (redacted type,
   message chain and stack trace), any other exception type the library or the network stack throws during a
   server operation is wrapped the same way as `Unreachable`, and the password being tried is registered with
@@ -223,7 +291,8 @@ one preemptively.
 #### Error Handling
 
 `DirectoryNotFoundException` for a missing feed folder; `OperationCanceledException` for the caller's
-cancellation. Failures of a server are reported as `PackageSourceAccessException` (derived from
+cancellation (also thrown before any preflight work when the token is already canceled). Failures of a server are
+reported as `PackageSourceAccessException` (derived from
 `InvalidOperationException`, so existing handlers keep working) carrying a `PackageSourceFailureKind`
 (`AgentControl-NuGetSourceProvider-ServerFailures`):
 

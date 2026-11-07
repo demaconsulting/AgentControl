@@ -20,6 +20,7 @@
 
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
+using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
@@ -419,6 +420,109 @@ public class SourceEditorServerViewModelTests
     }
 
     /// <summary>
+    ///     Test that when the address is edited while a connection test runs, the test is stopped
+    ///     and its result - even one produced by a provider that ignores cancellation and finishes
+    ///     successfully - is never shown, because it describes an address that is no longer there.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_TestConnection_LocationEditedWhileTesting_StaleResultIsNotShown()
+    {
+        // Arrange: a provider that ignores cancellation and answers "success" once released
+        var release = new TaskCompletionSource();
+        Assert.True(PackageVersion.TryParse("1.0.0", out var version));
+        var provider = new NonCancelableProvider(release.Task, [new DiscoveredPackage("contoso-agents", version!, "1.0.0", "any")]);
+        var editor = CreateEditor(_ => provider);
+        AddValidServerValues(editor);
+        var running = editor.TestConnectionCommand.ExecuteAsync();
+        Assert.True(editor.IsTesting);
+
+        // Act: the address changes mid-test, then the old test finishes
+        editor.Location = "https://other.example.com/v3/index.json";
+        release.SetResult();
+        await running;
+
+        // Assert: nothing about the old address is shown
+        Assert.False(editor.IsTesting);
+        Assert.False(editor.HasTestResult);
+        Assert.False(editor.TestSucceeded);
+        Assert.Equal(string.Empty, editor.TestResultTitle);
+        Assert.Equal(string.Empty, editor.TestResultDetail);
+    }
+
+    /// <summary>
+    ///     Test that when the package IDs are edited while a connection test runs, the test's result
+    ///     is not shown.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_TestConnection_PackageIdsEditedWhileTesting_StaleResultIsNotShown()
+    {
+        // Arrange
+        var release = new TaskCompletionSource();
+        var fake = new FakePackageSourceProvider("any", ("contoso-agents", "1.0.0")) { ListVersionsGate = release.Task };
+        var editor = CreateEditor(_ => fake);
+        AddValidServerValues(editor);
+        var running = editor.TestConnectionCommand.ExecuteAsync();
+        Assert.True(editor.IsTesting);
+
+        // Act: another package ID is added mid-test, then the old test ends
+        editor.NewPackageId = "second-agents";
+        editor.AddPackageIdCommand.Execute(null);
+        release.SetResult();
+        await running;
+
+        // Assert
+        Assert.False(editor.IsTesting);
+        Assert.False(editor.HasTestResult);
+        Assert.Equal(string.Empty, editor.TestResultTitle);
+    }
+
+    /// <summary>
+    ///     Test that when the insecure-HTTP choice is changed while a connection test runs, the
+    ///     test's result is not shown.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_TestConnection_AllowInsecureHttpChangedWhileTesting_StaleResultIsNotShown()
+    {
+        // Arrange
+        var release = new TaskCompletionSource();
+        var fake = new FakePackageSourceProvider("any", ("contoso-agents", "1.0.0")) { ListVersionsGate = release.Task };
+        var editor = CreateEditor(_ => fake);
+        AddValidServerValues(editor);
+        var running = editor.TestConnectionCommand.ExecuteAsync();
+        Assert.True(editor.IsTesting);
+
+        // Act
+        editor.AllowInsecureHttp = true;
+        release.SetResult();
+        await running;
+
+        // Assert
+        Assert.False(editor.IsTesting);
+        Assert.False(editor.HasTestResult);
+        Assert.Equal(string.Empty, editor.TestResultTitle);
+    }
+
+    /// <summary>
+    ///     Test that a test started after an edit reports normally: only a test whose inputs changed
+    ///     underneath it is ignored.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_TestConnection_StartedAfterTheEdit_ReportsItsResult()
+    {
+        // Arrange
+        var editor = CreateEditor(_ => new FakePackageSourceProvider("any", ("contoso-agents", "1.0.0")));
+        AddValidServerValues(editor);
+        editor.Location = "https://other.example.com/v3/index.json";
+
+        // Act
+        await editor.TestConnectionCommand.ExecuteAsync();
+
+        // Assert
+        Assert.True(editor.TestSucceeded);
+        Assert.Equal("Connection OK", editor.TestResultTitle);
+    }
+
+    /// <summary>
     ///     Creates a new server editor with no aliases taken.
     /// </summary>
     /// <param name="providerFactory">Creates the provider the connection test uses, or
@@ -437,5 +541,34 @@ public class SourceEditorServerViewModelTests
         editor.Location = FeedAddress;
         editor.NewPackageId = "contoso-agents";
         editor.AddPackageIdCommand.Execute(null);
+    }
+
+    /// <summary>
+    ///     A provider that ignores cancellation: its version listing finishes with the given
+    ///     versions as soon as its gate opens, whatever the token says - like a source that cannot
+    ///     interrupt a request it has already sent.
+    /// </summary>
+    /// <param name="gate">The task the listing waits for.</param>
+    /// <param name="versions">The versions the listing then returns.</param>
+    private sealed class NonCancelableProvider(Task gate, IReadOnlyList<DiscoveredPackage> versions) : IPackageSourceProvider
+    {
+        /// <inheritdoc />
+        public string Alias => "any";
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
+
+        /// <inheritdoc />
+        public async Task<IReadOnlyList<DiscoveredPackage>> ListVersionsAsync(
+            string packageId, CancellationToken cancellationToken)
+        {
+            await gate;
+            return versions;
+        }
+
+        /// <inheritdoc />
+        public Task<IPackageContentReader> AcquireAsync(DiscoveredPackage package, CancellationToken cancellationToken) =>
+            throw new NotSupportedException("The connection test never acquires a package.");
     }
 }

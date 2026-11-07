@@ -558,6 +558,99 @@ public class SourceEditorSignatureViewModelTests
     }
 
     /// <summary>
+    ///     Test that an address the dialog would refuse to save - not ending in index.json, plain
+    ///     http without the opt-in, or carrying credentials - never makes "Forget saved sign-in"
+    ///     available and never reaches the credential helper, although its origin can be parsed.
+    /// </summary>
+    [Theory]
+    [InlineData("https://feeds.example.com/v3/")]
+    [InlineData("https://feeds.example.com/v3/feed.json")]
+    [InlineData("http://feeds.example.com/v3/index.json")]
+    [InlineData("https://feeds.example.com/v3/index.json?sig=sentinel-forget-1")]
+    public async Task SourceEditorViewModel_CanForgetSavedSignIn_AddressNotAnAcceptableFeed_IsFalseAndHelperIsNeverAsked(
+        string address)
+    {
+        // Arrange
+        var usersStore = new FakeRememberedCredentialStore();
+        var editor = CreateServerEditor(credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore));
+        var asked = false;
+        editor.ForgetConfirmationRequested += (_, _) => asked = true;
+
+        // Act
+        editor.Location = address;
+        await editor.HelperCheckCompleted;
+        editor.ForgetSavedSignInCommand.Execute(null);
+        await editor.ForgetSavedSignInAsync();
+
+        // Assert: the origin parses, but the address is not acceptable, so nothing is available or asked
+        Assert.True(FeedOrigin.TryParse(address, out _));
+        Assert.NotNull(editor.LocationError);
+        Assert.False(editor.CanForgetSavedSignIn);
+        Assert.False(editor.ForgetSavedSignInCommand.CanExecute(null));
+        Assert.False(asked);
+        Assert.Empty(usersStore.Calls);
+        Assert.False(editor.HasForgetResult);
+    }
+
+    /// <summary>
+    ///     Test that a plain http address becomes eligible for forgetting its saved sign-in once the
+    ///     user opts in to insecure http, and stops being eligible when the opt-in is withdrawn.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_CanForgetSavedSignIn_InsecureHttpOptedIn_BecomesAvailable()
+    {
+        // Arrange
+        var usersStore = new FakeRememberedCredentialStore();
+        var editor = CreateServerEditor(credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore));
+        editor.Location = "http://127.0.0.1:5000/v3/index.json";
+        await editor.HelperCheckCompleted;
+        Assert.False(editor.CanForgetSavedSignIn);
+        Assert.Empty(usersStore.Calls);
+
+        // Act: opt in
+        editor.AllowInsecureHttp = true;
+        await editor.HelperCheckCompleted;
+
+        // Assert
+        Assert.True(editor.CanForgetSavedSignIn);
+        Assert.Equal(1, usersStore.CountOf("available"));
+
+        // Act: withdraw the opt-in
+        editor.AllowInsecureHttp = false;
+        await editor.HelperCheckCompleted;
+
+        // Assert
+        Assert.False(editor.CanForgetSavedSignIn);
+    }
+
+    /// <summary>
+    ///     Test that the signer fingerprint is accepted in every spelling a certificate viewer or
+    ///     command-line tool prints (colons, dashes, spaces, lower case) and saved normalized.
+    /// </summary>
+    [Theory]
+    [InlineData("a3-af-7a-f1-1e-bb-8e-f7-29-d2-d9-15-48-50-97-17-e7-e0-ff-55-a1-29-ab-c3-ae-aa-8a-69-40-26-76-41")]
+    [InlineData("a3 af 7a f1 1e bb 8e f7 29 d2 d9 15 48 50 97 17 e7 e0 ff 55 a1 29 ab c3 ae aa 8a 69 40 26 76 41")]
+    [InlineData("a3af7af11ebb8ef729d2d91548509717e7e0ff55a129abc3aeaa8a6940267641")]
+    [InlineData("A3AF7AF11EBB8EF729D2D91548509717E7E0FF55A129ABC3AEAA8A6940267641")]
+    public void SourceEditorViewModel_Fingerprint_DashesSpacesAndLowerCase_AreAccepted(string spelling)
+    {
+        // Arrange
+        var editor = CreateFilledServerEditor();
+        editor.RequireSignedPackages = true;
+        PackageSourceDefinition? saved = null;
+        editor.Saved += (_, definition) => saved = definition;
+
+        // Act
+        editor.SignerFingerprint = spelling;
+        editor.SaveCommand.Execute(null);
+
+        // Assert
+        Assert.Null(editor.FingerprintError);
+        Assert.NotNull(saved);
+        Assert.Equal(NormalizedFingerprint, saved.SignerFingerprint);
+    }
+
+    /// <summary>
     ///     Creates a server editor.
     /// </summary>
     /// <param name="signaturesSupported">Whether the platform is taken to support signature

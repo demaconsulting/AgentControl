@@ -30,7 +30,11 @@ package folder (a NuGet package's `content` folder).
   repo and, for a folder package, any symbolic link or junction
   (`AgentControl-PackageContentExtractor-ExtractFromFolder`,
   `AgentControl-PackageContentExtractor-RejectLinksAndTraversal`); also reads the package's
-  root-level release notes and `AGENTS.md` template (`AgentControl-PackageContentExtractor-ReadRootFiles`).
+  root-level release notes and `AGENTS.md` template (`AgentControl-PackageContentExtractor-ReadReleaseNotes`,
+  `AgentControl-PackageContentExtractor-ReadAgentsMdTemplate`). A broken link at a requested root-level file is
+  rejected like any other link (`AgentControl-PackageContentExtractor-RejectBrokenLink`), and a zip that cannot be
+  opened - including one given an invalid or unsupported path - is reported as `InvalidOperationException`
+  (`AgentControl-PackageContentExtractor-ZipOpenFailure`).
   It also refuses - before deleting or writing anything - to work in a repo whose `.github`
   folder, a managed folder or a destination folder is a symbolic link or junction, since the
   delete and copy would follow it outside the repo; the repo root itself may be reached through a
@@ -142,3 +146,17 @@ handling. Per architecture.md's "Committed agent files" badge description, Agent
 not modify git tracking state itself; `GitIgnoreEnsurer` is a deliberate, narrow exception
 limited to `.gitignore` *content* (never git tracking state) and does not contradict that
 stance (`AgentControl-RepoSync-GitIgnorePrevention`).
+
+#### Residual risks
+
+**Link validation is check-then-use (accepted).** Package and repo paths are validated against symbolic links and
+junctions and then used in a separate step - the package reader checks every component of a path before it opens
+the file, and the extractor checks the repo's folder chain before deleting and re-checks the destination directory
+chain immediately before each directory or file is created - so a link planted in the gap between check and use
+could redirect that one read or write outside the validated boundary (a time-of-check-to-time-of-use race). The risk
+is accepted without a code change: exploiting it needs a concurrent process of the same user, which can already write
+anywhere that user can write and so gains nothing new; every path component is checked before use and the
+destination chain is re-checked immediately before each creation; the supported concurrency model is that the repo
+working tree and the package folder are not modified by another process during extraction; and a stronger
+no-follow or handle-based open is not portable across Windows, Linux and macOS in .NET. The detail is in the
+`PackageContentExtractor` unit design and the limitation is recorded in its verification.

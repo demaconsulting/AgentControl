@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
@@ -135,6 +137,54 @@ public class SignatureVerificationSupportTests
         Assert.False(failing);
         Assert.False(wrongPlatform);
         Assert.Equal(0, probeRuns);
+    }
+
+    /// <summary>
+    ///     Test that the concrete probe - not a stand-in - really builds a certificate chain offline
+    ///     on the platforms the signature tests run on, so the capability check is true because a
+    ///     chain was built, not because an object could be created.
+    /// </summary>
+    [Fact]
+    public void SignatureVerificationSupport_ProbeCertificateChains_OnThisPlatform_BuildsAChainOfflineAndIsSupported()
+    {
+        // Arrange
+        var onAMatrixPlatform = OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
+
+        // Act
+        var probed = SignatureVerificationSupport.RunProbe(SignatureVerificationSupport.ProbeCertificateChains);
+
+        // Assert
+        Assert.Equal(onAMatrixPlatform, probed);
+    }
+
+    /// <summary>
+    ///     Test that a chain build that does not come out clean - here a certificate that has
+    ///     expired - means "not supported", so the probe fails closed on an unexpected chain status.
+    /// </summary>
+    [Fact]
+    public void SignatureVerificationSupport_ProbeChain_ExpiredCertificate_IsNotSupported()
+    {
+        // Arrange: a self-signed certificate whose validity ended days ago
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest("CN=expired probe", key, HashAlgorithmName.SHA256);
+        using var expired = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-10), DateTimeOffset.UtcNow.AddDays(-5));
+
+        // Act
+        var supported = SignatureVerificationSupport.ProbeChain(expired);
+
+        // Assert
+        Assert.False(supported);
+    }
+
+    /// <summary>
+    ///     Test that having no certificate to build a chain for is "not supported" rather than an
+    ///     exception.
+    /// </summary>
+    [Fact]
+    public void SignatureVerificationSupport_ProbeChain_NullCertificate_IsNotSupported()
+    {
+        // Act / Assert
+        Assert.False(SignatureVerificationSupport.ProbeChain(null));
     }
 
     /// <summary>

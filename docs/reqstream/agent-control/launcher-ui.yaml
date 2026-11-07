@@ -230,9 +230,30 @@ sections:
           - AgentControl-SettingsWindowViewModel-AddEditRemoveSource
           - AgentControl-SettingsWindowViewModel-AliasUnique
           - AgentControl-SourceEditorViewModel-Validation
+          - AgentControl-SourceEditorViewModel-AliasRules
+          - AgentControl-SourceEditorViewModel-FolderLocation
+          - AgentControl-SourceEditorViewModel-NoEmbeddedCredential
+          - AgentControl-SourceEditorViewModel-CredentialNeverEchoed
+          - AgentControl-SourceEditorViewModel-ServerAddressIndexJson
+          - AgentControl-SourceEditorViewModel-InsecureHttpAddress
+          - AgentControl-SourceEditorViewModel-PackageIdRequired
+          - AgentControl-SourceEditorViewModel-PackageIdRequiredServerMessage
+          - AgentControl-SourceEditorViewModel-NoErrorsUntilTouched
           - AgentControl-SourceEditorViewModel-PackageIds
+          - AgentControl-SourceEditorViewModel-PackageIdRemove
+          - AgentControl-SourceEditorViewModel-PackageIdMalformed
+          - AgentControl-SourceEditorViewModel-PackageIdDuplicate
           - AgentControl-SourceEditorViewModel-ServerSource
+          - AgentControl-SourceEditorViewModel-ServerExamples
+          - AgentControl-SourceEditorViewModel-InsecureHttpChoice
+          - AgentControl-SourceEditorViewModel-InsecureHttpWarning
+          - AgentControl-SourceEditorViewModel-ServerSettingsSaved
+          - AgentControl-SourceEditorViewModel-ServerSettingsEdited
           - AgentControl-SourceEditorViewModel-Save
+          - AgentControl-SourceEditorViewModel-EditKeepsAlias
+          - AgentControl-SourceEditorViewModel-EditKeepsHiddenSettings
+          - AgentControl-SourceEditorViewModel-SourceNotModified
+          - AgentControl-SourceEditorViewModel-SaveBlockedWhenInvalid
         tests:
           - SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder
           - SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource
@@ -256,7 +277,16 @@ sections:
           friendlier than discovering it later in a window that cannot say what failed, and a
           test against a slow or unreachable server must not freeze the dialog.
         children:
+          - AgentControl-SourceEditorViewModel-TestConnectionAvailability
           - AgentControl-SourceEditorViewModel-TestConnection
+          - AgentControl-SourceEditorViewModel-TestConnectionProgress
+          - AgentControl-SourceEditorViewModel-TestConnectionCancel
+          - AgentControl-SourceEditorViewModel-TestConnectionSuccess
+          - AgentControl-SourceEditorViewModel-TestConnectionPackageNotFound
+          - AgentControl-SourceEditorViewModel-TestConnectionFailureReasons
+          - AgentControl-SourceEditorViewModel-TestConnectionOtherFailures
+          - AgentControl-SourceEditorViewModel-TestConnectionResultDropped
+          - AgentControl-SourceEditorViewModel-TestConnectionStaleResult
           - AgentControl-MainWindowViewModel-ConnectionTestProvider
         tests:
           - SourceEditorWindow_TestConnection_ShowsProgressCancelAndResult
@@ -284,7 +314,14 @@ sections:
           operations from leaving the user with a hidden or stacked dialog.
         children:
           - AgentControl-CredentialPromptViewModel-ShowsDestination
+          - AgentControl-CredentialPromptViewModel-InsecureHttpFlag
+          - AgentControl-CredentialPromptViewModel-SessionOnlyNote
+          - AgentControl-CredentialPromptViewModel-PreviousCredentialRejected
+          - AgentControl-CredentialPromptViewModel-SignInRequiresBoth
           - AgentControl-CredentialPromptViewModel-SignIn
+          - AgentControl-CredentialPromptViewModel-PasswordVerbatim
+          - AgentControl-CredentialPromptViewModel-Cancel
+          - AgentControl-CredentialPromptViewModel-AnswerOnce
         tests:
           # The dialog itself and the object that shows it are views with no separate unit
           # document, so their behavior is verified by headless window tests at this level.
@@ -310,6 +347,10 @@ sections:
           and must not offer a choice the application cannot honor.
         children:
           - AgentControl-CredentialPromptViewModel-RememberOption
+          - AgentControl-CredentialPromptViewModel-RememberUnavailable
+          - AgentControl-CredentialPromptViewModel-RememberNeverWithoutHelper
+          - AgentControl-CredentialPromptViewModel-RememberAnswer
+          - AgentControl-CredentialPromptViewModel-RememberNote
         tests:
           - CredentialPromptWindow_CanRemember_CheckboxEnabledUncheckedAndAnswersRemember
           - CredentialPromptWindow_CannotRemember_CheckboxDisabledWithExplanatoryTooltip
@@ -327,6 +368,13 @@ sections:
           server, with no surprise and with an honest result.
         children:
           - AgentControl-SourceEditorViewModel-ForgetSavedSignIn
+          - AgentControl-SourceEditorViewModel-ForgetAcceptableAddressOnly
+          - AgentControl-SourceEditorViewModel-ForgetUnavailableExplained
+          - AgentControl-SourceEditorViewModel-ForgetChecking
+          - AgentControl-SourceEditorViewModel-ForgetConfirmation
+          - AgentControl-SourceEditorViewModel-ForgetResultForgotten
+          - AgentControl-SourceEditorViewModel-ForgetResultNothingSaved
+          - AgentControl-SourceEditorViewModel-ForgetResultNotRemoved
         tests:
           - SourceEditorWindow_ForgetSavedSignIn_ConfirmationDecidesAndResultIsShown
           - SourceEditorWindow_ForgetSavedSignIn_NoCredentialStore_ButtonDisabledWithTooltip
@@ -348,7 +396,18 @@ sections:
           or pretending.
         children:
           - AgentControl-SourceEditorViewModel-SignatureOptions
+          - AgentControl-SourceEditorViewModel-SignatureExplanation
+          - AgentControl-SourceEditorViewModel-SignatureUnsupportedPlatform
+          - AgentControl-SourceEditorViewModel-SignatureSettingsKept
+          - AgentControl-SourceEditorViewModel-SignatureChoiceSaved
+          - AgentControl-SourceEditorViewModel-ZipNeverRequiresSignatures
           - AgentControl-SourceEditorViewModel-SignerFingerprint
+          - AgentControl-SourceEditorViewModel-FingerprintOptional
+          - AgentControl-SourceEditorViewModel-FingerprintSpellings
+          - AgentControl-SourceEditorViewModel-FingerprintHelp
+          - AgentControl-SourceEditorViewModel-FingerprintError
+          - AgentControl-SourceEditorViewModel-FingerprintNormalized
+          - AgentControl-SourceEditorViewModel-FingerprintNotSavedWhenUnused
         tests:
           - SourceEditorWindow_SignatureOptions_TickingEnablesTheFingerprintAndValidatesIt
           - SourceEditorWindow_SignatureOptions_UnsupportedPlatform_CheckboxDisabledWithTooltip

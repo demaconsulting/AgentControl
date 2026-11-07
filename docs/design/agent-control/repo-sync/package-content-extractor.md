@@ -27,16 +27,28 @@ messages), `ListFiles()` (relative paths with `/` separators), `OpenRead(path)` 
 `ReadText(path)` (null when absent). Implementations never write to the package.
 
 **ZipPackageContentReader**: holds a `ZipArchive` open until disposed; `Open` wraps open
-failures in `InvalidOperationException` naming the zip.
+failures - an unreadable or invalid archive, and a path that is invalid or unsupported
+(`ArgumentException`, `NotSupportedException`, `PathTooLongException`, `SecurityException`) - in
+`InvalidOperationException` naming the zip, so no path exception escapes to a caller that handles one failure type
+(`AgentControl-PackageContentExtractor-ZipOpenFailure`).
 
 **DirectoryPackageContentReader**: holds only paths. `Open` requires a `content` sub-folder
 (otherwise `InvalidOperationException` — a wrong-layout package must never make the extractor
-delete a repo's managed folders for nothing) and rejects a package folder or a `content` folder
-that is itself a link. `ListFiles` walks the content tree and rejects any file or directory that is a symbolic link,
-junction or other reparse point (`FileAttributes.ReparsePoint` or a link target). `OpenRead` and
-`ReadText` resolve each path with `PathHelpers.SafePathCombine` against the content root and
+delete a repo's managed folders for nothing; `AgentControl-PackageContentExtractor-RejectMissingContentFolder`) and
+rejects a package folder or a `content` folder
+that is itself a link (`AgentControl-PackageContentExtractor-RejectLinkedPackageFolder`). `ListFiles` walks the
+content tree and rejects any file or directory that is a symbolic link,
+junction or other reparse point (`FileAttributes.ReparsePoint` or a link target;
+`AgentControl-PackageContentExtractor-RejectLinkedPackageDirectory`). `OpenRead` and
+`ReadText` resolve each path with `PathHelpers.SafePathCombine` against the content root (a path that leaves it is
+refused: `AgentControl-PackageContentExtractor-RejectPathOutsideContent`) and
 refuse a path when the file, or any directory between the content root and the file, is a link, so
-a linked parent directory holding an ordinary file cannot redirect a read.
+a linked parent directory holding an ordinary file cannot redirect a read
+(`AgentControl-PackageContentExtractor-RejectLinkedPackageFile`). The link check inspects the entry's own
+attributes before it decides the entry is absent, so a **broken** link - one whose target does not exist - at a
+requested root-level file such as `AGENTS.md` is rejected with `InvalidOperationException` like any other link,
+rather than being treated as a missing file for which `ReadText` returns `null`
+(`AgentControl-PackageContentExtractor-RejectBrokenLink`).
 
 #### Key Methods
 
@@ -47,9 +59,11 @@ repo if present, and copies the same four folders from the package into the repo
   (defaults to a fresh `AppLogging.Factory`-resolved logger per call rather than a cached static
   field, so logging configured after this class is first touched is never missed).
 - *Postconditions*: The four managed folders under `repoRoot` match the package's managed
-  folders exactly (`AgentControl-PackageContentExtractor-ExtractFromFolder`). Root-level files
+  folders exactly (`AgentControl-PackageContentExtractor-ExtractFromFolder`,
+  `-ReplaceManagedFolders`, `-PackageNeverModified`, each prefixed `AgentControl-PackageContentExtractor`). Root-level files
   such as `release-notes.md` and `AGENTS.md` and any file outside the managed folders are not
-  copied. Every file's destination is resolved with `PathHelpers.SafePathCombine` and its
+  copied (`AgentControl-PackageContentExtractor-NoRootFilesCopied`). Every file's destination is resolved with
+  `PathHelpers.SafePathCombine` and its
   membership in a managed folder decided on the canonical (`..`-resolved) relative path *before*
   anything is deleted, so a path that escapes the repo (or a link inside a folder package, which
   `ListFiles` rejects) fails the whole call with the repo untouched
@@ -60,9 +74,12 @@ repo if present, and copies the same four folders from the package into the repo
   (`FileAttributes.ReparsePoint` or a link target) — or a component whose type cannot be
   determined — refuses the whole extraction with a clear error, so a link can never redirect the
   delete or copy outside the repo and a refused extraction changes nothing
-  (`AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`). The repo root itself and the
+  (`AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`; the requirement covers a link in the
+  `.github` folder, a managed folder or the destination chain as one criterion - a linked folder on the way to
+  anything that would be deleted or written). The repo root itself and the
   components above it are never inspected, because a root may legitimately be reached through a
-  link such as a redirected user profile; only components at or below the root must be link-free.
+  link such as a redirected user profile; only components at or below the root must be link-free
+  (`AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink`).
   `CopyFile` repeats the check on its destination chain just before creating directories, as
   defense in depth. A delete or copy I/O failure can
   still leave the repo partially upgraded — there is intentionally no rollback, per
@@ -72,11 +89,13 @@ repo if present, and copies the same four folders from the package into the repo
 **AllManagedFoldersExist**: Reports whether all four managed folders exist under a repo root as
 ordinary folders, without inspecting contents. A managed folder that is a link, or sits below a
 linked `.github`, is not valid, so a caller that skips syncing when the folders exist falls
-through to `Extract`, which refuses the link with a clear error.
+through to `Extract`, which refuses the link with a clear error
+(`AgentControl-PackageContentExtractor-ManagedFoldersExist`).
 
 **ReadReleaseNotes / ReadAgentsMdTemplate**: Return the package's root-level `release-notes.md`
 or `AGENTS.md` text, or `null` when absent, without copying anything to disk
-(`AgentControl-PackageContentExtractor-ReadRootFiles`).
+(`AgentControl-PackageContentExtractor-ReadReleaseNotes`,
+`AgentControl-PackageContentExtractor-ReadAgentsMdTemplate`).
 
 #### Error Handling
 
@@ -87,7 +106,32 @@ the repo's `.github`/managed-folder/destination chain, a missing
 (wrapping `IOException`/`UnauthorizedAccessException`/`ArgumentException`/`NotSupportedException`
 with a message naming the package or file). Delete and copy failures are wrapped and not
 separately logged here: the caller (`RepoCardViewModel`) already logs the exception with repo and
-package context.
+package context. A zip that cannot be opened is also reported as `InvalidOperationException`, including when its
+path is invalid or unsupported.
+
+**Residual risk - check-then-use on links (accepted).** Link validation is check-then-use, not an atomic
+no-follow operation: `DirectoryPackageContentReader` validates each component of a package path
+(the package folder, the content folder, each directory and the file)
+before it opens the file, and `PackageContentExtractor` checks the repo's folder chain before deleting and
+re-checks the destination directory chain immediately before each `CreateDirectory` and file creation. A process
+that replaces a checked component with a link in the gap between the check and the use could therefore make a
+read or write follow the link outside the validated boundary (a time-of-check-to-time-of-use race). The risk is
+**accepted and not eliminated in code**, for these reasons:
+
+- Exploiting it needs a concurrent process running as the same user that can already write anywhere that user
+  can write, so a successful race gains the attacker nothing they could not do directly.
+- Mitigations in place: every path component is checked before use; the destination directory chain is checked
+  again immediately before each directory or file is created, which narrows the window to the interval between
+  that last check and the operating-system call.
+- The supported concurrency model is that the repo working tree and the package folder are **not modified by
+  another process while an extraction runs**; the application does not defend against a hostile concurrent writer
+  within that boundary.
+- A stronger no-follow or handle-based open (for example opening each component relative to the previous
+  directory handle without following links) is not portable across Windows, Linux and macOS in .NET, so it is
+  not used.
+
+This residual risk is repeated in the `RepoSync` subsystem design and is recorded as a verification limitation
+(it cannot be tested deterministically).
 
 #### Dependencies
 

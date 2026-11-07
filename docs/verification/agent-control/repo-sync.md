@@ -50,7 +50,8 @@ unit verification design), with `PackageZipExtractor_Extract_FreshRepo_CreatesMa
 `PackageZipExtractor_Extract_InvalidZipFile_ThrowsInvalidOperationException` cited directly at
 the subsystem level, covering `AgentControl-RepoSync-Sync` (children:
 `AgentControl-PackageZipExtractor-Extract`,
-`AgentControl-PackageZipExtractor-AllManagedFoldersExist`, `AgentControl-Utilities-SafePaths`).
+`AgentControl-PackageZipExtractor-AllManagedFoldersExist`, `AgentControl-PackageContentExtractor-ZipOpenFailure`,
+`AgentControl-Utilities-SafePaths`).
 
 **RepoSync_ReleaseNotes_UnitTestsCoverReadWithoutExtractAndPlaceholder**: Reading release
 notes without extracting and displaying them (with a placeholder for a package with none) are
@@ -98,9 +99,11 @@ managed folder is deleted. This scenario is verified by the `PackageContentExtra
 `PackageContentExtractor_Extract_ZipAndDirectoryWithSameContent_ProduceIdenticalRepoTrees`, and
 `PackageContentExtractor_Extract_TraversalPathFromReader_ThrowsBeforeDeletingManagedFolders` cited
 directly at the subsystem level, covering `AgentControl-RepoSync-SyncFromFolderPackage` (children:
-`AgentControl-PackageContentExtractor-ExtractFromFolder`,
-`AgentControl-PackageContentExtractor-RejectLinksAndTraversal`,
-`AgentControl-PackageContentExtractor-ReadRootFiles`, `AgentControl-Utilities-SafePaths`).
+`AgentControl-PackageContentExtractor-ExtractFromFolder`, `-ReplaceManagedFolders`, `-NoRootFilesCopied`,
+`-PackageNeverModified`, `-RejectMissingContentFolder`, `-RejectLinksAndTraversal`, `-RejectPathOutsideContent`,
+`-RejectLinkedPackageFolder`, `-RejectLinkedPackageDirectory`, `-RejectLinkedPackageFile`, `-RejectBrokenLink`,
+`-ReadReleaseNotes`, `-ReadAgentsMdTemplate` (each prefixed `AgentControl-PackageContentExtractor`) and
+`AgentControl-Utilities-SafePaths`).
 
 **RepoSync_RefuseLinkedRepoFolders_ChangesNothing**: Extracting a package zip through the
 subsystem's `PackageZipExtractor` entry point into a repo whose `.github` folder or a managed
@@ -113,5 +116,7 @@ reported by `AllManagedFoldersExist` as existing. This scenario is tested by
 `RepoSync_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched` (in
 `PackageZipExtractorTests.cs`; junction tests run on Windows, symbolic-link tests on Linux and
 skip where links cannot be created), covering `AgentControl-RepoSync-RefuseLinkedRepoFolders`
-(children: `AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`, whose unit tests are
+(children: `AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`,
+`AgentControl-PackageContentExtractor-ManagedFoldersExist` and
+`AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink`, whose unit tests are
 described in the `PackageContentExtractor` unit verification design).

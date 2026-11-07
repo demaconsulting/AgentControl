@@ -59,7 +59,8 @@ internal sealed class ZipPackageContentReader : IPackageContentReader
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="zipPath"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the file does not exist, is not a
-    ///     valid zip archive, or cannot be opened for another I/O reason.</exception>
+    ///     valid zip archive, the path is invalid or unsupported, or the file cannot be opened for
+    ///     another I/O or permission reason.</exception>
     public static ZipPackageContentReader Open(string zipPath)
     {
         ArgumentNullException.ThrowIfNull(zipPath);
@@ -68,8 +69,12 @@ internal sealed class ZipPackageContentReader : IPackageContentReader
         {
             return new ZipPackageContentReader(ZipFile.OpenRead(zipPath), zipPath);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
+                                       or ArgumentException or NotSupportedException
+                                       or System.Security.SecurityException)
         {
+            // Also the path-related failures (an unsupported or invalid path), so the documented
+            // contract - every failure to open is an InvalidOperationException - holds
             throw new InvalidOperationException($"Failed to open package zip '{zipPath}': {ex.Message}", ex);
         }
     }

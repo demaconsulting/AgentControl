@@ -82,6 +82,36 @@ public sealed class FeedOriginTests
     }
 
     /// <summary>
+    ///     Test that an absolute https address that really carries user information - built from
+    ///     its parts, so the test does not depend on how a literal is written - is refused and the
+    ///     refusal never repeats the user name or password.
+    /// </summary>
+    [Fact]
+    public void FeedOrigin_TryParse_UserInfoOnAbsoluteUri_IsRefusedWithoutRepeatingIt()
+    {
+        // Arrange: the precondition is asserted, so the test cannot pass on a malformed address
+        var address = new UriBuilder("https", "feeds.example.com")
+        {
+            UserName = "svc-user",
+            Password = "sentinel-pw-123",
+            Path = "/v3/index.json"
+        }.Uri;
+        Assert.True(address.IsAbsoluteUri);
+        Assert.Equal("svc-user:sentinel-pw-123", address.UserInfo);
+
+        // Act
+        var parsed = FeedOrigin.TryParse(address.OriginalString, out var origin);
+        var ex = Assert.Throws<ArgumentException>(() => FeedOrigin.Create(address));
+
+        // Assert
+        Assert.False(parsed);
+        Assert.Null(origin);
+        Assert.NotEmpty(ex.Message);
+        Assert.DoesNotContain("sentinel-pw-123", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("svc-user", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that blank, relative, non-web and malformed text is not an origin.
     /// </summary>
     [Theory]

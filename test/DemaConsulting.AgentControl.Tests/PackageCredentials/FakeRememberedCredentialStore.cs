@@ -60,6 +60,13 @@ internal sealed class FakeRememberedCredentialStore : IRememberedCredentialStore
     public bool ThrowOnEveryCall { get; set; }
 
     /// <summary>
+    ///     Gets or sets a value indicating whether only <see cref="FillAsync"/> throws (after its
+    ///     <see cref="FillDelay"/>), while every other call - availability included - works, to
+    ///     prove a failed lookup disables remembering even though a helper is configured.
+    /// </summary>
+    public bool FailFill { get; set; }
+
+    /// <summary>
     ///     Gets or sets how long a lookup takes, so concurrent callers can be shown to share one
     ///     lookup.
     /// </summary>
@@ -140,6 +147,11 @@ internal sealed class FakeRememberedCredentialStore : IRememberedCredentialStore
             await Task.Delay(FillDelay, cancellationToken);
         }
 
+        if (FailFill)
+        {
+            throw new InvalidOperationException("The credential store could not be read.");
+        }
+
         return Peek(origin);
     }
 
@@ -157,6 +169,12 @@ internal sealed class FakeRememberedCredentialStore : IRememberedCredentialStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    ///     Honors the exact-credential contract: with a credential, the saved one is removed only
+    ///     when it is that very credential (a newer one saved meanwhile survives a late rejection
+    ///     of an older one) - the request is still "accepted"; with <see langword="null"/> it
+    ///     removes whatever is saved for the origin.
+    /// </remarks>
     public Task<bool> RejectAsync(FeedOrigin origin, NuGetCredential? credential, CancellationToken cancellationToken)
     {
         Record("reject", origin);
@@ -167,7 +185,11 @@ internal sealed class FakeRememberedCredentialStore : IRememberedCredentialStore
 
         lock (_saved)
         {
-            _saved.Remove(origin.ToString());
+            var key = origin.ToString();
+            if (credential is null || (_saved.TryGetValue(key, out var current) && current.Equals(credential)))
+            {
+                _saved.Remove(key);
+            }
         }
 
         return Task.FromResult(true);

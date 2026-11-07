@@ -107,31 +107,53 @@ unit tests (see its unit verification design), with
 directly at the subsystem level, covering `AgentControl-AgentPackageManagement-SourceResolution`
 (children: `AgentControl-PackageSourceRegistry-ResolveAlias`,
 `AgentControl-PackageSourceRegistry-MissingAliasIsError`,
+`AgentControl-PackageSourceRegistry-BlankAliasNeverConfigured`,
+`AgentControl-PackageSourceRegistry-InvalidAliasesRejected`,
+`AgentControl-PackageSourceRegistry-NullDefinitionRejected`,
+`AgentControl-PackageSourceRegistry-DefinitionsAreASnapshot`,
 `AgentControl-PackageSourceRegistry-NoCrossSourceFallback`).
 
 **AgentPackageManagement_ZipFolderSource_ListsAndSuppliesFromItsFolderOnly**: A zip folder source
-lists its packages and versions with the same file-name rules as before and supplies a package's
-content only from its own folder. This scenario is verified by the `ZipFolderSourceProvider` unit
+lists its packages and versions with the same file-name rules as before, supplies a package's
+content only from its own folder (not through a link that leads outside it), reports a missing folder
+as such and honors cancellation. This scenario is verified by the `ZipFolderSourceProvider` unit
 tests, with `ZipFolderSourceProvider_ListVersions_MixedFolder_ReturnsMatchingPackagesStampedWithAlias`
 and `ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReturnsReaderOverZipRoot` cited directly at
 the subsystem level, covering `AgentControl-AgentPackageManagement-ZipFolderSource` (children:
 `AgentControl-ZipFolderSourceProvider-ListAndAcquire`,
-`AgentControl-ZipFolderSourceProvider-AcquireOnlyFromOwnSource`).
+`AgentControl-ZipFolderSourceProvider-ListPackageNames`,
+`AgentControl-ZipFolderSourceProvider-AcquireContent`,
+`AgentControl-ZipFolderSourceProvider-FolderErrorsNormalized`,
+`AgentControl-ZipFolderSourceProvider-CancellationObserved`,
+`AgentControl-ZipFolderSourceProvider-AcquireOnlyFromOwnSource`,
+`AgentControl-ZipFolderSourceProvider-ZipMustBeInOwnFolder`,
+`AgentControl-ZipFolderSourceProvider-RefusesLinkedZipOutsideFolder`,
+`AgentControl-ZipFolderSourceProvider-AllowsLinkedZipInsideFolder`,
+`AgentControl-ZipFolderSourceProvider-ValidateDefinition`).
 
 **AgentPackageManagement_NuGetFolderSource_ListsAndSuppliesFromPrivateStorage**: A NuGet folder
 source lists the versions of its packages, supplies a chosen version's content folder, keeps its
-storage in AgentControl-owned folders, and never touches the target repo. This scenario is
+storage in AgentControl-owned folders, never touches the target repo, and honors a cancellation requested
+before it starts without preparing anything. This scenario is
 verified by the `NuGetSourceProvider` unit tests, with
 `NuGetSourceProvider_ListVersions_FolderFeedWithVersions_ReturnsAllVersionsStampedWithAlias`,
 `NuGetSourceProvider_Acquire_ExistingPackage_ReturnsReaderOverContentFolder`, and
 `NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig` cited directly at the subsystem
 level, covering `AgentControl-AgentPackageManagement-NuGetFolderSource` (children:
 `AgentControl-NuGetSourceProvider-ListVersions`,
+`AgentControl-NuGetSourceProvider-ListVersionsUnknownPackageIsEmpty`,
+`AgentControl-NuGetSourceProvider-ListVersionsMissingFolderReported`,
+`AgentControl-NuGetSourceProvider-ListPackageIds`,
+`AgentControl-NuGetSourceProvider-CancellationHonoredBeforeSideEffects`,
 `AgentControl-NuGetSourceProvider-AcquireToPrivateCache`,
+`AgentControl-NuGetSourceProvider-PrivateCachePerSource`,
+`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`,
 `AgentControl-NuGetSourceProvider-ExplicitCacheRoot`,
+`AgentControl-NuGetSourceProvider-CacheRootMustBeAbsolute`,
 `AgentControl-NuGetSourceProvider-NoRepoNuGetConfig`,
 `AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration`,
 `AgentControl-NuGetSourceProvider-ValidateLocation`,
+`AgentControl-NuGetSourceProvider-RejectNonNuGetDefinition`,
 `AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource`).
 
 **AgentPackageManagement_NuGetServerSource_ListsSignsInAndReportsFailuresWithoutLeakingSecrets**: A NuGet
@@ -149,11 +171,29 @@ opt-in) of an `index.json` with no credential; and no secret reaches the log. Th
 `NuGetSourceProvider_Constructor_PlainHttp_RefusedUnlessInsecureHttpIsAllowed` cited directly at the subsystem
 level, covering `AgentControl-AgentPackageManagement-NuGetServerSource` (children:
 `AgentControl-NuGetSourceProvider-ServerListAndAcquire`,
-`AgentControl-NuGetSourceProvider-ValidateLocation`,
+`AgentControl-NuGetSourceProvider-ServerListDoesNotDownload`,
+`AgentControl-NuGetSourceProvider-ServerUnknownPackageIsEmpty`,
+`AgentControl-NuGetSourceProvider-ServerAcquire`,
+`AgentControl-NuGetSourceProvider-PlainHttpRefusedUnlessAllowed`,
+`AgentControl-NuGetSourceProvider-ServerAddressMustBeServiceIndex`,
+`AgentControl-NuGetSourceProvider-CredentialInAddressRefused`,
+`AgentControl-NuGetSourceProvider-HttpsAddressAccepted`,
 `AgentControl-NuGetSourceProvider-SignInOrder`,
+`AgentControl-NuGetSourceProvider-AskUserOnce`,
+`AgentControl-NuGetSourceProvider-CredentialRememberedAfterSuccess`,
+`AgentControl-NuGetSourceProvider-NonInteractiveLibrary`,
+`AgentControl-NuGetSourceProvider-SavedSignIn`,
+`AgentControl-NuGetSourceProvider-SavedSignInLookedUpOnce`,
+`AgentControl-NuGetSourceProvider-RejectedSavedSignInRemoved`,
+`AgentControl-NuGetSourceProvider-SignInSavedOnlyWhenChosen`,
 `AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin`,
 `AgentControl-NuGetSourceProvider-ServerFailures`,
-`AgentControl-NuGetSourceProvider-SecretsNotLogged`, `AgentControl-NuGetSourceProvider-SavedSignIn`).
+`AgentControl-NuGetSourceProvider-RejectedCredentialForgotten`,
+`AgentControl-NuGetSourceProvider-SignInTimeLimit`,
+`AgentControl-NuGetSourceProvider-CallerCancellationNotAFailure`,
+`AgentControl-NuGetSourceProvider-SecretsNotLogged`,
+`AgentControl-NuGetSourceProvider-SecretsNotInExceptions`,
+`AgentControl-PackageSourceRegistry-PlainHttpServerSourceRefused`).
 
 **AgentPackageManagement_SignedPackages_RefusesEveryPackageThatFailsTheRequirement**: Through the registry, which
 resolves configured sources into providers, a NuGet source that requires signed packages refuses an unsigned
@@ -169,8 +209,15 @@ publisher"; a hand-edited unreadable fingerprint stops the source when it is res
 the requirement or pin changed, a server source refusing an unsigned package, a repository countersignature pin
 not matching, the independence from the user's own trusted-signer settings and the generated trust configuration -
 is in the `NuGetSourceProvider` unit tests and is covered by the child requirements
-`AgentControl-NuGetSourceProvider-RequireSigned`, `AgentControl-NuGetSourceProvider-SignerPin`,
-`AgentControl-NuGetSourceProvider-SignerTrustIsolated`, `AgentControl-NuGetSourceProvider-SignatureFailureReported`
+`AgentControl-NuGetSourceProvider-RequireSigned`, `AgentControl-NuGetSourceProvider-SignatureCheckedForCachedPackage`,
+`AgentControl-NuGetSourceProvider-SignedPackageAccepted`,
+`AgentControl-NuGetSourceProvider-UnsignedAcceptedWhenNotRequired`, `AgentControl-NuGetSourceProvider-SignerPin`,
+`AgentControl-NuGetSourceProvider-RepositoryCountersignatureNotAPin`,
+`AgentControl-NuGetSourceProvider-ChangedPinAppliesToCachedPackages`,
+`AgentControl-NuGetSourceProvider-GeneratedSignerConfiguration`,
+`AgentControl-NuGetSourceProvider-NoSignerConfigurationWithoutRequirement`,
+`AgentControl-NuGetSourceProvider-SignerTrustIsolated`, `AgentControl-NuGetSourceProvider-SignatureFailureReported`,
+`AgentControl-NuGetSourceProvider-SignatureFailureNamesPinnedPublisher`
 and `AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused`.
 
 **AgentPackageManagement_SignaturePlatformSupport_FailsClosedWhereVerificationIsUnsupported**: When the platform
@@ -179,9 +226,12 @@ refuses to list with a signature failure that explains why, while a source that 
 the same feed works as usual. This scenario is tested by
 `AgentPackageManagementSubsystem_RequireSignedOnUnsupportedPlatform_SourceRefusesAndOthersWork`, covering
 `AgentControl-AgentPackageManagement-SignaturePlatformSupport`. The support check's own behavior (exactly Windows,
-Linux and macOS, the fail-closed probe, the documented explanation) and the provider's refusal to acquire are
+Linux and macOS, the fail-closed probe, the real offline certificate-chain probe, the documented explanation) and
+the provider's refusal to acquire are
 verified by the unit tests and covered by the children
 `AgentControl-SignatureVerificationSupport-PlatformSupport`,
 `AgentControl-SignatureVerificationSupport-FailClosedProbe`,
-`AgentControl-SignatureVerificationSupport-UnsupportedExplanation` and
-`AgentControl-NuGetSourceProvider-FailClosedWithoutVerification`.
+`AgentControl-SignatureVerificationSupport-RealChainProbe`,
+`AgentControl-SignatureVerificationSupport-UnsupportedExplanation`,
+`AgentControl-NuGetSourceProvider-FailClosedWithoutVerification` and
+`AgentControl-NuGetSourceProvider-UnsupportedPlatformDoesNotAffectOpenSources`.

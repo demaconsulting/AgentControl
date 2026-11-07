@@ -261,6 +261,58 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
     }
 
     /// <summary>
+    ///     Test that a server that answers HTTP 403 (Forbidden) with no credential available is
+    ///     reported as an authentication failure, the same way a 401 is, and never asks.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_ListVersions_ServerAnswersForbiddenAndNoPrompt_ThrowsAuthenticationFailedWithoutAsking()
+    {
+        // Arrange: a feed that refuses every request with 403, and no prompt available
+        var id = UniqueId();
+        var feed = await StartFeedAsync(id, "1.0.0");
+        feed.ForbidAllRequests = true;
+        var provider = CreateProvider(feed, new PackageCredentialContext(new SessionCredentialStore(), null));
+
+        // Act
+        var ex = await Assert.ThrowsAsync<PackageSourceAccessException>(
+            () => provider.ListVersionsAsync(id, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(PackageSourceFailureKind.AuthenticationFailed, ex.Kind);
+        Assert.Contains("needs a sign-in", ex.Message, StringComparison.Ordinal);
+        Assert.True(feed.ForbiddenCount > 0);
+    }
+
+    /// <summary>
+    ///     Test that a server that answers HTTP 403 (Forbidden) even to the credential the user
+    ///     typed is reported as an authentication failure after a single prompt, with no retry loop
+    ///     and nothing remembered.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_ListVersions_ServerAnswersForbiddenToTheCredential_ThrowsAuthenticationFailedAfterOnePrompt()
+    {
+        // Arrange: a feed that refuses every request with 403, and a user who types a credential
+        var id = UniqueId();
+        var feed = await StartFeedAsync(id, "1.0.0");
+        feed.ForbidAllRequests = true;
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential(FeedUser, SentinelPassword));
+        var store = new SessionCredentialStore();
+        var provider = CreateProvider(feed, new PackageCredentialContext(store, prompt));
+
+        // Act
+        var ex = await Assert.ThrowsAsync<PackageSourceAccessException>(
+            () => provider.ListVersionsAsync(id, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(PackageSourceFailureKind.AuthenticationFailed, ex.Kind);
+        Assert.Equal(1, prompt.AskCount);
+        Assert.Equal(0, store.Count);
+        Assert.Contains("rejected the credentials", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(SentinelPassword, ex.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that a session credential the server rejects is forgotten, the user is asked again
     ///     (and told the last one failed), and the new credential replaces it.
     /// </summary>

@@ -32,18 +32,26 @@ namespace DemaConsulting.AgentControl.PackageCredentials;
 ///     <para>
 ///     This store is the whole of AgentControl's own credential memory: it has no persistence of
 ///     any kind (nothing is written to the settings file, a repo pin, a log or the target repo),
-///     exposes no enumeration of its contents, and is emptied by <see cref="Clear"/> when the
-///     application exits. Credentials are keyed by <see cref="FeedOrigin"/>, so a credential is
+///     offers callers no way to enumerate its contents (only <see cref="Clear"/> walks the stored
+///     credentials, internally, to withdraw each one from the redactor), and is emptied by
+///     <see cref="Clear"/> when the application exits - which also invalidates any lookup of the
+///     user's credential store that is still in flight, so a late result cannot refill it.
+///     Credentials are keyed by <see cref="FeedOrigin"/>, so a credential is
 ///     only ever found by the exact feed it was typed for. The secret lives in an ordinary managed
 ///     string (the NuGet library needs one), which cannot be wiped from memory; the guarantee is
 ///     "never persisted", not "never in process memory".
 ///     </para>
 ///     <para>
-///     A credential is stored only after an operation that used it succeeded, and is forgotten
-///     (<see cref="Forget(FeedOrigin)"/>) as soon as a feed rejects it, so a wrong or revoked credential is
-///     never reused. Every stored secret is registered with <see cref="SecretRedactor"/> for as long
-///     as it is stored, so an occurrence of it in any log text or exception message is removed.
-///     Thread-safe: operations on different sources run concurrently.
+///     A credential the user typed is stored only after an operation that used it succeeded
+///     (<see cref="PackageCredentialCallback.CommitAsync"/>), and is forgotten
+///     (<see cref="Forget(FeedOrigin)"/>) as soon as a feed rejects it, so a wrong or revoked
+///     credential is never reused. A credential the user's own credential store already held is
+///     different: the once-per-session lookup (<see cref="EnsureRememberedLookupAsync"/>) puts it
+///     here before any operation has used it, because it was saved on purpose earlier, and a
+///     rejection removes it from here and from that store. Every stored secret is registered with
+///     <see cref="SecretRedactor"/> for as long as it is stored, so an occurrence of it in any log
+///     text or exception message is removed. Thread-safe: operations on different sources run
+///     concurrently.
 ///     </para>
 /// </remarks>
 internal sealed class SessionCredentialStore
@@ -71,6 +79,22 @@ internal sealed class SessionCredentialStore
     ///     that needs the answer.
     /// </summary>
     private readonly ConcurrentDictionary<FeedOrigin, Lazy<Task>> _rememberedLookups = new();
+
+    /// <summary>
+    ///     Counts how many times the store has been cleared. A remembered-store lookup records the
+    ///     value current when it started; a lookup that finishes after <see cref="Clear"/> sees a
+    ///     different value and its credential is discarded. Changed only under
+    ///     <see cref="_gate"/>.
+    /// </summary>
+    private long _generation;
+
+    /// <summary>
+    ///     The generation in which the current asynchronous flow's remembered-store lookup started,
+    ///     or <see langword="null"/> outside a lookup. It flows with the lookup's continuations so
+    ///     that <see cref="Set"/>, called from the lookup, can tell that the store was cleared
+    ///     while the lookup was in flight.
+    /// </summary>
+    private readonly AsyncLocal<long?> _lookupGeneration = new();
 
     /// <summary>
     ///     Gets how many feeds currently have a remembered credential. Exposed for display and
@@ -146,7 +170,9 @@ internal sealed class SessionCredentialStore
     }
 
     /// <summary>
-    ///     Remembers a credential for a feed, replacing any earlier one.
+    ///     Remembers a credential for a feed, replacing any earlier one. A call made from a
+    ///     remembered-store lookup that <see cref="Clear"/> has invalidated is ignored: the
+    ///     credential is neither stored nor registered with the redactor.
     /// </summary>
     /// <param name="origin">The feed origin the credential was typed for.</param>
     /// <param name="credential">The credential to remember for the rest of the session.</param>
@@ -165,6 +191,13 @@ internal sealed class SessionCredentialStore
         // replaced credential (if any) is withdrawn
         lock (_gate)
         {
+            // A saved credential found by a lookup that was started before Clear must not come back
+            // after the store was emptied (the application is exiting): drop it unregistered
+            if (_lookupGeneration.Value is { } lookupGeneration && lookupGeneration != _generation)
+            {
+                return;
+            }
+
             SecretRedactor.Register(credential);
             if (_credentials.TryGetValue(origin, out var replaced))
             {
@@ -212,7 +245,8 @@ internal sealed class SessionCredentialStore
     ///     <see cref="TryAcquire(FeedOrigin, out NuGetCredential?, out IDisposable?, out bool)"/>. A lookup
     ///     that found nothing is not repeated, so a feed without a saved sign-in costs one
     ///     lookup per session rather than one per operation. A fault in the lookup is surfaced to
-    ///     every waiting caller.
+    ///     every waiting caller (and is not retried). A lookup still running when <see cref="Clear"/>
+    ///     is called is invalidated: whatever it passes to <see cref="Set"/> afterwards is discarded.
     /// </remarks>
     /// <param name="origin">The feed origin.</param>
     /// <param name="lookup">Performs the lookup; run at most once per origin.</param>
@@ -224,8 +258,31 @@ internal sealed class SessionCredentialStore
         ArgumentNullException.ThrowIfNull(origin);
         ArgumentNullException.ThrowIfNull(lookup);
 
-        // Lazy so that a race between callers starts exactly one lookup
-        return _rememberedLookups.GetOrAdd(origin, _ => new Lazy<Task>(() => Task.Run(lookup))).Value;
+        // Lazy so that a race between callers starts exactly one lookup. The lookup runs in its own
+        // flow tagged with the generation it started in, so Clear can invalidate it
+        return _rememberedLookups.GetOrAdd(origin, _ => new Lazy<Task>(() => StartLookup(lookup))).Value;
+    }
+
+    /// <summary>
+    ///     Starts a remembered-store lookup on a worker thread, tagged with the current generation.
+    /// </summary>
+    /// <param name="lookup">The lookup.</param>
+    /// <returns>The task of the lookup.</returns>
+    private Task StartLookup(Func<Task> lookup)
+    {
+        long generation;
+        lock (_gate)
+        {
+            generation = _generation;
+        }
+
+        return Task.Run(() =>
+        {
+            // Set inside the worker's own execution context, so it reaches the lookup's
+            // continuations and nothing else
+            _lookupGeneration.Value = generation;
+            return lookup();
+        });
     }
 
     /// <summary>
@@ -286,12 +343,20 @@ internal sealed class SessionCredentialStore
     }
 
     /// <summary>
-    ///     Forgets every remembered credential, for when the application exits.
+    ///     Forgets every remembered credential, for when the application exits, and invalidates
+    ///     every remembered-store lookup that is still in flight: a credential such a lookup finds
+    ///     afterwards is discarded rather than stored, so clearing cannot be undone by a late
+    ///     lookup.
     /// </summary>
     public void Clear()
     {
         lock (_gate)
         {
+            // Invalidate in-flight lookups first, under the same lock Set takes
+            _generation++;
+
+            // Enumerated only here, to withdraw each secret from the redactor; callers cannot
+            // enumerate the store
             foreach (var credential in _credentials.Values)
             {
                 SecretRedactor.Unregister(credential);

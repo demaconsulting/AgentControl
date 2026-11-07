@@ -2,97 +2,351 @@
 # DemaConsulting.NuGet.Caching OTS Software Requirements
 #
 # Requirements for the DemaConsulting.NuGet.Caching library functionality that backs
-# AgentControl's NuGet package sources.
+# AgentControl's NuGet package sources. Each requirement states one observable behavior of the
+# library as AgentControl relies on it. The generation of the configuration the library reads
+# (the private package cache location and the trusted-signers list) belongs to the
+# NuGetSourceProvider unit, whose own requirements cover it; only the library's honoring of
+# what it finds is stated here.
+#
+# Evidence: AgentControl's own integration tests through the NuGetSourceProvider unit, which
+# exercise the real library against a real folder feed, an in-process NuGet V3 server and a real
+# signed package (see docs/verification/ots/nuget-caching.md). The library's own tests are not
+# re-executed by AgentControl and are not relied on by any requirement.
 
 sections:
   - title: OTS Software Requirements
     sections:
       - title: NuGetCaching Requirements
         requirements:
-          - id: AgentControl-OTS-NuGetCaching-ListAndCache
+          # Folder feeds and the package cache
+
+          - id: AgentControl-OTS-NuGetCaching-FolderListing
             title: >-
               DemaConsulting.NuGet.Caching shall list the versions of a package held in a NuGet
-              folder feed and unpack a chosen version into a package cache whose location is
-              governed by the supplied starting folder's NuGet configuration.
+              folder feed.
             justification: |
               AgentControl's NuGet package folder sources (the NuGetSourceProvider unit) rely on
-              the library to read a feed and to unpack the chosen package into a cache it can
-              then read. There is no vendor evidence packaged with the library and no separate
-              OTS test project in this repository, so the only evidence is the
-              NuGetSourceProvider integration tests, which exercise the real library against a
-              real folder feed created on the fly - the same precedent the other runtime OTS
-              items follow, cited honestly as indirect rather than as dedicated library tests.
+              the library to read a folder feed and report which versions of a package it holds,
+              so that AgentControl does not implement the NuGet feed layout itself. The evidence
+              is AgentControl's integration test through the NuGetSourceProvider unit against a
+              real folder feed created on the fly.
             tags: [ots]
             tests:
-              # Indirect evidence only, via the NuGetSourceProvider integration tests - see
-              # justification above.
               - NuGetSourceProvider_ListVersions_FolderFeedWithVersions_ReturnsAllVersionsStampedWithAlias
+
+          - id: AgentControl-OTS-NuGetCaching-ListAndCache
+            title: >-
+              DemaConsulting.NuGet.Caching shall unpack a chosen version of a package from a NuGet
+              folder feed into a package cache and provide the folder of the unpacked package.
+            justification: |
+              AgentControl reads the content of an agent package from the unpacked package folder,
+              so the unpacking itself is left to the library instead of reimplemented. The
+              evidence is AgentControl's integration test through the NuGetSourceProvider unit
+              against a real folder feed created on the fly.
+            tags: [ots]
+            tests:
               - NuGetSourceProvider_Acquire_ExistingPackage_ReturnsReaderOverContentFolder
+
+          - id: AgentControl-OTS-NuGetCaching-CacheLocation
+            title: >-
+              DemaConsulting.NuGet.Caching shall place the package cache in the global packages
+              folder named by the NuGet configuration discovered from the starting folder it is
+              given.
+            justification: |
+              AgentControl gives each package source a private package cache and keeps NuGet's
+              configuration discovery away from the target repository by starting it in a folder
+              AgentControl owns. That only works if the library honors the cache location of the
+              configuration it discovers from that folder. The evidence is AgentControl's
+              integration test, which supplies a generated configuration naming a private cache.
+            tags: [ots]
+            tests:
               - NuGetSourceProvider_Acquire_UsesExplicitAgentControlOwnedRootWithGeneratedConfig
+
+          # NuGet V3 servers
+
+          - id: AgentControl-OTS-NuGetCaching-ServerListing
+            title: >-
+              DemaConsulting.NuGet.Caching shall list the versions of a package on a NuGet V3
+              server without downloading any package.
+            justification: |
+              AgentControl lists versions routinely (for upgrade checks) and must not download
+              packages to do so. The evidence is AgentControl's integration test through the
+              NuGetSourceProvider unit against an in-process NuGet V3 server over plain HTTP,
+              which records every request.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_ListVersions_AnonymousServer_ReturnsVersionsWithoutDownloading
+
+          - id: AgentControl-OTS-NuGetCaching-ServerDownload
+            title: >-
+              DemaConsulting.NuGet.Caching shall download a chosen version of a package from a NuGet
+              V3 server into the package cache.
+            justification: |
+              AgentControl relies on the library for the download and unpacking of a package a
+              user chose from a server. The evidence is AgentControl's integration test through
+              the NuGetSourceProvider unit against an in-process NuGet V3 server over plain HTTP.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_Acquire_AnonymousServer_DownloadsPackageAndExposesContent
 
           - id: AgentControl-OTS-NuGetCaching-ServerAccess
             title: >-
-              DemaConsulting.NuGet.Caching shall list the versions of a package on a NuGet V3
-              server without downloading it and download a chosen version, shall obtain the
-              credentials for an address that asks for them from a callback supplied for each
-              call - and also from the user's NuGet configuration and non-interactive credential
-              providers - shall stop a credential exchange that takes longer than a time supplied
-              for the call, and shall report a refused access (HTTP 401 or 403) distinctly from
-              other failures.
+              DemaConsulting.NuGet.Caching shall, when a server challenges a request, obtain the
+              credential for the challenged address from the credential callback supplied for the
+              call and use it to retry the request.
             justification: |
-              AgentControl's NuGet package server sources (the NuGetSourceProvider unit) rely on
-              the library for every network and authentication step, and on its per-call options
-              (the credential callback, the exchange time limit, the single source to use) to scope
-              a credential to one source and one operation, because the NuGet credential service
-              it registers is shared by the whole process. There is no vendor evidence packaged
-              with the library and no separate OTS test project in this repository, so the only
-              evidence is the NuGetSourceProvider server tests, which exercise the real library
-              against an in-process NuGet V3 feed over plain HTTP - the same precedent the other
-              runtime OTS items follow, cited honestly as indirect rather than as dedicated
-              library tests.
+              AgentControl signs in to a server by supplying a callback for each call, because
+              the NuGet credential service the library registers is shared by the whole process
+              and a credential must be scoped to one source and one operation. The library
+              invokes the callback once for each challenged URL and request type, so distinct
+              resource URLs of one operation may invoke it separately; AgentControl makes that
+              safe by memoizing the answer for the operation and scoping it to the feed's origin.
+              The evidence is AgentControl's integration tests through the NuGetSourceProvider
+              unit against an in-process NuGet V3 server that requires Basic authentication.
             tags: [ots]
             tests:
-              # Indirect evidence only, via the NuGetSourceProvider server tests - see
-              # justification above.
-              - NuGetSourceProvider_ListVersions_AnonymousServer_ReturnsVersionsWithoutDownloading
-              - NuGetSourceProvider_Acquire_AnonymousServer_DownloadsPackageAndExposesContent
               - NuGetSourceProvider_ListVersions_ServerNeedsSignIn_PromptsOnceAndRemembersCredentialForTheSession
-              - NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt
-              - NuGetSourceProvider_ListVersions_SignInTakesTooLong_ThrowsTimedOut
+              - NuGetSourceProvider_Acquire_AfterSignInInAnEarlierOperation_ReusesSessionCredentialWithoutPrompting
+
+          - id: AgentControl-OTS-NuGetCaching-ServerConfiguredCredentials
+            title: >-
+              DemaConsulting.NuGet.Caching shall sign in to a server with the credentials stored
+              for a source of the same address in the NuGet configuration discovered from the
+              starting folder it is given.
+            justification: |
+              Users who already configured credentials for a feed in a nuget.config expect them
+              to be honored without being asked again. The evidence is AgentControl's integration
+              test through the NuGetSourceProvider unit, which places such a configuration above
+              the source's starting folder and gives no callback answer.
+            tags: [ots]
+            tests:
               - NuGetSourceProvider_ListVersions_NuGetConfigHasCredentialsForTheFeed_SignsInWithoutPrompting
+
+          - id: AgentControl-OTS-NuGetCaching-AuthenticationTimeout
+            title: >-
+              DemaConsulting.NuGet.Caching shall stop a credential exchange that takes longer than
+              the time supplied for the call and end the call with a cancellation that is not the
+              caller's own.
+            justification: |
+              A sign-in dialog nobody answers must not hold an operation open forever, and
+              AgentControl must be able to tell the library's time limit from the user's own
+              cancellation. The evidence is AgentControl's integration test through the
+              NuGetSourceProvider unit with a callback that never answers and a short time limit.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_ListVersions_SignInTakesTooLong_ThrowsTimedOut
+
+          - id: AgentControl-OTS-NuGetCaching-UnauthorizedReported
+            title: >-
+              DemaConsulting.NuGet.Caching shall fail a call with its authentication exception when
+              a server answers HTTP 401 and no credential is available for the challenged address.
+            justification: |
+              AgentControl must tell a refused access from an unreachable server so that it can
+              ask the user to sign in or report that a sign-in is needed. The evidence is
+              AgentControl's integration tests through the NuGetSourceProvider unit against an
+              in-process NuGet V3 server that answers 401, with no way to ask the user and with a
+              user who declines.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_ListVersions_ServerNeedsSignInAndNoPrompt_ThrowsAuthenticationFailedWithoutAsking
+              - NuGetSourceProvider_ListVersions_UserCancelsSignIn_ThrowsSignInCanceledAfterOnePrompt
+
+          - id: AgentControl-OTS-NuGetCaching-ForbiddenReported
+            title: >-
+              DemaConsulting.NuGet.Caching shall fail a call with its authentication exception when
+              a server answers HTTP 403 and no credential is available for the challenged address.
+            justification: |
+              Some servers answer 403 rather than 401 to a request that needs a sign-in, and
+              AgentControl must report it the same way. The evidence is AgentControl's
+              integration test through the NuGetSourceProvider unit against an in-process NuGet V3
+              server that answers 403 to every request, with no way to ask the user.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_ListVersions_ServerAnswersForbiddenAndNoPrompt_ThrowsAuthenticationFailedWithoutAsking
+
+          - id: AgentControl-OTS-NuGetCaching-RejectedCredentialNotRetried
+            title: >-
+              DemaConsulting.NuGet.Caching shall fail a call with its authentication exception,
+              after consulting the credential callback once, when the server rejects the credential
+              the callback supplied.
+            justification: |
+              A wrong password must produce one failure and one question for the user, not a retry
+              loop that locks the account or leaves the user stuck in a dialog. The evidence is
+              AgentControl's integration tests through the NuGetSourceProvider unit against an
+              in-process NuGet V3 server that rejects the credential with 401 and with 403.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt
+              - NuGetSourceProvider_ListVersions_ServerAnswersForbiddenToTheCredential_ThrowsAuthenticationFailedAfterOnePrompt
+
+          - id: AgentControl-OTS-NuGetCaching-NonInteractive
+            title: >-
+              DemaConsulting.NuGet.Caching shall, when called with interactive credential providers
+              disabled, obtain credentials only from the supplied callback or the NuGet
+              configuration and otherwise fail the call with its authentication exception instead
+              of waiting for a person.
+            justification: |
+              AgentControl runs the library from a graphical application and from background
+              checks and owns the only sign-in dialog; a plug-in that opened a window or waited
+              for console input would hang the operation. This requirement covers what
+              AgentControl relies on - the library, called with interactive plug-ins disabled,
+              never opens a user interface of its own. The behavior of a real NuGet credential
+              provider plug-in is not exercised by AgentControl's evidence; see the verification
+              document. The evidence is AgentControl's integration tests through the
+              NuGetSourceProvider unit, which complete without any interaction both when no
+              credential is available and when the NuGet configuration holds one.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_ListVersions_ServerNeedsSignInAndNoPrompt_ThrowsAuthenticationFailedWithoutAsking
+              - NuGetSourceProvider_ListVersions_NuGetConfigHasCredentialsForTheFeed_SignsInWithoutPrompting
+
+          # Signature verification. The trusted-signers list the library reads is generated by the
+          # NuGetSourceProvider unit (AgentControl-NuGetSourceProvider-GeneratedSignerConfiguration);
+          # the requirements below cover the library's honoring of what it finds.
 
           - id: AgentControl-OTS-NuGetCaching-SignatureVerification
             title: >-
-              DemaConsulting.NuGet.Caching shall, when asked to require signed packages, refuse a
-              package that is unsigned or whose signature is invalid or untrusted - both when it
-              downloads the package and when the package is already in the cache - shall decide
-              which signers are trusted from the trusted-signers list of the NuGet configuration
-              found from the supplied starting folder, a list that begins with a clear entry
-              applying alone, and shall report the refusal as an error that identifies a signature
-              failure.
+              DemaConsulting.NuGet.Caching shall, when asked to require signed packages, accept a
+              package whose signature is valid and chains to a trusted root when no trusted signer
+              restricts the result.
             justification: |
-              AgentControl's per-source signature requirement and publisher pin (the
-              NuGetSourceProvider unit) rely on the library for the verification itself and on its
-              reading of the trusted-signers list from the generated per-source configuration.
-              There is no vendor evidence packaged with the library and no separate OTS test
-              project in this repository, so the evidence is the NuGetSourceProvider tests: those
-              with a real signed package (downloaded once per run from nuget.org, its hash
-              verified) show a valid signature accepted, an author pin honored and a different pin
-              refused, with the user's own NuGet trusted-signers settings unable to widen or
-              narrow the result; those with an unsigned package show the refusal, including of a
-              package already cached. The signed-package tests are skipped only where nuget.org
-              cannot be reached or the machine lacks the trust roots the package needs - the same
-              precedent the other runtime OTS items follow, cited honestly as indirect rather than
-              as dedicated library tests.
+              AgentControl's per-source signature requirement relies on the library for the
+              verification itself, so that a valid signature is accepted and is not refused out of
+              caution. The evidence is AgentControl's integration test through the
+              NuGetSourceProvider unit with a real signed package downloaded once per run from
+              nuget.org with its hash verified; it is skipped only where nuget.org cannot be reached
+              or the machine lacks the trust roots the package needs.
             tags: [ots]
             tests:
-              # Indirect evidence only, via the NuGetSourceProvider signature tests - see
-              # justification above.
-              - NuGetSourceProvider_Acquire_RequireSignedAndPackageUnsigned_IsRejectedAndNothingIsInstalled
-              - NuGetSourceProvider_Acquire_RequirementEnabledAfterPackageWasCached_RejectsTheCachedPackage
               - NuGetSourceProvider_Acquire_SignedPackageAndNoPinnedSigner_SignatureIsAccepted
-              - NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted
+
+          - id: AgentControl-OTS-NuGetCaching-UnsignedRejected
+            title: >-
+              DemaConsulting.NuGet.Caching shall, when asked to require signed packages, refuse an
+              unsigned package it downloads or reads from a feed and install nothing.
+            justification: |
+              A source that requires signatures must never install an unsigned package. The
+              evidence is AgentControl's integration tests through the NuGetSourceProvider unit
+              with an unsigned package in a folder feed and on a server; they need no network
+              beyond the in-process server.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_Acquire_RequireSignedAndPackageUnsigned_IsRejectedAndNothingIsInstalled
+              - NuGetSourceProvider_Acquire_ServerRequiresSignaturesAndPackageUnsigned_IsRejectedAsASignatureFailure
+
+          - id: AgentControl-OTS-NuGetCaching-CachedUnsignedRejected
+            title: >-
+              DemaConsulting.NuGet.Caching shall, when asked to require signed packages, refuse an
+              unsigned package that is already in the package cache.
+            justification: |
+              A package that reached the cache while signatures were not required must not be
+              trusted once they are. The evidence is AgentControl's integration test through the
+              NuGetSourceProvider unit, which acquires an unsigned package without the requirement
+              and then again with it.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_Acquire_RequirementEnabledAfterPackageWasCached_RejectsTheCachedPackage
+
+          - id: AgentControl-OTS-NuGetCaching-InvalidSignatureRejected
+            title: >-
+              DemaConsulting.NuGet.Caching shall, when asked to require signed packages, refuse a
+              signed package whose content no longer matches its signature and install nothing.
+            justification: |
+              A package altered after it was signed is the attack the signature exists to stop.
+              The evidence is AgentControl's integration test through the NuGetSourceProvider
+              unit with the real signed package after one byte of its content was flipped; it is
+              skipped only where nuget.org cannot be reached or the machine lacks the trust roots
+              the package needs.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_Acquire_SignedPackageWithAlteredContent_IsRejectedAndNotInstalled
+
+          - id: AgentControl-OTS-NuGetCaching-UntrustedSignerRejected
+            title: >-
+              DemaConsulting.NuGet.Caching shall, when asked to require signed packages, refuse a
+              validly signed package whose signer is not among the trusted signers of the NuGet
+              configuration discovered from the starting folder it is given, and install nothing.
+            justification: |
+              AgentControl pins a source to one publisher by listing that publisher as the only
+              trusted signer in the configuration it generates; the library must then refuse any
+              other signer. The evidence is AgentControl's integration test through the
+              NuGetSourceProvider unit with the real signed package and a configuration trusting a
+              different certificate.
+            tags: [ots]
+            tests:
               - NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled
-              - NuGetSourceProvider_Acquire_UsersConfigurationTrustsTheAuthorButOtherSignerPinned_IsStillRejected
-              - NuGetSourceProvider_Acquire_UsersConfigurationTrustsOnlyAnotherSignerAndNoneIsPinned_SignatureIsAccepted
+
+          - id: AgentControl-OTS-NuGetCaching-TrustedSignerAccepted
+            title: >-
+              DemaConsulting.NuGet.Caching shall, when asked to require signed packages, accept a
+              validly signed package whose author certificate is a trusted signer of the NuGet
+              configuration discovered from the starting folder it is given.
+            justification: |
+              A source pinned to a publisher must still accept that publisher's packages. The
+              evidence is AgentControl's integration test through the NuGetSourceProvider unit
+              with the real signed package and a configuration trusting its author certificate.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted
+
+          - id: AgentControl-OTS-NuGetCaching-CachedSignerRechecked
+            title: >-
+              DemaConsulting.NuGet.Caching shall, when asked to require signed packages, evaluate
+              the trusted signers again for a signed package that is already in the package cache
+              and refuse it when its signer is no longer trusted.
+            justification: |
+              A change of the pinned publisher must apply to packages already on the computer, not
+              only to new downloads. The evidence is AgentControl's integration test through the
+              NuGetSourceProvider unit, which caches the real signed package under its author's
+              pin and then acquires it again under a different signer.
+            tags: [ots]
+            tests:
               - NuGetSourceProvider_Acquire_PinnedSignerChangedAfterPackageWasCached_RejectsTheCachedPackage
+
+          - id: AgentControl-OTS-NuGetCaching-OtherConfigurationCannotWidenTrust
+            title: >-
+              DemaConsulting.NuGet.Caching shall ignore the trusted signers of other NuGet
+              configuration files when the trusted-signers section of the configuration discovered
+              from the starting folder it is given begins with a clear entry, so that a signer
+              trusted only elsewhere is not accepted.
+            justification: |
+              The user's own NuGet trust settings must not widen a source's requirement. The
+              evidence is AgentControl's integration test through the NuGetSourceProvider unit,
+              which trusts the package's author in a configuration above the starting folder and
+              pins a different signer in the generated one; the test fails without the clear
+              entry.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_Acquire_UsersConfigurationTrustsTheAuthorButOtherSignerPinned_IsStillRejected
+
+          - id: AgentControl-OTS-NuGetCaching-OtherConfigurationCannotNarrowTrust
+            title: >-
+              DemaConsulting.NuGet.Caching shall ignore the trusted signers of other NuGet
+              configuration files when the trusted-signers section of the configuration discovered
+              from the starting folder it is given consists only of a clear entry, so that a
+              validly signed package is not refused because of signers listed elsewhere.
+            justification: |
+              The user's own NuGet trust settings must not narrow a source's requirement either.
+              The evidence is AgentControl's integration test through the NuGetSourceProvider
+              unit, which trusts only an unrelated certificate in a configuration above the
+              starting folder; the test fails without the clear entry.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_Acquire_UsersConfigurationTrustsOnlyAnotherSignerAndNoneIsPinned_SignatureIsAccepted
+
+          - id: AgentControl-OTS-NuGetCaching-SignatureFailureIdentified
+            title: >-
+              DemaConsulting.NuGet.Caching shall report the refusal of a package for its signature
+              as an invalid-operation error whose message identifies a signature verification
+              failure.
+            justification: |
+              AgentControl tells a signature refusal, a security decision it reports in words,
+              from an unreachable source by recognizing the library's error, so the error must
+              identify the signature failure. The evidence is AgentControl's integration tests
+              through the NuGetSourceProvider unit, which assert that a refusal is reported as a
+              signature failure and not as an unreachable source, for an unsigned package and for
+              a package signed by an untrusted signer.
+            tags: [ots]
+            tests:
+              - NuGetSourceProvider_Acquire_RequireSignedAndPackageUnsigned_IsRejectedAndNothingIsInstalled
+              - NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled

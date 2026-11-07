@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
 namespace DemaConsulting.AgentControl.AgentPackageManagement;
@@ -116,14 +117,54 @@ internal static class SignatureVerificationSupport
     }
 
     /// <summary>
-    ///     Checks that the platform can build a certificate chain, which signature verification
-    ///     needs.
+    ///     Checks that the platform can really build a certificate chain, which signature
+    ///     verification needs: builds the chain of a throw-away self-signed certificate created in
+    ///     memory, entirely offline.
     /// </summary>
-    /// <returns><see langword="true"/> when a chain object can be created and used.</returns>
-    private static bool ProbeCertificateChains()
+    /// <remarks>
+    ///     Merely creating an <see cref="X509Chain"/> proves nothing (the object always exists), so
+    ///     the probe performs the operation verification depends on: key generation, certificate
+    ///     creation and a chain build through the platform's certificate facility. Using a
+    ///     certificate of its own as the only trusted root makes the outcome independent of the
+    ///     machine's certificate stores and of the network. Whatever goes wrong is "not supported".
+    /// </remarks>
+    /// <returns><see langword="true"/> when the chain build succeeded as expected.</returns>
+    internal static bool ProbeCertificateChains()
     {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest(
+            "CN=AgentControl signature verification probe", key, HashAlgorithmName.SHA256);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        using var certificate = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        return ProbeChain(certificate);
+    }
+
+    /// <summary>
+    ///     Builds the chain of a certificate that is its own, only trusted root, offline, and
+    ///     reports whether the platform did so cleanly.
+    /// </summary>
+    /// <param name="certificate">The self-signed certificate; <see langword="null"/> is "not
+    ///     supported".</param>
+    /// <returns><see langword="true"/> only when the build succeeded, produced exactly the one
+    ///     element expected and reported no chain status at all; any other outcome - including an
+    ///     expired or otherwise unexpectedly flawed certificate - is <see langword="false"/>, so
+    ///     the caller fails closed.</returns>
+    internal static bool ProbeChain(X509Certificate2? certificate)
+    {
+        if (certificate is null)
+        {
+            return false;
+        }
+
         using var chain = new X509Chain();
+
+        // Offline and deterministic: no revocation lookup, no downloads of intermediate
+        // certificates, and the certificate itself is the only root that is trusted
         chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-        return chain.ChainPolicy is not null;
+        chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+        chain.ChainPolicy.CustomTrustStore.Add(certificate);
+        chain.ChainPolicy.DisableCertificateDownloads = true;
+        return chain.Build(certificate) && chain.ChainElements.Count == 1 && chain.ChainStatus.Length == 0;
     }
 }

@@ -6,7 +6,9 @@
 
 `SignatureVerificationSupport` tells whether the current platform can verify NuGet package signatures, so that the
 option to require signed packages is only offered where it can be honored and a source that requires them is never
-used where they cannot be checked. It satisfies `AgentControl-SignatureVerificationSupport-PlatformSupport` and
+used where they cannot be checked. It satisfies `AgentControl-SignatureVerificationSupport-PlatformSupport`,
+`AgentControl-SignatureVerificationSupport-FailClosedProbe`,
+`AgentControl-SignatureVerificationSupport-RealChainProbe` and
 `AgentControl-SignatureVerificationSupport-UnsupportedExplanation`.
 
 Requiring signatures is only meaningful if verification really happens. The NuGet caching OTS item verifies
@@ -48,10 +50,23 @@ operation, anything else - is "not supported"; the failure is never propagated, 
 make the platform unsupported (fail closed), never throw into the editor or the provider
 (`AgentControl-SignatureVerificationSupport-FailClosedProbe`).
 
-**ProbeCertificateChains** (private): Creates an `X509Chain` with revocation checking disabled and returns `true`
-when it can be created and used. It lets its failures escape to `RunProbe`. The probe
-deliberately does no network access and does not examine any certificate; it only proves the facility that
-signature verification builds on is usable.
+**ProbeCertificateChains** (internal, so tests can run it): The platform probe. It creates a throw-away, in-memory self-signed
+certificate and asks the platform's certificate-chain facility to build a chain for it **offline**:
+the chain policy trusts only that certificate as the root (custom root trust), revocation checking is
+disabled and downloading of missing certificates is disabled, so the result depends on neither the
+machine's trust stores nor the network. It answers `true` only when the build succeeds with no
+unexpected chain status and the chain has exactly one element (the certificate itself); any other
+outcome - the build failing, an unexpected status, a different chain length, or an exception - is
+"not supported". This is the same facility NuGet's signature verification builds on, so a platform
+that cannot do it cannot verify signatures; a chain facility that merely exists and constructs
+(`new X509Chain()` always succeeds) proves nothing and is not enough
+(`AgentControl-SignatureVerificationSupport-RealChainProbe`). Exceptions escape to `RunProbe`, which
+turns them into "not supported".
+
+**ProbeChain(certificate)**: The chain build and its evaluation for a given certificate,
+separated from the creation of the throw-away certificate so the failure paths can be tested on any
+platform: a `null` certificate and a certificate that has expired (which makes the build report a
+status) are both "not supported".
 
 #### Error Handling
 

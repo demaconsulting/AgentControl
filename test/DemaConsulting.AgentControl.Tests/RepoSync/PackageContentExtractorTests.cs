@@ -328,6 +328,52 @@ public sealed class PackageContentExtractorTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a broken symbolic link standing in for a root-level file (one whose target does
+    ///     not exist) is refused like any other link, rather than being treated as a missing file.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_ReadText_BrokenFileSymlinkAtRoot_ThrowsInvalidOperationException()
+    {
+        // Arrange: content/release-notes.md is a link to a file that does not exist
+        var package = CreatePackageFolder((".github/agents/a.md", "x"));
+        var missingTarget = Path.Combine(CreateTempDirectory(), "does-not-exist.md");
+        TryCreateFileSymlinkOrSkip(Path.Combine(package, "content", "release-notes.md"), missingTarget);
+        using var reader = DirectoryPackageContentReader.Open(package);
+
+        // Act / Assert
+        var ex = Assert.Throws<InvalidOperationException>(() => reader.ReadText("release-notes.md"));
+        Assert.Contains("link", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that a zip path the platform cannot use (for example one with an embedded null
+    ///     character) is reported as the documented <see cref="InvalidOperationException"/> rather
+    ///     than escaping as a path exception.
+    /// </summary>
+    [Fact]
+    public void ZipPackageContentReader_Open_InvalidPath_ThrowsInvalidOperationException()
+    {
+        // Act / Assert
+        var ex = Assert.Throws<InvalidOperationException>(() => ZipPackageContentReader.Open("not\0valid.zip"));
+        Assert.Contains("Failed to open package zip", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a file that is not a zip archive is reported as the documented
+    ///     <see cref="InvalidOperationException"/>.
+    /// </summary>
+    [Fact]
+    public void ZipPackageContentReader_Open_NotAZip_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var notAZip = Path.Combine(CreateTempDirectory(), "fake-1.0.0.zip");
+        File.WriteAllText(notAZip, "this is not a zip archive");
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(() => ZipPackageContentReader.Open(notAZip));
+    }
+
+    /// <summary>
     ///     Test that an unpacked package folder that is itself a symbolic link is rejected when
     ///     opened.
     /// </summary>

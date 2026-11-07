@@ -19,7 +19,12 @@ N/A - standard test environment.
   creates each provider once and only when first used.
 - Resolving an alias that is not configured is an error naming the alias - including when exactly
   one source (or a source named `Default`) is configured - and never contacts any source.
-- Duplicate or blank aliases are rejected when the registry is built.
+- A blank alias is never configured and is rejected by `Resolve`.
+- Duplicate or blank aliases, and a missing (`null`) source entry, are rejected when the registry is
+  built, the latter with an error saying a configured source entry is missing.
+- A plain-`http` server source without the insecure-HTTP opt-in is refused when resolved.
+- Changing a definition, or the list it was built from, after construction - or changing a definition
+  obtained from `Definitions` - does not change which source an alias resolves to.
 - With the same package ID at two sources, resolving the pinned source contacts only that source.
 
 #### Test Scenarios
@@ -34,15 +39,39 @@ their source types. This scenario is tested by
 `AgentControl-PackageSourceRegistry-ResolveAlias`.
 
 **PackageSourceRegistry_MissingAlias_IsAnErrorNamingTheAlias**: An alias that is not configured
-throws `UnknownSourceException` carrying and naming the alias; duplicate and blank aliases are
-rejected at construction; blank aliases are never contained and rejected by `Resolve`; a NuGet
-server source with an `https` address resolves to a `NuGetSourceProvider` while a plain-`http` one, whose
-definition does not allow insecure HTTP, fails when resolved. This scenario is tested by
-`PackageSourceRegistry_Resolve_MissingAlias_ThrowsUnknownSourceExceptionNamingAlias`,
-`PackageSourceRegistry_Constructor_DuplicateOrBlankAlias_ThrowsInvalidOperationException`,
-`PackageSourceRegistry_BlankAlias_ContainsFalseAndResolveThrowsArgumentException`, and
-`PackageSourceRegistry_Create_NuGetServerSource_ResolvesHttpsAndRefusesPlainHttpWithoutOptIn`, covering
+throws `UnknownSourceException` carrying and naming the alias. This scenario is tested by
+`PackageSourceRegistry_Resolve_MissingAlias_ThrowsUnknownSourceExceptionNamingAlias`, covering
 `AgentControl-PackageSourceRegistry-MissingAliasIsError`.
+
+**PackageSourceRegistry_BlankAlias_IsNeverConfigured**: A blank alias is not contained and is rejected
+by `Resolve` with `ArgumentException`. This scenario is tested by
+`PackageSourceRegistry_BlankAlias_ContainsFalseAndResolveThrowsArgumentException`, covering
+`AgentControl-PackageSourceRegistry-BlankAliasNeverConfigured`.
+
+**PackageSourceRegistry_InvalidAliases_AreRejectedWhenBuilt**: A configuration with a duplicate alias or
+a blank alias is rejected at construction with `InvalidOperationException`. This scenario is tested by
+`PackageSourceRegistry_Constructor_DuplicateOrBlankAlias_ThrowsInvalidOperationException`, covering
+`AgentControl-PackageSourceRegistry-InvalidAliasesRejected`.
+
+**PackageSourceRegistry_NullDefinitionEntry_IsRejectedWhenBuilt**: A definitions sequence that contains a
+`null` element is rejected at construction with `InvalidOperationException` saying that a configured
+package source entry is missing, not with a `NullReferenceException`. This scenario is tested by
+`PackageSourceRegistry_Constructor_NullDefinitionEntry_ThrowsInvalidOperationException`, covering
+`AgentControl-PackageSourceRegistry-NullDefinitionRejected`.
+
+**PackageSourceRegistry_PlainHttpServerSource_IsRefusedWithoutOptIn**: A NuGet server source with an
+`https` address resolves to a `NuGetSourceProvider` while a plain-`http` one, whose definition does not
+allow insecure HTTP, fails when resolved. This scenario is tested by
+`PackageSourceRegistry_Create_NuGetServerSource_ResolvesHttpsAndRefusesPlainHttpWithoutOptIn`, covering
+`AgentControl-PackageSourceRegistry-PlainHttpServerSourceRefused`.
+
+**PackageSourceRegistry_Definitions_AreASnapshot**: After a registry is built, mutating a definition (or
+the list it was built from) does not change which source an alias resolves to; mutating what `Definitions`
+returns leaves the registry unaffected, because every access returns a fresh immutable list of clones.
+This scenario is tested by
+`PackageSourceRegistry_Constructor_DefinitionsMutatedAfterwards_RegistryIsASnapshot` and
+`PackageSourceRegistry_Definitions_CallerMutatesReturnedDefinitions_RegistryIsUnaffected`, covering
+`AgentControl-PackageSourceRegistry-DefinitionsAreASnapshot`.
 
 **PackageSourceRegistry_NoFallback_NeverUsesAnotherSource**: With a single configured source
 named `Default`, resolving a different alias fails and that source receives no calls; with the

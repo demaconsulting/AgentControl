@@ -13,11 +13,39 @@ message source, all text passes through `SecretRedactor`, so the rule *secrets, 
 URLs with query strings never reach the log* holds whatever the caller writes. The unit also contains the
 redaction engine itself (`SecretRedactor`) and `SanitizedException`, the secret-free stand-in for an
 exception, because the same engine protects the text shown in the user interface and the inner exception kept
-by `PackageSourceAccessException`. It satisfies `AgentControl-SecretRedactingLogger-RemovesUrlSecrets`,
-`AgentControl-SecretRedactingLogger-RemovesAuthorizationValues`,
-`AgentControl-SecretRedactingLogger-RemovesKnownSecrets`,
-`AgentControl-SecretRedactingLogger-AppliesToEveryMessage` and
-`AgentControl-SecretRedactingLogger-SanitizesExceptions`.
+by `PackageSourceAccessException`. It satisfies the following requirements, each of which states one criterion:
+
+- *Web addresses*: `AgentControl-SecretRedactingLogger-RemovesUrlSecrets`,
+  `AgentControl-SecretRedactingLogger-RemovesUrlUserInfo`,
+  `AgentControl-SecretRedactingLogger-RemovesUrlFragment`,
+  `AgentControl-SecretRedactingLogger-KeepsUrlLocation`,
+  `AgentControl-SecretRedactingLogger-KeepsSurroundingText`,
+  `AgentControl-SecretRedactingLogger-RecognizesIpv6Literal`,
+  `AgentControl-SecretRedactingLogger-RedactsUrlInsideEscapedQuotes` and
+  `AgentControl-SecretRedactingLogger-RedactsUrlInsideParentheses`.
+- *Headers and keys*: `AgentControl-SecretRedactingLogger-RemovesAuthorizationValues`,
+  `AgentControl-SecretRedactingLogger-ReplacesValueWhateverScheme`,
+  `AgentControl-SecretRedactingLogger-KeepsHeaderNameAndOtherLines`,
+  `AgentControl-SecretRedactingLogger-RemovesBareCredentials`,
+  `AgentControl-SecretRedactingLogger-RemovesSecretBearingKeys`,
+  `AgentControl-SecretRedactingLogger-RedactsEscapedDelimitedValues`,
+  `AgentControl-SecretRedactingLogger-RedactsNestedJsonValues` and
+  `AgentControl-SecretRedactingLogger-StopsAtTheRealTerminator`.
+- *Registered secrets*: `AgentControl-SecretRedactingLogger-RemovesKnownSecrets`,
+  `AgentControl-SecretRedactingLogger-RemovesEncodedSecretForms`,
+  `AgentControl-SecretRedactingLogger-StopsWhenSecretWithdrawn`,
+  `AgentControl-SecretRedactingLogger-RedactsWhileAnyHolderUsesSecret` and
+  `AgentControl-SecretRedactingLogger-RegistryIsThreadSafe`.
+- *Messages the logger forwards*: `AgentControl-SecretRedactingLogger-AppliesToEveryMessage`,
+  `AgentControl-SecretRedactingLogger-RedactsStructuredProperties`,
+  `AgentControl-SecretRedactingLogger-RedactsScopes`,
+  `AgentControl-SecretRedactingLogger-KeepsLevelFiltering` and
+  `AgentControl-SecretRedactingLogger-ForwardsOnlySanitizedException`.
+- *Secret-free exception description*: `AgentControl-SecretRedactingLogger-SanitizesExceptions`,
+  `AgentControl-SecretRedactingLogger-KeepsExceptionTypeName`,
+  `AgentControl-SecretRedactingLogger-KeepsRedactedStackTrace`,
+  `AgentControl-SecretRedactingLogger-DropsOriginalExceptionData` and
+  `AgentControl-SecretRedactingLogger-RedactsConstructorInputs`.
 
 #### Data Model
 
@@ -32,7 +60,10 @@ scheme word followed by a token, or a JSON web token). The registry is process-w
 protects are (the NuGet credential service is too); it is never enumerated, serialized or logged.
 
 **SanitizedException**: an `Exception` that keeps the original type name, a redacted message chain and a
-redacted stack trace, and nothing else - no inner exception, no data, no reference to the original.
+redacted stack trace, and nothing else - no inner exception, no data, no reference to the original. Its
+constructor is `internal` and redacts the type name, message and stack trace it is given, so a secret-free
+contract holds for every construction path (`Sanitize` and any other caller inside the assembly); the type
+cannot be built with text that has not been redacted from outside the assembly.
 
 #### Key Methods
 
@@ -49,7 +80,9 @@ which is the safe direction.
 (1) Every registered secret is replaced verbatim. (2) The *complete* value of an `Authorization`,
 `Proxy-Authorization`, API-key or cookie header is replaced whatever its scheme - basic, bearer, digest, NTLM,
 negotiate, a custom scheme or none. The header name is found by a pattern (which accepts the quote after it in
-every written form: `"`, `\"`, `\u0022`, `&quot;`, at any level of backslash escaping) and the value by an
+every written form - plain `"` and `'`, backslash-escaped `\"`, `\\"` and so on, `\u0022`-style escapes
+(`\uXXXX`, the default escaping of `System.Text.Json`) and the entity forms `&quot;` and `&#34;` - at any level
+of backslash escaping) and the value by an
 **escape-aware scanner**: a value in plain quotes ends at the first quote that is neither backslash-escaped
 (`\"`, `\\`, `\u0022` - an odd run of backslashes escapes the quote, an even run does not) nor doubled; a value
 that starts with an escaped or entity-encoded quote (nested JSON, HTML), an unterminated quoted value and any
@@ -58,8 +91,13 @@ other header value run to the end of the line - when in doubt it redacts rather 
 literal and the same backslash and doubled-quote escapes, so an address inside a JSON or quoted string is
 consumed through escaped delimiters up to its real terminator - and reduces it to scheme, host, port and path:
 user information, query string and fragment are removed, and an `@` anywhere before the query is treated as
-the end of user information so a password containing `/`, `?` or `#` cannot survive. Trailing sentence
-punctuation stays. (4) Secret-bearing keys (found the same way as headers, values scanned escape-aware) and
+the end of user information so a password containing `/`, `?` or `#` cannot survive. Parentheses are treated in
+balance: a `)` that closes a `(` opened inside the address is part of the address, and an unmatched `)` ends the
+address only when it is followed by the end of the text, whitespace or closing or sentence punctuation;
+otherwise it is treated as part of the address, so that the whole query string and fragment of an address such
+as `https://h/p(1)?sig=x` or a Markdown link `[text](https://u:p@h/p?q=1#f)` are removed rather than the part
+after a parenthesis being left behind. Trailing sentence punctuation stays. (4) Secret-bearing keys (found the
+same way as headers, so with the same quote forms, values scanned escape-aware) and
 bare credentials are replaced. Redaction is conservative: it may remove more than strictly necessary but never
 less. Text without secrets, and null, pass through unchanged (null becomes empty).
 
@@ -85,6 +123,11 @@ other state is forwarded as redacted text.
 #### Error Handling
 
 Redaction never throws for null or empty input. Exceptions raised by the wrapped logger propagate unchanged.
+Redaction errs on the side of removing too much: an unterminated quoted value, an unmatched parenthesis that is
+not followed by a sentence boundary and an escape form it cannot classify are all redacted to the end of the
+value, address or line rather than left in the output. `SanitizedException` can only be built inside the assembly,
+and its constructor redacts its inputs, so even an internal caller that passes raw text cannot produce a stand-in
+that holds a secret.
 The user name and password a person types are never passed to a logger by AgentControl; they are
 additionally registered with `SecretRedactor` for as long as they are in use (by `SessionCredentialStore`
 while stored and by `PackageCredentialCallback` while an operation tries them), so even an unforeseen path

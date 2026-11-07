@@ -199,6 +199,19 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     private Task _helperCheck = Task.CompletedTask;
 
     /// <summary>
+    ///     Counts the edits that change what a connection test describes (the address, the package
+    ///     IDs, the insecure-HTTP choice and the alias); a test's result is shown only while this
+    ///     still has the value it had when the test started.
+    /// </summary>
+    private int _inputVersion;
+
+    /// <summary>
+    ///     The value of <see cref="_inputVersion"/> when the running (or last) connection test
+    ///     started.
+    /// </summary>
+    private int _testInputVersion;
+
+    /// <summary>
     ///     Initializes a new <see cref="SourceEditorViewModel"/>.
     /// </summary>
     /// <param name="type">The kind of source being added; ignored when
@@ -387,6 +400,10 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
             if (SetField(ref _allowInsecureHttp, value))
             {
                 OnPropertyChanged(nameof(ShowInsecureWarning));
+
+                // Whether an http address is acceptable - and so whether a saved sign-in can be
+                // looked up for it - depends on this choice
+                RefreshHelperAvailability();
                 RaiseValidationChanged();
             }
         }
@@ -703,12 +720,14 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets a value indicating whether the "Forget saved sign-in" action is available: a
-    ///     server source with an acceptable address, and a Git credential helper that applies to
-    ///     it (without one nothing can have been saved, so there is nothing to forget).
+    ///     server source whose address is acceptable as a feed - the same rules that gate saving
+    ///     the source (https unless plain http is allowed, ends in <c>index.json</c>, no embedded
+    ///     credentials) - and a Git credential helper that applies to it (without one nothing can
+    ///     have been saved, so there is nothing to forget).
     /// </summary>
     public bool CanForgetSavedSignIn =>
         IsServer && !_isForgetting && _credentials?.Remembered is not null &&
-        _helperAvailable == true && FeedOrigin.TryParse(_location, out _);
+        _helperAvailable == true && TryGetForgetOrigin(out _);
 
     /// <summary>
     ///     The tooltip of the "Forget saved sign-in" button when no Git credential helper is
@@ -738,7 +757,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
                 return "Not available: no Git credential helper can be reached from this window";
             }
 
-            if (!FeedOrigin.TryParse(_location, out _))
+            if (!TryGetForgetOrigin(out _))
             {
                 return "Enter a valid feed address to forget its saved sign-in";
             }
@@ -797,7 +816,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     ///     the credential helper; the failure is reported in words.</returns>
     public async Task ForgetSavedSignInAsync()
     {
-        if (!CanForgetSavedSignIn || !FeedOrigin.TryParse(_location, out var origin) || origin is null)
+        if (!CanForgetSavedSignIn || !TryGetForgetOrigin(out var origin) || origin is null)
         {
             return;
         }
@@ -830,11 +849,29 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Finds the feed origin a saved sign-in can be looked up or forgotten for: the typed
+    ///     address, but only when it passes the same acceptance rules as saving the source.
+    /// </summary>
+    /// <remarks>
+    ///     Parsing the origin alone is too lenient: an address that the dialog would refuse to
+    ///     save (not <c>index.json</c>, plain http without the opt-in, embedded credentials) must not
+    ///     reach the credential helper either.
+    /// </remarks>
+    /// <param name="origin">The origin when the method returns <see langword="true"/>.</param>
+    /// <returns><see langword="true"/> for a server source with an acceptable feed address.</returns>
+    private bool TryGetForgetOrigin(out FeedOrigin? origin)
+    {
+        origin = null;
+        return IsServer && GetLocationProblem() is null && FeedOrigin.TryParse(_location.Trim(), out origin) &&
+               origin is not null;
+    }
+
+    /// <summary>
     ///     Asks the view to confirm forgetting the saved sign-in.
     /// </summary>
     private void RequestForgetSavedSignIn()
     {
-        if (!CanForgetSavedSignIn || !FeedOrigin.TryParse(_location, out var origin) || origin is null)
+        if (!CanForgetSavedSignIn || !TryGetForgetOrigin(out var origin) || origin is null)
         {
             return;
         }
@@ -860,7 +897,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         _helperAvailable = null;
         _helperCheck = Task.CompletedTask;
 
-        if (!IsServer || _credentials?.Remembered is null || !FeedOrigin.TryParse(_location, out var origin) || origin is null)
+        if (!IsServer || _credentials?.Remembered is null || !TryGetForgetOrigin(out var origin) || origin is null)
         {
             return;
         }
@@ -973,7 +1010,8 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     /// <remarks>
     ///     Only the version list is read, never a package, so the test is cheap and changes
     ///     nothing. Every failure is turned into a sentence that says what to do; a cancelled
-    ///     test is a neutral outcome, not an error.
+    ///     test is a neutral outcome, not an error. An edit of the address, the package IDs or the
+    ///     insecure-HTTP choice while the test runs cancels it and its result is never shown.
     /// </remarks>
     /// <param name="cancellationToken">Cancelled by <see cref="CancelTestCommand"/>.</param>
     /// <returns>A task that completes when the outcome is shown.</returns>
@@ -982,6 +1020,9 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     private async Task TestConnectionAsync(CancellationToken cancellationToken)
     {
         ClearTestResult();
+
+        // Remember which inputs this test is for; if any change while it runs, its result is stale
+        _testInputVersion = _inputVersion;
         var packageId = PackageIds[0];
         try
         {
@@ -1046,13 +1087,20 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     };
 
     /// <summary>
-    ///     Records the outcome of a test.
+    ///     Records the outcome of a test, unless the inputs it was run with have changed since.
     /// </summary>
     /// <param name="kind">The outcome.</param>
     /// <param name="title">The headline.</param>
     /// <param name="detail">The explanation.</param>
     private void SetTestResult(ConnectionTestResultKind kind, string title, string detail)
     {
+        // A result describes the address and package IDs the test ran with; once an edit has
+        // changed either, showing it would claim something about inputs that are no longer there
+        if (_testInputVersion != _inputVersion)
+        {
+            return;
+        }
+
         TestResultTitle = title;
         TestResultDetail = detail;
         TestResultKind = kind;
@@ -1134,10 +1182,19 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     /// <summary>
     ///     Raises the change notifications that follow any edit of the field values or package
     ///     IDs. A connection test result describes the address and package IDs it was run with,
-    ///     so it is dropped once either changes.
+    ///     so it is dropped once either changes - and a test that is still running is canceled and
+    ///     its eventual result ignored, so a result never describes inputs that are no longer in
+    ///     the dialog.
     /// </summary>
     private void RaiseValidationChanged()
     {
+        // Invalidate any running test first: whatever it reports from now on is stale
+        _inputVersion++;
+        if (IsTesting)
+        {
+            TestConnectionCommand.Cancel();
+        }
+
         OnPropertyChanged(nameof(AliasError));
         OnPropertyChanged(nameof(LocationError));
         OnPropertyChanged(nameof(PackageIdsError));
@@ -1147,10 +1204,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         SaveCommand.RaiseCanExecuteChanged();
         TestConnectionCommand.RaiseCanExecuteChanged();
         RaiseForgetAvailabilityChanged();
-        if (!IsTesting)
-        {
-            ClearTestResult();
-        }
+        ClearTestResult();
     }
 
     /// <summary>

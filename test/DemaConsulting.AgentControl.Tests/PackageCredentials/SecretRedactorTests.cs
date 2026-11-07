@@ -436,6 +436,202 @@ public sealed class SecretRedactorTests
     }
 
     /// <summary>
+    ///     Test that a URL inside parentheses - as a bare parenthesized link or in a sentence - is
+    ///     reduced, its query and fragment removed, and the closing parenthesis and surrounding
+    ///     punctuation kept.
+    /// </summary>
+    [Theory]
+    [InlineData("see (https://h.example.com/p?token=sentinel).", "see (https://h.example.com/p).")]
+    [InlineData("(see https://h.example.com/p?sig=sentinel)", "(see https://h.example.com/p)")]
+    [InlineData("fetched (https://h.example.com:8443/a/b?x=sentinel#sentinel) ok", "fetched (https://h.example.com:8443/a/b) ok")]
+    [InlineData("((https://h.example.com/p?x=sentinel))", "((https://h.example.com/p))")]
+    public void SecretRedactor_Redact_UrlInParentheses_RedactsQueryAndKeepsClosingParenthesis(string text, string expected)
+    {
+        // Act
+        var redacted = SecretRedactor.Redact(text);
+
+        // Assert
+        Assert.Equal(expected, redacted);
+        Assert.DoesNotContain("sentinel", redacted, StringComparison.Ordinal);
+        Assert.Equal(text.Count(c => c == ')'), redacted.Count(c => c == ')'));
+    }
+
+    /// <summary>
+    ///     Test that parentheses that belong to the URL - balanced in the path, query or fragment,
+    ///     or an unmatched closer followed by more query text - never end the URL early, so no part
+    ///     of the query or fragment survives.
+    /// </summary>
+    [Theory]
+    [InlineData("https://en.example.com/wiki/Foo_(bar)?token=sentinel#frag(x)", "https://en.example.com/wiki/Foo_(bar)")]
+    [InlineData("https://h.example.com/p?sig=a(b)c&t=sentinel", "https://h.example.com/p")]
+    [InlineData("https://h.example.com/p?sig=ab)cd&t=sentinel next", "https://h.example.com/p next")]
+    [InlineData("https://h.example.com/p#frag)sentinel", "https://h.example.com/p")]
+    public void SecretRedactor_Redact_UrlWithBalancedParenthesesInPathAndQuery_RedactsWholeQueryAndFragment(
+        string text, string expected)
+    {
+        // Act
+        var redacted = SecretRedactor.Redact(text);
+
+        // Assert
+        Assert.Equal(expected, redacted);
+        Assert.DoesNotContain("sentinel", redacted, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a markdown-style link whose URL carries user information, a query and a
+    ///     fragment is reduced to scheme, host and path, and that the text around it is kept.
+    /// </summary>
+    [Fact]
+    public void SecretRedactor_Redact_MarkdownLinkWithUserInfoAndQuery_RedactsUserInfoQueryAndFragment()
+    {
+        // Arrange
+        var link = "https://svc:sentinel-pw@h.example.com/a(b)?sig=sentinel#sentinel";
+        var text = $"[docs]({link}) and [more](https://h2.example.com/x?t=sentinel).";
+
+        // Act
+        var redacted = SecretRedactor.Redact(text);
+
+        // Assert
+        Assert.Equal("[docs](https://h.example.com/a(b)) and [more](https://h2.example.com/x).", redacted);
+    }
+
+    /// <summary>
+    ///     Test that header and secret-key values are redacted when the quotes around them were
+    ///     written by <see cref="JsonSerializer"/> with its default encoder (<c>\u0022</c> and
+    ///     <c>\u0027</c>, as happens when a JSON document is logged inside a string).
+    /// </summary>
+    [Theory]
+    [InlineData("Authorization")]
+    [InlineData("Proxy-Authorization")]
+    [InlineData("X-NuGet-ApiKey")]
+    [InlineData("Cookie")]
+    [InlineData("password")]
+    [InlineData("token")]
+    [InlineData("access_token")]
+    [InlineData("client_secret")]
+    [InlineData("api-key")]
+    [InlineData("sig")]
+    public void SecretRedactor_Redact_JsonSerializerDefaultEscaping_RedactsHeaderAndKeyValues(string name)
+    {
+        // Arrange: a JSON document inside a JSON string, so the default encoder writes its quotes as \u0022
+        var inner = $$"""{"{{name}}":"sentinel-value","other":1}""";
+        var withSingle = $$"""{'{{name}}':'sentinel-value'}""";
+        var json = JsonSerializer.Serialize(new Dictionary<string, string> { ["message"] = inner, ["single"] = withSingle });
+        Assert.Contains("\\u0022", json, StringComparison.Ordinal);
+        Assert.Contains("\\u0027", json, StringComparison.Ordinal);
+
+        // Act
+        var redacted = SecretRedactor.Redact(json);
+
+        // Assert
+        Assert.DoesNotContain("sentinel", redacted, StringComparison.Ordinal);
+        Assert.Contains("[redacted]", redacted, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that header and key values delimited by <c>\u0022</c> or <c>\u0027</c> - written
+    ///     directly, or escaped once more (<c>\\u0022</c>) - are redacted, in every position
+    ///     (start of text, after a delimiter, after the opposite quote form).
+    /// </summary>
+    [Theory]
+    [InlineData("""\u0022Authorization\u0022: \u0022Bearer sentinel-a\u0022""")]
+    [InlineData("""x \u0027password\u0027=\u0027sentinel-b\u0027 y""")]
+    [InlineData("""\\u0022token\\u0022:\\u0022sentinel-c\\u0022""")]
+    [InlineData("""{"m":"\u0022api_key\u0022:\u0022sentinel-d\u0022,\u0022other\u0022:1"}""")]
+    [InlineData("""\u0022Proxy-Authorization\u0022:\u0027Basic sentinel-e\u0027""")]
+    [InlineData("""\u0027sig\u0027 : \u0027sentinel-f\u0027""")]
+    [InlineData("""\\\u0022secret\\\u0022:\\\u0022sentinel-g\\\u0022""")]
+    public void SecretRedactor_Redact_UnicodeEscapedQuoteDelimiters_RedactsHeaderAndKeyValues(string text)
+    {
+        // Act
+        var redacted = SecretRedactor.Redact(text);
+
+        // Assert: the escaped text is replaced, not merely reordered or kept alongside the placeholder
+        Assert.DoesNotContain("sentinel", redacted, StringComparison.Ordinal);
+        Assert.Contains("[redacted]", redacted, StringComparison.Ordinal);
+        Assert.NotEqual(text, redacted);
+    }
+
+    /// <summary>
+    ///     Test that header and key values survive no level of JSON nesting: a document serialized
+    ///     into a string, that string serialized into another document, and so on, with the default
+    ///     and the relaxed encoder.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "Authorization")]
+    [InlineData(true, "Authorization")]
+    [InlineData(false, "password")]
+    [InlineData(true, "password")]
+    [InlineData(false, "access_token")]
+    [InlineData(true, "access_token")]
+    public void SecretRedactor_Redact_NestedJsonText_RedactsHeaderAndKeyValues(bool relaxedEscaping, string name)
+    {
+        // Arrange
+        var options = new JsonSerializerOptions
+        {
+            Encoder = relaxedEscaping ? JavaScriptEncoder.UnsafeRelaxedJsonEscaping : JavaScriptEncoder.Default
+        };
+        var level0 = JsonSerializer.Serialize(new Dictionary<string, string> { [name] = "sentinel-value", ["Accept"] = "*/*" }, options);
+        var level1 = JsonSerializer.Serialize(new Dictionary<string, string> { ["log"] = level0 }, options);
+        var level2 = JsonSerializer.Serialize(new Dictionary<string, string> { ["entry"] = level1 }, options);
+        var level3 = JsonSerializer.Serialize(new Dictionary<string, string> { ["batch"] = level2 }, options);
+
+        // Act / Assert
+        foreach (var text in new[] { level0, level1, level2, level3 })
+        {
+            var redacted = SecretRedactor.Redact(text);
+            Assert.DoesNotContain("sentinel", redacted, StringComparison.Ordinal);
+            Assert.Contains("[redacted]", redacted, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a <see cref="SanitizedException"/> redacts whatever text it is constructed
+    ///     with, so the secret-free contract holds for every construction path.
+    /// </summary>
+    [Fact]
+    public void SanitizedException_Constructor_UnredactedText_IsRedactedByTheConstructor()
+    {
+        // Act
+        var sanitized = new SanitizedException(
+            "Some.Type",
+            "failed https://h.example.com/x?sig=sentinel-q with Authorization: Bearer sentinel-b",
+            "at Some.Method() https://svc:sentinel-p@h.example.com/y?t=sentinel-s");
+
+        // Assert
+        var text = sanitized.Message + sanitized.StackTrace + sanitized;
+        Assert.DoesNotContain("sentinel", text, StringComparison.Ordinal);
+        Assert.Equal("Some.Type", sanitized.OriginalTypeName);
+        Assert.Contains("https://h.example.com/x", sanitized.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that each lease withdraws exactly its own registration: disposing one lease twice
+    ///     does not end redaction while another holder's lease is alive, and the secret is only
+    ///     released when the last holder is done.
+    /// </summary>
+    [Fact]
+    public void SecretRedactor_Lease_DisposedTwiceOrAlongsideOtherHolders_WithdrawsOnlyItsOwnRegistration()
+    {
+        // Arrange
+        var secret = "sec-" + Guid.NewGuid().ToString("N");
+        var credential = new NuGetCredential("u", secret);
+        var first = SecretRedactor.Lease(credential);
+        var second = SecretRedactor.Lease(credential);
+
+        // Act: the first holder finishes, twice
+        first.Dispose();
+        first.Dispose();
+        var whileSecondHolds = SecretRedactor.Redact($"value {secret} end");
+        second.Dispose();
+        var afterAll = SecretRedactor.Redact($"value {secret} end");
+
+        // Assert
+        Assert.Equal("value [redacted] end", whileSecondHolds);
+        Assert.Equal($"value {secret} end", afterAll);
+    }
+
+    /// <summary>
     ///     An object whose text is fixed, to prove arbitrary objects are redacted via their text.
     /// </summary>
     /// <param name="Text">The text.</param>

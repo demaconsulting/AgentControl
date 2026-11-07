@@ -64,7 +64,9 @@ source.
 - *Contract*: Returns the provider for a configured alias (case-insensitive); an alias that is
   not configured is an error (`UnknownSourceException`) and no other source is ever substituted
   or contacted (`AgentControl-AgentPackageManagement-SourceResolution`).
-- *Constraints*: Duplicate or blank aliases are rejected when the registry is built.
+- *Constraints*: Duplicate or blank aliases and missing entries are rejected when the registry is built, and the
+  registry works from a private snapshot of the definitions, so later changes to the settings objects it was
+  built from cannot change what an alias resolves to.
 
 **PackageSource.EnumeratePackageNames**: Enumerates the distinct package base names present
 in a zip source folder.
@@ -143,13 +145,15 @@ together with its source. `DiscoveredPackage` is a package version found at a so
 its alias and a provider-defined location.
 
 **Providers.** `ZipFolderSourceProvider` adapts the unchanged static `PackageSource` scan to the
-provider contract (`AgentControl-AgentPackageManagement-ZipFolderSource`).
+provider contract (`AgentControl-AgentPackageManagement-ZipFolderSource`); it reports an unusable folder as
+`DirectoryNotFoundException` and every other failure as `InvalidOperationException`, honors cancellation
+while a slow share is being read, and refuses a package zip that is a link leading outside its folder.
 `NuGetSourceProvider` wraps the NuGet caching OTS item for folder feeds and for NuGet V3 servers, keeping
 all of its state in AgentControl-owned, per-source storage and never touching the target repo
 (`AgentControl-AgentPackageManagement-NuGetFolderSource`). For a server it additionally signs in, using in
-order what NuGet itself knows (a `nuget.config` source with the same address, credential-provider
-plug-ins running non-interactively), the credential the user already typed this session or saved earlier with
-their own Git credential helper, and only then the
+order what NuGet itself knows (a `nuget.config` source with the same address; the library runs
+non-interactively, so nothing it does can open a dialog of its own), the credential the user already typed this
+session or saved earlier with their own Git credential helper, and only then the
 sign-in dialog - at most once per operation - through the `PackageCredentials` subsystem, and maps every
 failure to a `PackageSourceAccessException` with a secret-free message
 (`AgentControl-AgentPackageManagement-NuGetServerSource`). Listing a server's versions never downloads a

@@ -340,9 +340,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         string packageId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
-        EnsureLocationExists();
-        EnsureSignatureVerificationPossible();
-        PrepareRoot();
+        await PrepareAsync(cancellationToken);
 
         // Ask the library for every listed version (prereleases included, as pins may be
         // prereleases); the source is named explicitly in Sources, so it is always queried. Only
@@ -378,9 +376,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
                 nameof(package));
         }
 
-        EnsureLocationExists();
-        EnsureSignatureVerificationPossible();
-        PrepareRoot();
+        await PrepareAsync(cancellationToken);
 
         // The library unpacks the package into the global packages folder configured in the
         // generated per-source nuget.config and returns that package's folder
@@ -407,6 +403,42 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         }
 
         return DirectoryPackageContentReader.Open(packageFolder);
+    }
+
+    /// <summary>
+    ///     Runs the checks and preparation every operation needs before the NuGet library is called -
+    ///     a folder source exists, signature verification is possible, the private cache root and
+    ///     its configuration exist - after checking cancellation, and off the caller's thread.
+    /// </summary>
+    /// <remarks>
+    ///     The checks do synchronous file-system work that can block for a long time (an offline
+    ///     UNC folder), so they run on a worker thread and the caller is released as soon as it
+    ///     cancels. Cancellation is checked first, so a call that is already canceled neither
+    ///     reports a missing folder nor creates the cache root or its configuration. Work that
+    ///     started before a later cancellation finishes in the background; it is idempotent (the
+    ///     root and configuration are the ones the next operation needs anyway).
+    /// </remarks>
+    /// <param name="cancellationToken">Token to abandon the call.</param>
+    /// <returns>A task that completes when the source is ready to be used.</returns>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> is canceled.</exception>
+    /// <exception cref="DirectoryNotFoundException">Thrown when a folder source does not exist or
+    ///     is unreachable.</exception>
+    /// <exception cref="PackageSourceAccessException">Thrown when signatures are required and cannot
+    ///     be verified on this platform.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the cache root cannot be
+    ///     prepared.</exception>
+    private async Task PrepareAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await Task.Run(
+            () =>
+            {
+                EnsureLocationExists();
+                EnsureSignatureVerificationPossible();
+                PrepareRoot();
+            },
+            CancellationToken.None).WaitAsync(cancellationToken);
     }
 
     /// <summary>
@@ -768,7 +800,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     /// <param name="callback">The credential callback for a server attempt, or
     ///     <see langword="null"/> for a folder.</param>
     /// <returns>The options for one library call.</returns>
-    private NuGetCacheOptions CreateOptions(PackageCredentialCallback? callback) => new()
+    internal NuGetCacheOptions CreateOptions(PackageCredentialCallback? callback) => new()
     {
         Sources = [_location],
         Interactive = false,

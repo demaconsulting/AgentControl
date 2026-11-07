@@ -236,6 +236,430 @@ public class PackageCredentialsSubsystemTests
     }
 
     /// <summary>
+    ///     Test that repeated challenges on one operation's callback - different addresses of the
+    ///     feed, retries, concurrent requests - ask the user at most once and all receive the same
+    ///     answer, a declined sign-in included.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PackageCredentials_RepeatedChallengesOnOneCallback_PromptsOnceAndSharesTheAnswer(bool userDeclines)
+    {
+        // Arrange
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(userDeclines ? null : new NuGetCredential("svc", "pw-repeat-" + Guid.NewGuid().ToString("N")));
+        var callback = new PackageCredentialCallback(FeedOrigin.Create(FeedIndex), "Feed", new SessionCredentialStore(), prompt);
+        var challenges = new[]
+        {
+            FeedIndex,
+            new Uri("https://feeds.example.com/v3/flat/pkg/index.json"),
+            new Uri("https://FEEDS.example.com:443/v3/flat/pkg/1.0.0/pkg.1.0.0.nupkg"),
+            FeedIndex
+        };
+
+        // Act: sequential retries, then a burst of concurrent requests
+        var sequential = new List<NuGetCredential?>();
+        foreach (var challenge in challenges)
+        {
+            sequential.Add(await callback.Callback(challenge, CancellationToken.None));
+        }
+
+        var concurrent = await Task.WhenAll(challenges.Select(challenge => callback.Callback(challenge, CancellationToken.None)));
+
+        // Assert
+        Assert.Equal(1, prompt.AskCount);
+        Assert.Equal(userDeclines, callback.UserDeclined);
+        Assert.All(sequential.Concat(concurrent), credential =>
+        {
+            if (userDeclines)
+            {
+                Assert.Null(credential);
+            }
+            else
+            {
+                Assert.Same(callback.SuppliedCredential, credential);
+            }
+        });
+        callback.Release();
+    }
+
+    /// <summary>
+    ///     Test that a challenge from a different scheme, host, sub-domain or port than the feed's
+    ///     gets no credential, never opens the prompt and never consults either credential store -
+    ///     as a redirect or a link inside a feed would produce.
+    /// </summary>
+    [Theory]
+    [InlineData("https://feeds.example.com:8443/v3/index.json")]
+    [InlineData("http://feeds.example.com/v3/index.json")]
+    [InlineData("https://sub.feeds.example.com/v3/index.json")]
+    [InlineData("https://feeds.example.com.evil.test/v3/index.json")]
+    [InlineData("https://evil.example.com/redirect")]
+    public async Task PackageCredentials_ChallengeFromDifferentSchemeHostOrPort_GetsNoCredentialAndNoPrompt(string foreign)
+    {
+        // Arrange: a credential in the session, another saved by the user, and a prompt ready to answer
+        var origin = FeedOrigin.Create(FeedIndex);
+        var store = new SessionCredentialStore();
+        store.Set(origin, new NuGetCredential("svc", "pw-scope-" + Guid.NewGuid().ToString("N")));
+        var usersStore = new FakeRememberedCredentialStore();
+        usersStore.Save(origin, new NuGetCredential("svc", "pw-scope-saved-" + Guid.NewGuid().ToString("N")));
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential("typed", "pw-scope-typed-" + Guid.NewGuid().ToString("N")));
+        var callback = new PackageCredentialCallback(origin, "Feed", store, prompt, remembered: usersStore);
+
+        // Act
+        var credential = await callback.Callback(new Uri(foreign), CancellationToken.None);
+
+        // Assert
+        Assert.Null(credential);
+        Assert.Equal(0, prompt.AskCount);
+        Assert.Empty(usersStore.Calls);
+        Assert.Null(callback.SuppliedCredential);
+    }
+
+    /// <summary>
+    ///     Test that a late rejection of an old credential - arriving after the user saved a newer
+    ///     one for the same feed - removes nothing that is newer, neither in the session nor in the
+    ///     user's own credential store.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentials_LateRejectionOfAnOldCredential_KeepsTheNewerRememberedCredential()
+    {
+        // Arrange: a slow operation offers the saved credential A
+        var origin = FeedOrigin.Create(FeedIndex);
+        var usersStore = new FakeRememberedCredentialStore();
+        usersStore.Save(origin, new NuGetCredential("svc", "pw-old-" + Guid.NewGuid().ToString("N")));
+        var store = new SessionCredentialStore();
+        var slow = new PackageCredentialCallback(origin, "Feed", store, prompt: null, remembered: usersStore);
+        await slow.Callback(FeedIndex, CancellationToken.None);
+
+        // Act: meanwhile another operation signs in again and the new credential is saved
+        var newer = new NuGetCredential("svc", "pw-new-" + Guid.NewGuid().ToString("N"));
+        usersStore.Save(origin, newer);
+        store.Set(origin, newer, fromRememberedStore: true);
+        await slow.RejectAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(newer, usersStore.Peek(origin));
+        Assert.True(store.TryGet(origin, out var current));
+        Assert.Equal(newer, current);
+    }
+
+    /// <summary>
+    ///     Test that clearing the session store (as at exit) forgets every credential in it, so the
+    ///     next operation has to ask again and the secrets are no longer tracked for redaction.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentials_ClearedSessionStore_ForgetsEveryCredentialAndTheNextOperationAsksAgain()
+    {
+        // Arrange
+        var origin = FeedOrigin.Create(FeedIndex);
+        var other = FeedOrigin.Create(new Uri("https://other.example.com/v3/index.json"));
+        var secret = "pw-clear-" + Guid.NewGuid().ToString("N");
+        var store = new SessionCredentialStore();
+        store.Set(origin, new NuGetCredential("svc", secret));
+        store.Set(other, new NuGetCredential("svc", "pw-clear-other-" + Guid.NewGuid().ToString("N")));
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(null);
+
+        // Act
+        store.Clear();
+        var next = new PackageCredentialCallback(origin, "Feed", store, prompt);
+        var answer = await next.Callback(FeedIndex, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(0, store.Count);
+        Assert.Null(answer);
+        Assert.Equal(1, prompt.AskCount);
+        Assert.Equal(secret, SecretRedactor.Redact(secret));
+    }
+
+    /// <summary>
+    ///     Test that nothing is ever handed to the user's own credential store unless the user
+    ///     ticked "Remember" and the operation succeeded.
+    /// </summary>
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task PackageCredentials_RememberNotTickedOrOperationNotSucceeded_NothingIsSavedInTheUsersStore(
+        bool ticked, bool succeeded)
+    {
+        // Arrange
+        var origin = FeedOrigin.Create(FeedIndex);
+        var usersStore = new FakeRememberedCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential("svc", "pw-unsaved-" + Guid.NewGuid().ToString("N")), remember: ticked);
+        var callback = new PackageCredentialCallback(
+            origin, "Feed", new SessionCredentialStore(), prompt, remembered: usersStore);
+        await callback.Callback(FeedIndex, CancellationToken.None);
+
+        // Act
+        if (succeeded)
+        {
+            await callback.CommitAsync(CancellationToken.None);
+        }
+        else
+        {
+            await callback.RejectAsync(CancellationToken.None);
+        }
+
+        // Assert
+        Assert.Equal(0, usersStore.CountOf("approve"));
+        Assert.Null(usersStore.Peek(origin));
+    }
+
+    /// <summary>
+    ///     Test that the sign-in prompt offers to remember only when the user's own credential store
+    ///     exists and can keep a sign-in for the feed.
+    /// </summary>
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    public async Task PackageCredentials_PromptRequest_OffersRememberOnlyWhenTheUsersStoreCanKeepIt(
+        bool hasUsersStore, bool helperAvailable, bool expected)
+    {
+        // Arrange
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(null);
+        IRememberedCredentialStore? usersStore = hasUsersStore
+            ? new FakeRememberedCredentialStore { Available = helperAvailable }
+            : null;
+        var callback = new PackageCredentialCallback(
+            FeedOrigin.Create(FeedIndex), "Feed", new SessionCredentialStore(), prompt, remembered: usersStore);
+
+        // Act
+        await callback.Callback(FeedIndex, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expected, Assert.Single(prompt.Requests).CanRemember);
+    }
+
+    /// <summary>
+    ///     Test that operations on one server that start together look in the user's credential
+    ///     store once between them, and all use what it held.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentials_ConcurrentOperationsOnOneServer_LookUpTheSavedCredentialOnce()
+    {
+        // Arrange
+        var origin = FeedOrigin.Create(FeedIndex);
+        var usersStore = new FakeRememberedCredentialStore { FillDelay = TimeSpan.FromMilliseconds(200) };
+        usersStore.Save(origin, new NuGetCredential("svc", "pw-lookup-" + Guid.NewGuid().ToString("N")));
+        var store = new SessionCredentialStore();
+        var callbacks = Enumerable.Range(0, 6)
+            .Select(_ => new PackageCredentialCallback(origin, "Feed", store, prompt: null, remembered: usersStore))
+            .ToList();
+
+        // Act
+        var credentials = await Task.WhenAll(callbacks.Select(callback => callback.Callback(FeedIndex, CancellationToken.None)));
+
+        // Assert
+        Assert.Equal(1, usersStore.CountOf("fill"));
+        Assert.All(credentials, credential => Assert.NotNull(credential));
+        callbacks.ForEach(callback => callback.Release());
+    }
+
+    /// <summary>
+    ///     Test that a saved credential the server rejects is removed from the user's own credential
+    ///     store, so the next session asks the user instead of repeating it.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentials_RejectedSavedCredential_IsRemovedFromTheUsersStoreAndTheNextSessionAsks()
+    {
+        // Arrange
+        var origin = FeedOrigin.Create(FeedIndex);
+        var usersStore = new FakeRememberedCredentialStore();
+        usersStore.Save(origin, new NuGetCredential("svc", "pw-saved-bad-" + Guid.NewGuid().ToString("N")));
+        var silent = new PackageCredentialCallback(origin, "Feed", new SessionCredentialStore(), prompt: null, remembered: usersStore);
+        await silent.Callback(FeedIndex, CancellationToken.None);
+
+        // Act: the server rejects it; a later session (a fresh session store) is allowed to ask
+        await silent.RejectAsync(CancellationToken.None);
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(null);
+        var nextSession = new PackageCredentialCallback(
+            origin, "Feed", new SessionCredentialStore(), prompt, remembered: usersStore);
+        var answer = await nextSession.Callback(FeedIndex, CancellationToken.None);
+
+        // Assert
+        Assert.Null(usersStore.Peek(origin));
+        Assert.Null(answer);
+        Assert.Equal(1, prompt.AskCount);
+    }
+
+    /// <summary>
+    ///     Test that no part of a logged address - user information, query string or fragment -
+    ///     reaches the log, however the address is given to the logger.
+    /// </summary>
+    [Theory]
+    [InlineData("https://svc:sentinel-sub-1@feeds.example.com/v3/index.json")]
+    [InlineData("https://feeds.example.com/v3/index.json?sig=sentinel-sub-2&se=2026")]
+    [InlineData("https://feeds.example.com/v3/index.json#sentinel-sub-3")]
+    [InlineData("https://svc:sentinel-sub-4@feeds.example.com/v3/index.json?sig=sentinel-sub-4#sentinel-sub-4")]
+    [InlineData("(https://feeds.example.com/v3/index.json?token=sentinel-sub-5)")]
+    public void PackageCredentials_LoggedUrlParts_NeverReachTheLog(string url)
+    {
+        // Arrange
+        var inner = new ListLogger();
+        var logger = new SecretRedactingLogger(inner);
+
+        // Act: as message text, as a structured property and in a scope
+        LogText(logger, "Requesting " + url);
+        logger.LogInformation("Requesting {Url}", url);
+        using (logger.BeginScope("Source {Url}", url))
+        {
+            logger.LogDebug("inside the scope");
+        }
+
+        // Assert
+        var everything = inner.Snapshot().Concat(inner.Scopes).ToList();
+        Assert.NotEmpty(everything);
+        Assert.All(everything, line => Assert.DoesNotContain("sentinel-sub", line, StringComparison.Ordinal));
+        Assert.Contains(everything, line => line.Contains("feeds.example.com", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     Test that the whole value of an Authorization header is removed whatever its scheme -
+    ///     Basic, Bearer, Digest, NTLM, Negotiate or a custom scheme - in message text and in a
+    ///     structured property.
+    /// </summary>
+    [Theory]
+    [InlineData("Basic sentinel-sub-a")]
+    [InlineData("Bearer sentinel-sub-b")]
+    [InlineData("Digest username=\"u\", realm=\"r\", response=\"sentinel-sub-c\"")]
+    [InlineData("NTLM sentinel-sub-d")]
+    [InlineData("Negotiate sentinel-sub-e")]
+    [InlineData("Custom-Scheme sentinel-sub-f and more")]
+    public void PackageCredentials_LoggedAuthorizationSchemes_NeverReachTheLog(string headerValue)
+    {
+        // Arrange
+        var inner = new ListLogger();
+        var logger = new SecretRedactingLogger(inner);
+
+        // Act
+        LogText(logger, "Request failed. Authorization: " + headerValue);
+        logger.LogWarning("Headers were {Headers}", "Accept: */*\nAuthorization: " + headerValue);
+
+        // Assert
+        var lines = inner.Snapshot();
+        Assert.Equal(2, lines.Count);
+        Assert.All(lines, line => Assert.DoesNotContain("sentinel-sub", line, StringComparison.Ordinal));
+        Assert.All(lines, line => Assert.Contains("[redacted]", line, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     Test that a logged exception reaches the log only as a secret-free description: its type,
+    ///     the redacted messages of its whole inner chain and a redacted stack trace, with nothing
+    ///     from its data or the original object.
+    /// </summary>
+    [Fact]
+    public void PackageCredentials_LoggedExceptions_AreSanitized()
+    {
+        // Arrange
+        var inner = new ListLogger();
+        var logger = new SecretRedactingLogger(inner);
+        var secret = "sentinel-sub-reg-" + Guid.NewGuid().ToString("N");
+        var credential = new NuGetCredential("svc", secret);
+        using var lease = SecretRedactor.Lease(credential);
+        Exception thrown;
+        try
+        {
+            throw new InvalidOperationException(
+                "failed https://feeds.example.com/x?sig=sentinel-sub-m Authorization: Bearer sentinel-sub-n " + secret,
+                new IOException("inner https://svc:sentinel-sub-o@h.example.com/y?t=sentinel-sub-p"))
+            {
+                Data = { ["token"] = "sentinel-sub-q" }
+            };
+        }
+        catch (InvalidOperationException ex)
+        {
+            thrown = ex;
+        }
+
+        // Act
+        logger.LogError(thrown, "The operation failed for {Alias}", "Feed");
+
+        // Assert
+        var line = Assert.Single(inner.Snapshot());
+        Assert.DoesNotContain("sentinel-sub", line, StringComparison.Ordinal);
+        Assert.Contains("InvalidOperationException", line, StringComparison.Ordinal);
+        Assert.Contains("IOException", line, StringComparison.Ordinal);
+        Assert.Contains("https://feeds.example.com/x", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that structured property values and scope values are redacted while plain value types
+    ///     keep their values, so structured sinks stay useful.
+    /// </summary>
+    [Fact]
+    public void PackageCredentials_LoggedScopesAndProperties_AreRedacted()
+    {
+        // Arrange
+        var inner = new ListLogger();
+        var logger = new SecretRedactingLogger(inner);
+        var scopeState = new Dictionary<string, object?>
+        {
+            ["Request"] = "GET https://feeds.example.com/v3/index.json?sig=sentinel-sub-s",
+            ["Header"] = "Authorization: Basic sentinel-sub-t",
+            ["Attempt"] = 3
+        };
+
+        // Act
+        using (logger.BeginScope(scopeState))
+        {
+            logger.LogInformation(
+                "Fetched {Url} in {Attempts} attempts with {Header}",
+                "https://feeds.example.com/v3/index.json?sig=sentinel-sub-u",
+                2,
+                "Cookie: session=sentinel-sub-v");
+        }
+
+        // Assert
+        var scope = Assert.Single(inner.Scopes);
+        var line = Assert.Single(inner.Snapshot());
+        Assert.DoesNotContain("sentinel-sub", scope, StringComparison.Ordinal);
+        Assert.DoesNotContain("sentinel-sub", line, StringComparison.Ordinal);
+        Assert.Contains("Attempt=3", scope, StringComparison.Ordinal);
+        Assert.Contains("Attempts=2", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test the redaction lease life cycle: the credential a user typed is redacted from the
+    ///     moment it is entered until the operation ends, and - when the operation did not commit
+    ///     it - not tracked afterwards; a committed credential stays redacted while the store holds
+    ///     it and stops when the store is cleared.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentials_RedactionLease_SecretIsRedactedUntilTheLeaseEnds()
+    {
+        // Arrange
+        var origin = FeedOrigin.Create(FeedIndex);
+        var notKept = "pw-lease-discarded-" + Guid.NewGuid().ToString("N");
+        var kept = "pw-lease-kept-" + Guid.NewGuid().ToString("N");
+        var store = new SessionCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential("svc", notKept));
+        prompt.EnqueueAnswer(new NuGetCredential("svc", kept));
+
+        // Act / Assert: the typed secret is redacted while the operation runs and not tracked after
+        // an operation that did not keep it
+        var failed = new PackageCredentialCallback(origin, "Feed", store, prompt);
+        await failed.Callback(FeedIndex, CancellationToken.None);
+        Assert.Equal("value [redacted]", SecretRedactor.Redact("value " + notKept));
+        await failed.RejectAsync(CancellationToken.None);
+        Assert.Equal("value " + notKept, SecretRedactor.Redact("value " + notKept));
+
+        // Act / Assert: a committed credential stays redacted after the operation, until the store clears
+        var succeeded = new PackageCredentialCallback(origin, "Feed", store, prompt);
+        await succeeded.Callback(FeedIndex, CancellationToken.None);
+        await succeeded.CommitAsync(CancellationToken.None);
+        Assert.Equal("value [redacted]", SecretRedactor.Redact("value " + kept));
+        store.Clear();
+        Assert.Equal("value " + kept, SecretRedactor.Redact("value " + kept));
+    }
+
+    /// <summary>
     ///     Test that when the callback, the store and the redacting logger work together, neither the
     ///     typed password nor a header or URL secret reaches the log.
     /// </summary>
@@ -264,4 +688,13 @@ public class PackageCredentialsSubsystemTests
         Assert.All(lines, line => Assert.DoesNotContain(SentinelPassword, line, StringComparison.Ordinal));
         Assert.All(lines, line => Assert.DoesNotContain(encoded, line, StringComparison.Ordinal));
     }
+
+    /// <summary>
+    ///     Writes text to a logger exactly as given, as a message that is not a template, the way
+    ///     a library that formats its own messages does.
+    /// </summary>
+    /// <param name="logger">The logger.</param>
+    /// <param name="text">The finished message text.</param>
+    private static void LogText(ILogger logger, string text) =>
+        logger.Log(LogLevel.Information, default, text, null, static (message, _) => message);
 }

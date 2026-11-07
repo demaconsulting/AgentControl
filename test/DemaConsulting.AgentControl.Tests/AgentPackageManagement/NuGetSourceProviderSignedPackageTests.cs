@@ -105,6 +105,29 @@ public sealed class NuGetSourceProviderSignedPackageTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a package whose content was altered after it was signed is rejected - and not
+    ///     installed - as a signature failure, because its signature no longer matches its content.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_Acquire_SignedPackageWithAlteredContent_IsRejectedAndNotInstalled()
+    {
+        // Arrange: the signed package with one byte of its content flipped, and no pinned publisher
+        using var scope = SignedNuGetFixture.Arrange();
+        var feed = CreateTempDirectory();
+        SignedNuGetFixture.CopyAlteredToFeed(feed);
+        var provider = new NuGetSourceProvider(Definition(feed, fingerprint: null), CreateTempDirectory());
+        var package = Assert.Single(await provider.ListVersionsAsync(SignedNuGetFixture.PackageId, CancellationToken.None));
+
+        // Act
+        var ex = await Assert.ThrowsAsync<PackageSourceAccessException>(
+            () => provider.AcquireAsync(package, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(PackageSourceFailureKind.SignatureRejected, ex.Kind);
+        Assert.Empty(InstalledPackages(provider));
+    }
+
+    /// <summary>
     ///     Test that the pin names the package's author: pinning the nuget.org repository's
     ///     certificate (which only countersigns) does not match, so the package is rejected.
     /// </summary>

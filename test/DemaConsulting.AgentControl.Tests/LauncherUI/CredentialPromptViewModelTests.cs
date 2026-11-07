@@ -179,6 +179,22 @@ public class CredentialPromptViewModelTests
     }
 
     /// <summary>
+    ///     Test that the dialog tells the user the last sign-in did not work when a credential for
+    ///     the feed was just rejected, and says nothing of the kind on a first request.
+    /// </summary>
+    [Fact]
+    public void CredentialPromptViewModel_Constructor_PreviousCredentialRejected_ShowsWarningOnlyWhenRejected()
+    {
+        // Act
+        var firstRequest = Create(previousRejected: false);
+        var askedAgain = Create(previousRejected: true);
+
+        // Assert
+        Assert.False(firstRequest.PreviousCredentialRejected);
+        Assert.True(askedAgain.PreviousCredentialRejected);
+    }
+
+    /// <summary>
     ///     Test that a null request is refused.
     /// </summary>
     [Fact]

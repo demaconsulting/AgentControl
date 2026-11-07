@@ -10,12 +10,12 @@ sections:
       - id: AgentControl-SignatureVerificationSupport-PlatformSupport
         title: >-
           The SignatureVerificationSupport class shall report that package signature verification
-          is supported on Windows, Linux and macOS - provided the platform's certificate-chain
-          facility works - and that it is not supported on any other platform.
+          is supported only on Windows, Linux and macOS, and that it is not supported on any other
+          platform.
         justification: |
           Requiring signatures is only meaningful where verification really happens; the supported
           platforms are those on which the verification is exercised by the project's automated
-          builds, and a platform whose certificate facility fails cannot be trusted to verify.
+          builds.
         tests:
           - SignatureVerificationSupport_IsSupportedPlatform_WindowsLinuxAndMacOsOnly
           - SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue
@@ -34,6 +34,25 @@ sections:
           - SignatureVerificationSupport_RunProbe_ProbeAnswers_ReturnsTheAnswer
           - SignatureVerificationSupport_RunProbe_ProbeFails_IsNotSupportedAndNeverThrows
           - SignatureVerificationSupport_Evaluate_NeedsPlatformAndASuccessfulProbe
+
+      - id: AgentControl-SignatureVerificationSupport-RealChainProbe
+        title: >-
+          The SignatureVerificationSupport class shall report that signature verification is
+          supported only when the platform's certificate facility can build, without network
+          access, a certificate chain of exactly one element for a throw-away self-signed
+          certificate that it trusts for the purpose, with no unexpected chain status, and shall
+          report it as not supported when the chain cannot be built, has any unexpected status or
+          no certificate is given.
+        justification: |
+          Verifying a package signature means building a certificate chain; a platform whose
+          chain facility cannot do that - or only appears to exist - must not be reported as able
+          to verify, or a requirement for signed packages would be accepted and then fail or be
+          skipped. The check uses a certificate created on the spot and never the network, so its
+          answer does not depend on the machine's trust stores or connectivity.
+        tests:
+          - SignatureVerificationSupport_ProbeCertificateChains_OnThisPlatform_BuildsAChainOfflineAndIsSupported
+          - SignatureVerificationSupport_ProbeChain_ExpiredCertificate_IsNotSupported
+          - SignatureVerificationSupport_ProbeChain_NullCertificate_IsNotSupported
 
       - id: AgentControl-SignatureVerificationSupport-UnsupportedExplanation
         title: >-

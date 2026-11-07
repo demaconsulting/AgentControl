@@ -44,7 +44,8 @@ shell script elsewhere). The tests pass an explicit working folder, so they neve
   exceptions.
 - A hanging git is killed, with its process tree, at the time limit and reported as "nothing"; cancelling kills it too
   and propagates the cancellation.
-- No request, response or credential appears in the log, and a credential (or origin) with a line feed, carriage
+- No request line, response line, credential or credential-bearing command-line argument appears in the log, and a
+  credential (or origin) with a line feed, carriage
   return or NUL is refused without running git, while a password containing `=` is sent and read back unchanged.
 - With a real git and an isolated helper the full miss, approve, fill, reject life cycle behaves as specified.
 
@@ -109,8 +110,10 @@ documented exceptions; extra configuration passes through with `-c`. This scenar
 `AgentControl-GitCredentialClient-UnavailableIsNotAnError`.
 
 **GitCredentialClient_SecretsNeverLogged_ContentNeverReachesTheLog**: Every operation is run with a sentinel
-password in the request and the response and a recording logger; no logged line contains the password, the user name
-or any request or response line. A credential whose user name or password contains a character the line protocol
+password in the request and the response and a recording logger; no logged line contains the password, the user name,
+any line of the request (the protocol, host, path, user name and password lines), any line of the helper's response
+(including its non-secret lines such as the protocol and host it echoes), or any command-line argument that bears a
+credential. A credential whose user name or password contains a character the line protocol
 cannot carry - a line feed, a carriage return or NUL - is refused for approve and reject: no git process is started
 and the result is `false`; the request builder yields no request for such a value. A password containing `=`,
 including the `=` and `==` padding of a Base64 token, is not refused: it is sent unchanged (checked against the stub's

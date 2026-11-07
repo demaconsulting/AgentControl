@@ -4,94 +4,219 @@
 # PackageContentExtractor applies a package's content (a zip file or an unpacked package
 # folder) to a repo's managed agent folders with the same blind delete-and-replace sequence,
 # path containment and link rules for every package format, and reads the package's
-# release notes and AGENTS.md template.
+# release notes and AGENTS.md template. Each requirement states one observable behavior.
+#
+# Grouping note: AgentControl-PackageContentExtractor-RejectLinksAndTraversal and
+# AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders each name one criterion - an
+# unsafe package, or a linked repo folder anywhere on the destination chain, is refused before
+# anything is changed - that is verified at several positions; the positions that need their own
+# evidence are separate requirements below.
 
 sections:
   - title: PackageContentExtractor Unit Requirements
     requirements:
+      # ---- Extracting a folder package ----
       - id: AgentControl-PackageContentExtractor-ExtractFromFolder
         title: >-
           The PackageContentExtractor class shall, for a package supplied as an unpacked folder,
-          replace a repo's managed agent folders with the package's managed folders exactly as it
-          does for a zip package - deleting the old folders first and never copying root-level
-          files such as release notes or the AGENTS.md template - and shall never modify the
-          package it reads from.
+          give a repo the same managed agent folders as the same content supplied as a zip
+          package.
         justification: |
-          NuGet packages are unpacked into a cache the user does not manage and that other
-          tools share; agent files must reach the repo identically whatever the package format,
-          and the cache must be left exactly as found.
+          NuGet packages are unpacked into a cache the user does not manage; agent files must
+          reach the repo identically whatever the package format.
         tests:
           - PackageContentExtractor_Extract_DirectoryPackageIntoFreshRepo_CreatesManagedFoldersOnly
-          - PackageContentExtractor_Extract_DirectoryPackageOverExistingFolder_ReplacesOldContents
-          - PackageContentExtractor_Extract_DirectoryPackage_NeverModifiesPackageFolder
           - PackageContentExtractor_Extract_ZipAndDirectoryWithSameContent_ProduceIdenticalRepoTrees
+
+      - id: AgentControl-PackageContentExtractor-ReplaceManagedFolders
+        title: >-
+          The PackageContentExtractor class shall delete a repo's old managed agent folders
+          before copying the package's, so that no stale file from an earlier version remains.
+        justification: |
+          A package upgrade must leave exactly the package's files; a file the new version no
+          longer ships must not linger in the repo.
+        tests:
+          - PackageContentExtractor_Extract_DirectoryPackageOverExistingFolder_ReplacesOldContents
+
+      - id: AgentControl-PackageContentExtractor-NoRootFilesCopied
+        title: >-
+          The PackageContentExtractor class shall not copy root-level package files, such as the
+          release notes or the AGENTS.md template, or anything else outside the managed agent
+          folders into the repo.
+        justification: |
+          Release notes and the AGENTS.md template are offered to the user, not applied to the
+          repo; silently writing them would overwrite files the developer owns.
+        tests:
+          - PackageContentExtractor_Extract_DirectoryPackageIntoFreshRepo_CreatesManagedFoldersOnly
+
+      - id: AgentControl-PackageContentExtractor-PackageNeverModified
+        title: >-
+          The PackageContentExtractor class shall never modify the package folder it reads from.
+        justification: |
+          An unpacked NuGet package lives in a cache that other tools share; it must be left
+          exactly as found.
+        tests:
+          - PackageContentExtractor_Extract_DirectoryPackage_NeverModifiesPackageFolder
+
+      - id: AgentControl-PackageContentExtractor-RejectMissingContentFolder
+        title: >-
+          The PackageContentExtractor class shall reject a package folder that has no content
+          folder when it is opened, naming the folder.
+        justification: |
+          A package with the wrong layout must never make a sync delete a repo's managed folders
+          for nothing.
+        tests:
           - DirectoryPackageContentReader_Open_NoContentFolder_ThrowsInvalidOperationException
 
+      # ---- Rejecting an unsafe package ----
       - id: AgentControl-PackageContentExtractor-RejectLinksAndTraversal
         title: >-
-          The PackageContentExtractor class shall reject, before deleting anything from the
-          repo, any package file whose destination would fall outside the repo and any
-          symbolic link, junction or other link in a folder package - at the package folder,
-          at its content folder, at any directory leading to a file, or at the file itself -
-          and shall refuse to read package files outside the package's content folder.
+          The PackageContentExtractor class shall reject an unsafe package - one with a file
+          whose destination would fall outside the repo, or a folder package that contains a
+          symbolic link, junction or other link among the files it would copy - before deleting
+          anything from the repo.
         justification: |
-          A package is untrusted input: a crafted path could write outside the repo, and a link
-          inside an unpacked package could redirect a read to an arbitrary file, so both must
-          be refused up front so that a hostile package can neither escape nor leave the repo
-          half upgraded.
+          A package is untrusted input: a crafted path could write outside the repo and a link
+          inside an unpacked package could redirect a read to an arbitrary file. Refusing it
+          up front means a hostile package can neither escape nor leave the repo half upgraded.
         tests:
           - PackageContentExtractor_Extract_TraversalPathFromReader_ThrowsBeforeDeletingManagedFolders
-          - DirectoryPackageContentReader_OpenReadAndReadText_TraversalOrMissingPath_Rejected
           - ubuntu@PackageContentExtractor_Extract_SymlinkedFileInPackage_ThrowsBeforeDeletingManagedFolders
-          - ubuntu@DirectoryPackageContentReader_ListFiles_SymlinkedDirectoryInPackage_ThrowsInvalidOperationException
-          - ubuntu@DirectoryPackageContentReader_Open_ContentFolderIsSymlink_ThrowsInvalidOperationException
-          - ubuntu@DirectoryPackageContentReader_ReadText_SymlinkedReleaseNotes_ThrowsInvalidOperationException
-          - ubuntu@DirectoryPackageContentReader_Open_PackageFolderIsSymlink_ThrowsInvalidOperationException
-          - ubuntu@DirectoryPackageContentReader_OpenRead_LinkedParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException
-          # Directory junctions need no privilege on Windows, so the directory-level rejection
-          # has passing evidence there too.
+          # Directory junctions need no privilege on Windows, so the rejection has passing
+          # evidence there too.
           - windows@PackageContentExtractor_Extract_JunctionInPackage_ThrowsBeforeDeletingManagedFolders
-          - windows@DirectoryPackageContentReader_ListFiles_JunctionInPackage_ThrowsInvalidOperationException
+
+      - id: AgentControl-PackageContentExtractor-RejectPathOutsideContent
+        title: >-
+          The PackageContentExtractor class shall refuse to read a package file outside the
+          package's content folder.
+        justification: |
+          A crafted path such as a parent-directory reference could otherwise read any file the
+          user can read.
+        tests:
+          - DirectoryPackageContentReader_OpenReadAndReadText_TraversalOrMissingPath_Rejected
+
+      - id: AgentControl-PackageContentExtractor-RejectLinkedPackageFolder
+        title: >-
+          The PackageContentExtractor class shall reject a folder package whose package folder or
+          content folder is itself a symbolic link, junction or other link, when it is opened.
+        justification: |
+          A linked package or content folder would redirect every read to wherever the link
+          points.
+        tests:
+          - ubuntu@DirectoryPackageContentReader_Open_PackageFolderIsSymlink_ThrowsInvalidOperationException
+          - ubuntu@DirectoryPackageContentReader_Open_ContentFolderIsSymlink_ThrowsInvalidOperationException
           - windows@DirectoryPackageContentReader_Open_PackageFolderIsJunction_ThrowsInvalidOperationException
           - windows@DirectoryPackageContentReader_Open_ContentFolderIsJunction_ThrowsInvalidOperationException
+
+      - id: AgentControl-PackageContentExtractor-RejectLinkedPackageDirectory
+        title: >-
+          The PackageContentExtractor class shall reject a folder package in which a directory
+          leading to a file is a symbolic link, junction or other link, whether the package is
+          listed or a single file in it is read.
+        justification: |
+          A linked parent directory holding an ordinary file would otherwise redirect a read
+          outside the package without the file itself looking like a link.
+        tests:
+          - ubuntu@DirectoryPackageContentReader_ListFiles_SymlinkedDirectoryInPackage_ThrowsInvalidOperationException
+          - ubuntu@DirectoryPackageContentReader_OpenRead_LinkedParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException
+          - windows@DirectoryPackageContentReader_ListFiles_JunctionInPackage_ThrowsInvalidOperationException
           - windows@DirectoryPackageContentReader_OpenRead_JunctionParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException
 
+      - id: AgentControl-PackageContentExtractor-RejectLinkedPackageFile
+        title: >-
+          The PackageContentExtractor class shall reject a requested package file that is
+          itself a symbolic link or other link.
+        justification: |
+          A link in place of release notes or a template would let a package make the
+          application read an arbitrary file.
+        tests:
+          - ubuntu@DirectoryPackageContentReader_ReadText_SymlinkedReleaseNotes_ThrowsInvalidOperationException
+
+      - id: AgentControl-PackageContentExtractor-RejectBrokenLink
+        title: >-
+          The PackageContentExtractor class shall reject a broken symbolic link or junction at a
+          requested root-level package file like any other link, and not treat the file as
+          missing.
+        justification: |
+          A link whose target does not exist is still a link a package author placed there;
+          treating it as an absent file would hide it, and the target could be created later.
+        tests:
+          - ubuntu@DirectoryPackageContentReader_ReadText_BrokenFileSymlinkAtRoot_ThrowsInvalidOperationException
+
+      # ---- Refusing a linked repo ----
       - id: AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders
         title: >-
           The PackageContentExtractor class shall refuse to extract into a repo - deleting and
           writing nothing, and reporting a clear error - when the repo's .github folder, a
           managed agent folder or a folder on the path of a file to be written is a symbolic
-          link or junction, shall not treat a linked managed folder as an existing one, and
-          shall accept a repo whose root itself is reached through a link, because only folders
-          at or below the repo root are checked.
+          link or junction.
         justification: |
           Deleting and copying through a link in the repo would delete or write files outside
-          the repository, wherever the link points; refusing before anything is changed keeps
-          a sync from ever escaping the repo, while a repo root reached through a link (such as
-          a redirected user profile) is legitimate and must keep working.
+          the repository, wherever the link points; refusing before anything is changed keeps a
+          sync from ever escaping the repo.
         tests:
           - windows@PackageContentExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched
           - windows@PackageContentExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched
           - windows@PackageContentExtractor_Extract_DestinationSubfolderIsJunction_RefusesAndLeavesTargetUntouched
-          - windows@PackageContentExtractor_Extract_RepoRootUnderJunction_Succeeds
-          - windows@PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsJunction_ReturnsFalse
           - ubuntu@PackageContentExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched
           - ubuntu@PackageContentExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched
           - ubuntu@PackageContentExtractor_Extract_DestinationSubfolderIsSymlink_RefusesAndLeavesTargetUntouched
-          - ubuntu@PackageContentExtractor_Extract_RepoRootUnderSymlink_Succeeds
+
+      - id: AgentControl-PackageContentExtractor-ManagedFoldersExist
+        title: >-
+          The PackageContentExtractor class shall report that a repo's managed agent folders
+          exist only when all four exist as ordinary folders, so that a linked managed folder is
+          not treated as an existing one.
+        justification: |
+          A caller that skips syncing because the folders exist must fall through to the
+          extraction, which refuses the link with a clear error, rather than trust a link.
+        tests:
+          - windows@PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsJunction_ReturnsFalse
           - ubuntu@PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsSymlink_ReturnsFalse
           - PackageContentExtractor_AllManagedFoldersExist_AllFoldersOrdinary_ReturnsTrue
 
-      - id: AgentControl-PackageContentExtractor-ReadRootFiles
+      - id: AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink
         title: >-
-          The PackageContentExtractor class shall read a package's root-level release notes and
-          optional AGENTS.md template from either package format without copying them to disk,
-          returning none when the package has no such file.
+          The PackageContentExtractor class shall extract into a repo whose root itself is
+          reached through a symbolic link or junction.
         justification: |
-          Release notes and the AGENTS.md template are offered to the user, not applied to the
-          managed folders, and must be available from a NuGet package's content folder exactly
-          as from a zip's root.
+          A repo root reached through a link, such as a redirected user profile, is legitimate
+          and must keep working; only folders at or below the repo root are checked.
+        tests:
+          - windows@PackageContentExtractor_Extract_RepoRootUnderJunction_Succeeds
+          - ubuntu@PackageContentExtractor_Extract_RepoRootUnderSymlink_Succeeds
+
+      # ---- Reading root-level files ----
+      - id: AgentControl-PackageContentExtractor-ReadReleaseNotes
+        title: >-
+          The PackageContentExtractor class shall read a package's root-level release notes
+          without copying them to disk, returning none when the package has no such file.
+        justification: |
+          Release notes are offered to the user, not applied to the managed folders, and must
+          be available from a NuGet package's content folder exactly as from a zip's root.
         tests:
           - PackageContentExtractor_ReadReleaseNotes_DirectoryPackage_ReturnsContentOrNull
+
+      - id: AgentControl-PackageContentExtractor-ReadAgentsMdTemplate
+        title: >-
+          The PackageContentExtractor class shall read a package's optional root-level AGENTS.md
+          template without copying it to disk, returning none when the package has no such file.
+        justification: |
+          A package may offer a starting AGENTS.md for the user to adopt; it must be readable
+          without being applied to the repo.
+        tests:
           - PackageContentExtractor_ReadAgentsMdTemplate_DirectoryPackage_ReturnsContentOrNull
-          - PackageContentExtractor_Extract_NullArguments_ThrowsArgumentNullException
+
+      # ---- Opening a zip package ----
+      - id: AgentControl-PackageContentExtractor-ZipOpenFailure
+        title: >-
+          The PackageContentExtractor class shall report a zip package that cannot be opened
+          because its path is invalid or unsupported as an error that names the zip, rather than
+          letting a low-level path exception escape.
+        justification: |
+          Callers handle one kind of failure for a package that cannot be read; a path exception
+          escaping from the operating system would bypass that handling and show the user a
+          message that does not name the package.
+        tests:
+          - ZipPackageContentReader_Open_InvalidPath_ThrowsInvalidOperationException

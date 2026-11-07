@@ -33,7 +33,170 @@ namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 /// </remarks>
 public sealed class ZipFolderSourceProviderTests : IDisposable
 {
+    /// <summary>
+    ///     The temporary folders created by the tests, deleted (best effort) when the test ends.
+    /// </summary>
     private readonly List<string> _tempPaths = [];
+
+    /// <summary>
+    ///     Test that a token that is already canceled stops a listing before any scan starts.
+    /// </summary>
+    [Fact]
+    public async Task ZipFolderSourceProvider_ListPackageIds_PreCanceledToken_ThrowsOperationCanceled()
+    {
+        // Arrange
+        var folder = CreateTempDirectory();
+        CreateZip(folder, "contoso-agents-1.0.0.zip");
+        var provider = CreateProvider("Zips", folder);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act / Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.ListPackageIdsAsync(cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => provider.ListVersionsAsync("contoso-agents", cancellation.Token));
+    }
+
+    /// <summary>
+    ///     Test that a call whose token is canceled while blocking work is running returns at once
+    ///     with <see cref="OperationCanceledException"/>, and that the result the abandoned work
+    ///     finally produces is handed back for disposal rather than leaked.
+    /// </summary>
+    [Fact]
+    public async Task ZipFolderSourceProvider_RunCancellable_CanceledWhileWorkRuns_ReturnsPromptlyAndDisposesLateResult()
+    {
+        // Arrange: work that blocks until the test lets it finish
+        using var cancellation = new CancellationTokenSource();
+        using var started = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var disposed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var call = ZipFolderSourceProvider.RunCancellableAsync(
+            () =>
+            {
+                started.Set();
+                release.Wait(TimeSpan.FromSeconds(60));
+                return "late result";
+            },
+            cancellation.Token,
+            late => disposed.TrySetResult(late));
+        Assert.True(started.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+
+        // Act: cancel while the work is still blocked
+        await cancellation.CancelAsync();
+
+        // Assert: the caller is released although the work has not finished, and nothing was disposed yet
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => call);
+        Assert.False(release.IsSet);
+        Assert.False(disposed.Task.IsCompleted);
+
+        // Act: the abandoned work finishes
+        release.Set();
+
+        // Assert: its late result was handed back for disposal
+        Assert.Equal("late result", await disposed.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that a zip that is acquired after its folder has disappeared is reported as a
+    ///     missing folder (<see cref="DirectoryNotFoundException"/>), as listing would report it.
+    /// </summary>
+    [Fact]
+    public async Task ZipFolderSourceProvider_Acquire_FolderRemovedAfterListing_ThrowsDirectoryNotFoundException()
+    {
+        // Arrange: list a package, then remove the whole folder (an unplugged drive, a deleted share)
+        var folder = CreateTempDirectory();
+        CreateZip(folder, "contoso-agents-1.0.0.zip");
+        var provider = CreateProvider("Zips", folder);
+        var package = Assert.Single(await provider.ListVersionsAsync("contoso-agents", CancellationToken.None));
+        Directory.Delete(folder, recursive: true);
+
+        // Act / Assert
+        await Assert.ThrowsAsync<DirectoryNotFoundException>(() => provider.AcquireAsync(package, CancellationToken.None));
+    }
+
+    /// <summary>
+    ///     Test that a source whose configured path is not a folder at all (here a file) is
+    ///     reported as a folder problem - a missing folder - for both listings.
+    /// </summary>
+    [Fact]
+    public async Task ZipFolderSourceProvider_ListPackageIds_FolderPathIsAFile_IsReportedAsFolderProblem()
+    {
+        // Arrange
+        var folder = CreateTempDirectory();
+        var file = Path.Combine(folder, "not-a-folder.txt");
+        await File.WriteAllTextAsync(file, "just a file", TestContext.Current.CancellationToken);
+        var provider = CreateProvider("Zips", file);
+
+        // Act / Assert
+        await Assert.ThrowsAsync<DirectoryNotFoundException>(() => provider.ListPackageIdsAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<DirectoryNotFoundException>(
+            () => provider.ListVersionsAsync("contoso-agents", CancellationToken.None));
+    }
+
+    /// <summary>
+    ///     Test that a zip that cannot be opened (here, not a zip archive at all) is reported as an
+    ///     <see cref="InvalidOperationException"/> naming the problem, not a raw I/O exception.
+    /// </summary>
+    [Fact]
+    public async Task ZipFolderSourceProvider_Acquire_UnreadableZip_ThrowsInvalidOperationExceptionWithSafeMessage()
+    {
+        // Arrange: a file with a package name that is not a zip
+        var folder = CreateTempDirectory();
+        var path = Path.Combine(folder, "contoso-agents-1.0.0.zip");
+        await File.WriteAllTextAsync(path, "this is not a zip", TestContext.Current.CancellationToken);
+        var provider = CreateProvider("Zips", folder);
+        var package = new DiscoveredPackage("contoso-agents", Parse("1.0.0"), path, "Zips");
+
+        // Act
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, CancellationToken.None));
+
+        // Assert
+        Assert.Contains("Failed to open package zip", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a package zip in the source's folder that is a symbolic link to a zip outside
+    ///     the folder is refused, although its own path is inside the folder.
+    /// </summary>
+    [Fact]
+    public async Task ZipFolderSourceProvider_Acquire_ZipIsSymlinkToFileOutsideFolder_ThrowsArgumentException()
+    {
+        // Arrange: a real zip elsewhere, and a link to it with a package name inside the source folder
+        var folder = CreateTempDirectory();
+        var outsideZip = CreateZip(CreateTempDirectory(), "contoso-agents-1.0.0.zip");
+        var link = Path.Combine(folder, "contoso-agents-1.0.0.zip");
+        TryCreateFileSymlinkOrSkip(link, outsideZip);
+        var provider = CreateProvider("Zips", folder);
+        var package = Assert.Single(await provider.ListVersionsAsync("contoso-agents", CancellationToken.None));
+
+        // Act / Assert
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => provider.AcquireAsync(package, CancellationToken.None));
+        Assert.Contains("outside", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a package zip that is a symbolic link to another file in the same folder is
+    ///     still allowed: the content comes from the source's own folder.
+    /// </summary>
+    [Fact]
+    public async Task ZipFolderSourceProvider_Acquire_ZipIsSymlinkToFileInsideFolder_IsAllowed()
+    {
+        // Arrange: a real zip in the folder and a second package name linking to it
+        var folder = CreateTempDirectory();
+        var realZip = CreateZip(folder, "contoso-agents-1.0.0.zip", ("AGENTS.md", "real"));
+        var link = Path.Combine(folder, "contoso-agents-1.0.1.zip");
+        TryCreateFileSymlinkOrSkip(link, realZip);
+        var provider = CreateProvider("Zips", folder);
+        var package = (await provider.ListVersionsAsync("contoso-agents", CancellationToken.None))
+            .Single(p => p.Version.ToString() == "1.0.1");
+
+        // Act
+        using var reader = await provider.AcquireAsync(package, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("real", reader.ReadText("AGENTS.md"));
+    }
 
     /// <summary>
     ///     Test that listing versions returns only the matching package's zips, each stamped with
@@ -196,6 +359,24 @@ public sealed class ZipFolderSourceProviderTests : IDisposable
         Assert.Throws<ArgumentException>(() => new ZipFolderSourceProvider(
             new PackageSourceDefinition { Alias = "Z", Type = PackageSourceType.Zip, Location = " " }));
         Assert.Throws<ArgumentNullException>(() => new ZipFolderSourceProvider(null!));
+    }
+
+    /// <summary>
+    ///     Creates a file symbolic link, or skips the test when the platform or its privileges do not
+    ///     allow creating one.
+    /// </summary>
+    /// <param name="linkPath">The link to create.</param>
+    /// <param name="target">The file it points at.</param>
+    private static void TryCreateFileSymlinkOrSkip(string linkPath, string target)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, target);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            Assert.Skip($"Cannot create symbolic links in this environment: {ex.Message}");
+        }
     }
 
     /// <summary>

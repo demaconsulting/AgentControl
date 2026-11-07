@@ -7,11 +7,13 @@
 `CredentialPromptViewModel` backs the sign-in dialog that asks the user for the user name and password (or
 access token) a package server needs. The dialog exists so a credential is only ever typed into a window that
 says, prominently, which server will receive it and what becomes of it: kept for this session only, or - when the
-user ticks "Remember on this computer" - saved by their own Git credential helper. It
-satisfies `AgentControl-CredentialPromptViewModel-ShowsDestination`,
-`AgentControl-CredentialPromptViewModel-RememberOption` and
-`AgentControl-CredentialPromptViewModel-SignIn`, and together with `CredentialPromptWindow` and
-`AvaloniaCredentialPrompt` (view-layer types documented in the `LauncherUI` subsystem design) provides
+user ticks "Remember on this computer" - saved by their own Git credential helper. Its behavior is specified by
+the unit requirements `AgentControl-CredentialPromptViewModel-ShowsDestination`,
+`-InsecureHttpFlag`, `-SessionOnlyNote`, `-PreviousCredentialRejected`, `-RememberOption`,
+`-RememberUnavailable`, `-RememberNeverWithoutHelper`, `-RememberAnswer`, `-RememberNote`,
+`-SignInRequiresBoth`, `-SignIn`, `-PasswordVerbatim`, `-Cancel` and `-AnswerOnce` (each prefixed
+`AgentControl-CredentialPromptViewModel`), and together with `CredentialPromptWindow` and
+`AvaloniaCredentialPrompt` (view-layer types documented in the `LauncherUI` subsystem design) it provides
 `AgentControl-LauncherUI-SignIn` and `AgentControl-LauncherUI-RememberSignIn`.
 
 #### Data Model
@@ -26,7 +28,9 @@ needs a user name and a password or token.
 encrypted.
 
 **PreviousCredentialRejected**: `bool` - a credential was already supplied for this server during this
-operation and was rejected, so the dialog says the last sign-in did not work.
+operation and was rejected, so the dialog says the last sign-in did not work; copied from the request, and
+`false` on a first request so that no such warning is shown
+(`AgentControl-CredentialPromptViewModel-PreviousCredentialRejected`).
 
 **CanRemember**: `bool` - copied from the request: a credential helper applies to the server, so the sign-in
 can be kept. When it is `false` the "Remember" checkbox is shown **disabled** (with an explanatory tooltip, shown

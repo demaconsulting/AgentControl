@@ -119,6 +119,13 @@ internal sealed class MockNuGetFeed : IAsyncDisposable
     public bool IncludeRegistration { get; set; } = true;
 
     /// <summary>
+    ///     Gets or sets a value indicating whether every request is answered 403 (Forbidden),
+    ///     whatever credentials it carries, as a server does for an account that may not read the
+    ///     feed; the default is <see langword="false"/>.
+    /// </summary>
+    public bool ForbidAllRequests { get; set; }
+
+    /// <summary>
     ///     Gets the requests received so far, as <c>METHOD /path</c>.
     /// </summary>
     public IReadOnlyList<string> Requests
@@ -151,6 +158,11 @@ internal sealed class MockNuGetFeed : IAsyncDisposable
     ///     Gets how many requests were refused with 401.
     /// </summary>
     public int UnauthorizedCount { get; private set; }
+
+    /// <summary>
+    ///     Gets how many requests were refused with 403.
+    /// </summary>
+    public int ForbiddenCount { get; private set; }
 
     /// <summary>
     ///     Gets how many requests of the <c>.nupkg</c> download kind were served.
@@ -262,7 +274,7 @@ internal sealed class MockNuGetFeed : IAsyncDisposable
     /// </summary>
     private void MapEndpoints()
     {
-        // Record every request and enforce Basic authentication before anything is served
+        // Record every request, then refuse it (403 for all, 401 without the Basic credentials)
         _app.Use(async (context, next) =>
         {
             var header = context.Request.Headers.Authorization.ToString();
@@ -270,6 +282,17 @@ internal sealed class MockNuGetFeed : IAsyncDisposable
             {
                 _requests.Add($"{context.Request.Method} {context.Request.Path}");
                 _authorizationHeaders.Add(header);
+            }
+
+            if (ForbidAllRequests)
+            {
+                lock (_requests)
+                {
+                    ForbiddenCount++;
+                }
+
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
             }
 
             if (RequiredUser is not null && header != ExpectedAuthorization())

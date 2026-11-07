@@ -214,8 +214,8 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     /// </summary>
     /// <param name="relativePath">The relative path using <c>/</c> separators; already validated
     ///     to stay inside the content root.</param>
-    /// <exception cref="InvalidOperationException">Thrown when a component that exists is a
-    ///     link.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when a component that exists - or a
+    ///     broken link that would exist if its target did - is a link.</exception>
     /// <remarks>
     ///     Checking only the last component would let a linked parent directory containing an
     ///     ordinary file redirect the read outside the package, so every component is examined,
@@ -230,6 +230,15 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
             FileSystemInfo entry = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
             if (!entry.Exists)
             {
+                // A broken link does not "exist" (Exists follows the link) but it is still a link
+                // that a later write or read could be redirected through, so it is refused like
+                // any other; only a genuinely missing entry ends the check
+                if (entry.LinkTarget is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"Package file '{relativePath}' in '{Description}' passes through a broken link, which is not allowed.");
+                }
+
                 return;
             }
 

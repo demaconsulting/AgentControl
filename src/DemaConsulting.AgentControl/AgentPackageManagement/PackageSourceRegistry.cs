@@ -99,8 +99,9 @@ internal sealed class PackageSourceRegistry
     ///     once per alias, on first <see cref="Resolve"/>.</param>
     /// <exception cref="ArgumentNullException">Thrown when either argument is
     ///     <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when a definition has a blank alias or
-    ///     two definitions share an alias (compared case-insensitively).</exception>
+    /// <exception cref="InvalidOperationException">Thrown when an entry of <paramref name="definitions"/>
+    ///     is <see langword="null"/>, a definition has a blank alias or two definitions share an alias
+    ///     (compared case-insensitively).</exception>
     public PackageSourceRegistry(
         IEnumerable<PackageSourceDefinition> definitions,
         Func<PackageSourceDefinition, IPackageSourceProvider> providerFactory)
@@ -111,18 +112,28 @@ internal sealed class PackageSourceRegistry
         _providerFactory = providerFactory;
         foreach (var definition in definitions)
         {
+            // A null entry (a hand-edited settings file) is a configuration problem to report, not
+            // an incidental NullReferenceException
+            if (definition is null)
+            {
+                throw new InvalidOperationException("A configured package source entry is missing.");
+            }
+
             if (string.IsNullOrWhiteSpace(definition.Alias))
             {
                 throw new InvalidOperationException("A configured package source has no alias.");
             }
 
-            if (!_definitions.TryAdd(definition.Alias, definition))
+            // The registry keeps its own copy, so later changes to the caller's object (or to the
+            // list it came from) cannot change which source an alias resolves to
+            var snapshot = definition.Clone();
+            if (!_definitions.TryAdd(snapshot.Alias, snapshot))
             {
                 throw new InvalidOperationException(
                     $"Package source alias '{definition.Alias}' is configured more than once; aliases must be unique.");
             }
 
-            _ordered.Add(definition);
+            _ordered.Add(snapshot);
         }
     }
 
@@ -156,7 +167,11 @@ internal sealed class PackageSourceRegistry
     /// <summary>
     ///     Gets the configured source definitions in configuration order.
     /// </summary>
-    public IReadOnlyList<PackageSourceDefinition> Definitions => _ordered;
+    /// <remarks>
+    ///     Every access returns a new list of new copies, so neither the list nor any definition in
+    ///     it is shared with the registry: changing them cannot change what the registry resolves.
+    /// </remarks>
+    public IReadOnlyList<PackageSourceDefinition> Definitions => [.. _ordered.Select(definition => definition.Clone())];
 
     /// <summary>
     ///     Determines whether a source with the given alias is configured.
@@ -189,7 +204,7 @@ internal sealed class PackageSourceRegistry
         {
             if (!_providers.TryGetValue(alias, out var provider))
             {
-                provider = _providerFactory(definition);
+                provider = _providerFactory(definition.Clone());
                 _providers[alias] = provider;
             }
 

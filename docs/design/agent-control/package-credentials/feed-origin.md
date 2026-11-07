@@ -7,8 +7,11 @@
 `FeedOrigin` is the identity of a package server - its scheme, host and port - and the unit to which a
 credential is scoped. Scoping by origin rather than by full address lets one sign-in cover every endpoint
 of a server (service index, version list, package download) while guaranteeing that a redirect, a
-different port or another sub-domain never matches. It satisfies
-`AgentControl-FeedOrigin-NormalizedOrigin` and `AgentControl-FeedOrigin-MatchesSameOriginOnly`.
+different port or another sub-domain never matches. It satisfies `AgentControl-FeedOrigin-NormalizedOrigin`,
+`AgentControl-FeedOrigin-EquivalentSpellings`, `AgentControl-FeedOrigin-RefusesNonWebAddress`,
+`AgentControl-FeedOrigin-RefusesUserInfo`, `AgentControl-FeedOrigin-RefusalNeverRepeatsAddress`,
+`AgentControl-FeedOrigin-TextFormShowsOnlyOrigin`, `AgentControl-FeedOrigin-MatchesSameOriginOnly` and
+`AgentControl-FeedOrigin-NeverMatchesRelativeOrMissingAddress`.
 
 #### Data Model
 

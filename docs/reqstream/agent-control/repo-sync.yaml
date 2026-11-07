@@ -29,6 +29,7 @@ sections:
         children:
           - AgentControl-PackageZipExtractor-Extract
           - AgentControl-PackageZipExtractor-AllManagedFoldersExist
+          - AgentControl-PackageContentExtractor-ZipOpenFailure
           - AgentControl-Utilities-SafePaths
         tests:
           - PackageZipExtractor_Extract_FreshRepo_CreatesManagedFoldersOnly
@@ -45,6 +46,8 @@ sections:
           managed folders through one would delete or overwrite files outside the repository.
         children:
           - AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders
+          - AgentControl-PackageContentExtractor-ManagedFoldersExist
+          - AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink
         tests:
           - windows@RepoSync_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched
           - windows@RepoSync_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched
@@ -123,8 +126,18 @@ sections:
           a cache that other tools can write to must be treated as untrusted input.
         children:
           - AgentControl-PackageContentExtractor-ExtractFromFolder
+          - AgentControl-PackageContentExtractor-ReplaceManagedFolders
+          - AgentControl-PackageContentExtractor-NoRootFilesCopied
+          - AgentControl-PackageContentExtractor-PackageNeverModified
+          - AgentControl-PackageContentExtractor-RejectMissingContentFolder
           - AgentControl-PackageContentExtractor-RejectLinksAndTraversal
-          - AgentControl-PackageContentExtractor-ReadRootFiles
+          - AgentControl-PackageContentExtractor-RejectPathOutsideContent
+          - AgentControl-PackageContentExtractor-RejectLinkedPackageFolder
+          - AgentControl-PackageContentExtractor-RejectLinkedPackageDirectory
+          - AgentControl-PackageContentExtractor-RejectLinkedPackageFile
+          - AgentControl-PackageContentExtractor-RejectBrokenLink
+          - AgentControl-PackageContentExtractor-ReadReleaseNotes
+          - AgentControl-PackageContentExtractor-ReadAgentsMdTemplate
           - AgentControl-Utilities-SafePaths
         tests:
           - PackageContentExtractor_Extract_DirectoryPackageIntoFreshRepo_CreatesManagedFoldersOnly

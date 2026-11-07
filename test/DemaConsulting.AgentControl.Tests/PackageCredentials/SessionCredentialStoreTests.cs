@@ -333,6 +333,108 @@ public sealed class SessionCredentialStoreTests
     }
 
     /// <summary>
+    ///     Test that a lookup still in flight when the store is cleared cannot put its credential
+    ///     back afterwards: the late <c>Set</c> is discarded and the secret is not registered with
+    ///     the redactor (so the exit-time clearing cannot be undone).
+    /// </summary>
+    [Fact]
+    public async Task SessionCredentialStore_EnsureRememberedLookup_ClearWhileLookupInFlight_LateSetIsDiscardedAndNotRedacted()
+    {
+        // Arrange: a lookup that waits until after Clear before it stores what it found
+        var store = new SessionCredentialStore();
+        var origin = Origin("https://feeds.example.com/v3/index.json");
+        var secret = "late-" + Guid.NewGuid().ToString("N");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task Lookup()
+        {
+            started.SetResult();
+            await release.Task;
+            store.Set(origin, new NuGetCredential("svc", secret), fromRememberedStore: true);
+        }
+
+        var lookup = store.EnsureRememberedLookupAsync(origin, Lookup);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // Act: the application exits while the lookup runs, then the lookup finishes
+        store.Clear();
+        release.SetResult();
+        await lookup.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // Assert: nothing came back, and the late secret is not being tracked for redaction
+        Assert.Equal(0, store.Count);
+        Assert.False(store.TryGet(origin, out _));
+        Assert.False(store.IsFromRememberedStore(origin));
+        Assert.Equal(secret, SecretRedactor.Redact(secret));
+
+        // Assert: a credential stored by an ordinary operation after Clear is still accepted
+        var typed = new NuGetCredential("svc", "typed-" + Guid.NewGuid().ToString("N"));
+        store.Set(origin, typed);
+        Assert.True(store.TryGet(origin, out var found));
+        Assert.Same(typed, found);
+        store.Clear();
+    }
+
+    /// <summary>
+    ///     Test that a lookup that fails surfaces its fault to every caller - also callers that
+    ///     arrive later - and is not run again.
+    /// </summary>
+    [Fact]
+    public async Task SessionCredentialStore_EnsureRememberedLookup_LookupFaults_SurfacesToEveryCallerAndIsNotRepeated()
+    {
+        // Arrange
+        var store = new SessionCredentialStore();
+        var origin = Origin("https://feeds.example.com/v3/index.json");
+        var runs = 0;
+        Task Lookup()
+        {
+            Interlocked.Increment(ref runs);
+            return Task.FromException(new InvalidOperationException("the helper failed"));
+        }
+
+        // Act
+        var first = store.EnsureRememberedLookupAsync(origin, Lookup);
+        var second = store.EnsureRememberedLookupAsync(origin, Lookup);
+
+        // Assert: both waiting callers see the fault, and so does a caller that arrives afterwards
+        await Assert.ThrowsAsync<InvalidOperationException>(() => first);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => second);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.EnsureRememberedLookupAsync(origin, Lookup));
+        Assert.Equal(1, runs);
+        Assert.Equal(0, store.Count);
+    }
+
+    /// <summary>
+    ///     Test that after the store was cleared a new lookup starts fresh and its credential is
+    ///     stored normally (only lookups that were in flight at the time of the clear are
+    ///     invalidated).
+    /// </summary>
+    [Fact]
+    public async Task SessionCredentialStore_EnsureRememberedLookup_LookupAfterClear_StartsFreshAndStoresNormally()
+    {
+        // Arrange
+        var store = new SessionCredentialStore();
+        var origin = Origin("https://feeds.example.com/v3/index.json");
+        var credential = new NuGetCredential("svc", "saved-" + Guid.NewGuid().ToString("N"));
+        store.Clear();
+
+        // Act
+        await store.EnsureRememberedLookupAsync(
+            origin,
+            async () =>
+            {
+                await Task.Yield();
+                store.Set(origin, credential, fromRememberedStore: true);
+            });
+
+        // Assert
+        Assert.True(store.TryGet(origin, out var found));
+        Assert.Same(credential, found);
+        Assert.True(store.IsFromRememberedStore(origin));
+        store.Clear();
+    }
+
+    /// <summary>
     ///     Creates a feed origin for test setup.
     /// </summary>
     /// <param name="url">The feed URL.</param>

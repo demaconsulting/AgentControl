@@ -591,7 +591,7 @@ public class GitCredentialClientTests
     {
         // Arrange
         var stub = GitCredentialStub.Create(
-            fillOutput: $"protocol=https|host=feeds.example.com:8443|username=svc-user-4417|password={SentinelPassword}");
+            fillOutput: $"protocol=https|host=feeds.example.com:8443|username=svc-user-4417|helper_note=sentinel-helper-output-4417|password={SentinelPassword}");
         var folder = CreateTempDirectory();
         var logger = new ListLogger();
         try
@@ -611,6 +611,21 @@ public class GitCredentialClientTests
             Assert.NotEmpty(lines);
             Assert.All(lines, line => Assert.DoesNotContain(SentinelPassword, line, StringComparison.Ordinal));
             Assert.All(lines, line => Assert.DoesNotContain("svc-user-4417", line, StringComparison.Ordinal));
+
+            // Assert: nothing that was sent (request lines), nothing the helper printed back, and no
+            // command-line argument that carries the origin or configuration reaches the log
+            string[] neverLogged =
+            [
+                "protocol=", "host=", "username=", "helper_note", "sentinel-helper-output-4417",
+                "core.askPass", ".provider=generic", "--get-urlmatch", "credential.helper"
+            ];
+            foreach (var forbidden in neverLogged)
+            {
+                Assert.All(lines, line => Assert.DoesNotContain(forbidden, line, StringComparison.Ordinal));
+            }
+
+            // Assert: what is logged is origin-only diagnostics, so the log does say something
+            Assert.Contains(lines, line => line.Contains("https://feeds.example.com:8443", StringComparison.Ordinal));
             Assert.All(lines, line => Assert.DoesNotContain("password=", line, StringComparison.Ordinal));
         }
         finally
