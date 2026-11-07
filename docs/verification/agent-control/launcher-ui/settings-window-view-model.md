@@ -20,6 +20,8 @@ N/A - standard test environment.
 - Saving invokes the owner's callback with the current values and raises `Saved`.
 - `AvailableShellPreferences` is non-empty, has no duplicate entries, starts with a blank
   auto-detect entry, and contains the expected OS-appropriate preset names.
+- Saving writes the package source field as the Default source (never the legacy path), keeps all
+  other configured sources unchanged, and removes the Default source when the field is blank.
 
 #### Test Scenarios
 
@@ -51,3 +53,15 @@ no duplicate entries, and for matching the expected preset names for the OS the 
 `SettingsWindowViewModel_AvailableShellPreferences_NoDuplicateEntries`, and
 `SettingsWindowViewModel_AvailableShellPreferences_CurrentOs_ContainsExpectedPresets`, covering
 `AgentControl-SettingsWindowViewModel-ShellPreferencePresets`.
+
+**SettingsWindowViewModel_DefaultSource_EditedWhileOtherSourcesPreserved**: Saving with an edited
+package source field writes a single `Default` zip source and no legacy path; with a `Default` zip
+source and a NuGet source configured, only the `Default` location changes and the NuGet source
+(with its package IDs) is carried through while the live settings stay untouched; a blank field
+removes `Default` but keeps other sources; a legacy single path in the initial settings seeds the
+field. This scenario is tested by
+`SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved`,
+`SettingsWindowViewModel_Save_OtherSourcesConfigured_PreservesThemAndEditsOnlyDefault`,
+`SettingsWindowViewModel_Save_BlankPackageSourcePath_RemovesDefaultSourceOnly`, and
+`SettingsWindowViewModel_Constructor_LegacyPackageSourcePath_SeedsPackageSourcePathField`,
+covering `AgentControl-SettingsWindowViewModel-DefaultSource`.

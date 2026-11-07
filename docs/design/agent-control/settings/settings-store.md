@@ -28,7 +28,10 @@ options used by both `Load` and `Save`.
   equivalent elsewhere), per architecture.md's data-storage decision
   (`AgentControl-SettingsStore-DefaultDirectory`).
 
-**Load**: Loads `AppSettings` from a configuration directory.
+**Load**: Loads `AppSettings` from a configuration directory, migrating a legacy
+single package-folder path to a `Default` zip source when no sources are configured
+(`AgentControl-SettingsStore-LegacySourceMigration`); a configured source list wins over a legacy
+path.
 
 - *Parameters*: `string? configDirectory = null` (defaults to `GetDefaultConfigDirectory`).
 - *Returns*: `AppSettings`.
@@ -40,7 +43,13 @@ options used by both `Load` and `Save`.
 - *Parameters*: `AppSettings settings`, `string? configDirectory = null`.
 - *Returns*: `void`.
 - *Postconditions*: The settings file at the configuration directory reflects `settings`
-  exactly (`AgentControl-SettingsStore-Save`).
+  (`AgentControl-SettingsStore-Save`) with the effective package sources in `Sources` and no
+  legacy `PackageSourcePath`, serialized from a persisted copy so the caller's instance is not
+  changed (`AgentControl-SettingsStore-SourcesRoundTrip`). The JSON is written to a uniquely
+  named temporary file in the same directory and moved over the settings file, so a failure
+  never leaves a truncated or partial file, and a leftover temporary file is removed
+  (`AgentControl-SettingsStore-AtomicSave`). Because the model has no secret-bearing member,
+  nothing secret is written (`AgentControl-SettingsStore-NoSecretsPersisted`).
 
 #### Error Handling
 
@@ -51,7 +60,10 @@ when the configuration directory cannot be created or the file cannot be written
 
 #### Dependencies
 
-- **AppSettings** (record, same subsystem) — the data type read/written.
+- **AppSettings** (data type, same subsystem) — the data type read/written, including its
+  legacy-migration and persisted-copy members.
+- **PackageSourceDefinition** (`AgentPackageManagement` subsystem) — the source data type held in
+  `AppSettings.Sources`.
 - **.NET BCL** — `System.Text.Json`, `Environment.GetFolderPath`.
 
 #### Callers

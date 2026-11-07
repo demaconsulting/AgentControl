@@ -25,9 +25,10 @@ This document covers the verification design for the following software items:
     - **MainWindowViewModel**, **RepoCardViewModel**, **SelectPackageWindowViewModel**,
       **SettingsWindowViewModel**
   - **AgentPackageManagement** subsystem
-    - **PackageSource**, **PackageVersion**, **PackageVersionCache**
+    - **PackageSource**, **PackageVersion**, **PackageVersionCache**, **PackageSourceRegistry**,
+      **ZipFolderSourceProvider**, **NuGetSourceProvider**
   - **RepoSync** subsystem
-    - **PackageZipExtractor**, **ReleaseNotesViewerViewModel**
+    - **PackageContentExtractor**, **PackageZipExtractor**, **ReleaseNotesViewerViewModel**
   - **RepoConfig** subsystem
     - **RepoPinStore**
   - **AgentToolLauncher** subsystem
@@ -48,6 +49,7 @@ This document covers the verification design for the following software items:
 - **BuildMark** — build-notes documentation tool
 - **FileAssert** — document assertion tool
 - **FlaUI** — Windows UI Automation testing library
+- **NuGetCaching** — NuGet package listing and caching library
 - **Pandoc** — Markdown-to-HTML conversion tool
 - **ReqStream** — requirements traceability tool
 - **ReviewMark** — file review enforcement tool

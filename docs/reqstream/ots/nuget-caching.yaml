@@ -1,0 +1,31 @@
+---
+# DemaConsulting.NuGet.Caching OTS Software Requirements
+#
+# Requirements for the DemaConsulting.NuGet.Caching library functionality that backs
+# AgentControl's NuGet package sources.
+
+sections:
+  - title: OTS Software Requirements
+    sections:
+      - title: NuGetCaching Requirements
+        requirements:
+          - id: AgentControl-OTS-NuGetCaching-ListAndCache
+            title: >-
+              DemaConsulting.NuGet.Caching shall list the versions of a package held in a NuGet
+              folder feed and unpack a chosen version into a package cache whose location is
+              governed by the supplied starting folder's NuGet configuration.
+            justification: |
+              AgentControl's NuGet package folder sources (the NuGetSourceProvider unit) rely on
+              the library to read a feed and to unpack the chosen package into a cache it can
+              then read. There is no vendor evidence packaged with the library and no separate
+              OTS test project in this repository, so the only evidence is the
+              NuGetSourceProvider integration tests, which exercise the real library against a
+              real folder feed created on the fly - the same precedent the other runtime OTS
+              items follow, cited honestly as indirect rather than as dedicated library tests.
+            tags: [ots]
+            tests:
+              # Indirect evidence only, via the NuGetSourceProvider integration tests - see
+              # justification above.
+              - NuGetSourceProvider_ListVersions_FolderFeedWithVersions_ReturnsAllVersionsStampedWithAlias
+              - NuGetSourceProvider_Acquire_ExistingPackage_ReturnsReaderOverContentFolder
+              - NuGetSourceProvider_Acquire_UsesExplicitAgentControlOwnedRootWithGeneratedConfig

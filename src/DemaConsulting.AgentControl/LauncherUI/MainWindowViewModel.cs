@@ -197,7 +197,8 @@ internal sealed class MainWindowViewModel : ViewModelBase
         {
             Path = repoPath,
             PinnedPackageName = pin?.PackageName,
-            PinnedPackageVersion = pin?.Version
+            PinnedPackageVersion = pin?.Version,
+            PinnedSource = pin?.Source
         };
 
         _settings.RecentRepos.Insert(0, recentRepo);
@@ -239,7 +240,9 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     Replaces the current settings with <paramref name="updated"/> (preserving the
     ///     recent-repos list, which is only ever mutated via <see cref="AddRepo"/>/
     ///     <see cref="RemoveRepo"/>), persists them, invalidates the shared
-    ///     <see cref="PackageVersionCache"/> (the package-source path may have changed), and
+    ///     <see cref="PackageVersionCache"/> for each package source that was changed or removed
+    ///     (cached results for an edited source would otherwise be silently reused; sources that
+    ///     did not change keep theirs), and
     ///     re-runs each card's cheap refresh (pin file, branch, committed-files badge, upgrade
     ///     availability) so those properties reflect any changed package-source/git-path
     ///     settings immediately.
@@ -270,13 +273,17 @@ internal sealed class MainWindowViewModel : ViewModelBase
         var gitExecutablePathChanged = !string.Equals(
             _settings.GitExecutablePath, updated.GitExecutablePath, StringComparison.Ordinal);
 
+        // Note which sources were configured before the swap so cached results for any that were
+        // edited or removed can be dropped afterwards
+        var previousSources = _settings.GetEffectiveSources().ToList();
+
         updated.RecentRepos = _settings.RecentRepos;
         _settings = updated;
         OnPropertyChanged(nameof(Settings));
 
         SaveSettings();
 
-        _packageVersionCache.Invalidate();
+        InvalidateChangedSources(previousSources, updated.GetEffectiveSources());
         foreach (var card in RepoCards)
         {
             var wasMissing = card.IsMissing;
@@ -296,6 +303,27 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be
     ///     written.</exception>
     public void SaveSettings() => SettingsStore.Save(_settings, _configDirectory);
+
+    /// <summary>
+    ///     Drops the shared cache's entries for every source that existed before a settings change
+    ///     and is now removed or different, so a stale result is never reused for an edited source
+    ///     while untouched sources keep their cached results.
+    /// </summary>
+    /// <param name="previous">The sources in effect before the change.</param>
+    /// <param name="current">The sources in effect after the change.</param>
+    private void InvalidateChangedSources(
+        IReadOnlyList<PackageSourceDefinition> previous, IReadOnlyList<PackageSourceDefinition> current)
+    {
+        foreach (var before in previous)
+        {
+            var after = current.FirstOrDefault(
+                source => string.Equals(source.Alias, before.Alias, StringComparison.OrdinalIgnoreCase));
+            if (after is null || !after.IsEquivalentTo(before))
+            {
+                _packageVersionCache.Invalidate(before.Alias);
+            }
+        }
+    }
 
     /// <summary>
     ///     Recomputes <see cref="DisplayedRepoCards"/> from <see cref="RepoCards"/>: a

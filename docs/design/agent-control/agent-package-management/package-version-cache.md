@@ -4,68 +4,90 @@
 
 #### Purpose
 
-`PackageVersionCache` is a session-scoped cache decorating `PackageSource`'s version-scanning
-logic, keyed by `(sourceDirectory, packageName)`. Per architecture.md's repo-fact caching
-strategy, the set of available package versions at the configured source is not repo-scoped
-(every repo pinned to the same package name shares the same answer) and may involve slow
-network/UNC I/O, so it is cached once per app session rather than rescanned per repo card.
-`PackageSource` itself is deliberately left untouched (stateless/pure) — this class is a
-decorator, constructed once by `MainWindowViewModel` and shared across every
-`RepoCardViewModel` instance for the app session's lifetime.
+`PackageVersionCache` is a session-scoped cache of what each configured package source offers,
+keyed by `(source alias, package ID)`. Per architecture.md's repo-fact caching strategy, the set
+of available package versions at a source is not repo-scoped (every repo pinned to the same
+package at the same source shares the same answer) and may involve slow network I/O, so it is
+fetched once per app session rather than per repo card. It is constructed once by
+`MainWindowViewModel` and shared across every `RepoCardViewModel` and every
+`SelectPackageWindowViewModel` for the app session's lifetime. Keying by alias (never by
+location, and never by package ID alone) guarantees a result fetched from one source is never
+returned for another.
 
 #### Data Model
 
-**\_cache**: `Dictionary<(string, string), DiscoveredPackage?>` — the "latest discovered
-package" result per source/name pair; a cached `null` (no package found) is a valid, distinct
-entry from "not yet queried".
+**\_sources**: `Dictionary<string, SourceEntry>` (case-insensitive alias) — one private
+`SourceEntry` per source holding that source's cached package IDs (`null` = not yet queried) and
+a `Dictionary<string, IReadOnlyList<DiscoveredPackage>>` of descending version lists by package
+ID. A present key with an empty list means "queried, none found", which is distinct from "not
+yet queried"; a failed query is never cached.
 
-**\_packageNamesCache**: `Dictionary<string, IReadOnlyList<string>>` — discovered package
-names per source directory.
+**\_lock**: `object` — guards the dictionaries and entries so the cache is safe for concurrent
+use.
 
-**\_versionsDescendingCache**: `Dictionary<(string, string), IReadOnlyList<DiscoveredPackage>>`
-— the descending-by-version package list per source/name pair.
-
-Not thread-safe; used only from the UI thread, consistent with every other view-model-adjacent
-class in this codebase.
+**UpgradeCheck** (record, same file): `IsNewerAvailable: bool`, `Latest: DiscoveredPackage?` —
+the answer to the upgrade question.
 
 #### Key Methods
 
-**GetPackageNames**: Enumerates distinct package base names at a source, consulting/populating
-the cache instead of re-scanning on every call
-(`AgentControl-PackageVersionCache-CachePackageNames`).
+**GetPackageIdsAsync**: Gets the package names a source offers, consulting/populating the
+cache (`AgentControl-PackageVersionCache-CachePackageNames`).
 
-**GetVersionsDescending**: Enumerates a named package's discoverable versions, descending by
-version, consulting/populating the cache (`AgentControl-PackageVersionCache-CacheVersions`).
+- *Parameters*: `PackageSourceRegistry registry`, `string sourceAlias`, `CancellationToken`.
+- *Returns*: `Task<IReadOnlyList<string>>`.
+- *Postconditions*: The alias is resolved through the registry first, so an alias that is not
+  configured fails with `UnknownSourceException` instead of returning cached data
+  (`AgentControl-PackageVersionCache-KeyedBySource`).
 
-**IsNewerVersionAvailable**: Determines whether a newer version exists than a pinned one,
-consulting/populating the cache; semantics otherwise identical to
-`PackageSource.IsNewerVersionAvailable` (`AgentControl-PackageVersionCache-CacheNewerVersion`).
+**GetVersionsDescendingAsync**: Gets a package's versions at a source, highest first,
+consulting/populating the cache (`AgentControl-PackageVersionCache-CacheVersions`).
 
-**Invalidate**: Clears every cached entry.
+- *Parameters*: `PackageSourceRegistry registry`, `string sourceAlias`, `string packageId`,
+  `CancellationToken`.
+- *Returns*: `Task<IReadOnlyList<DiscoveredPackage>>`.
 
-- *Parameters*: None.
-- *Postconditions*: The next call for any source/package pair re-enumerates the filesystem.
-  Called when the package-source path setting changes, since a cached result for the old path
-  would otherwise be silently (and incorrectly) reused for the new path
-  (`AgentControl-PackageVersionCache-Invalidate`).
+**IsNewerVersionAvailableAsync**: Determines whether a newer version exists than a pinned one,
+using the cached descending list; the highest entry is the latest
+(`AgentControl-PackageVersionCache-CacheNewerVersion`).
+
+- *Parameters*: as `GetVersionsDescendingAsync`, plus `string pinnedVersion`.
+- *Returns*: `Task<UpgradeCheck>`.
+- *Postconditions*: No packages found gives `IsNewerAvailable = false`; an unparsable pinned
+  version gives `true` (treated as needing attention); otherwise the latest is compared with
+  the pin via `PackageVersion.CompareTo`, so a pin with a fourth segment or build metadata is
+  compared by version rather than treated as unparsable.
+
+**Invalidate()**: Clears every cached entry for every source.
+
+**Invalidate(sourceAlias)**: Clears one source's entry, leaving the others cached
+(`AgentControl-PackageVersionCache-Invalidate`, `AgentControl-PackageVersionCache-InvalidateBySource`).
+
+- *Postconditions*: A query already in flight for that source captured the old entry; it writes
+  its result into that detached entry, so a stale answer never repopulates the cache.
 
 #### Error Handling
 
-Every method that scans the filesystem on a cache miss propagates `PackageSource`'s exceptions
-unchanged (`ArgumentNullException`, `ArgumentException`, `DirectoryNotFoundException`). A
-cache hit returns the previously observed result instead, even if the source directory has
-since become unreachable — a deliberate staleness trade-off to avoid re-querying a potentially
-slow or offline UNC path on every UI refresh.
+Every method that queries a source on a cache miss propagates the provider's exceptions
+unchanged (`DirectoryNotFoundException` for a missing folder, `InvalidOperationException` for
+other source failures, `OperationCanceledException`), and `UnknownSourceException` for an
+unconfigured alias; argument checks throw `ArgumentNullException`/`ArgumentException`. A cache
+hit returns the previously observed result instead, even if the source has since become
+unreachable — a deliberate staleness trade-off to avoid re-querying a potentially slow or
+offline location on every UI refresh. Two simultaneous misses for the same key may both query;
+the later result wins.
 
 #### Dependencies
 
-- **PackageSource** — the underlying scan logic this class decorates.
-- **PackageVersion** — used indirectly via `PackageSource`'s comparisons.
+- **PackageSourceRegistry** — resolves an alias to its provider on a cache miss.
+- **IPackageSourceProvider** (via the registry) — the source being cached.
+- **PackageVersion** — used to order versions and compare against a pin.
 
 #### Callers
 
 - **MainWindowViewModel** — constructs the single shared instance for the app session and
-  calls `Invalidate` when the package-source path setting changes.
-- **RepoCardViewModel** — calls `IsNewerVersionAvailable` when refreshing the upgrade badge.
-- **SelectPackageWindowViewModel** — calls `GetPackageNames`/`GetVersionsDescending` to
+  calls `Invalidate(sourceAlias)` for each source that is edited or removed when settings are
+  applied.
+- **RepoCardViewModel** — calls `IsNewerVersionAvailableAsync` when refreshing the upgrade
+  badge.
+- **SelectPackageWindowViewModel** — calls `GetPackageIdsAsync`/`GetVersionsDescendingAsync` to
   populate its picker lists.

@@ -187,6 +187,221 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
+    ///     Test that a legacy (version 1) pin file with no source and no schema version loads with
+    ///     its source mapped to the legacy Default alias, and the original fields intact.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource()
+    {
+        // Arrange: a hand-written v1 pin file
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(repoRoot, ".agentcontrol.json"),
+                """{ "PackageName": "contoso-agents", "Version": "1.0.0", "AgentsMdTemplateDeclined": true }""");
+
+            // Act
+            var loaded = RepoPinStore.Load(repoRoot);
+
+            // Assert: Default source, v1 fields preserved
+            Assert.NotNull(loaded);
+            Assert.Equal("Default", loaded.Source);
+            Assert.Equal("contoso-agents", loaded.PackageName);
+            Assert.Equal("1.0.0", loaded.Version);
+            Assert.True(loaded.AgentsMdTemplateDeclined);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that saving writes schema version 2 and the source alias, and that a pin
+    ///     round-trips with its source.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion2AndRoundTripsSource()
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            // Act
+            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Team Feed", PackageName = "contoso-agents", Version = "1.2.3.4+b5" });
+            var loaded = RepoPinStore.Load(repoRoot);
+            var json = File.ReadAllText(Path.Combine(repoRoot, ".agentcontrol.json"));
+
+            // Assert: the file declares schema 2 and the source, and the pin round-trips
+            Assert.Contains("\"SchemaVersion\": 2", json, StringComparison.Ordinal);
+            Assert.Contains("\"Source\": \"Team Feed\"", json, StringComparison.Ordinal);
+            Assert.NotNull(loaded);
+            Assert.Equal(2, loaded.SchemaVersion);
+            Assert.Equal("Team Feed", loaded.Source);
+            Assert.Equal("1.2.3.4+b5", loaded.Version);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that camelCase property names written by hand are read, since pin properties are
+    ///     matched case-insensitively.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_Load_CamelCasePropertyNames_AreRead()
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(repoRoot, ".agentcontrol.json"),
+                """{ "schemaVersion": 2, "source": "Feed", "packageName": "p", "version": "1.0.0" }""");
+
+            // Act
+            var loaded = RepoPinStore.Load(repoRoot);
+
+            // Assert
+            Assert.NotNull(loaded);
+            Assert.Equal("Feed", loaded.Source);
+            Assert.Equal("p", loaded.PackageName);
+            Assert.Equal(2, loaded.SchemaVersion);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that properties this version does not know survive a load-modify-save cycle, and
+    ///     also survive a save of a freshly built pin over an existing file.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_Save_UnknownProperties_ArePreserved()
+    {
+        // Arrange: a v2 pin file with a property from some other version, including a nested value
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(repoRoot, ".agentcontrol.json");
+            File.WriteAllText(
+                path,
+                """{ "SchemaVersion": 2, "Source": "Feed", "PackageName": "p", "Version": "1.0.0", "FutureField": { "a": [1, 2] }, "Note": "keep" }""");
+
+            // Act 1: load, change the version, save
+            var loaded = RepoPinStore.Load(repoRoot);
+            Assert.NotNull(loaded);
+            loaded.Version = "2.0.0";
+            RepoPinStore.Save(repoRoot, loaded);
+            var afterLoadedSave = File.ReadAllText(path);
+
+            // Act 2: save a brand-new pin object (as a caller that did not load would)
+            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "3.0.0" });
+            var afterFreshSave = File.ReadAllText(path);
+
+            // Assert: the unknown properties are still there in both cases
+            Assert.Contains("\"FutureField\"", afterLoadedSave, StringComparison.Ordinal);
+            Assert.Contains("\"Note\": \"keep\"", afterLoadedSave, StringComparison.Ordinal);
+            Assert.Contains("\"2.0.0\"", afterLoadedSave, StringComparison.Ordinal);
+            Assert.Contains("\"FutureField\"", afterFreshSave, StringComparison.Ordinal);
+            Assert.Contains("\"a\": [", afterFreshSave.Replace("\r\n", "\n").Replace("\n", string.Empty), StringComparison.Ordinal);
+            Assert.Contains("\"3.0.0\"", afterFreshSave, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a pin file declaring a newer schema than this build supports is rejected with
+    ///     an actionable message instead of being interpreted.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage()
+    {
+        // Arrange: a pin file from a newer AgentControl
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(repoRoot, ".agentcontrol.json"),
+                """{ "SchemaVersion": 3, "Source": "Feed", "PackageName": "p", "Version": "1.0.0" }""");
+
+            // Act
+            var ex = Assert.Throws<UnsupportedPinSchemaException>(() => RepoPinStore.Load(repoRoot));
+
+            // Assert: the message names the file's version and tells the user what to do
+            Assert.Equal(3, ex.SchemaVersion);
+            Assert.Contains("3", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("Update AgentControl", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that saving over a pin file with a newer schema is refused and leaves the file
+    ///     byte-for-byte unchanged (an older AgentControl never clobbers a newer file).
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_Save_ExistingNewerSchemaFile_ThrowsAndLeavesFileUnchanged()
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(repoRoot, ".agentcontrol.json");
+            const string newerContent = """{ "SchemaVersion": 9, "Whatever": true }""";
+            File.WriteAllText(path, newerContent);
+
+            // Act / Assert
+            Assert.Throws<UnsupportedPinSchemaException>(
+                () => RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" }));
+            Assert.Equal(newerContent, File.ReadAllText(path));
+            Assert.Equal([path], Directory.GetFiles(repoRoot));
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a corrupt existing pin file is replaced by a save (overwriting it is the
+    ///     repair), and that a save leaves no temporary file behind.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_Save_CorruptExistingFile_IsReplacedAndLeavesNoTemporaryFile()
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(repoRoot, ".agentcontrol.json");
+            File.WriteAllText(path, "{ this is not json");
+
+            // Act
+            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" });
+
+            // Assert
+            Assert.Equal("p", RepoPinStore.Load(repoRoot)?.PackageName);
+            Assert.Equal([path], Directory.GetFiles(repoRoot));
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Creates a unique temporary directory for test isolation.
     /// </summary>
     /// <returns>The created directory's path.</returns>

@@ -151,7 +151,7 @@ sections:
           - RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CannotExecute
           - RepoCardViewModel_SelectPackageCommand_RepoIsMissing_CannotExecute
           - RepoCardViewModel_SelectPackageCommand_NoPackageSourceConfigured_RaisesErrorOccurredOnly
-          - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourcePath
+          - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias
 
       - id: AgentControl-RepoCardViewModel-ApplySelectedPackage
         title: >-
@@ -268,3 +268,30 @@ sections:
           not unilaterally remove itself or change state before that confirmation occurs.
         tests:
           - RepoCardViewModel_RemoveCommand_RaisesRemoveRequestedWithoutMutatingState
+
+      - id: AgentControl-RepoCardViewModel-SourceAwareness
+        title: >-
+          The RepoCardViewModel class shall resolve its pinned package, check for upgrades and
+          repair missing managed folders only at the source named in the repo's pin (a pin
+          without a source is a pin to the source named Default), shall record the source in
+          the pin when a package is applied while keeping the pin's other fields, shall refuse to
+          apply a package to a repo whose pin was written by a newer version of the tool, and shall
+          expose an error state - with no upgrade offered and nothing extracted - when the
+          pinned source is not configured.
+        justification: |
+          The pin binds the repo to one source; resolving it anywhere else, or overwriting a
+          pin the tool does not understand, could change what is installed without the user
+          knowing.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_LegacySinglePath_PinRecordsDefaultSourceAlias
+          - RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent
+          - RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
+          - RepoCardViewModel_ApplySelectedPackage_UnconfiguredSourceAlias_RaisesErrorAndChangesNothing
+          - RepoCardViewModel_EnsureAgentFilesSynced_PinNamesUnconfiguredSource_ReturnsFalseWithoutExtracting
+          - RepoCardViewModel_Refresh_SamePackageNameInTwoSources_ComparesOnlyAgainstPinnedSource
+          - RepoCardViewModel_Refresh_LegacyV1PinFile_ResolvesAgainstDefaultSource
+          - RepoCardViewModel_Refresh_LegacyV1PinFileAndNoDefaultSource_ShowsSourceProblem
+          - RepoCardViewModel_ApplySelectedPackage_PinWithUnknownFieldAndDecline_PreservesBoth
+          - RepoCardViewModel_ApplySelectedPackage_NewerSchemaPinFile_RaisesErrorAndChangesNothing
+          - RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes
+          - RepoCardViewModel_UpgradeCommand_NuGetFolderSource_UpgradesToHighestVersion

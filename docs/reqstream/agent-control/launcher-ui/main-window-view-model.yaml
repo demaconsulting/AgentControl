@@ -112,3 +112,16 @@ sections:
           - MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately
           - MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus
           - MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus
+
+      - id: AgentControl-MainWindowViewModel-InvalidateChangedSources
+        title: >-
+          The MainWindowViewModel class shall, when settings are applied, discard the cached
+          package results of each package source that was edited or removed, and keep those of
+          sources that did not change.
+        justification: |
+          A cached answer for the old definition of a source must not be reused for the edited
+          one, yet unrelated sources (which may be slow network locations) should not be
+          queried again just because another source changed.
+        tests:
+          - MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache
+          - MainWindowViewModel_ApplySettings_OnlyEditedSourceIsInvalidated

@@ -26,6 +26,11 @@ invocations are not parallelized with other tests using real process launches).
   package genuinely has a template to offer, never re-fires after a decline is persisted, and
   never fires when the ensure-synced-before-launch check found the managed folders already
   present.
+- Every package-source operation is bound to the source named in the pin, with a pin lacking a source
+  read as a pin to Default; the pin records the source alias and keeps its other fields; a pin naming
+  an unconfigured source gives an error state and no upgrade, and nothing is extracted from any other
+  source; a pin from a newer schema stops an apply before the repo is touched.
+- A NuGet folder source can be selected from, upgraded from, and applied to a repo.
 
 #### Test Scenarios
 
@@ -118,7 +123,7 @@ scenario is tested by `RepoCardViewModel_IsPackageSelectionNeeded_ReflectsPinSta
 `RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CannotExecute`,
 `RepoCardViewModel_SelectPackageCommand_RepoIsMissing_CannotExecute`,
 `RepoCardViewModel_SelectPackageCommand_NoPackageSourceConfigured_RaisesErrorOccurredOnly`, and
-`RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourcePath`,
+`RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias`,
 covering `AgentControl-RepoCardViewModel-SelectPackage`.
 
 **RepoCardViewModel_ApplySelectedPackage_RejectsStaleVersionWithoutMutatingPin**: Applying a
@@ -196,3 +201,31 @@ toggles `IsFavorite` and raises `FavoriteChanged`. This scenario is tested by
 to its owner. This scenario is tested by
 `RepoCardViewModel_RemoveCommand_RaisesRemoveRequestedWithoutMutatingState`, covering
 `AgentControl-RepoCardViewModel-RemoveRequest`.
+
+**RepoCardViewModel_SourceAwareness_BindsEveryOperationToThePinsSource**: Applying a package from a
+legacy single path records source `Default` in a current-schema pin; selecting from the second of
+two sources offering the same package and version records that alias and extracts that source's
+content; a pin to a source that is not configured sets the card's source problem (naming the
+alias), offers no upgrade and no latest version even though another source offers a higher
+version; applying a package for an unconfigured alias raises an error naming it and leaves the
+repo and pin unchanged; the ensure-synced repair for such a pin fails without extracting; with the
+same package at two sources a pin to the lower-version source is compared only against that source;
+a legacy pin file with no source resolves against `Default` and, when no `Default` source exists,
+shows a source problem; applying over a pin with an unknown field and a recorded decline keeps both;
+applying over a pin from a newer schema raises an error and leaves the pin and repo untouched.
+This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackage_LegacySinglePath_PinRecordsDefaultSourceAlias`,
+`RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent`,
+`RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
+`RepoCardViewModel_ApplySelectedPackage_UnconfiguredSourceAlias_RaisesErrorAndChangesNothing`,
+`RepoCardViewModel_EnsureAgentFilesSynced_PinNamesUnconfiguredSource_ReturnsFalseWithoutExtracting`,
+`RepoCardViewModel_Refresh_SamePackageNameInTwoSources_ComparesOnlyAgainstPinnedSource`,
+`RepoCardViewModel_Refresh_LegacyV1PinFile_ResolvesAgainstDefaultSource`,
+`RepoCardViewModel_Refresh_LegacyV1PinFileAndNoDefaultSource_ShowsSourceProblem`,
+`RepoCardViewModel_ApplySelectedPackage_PinWithUnknownFieldAndDecline_PreservesBoth`, and
+`RepoCardViewModel_ApplySelectedPackage_NewerSchemaPinFile_RaisesErrorAndChangesNothing`; and, for
+a NuGet folder source (a real folder feed, with the NuGet cache isolated through the startup
+configuration-directory override), by
+`RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes`
+and `RepoCardViewModel_UpgradeCommand_NuGetFolderSource_UpgradesToHighestVersion`, covering
+`AgentControl-RepoCardViewModel-SourceAwareness`.

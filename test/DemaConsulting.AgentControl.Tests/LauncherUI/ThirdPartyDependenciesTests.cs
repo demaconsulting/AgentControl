@@ -37,12 +37,14 @@ public class ThirdPartyDependenciesTests
     private static readonly string[] RuntimeDependencyItemGroupComments =
     [
         " Logging Dependencies ",
+        " Agent Package Source Dependencies ",
         " Avalonia UI Dependencies "
     ];
 
     /// <summary>
     ///     Test that the dependency list's names match the csproj's actual
-    ///     "Logging Dependencies"/"Avalonia UI Dependencies" <c>PackageReference</c> entries
+    ///     "Logging Dependencies"/"Agent Package Source Dependencies"/"Avalonia UI Dependencies"
+    ///     <c>PackageReference</c> entries
     ///     exactly, order-independent, so the hand-maintained list cannot silently drift from the
     ///     project file it documents. Versions are deliberately not compared so dependency-update
     ///     tooling can bump them freely. The license column cannot be derived from the csproj (NuGet

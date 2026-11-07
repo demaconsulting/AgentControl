@@ -24,8 +24,12 @@ flowchart TD
         PackageSource
         PackageVersion
         PackageVersionCache
+        PackageSourceRegistry
+        ZipFolderSourceProvider
+        NuGetSourceProvider
     end
     subgraph RepoSync
+        PackageContentExtractor
         PackageZipExtractor
         ReleaseNotesViewerViewModel
     end
@@ -57,8 +61,14 @@ flowchart TD
     Program --> MainWindowViewModel
     MainWindowViewModel --> RepoCardViewModel
     MainWindowViewModel --> SettingsStore
-    RepoCardViewModel --> PackageSource
-    RepoCardViewModel --> PackageZipExtractor
+    RepoCardViewModel --> PackageSourceRegistry
+    RepoCardViewModel --> PackageVersionCache
+    PackageSourceRegistry --> ZipFolderSourceProvider
+    PackageSourceRegistry --> NuGetSourceProvider
+    ZipFolderSourceProvider --> PackageSource
+    PackageVersionCache --> PackageSourceRegistry
+    RepoCardViewModel --> PackageContentExtractor
+    PackageZipExtractor --> PackageContentExtractor
     RepoCardViewModel --> RepoPinStore
     RepoCardViewModel --> GitClient
     RepoCardViewModel --> AgentToolLauncher_Unit
@@ -68,23 +78,22 @@ flowchart TD
 ```
 
 `Program` is the entry point: it parses startup arguments (`Startup`), initializes diagnostic
-logging (`Logging`), and hands off to Avalonia's classic desktop lifetime, which loads
-settings (`Settings`) and shows `MainWindowViewModel`'s window (`LauncherUI`). From there,
-`LauncherUI`'s view-models orchestrate the remaining subsystems: `AgentPackageManagement` for
-discovering available package versions, `RepoSync` for extracting a package zip's managed
-folders into a repo and displaying release notes, `RepoConfig` for persisting each repo's
-pin, `GitIntegration` for status/pull/branch queries, and `AgentToolLauncher` for detecting a
-shell and launching the configured agentic CLI tool in it. `Utilities` provides shared,
-independently testable helpers (currently safe path combination) consumed across subsystems.
-After a genuine sync (Select Package, Upgrade, or Launch's best-effort re-extraction),
-`RepoCardViewModel` may also offer to place a package's optional root-level `AGENTS.md`
-template at the repo's root via a modal confirmation, never overwriting a pre-existing
-`AGENTS.md` and remembering a decline so the user is not re-prompted for that repo again
-(`AgentControl-System-AgentsMdTemplate`).
-See `docs/design/agent-control/{subsystem}.md` for each subsystem's own design, and
-`docs/design/agent-control/program.md` for `Program`'s design (which also documents
-Avalonia's `App` bootstrap responsibility, per program.sysml's documented exception for units
-without a dedicated companion test file).
+logging (`Logging`), and hands off to Avalonia's classic desktop lifetime, which loads settings
+(`Settings`) and shows `MainWindowViewModel`'s window (`LauncherUI`). From there, `LauncherUI`'s
+view-models orchestrate the remaining subsystems: `AgentPackageManagement` for discovering available
+package versions, `RepoSync` for extracting a package zip's managed folders (from a zip or an
+unpacked NuGet package folder) into a repo and displaying release notes, `RepoConfig` for persisting
+each repo's pin, `GitIntegration` for status/pull/branch queries, and `AgentToolLauncher` for
+detecting a shell and launching the configured agentic CLI tool in it. `Utilities` provides shared,
+independently testable helpers (currently safe path combination) consumed across subsystems. After a
+genuine sync (Select Package, Upgrade, or Launch's best-effort re-extraction), `RepoCardViewModel`
+may also offer to place a package's optional root-level `AGENTS.md` template at the repo's root via
+a modal confirmation, never overwriting a pre-existing `AGENTS.md` and remembering a decline so the
+user is not re-prompted for that repo again (`AgentControl-System-AgentsMdTemplate`). See
+`docs/design/agent-control/{subsystem}.md` for each subsystem's own design, and
+`docs/design/agent-control/program.md` for `Program`'s design (which also documents Avalonia's `App`
+bootstrap responsibility, per program.sysml's documented exception for units without a dedicated
+companion test file).
 
 ## External Interfaces
 
@@ -104,24 +113,33 @@ without a dedicated companion test file).
 - *Constraints*: v1 ships a Windows MSI only; the Avalonia codebase remains cross-platform
   capable (see architecture.md's Open Concerns #2).
 
-**Filesystem Package Source**: A configurable local/mapped-drive/UNC folder containing agent
-package zip files.
+**Package Sources**: Any number of user-configured sources, each a folder of agent package zip
+files or a NuGet package folder (a local, mapped-drive or UNC folder feed), identified by a unique
+alias.
 
 - *Type*: File.
-- *Role*: Consumer (`AgentPackageManagement`/`RepoSync` read package zips from it).
-- *Contract*: Package zip filenames encode a name and a `PackageVersion`-parsable version
-  (see `docs/design/agent-control/agent-package-management/package-source.md`). No
-  authentication, checksum, or signature verification is performed; the security and
-  integrity of the shared path is the responsibility of whoever maintains it.
-- *Constraints*: Version 1 supports only a filesystem-based source; HTTP(S)/package-feed
-  sources are explicitly deferred (architecture.md's Scope and Open Concerns #1).
+- *Role*: Consumer (`AgentPackageManagement`/`RepoSync` read packages from them).
+- *Contract*: Zip package filenames encode a name and a `PackageVersion`-parsable version (see
+  `docs/design/agent-control/agent-package-management/package-source.md`); a NuGet package carries
+  its agent files under its `content` folder, and its versions are listed and unpacked by the
+  NuGet caching library into a per-source cache AgentControl owns (see
+  `docs/design/agent-control/agent-package-management/nuget-source-provider.md`)
+  (`AgentControl-System-MultipleSources`, `AgentControl-System-NuGetSources`). Nothing about a
+  source is ever written to the target repo, including its NuGet configuration. No
+  authentication, checksum, or signature verification is performed for folder sources; the
+  security and integrity of a shared folder is the responsibility of whoever maintains it.
+- *Constraints*: Folder-based sources only; NuGet server sources, credentials and signature
+  enforcement are explicitly later work (a NuGet server location is rejected with a clear error).
+  AgentControl never stores a password or token.
 
 **Per-Repo Pin File**: `.agentcontrol.json` at each tracked repo's root.
 
 - *Type*: File.
 - *Role*: Provider/Consumer (`RepoConfig` reads and writes it).
-- *Contract*: Records the pinned package name and exact version for that repo; a missing
-  file means the repo has no pin yet.
+- *Contract*: Records the pinned package name, exact version and the alias of the source it came
+  from for that repo, plus a schema version; a missing file means the repo has no pin yet, a pin
+  without a source is read as a pin to the source named `Default`, and a pin from a newer schema
+  is neither interpreted nor overwritten (`AgentControl-System-SourcePinIntegrity`).
 - *Constraints*: No "latest"/unpinned mode is supported (mandatory version pinning).
 
 **Configured Git Executable**: The git executable used for status/pull/branch queries.
@@ -160,9 +178,11 @@ override for hermetic testing).
 
 - *Type*: File.
 - *Role*: Provider/Consumer (`Settings` reads and writes it).
-- *Contract*: Records the package source path, git/agent-tool overrides, agent-tool
-  selection, shell preference, and the recent-repos list (`AgentControl-System-Settings`).
-  Returns default settings when no file exists yet (first-ever run).
+- *Contract*: Records the package sources, git/agent-tool overrides, agent-tool selection, shell
+  preference, and the recent-repos list (`AgentControl-System-Settings`,
+  `AgentControl-System-MultipleSources`); a legacy single package-folder path is carried forward
+  as the source named `Default`. Contains no password, token or other secret. Returns default
+  settings when no file exists yet (first-ever run).
 - *Constraints*: Location can be overridden by a startup argument to isolate FlaUI end-to-end
   tests (see `docs/design/agent-control/startup.md`).
 
@@ -172,6 +192,9 @@ override for hermetic testing).
   every `LauncherUI` window and control. See `docs/design/ots/avalonia.md`.
 - **Serilog** (`AgentControl-OTS-Serilog-WriteLogFile`): structured-logging library backing
   the `Logging` subsystem's rolling diagnostic log file. See `docs/design/ots/serilog.md`.
+- **NuGetCaching** (`AgentControl-OTS-NuGetCaching-ListAndCache`): the DemaConsulting.NuGet.Caching
+  library that lists the versions of, and unpacks, packages from NuGet package folder sources
+  for `NuGetSourceProvider`. See `docs/design/ots/nuget-caching.md`.
 - **FlaUI** (`AgentControl-OTS-FlaUI-DriveUiTests`): drives the published application's UI
   via Windows UI Automation for end-to-end test scenarios. See `docs/design/ots/flaui.md`.
 - **WiX Toolset** (`AgentControl-OTS-WixToolset-BuildInstaller`): packages the published
@@ -183,7 +206,11 @@ override for hermetic testing).
 N/A - not a safety-classified software item. The main accepted risk is the blind-delete
 sync trade-off documented in `docs/design/agent-control/repo-sync.md` and architecture.md's
 Open Concerns #3 (local customizations inside the four managed folders are silently removed
-on the next sync/upgrade); this is a disclosed, accepted trade-off, not a defect. The AGENTS.md
+on the next sync/upgrade); this is a disclosed, accepted trade-off, not a defect. Package sources are
+untrusted input: pins are bound to their source alias and never resolved elsewhere
+(`AgentControl-System-SourcePinIntegrity`), NuGet content is read from a private per-source cache
+that rejects links and path traversal, and no secret is ever stored (see
+`docs/design/agent-control/agent-package-management.md` and `repo-sync.md`). The AGENTS.md
 template-offer feature (`AgentControl-System-AgentsMdTemplate`) is gated by an explicit modal
 yes/no confirmation before any write to a repo's working directory, never overwrites a
 pre-existing `AGENTS.md`, and the decline is permanent (never reset) — mitigating the risk of
@@ -203,20 +230,22 @@ an unwanted or repeated file write.
 3. On each repo card's lightweight refresh, `RepoCardViewModel` reads the pin file
    (`RepoPinStore.Load`), resolves the current branch and committed-agent-files badge
    (`GitClient`, `CommittedAgentFilesCache`), and checks upgrade availability
-   (`PackageSource`/`PackageVersionCache`) against the configured package source.
+   (`PackageSourceRegistry`/`PackageVersionCache`) against the source the pin names - and only
+   that source - showing an error state when that source is not configured.
 4. User actions on a card dispatch to the relevant subsystem: Pull to `GitClient.Pull`
    (gated on a clean working tree, `AgentControl-System-Pull`); Launch to
    `RepoCardViewModel`'s ensure-synced check (re-extracting via `PackageZipExtractor` only if
    a managed folder is missing) followed by `AgentToolLauncher.BuildProcessStartInfo`
-   (`AgentControl-System-Launch`); Select Package to `PackageSource.EnumeratePackages`
-   followed by `PackageZipExtractor.Extract` and `RepoPinStore.Save`
-   (`AgentControl-System-SelectPackage`, `AgentControl-System-PinFile`); Upgrade to
-   `PackageSource.FindLatest` followed by the same extract/pin/`ReleaseNotesViewerViewModel`
+   (`AgentControl-System-Launch`); Select Package to the chosen source's provider
+   (`IPackageSourceProvider.ListVersionsAsync`/`AcquireAsync`) followed by
+   `PackageContentExtractor.Extract` and `RepoPinStore.Save` recording the source alias
+   (`AgentControl-System-SelectPackage`, `AgentControl-System-PinFile`); Upgrade to the pin's
+   source's latest version followed by the same extract/pin/`ReleaseNotesViewerViewModel`
    display sequence (`AgentControl-System-Upgrade`); Settings to
    `SettingsWindowViewModel.Save`, applied back through `MainWindowViewModel.ApplySettings`
    (`AgentControl-System-Settings`); and, after a Select Package, Upgrade, or Launch-time
    re-extraction genuinely occurs, `RepoCardViewModel` decides whether to offer the package's
-   optional root-level `AGENTS.md` template (`PackageZipExtractor.ReadAgentsMdTemplate`),
+   optional root-level `AGENTS.md` template (`PackageContentExtractor.ReadAgentsMdTemplate`),
    writes it via `AcceptAgentsMdTemplate`, or persists a decline via `RepoPinStore.Save`
    (`AgentControl-System-AgentsMdTemplate`).
 5. Throughout, `Utilities.PathHelpers.SafePathCombine` validates any caller-supplied path

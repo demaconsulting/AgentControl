@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Text.Json.Nodes;
+using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Settings;
 
 namespace DemaConsulting.AgentControl.Tests.Settings;
@@ -39,7 +41,25 @@ public class SettingsStoreTests
         {
             var settings = new AppSettings
             {
-                PackageSourcePath = @"\\shared\agent-packages",
+                Sources =
+                [
+                    new PackageSourceDefinition
+                    {
+                        Alias = "Default",
+                        Type = PackageSourceType.Zip,
+                        Location = @"\\shared\agent-packages"
+                    },
+                    new PackageSourceDefinition
+                    {
+                        Alias = "Feed",
+                        Type = PackageSourceType.NuGet,
+                        Location = @"\\shared\feed",
+                        PackageIds = ["contoso.agents", "contoso.extras"],
+                        AllowInsecureHttp = true,
+                        RequireSignedPackages = true,
+                        SignerFingerprint = "AB12"
+                    }
+                ],
                 GitExecutablePath = @"C:\tools\git.exe",
                 AgentTool = AgentToolKind.Custom,
                 CustomAgentCommand = "my-custom-tool --flag",
@@ -50,7 +70,8 @@ public class SettingsStoreTests
                     {
                         Path = @"C:\repos\example",
                         PinnedPackageName = "contoso-agents",
-                        PinnedPackageVersion = "1.2.3"
+                        PinnedPackageVersion = "1.2.3",
+                        PinnedSource = "Feed"
                     }
                 ]
             };
@@ -60,7 +81,18 @@ public class SettingsStoreTests
             var loaded = SettingsStore.Load(configDir);
 
             // Assert: every field round-trips exactly
-            Assert.Equal(settings.PackageSourcePath, loaded.PackageSourcePath);
+            Assert.Equal(2, loaded.Sources.Count);
+            Assert.Equal("Default", loaded.Sources[0].Alias);
+            Assert.Equal(PackageSourceType.Zip, loaded.Sources[0].Type);
+            Assert.Equal(@"\\shared\agent-packages", loaded.Sources[0].Location);
+            Assert.Equal("Feed", loaded.Sources[1].Alias);
+            Assert.Equal(PackageSourceType.NuGet, loaded.Sources[1].Type);
+            Assert.Equal(@"\\shared\feed", loaded.Sources[1].Location);
+            Assert.Equal(["contoso.agents", "contoso.extras"], loaded.Sources[1].PackageIds);
+            Assert.True(loaded.Sources[1].AllowInsecureHttp);
+            Assert.True(loaded.Sources[1].RequireSignedPackages);
+            Assert.Equal("AB12", loaded.Sources[1].SignerFingerprint);
+            Assert.Null(loaded.PackageSourcePath);
             Assert.Equal(settings.GitExecutablePath, loaded.GitExecutablePath);
             Assert.Equal(settings.AgentTool, loaded.AgentTool);
             Assert.Equal(settings.CustomAgentCommand, loaded.CustomAgentCommand);
@@ -69,6 +101,7 @@ public class SettingsStoreTests
             Assert.Equal(@"C:\repos\example", loadedRepo.Path);
             Assert.Equal("contoso-agents", loadedRepo.PinnedPackageName);
             Assert.Equal("1.2.3", loadedRepo.PinnedPackageVersion);
+            Assert.Equal("Feed", loadedRepo.PinnedSource);
         }
         finally
         {
@@ -164,6 +197,206 @@ public class SettingsStoreTests
         var expectedRoot = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         Assert.StartsWith(expectedRoot, directory, StringComparison.Ordinal);
         Assert.EndsWith("AgentControl", directory, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a settings file written before multiple sources existed (only the legacy
+    ///     PackageSourcePath) loads with that path migrated to a Default zip source.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource()
+    {
+        // Arrange: a legacy settings file with only the single-path field
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                """{ "PackageSourcePath": "\\\\shared\\agent-packages", "AgentTool": 0 }""");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert: the path became the Default zip source and the legacy field is cleared
+            var source = Assert.Single(loaded.Sources);
+            Assert.Equal("Default", source.Alias);
+            Assert.Equal(PackageSourceType.Zip, source.Type);
+            Assert.Equal(@"\\shared\agent-packages", source.Location);
+            Assert.Null(loaded.PackageSourcePath);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that when a settings file has both a Sources list and a legacy path, the Sources
+    ///     list wins and the legacy path is ignored (not added as another source).
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_SourcesAndLegacyPath_SourcesWin()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                """{ "PackageSourcePath": "C:\\legacy", "Sources": [ { "Alias": "Mine", "Type": "Zip", "Location": "C:\\mine" } ] }""");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert
+            var source = Assert.Single(loaded.Sources);
+            Assert.Equal("Mine", source.Alias);
+            Assert.Null(loaded.PackageSourcePath);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that saving settings that only carry the legacy path writes it as a Sources entry
+    ///     and never writes the legacy field, without altering the in-memory settings.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Save_LegacyPackageSourcePath_WritesSourcesNotLegacyField()
+    {
+        // Arrange: in-memory settings seeded the legacy way
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var settings = new AppSettings { PackageSourcePath = @"D:\packages" };
+
+            // Act
+            SettingsStore.Save(settings, configDir);
+            var json = JsonNode.Parse(File.ReadAllText(Path.Combine(configDir, "settings.json")))!.AsObject();
+
+            // Assert: Sources holds the Default zip source, the legacy field is absent, and the
+            // caller's instance is untouched
+            Assert.False(json.ContainsKey("PackageSourcePath"));
+            var source = Assert.Single(json["Sources"]!.AsArray())!.AsObject();
+            Assert.Equal("Default", (string?)source["Alias"]);
+            Assert.Equal("Zip", (string?)source["Type"]);
+            Assert.Equal(@"D:\packages", (string?)source["Location"]);
+            Assert.Equal(@"D:\packages", settings.PackageSourcePath);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the persisted settings JSON never contains a property that could hold a
+    ///     secret, even for a fully populated NuGet source.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties()
+    {
+        // Arrange: a NuGet server source with every option populated
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var settings = new AppSettings
+            {
+                Sources =
+                [
+                    new PackageSourceDefinition
+                    {
+                        Alias = "Server",
+                        Type = PackageSourceType.NuGet,
+                        Location = "https://feeds.example.com/v3/index.json",
+                        PackageIds = ["contoso.agents"],
+                        AllowInsecureHttp = false,
+                        RequireSignedPackages = true,
+                        SignerFingerprint = "ABCDEF"
+                    }
+                ]
+            };
+
+            // Act
+            SettingsStore.Save(settings, configDir);
+            var json = File.ReadAllText(Path.Combine(configDir, "settings.json"));
+
+            // Assert: no property name suggests a stored credential
+            string[] secretMarkers = ["password", "passwd", "secret", "token", "credential", "key", "pat"];
+            var propertyNames = new List<string>();
+            CollectPropertyNames(JsonNode.Parse(json)!, propertyNames);
+            Assert.All(
+                propertyNames,
+                name => Assert.DoesNotContain(
+                    secretMarkers, marker => string.Equals(name, marker, StringComparison.OrdinalIgnoreCase) ||
+                                             (marker.Length > 3 && name.Contains(marker, StringComparison.OrdinalIgnoreCase))));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a save replaces the settings file atomically: afterwards only the settings
+    ///     file exists (no temporary file is left behind) and it holds the latest content.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Save_RepeatedSaves_LeavesOnlySettingsFileWithLatestContent()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            SettingsStore.Save(new AppSettings { GitExecutablePath = "first" }, configDir);
+
+            // Act: overwrite with new content
+            SettingsStore.Save(new AppSettings { GitExecutablePath = "second" }, configDir);
+
+            // Assert: exactly one file, with the second value
+            var file = Assert.Single(Directory.GetFiles(configDir));
+            Assert.Equal("settings.json", Path.GetFileName(file));
+            Assert.Equal("second", SettingsStore.Load(configDir).GitExecutablePath);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Recursively collects every JSON property name in a node.
+    /// </summary>
+    /// <param name="node">The node to walk.</param>
+    /// <param name="names">Receives the property names.</param>
+    private static void CollectPropertyNames(JsonNode node, List<string> names)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach (var (name, child) in obj)
+                {
+                    names.Add(name);
+                    if (child is not null)
+                    {
+                        CollectPropertyNames(child, names);
+                    }
+                }
+
+                break;
+            case JsonArray array:
+                foreach (var child in array)
+                {
+                    if (child is not null)
+                    {
+                        CollectPropertyNames(child, names);
+                    }
+                }
+
+                break;
+        }
     }
 
     /// <summary>

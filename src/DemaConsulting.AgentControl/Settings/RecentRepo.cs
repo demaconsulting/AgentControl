@@ -57,6 +57,16 @@ internal sealed class RecentRepo
     public string? PinnedPackageVersion { get; set; }
 
     /// <summary>
+    ///     Gets or sets the alias of the package source the pin last seen in this repo's
+    ///     <c>.agentcontrol.json</c> names, or <see langword="null"/> if the repo has never been
+    ///     synced (or was last seen before pins named a source).
+    /// </summary>
+    /// <remarks>
+    ///     Cached copy; see <see cref="PinnedPackageName"/> remarks for the authoritative source.
+    /// </remarks>
+    public string? PinnedSource { get; set; }
+
+    /// <summary>
     ///     Gets or sets whether the user has pinned/favorited this repo, per architecture.md's
     ///     recent-repos "pinning/favorites" sort-order feature.
     /// </summary>

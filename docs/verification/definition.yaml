@@ -26,9 +26,13 @@ input-files:
   - docs/verification/agent-control/launcher-ui/settings-window-view-model.md
   - docs/verification/agent-control/agent-package-management.md
   - docs/verification/agent-control/agent-package-management/package-source.md
+  - docs/verification/agent-control/agent-package-management/package-source-registry.md
+  - docs/verification/agent-control/agent-package-management/zip-folder-source-provider.md
+  - docs/verification/agent-control/agent-package-management/nuget-source-provider.md
   - docs/verification/agent-control/agent-package-management/package-version.md
   - docs/verification/agent-control/agent-package-management/package-version-cache.md
   - docs/verification/agent-control/repo-sync.md
+  - docs/verification/agent-control/repo-sync/package-content-extractor.md
   - docs/verification/agent-control/repo-sync/package-zip-extractor.md
   - docs/verification/agent-control/repo-sync/release-notes-viewer-view-model.md
   - docs/verification/agent-control/repo-config.md
@@ -51,6 +55,7 @@ input-files:
   - docs/verification/ots/buildmark.md
   - docs/verification/ots/fileassert.md
   - docs/verification/ots/flaui.md
+  - docs/verification/ots/nuget-caching.md
   - docs/verification/ots/pandoc.md
   - docs/verification/ots/reqstream.md
   - docs/verification/ots/reviewmark.md

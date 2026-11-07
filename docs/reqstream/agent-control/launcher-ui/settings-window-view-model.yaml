@@ -1,8 +1,9 @@
 ---
 # Software Unit Requirements for the SettingsWindowViewModel Class
 #
-# SettingsWindowViewModel backs the settings dialog: the package source path, git executable
-# override, agent tool selection, and shell preference.
+# SettingsWindowViewModel backs the settings dialog: the package source path (which edits the
+# Default package source), git executable override, agent tool selection, and shell
+# preference.
 
 sections:
   - title: SettingsWindowViewModel Unit Requirements
@@ -56,3 +57,18 @@ sections:
           - SettingsWindowViewModel_AvailableShellPreferences_IsNonEmptyWithBlankFirstEntry
           - SettingsWindowViewModel_AvailableShellPreferences_NoDuplicateEntries
           - SettingsWindowViewModel_AvailableShellPreferences_CurrentOs_ContainsExpectedPresets
+
+      - id: AgentControl-SettingsWindowViewModel-DefaultSource
+        title: >-
+          The SettingsWindowViewModel class shall let the user edit the location of the package
+          source named Default - creating it when absent and removing it when blank - and shall
+          carry every other configured source through a save unchanged.
+        justification: |
+          Until the settings dialog can edit several sources, the single package-folder field
+          must keep working as it always has, and saving it must not discard sources that were
+          configured another way.
+        tests:
+          - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
+          - SettingsWindowViewModel_Save_OtherSourcesConfigured_PreservesThemAndEditsOnlyDefault
+          - SettingsWindowViewModel_Save_BlankPackageSourcePath_RemovesDefaultSourceOnly
+          - SettingsWindowViewModel_Constructor_LegacyPackageSourcePath_SeedsPackageSourcePathField

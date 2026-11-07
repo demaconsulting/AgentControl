@@ -148,7 +148,7 @@ sections:
           - AgentControl-SelectPackageWindowViewModel-Confirm
           - AgentControl-RepoCardViewModel-ApplySelectedPackage
         tests:
-          - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourcePath
+          - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias
           - SelectPackageWindowViewModel_SelectPackageName_PopulatesVersionsDescendingAndDefaultsToLatest
           - SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithSelectedPair
           - RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady
@@ -227,3 +227,23 @@ sections:
           - ThirdPartyDependencies_All_NoDuplicateNames
           - ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense
           - DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat
+
+      - id: AgentControl-LauncherUI-SourceAwareActions
+        title: >-
+          The LauncherUI subsystem shall perform select-package, upgrade, launch-time sync and
+          upgrade-available checks for a repo only at the package source named in the repo's
+          pin, shall record that source in the pin when a package is applied, shall show an
+          error state instead of offering anything when the pinned source is not configured, and
+          shall keep cached source results only for sources that have not changed.
+        justification: |
+          A repo's pin binds it to one source; quietly using a different source because the
+          pinned one is missing or renamed would install content the pin never named, and the
+          user needs to see that the source is missing so they can restore it.
+        children:
+          - AgentControl-RepoCardViewModel-SourceAwareness
+          - AgentControl-SettingsWindowViewModel-DefaultSource
+          - AgentControl-MainWindowViewModel-InvalidateChangedSources
+          - AgentControl-SelectPackageWindowViewModel-SourceScoped
+        tests:
+          - RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
+          - RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent

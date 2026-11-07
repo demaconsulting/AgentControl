@@ -192,7 +192,7 @@ internal sealed partial class MainWindow : Window
         card.ReleaseNotesReady += (_, releaseNotes) =>
             ShowTrackedChildWindow(new ReleaseNotesViewer(new ReleaseNotesViewerViewModel(card.RepoName, releaseNotes)));
         card.RemoveRequested += async (_, _) => await ConfirmAndRemoveCard(card);
-        card.SelectPackageRequested += async (_, sourceDirectory) => await ShowSelectPackageDialog(card, sourceDirectory);
+        card.SelectPackageRequested += async (_, sourceAlias) => await ShowSelectPackageDialog(card, sourceAlias);
         card.AgentsMdTemplateOfferRequested += async (_, templateContent) => await ShowAgentsMdTemplateOfferDialog(card, templateContent);
     }
 
@@ -202,14 +202,26 @@ internal sealed partial class MainWindow : Window
     ///     <see cref="RepoCardViewModel.ApplySelectedPackage"/>.
     /// </summary>
     /// <param name="card">The card that requested package selection.</param>
-    /// <param name="sourceDirectory">The resolved package-source directory to enumerate.</param>
-    private async Task ShowSelectPackageDialog(RepoCardViewModel card, string sourceDirectory)
+    /// <param name="sourceAlias">The alias of the configured package source to enumerate.</param>
+    private async Task ShowSelectPackageDialog(RepoCardViewModel card, string sourceAlias)
     {
-        var viewModel = new SelectPackageWindowViewModel(sourceDirectory, card.PackageVersionCache);
+        SelectPackageWindowViewModel viewModel;
+        try
+        {
+            viewModel = new SelectPackageWindowViewModel(card.CreateSourceRegistry(), sourceAlias, card.PackageVersionCache);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException)
+        {
+            // An unreachable or misconfigured source must be reported to the user, not crash the
+            // application from this fire-and-forget event handler
+            await new MessageBoxWindow($"Package source is unavailable: {ex.Message}").ShowDialog(this);
+            return;
+        }
+
         var result = await new SelectPackageWindow(viewModel).ShowDialog<(string Name, string Version)?>(this);
         if (result is not null)
         {
-            card.ApplySelectedPackage(result.Value.Name, result.Value.Version);
+            card.ApplySelectedPackage(result.Value.Name, result.Value.Version, viewModel.SourceAlias);
         }
     }
 

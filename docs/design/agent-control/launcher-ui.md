@@ -74,25 +74,29 @@ loaded `AppSettings`. It exposes `AddRepo`/`RemoveRepo` (persisting via `Setting
 each mutation), a `FilterText` property driving `DisplayedRepoCards`, and `ApplySettings`
 (invoked when `SettingsWindowViewModel` reports `Saved`), which persists the new settings
 while preserving the existing recent-repos list and invalidates the shared
-`PackageVersionCache`.
+`PackageVersionCache` for each package source that was edited or removed.
 
-Each `RepoCardViewModel` is independently responsible for one repo's status and actions: it
-reads the pin via `RepoPinStore`, checks upgrade availability via `PackageSource`/
-`PackageVersionCache`, resolves git status/branch via `GitClient`/`CommittedAgentFilesCache`,
-and drives Launch/Pull/Upgrade/Select-Package/Favorite/Remove. A lightweight `RefreshCheap`
-path (branch resolution, cached committed-files badge) is kept separate from the full
-`Refresh` path (which also checks working-tree cleanliness) so the main window's frequent UI
-refresh does not eagerly invoke a git subprocess for every card. Removal never mutates state
-directly: `RemoveCommand` raises `RemoveRequested` and `MainWindowViewModel` shows a
-`ConfirmationWindow`, removing the card only if the user confirms
-(`AgentControl-LauncherUI-RemoveRepo`).
+Each `RepoCardViewModel` is independently responsible for one repo's status and actions: it reads
+the pin via `RepoPinStore`, checks upgrade availability via `PackageSourceRegistry`/
+`PackageVersionCache` at the source the pin names (showing an error state, never using another
+source, when that source is not configured - `AgentControl-LauncherUI-SourceAwareActions`), resolves
+git status/branch via `GitClient`/`CommittedAgentFilesCache`, and drives
+Launch/Pull/Upgrade/Select-Package/Favorite/Remove. A lightweight `RefreshCheap` path (branch
+resolution, cached committed-files badge) is kept separate from the full `Refresh` path (which also
+checks working-tree cleanliness) so the main window's frequent UI refresh does not eagerly invoke a
+git subprocess for every card. Removal never mutates state directly: `RemoveCommand` raises
+`RemoveRequested` and `MainWindowViewModel` shows a `ConfirmationWindow`, removing the card only if
+the user confirms (`AgentControl-LauncherUI-RemoveRepo`).
 
 `SelectPackageWindowViewModel` backs the package-selection dialog opened from a card with no
-existing pin: it lists package names from `PackageSource`/`PackageVersionCache`, then that
-name's versions in descending order (defaulting to latest) once a name is chosen.
+existing pin: it lists the package names of one named source from `PackageVersionCache`, then
+that name's versions in descending order (defaulting to latest) once a name is chosen, and
+reports the source alias with the selection so the pin records it.
 `SettingsWindowViewModel` seeds its editable properties from the current `AppSettings` on
 construction and exposes `IsCustomAgentToolSelected` to drive the settings window's
-custom-command entry field visibility.
+custom-command entry field visibility; its package source field edits the source named
+`Default`, carrying every other configured source through a save unchanged, until a full
+multi-source editor exists.
 
 `RepoCardViewModel` reuses the existing modal `ConfirmationWindow` (the same Yes/No dialog
 shown for Remove confirmation) to offer a package's optional root-level `AGENTS.md` template

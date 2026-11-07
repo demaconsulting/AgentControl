@@ -49,3 +49,14 @@ sections:
           pin, so the exact chosen values must be communicated accurately.
         tests:
           - SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithSelectedPair
+
+      - id: AgentControl-SelectPackageWindowViewModel-SourceScoped
+        title: >-
+          The SelectPackageWindowViewModel class shall list the packages and versions of
+          exactly one named package source, report that source's alias with the selection, and
+          never include another source's packages.
+        justification: |
+          The selection is recorded in the repo's pin together with its source, so the dialog
+          must offer, and report, one source at a time.
+        tests:
+          - SelectPackageWindowViewModel_TwoSources_ListsOnlyTheChosenSourcesPackagesAndReportsItsAlias

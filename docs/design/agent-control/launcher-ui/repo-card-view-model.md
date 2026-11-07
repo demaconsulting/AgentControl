@@ -8,8 +8,10 @@
 repo's pin, git status, and upgrade availability, and drives Launch/Pull/Upgrade/Select-
 Package/Favorite/Remove actions for that repo. All business logic (upgrade detection, launch
 orchestration, pull-eligibility checks) is implemented here or delegated to `GitClient`,
-`PackageSource`, `PackageZipExtractor`, `RepoPinStore`, and `AgentToolLauncher` rather than in
-any view code-behind, so this class is fully unit-testable without an Avalonia window.
+`PackageSourceRegistry`, `PackageContentExtractor`, `RepoPinStore`, and `AgentToolLauncher`
+rather than in any view code-behind, so this class is fully unit-testable without an Avalonia
+window. Every package-source operation is bound to the source named in the repo's pin
+(`AgentControl-RepoCardViewModel-SourceAwareness`).
 
 #### Data Model
 
@@ -22,16 +24,24 @@ any view code-behind, so this class is fully unit-testable without an Avalonia w
 other check/action short-circuits to its "unavailable" default rather than attempting a git/
 filesystem operation against a nonexistent path (`AgentControl-RepoCardViewModel-MissingRepo`).
 
-**IsFavorite**, **LastLaunchedUtc**, **PinnedPackageName**, **PinnedPackageVersion**: mirror
-the corresponding fields on the shared `RecentRepo`/pin file
+**IsFavorite**, **LastLaunchedUtc**, **PinnedPackageName**, **PinnedPackageVersion**,
+**PinnedSource**: mirror the corresponding fields on the shared `RecentRepo`/pin file
 (`AgentControl-RepoCardViewModel-Favorite`, `AgentControl-RepoCardViewModel-DisplayInfo`).
+`PinnedSource` is the alias of the source the pin names (a pin written before sources existed
+reads as `Default`).
+
+**SourceProblem** / **HasSourceProblem**: `string?`/`bool` — the card's error state for a pin whose
+source cannot be used, chiefly an alias that is not among the configured sources. When set, no
+upgrade is offered and no other source is ever consulted
+(`AgentControl-RepoCardViewModel-SourceAwareness`). Set by `RefreshUpgradeStatus`; cleared when
+the pin or settings no longer have the problem.
 
 **CurrentBranch**, **HasCommittedAgentFiles**: `string?`/`bool` — Resolved via `GitClient`,
 with the committed-files result consulting the per-card `CommittedAgentFilesCache`
 (`AgentControl-RepoCardViewModel-CommittedFilesBadge`).
 
 **IsUpgradeAvailable**, **LatestAvailableVersion**: `bool`/`string?` — Resolved via the shared
-`PackageVersionCache` (`AgentControl-RepoCardViewModel-UpgradeBadge`).
+`PackageVersionCache` at the pin's source (`AgentControl-RepoCardViewModel-UpgradeBadge`).
 
 **CanPull**: `bool` — Reflects working-tree cleanliness, refreshed lazily
 (`AgentControl-RepoCardViewModel-PullGating`).
@@ -68,6 +78,16 @@ button so this explanatory text remains reachable while the button is disabled v
 which would otherwise hide the explanation precisely when it is most needed.
 
 **IsPackageSelectionNeeded**: `bool` (derived) — `PinnedPackageName is null`.
+
+**Source access and the synchronous bridge.** The card builds a `PackageSourceRegistry` from the
+current settings' effective sources for each operation (`CreateSourceRegistry`) and calls the
+asynchronous providers through a private `RunBlocking` helper that runs the operation on a worker
+thread and waits for it, so its existing synchronous commands neither deadlock on the UI thread's
+synchronization context nor change shape. This blocks the calling thread exactly as the former
+direct folder scans did; moving these commands to true asynchronous execution with progress and
+cancellation is part of the source-aware UI work. NuGet sources keep their private caches under a
+`nuget` folder inside the startup configuration-directory override when one is supplied (so
+automated tests never touch the user profile), otherwise in the per-user default.
 
 **_logger**: `ILogger<RepoCardViewModel>` (private, via `AppLogging.Factory.CreateLogger<RepoCardViewModel>()`)
 — Used to log the real work this view model performs (launch, pull, upgrade/apply-package,
@@ -130,8 +150,10 @@ is an informational side action only — it never blocks `Launch`.
   launch is proceeding without managed agent files. If `PackageZipExtractor.AllManagedFoldersExist`
   is already `true`, returns `true` immediately with no extra I/O — and critically, never
   calls `MaybeOfferAgentsMdTemplate` in that case, since the offer must only ever fire when a
-  sync genuinely happens. Otherwise resolves the *currently pinned* package at the configured
-  source (never the latest) and re-extracts it directly via `PackageZipExtractor.Extract`,
+  sync genuinely happens. Otherwise resolves the *currently pinned* package at the source the pin
+  names (never the latest, and never another source - a pin whose source is not configured fails
+  here with a non-blocking warning) and re-extracts it directly via
+  `PackageContentExtractor.Extract` over the reader the provider returns,
   without displaying release notes but still calling `MaybeOfferAgentsMdTemplate`; if this
   re-extraction attempt fails for any reason, `ErrorOccurred` is raised as a non-blocking
   warning (`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`).
@@ -143,39 +165,43 @@ is an informational side action only — it never blocks `Launch`.
 (`AgentControl-RepoCardViewModel-Pull`). Reports success/failure via `StatusMessage`, never
 throwing for a failed pull.
 
-**Upgrade**: Finds the latest package at the configured source for the pinned package name,
-then applies it via `ApplyPackageAndShowReleaseNotes`
-(`AgentControl-RepoCardViewModel-Upgrade`).
+**Upgrade**: Finds the latest package at the pin's source for the pinned package name, then
+applies it via `ApplyPackageAndShowReleaseNotes` (`AgentControl-RepoCardViewModel-Upgrade`). An
+unconfigured source or a failing source is reported through `ErrorOccurred`.
 
-**ApplySelectedPackage**: Resolves the exact user-selected package name/version at the
-configured source, then applies it via `ApplyPackageAndShowReleaseNotes`.
+**ApplySelectedPackage**: Resolves the exact user-selected package name/version at the chosen
+source, then applies it via `ApplyPackageAndShowReleaseNotes`.
 
-- *Parameters*: `string packageName`, `string version`.
+- *Parameters*: `string packageName`, `string version`, `string? sourceAlias = null` (the source
+  the selection was made from; when omitted the interim default is the `Default` source, else the
+  first configured source).
 - *Postconditions*: On success, the pin and release notes are updated exactly as `Upgrade`
   (`AgentControl-RepoCardViewModel-ApplySelectedPackage`); on a version no longer available at
   the source, raises `ErrorOccurred` without mutating the existing pin.
 
 **ApplyPackageAndShowReleaseNotes** (private): Shared extract-and-pin sequence reused by
-`Upgrade` and `ApplySelectedPackage`: extracts the package (blind-delete-and-replace),
-proactively ensures the repo's `.gitignore` covers the four managed agent folders (via
-`EnsureGitIgnoreCoversManagedFolders`, its own non-blocking step — see Error Handling),
-rewrites the pin file (preserving any pre-existing `AgentsMdTemplateDeclined` value — read via
-its own try/catch that tolerates a corrupt/unreadable existing pin file by defaulting to
-`false` rather than aborting the apply; see Error Handling), refreshes pin/upgrade-status
-properties, raises `ReleaseNotesReady` with the new package's release notes, and finally calls
-`MaybeOfferAgentsMdTemplate`.
+`Upgrade` and `ApplySelectedPackage`: first loads the repo's existing pin (a newer-schema pin
+aborts here with its actionable message while the repo is still untouched; a corrupt one is
+tolerated and replaced), acquires the package from its provider, extracts it
+(blind-delete-and-replace), proactively ensures the repo's `.gitignore` covers the four managed
+agent folders (via `EnsureGitIgnoreCoversManagedFolders`, its own non-blocking step — see Error
+Handling), updates the loaded pin in place with the package's source alias, name and version and
+saves it (so `AgentsMdTemplateDeclined` and any unknown fields are preserved), refreshes
+pin/upgrade-status properties, raises `ReleaseNotesReady` with the new package's release notes,
+and finally calls `MaybeOfferAgentsMdTemplate`. The acquired package reader stays open until the
+sequence ends.
 
 **MaybeOfferAgentsMdTemplate** (private): Decides whether to offer the package's optional
 root-level `AGENTS.md` template, called immediately after every successful extraction in both
 `ApplyPackageAndShowReleaseNotes` and `EnsureAgentFilesSyncedBeforeLaunch`'s re-extraction
 branch — never as an independent, standing per-launch poll.
 
-- *Parameters*: `string packageFilePath` — the zip just successfully extracted.
+- *Parameters*: `IPackageContentReader reader` — the package just successfully extracted.
 - *Returns*: `void`.
 - *Postconditions*: Does nothing if the repo already has a root-level `AGENTS.md` file, or if
   the repo's pin records a prior decline (`AgentsMdTemplateDeclined == true`), or if the
-  package's zip has no root-level `AGENTS.md` entry. Otherwise reads the template via
-  `PackageZipExtractor.ReadAgentsMdTemplate` and raises `AgentsMdTemplateOfferRequested` with
+  package has no root-level `AGENTS.md`. Otherwise reads the template via
+  `PackageContentExtractor.ReadAgentsMdTemplate` and raises `AgentsMdTemplateOfferRequested` with
   its content (`AgentControl-RepoCardViewModel-AgentsMdTemplateOffer`).
 - Wrapped in its own non-blocking try/catch, mirroring `EnsureGitIgnoreCoversManagedFolders`:
   a failure here (e.g. a transient read error) never aborts the pin write, release-notes
@@ -217,57 +243,64 @@ try/catch, separate from `ApplyPackageAndShowReleaseNotes`'s outer catch, so a `
 failure can never abort the pin write or release-notes display that follow it — mirroring the
 non-blocking idiom already established by `EnsureAgentFilesSyncedBeforeLaunch`.
 
-**SelectPackage** (private): Validates a package source is configured, then raises
-`SelectPackageRequested` for the view layer to show the dialog
-(`AgentControl-RepoCardViewModel-SelectPackage`).
+**SelectPackage** (private): Validates at least one package source is configured, then raises
+`SelectPackageRequested` carrying the alias of the source to select from (the `Default` source,
+else the first configured one, until the dialog can offer a choice) for the view layer to show the
+dialog (`AgentControl-RepoCardViewModel-SelectPackage`).
+
+**RefreshUpgradeStatus** (private): Re-checks the upgrade badge at the pin's source via the shared
+cache. A pin naming a source that is not configured sets `SourceProblem`, offers no upgrade, and
+never looks elsewhere; an unreachable or failing source simply means no upgrade is offered.
 
 #### Error Handling
 
 `Launch` catches `InvalidOperationException`/`ArgumentException` from
 `AgentToolLauncher.BuildProcessStartInfo`/`Launch` and raises `ErrorOccurred`.
-`EnsureAgentFilesSyncedBeforeLaunch` catches `InvalidOperationException` (extraction failure)
-and `DirectoryNotFoundException` (unreachable source), raising `ErrorOccurred` as a
-non-blocking warning for each rather than propagating or blocking the launch. `Pull` catches
-`InvalidOperationException` from `GitClient.Pull` and reports it via `ErrorOccurred`.
-`RefreshGitStatus`/`RefreshBranchAndCommittedFiles` catch `InvalidOperationException` from
-`GitClient` and degrade to "unknown"/`false` rather than propagating, since these run as part
-of routine, frequent UI refreshes. `ApplyPackageAndShowReleaseNotes` catches
-`InvalidOperationException` and `DirectoryNotFoundException`, raising `ErrorOccurred` without
-applying a partial pin update; its read of a prior pin's `AgentsMdTemplateDeclined` value is
-guarded by its own inner try/catch that treats an `InvalidOperationException` (corrupt/unreadable
-existing pin file) as "no persisted decline" (defaults to `false`) rather than letting it
-propagate to the outer catch and abort the apply after extraction has already succeeded; the
-subsequent `RepoPinStore.Save` call's own failure handling is unchanged. `EnsureGitIgnoreCoversManagedFolders` catches
-`InvalidOperationException` from `GitIgnoreEnsurer.Ensure` separately, in its own nested
-try/catch, raising `ErrorOccurred` as a non-blocking warning without ever propagating — a
-`.gitignore` I/O failure never aborts the pin write or release-notes display. `MaybeOfferAgentsMdTemplate`
-catches `InvalidOperationException`/`ArgumentException`/`NotSupportedException` (covering both
-`PackageZipExtractor.ReadAgentsMdTemplate` and `PathHelpers.SafePathCombine` failure modes) in
-its own non-blocking try/catch, logging nothing further and never propagating.
-`AcceptAgentsMdTemplate` writes via `FileMode.CreateNew` in a step isolated from the
-subsequent write/flush; only that creation step's `IOException` is guarded by a check that the
-target file now exists (another user/process created it after the offer was raised but before
-this call ran) to report a non-destructive, informational `StatusMessage` rather than an
-error. A failure during the write/flush step that follows a successful create is always a
-genuine error (e.g. disk full) and is never misreported as "already exists", since it is
-handled by a separate, later catch. Any `IOException`/`UnauthorizedAccessException`/
-`ArgumentException`/`NotSupportedException` from either step (other than the guarded
-create-time "already exists" case) raises `ErrorOccurred` rather than throwing (it never calls
-`RepoPinStore`, so `InvalidOperationException` cannot occur on this path).
-`DeclineAgentsMdTemplate` catches those same four exception types plus
-`InvalidOperationException` from `RepoPinStore.Load`/`Save` and likewise raises
-`ErrorOccurred` rather than throwing. The constructor
-throws `ArgumentNullException` for a null
-`recentRepo`, `getSettings`, or `packageVersionCache`. `ApplySelectedPackage` throws
-`ArgumentNullException` for a null `packageName` or `version`.
+`EnsureAgentFilesSyncedBeforeLaunch` catches `InvalidOperationException` (extraction failure, or an
+unconfigured pinned source via `UnknownSourceException`) and `DirectoryNotFoundException`
+(unreachable source), raising `ErrorOccurred` as a non-blocking warning for each rather than
+propagating or blocking the launch. `Pull` catches `InvalidOperationException` from `GitClient.Pull`
+and reports it via `ErrorOccurred`. `RefreshGitStatus`/`RefreshBranchAndCommittedFiles` catch
+`InvalidOperationException` from `GitClient` and degrade to "unknown"/`false` rather than
+propagating, since these run as part of routine, frequent UI refreshes.
+`ApplyPackageAndShowReleaseNotes` catches `InvalidOperationException` and
+`DirectoryNotFoundException`, raising `ErrorOccurred` without applying a partial pin update; its
+read of a prior pin's `AgentsMdTemplateDeclined` value is guarded by its own inner try/catch that
+treats an `InvalidOperationException` (corrupt/unreadable existing pin file) as "no persisted
+decline" (defaults to `false`) rather than letting it propagate to the outer catch and abort the
+apply after extraction has already succeeded; the subsequent `RepoPinStore.Save` call's own failure
+handling is unchanged. `EnsureGitIgnoreCoversManagedFolders` catches `InvalidOperationException`
+from `GitIgnoreEnsurer.Ensure` separately, in its own nested try/catch, raising `ErrorOccurred` as a
+non-blocking warning without ever propagating — a `.gitignore` I/O failure never aborts the pin
+write or release-notes display. `MaybeOfferAgentsMdTemplate` catches
+`InvalidOperationException`/`ArgumentException`/`NotSupportedException` (covering both
+`PackageZipExtractor.ReadAgentsMdTemplate` and `PathHelpers.SafePathCombine` failure modes) in its
+own non-blocking try/catch, logging nothing further and never propagating. `AcceptAgentsMdTemplate`
+writes via `FileMode.CreateNew` in a step isolated from the subsequent write/flush; only that
+creation step's `IOException` is guarded by a check that the target file now exists (another
+user/process created it after the offer was raised but before this call ran) to report a
+non-destructive, informational `StatusMessage` rather than an error. A failure during the
+write/flush step that follows a successful create is always a genuine error (e.g. disk full) and is
+never misreported as "already exists", since it is handled by a separate, later catch. Any
+`IOException`/`UnauthorizedAccessException`/ `ArgumentException`/`NotSupportedException` from either
+step (other than the guarded create-time "already exists" case) raises `ErrorOccurred` rather than
+throwing (it never calls `RepoPinStore`, so `InvalidOperationException` cannot occur on this path).
+`DeclineAgentsMdTemplate` catches those same four exception types plus `InvalidOperationException`
+from `RepoPinStore.Load`/`Save` and likewise raises `ErrorOccurred` rather than throwing. The
+constructor throws `ArgumentNullException` for a null `recentRepo`, `getSettings`, or
+`packageVersionCache`. `ApplySelectedPackage` throws `ArgumentNullException` for a null
+`packageName` or `version`.
 
 #### Dependencies
 
 - **RepoPinStore** (`RepoConfig` subsystem) — reads/writes the repo's pin.
-- **PackageSource**, **PackageVersionCache** (`AgentPackageManagement` subsystem) — package
-  discovery and upgrade-availability checks.
-- **PackageZipExtractor** (`RepoSync` subsystem) — extracts a package into the repo, and
-  reads an optional root-level `AGENTS.md` template via `ReadAgentsMdTemplate`.
+- **PackageSourceRegistry**, **IPackageSourceProvider**, **PackageVersionCache**,
+  **DiscoveredPackage** (`AgentPackageManagement` subsystem) — source resolution at the pin's
+  alias, package discovery, acquisition, and upgrade-availability checks.
+- **PackageContentExtractor**, **PackageZipExtractor** (`RepoSync` subsystem) — extracts a
+  package into the repo, reads its release notes, and reads an optional root-level `AGENTS.md`
+  template via `ReadAgentsMdTemplate`; `PackageZipExtractor.AllManagedFoldersExist` checks whether
+  a re-extraction is needed.
 - **GitIgnoreEnsurer** (`RepoSync` subsystem) — proactively ensures the repo's `.gitignore`
   covers the four managed agent folders after a successful extraction.
 - **PathHelpers** (`Utilities` subsystem) — used by `MaybeOfferAgentsMdTemplate` and

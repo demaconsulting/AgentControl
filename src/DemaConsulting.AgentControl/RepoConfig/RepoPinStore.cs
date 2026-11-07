@@ -24,12 +24,50 @@ using DemaConsulting.AgentControl.Utilities;
 namespace DemaConsulting.AgentControl.RepoConfig;
 
 /// <summary>
+///     Raised when a pin file declares a schema version newer than this build understands, so the
+///     file is neither interpreted nor overwritten.
+/// </summary>
+internal sealed class UnsupportedPinSchemaException : InvalidOperationException
+{
+    /// <summary>
+    ///     Initializes the exception with an actionable message.
+    /// </summary>
+    /// <param name="filePath">Path of the pin file.</param>
+    /// <param name="schemaVersion">The schema version the file declares.</param>
+    public UnsupportedPinSchemaException(string filePath, int schemaVersion)
+        : base($"Pin file '{filePath}' uses schema version {schemaVersion}, which is newer than this version of " +
+               $"AgentControl supports (up to {RepoPin.CurrentSchemaVersion}). Update AgentControl to work with " +
+               "this repo; the pin file was not changed.")
+    {
+        SchemaVersion = schemaVersion;
+    }
+
+    /// <summary>
+    ///     Gets the schema version the pin file declares.
+    /// </summary>
+    public int SchemaVersion { get; }
+}
+
+/// <summary>
 ///     Reads and writes the per-repo <c>.agentcontrol.json</c> pin file at a repo's root.
 /// </summary>
 /// <remarks>
+///     <para>
+///     The store understands two schema versions. Version 1 (no <c>SchemaVersion</c> or
+///     <c>Source</c> property) predates configurable sources and is read as a pin to the source
+///     named <see cref="RepoPin.LegacySourceAlias"/>; version 2 adds <c>SchemaVersion</c> and
+///     <c>Source</c> and is what <see cref="Save"/> always writes. A file declaring a newer schema
+///     than <see cref="RepoPin.CurrentSchemaVersion"/> is rejected with
+///     <see cref="UnsupportedPinSchemaException"/> by both <see cref="Load"/> and <see cref="Save"/>,
+///     so an older AgentControl never misreads - or clobbers - a file written by a newer one. JSON
+///     properties this version does not know are preserved on rewrite, whether or not the caller
+///     loaded the pin first.
+///     </para>
+///     <para>
 ///     Stateless and thread-safe: every member is a pure function of its parameters plus the
 ///     filesystem. Uses <see cref="PathHelpers.SafePathCombine"/> to construct the pin file path
 ///     so the repo root cannot be escaped via a malformed root path.
+///     </para>
 /// </remarks>
 internal static class RepoPinStore
 {
@@ -39,18 +77,27 @@ internal static class RepoPinStore
     private const string PinFileName = ".agentcontrol.json";
 
     /// <summary>
-    ///     JSON serialization options shared by <see cref="Load"/> and <see cref="Save"/>.
+    ///     JSON serialization options shared by <see cref="Load"/> and <see cref="Save"/>: indented
+    ///     output, and case-insensitive reading so hand-edited camelCase names are accepted.
     /// </summary>
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNameCaseInsensitive = true
+    };
 
     /// <summary>
     ///     Loads the <see cref="RepoPin"/> for the repo at <paramref name="repoRoot"/>, or
     ///     <see langword="null"/> if the repo has no pin file yet (never synced).
     /// </summary>
     /// <param name="repoRoot">Absolute path to the repository root.</param>
-    /// <returns>The parsed pin, or <see langword="null"/> when no pin file exists.</returns>
+    /// <returns>The parsed pin, or <see langword="null"/> when no pin file exists. A version 1 pin
+    ///     (schema older than 2) is returned with <see cref="RepoPin.Source"/> set to
+    ///     <see cref="RepoPin.LegacySourceAlias"/>.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> is
     ///     <see langword="null"/>.</exception>
+    /// <exception cref="UnsupportedPinSchemaException">Thrown when the pin file declares a schema
+    ///     version newer than <see cref="RepoPin.CurrentSchemaVersion"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the pin file exists but cannot be
     ///     read or contains invalid JSON.</exception>
     public static RepoPin? Load(string repoRoot)
@@ -63,25 +110,56 @@ internal static class RepoPinStore
             return null;
         }
 
+        RepoPin? pin;
         try
         {
             var json = File.ReadAllText(filePath);
-            return JsonSerializer.Deserialize<RepoPin>(json, JsonOptions);
+            pin = JsonSerializer.Deserialize<RepoPin>(json, JsonOptions);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             throw new InvalidOperationException($"Failed to load pin file '{filePath}': {ex.Message}", ex);
         }
+
+        if (pin is null)
+        {
+            return null;
+        }
+
+        // Never interpret a file written by a newer schema - its fields may mean something else
+        if (pin.SchemaVersion > RepoPin.CurrentSchemaVersion)
+        {
+            throw new UnsupportedPinSchemaException(filePath, pin.SchemaVersion);
+        }
+
+        // A pin written before sources existed names none: it belongs to the legacy "Default"
+        // source (and only that source - there is no guessing among several)
+        if (pin.SchemaVersion < RepoPin.CurrentSchemaVersion && string.IsNullOrWhiteSpace(pin.Source))
+        {
+            pin.Source = RepoPin.LegacySourceAlias;
+        }
+
+        return pin;
     }
 
     /// <summary>
     ///     Writes the <see cref="RepoPin"/> for the repo at <paramref name="repoRoot"/>, creating
-    ///     or overwriting the <c>.agentcontrol.json</c> file.
+    ///     or overwriting the <c>.agentcontrol.json</c> file as schema version
+    ///     <see cref="RepoPin.CurrentSchemaVersion"/>.
     /// </summary>
     /// <param name="repoRoot">Absolute path to the repository root. Must already exist.</param>
-    /// <param name="pin">The pin to persist.</param>
+    /// <param name="pin">The pin to persist. Its <see cref="RepoPin.SchemaVersion"/> is set to the
+    ///     current version, and JSON properties found in an existing file that this version does
+    ///     not model are merged into <see cref="RepoPin.ExtensionData"/> (the pin's own values
+    ///     win), so unknown fields survive the rewrite.</param>
+    /// <remarks>
+    ///     The file is replaced atomically (written to a temporary file, then moved over the pin
+    ///     file) so a failure never leaves a half-written pin.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> or
     ///     <paramref name="pin"/> is <see langword="null"/>.</exception>
+    /// <exception cref="UnsupportedPinSchemaException">Thrown when the existing file declares a
+    ///     newer schema; the file is left untouched.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the pin file cannot be written.</exception>
     public static void Save(string repoRoot, RepoPin pin)
     {
@@ -89,15 +167,79 @@ internal static class RepoPinStore
         ArgumentNullException.ThrowIfNull(pin);
 
         var filePath = PathHelpers.SafePathCombine(repoRoot, PinFileName);
+        var temporaryPath = filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
 
         try
         {
+            // Look at what is already there first: refuse to clobber a newer schema, and carry
+            // over any unknown properties so another version's fields are not stripped
+            MergeExistingFile(filePath, pin);
+            pin.SchemaVersion = RepoPin.CurrentSchemaVersion;
+
             var json = JsonSerializer.Serialize(pin, JsonOptions);
-            File.WriteAllText(filePath, json);
+            File.WriteAllText(temporaryPath, json);
+            File.Move(temporaryPath, filePath, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new InvalidOperationException($"Failed to save pin file '{filePath}': {ex.Message}", ex);
+        }
+        finally
+        {
+            // A successful move leaves nothing behind; remove the temporary file after a failure
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Inspects an existing pin file before it is overwritten: rejects a newer schema and merges
+    ///     its unknown properties into the pin about to be written.
+    /// </summary>
+    /// <param name="filePath">Path of the pin file.</param>
+    /// <param name="pin">The pin about to be written; receives the unknown properties.</param>
+    /// <exception cref="UnsupportedPinSchemaException">Thrown when the existing file declares a
+    ///     newer schema version.</exception>
+    private static void MergeExistingFile(string filePath, RepoPin pin)
+    {
+        if (!File.Exists(filePath))
+        {
+            return;
+        }
+
+        // An existing file that cannot be parsed is corrupt: overwriting it is the repair, so it
+        // contributes nothing and blocks nothing
+        RepoPin? existing;
+        try
+        {
+            existing = JsonSerializer.Deserialize<RepoPin>(File.ReadAllText(filePath), JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        if (existing is null)
+        {
+            return;
+        }
+
+        if (existing.SchemaVersion > RepoPin.CurrentSchemaVersion)
+        {
+            throw new UnsupportedPinSchemaException(filePath, existing.SchemaVersion);
+        }
+
+        if (existing.ExtensionData is null)
+        {
+            return;
+        }
+
+        pin.ExtensionData ??= [];
+        foreach (var (name, value) in existing.ExtensionData)
+        {
+            pin.ExtensionData.TryAdd(name, value);
         }
     }
 }

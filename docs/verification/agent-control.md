@@ -48,6 +48,9 @@ supported platform with no additional environment setup
   the real UI.
 - No test depends on a real git installation, a real agentic CLI tool, or the developer's
   actual settings/log folders.
+- Several package sources can be configured and carried forward from the legacy setting, a NuGet
+  folder source supplies packages applied like zip packages, and a repo pin is only ever resolved
+  against the source it names.
 
 ## Test Scenarios
 
@@ -166,3 +169,28 @@ exposing UI Automation identifiers. This scenario is tested by
 the .NET 10 runtime; a non-empty, non-null version string is returned, proving the tool runs
 correctly on .NET 10. This scenario is tested by `Program_Version_ReturnsNonEmptyString`,
 covering `AgentControl-Platform-Net10`.
+
+**AgentControl_MultipleSources_SettingsRoundTripAndLegacyMigration**: Settings holding several
+sources are saved and loaded back with every field intact, and a legacy settings file that holds
+only the single package-source folder is loaded as one zip source named `Default`, proving the tool
+supports several configured sources and carries the earlier setup forward. This is verified at unit
+level because no end-to-end test configures several sources yet (the limitation is disclosed in the
+requirement). This scenario is tested by `SettingsStore_SaveThenLoad_RoundTripsAllFields` and
+`SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource`, covering
+`AgentControl-System-MultipleSources`.
+
+**AgentControl_NuGetSources_FolderFeed_AppliesPackageWithoutTouchingRepoNuGetConfig**: A repo is
+given a package chosen from a real NuGet folder feed; the managed folders, release notes, and pin
+are produced as for a zip package, and listing and acquiring packages never reads or writes a
+`nuget.config` in the repo or the current directory. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes`
+and `NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig`, covering
+`AgentControl-System-NuGetSources`.
+
+**AgentControl_SourcePinIntegrity_PinBoundToSource_NoSubstitution**: With the same package id
+offered by two sources, a pin to the second source resolves only against it and the first source
+is never contacted; a pin naming a source that is not configured gives an error state for the repo
+and offers no upgrade from any other source. This scenario is tested by
+`PackageSourceRegistry_PinToSourceB_SamePackageIdAtBothSources_OnlyBIsContacted` and
+`RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
+covering `AgentControl-System-SourcePinIntegrity`.

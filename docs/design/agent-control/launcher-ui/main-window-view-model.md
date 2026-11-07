@@ -88,7 +88,11 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
 - *Preconditions*: `updated` is not null.
 - *Postconditions*: The live settings instance is replaced (preserving the existing recent-
   repos list, since `SettingsWindowViewModel` never owns it), persisted, the shared
-  `PackageVersionCache` is invalidated, and every card's cheap refresh re-runs. A present card
+  `PackageVersionCache` is invalidated for each package source that was edited or removed (the
+  sources before and after are compared by alias and by `PackageSourceDefinition.IsEquivalentTo`;
+  unchanged sources keep their cached results)
+  (`AgentControl-MainWindowViewModel-InvalidateChangedSources`), and every card's cheap refresh
+  re-runs. A present card
   is additionally given a fresh Git status check (via `RefreshDirtyStatus`) when either it
   reappeared (was missing, now present) during this call, so it is not left showing a "not yet
   checked" state indefinitely, or `GitExecutablePath` itself changed, so a clean/dirty result
@@ -123,7 +127,7 @@ succeeding.
   newly-added repo.
 - **SettingsStore** (`Settings` subsystem) — `SaveSettings` persists the live `AppSettings`.
 - **PackageVersionCache** (`AgentPackageManagement` subsystem) — shared across all cards;
-  invalidated by `ApplySettings` when the package source may have changed.
+  invalidated per source by `ApplySettings` when a package source was edited or removed.
 
 #### Callers
 

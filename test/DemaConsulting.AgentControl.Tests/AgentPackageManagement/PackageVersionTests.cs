@@ -66,9 +66,14 @@ public class PackageVersionTests
     [Theory]
     [InlineData("")]
     [InlineData("1.2")]
-    [InlineData("1.2.3.4")]
+    [InlineData("1.2.3.4.5")]
+    [InlineData("1.2.3.")]
+    [InlineData("1.2.3.x")]
     [InlineData("a.b.c")]
     [InlineData("1.2.-")]
+    [InlineData("1.2.3+")]
+    [InlineData("1.2.3+a..b")]
+    [InlineData("1.2.3+a_b")]
     [InlineData(null)]
     public void PackageVersion_TryParse_MalformedInput_ReturnsFalse(string? input)
     {
@@ -78,6 +83,164 @@ public class PackageVersionTests
         // Assert: parsing fails cleanly, no exception, and no version is produced
         Assert.False(parsed);
         Assert.Null(version);
+    }
+
+    /// <summary>
+    ///     Test that an optional fourth numeric segment is parsed into the revision, and that its
+    ///     presence ranks the version after the same three-part version.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_TryParse_FourPartVersion_ParsesRevisionAndOrdersAfterThreePart()
+    {
+        // Act: parse a four-part version and its three-part base
+        Assert.True(PackageVersion.TryParse("1.2.3.4", out var fourPart));
+        Assert.True(PackageVersion.TryParse("1.2.3", out var threePart));
+        Assert.NotNull(fourPart);
+        Assert.NotNull(threePart);
+
+        // Assert: the revision is captured, defaults to zero when absent, and orders after patch
+        Assert.Equal(4, fourPart.Revision);
+        Assert.Equal(0, threePart.Revision);
+        Assert.True(fourPart > threePart);
+        Assert.Equal("1.2.3.4", fourPart.ToString());
+    }
+
+    /// <summary>
+    ///     Test that a zero fourth segment is the same version as the three-part form, as NuGet
+    ///     treats <c>1.0.0.0</c> and <c>1.0.0</c>.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_Equals_ZeroRevisionAndThreePart_AreEqualWithSameHashCode()
+    {
+        // Arrange
+        Assert.True(PackageVersion.TryParse("1.0.0.0", out var fourPart));
+        Assert.True(PackageVersion.TryParse("1.0.0", out var threePart));
+        Assert.NotNull(fourPart);
+
+        // Act / Assert: equal, with matching hash codes, but each keeps its own original text
+        Assert.NotNull(threePart);
+        Assert.Equal(threePart, fourPart);
+        Assert.Equal(threePart.GetHashCode(), fourPart.GetHashCode());
+        Assert.Equal("1.0.0.0", fourPart.Original);
+    }
+
+    /// <summary>
+    ///     Test that build metadata is captured and preserved in the original text, but ignored by
+    ///     comparison, equality and hashing.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_TryParse_BuildMetadata_PreservedButIgnoredInComparison()
+    {
+        // Arrange: the same version with different metadata, and one without
+        Assert.True(PackageVersion.TryParse("1.2.3+build.5", out var withMetadata));
+        Assert.True(PackageVersion.TryParse("1.2.3+other", out var otherMetadata));
+        Assert.True(PackageVersion.TryParse("1.2.3", out var plain));
+        Assert.NotNull(withMetadata);
+        Assert.NotNull(otherMetadata);
+
+        // Assert: metadata and original text are kept, yet all three are the same version
+        Assert.Equal("build.5", withMetadata.Metadata);
+        Assert.Equal("1.2.3+build.5", withMetadata.Original);
+        Assert.Equal("1.2.3+build.5", withMetadata.ToString());
+        Assert.Equal(0, withMetadata.CompareTo(plain));
+        Assert.Equal(withMetadata, otherMetadata);
+        Assert.Equal(withMetadata.GetHashCode(), otherMetadata.GetHashCode());
+    }
+
+    /// <summary>
+    ///     Test that prerelease, revision and metadata combine, with the prerelease still ranking
+    ///     below the release.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_TryParse_PrereleaseRevisionAndMetadata_AllParsed()
+    {
+        // Act
+        Assert.True(PackageVersion.TryParse("1.2.3.4-beta.1+sha.abc", out var version));
+        Assert.True(PackageVersion.TryParse("1.2.3.4", out var release));
+
+        // Assert
+        Assert.NotNull(version);
+        Assert.Equal(4, version.Revision);
+        Assert.Equal("beta.1", version.Prerelease);
+        Assert.Equal("sha.abc", version.Metadata);
+        Assert.True(version < release);
+    }
+
+    /// <summary>
+    ///     Test that the strict parser used for zip file names still rejects the extended forms
+    ///     (a fourth segment or build metadata), keeping zip name/version splitting unchanged.
+    /// </summary>
+    [Theory]
+    [InlineData("1.2.3.4")]
+    [InlineData("1.2.3+build")]
+    [InlineData("1.2.3-beta+build")]
+    [InlineData("1.2")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void PackageVersion_TryParseStrict_ExtendedOrMalformedForms_ReturnsFalse(string? input)
+    {
+        // Act
+        var parsed = PackageVersion.TryParseStrict(input, out var version);
+
+        // Assert: strict parsing accepts only MAJOR.MINOR.PATCH[-PRERELEASE]
+        Assert.False(parsed);
+        Assert.Null(version);
+    }
+
+    /// <summary>
+    ///     Test that the strict parser accepts the plain release and prerelease forms.
+    /// </summary>
+    [Theory]
+    [InlineData("1.2.3")]
+    [InlineData("1.2.3-beta.1")]
+    public void PackageVersion_TryParseStrict_ThreePartForms_ReturnsTrue(string input)
+    {
+        // Act
+        var parsed = PackageVersion.TryParseStrict(input, out var version);
+
+        // Assert
+        Assert.True(parsed);
+        Assert.NotNull(version);
+        Assert.Equal(input, version.ToString());
+    }
+
+    /// <summary>
+    ///     Parity test: for a range of versions (including four-part, prerelease, and metadata
+    ///     forms) the comparison and equality results agree with
+    ///     <see cref="global::NuGet.Versioning.NuGetVersion"/>, so ordering a NuGet source's versions
+    ///     here picks the same "latest" NuGet would.
+    /// </summary>
+    /// <remarks>
+    ///     Prerelease labels differing only by letter case are deliberately excluded: this type
+    ///     follows semver (case-sensitive) while NuGet compares labels case-insensitively.
+    /// </remarks>
+    [Fact]
+    public void PackageVersion_CompareTo_VersionsAgreeWithNuGetVersionOrdering()
+    {
+        // Arrange: a spread of versions exercising every precedence rule
+        string[] versions =
+        [
+            "0.0.1", "0.1.0", "1.0.0", "1.0.0.0", "1.0.0.1", "1.0.1", "1.0.0-alpha", "1.0.0-alpha.1",
+            "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0+build1",
+            "1.0.0+build2", "1.0.0-beta+meta", "1.2.3", "1.2.3.4", "2.0.0", "10.0.0", "2.0.0-rc.1", "1.10.0",
+            "1.9.0"
+        ];
+
+        // Act / Assert: every ordered pair compares with the same sign as NuGet's own ordering
+        foreach (var left in versions)
+        {
+            foreach (var right in versions)
+            {
+                Assert.True(PackageVersion.TryParse(left, out var ours1));
+                Assert.True(PackageVersion.TryParse(right, out var ours2));
+                var nuget1 = global::NuGet.Versioning.NuGetVersion.Parse(left);
+                var nuget2 = global::NuGet.Versioning.NuGetVersion.Parse(right);
+                Assert.Equal(
+                    Math.Sign(nuget1.CompareTo(nuget2)),
+                    Math.Sign(ours1!.CompareTo(ours2)));
+                Assert.Equal(nuget1.Equals(nuget2), ours1.Equals(ours2));
+            }
+        }
     }
 
     /// <summary>

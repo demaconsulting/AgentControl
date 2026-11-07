@@ -7,15 +7,16 @@
 #   the RepoPin.cs data record, which is folded into this subsystem-level description as it
 #   has no dedicated test file
 # - Subsystem requirements describe the observable behavior of persisting a repo's pinned
-#   package name/version and whether the user has declined the AGENTS.md template offer
+#   package name/version/source and whether the user has declined the AGENTS.md template offer
 
 sections:
   - title: RepoConfig Subsystem Requirements
     requirements:
       - id: AgentControl-RepoConfig-PinPersistence
         title: >-
-          The RepoConfig subsystem shall persist a repo's pinned package name and exact
-          version in a per-repo pin file, and shall report no pin for a repo that has none.
+          The RepoConfig subsystem shall persist a repo's pinned package name, exact version
+          and source alias in a per-repo pin file, and shall report no pin for a repo that has
+          none.
         justification: |
           Per architecture.md's mandatory version-pinning decision, the pinned package/version
           must survive across application restarts and be readable per-repo without any
@@ -40,3 +41,26 @@ sections:
         tests:
           - RepoPinStore_SaveThenLoad_AgentsMdTemplateDeclinedTrue_RoundTrips
           - RepoPinStore_Load_LegacyPinFileMissingAgentsMdTemplateDeclinedField_DefaultsToFalse
+
+      - id: AgentControl-RepoConfig-SourcePin
+        title: >-
+          The RepoConfig subsystem shall record the alias of the package source in a repo's
+          pin, shall read a pin written before sources existed as a pin to the source named
+          Default, shall preserve pin-file properties it does not understand when rewriting,
+          and shall neither interpret nor overwrite a pin file written by a newer version of
+          the tool.
+        justification: |
+          Binding a pin to its source is what lets every later operation resolve the pin at the
+          right source only; existing pins must keep working, a pin file may be shared with
+          other tool versions, and an older tool must never damage a file it does not
+          understand.
+        children:
+          - AgentControl-RepoPinStore-SourceAlias
+          - AgentControl-RepoPinStore-LegacyV1
+          - AgentControl-RepoPinStore-PreserveUnknownFields
+          - AgentControl-RepoPinStore-RejectNewerSchema
+        tests:
+          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion2AndRoundTripsSource
+          - RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource
+          - RepoPinStore_Save_UnknownProperties_ArePreserved
+          - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage

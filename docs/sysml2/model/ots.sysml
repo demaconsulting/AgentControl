@@ -18,4 +18,10 @@ package AgentControl {
 
         comment reqRef /* Requirements: docs/reqstream/ots/serilog.yaml */
     }
+
+    part def NuGetCaching {
+        doc /* DemaConsulting.NuGet.Caching library backing the NuGet package folder source provider: lists package versions and unpacks a chosen version into a package cache. */
+
+        comment reqRef /* Requirements: docs/reqstream/ots/nuget-caching.yaml */
+    }
 }

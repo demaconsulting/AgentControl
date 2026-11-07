@@ -126,8 +126,9 @@ sections:
 
       - id: AgentControl-System-PinFile
         title: >-
-          The tool shall persist each repo's pinned agent package name and exact version, so
-          that upgrades are an explicit user action rather than an automatic version float.
+          The tool shall persist each repo's pinned agent package name, exact version, and
+          package source, so that upgrades are an explicit user action rather than an
+          automatic version float.
         tags: [system]
         justification: |
           Per architecture.md's "Mandatory version pinning" decision, package upgrades can
@@ -161,6 +162,74 @@ sections:
           - RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent
           - RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent
           - RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile
+
+      - id: AgentControl-System-MultipleSources
+        title: >-
+          The tool shall support several configured agent package sources at once, each
+          identified by a unique alias and being either a folder of zip packages or a NuGet
+          package folder, shall persist them in the user's settings, and shall carry forward a
+          previously configured single package-source folder as a source named Default.
+        tags: [system]
+        justification: |
+          Organizations distribute agent packages in more than one place (a share of zip files,
+          a NuGet feed folder, later a server), so a developer needs more than one source
+          configured side by side without losing the single-folder setup they already have.
+        children:
+          - AgentControl-Settings-PackageSources
+          - AgentControl-AgentPackageManagement-SourceDefinitions
+          - AgentControl-AgentPackageManagement-ZipFolderSource
+        tests:
+          # No FlaUI end-to-end test configures several sources yet (the Settings window still
+          # edits only the Default source; UiTests seed settings through TestSettingsWriter's
+          # legacy single path, which exercises the Default-source migration). This system
+          # requirement is therefore verified via the underlying unit tests - a disclosed
+          # granularity limitation, not a fabricated end-to-end claim.
+          - SettingsStore_SaveThenLoad_RoundTripsAllFields
+          - SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource
+
+      - id: AgentControl-System-NuGetSources
+        title: >-
+          The tool shall obtain agent packages from a NuGet package folder source, offering the
+          configured package IDs with their available versions and applying a chosen version's
+          content to a repo exactly as it does a zip package, without reading or writing the
+          repo's NuGet configuration.
+        tags: [system]
+        justification: |
+          Teams that already publish internal packages to a NuGet feed folder can deliver agent
+          packages the same way; AgentControl must not leave any trace of its sources in the
+          target repo, whose own NuGet configuration belongs to the repo's owners.
+        children:
+          - AgentControl-AgentPackageManagement-NuGetFolderSource
+          - AgentControl-RepoSync-SyncFromFolderPackage
+          - AgentControl-OTS-NuGetCaching-ListAndCache
+        tests:
+          # Verified at unit level through the real NuGet folder-feed provider and the card
+          # view model driving it; no FlaUI test drives a NuGet source yet (see
+          # AgentControl-System-MultipleSources for the same disclosed limitation).
+          - RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes
+          - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig
+
+      - id: AgentControl-System-SourcePinIntegrity
+        title: >-
+          The tool shall record in each repo's pin the alias of the source its package came
+          from and shall resolve that pin only against that source; when the source is not
+          configured the tool shall report an error for that repo and shall never substitute
+          another source.
+        tags: [system]
+        justification: |
+          A package name is not unique across sources, so resolving a pin by name alone could
+          install a different source's package under the repo's pin (a dependency-confusion
+          attack, or just an accident). Pins must therefore be bound to their source, and a
+          missing source must stop the operation rather than be quietly replaced.
+        children:
+          - AgentControl-RepoConfig-SourcePin
+          - AgentControl-AgentPackageManagement-SourceResolution
+          - AgentControl-LauncherUI-SourceAwareActions
+        tests:
+          # Verified at unit level (see AgentControl-System-MultipleSources for the disclosed
+          # limitation that no FlaUI test configures several sources yet).
+          - PackageSourceRegistry_PinToSourceB_SamePackageIdAtBothSources_OnlyBIsContacted
+          - RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
 
       - id: AgentControl-System-Settings
         title: >-

@@ -1,0 +1,37 @@
+---
+# Software Unit Requirements for the ZipFolderSourceProvider Class
+#
+# ZipFolderSourceProvider serves a folder of {name}-{semver}.zip package files through the
+# common package-source contract, with the same discovery behavior as PackageSource.
+
+sections:
+  - title: ZipFolderSourceProvider Unit Requirements
+    requirements:
+      - id: AgentControl-ZipFolderSourceProvider-ListAndAcquire
+        title: >-
+          The ZipFolderSourceProvider class shall list the package names and the versions of a
+          named package found in its folder of zip packages, labeling each with its source
+          alias, report a folder that does not exist, and supply a discovered package's content
+          as a package reader.
+        justification: |
+          The zip folder is the original source type; it must keep discovering packages by the
+          same file-name rules while taking part in the multi-source model, and must make its
+          content available to the common extraction sequence.
+        tests:
+          - ZipFolderSourceProvider_ListVersions_MixedFolder_ReturnsMatchingPackagesStampedWithAlias
+          - ZipFolderSourceProvider_ListVersions_ExtendedVersionFileNames_AreSkipped
+          - ZipFolderSourceProvider_ListPackageIds_MixedFolder_ReturnsDistinctSortedNames
+          - ZipFolderSourceProvider_List_FolderDoesNotExist_ThrowsDirectoryNotFoundException
+          - ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReturnsReaderOverZipRoot
+
+      - id: AgentControl-ZipFolderSourceProvider-AcquireOnlyFromOwnSource
+        title: >-
+          The ZipFolderSourceProvider class shall refuse to supply the content of a package
+          that was discovered at a different source or whose zip is outside its own folder.
+        justification: |
+          Content must only ever come from the source whose alias the pin names; a package
+          object that names another source, or points outside the folder, must not be honored.
+        tests:
+          - ZipFolderSourceProvider_Acquire_PackageFromOtherSource_ThrowsArgumentException
+          - ZipFolderSourceProvider_Acquire_ZipOutsideSourceFolder_ThrowsArgumentException
+          - ZipFolderSourceProvider_Constructor_InvalidDefinition_Throws

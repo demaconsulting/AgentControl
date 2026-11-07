@@ -5,7 +5,9 @@
 `PackageZipExtractor` is verified with unit tests defined in `PackageZipExtractorTests.cs`.
 Every test creates a real temporary repo directory and a real temporary package zip file
 (built with `System.IO.Compression`), so extraction, folder-presence checks, and release-notes
-reading are all exercised against genuine filesystem/zip-archive state.
+reading are all exercised against genuine filesystem/zip-archive state. Because the unit is a
+facade over `PackageContentExtractor` (see its verification design), these tests also act as the
+regression suite proving the zip behavior is unchanged by the shared implementation.
 
 #### Test Environment
 

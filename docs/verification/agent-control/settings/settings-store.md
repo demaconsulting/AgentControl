@@ -14,6 +14,10 @@ N/A - standard test environment.
 #### Acceptance Criteria
 
 - All unit tests pass with zero failures.
+- Package sources (with all fields) round-trip; a legacy single package-folder path migrates to a
+  Default zip source, loses to a configured source list, and is never written back.
+- The persisted JSON contains no property named like a secret.
+- A save leaves only the settings file, holding the latest content.
 - Settings saved and then loaded again return every field unchanged.
 - Loading with no settings file present returns default settings rather than throwing.
 - Saving creates the configuration directory when it does not yet exist.
@@ -40,3 +44,29 @@ directory does not yet exist creates it, and saving a null settings value throws
 directory resolves to a path under the user's application-data folder. This scenario is
 tested by `SettingsStore_GetDefaultConfigDirectory_ReturnsPathUnderApplicationData`, covering
 `AgentControl-SettingsStore-DefaultDirectory`.
+
+**SettingsStore_SourcesRoundTrip_AllSourceFieldsSurvive**: A zip source and a NuGet source with
+package IDs and trust options survive a save-then-load round trip, as does a recent repo's pinned
+source. This scenario is tested by `SettingsStore_SaveThenLoad_RoundTripsAllFields`, covering
+`AgentControl-SettingsStore-SourcesRoundTrip`.
+
+**SettingsStore_LegacySourceMigration_DefaultZipSourceAndNoLegacyWrite**: A settings file with
+only the legacy path loads with it as the `Default` zip source and the legacy field cleared; when
+both a source list and a legacy path are present the list wins; saving in-memory settings that
+only carry the legacy path writes a `Sources` entry, writes no legacy field, and leaves the
+caller's instance unchanged. This scenario is tested by
+`SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource`,
+`SettingsStore_Load_SourcesAndLegacyPath_SourcesWin`, and
+`SettingsStore_Save_LegacyPackageSourcePath_WritesSourcesNotLegacyField`, covering
+`AgentControl-SettingsStore-LegacySourceMigration`.
+
+**SettingsStore_NoSecretsPersisted_JsonHasNoSecretLikeProperties**: The persisted JSON of settings
+holding a fully populated NuGet server source has no property named like a password, token,
+secret, credential or key. This scenario is tested by
+`SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties`, covering
+`AgentControl-SettingsStore-NoSecretsPersisted`.
+
+**SettingsStore_AtomicSave_LeavesOnlySettingsFileWithLatestContent**: After two saves the
+configuration directory holds exactly the settings file, with the second save's content. This
+scenario is tested by `SettingsStore_Save_RepeatedSaves_LeavesOnlySettingsFileWithLatestContent`,
+covering `AgentControl-SettingsStore-AtomicSave`.

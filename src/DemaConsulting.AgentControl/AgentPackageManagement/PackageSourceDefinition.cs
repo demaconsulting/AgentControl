@@ -1,0 +1,196 @@
+// Copyright (c) DEMA Consulting
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+
+namespace DemaConsulting.AgentControl.AgentPackageManagement;
+
+/// <summary>
+///     A user-configured agent package source: where packages come from and how they are
+///     fetched, persisted in the per-user settings file.
+/// </summary>
+/// <remarks>
+///     <para>
+///     A definition is identified by its <see cref="Alias"/>, which repos record in their pin so a
+///     pinned package is always resolved against the source it came from. Aliases are unique
+///     case-insensitively within a settings file and are not editable once a source exists.
+///     </para>
+///     <para>
+///     By design this type has no password, token, key, or any other credential member: sources
+///     that need credentials obtain them from the user or from the operating system's own
+///     mechanisms at the moment of use and never persist them here. A reflection test guards that
+///     property. <see cref="AllowInsecureHttp"/>, <see cref="RequireSignedPackages"/> and
+///     <see cref="SignerFingerprint"/> are persisted now so settings files stay compatible; their
+///     enforcement belongs to the NuGet server and package-signing work, and local-folder sources
+///     ignore them. Mutable with public getters/setters so
+///     <see cref="System.Text.Json.JsonSerializer"/> round-trips it without custom converters. Not
+///     thread-safe.
+///     </para>
+/// </remarks>
+internal sealed partial class PackageSourceDefinition
+{
+    /// <summary>
+    ///     The alias given to the single source migrated from the legacy single-folder setting, and
+    ///     the alias a pre-source-aware pin file is resolved against.
+    /// </summary>
+    public const string DefaultAlias = "Default";
+
+    /// <summary>
+    ///     Maximum length of an alias, chosen to keep aliases readable in pins and on cards.
+    /// </summary>
+    private const int MaxAliasLength = 64;
+
+    /// <summary>
+    ///     Gets or sets the unique, case-insensitive name of this source, recorded in each repo's
+    ///     pin file.
+    /// </summary>
+    public string Alias { get; set; } = string.Empty;
+
+    /// <summary>
+    ///     Gets or sets the package format of this source.
+    /// </summary>
+    public PackageSourceType Type { get; set; }
+
+    /// <summary>
+    ///     Gets or sets the source location: a rooted folder or UNC path, or - for NuGet sources
+    ///     - an absolute <c>http</c>/<c>https</c> feed URL.
+    /// </summary>
+    public string Location { get; set; } = string.Empty;
+
+    /// <summary>
+    ///     Gets or sets the package IDs offered from a NuGet source (a NuGet feed cannot be
+    ///     enumerated cheaply, so the user names the packages of interest); unused by zip
+    ///     sources, which discover their packages from the folder contents.
+    /// </summary>
+    public List<string> PackageIds { get; set; } = [];
+
+    /// <summary>
+    ///     Gets or sets whether a plain <c>http</c> server location is permitted. Defaults to
+    ///     <see langword="false"/>. Persisted now; enforced by the NuGet server work.
+    /// </summary>
+    public bool AllowInsecureHttp { get; set; }
+
+    /// <summary>
+    ///     Gets or sets whether packages from this source must be validly signed. Defaults to
+    ///     <see langword="false"/>. Persisted now; enforced by the package-signing work.
+    /// </summary>
+    public bool RequireSignedPackages { get; set; }
+
+    /// <summary>
+    ///     Gets or sets the expected SHA-256 fingerprint of the package author's signing
+    ///     certificate, or <see langword="null"/> for none. Not a secret: it is a trust decision
+    ///     owned by the user and so lives here rather than in a repo. Persisted now; enforced by
+    ///     the package-signing work.
+    /// </summary>
+    public string? SignerFingerprint { get; set; }
+
+    /// <summary>
+    ///     Gets whether <see cref="Location"/> is a filesystem folder or a remote server, derived
+    ///     from the location text: an absolute <c>http</c>/<c>https</c> URI is a server;
+    ///     everything else (rooted, drive-letter, or UNC path) is a folder.
+    /// </summary>
+    /// <remarks>
+    ///     Derived rather than persisted so the location text is the single source of truth.
+    ///     Not serialized.
+    /// </remarks>
+    [JsonIgnore]
+    public PackageSourceLocationKind LocationKind =>
+        Uri.TryCreate(Location, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            ? PackageSourceLocationKind.Server
+            : PackageSourceLocationKind.Folder;
+
+    /// <summary>
+    ///     Gets the pattern of characters an alias may contain: a letter or digit followed by any
+    ///     number of letters, digits, spaces, dots, underscores or hyphens (length and trailing
+    ///     characters are checked separately by <see cref="IsValidAlias"/>).
+    /// </summary>
+    /// <returns>The compiled alias pattern.</returns>
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9 ._-]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex AliasPattern();
+
+    /// <summary>
+    ///     Determines whether <paramref name="alias"/> is acceptable as a source alias.
+    /// </summary>
+    /// <param name="alias">The candidate alias; may be <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> if the alias is 1-64 characters, starts with a letter or
+    ///     digit, contains only letters, digits, spaces, dots, underscores and hyphens, and has no
+    ///     trailing space or dot (so it is safe to show, to store in a pin, and to use as part of
+    ///     a folder name).</returns>
+    public static bool IsValidAlias(string? alias) =>
+        !string.IsNullOrEmpty(alias) &&
+        alias.Length <= MaxAliasLength &&
+        !alias.EndsWith(' ') &&
+        !alias.EndsWith('.') &&
+        AliasPattern().IsMatch(alias);
+
+    /// <summary>
+    ///     Creates the source that a legacy single package-folder setting migrates to.
+    /// </summary>
+    /// <param name="folder">The legacy package source folder.</param>
+    /// <returns>A zip source with alias <see cref="DefaultAlias"/> at <paramref name="folder"/>.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="folder"/> is
+    ///     <see langword="null"/>.</exception>
+    public static PackageSourceDefinition CreateDefaultZip(string folder)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+        return new PackageSourceDefinition { Alias = DefaultAlias, Type = PackageSourceType.Zip, Location = folder };
+    }
+
+    /// <summary>
+    ///     Creates an independent copy so an editor can change a working copy without mutating
+    ///     the live settings.
+    /// </summary>
+    /// <returns>A deep copy of this definition.</returns>
+    public PackageSourceDefinition Clone() => new()
+    {
+        Alias = Alias,
+        Type = Type,
+        Location = Location,
+        PackageIds = [.. PackageIds],
+        AllowInsecureHttp = AllowInsecureHttp,
+        RequireSignedPackages = RequireSignedPackages,
+        SignerFingerprint = SignerFingerprint
+    };
+
+    /// <summary>
+    ///     Determines whether another definition would make a source behave identically: same
+    ///     alias (case-insensitively), type, location, package IDs and trust options.
+    /// </summary>
+    /// <param name="other">The definition to compare with.</param>
+    /// <returns><see langword="true"/> if nothing that affects what the source offers or how it is
+    ///     fetched differs. Used to decide whether cached results for the source are still
+    ///     valid after settings change.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="other"/> is
+    ///     <see langword="null"/>.</exception>
+    public bool IsEquivalentTo(PackageSourceDefinition other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        return string.Equals(Alias, other.Alias, StringComparison.OrdinalIgnoreCase) &&
+               Type == other.Type &&
+               string.Equals(Location, other.Location, StringComparison.Ordinal) &&
+               PackageIds.SequenceEqual(other.PackageIds, StringComparer.Ordinal) &&
+               AllowInsecureHttp == other.AllowInsecureHttp &&
+               RequireSignedPackages == other.RequireSignedPackages &&
+               string.Equals(SignerFingerprint, other.SignerFingerprint, StringComparison.Ordinal);
+    }
+}

@@ -112,7 +112,7 @@ by `RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue`,
 raised with the configured source path, the selection window populates versions descending
 and defaults to latest, confirming raises the selected pair, and applying the selected package
 updates the pin, extracts the files, and raises release-notes-ready. This scenario is tested
-by `RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourcePath`,
+by `RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias`,
 `SelectPackageWindowViewModel_SelectPackageName_PopulatesVersionsDescendingAndDefaultsToLatest`,
 `SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithSelectedPair`, and
 `RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady`,
@@ -159,3 +159,15 @@ duplicates, no empty fields, and the expected display format) has direct unit co
 `ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense`,
 and `DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat`, covering
 `AgentControl-LauncherUI-About`.
+
+**LauncherUI_SourceAwareActions_UnitTestsCoverPinBindingAndTargetedInvalidation**: Source-aware
+select/upgrade/launch-sync behavior is verified by the `RepoCardViewModel`,
+`SettingsWindowViewModel`, `MainWindowViewModel`, and `SelectPackageWindowViewModel` unit tests
+(see their unit verification designs), with
+`RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade` and
+`RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent`
+cited directly at the subsystem level, covering `AgentControl-LauncherUI-SourceAwareActions`
+(children: `AgentControl-RepoCardViewModel-SourceAwareness`,
+`AgentControl-SettingsWindowViewModel-DefaultSource`,
+`AgentControl-MainWindowViewModel-InvalidateChangedSources`,
+`AgentControl-SelectPackageWindowViewModel-SourceScoped`).

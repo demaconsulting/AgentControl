@@ -23,6 +23,7 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - Search filtering and sort ordering produce the documented result for every tested input.
 - Applying updated settings preserves the recent-repos list and invalidates the shared
   package-version cache.
+- Applying settings drops cached package results only for sources that were edited or removed.
 
 #### Test Scenarios
 
@@ -95,3 +96,11 @@ tracked repo. This scenario is tested by
 `MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus`, and
 `MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus`,
 covering `AgentControl-MainWindowViewModel-ApplySettings`.
+
+**MainWindowViewModel_InvalidateChangedSources_OnlyEditedOrRemovedSourcesAreInvalidated**:
+`ApplySettings` replaces one package source's location; a card pinned to the unchanged source
+keeps its cached upgrade answer even after that source's folder has disappeared (an invalidated
+cache would fail to read it and report no upgrade), while a changed source is observed afresh. This
+scenario is tested by `MainWindowViewModel_ApplySettings_OnlyEditedSourceIsInvalidated` and
+`MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache`, covering
+`AgentControl-MainWindowViewModel-InvalidateChangedSources`.

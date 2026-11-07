@@ -28,18 +28,27 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     the latest), per architecture.md's "Initial package selection" decision.
 /// </summary>
 /// <remarks>
-///     All filesystem access is routed through the shared, session-scoped
-///     <see cref="AgentPackageManagement.PackageVersionCache"/> rather than
-///     <see cref="PackageSource"/> directly, so opening this dialog a second time in the same app
-///     session does not re-scan the filesystem, consistent with architecture.md's caching
-///     strategy. Not thread-safe; every member is expected to be called from the UI thread.
+///     <para>
+///     All source access is routed through the shared, session-scoped
+///     <see cref="AgentPackageManagement.PackageVersionCache"/> rather than a source provider
+///     directly, so opening this dialog a second time in the same app session does not query the
+///     source again, consistent with architecture.md's caching strategy. The dialog lists the
+///     packages of exactly one configured source (<see cref="SourceAlias"/>) and never consults
+///     another.
+///     </para>
+///     <para>
+///     The asynchronous cache is awaited synchronously on a worker thread (the dialog's lists are
+///     populated before it is shown), as the single-source dialog did before; a source-aware,
+///     asynchronous dialog with progress and cancellation is part of the multi-source UI work.
+///     Not thread-safe; every member is expected to be called from the UI thread.
+///     </para>
 /// </remarks>
 internal sealed class SelectPackageWindowViewModel : ViewModelBase
 {
     /// <summary>
-    ///     The configured package-source directory this dialog enumerates names/versions from.
+    ///     The registry that resolves <see cref="SourceAlias"/> to its provider on a cache miss.
     /// </summary>
-    private readonly string _sourceDirectory;
+    private readonly PackageSourceRegistry _registry;
 
     /// <summary>
     ///     The shared, session-scoped package-version cache.
@@ -52,24 +61,40 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
 
     /// <summary>
     ///     Initializes a new <see cref="SelectPackageWindowViewModel"/>, populating
-    ///     <see cref="PackageNames"/> from the configured source via the shared cache.
+    ///     <see cref="PackageNames"/> from the chosen source via the shared cache.
     /// </summary>
-    /// <param name="sourceDirectory">The configured package-source directory to enumerate.</param>
+    /// <param name="registry">The configured sources.</param>
+    /// <param name="sourceAlias">The alias of the source to select a package from.</param>
     /// <param name="cache">The shared, session-scoped package-version cache.</param>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sourceDirectory"/> or
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry"/> or
     ///     <paramref name="cache"/> is <see langword="null"/>.</exception>
-    public SelectPackageWindowViewModel(string sourceDirectory, PackageVersionCache cache)
+    /// <exception cref="ArgumentException">Thrown when <paramref name="sourceAlias"/> is null,
+    ///     empty or whitespace.</exception>
+    /// <exception cref="UnknownSourceException">Thrown when <paramref name="sourceAlias"/> is not
+    ///     configured.</exception>
+    /// <exception cref="DirectoryNotFoundException">Thrown when a folder source does not exist or
+    ///     is unreachable.</exception>
+    public SelectPackageWindowViewModel(PackageSourceRegistry registry, string sourceAlias, PackageVersionCache cache)
     {
-        ArgumentNullException.ThrowIfNull(sourceDirectory);
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceAlias);
         ArgumentNullException.ThrowIfNull(cache);
 
-        _sourceDirectory = sourceDirectory;
+        _registry = registry;
         _cache = cache;
+        SourceAlias = sourceAlias;
 
-        PackageNames = _cache.GetPackageNames(sourceDirectory);
+        PackageNames = Task.Run(() => _cache.GetPackageIdsAsync(_registry, sourceAlias, CancellationToken.None))
+            .GetAwaiter().GetResult();
 
         ConfirmCommand = new RelayCommand(Confirm, () => CanConfirm);
     }
+
+    /// <summary>
+    ///     Gets the alias of the source this dialog lists packages from; reported back with the
+    ///     selection so the pin records it.
+    /// </summary>
+    public string SourceAlias { get; }
 
     /// <summary>
     ///     Gets the distinct package base names discoverable at the configured source.
@@ -94,7 +119,8 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
 
             AvailableVersions = value is null
                 ? []
-                : _cache.GetVersionsDescending(_sourceDirectory, value)
+                : Task.Run(() => _cache.GetVersionsDescendingAsync(_registry, SourceAlias, value, CancellationToken.None))
+                    .GetAwaiter().GetResult()
                     .Select(p => p.Version.ToString())
                     .ToList();
             SelectedVersion = AvailableVersions.Count > 0 ? AvailableVersions[0] : null;

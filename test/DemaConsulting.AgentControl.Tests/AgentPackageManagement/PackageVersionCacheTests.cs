@@ -25,6 +25,11 @@ namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 /// <summary>
 ///     Unit tests for <see cref="PackageVersionCache"/>.
 /// </summary>
+/// <remarks>
+///     Most tests use real zip-folder sources over real temporary directories (so staleness after
+///     deleting the directory proves a cache hit); the multi-source tests use
+///     <see cref="FakePackageSourceProvider"/> so provider call counts can be asserted.
+/// </remarks>
 public sealed class PackageVersionCacheTests : IDisposable
 {
     private readonly List<string> _tempPaths = [];
@@ -34,24 +39,27 @@ public sealed class PackageVersionCacheTests : IDisposable
     ///     directory has since been deleted, rather than re-enumerating the filesystem.
     /// </summary>
     [Fact]
-    public void PackageVersionCache_RepeatedCallSameSource_ReturnsCachedResultWithoutRescanning()
+    public async Task PackageVersionCache_RepeatedCallSameSource_ReturnsCachedResultWithoutRescanning()
     {
         // Arrange: a source directory with a 2.0.0 package
         var sourceDir = CreateTempDirectory();
         CreateFile(sourceDir, "contoso-agents-2.0.0.zip");
+        var registry = CreateRegistry(sourceDir);
         var cache = new PackageVersionCache();
 
         // Act: first call populates the cache, then the directory is deleted, then a second call
-        var firstResult = cache.IsNewerVersionAvailable(sourceDir, "contoso-agents", "1.0.0", out var firstLatest);
+        var first = await cache.IsNewerVersionAvailableAsync(
+            registry, "Default", "contoso-agents", "1.0.0", CancellationToken.None);
         Directory.Delete(sourceDir, recursive: true);
-        var secondResult = cache.IsNewerVersionAvailable(sourceDir, "contoso-agents", "1.0.0", out var secondLatest);
+        var second = await cache.IsNewerVersionAvailableAsync(
+            registry, "Default", "contoso-agents", "1.0.0", CancellationToken.None);
 
         // Assert: both calls return the same cached result, and the deleted directory did not
         // cause the second (cached) call to throw
-        Assert.True(firstResult);
-        Assert.True(secondResult);
-        Assert.Equal("2.0.0", firstLatest?.Version.ToString());
-        Assert.Equal("2.0.0", secondLatest?.Version.ToString());
+        Assert.True(first.IsNewerAvailable);
+        Assert.True(second.IsNewerAvailable);
+        Assert.Equal("2.0.0", first.Latest?.Version.ToString());
+        Assert.Equal("2.0.0", second.Latest?.Version.ToString());
     }
 
     /// <summary>
@@ -60,15 +68,16 @@ public sealed class PackageVersionCacheTests : IDisposable
     ///     <see cref="PackageSource"/>'s existing behavior.
     /// </summary>
     [Fact]
-    public void PackageVersionCache_UncachedCallMissingDirectory_ThrowsDirectoryNotFoundException()
+    public async Task PackageVersionCache_UncachedCallMissingDirectory_ThrowsDirectoryNotFoundException()
     {
         // Arrange
         var missingDir = Path.Combine(Path.GetTempPath(), "agentcontrol_missing_source_" + Guid.NewGuid());
+        var registry = CreateRegistry(missingDir);
         var cache = new PackageVersionCache();
 
         // Act / Assert
-        Assert.Throws<DirectoryNotFoundException>(
-            () => cache.IsNewerVersionAvailable(missingDir, "contoso-agents", "1.0.0", out _));
+        await Assert.ThrowsAsync<DirectoryNotFoundException>(() => cache.IsNewerVersionAvailableAsync(
+            registry, "Default", "contoso-agents", "1.0.0", CancellationToken.None));
     }
 
     /// <summary>
@@ -76,23 +85,26 @@ public sealed class PackageVersionCacheTests : IDisposable
     ///     package added after the first (now-invalidated) call.
     /// </summary>
     [Fact]
-    public void PackageVersionCache_Invalidate_ForcesReEnumeration()
+    public async Task PackageVersionCache_Invalidate_ForcesReEnumeration()
     {
         // Arrange: a source directory with only a 1.0.0 package initially
         var sourceDir = CreateTempDirectory();
         CreateFile(sourceDir, "contoso-agents-1.0.0.zip");
+        var registry = CreateRegistry(sourceDir);
         var cache = new PackageVersionCache();
-        cache.IsNewerVersionAvailable(sourceDir, "contoso-agents", "1.0.0", out var initialLatest);
-        Assert.Equal("1.0.0", initialLatest?.Version.ToString());
+        var initial = await cache.IsNewerVersionAvailableAsync(
+            registry, "Default", "contoso-agents", "1.0.0", CancellationToken.None);
+        Assert.Equal("1.0.0", initial.Latest?.Version.ToString());
 
         // Act: add a newer package, invalidate, then query again
         CreateFile(sourceDir, "contoso-agents-2.0.0.zip");
         cache.Invalidate();
-        var result = cache.IsNewerVersionAvailable(sourceDir, "contoso-agents", "1.0.0", out var latest);
+        var result = await cache.IsNewerVersionAvailableAsync(
+            registry, "Default", "contoso-agents", "1.0.0", CancellationToken.None);
 
         // Assert: the newly-added 2.0.0 package is now observed
-        Assert.True(result);
-        Assert.Equal("2.0.0", latest?.Version.ToString());
+        Assert.True(result.IsNewerAvailable);
+        Assert.Equal("2.0.0", result.Latest?.Version.ToString());
     }
 
     /// <summary>
@@ -100,37 +112,83 @@ public sealed class PackageVersionCacheTests : IDisposable
     ///     <see cref="PackageSource.IsNewerVersionAvailable"/>'s documented behavior.
     /// </summary>
     [Fact]
-    public void PackageVersionCache_UnparsablePinnedVersion_ReturnsTrue()
+    public async Task PackageVersionCache_UnparsablePinnedVersion_ReturnsTrue()
     {
         // Arrange
         var sourceDir = CreateTempDirectory();
         CreateFile(sourceDir, "contoso-agents-1.0.0.zip");
+        var registry = CreateRegistry(sourceDir);
         var cache = new PackageVersionCache();
 
         // Act
-        var result = cache.IsNewerVersionAvailable(sourceDir, "contoso-agents", "not-a-version", out var latest);
+        var result = await cache.IsNewerVersionAvailableAsync(
+            registry, "Default", "contoso-agents", "not-a-version", CancellationToken.None);
 
         // Assert
-        Assert.True(result);
-        Assert.NotNull(latest);
+        Assert.True(result.IsNewerAvailable);
+        Assert.NotNull(result.Latest);
     }
 
     /// <summary>
-    ///     Test that GetPackageNames returns a cached result on a second call even if the source
-    ///     directory is deleted in between.
+    ///     Test that a pin that is a four-part version or carries build metadata is compared by
+    ///     version (metadata ignored) rather than being treated as unparsable.
     /// </summary>
     [Fact]
-    public void PackageVersionCache_GetPackageNames_RepeatedCall_ReturnsCachedResultWithoutRescanning()
+    public async Task PackageVersionCache_PinWithRevisionOrMetadata_ComparedByVersionNotTreatedAsUnparsable()
+    {
+        // Arrange: a source offering 1.2.3
+        var registry = CreateRegistry(
+            new FakePackageSourceProvider("Default", ("contoso-agents", "1.2.3")));
+        var cache = new PackageVersionCache();
+
+        // Act
+        var revisionAhead = await cache.IsNewerVersionAvailableAsync(
+            registry, "Default", "contoso-agents", "1.2.3.1", CancellationToken.None);
+        var metadataEqual = await cache.IsNewerVersionAvailableAsync(
+            registry, "Default", "contoso-agents", "1.2.3+build7", CancellationToken.None);
+
+        // Assert: 1.2.3.1 is ahead of 1.2.3, and 1.2.3+build7 is the same version as 1.2.3
+        Assert.False(revisionAhead.IsNewerAvailable);
+        Assert.False(metadataEqual.IsNewerAvailable);
+    }
+
+    /// <summary>
+    ///     Test that no packages found at the source is a definite "no upgrade" answer with no
+    ///     latest package.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_NoPackagesFound_ReturnsNoUpgradeAndNoLatest()
+    {
+        // Arrange: an empty source
+        var registry = CreateRegistry(CreateTempDirectory());
+        var cache = new PackageVersionCache();
+
+        // Act
+        var result = await cache.IsNewerVersionAvailableAsync(
+            registry, "Default", "contoso-agents", "1.0.0", CancellationToken.None);
+
+        // Assert
+        Assert.False(result.IsNewerAvailable);
+        Assert.Null(result.Latest);
+    }
+
+    /// <summary>
+    ///     Test that GetPackageIdsAsync returns a cached result on a second call even if the
+    ///     source directory is deleted in between.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_GetPackageIds_RepeatedCall_ReturnsCachedResultWithoutRescanning()
     {
         // Arrange
         var sourceDir = CreateTempDirectory();
         CreateFile(sourceDir, "contoso-agents-1.0.0.zip");
+        var registry = CreateRegistry(sourceDir);
         var cache = new PackageVersionCache();
 
         // Act: first call populates the cache, then the directory is deleted, then a second call
-        var firstNames = cache.GetPackageNames(sourceDir);
+        var firstNames = await cache.GetPackageIdsAsync(registry, "Default", CancellationToken.None);
         Directory.Delete(sourceDir, recursive: true);
-        var secondNames = cache.GetPackageNames(sourceDir);
+        var secondNames = await cache.GetPackageIdsAsync(registry, "Default", CancellationToken.None);
 
         // Assert: both calls return the same cached result
         Assert.Equal(["contoso-agents"], firstNames);
@@ -138,23 +196,26 @@ public sealed class PackageVersionCacheTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that GetVersionsDescending returns versions in descending order and is cached per
-    ///     (sourceDirectory, packageName).
+    ///     Test that GetVersionsDescendingAsync returns versions in descending order and is cached
+    ///     per (source alias, package ID).
     /// </summary>
     [Fact]
-    public void PackageVersionCache_GetVersionsDescending_MultipleVersions_ReturnsDescendingAndCached()
+    public async Task PackageVersionCache_GetVersionsDescending_MultipleVersions_ReturnsDescendingAndCached()
     {
         // Arrange
         var sourceDir = CreateTempDirectory();
         CreateFile(sourceDir, "contoso-agents-1.0.0.zip");
         CreateFile(sourceDir, "contoso-agents-2.5.0.zip");
         CreateFile(sourceDir, "contoso-agents-2.4.9.zip");
+        var registry = CreateRegistry(sourceDir);
         var cache = new PackageVersionCache();
 
         // Act: first call populates the cache, then the directory is deleted, then a second call
-        var firstVersions = cache.GetVersionsDescending(sourceDir, "contoso-agents");
+        var firstVersions = await cache.GetVersionsDescendingAsync(
+            registry, "Default", "contoso-agents", CancellationToken.None);
         Directory.Delete(sourceDir, recursive: true);
-        var secondVersions = cache.GetVersionsDescending(sourceDir, "contoso-agents");
+        var secondVersions = await cache.GetVersionsDescendingAsync(
+            registry, "Default", "contoso-agents", CancellationToken.None);
 
         // Assert: descending order, and the second (cached) call did not need the directory
         Assert.Equal(["2.5.0", "2.4.9", "1.0.0"], firstVersions.Select(p => p.Version.ToString()));
@@ -162,31 +223,142 @@ public sealed class PackageVersionCacheTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that Invalidate clears both new caches (GetPackageNames/GetVersionsDescending),
-    ///     not just the pre-existing IsNewerVersionAvailable cache.
+    ///     Test that Invalidate clears both caches (package IDs and versions), not just the
+    ///     upgrade-check result.
     /// </summary>
     [Fact]
-    public void PackageVersionCache_Invalidate_ClearsPackageNamesAndVersionsDescendingCaches()
+    public async Task PackageVersionCache_Invalidate_ClearsPackageNamesAndVersionsDescendingCaches()
     {
-        // Arrange: populate all three caches, then add a new package
+        // Arrange: populate both caches, then add a new package
         var sourceDir = CreateTempDirectory();
         CreateFile(sourceDir, "contoso-agents-1.0.0.zip");
+        var registry = CreateRegistry(sourceDir);
         var cache = new PackageVersionCache();
-        cache.GetPackageNames(sourceDir);
-        cache.GetVersionsDescending(sourceDir, "contoso-agents");
+        await cache.GetPackageIdsAsync(registry, "Default", CancellationToken.None);
+        await cache.GetVersionsDescendingAsync(registry, "Default", "contoso-agents", CancellationToken.None);
 
         CreateFile(sourceDir, "another-package-1.0.0.zip");
         CreateFile(sourceDir, "contoso-agents-2.0.0.zip");
 
         // Act
         cache.Invalidate();
-        var names = cache.GetPackageNames(sourceDir);
-        var versions = cache.GetVersionsDescending(sourceDir, "contoso-agents");
+        var names = await cache.GetPackageIdsAsync(registry, "Default", CancellationToken.None);
+        var versions = await cache.GetVersionsDescendingAsync(
+            registry, "Default", "contoso-agents", CancellationToken.None);
 
         // Assert: the newly-added package/version are now observed
         Assert.Equal(["another-package", "contoso-agents"], names);
         Assert.Equal(["2.0.0", "1.0.0"], versions.Select(p => p.Version.ToString()));
     }
+
+    /// <summary>
+    ///     Test that the same package ID at two sources is cached separately per source alias, so
+    ///     a result fetched from one source is never returned for the other.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_SamePackageIdInTwoSources_CachedPerSourceAlias()
+    {
+        // Arrange: two sources offering the same package ID with different versions
+        var sourceA = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var sourceB = new FakePackageSourceProvider("B", ("contoso-agents", "9.0.0"));
+        var registry = CreateRegistry(sourceA, sourceB);
+        var cache = new PackageVersionCache();
+
+        // Act: query both sources twice each
+        var a1 = await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+        var b1 = await cache.GetVersionsDescendingAsync(registry, "B", "contoso-agents", CancellationToken.None);
+        var a2 = await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+        var b2 = await cache.GetVersionsDescendingAsync(registry, "B", "contoso-agents", CancellationToken.None);
+
+        // Assert: each source returns its own version, and each was queried exactly once
+        Assert.Equal("1.0.0", a1.Single().Version.ToString());
+        Assert.Equal("9.0.0", b1.Single().Version.ToString());
+        Assert.Equal("1.0.0", a2.Single().Version.ToString());
+        Assert.Equal("9.0.0", b2.Single().Version.ToString());
+        Assert.Equal(1, sourceA.ListVersionsCalls);
+        Assert.Equal(1, sourceB.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that invalidating one source leaves the other source's cached results in place and
+    ///     forces only the invalidated source to be queried again.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_InvalidateSingleSource_LeavesOtherSourcesCached()
+    {
+        // Arrange: two sources, both queried once
+        var sourceA = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var sourceB = new FakePackageSourceProvider("B", ("contoso-agents", "9.0.0"));
+        var registry = CreateRegistry(sourceA, sourceB);
+        var cache = new PackageVersionCache();
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+        await cache.GetVersionsDescendingAsync(registry, "B", "contoso-agents", CancellationToken.None);
+
+        // Act: invalidate source A (alias compared case-insensitively), then query both again
+        cache.Invalidate("a");
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+        await cache.GetVersionsDescendingAsync(registry, "B", "contoso-agents", CancellationToken.None);
+
+        // Assert: only A was queried again
+        Assert.Equal(2, sourceA.ListVersionsCalls);
+        Assert.Equal(1, sourceB.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that a fetch already in flight when its source is invalidated does not repopulate
+    ///     the cache with its (stale) result.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_InvalidateDuringInFlightFetch_DoesNotCacheStaleResult()
+    {
+        // Arrange: a source whose version listing is held open
+        var gate = new TaskCompletionSource();
+        var source = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0")) { ListVersionsGate = gate.Task };
+        var registry = CreateRegistry(source);
+        var cache = new PackageVersionCache();
+        var inFlight = cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Act: invalidate while the fetch is in flight, release it, then query again
+        cache.Invalidate("A");
+        gate.SetResult();
+        await inFlight;
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Assert: the in-flight result was discarded, so the second query had to fetch again
+        Assert.Equal(2, source.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that asking the cache about an alias that is not configured fails with
+    ///     <see cref="UnknownSourceException"/> and never consults any other source.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_UnknownAlias_ThrowsUnknownSourceExceptionWithoutContactingOtherSources()
+    {
+        // Arrange: only source A is configured
+        var sourceA = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(sourceA);
+        var cache = new PackageVersionCache();
+
+        // Act / Assert
+        await Assert.ThrowsAsync<UnknownSourceException>(() => cache.GetVersionsDescendingAsync(
+            registry, "B", "contoso-agents", CancellationToken.None));
+        Assert.Equal(0, sourceA.TotalCalls);
+    }
+
+    /// <summary>
+    ///     Creates a registry with a single zip-folder source named <c>Default</c> at a directory.
+    /// </summary>
+    private static PackageSourceRegistry CreateRegistry(string sourceDir) =>
+        PackageSourceRegistry.Create([PackageSourceDefinition.CreateDefaultZip(sourceDir)]);
+
+    /// <summary>
+    ///     Creates a registry that serves the given fake providers by their aliases.
+    /// </summary>
+    private static PackageSourceRegistry CreateRegistry(params FakePackageSourceProvider[] providers) =>
+        new(
+            providers.Select(p => new PackageSourceDefinition { Alias = p.Alias, Type = PackageSourceType.Zip, Location = "unused" }),
+            definition => providers.Single(p => p.Alias == definition.Alias));
 
     /// <summary>
     ///     Creates a unique temporary directory tracked for cleanup in <see cref="Dispose"/>.

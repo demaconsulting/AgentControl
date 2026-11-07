@@ -38,7 +38,7 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 /// <remarks>
 ///     All business logic (upgrade detection, launch orchestration, pull-eligibility checks) is
 ///     implemented here or delegated to the Phase 1 subsystems (<see cref="GitClient"/>,
-///     <see cref="PackageSource"/>, <see cref="PackageZipExtractor"/>,
+///     <see cref="PackageSourceRegistry"/>, <see cref="PackageContentExtractor"/>,
 ///     <see cref="GitIgnoreEnsurer"/>, <see cref="RepoPinStore"/>, <see cref="AgentLauncher"/>)
 ///     rather than in any view
 ///     code-behind, so this class is fully unit-testable without an Avalonia window. Not
@@ -103,6 +103,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private bool _isMissing;
     private bool _isUpgradeAvailable;
     private string? _latestAvailableVersion;
+    private string? _sourceProblem;
     private string? _currentBranch;
     private bool _hasCommittedAgentFiles;
     private bool _canPull;
@@ -269,6 +270,54 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Gets the alias of the package source the pinned package comes from, or
+    ///     <see langword="null"/> if the repo has never been synced. A pin file written before
+    ///     sources existed reports the legacy <c>Default</c> alias.
+    /// </summary>
+    public string? PinnedSource
+    {
+        get => _recentRepo.PinnedSource;
+        private set
+        {
+            if (_recentRepo.PinnedSource == value)
+            {
+                return;
+            }
+
+            _recentRepo.PinnedSource = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    ///     Gets a user-readable description of why the pinned package's source cannot be used (for
+    ///     example the pin names a source that is not configured), or <see langword="null"/> when
+    ///     there is no such problem.
+    /// </summary>
+    /// <remarks>
+    ///     This is the card's error state for a pin whose source alias is missing from the
+    ///     configured sources. The card never substitutes another source: upgrade checking is
+    ///     disabled and every action that needs the source reports this problem instead.
+    /// </remarks>
+    public string? SourceProblem
+    {
+        get => _sourceProblem;
+        private set
+        {
+            if (SetField(ref _sourceProblem, value))
+            {
+                OnPropertyChanged(nameof(HasSourceProblem));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether <see cref="SourceProblem"/> is set, for binding the
+    ///     card's error indicator.
+    /// </summary>
+    public bool HasSourceProblem => _sourceProblem is not null;
+
+    /// <summary>
     ///     Gets the repo's current git branch name, or <see langword="null"/> if it could not be
     ///     determined (not a git repository, missing repo, etc.).
     /// </summary>
@@ -348,6 +397,76 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     without threading the cache through <see cref="MainWindowViewModel"/> a second way.
     /// </summary>
     internal PackageVersionCache PackageVersionCache => _packageVersionCache;
+
+    /// <summary>
+    ///     Builds a <see cref="PackageSourceRegistry"/> from the current settings' configured
+    ///     sources, for the "Select Package..." dialog (and this card's own source lookups).
+    /// </summary>
+    /// <returns>A registry over the sources in effect right now (a snapshot: callers build a new
+    ///     one after settings change).</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the configured sources are invalid
+    ///     (for example a duplicated alias).</exception>
+    internal PackageSourceRegistry CreateSourceRegistry() =>
+        PackageSourceRegistry.Create(_getSettings().GetEffectiveSources(), GetNuGetRootBase());
+
+    /// <summary>
+    ///     Gets the folder under which NuGet sources keep their private package caches: a
+    ///     <c>nuget</c> folder inside the test-isolation configuration directory when one was
+    ///     supplied at startup (so automated tests never touch the real user profile), otherwise
+    ///     <see langword="null"/> for the per-user default.
+    /// </summary>
+    /// <returns>The override base folder, or <see langword="null"/> for the default. Never the
+    ///     repo this card represents.</returns>
+    private string? GetNuGetRootBase() =>
+        string.IsNullOrWhiteSpace(_startupOptions?.ConfigDirectory)
+            ? null
+            : Path.Combine(_startupOptions.ConfigDirectory, "nuget");
+
+    /// <summary>
+    ///     Runs an asynchronous source operation to completion on a worker thread and returns its
+    ///     result, so this view model's existing synchronous commands can use the asynchronous
+    ///     source providers without risking a deadlock on the UI thread's synchronization context.
+    /// </summary>
+    /// <typeparam name="T">The operation's result type.</typeparam>
+    /// <param name="operation">Starts the asynchronous operation.</param>
+    /// <returns>The operation's result; an exception thrown by the operation is rethrown with its
+    ///     original type (not wrapped in an <see cref="AggregateException"/>).</returns>
+    /// <remarks>
+    ///     This blocks the calling (UI) thread for the duration of the operation, exactly as the
+    ///     previous direct filesystem scans did; moving these commands to true asynchronous
+    ///     execution with progress and cancellation is part of the source-aware UI work.
+    /// </remarks>
+    private static T RunBlocking<T>(Func<Task<T>> operation) =>
+        Task.Run(operation).GetAwaiter().GetResult();
+
+    /// <summary>
+    ///     Determines whether a discovered package is the version recorded in a pin: equal text, or
+    ///     - when both parse - an equal version (so a pin of <c>1.0.0.0</c> still finds the
+    ///     NuGet-normalized <c>1.0.0</c>).
+    /// </summary>
+    /// <param name="package">The discovered package.</param>
+    /// <param name="versionText">The pinned or selected version text.</param>
+    /// <returns><see langword="true"/> if the package is that version.</returns>
+    private static bool IsVersion(DiscoveredPackage package, string? versionText) =>
+        string.Equals(package.Version.ToString(), versionText, StringComparison.Ordinal) ||
+        (PackageVersion.TryParse(versionText, out var parsed) && parsed is not null && package.Version.Equals(parsed));
+
+    /// <summary>
+    ///     Chooses the source a new package selection is made from when the caller does not name
+    ///     one: the source with the legacy <c>Default</c> alias if configured, otherwise the first
+    ///     configured source.
+    /// </summary>
+    /// <param name="registry">The configured sources; must not be empty.</param>
+    /// <returns>The chosen source alias.</returns>
+    /// <remarks>
+    ///     Interim behavior for the single-source Settings window: until the user can choose among
+    ///     several sources, the source the Settings window edits (<c>Default</c>) is the one
+    ///     packages are selected from.
+    /// </remarks>
+    private static string ChooseSelectionSourceAlias(PackageSourceRegistry registry) =>
+        registry.Contains(PackageSourceDefinition.DefaultAlias)
+            ? PackageSourceDefinition.DefaultAlias
+            : registry.Definitions[0].Alias;
 
     /// <summary>
     ///     Gets a value indicating whether the "Pull" action is currently offered, per
@@ -547,10 +666,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Raised by <see cref="SelectPackageCommand"/> to request the "Select Package..." dialog
-    ///     be shown, carrying the resolved package-source directory. Only raised once
-    ///     <c>settings.PackageSourcePath</c> has been validated as configured - a blank source
-    ///     raises <see cref="ErrorOccurred"/> instead. Does not itself show any dialog - that is
-    ///     a view-layer concern handled by <c>MainWindow</c>'s code-behind, exactly like
+    ///     be shown, carrying the alias of the package source to select from (see
+    ///     <see cref="CreateSourceRegistry"/> for the sources). Only raised once at least one
+    ///     package source is configured - otherwise <see cref="ErrorOccurred"/> is raised instead.
+    ///     Does not itself show any dialog - that is a view-layer concern handled by
+    ///     <c>MainWindow</c>'s code-behind, exactly like
     ///     <see cref="RemoveRequested"/>/<see cref="ConfirmationWindow"/>.
     /// </summary>
     public event EventHandler<string>? SelectPackageRequested;
@@ -607,6 +727,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             CanPull = false;
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
+            SourceProblem = null;
 
             // The repo just disappeared (or was already missing): any previously-cached Git
             // status is no longer trustworthy, so invalidate it rather than let it linger and
@@ -757,7 +878,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     repo whose <c>.gitignore</c>'d agent folders were never unpacked on this machine), this
     ///     resolves the <em>currently pinned</em> package at the configured source (never the
     ///     latest - upgrading remains a deliberate, separate user action) and re-extracts it
-    ///     directly via <see cref="PackageZipExtractor.Extract"/>, deliberately without going
+    ///     directly via <see cref="PackageContentExtractor.Extract"/>, deliberately without going
     ///     through <see cref="ApplyPackageAndShowReleaseNotes"/> - architecture.md's
     ///     ensure-synced-before-launch bullet never mentions showing release notes, unlike its
     ///     Select-Package bullet, so a silent background repair must not pop a release-notes
@@ -793,15 +914,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         try
         {
-            var settings = _getSettings();
-            if (string.IsNullOrWhiteSpace(settings.PackageSourcePath))
+            var registry = CreateSourceRegistry();
+            if (registry.Definitions.Count == 0)
             {
                 ErrorOccurred?.Invoke(this, "No package source is configured for this repo. Launching without syncing agent files.");
                 return false;
             }
 
-            var pinnedPackage = PackageSource.EnumeratePackages(settings.PackageSourcePath, PinnedPackageName)
-                .FirstOrDefault(p => p.Version.ToString() == PinnedPackageVersion);
+            // Resolve the pinned package at the source the pin names - and only that source. A
+            // pin whose source is not configured fails here (UnknownSourceException) rather than
+            // being served by any other source.
+            var provider = registry.Resolve(PinnedSource ?? RepoPin.LegacySourceAlias);
+            var pinnedPackage = RunBlocking(() => provider.ListVersionsAsync(PinnedPackageName, CancellationToken.None))
+                .FirstOrDefault(p => IsVersion(p, PinnedPackageVersion));
             if (pinnedPackage is null)
             {
                 ErrorOccurred?.Invoke(
@@ -813,12 +938,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
             if (_logger.IsEnabled(LogLevel.Information))
             {
                 _logger.LogInformation(
-                    "Re-syncing missing managed agent folders for repo '{RepoName}' from pinned package '{PackageName} {Version}'",
-                    RepoName, pinnedPackage.PackageName, pinnedPackage.Version);
+                    "Re-syncing missing managed agent folders for repo '{RepoName}' from pinned package '{PackageName} {Version}' (source '{Source}')",
+                    RepoName, pinnedPackage.PackageName, pinnedPackage.Version, pinnedPackage.SourceAlias);
             }
 
-            PackageZipExtractor.Extract(pinnedPackage.FilePath, RepoPath);
-            MaybeOfferAgentsMdTemplate(pinnedPackage.FilePath);
+            using var reader = RunBlocking(() => provider.AcquireAsync(pinnedPackage, CancellationToken.None));
+            PackageContentExtractor.Extract(reader, RepoPath);
+            MaybeOfferAgentsMdTemplate(reader);
             return true;
         }
         catch (InvalidOperationException ex)
@@ -890,29 +1016,49 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Runs the full upgrade sequence for this repo: finds the latest package at the
-    ///     configured source, then applies it via <see cref="ApplyPackageAndShowReleaseNotes"/>.
+    ///     Runs the full upgrade sequence for this repo: finds the latest package at the source the
+    ///     pin names, then applies it via <see cref="ApplyPackageAndShowReleaseNotes"/>.
     /// </summary>
+    /// <remarks>
+    ///     The upgrade is resolved only at the pin's own source; if that source is not configured
+    ///     the upgrade is refused with an explanatory message rather than offered from another
+    ///     source.
+    /// </remarks>
     private void Upgrade()
     {
-        var settings = _getSettings();
-        if (string.IsNullOrWhiteSpace(settings.PackageSourcePath) || string.IsNullOrWhiteSpace(PinnedPackageName))
+        PackageSourceRegistry registry;
+        try
+        {
+            registry = CreateSourceRegistry();
+        }
+        catch (InvalidOperationException ex)
+        {
+            ErrorOccurred?.Invoke(this, $"Upgrade failed: {ex.Message}");
+            return;
+        }
+
+        if (registry.Definitions.Count == 0 || string.IsNullOrWhiteSpace(PinnedPackageName))
         {
             ErrorOccurred?.Invoke(this, "No package source or pinned package name is configured for this repo.");
             return;
         }
 
+        var sourceAlias = PinnedSource ?? RepoPin.LegacySourceAlias;
         if (_logger.IsEnabled(LogLevel.Information))
         {
             _logger.LogInformation(
-                "Checking for an upgrade to package '{PackageName}' for repo '{RepoName}' at source '{PackageSourcePath}'",
-                PinnedPackageName, RepoName, settings.PackageSourcePath);
+                "Checking for an upgrade to package '{PackageName}' for repo '{RepoName}' at source '{SourceAlias}'",
+                PinnedPackageName, RepoName, sourceAlias);
         }
 
+        IPackageSourceProvider provider;
         DiscoveredPackage? latest;
         try
         {
-            latest = PackageSource.FindLatest(settings.PackageSourcePath, PinnedPackageName);
+            provider = registry.Resolve(sourceAlias);
+            latest = RunBlocking(() => provider.ListVersionsAsync(PinnedPackageName, CancellationToken.None))
+                .OrderByDescending(p => p.Version)
+                .FirstOrDefault();
         }
         catch (DirectoryNotFoundException ex)
         {
@@ -922,6 +1068,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
             }
 
             ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message}");
+            return;
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Package source failed while upgrading repo '{RepoName}'", RepoName);
+            }
+
+            ErrorOccurred?.Invoke(this, $"Upgrade failed: {ex.Message}");
             return;
         }
 
@@ -945,40 +1101,65 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 RepoName, latest.PackageName, latest.Version);
         }
 
-        ApplyPackageAndShowReleaseNotes(latest, $"Upgraded to {latest.Version}.", "Upgrade");
+        ApplyPackageAndShowReleaseNotes(provider, latest, $"Upgraded to {latest.Version}.", "Upgrade");
     }
 
     /// <summary>
     ///     Applies a user-selected package name/version to this repo: resolves the exact
-    ///     <see cref="DiscoveredPackage"/> at the configured source, then applies it via
+    ///     <see cref="DiscoveredPackage"/> at the chosen source, then applies it via
     ///     <see cref="ApplyPackageAndShowReleaseNotes"/>.
     /// </summary>
-    /// <param name="packageName">The package base name the user selected.</param>
-    /// <param name="version">The exact version string the user selected (matched against
-    ///     <see cref="DiscoveredPackage.Version"/>'s <see cref="object.ToString"/>).</param>
+    /// <param name="packageName">The package name or ID the user selected.</param>
+    /// <param name="version">The exact version string the user selected (matched against the
+    ///     source's discovered versions).</param>
+    /// <param name="sourceAlias">The alias of the source the selection was made from, or
+    ///     <see langword="null"/> to use the interim default (the <c>Default</c> source, else the
+    ///     first configured source). The alias is recorded in the repo's pin.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="packageName"/> or
     ///     <paramref name="version"/> is <see langword="null"/>.</exception>
-    public void ApplySelectedPackage(string packageName, string version)
+    public void ApplySelectedPackage(string packageName, string version, string? sourceAlias = null)
     {
         ArgumentNullException.ThrowIfNull(packageName);
         ArgumentNullException.ThrowIfNull(version);
 
-        var settings = _getSettings();
-        if (string.IsNullOrWhiteSpace(settings.PackageSourcePath))
+        PackageSourceRegistry registry;
+        try
+        {
+            registry = CreateSourceRegistry();
+        }
+        catch (InvalidOperationException ex)
+        {
+            ErrorOccurred?.Invoke(this, $"Select Package failed: {ex.Message}");
+            return;
+        }
+
+        if (registry.Definitions.Count == 0)
         {
             ErrorOccurred?.Invoke(this, "No package source is configured. Set one in Settings.");
             return;
         }
 
+        IPackageSourceProvider provider;
         DiscoveredPackage? selected;
         try
         {
-            selected = PackageSource.EnumeratePackages(settings.PackageSourcePath, packageName)
-                .FirstOrDefault(p => p.Version.ToString() == version);
+            provider = registry.Resolve(sourceAlias ?? ChooseSelectionSourceAlias(registry));
+            selected = RunBlocking(() => provider.ListVersionsAsync(packageName, CancellationToken.None))
+                .FirstOrDefault(p => IsVersion(p, version));
         }
         catch (DirectoryNotFoundException ex)
         {
             ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message}");
+            return;
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Package source failed while selecting a package for repo '{RepoName}'", RepoName);
+            }
+
+            ErrorOccurred?.Invoke(this, $"Select Package failed: {ex.Message}");
             return;
         }
 
@@ -999,78 +1180,77 @@ internal sealed class RepoCardViewModel : ViewModelBase
         if (_logger.IsEnabled(LogLevel.Information))
         {
             _logger.LogInformation(
-                "Selecting package '{PackageName} {Version}' for repo '{RepoName}'",
-                packageName, version, RepoName);
+                "Selecting package '{PackageName} {Version}' from source '{SourceAlias}' for repo '{RepoName}'",
+                packageName, version, selected.SourceAlias, RepoName);
         }
 
-        ApplyPackageAndShowReleaseNotes(selected, $"Package selected: {packageName} {version}.", "Select Package");
+        ApplyPackageAndShowReleaseNotes(provider, selected, $"Package selected: {packageName} {version}.", "Select Package");
     }
 
     /// <summary>
     ///     Shared extract-and-pin sequence reused by both <see cref="Upgrade"/> (after resolving
     ///     the latest version) and <see cref="ApplySelectedPackage"/> (after resolving the exact
-    ///     user-selected version): extracts the package (blind-delete-and-replace), proactively
-    ///     ensures the repo's <c>.gitignore</c> covers the managed agent folders, rewrites the
-    ///     pin file (tolerating a corrupt/unreadable existing pin file when reading its prior
-    ///     <see cref="RepoPin.AgentsMdTemplateDeclined"/> value - see remarks), refreshes this
-    ///     card's pin/upgrade-status properties, and raises <see cref="ReleaseNotesReady"/> with
-    ///     the new package's release notes.
+    ///     user-selected version): acquires the package from its source, extracts it
+    ///     (blind-delete-and-replace), proactively ensures the repo's <c>.gitignore</c> covers the
+    ///     managed agent folders, rewrites the pin file (recording the package's source alias and
+    ///     keeping any existing pin's other fields), refreshes this card's pin/upgrade-status
+    ///     properties, and raises <see cref="ReleaseNotesReady"/> with the new package's release
+    ///     notes.
     /// </summary>
     /// <remarks>
-    ///     The read of any existing pin file's <see cref="RepoPin.AgentsMdTemplateDeclined"/>
-    ///     value is wrapped in its own try/catch, separate from this method's outer catch: a
-    ///     corrupt/unreadable existing <c>.agentcontrol.json</c> must not abort the apply after
-    ///     extraction has already succeeded, since the pre-feature behavior unconditionally wrote
-    ///     a fresh pin regardless of what (if anything) existed before. A read failure here
-    ///     defaults to "no persisted decline" and the new pin is still written via
-    ///     <see cref="RepoPinStore.Save"/> below; that <c>Save</c> call's own failure handling is
-    ///     unchanged - a genuine write failure there is still reported via the outer
-    ///     <see cref="ErrorOccurred"/> handler.
+    ///     The existing pin file is read <em>before</em> anything is changed so a pin written by a
+    ///     newer AgentControl (an unsupported schema) aborts the whole apply with its actionable
+    ///     message while the repo is still untouched. Any other read failure (a corrupt or
+    ///     unreadable file) is tolerated and defaults to "no persisted decline", since the
+    ///     pre-feature behavior unconditionally wrote a fresh pin regardless of what (if anything)
+    ///     existed before; the new pin is then still written via <see cref="RepoPinStore.Save"/>,
+    ///     whose own failure handling is unchanged - a genuine write failure there is still
+    ///     reported via the outer <see cref="ErrorOccurred"/> handler. Reusing the loaded pin keeps
+    ///     <see cref="RepoPin.AgentsMdTemplateDeclined"/> and any unknown fields intact.
     /// </remarks>
+    /// <param name="provider">The provider of the source the package was discovered at.</param>
     /// <param name="package">The resolved package to apply.</param>
     /// <param name="successMessage">The <see cref="StatusMessage"/> text to set on success.</param>
     /// <param name="failureVerb">A short verb phrase (e.g. <c>"Upgrade"</c>, <c>"Select Package"</c>)
     ///     used to prefix any <see cref="ErrorOccurred"/> message raised on failure.</param>
-    private void ApplyPackageAndShowReleaseNotes(DiscoveredPackage package, string successMessage, string failureVerb)
+    private void ApplyPackageAndShowReleaseNotes(
+        IPackageSourceProvider provider, DiscoveredPackage package, string successMessage, string failureVerb)
     {
         if (_logger.IsEnabled(LogLevel.Information))
         {
             _logger.LogInformation(
-                "Fetching and applying package '{PackageName} {Version}' from '{PackageFilePath}' to repo '{RepoName}' ('{RepoPath}')",
-                package.PackageName, package.Version, package.FilePath, RepoName, RepoPath);
+                "Fetching and applying package '{PackageName} {Version}' from source '{SourceAlias}' to repo '{RepoName}' ('{RepoPath}')",
+                package.PackageName, package.Version, package.SourceAlias, RepoName, RepoPath);
         }
 
         try
         {
-            PackageZipExtractor.Extract(package.FilePath, RepoPath);
-            EnsureGitIgnoreCoversManagedFolders();
-
-            // Preserve a prior AGENTS.md template decline across re-pinning: this field is
-            // orthogonal to the selected package/version and must never be silently reset.
-            // A corrupt/unreadable existing pin file must not abort the apply - the extraction
-            // above has already succeeded, so this defaults to "no persisted decline" and lets
-            // the Save below still happen, rather than leaving the repo with newly-extracted
-            // files but a stale pin.
-            bool agentsMdTemplateDeclined;
+            // Read the existing pin first: a newer-schema pin must stop the apply before the repo
+            // is touched; a corrupt one is simply replaced
+            RepoPin? existingPin;
             try
             {
-                agentsMdTemplateDeclined = RepoPinStore.Load(RepoPath)?.AgentsMdTemplateDeclined ?? false;
+                existingPin = RepoPinStore.Load(RepoPath);
             }
-            catch (InvalidOperationException)
+            catch (InvalidOperationException ex) when (ex is not UnsupportedPinSchemaException)
             {
-                agentsMdTemplateDeclined = false;
+                existingPin = null;
             }
 
-            RepoPinStore.Save(
-                RepoPath,
-                new RepoPin
-                {
-                    PackageName = package.PackageName,
-                    Version = package.Version.ToString(),
-                    AgentsMdTemplateDeclined = agentsMdTemplateDeclined,
-                });
+            using var reader = RunBlocking(() => provider.AcquireAsync(package, CancellationToken.None));
+            PackageContentExtractor.Extract(reader, RepoPath);
+            EnsureGitIgnoreCoversManagedFolders();
 
-            var releaseNotes = PackageZipExtractor.ReadReleaseNotes(package.FilePath) ?? string.Empty;
+            // Preserve a prior AGENTS.md template decline (and any unknown fields) across
+            // re-pinning by updating the loaded pin in place: those fields are orthogonal to the
+            // selected package/version and must never be silently reset.
+            var pin = existingPin ?? new RepoPin();
+            pin.Source = package.SourceAlias;
+            pin.PackageName = package.PackageName;
+            pin.Version = package.Version.ToString();
+            RepoPinStore.Save(RepoPath, pin);
+
+            var releaseNotes = PackageContentExtractor.ReadReleaseNotes(reader) ?? string.Empty;
 
             RefreshPin();
             RefreshUpgradeStatus();
@@ -1084,7 +1264,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             }
 
             ReleaseNotesReady?.Invoke(this, releaseNotes);
-            MaybeOfferAgentsMdTemplate(package.FilePath);
+            MaybeOfferAgentsMdTemplate(reader);
         }
         catch (InvalidOperationException ex)
         {
@@ -1118,19 +1298,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <c>AGENTS.md</c> template, and the user has not previously declined this offer for
     ///     this repo (<see cref="RepoPin.AgentsMdTemplateDeclined"/>).
     /// </summary>
-    /// <param name="packageFilePath">Path to the package zip that was just successfully applied
+    /// <param name="reader">The content of the package that was just successfully applied
     ///     (extracted) to this repo.</param>
     /// <remarks>
-    ///     Called only from call sites that already have a <paramref name="packageFilePath"/> in
-    ///     hand immediately after a successful <see cref="PackageZipExtractor.Extract"/> call
+    ///     Called only from call sites that already have a <paramref name="reader"/> in hand
+    ///     immediately after a successful <see cref="PackageContentExtractor.Extract"/> call
     ///     (<see cref="ApplyPackageAndShowReleaseNotes"/> and the re-extraction branch of
     ///     <see cref="EnsureAgentFilesSyncedBeforeLaunch"/>) - never as an independent, standing
     ///     per-launch check, so the offer only ever fires when a sync genuinely just happened.
     ///     Wrapped in its own non-blocking try/catch, mirroring
     ///     <see cref="EnsureGitIgnoreCoversManagedFolders"/>'s precedent, so a pin-read or
-    ///     zip-read failure here can never disrupt an already-successful sync.
+    ///     package-read failure here can never disrupt an already-successful sync.
     /// </remarks>
-    private void MaybeOfferAgentsMdTemplate(string packageFilePath)
+    private void MaybeOfferAgentsMdTemplate(IPackageContentReader reader)
     {
         try
         {
@@ -1145,7 +1325,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return;
             }
 
-            var template = PackageZipExtractor.ReadAgentsMdTemplate(packageFilePath);
+            var template = PackageContentExtractor.ReadAgentsMdTemplate(reader);
             if (template is null)
             {
                 return;
@@ -1272,7 +1452,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     {
         try
         {
-            var pin = RepoPinStore.Load(RepoPath) ?? new RepoPin { PackageName = PinnedPackageName ?? string.Empty, Version = PinnedPackageVersion ?? string.Empty };
+            var pin = RepoPinStore.Load(RepoPath) ?? new RepoPin
+            {
+                Source = PinnedSource,
+                PackageName = PinnedPackageName ?? string.Empty,
+                Version = PinnedPackageVersion ?? string.Empty
+            };
             pin.AgentsMdTemplateDeclined = true;
             RepoPinStore.Save(RepoPath, pin);
 
@@ -1320,24 +1505,42 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Validates a package source is configured, then raises <see cref="SelectPackageRequested"/>
-    ///     so the view layer can show the "Select Package..." dialog.
+    ///     Chooses the source to select a package from, then raises
+    ///     <see cref="SelectPackageRequested"/> so the view layer can show the "Select Package..."
+    ///     dialog.
     /// </summary>
+    /// <remarks>
+    ///     Reports an error instead when no package source is configured (or the configured
+    ///     sources are invalid). Until the dialog offers a choice of source, the <c>Default</c>
+    ///     source (else the first configured one) is used - see
+    ///     <see cref="ChooseSelectionSourceAlias"/>.
+    /// </remarks>
     private void SelectPackage()
     {
-        var settings = _getSettings();
-        if (string.IsNullOrWhiteSpace(settings.PackageSourcePath))
+        PackageSourceRegistry registry;
+        try
+        {
+            registry = CreateSourceRegistry();
+        }
+        catch (InvalidOperationException ex)
+        {
+            ErrorOccurred?.Invoke(this, ex.Message);
+            return;
+        }
+
+        if (registry.Definitions.Count == 0)
         {
             ErrorOccurred?.Invoke(this, "No package source is configured. Set one in Settings.");
             return;
         }
 
-        SelectPackageRequested?.Invoke(this, settings.PackageSourcePath);
+        SelectPackageRequested?.Invoke(this, ChooseSelectionSourceAlias(registry));
     }
 
     /// <summary>
     ///     Re-reads the repo's <c>.agentcontrol.json</c> pin file, updating
-    ///     <see cref="PinnedPackageName"/> and <see cref="PinnedPackageVersion"/>.
+    ///     <see cref="PinnedPackageName"/>, <see cref="PinnedPackageVersion"/> and
+    ///     <see cref="PinnedSource"/>.
     /// </summary>
     private void RefreshPin()
     {
@@ -1346,15 +1549,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
             var pin = RepoPinStore.Load(RepoPath);
             PinnedPackageName = pin?.PackageName;
             PinnedPackageVersion = pin?.Version;
+            PinnedSource = pin?.Source;
         }
         catch (InvalidOperationException ex)
         {
-            // The pin file exists but could not be read/parsed - clear any previously cached
-            // pin fields rather than leaving stale data in place, so neither the UI nor the
-            // upgrade-gating logic in RefreshUpgradeStatus() continues to treat this repo as
-            // pinned to a package that can no longer be confirmed from disk.
+            // The pin file exists but could not be read/parsed (or was written by a newer
+            // AgentControl) - clear any previously cached pin fields rather than leaving stale
+            // data in place, so neither the UI nor the upgrade-gating logic in
+            // RefreshUpgradeStatus() continues to treat this repo as pinned to a package that
+            // can no longer be confirmed from disk.
             PinnedPackageName = null;
             PinnedPackageVersion = null;
+            PinnedSource = null;
             StatusMessage = $"Failed to read pin file: {ex.Message}";
         }
     }
@@ -1420,15 +1626,21 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Re-checks whether a newer package version is available at the configured source (via
-    ///     the shared <see cref="PackageVersionCache"/>), updating <see cref="IsUpgradeAvailable"/>
-    ///     and <see cref="LatestAvailableVersion"/>. Any failure (no source configured, source
-    ///     unreachable) is treated as "no upgrade available" rather than propagated.
+    ///     Re-checks whether a newer package version is available at the source the pin names (via
+    ///     the shared <see cref="PackageVersionCache"/>), updating <see cref="IsUpgradeAvailable"/>,
+    ///     <see cref="LatestAvailableVersion"/> and <see cref="SourceProblem"/>. Any failure
+    ///     (source unreachable or failing) is treated as "no upgrade available" rather than
+    ///     propagated.
     /// </summary>
+    /// <remarks>
+    ///     A pin naming a source that is not configured is an error state, not a reason to look
+    ///     elsewhere: <see cref="SourceProblem"/> explains it and no upgrade is offered. Only the
+    ///     pin's own source is ever consulted.
+    /// </remarks>
     private void RefreshUpgradeStatus()
     {
-        var settings = _getSettings();
-        if (string.IsNullOrWhiteSpace(settings.PackageSourcePath) || string.IsNullOrWhiteSpace(PinnedPackageName))
+        SourceProblem = null;
+        if (string.IsNullOrWhiteSpace(PinnedPackageName))
         {
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
@@ -1437,13 +1649,29 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         try
         {
-            var isNewer = _packageVersionCache.IsNewerVersionAvailable(
-                settings.PackageSourcePath, PinnedPackageName, PinnedPackageVersion ?? string.Empty, out var latest);
-            LatestAvailableVersion = latest?.Version.ToString();
-            IsUpgradeAvailable = isNewer;
+            var registry = CreateSourceRegistry();
+            var sourceAlias = PinnedSource ?? RepoPin.LegacySourceAlias;
+            if (!registry.Contains(sourceAlias))
+            {
+                // No fallback: the pin's source is simply not available, and the card says so
+                SourceProblem = new UnknownSourceException(sourceAlias).Message;
+                IsUpgradeAvailable = false;
+                LatestAvailableVersion = null;
+                return;
+            }
+
+            var pinnedPackageName = PinnedPackageName;
+            var pinnedVersion = PinnedPackageVersion ?? string.Empty;
+            var check = RunBlocking(() => _packageVersionCache.IsNewerVersionAvailableAsync(
+                registry, sourceAlias, pinnedPackageName, pinnedVersion, CancellationToken.None));
+            LatestAvailableVersion = check.Latest?.Version.ToString();
+            IsUpgradeAvailable = check.IsNewerAvailable;
         }
-        catch (DirectoryNotFoundException)
+        catch (Exception ex) when (ex is DirectoryNotFoundException or InvalidOperationException)
         {
+            // An unreachable or failing source (or invalid source configuration) means "no
+            // upgrade can be offered", not a crash; the specific failure is surfaced by the
+            // actions that need the source
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
         }

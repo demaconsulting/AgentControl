@@ -5,14 +5,25 @@
 #### Purpose
 
 `SettingsWindowViewModel` backs the settings window: it edits a working copy of
-`AppSettings`'s user-configurable fields (package source path, git executable override, agent
-tool selection, custom command, shell preference) and persists them on `Save`. It edits a
+`AppSettings`'s user-configurable fields (the package source path - which edits the `Default`
+package source -, git executable override, agent tool selection, custom command, shell
+preference) and persists them on `Save`. It edits a
 copy rather than the live `AppSettings` instance so that closing the window without saving
 never partially mutates the caller's settings.
 
 #### Data Model
 
-**PackageSourcePath**, **GitExecutablePath**, **CustomAgentCommand**, **ShellPreference**:
+**PackageSourcePath**: `string?` — The location of the package source named `Default` (the
+source a single-folder configuration migrates to), seeded from `AppSettings.GetEffectiveSources`.
+Blank removes the `Default` source on save; a non-blank value creates it as a zip source if
+absent (`AgentControl-SettingsWindowViewModel-DefaultSource`). This single field is an interim
+editor: every other configured source is carried through a save unchanged until a full
+multi-source editor exists.
+
+**\_sources**: `List<PackageSourceDefinition>` — private working copies (clones) of the configured
+sources taken at construction, so the live settings are never mutated.
+
+**GitExecutablePath**, **CustomAgentCommand**, **ShellPreference**:
 `string?` — Editable copies of the corresponding `AppSettings` fields.
 
 **AgentTool**: `AgentToolKind` — The selected agent tool; setting it also raises a change
@@ -53,7 +64,11 @@ properties and invokes the `onSave` callback.
 - *Parameters*: None.
 - *Returns*: `void`.
 - *Postconditions*: `onSave` has been invoked with a new `AppSettings` reflecting the current
-  property values; `Saved` has been raised (`AgentControl-SettingsWindowViewModel-Save`).
+  property values; `Saved` has been raised (`AgentControl-SettingsWindowViewModel-Save`). The
+  configured sources are written to `AppSettings.Sources` (never the legacy path): clones of the
+  working sources with the `Default` source updated, created at the front, or removed according to
+  `PackageSourcePath`, and all other sources unchanged
+  (`AgentControl-SettingsWindowViewModel-DefaultSource`).
 
 The returned `AppSettings.RecentRepos` is left as a fresh empty list; callers (specifically
 `MainWindowViewModel.ApplySettings`) are responsible for preserving the authoritative
@@ -70,6 +85,8 @@ itself performs no validation and cannot fail; any failure persisting the result
 
 - **AppSettings**, **AgentToolKind** (`Settings` subsystem) — the data types this view model
   edits a working copy of.
+- **PackageSourceDefinition** (`AgentPackageManagement` subsystem) — the source data type it
+  clones and edits.
 - **RelayCommand** (`LauncherUI` subsystem, shared MVVM support) — backs `SaveCommand`.
 
 #### Callers

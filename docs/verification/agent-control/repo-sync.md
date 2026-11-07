@@ -3,16 +3,17 @@
 ### Verification Approach
 
 The `RepoSync` subsystem is verified indirectly through its constituent units' test suites
-(`PackageZipExtractorTests.cs`, `ReleaseNotesViewerViewModelTests.cs`, and
-`GitIgnoreEnsurerTests.cs`), each documented in its own unit-level verification design.
-`ReleaseNotesViewerViewModelTests.cs` also directly exercises `ReleaseNotesViewer`'s internal
-`BuildBlockTextBlock` rendering helper (via `InternalsVisibleTo`), constructing `MarkdownBlock`
-values and asserting on the resulting `TextBlock`'s `Run` styling, without constructing the
-`Window` itself. End-to-end window display is covered only by the FlaUI
+(`PackageContentExtractorTests.cs`, `PackageZipExtractorTests.cs`,
+`ReleaseNotesViewerViewModelTests.cs`, and `GitIgnoreEnsurerTests.cs`), each documented in its own
+unit-level verification design. `ReleaseNotesViewerViewModelTests.cs` also directly exercises
+`ReleaseNotesViewer`'s internal `BuildBlockTextBlock` rendering helper (via `InternalsVisibleTo`),
+constructing `MarkdownBlock` values and asserting on the resulting `TextBlock`'s `Run` styling,
+without constructing the `Window` itself. End-to-end window display is covered only by the FlaUI
 release-notes-dialog check described at the system level (see the `AgentControl` system-level
-verification design). All `PackageZipExtractor` and
-`GitIgnoreEnsurer` tests operate on real temporary directories and real files (zip archives
-and `.gitignore` files respectively).
+verification design). All `PackageContentExtractor`, `PackageZipExtractor` and `GitIgnoreEnsurer`
+tests operate on real temporary directories and real files (zip archives, unpacked package folders,
+and `.gitignore` files respectively); the extractor tests also use a small stub reader to present
+hostile paths a real package reader would never produce.
 
 ### Test Environment
 
@@ -20,8 +21,11 @@ N/A - standard test environment; no external services or hardware required.
 
 ### Acceptance Criteria
 
-- All unit tests for `PackageZipExtractor`, `ReleaseNotesViewerViewModel`, and
-  `GitIgnoreEnsurer` pass with zero failures.
+- All unit tests for `PackageContentExtractor`, `PackageZipExtractor`,
+  `ReleaseNotesViewerViewModel`, and `GitIgnoreEnsurer` pass with zero failures.
+- An unpacked package folder is applied to a repo exactly as a zip package is, never modifying the
+  package, and a hostile path or (where the platform lets a test create one) a symbolic link in
+  the package is refused before anything in the repo is deleted.
 - A sync fully replaces a repo's managed agent-file folders and never partially extracts an
   invalid zip.
 - The release-notes dialog always has coherent content, even for a package with no release
@@ -80,3 +84,16 @@ with `PackageZipExtractor_ReadAgentsMdTemplate_EntryPresent_ReturnsContentWithou
 `PackageZipExtractor_Extract_FreshRepoWithAgentsMdEntry_DoesNotExtractAgentsMdRootEntry` cited
 directly at the subsystem level, covering `AgentControl-RepoSync-AgentsMdTemplate` (children:
 `AgentControl-PackageZipExtractor-ReadAgentsMdTemplate`).
+
+**RepoSync_SyncFromFolderPackage_SameResultAsZipAndRefusesHostilePackages**: An unpacked package
+folder replaces the managed folders and is left unmodified; the same content supplied as a zip and
+as a folder yields identical repo trees; a path that escapes the repo is rejected before any
+managed folder is deleted. This scenario is verified by the `PackageContentExtractor` unit tests
+(see their unit verification design), with
+`PackageContentExtractor_Extract_DirectoryPackageIntoFreshRepo_CreatesManagedFoldersOnly`,
+`PackageContentExtractor_Extract_ZipAndDirectoryWithSameContent_ProduceIdenticalRepoTrees`, and
+`PackageContentExtractor_Extract_TraversalPathFromReader_ThrowsBeforeDeletingManagedFolders` cited
+directly at the subsystem level, covering `AgentControl-RepoSync-SyncFromFolderPackage` (children:
+`AgentControl-PackageContentExtractor-ExtractFromFolder`,
+`AgentControl-PackageContentExtractor-RejectLinksAndTraversal`,
+`AgentControl-PackageContentExtractor-ReadRootFiles`, `AgentControl-Utilities-SafePaths`).

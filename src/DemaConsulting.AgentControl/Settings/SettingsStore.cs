@@ -64,7 +64,9 @@ internal static class SettingsStore
     ///     <see langword="null"/> to use <see cref="GetDefaultConfigDirectory"/>.</param>
     /// <returns>
     ///     The persisted settings, or a fresh default <see cref="AppSettings"/> instance if no
-    ///     settings file exists yet (first run) — this is expected, not an error.
+    ///     settings file exists yet (first run) — this is expected, not an error. A legacy
+    ///     <c>PackageSourcePath</c> in the file is migrated into <c>Sources</c> as the
+    ///     <c>Default</c> zip source when no sources are configured.
     /// </returns>
     /// <exception cref="InvalidOperationException">Thrown when the settings file exists but
     ///     cannot be read or contains invalid JSON.</exception>
@@ -83,7 +85,11 @@ internal static class SettingsStore
         try
         {
             var json = File.ReadAllText(filePath);
-            return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+
+            // Carry a legacy single package-folder setting forward as the "Default" source
+            settings.MigrateLegacySource();
+            return settings;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -98,6 +104,13 @@ internal static class SettingsStore
     /// <param name="settings">The settings to persist. Must not be <see langword="null"/>.</param>
     /// <param name="configDirectory">Configuration directory to write to. Pass
     ///     <see langword="null"/> to use <see cref="GetDefaultConfigDirectory"/>.</param>
+    /// <remarks>
+    ///     Writes the effective package sources in <c>Sources</c> and never the legacy
+    ///     <c>PackageSourcePath</c>. The file is replaced atomically (written to a temporary file in
+    ///     the same directory, then moved over the settings file) so a crash or full disk never
+    ///     leaves a truncated settings file. The persisted model has no field that can hold a
+    ///     password, token or other secret, so none can be written.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the configuration directory
@@ -107,13 +120,19 @@ internal static class SettingsStore
         ArgumentNullException.ThrowIfNull(settings);
 
         var directory = configDirectory ?? GetDefaultConfigDirectory();
+        string? temporaryPath = null;
 
         try
         {
             Directory.CreateDirectory(directory);
             var filePath = Path.Combine(directory, SettingsFileName);
-            var json = JsonSerializer.Serialize(settings, JsonOptions);
-            File.WriteAllText(filePath, json);
+            var json = JsonSerializer.Serialize(settings.CreatePersistedCopy(), JsonOptions);
+
+            // Write beside the target, then move over it, so readers never see a partial file
+            temporaryPath = filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllText(temporaryPath, json);
+            File.Move(temporaryPath, filePath, overwrite: true);
+            temporaryPath = null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
                    or PathTooLongException or NotSupportedException or DirectoryNotFoundException)
@@ -123,6 +142,14 @@ internal static class SettingsStore
             // distinct exception types - normalize every one of them to InvalidOperationException
             // so callers only ever need to catch the single documented exception type.
             throw new InvalidOperationException($"Failed to save settings to '{directory}': {ex.Message}", ex);
+        }
+        finally
+        {
+            // Only reached with a value after a failure between the write and the move
+            if (temporaryPath is not null && File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
         }
     }
 }

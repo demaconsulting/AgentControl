@@ -1,0 +1,61 @@
+---
+# Software Unit Requirements for the PackageContentExtractor Class
+#
+# PackageContentExtractor applies a package's content (a zip file or an unpacked package
+# folder) to a repo's managed agent folders with the same blind delete-and-replace sequence,
+# path containment and link rules for every package format, and reads the package's
+# release notes and AGENTS.md template.
+
+sections:
+  - title: PackageContentExtractor Unit Requirements
+    requirements:
+      - id: AgentControl-PackageContentExtractor-ExtractFromFolder
+        title: >-
+          The PackageContentExtractor class shall, for a package supplied as an unpacked folder,
+          replace a repo's managed agent folders with the package's managed folders exactly as it
+          does for a zip package - deleting the old folders first and never copying root-level
+          files such as release notes or the AGENTS.md template - and shall never modify the
+          package it reads from.
+        justification: |
+          NuGet packages are unpacked into a cache the user does not manage and that other
+          tools share; agent files must reach the repo identically whatever the package format,
+          and the cache must be left exactly as found.
+        tests:
+          - PackageContentExtractor_Extract_DirectoryPackageIntoFreshRepo_CreatesManagedFoldersOnly
+          - PackageContentExtractor_Extract_DirectoryPackageOverExistingFolder_ReplacesOldContents
+          - PackageContentExtractor_Extract_DirectoryPackage_NeverModifiesPackageFolder
+          - PackageContentExtractor_Extract_ZipAndDirectoryWithSameContent_ProduceIdenticalRepoTrees
+          - DirectoryPackageContentReader_Open_NoContentFolder_ThrowsInvalidOperationException
+
+      - id: AgentControl-PackageContentExtractor-RejectLinksAndTraversal
+        title: >-
+          The PackageContentExtractor class shall reject, before deleting anything from the
+          repo, any package file whose destination would fall outside the repo and any
+          symbolic link, junction or other link inside a folder package, and shall refuse to
+          read package files outside the package's content folder.
+        justification: |
+          A package is untrusted input: a crafted path could write outside the repo, and a link
+          inside an unpacked package could redirect a read to an arbitrary file, so both must
+          be refused up front so that a hostile package can neither escape nor leave the repo
+          half upgraded.
+        tests:
+          - PackageContentExtractor_Extract_TraversalPathFromReader_ThrowsBeforeDeletingManagedFolders
+          - DirectoryPackageContentReader_OpenReadAndReadText_TraversalOrMissingPath_Rejected
+          - ubuntu@PackageContentExtractor_Extract_SymlinkedFileInPackage_ThrowsBeforeDeletingManagedFolders
+          - ubuntu@DirectoryPackageContentReader_ListFiles_SymlinkedDirectoryInPackage_ThrowsInvalidOperationException
+          - ubuntu@DirectoryPackageContentReader_Open_ContentFolderIsSymlink_ThrowsInvalidOperationException
+          - ubuntu@DirectoryPackageContentReader_ReadText_SymlinkedReleaseNotes_ThrowsInvalidOperationException
+
+      - id: AgentControl-PackageContentExtractor-ReadRootFiles
+        title: >-
+          The PackageContentExtractor class shall read a package's root-level release notes and
+          optional AGENTS.md template from either package format without copying them to disk,
+          returning none when the package has no such file.
+        justification: |
+          Release notes and the AGENTS.md template are offered to the user, not applied to the
+          managed folders, and must be available from a NuGet package's content folder exactly
+          as from a zip's root.
+        tests:
+          - PackageContentExtractor_ReadReleaseNotes_DirectoryPackage_ReturnsContentOrNull
+          - PackageContentExtractor_ReadAgentsMdTemplate_DirectoryPackage_ReturnsContentOrNull
+          - PackageContentExtractor_Extract_NullArguments_ThrowsArgumentNullException

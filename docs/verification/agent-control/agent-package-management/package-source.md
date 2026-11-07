@@ -5,7 +5,8 @@
 `PackageSource` is verified with unit tests defined in `PackageSourceTests.cs`. Every test
 creates a unique real temporary directory populated with real (empty-content, correctly
 named) zip files, so package discovery is exercised against genuine filesystem state rather
-than a mocked file system.
+than a mocked file system. The unit is also exercised, unchanged, through
+`ZipFolderSourceProvider` (see its verification design), which adapts it to the provider contract.
 
 #### Test Environment
 

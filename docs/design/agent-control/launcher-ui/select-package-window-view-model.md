@@ -5,14 +5,19 @@
 #### Purpose
 
 `SelectPackageWindowViewModel` backs the "Select Package..." dialog: lists distinct package
-names discoverable at a configured source, then that name's discoverable versions (descending,
-defaulting to the latest), per architecture.md's "Initial package selection" decision. It
-lets a repo with no existing pin acquire its first pinned package/version.
+names discoverable at one named package source, then that name's discoverable versions
+(descending, defaulting to the latest), per architecture.md's "Initial package selection"
+decision. It lets a repo with no existing pin acquire its first pinned package/version, and
+reports the source alias with the selection so the pin records it
+(`AgentControl-SelectPackageWindowViewModel-SourceScoped`).
 
 #### Data Model
 
-**PackageNames**: `IReadOnlyList<string>` — The distinct package base names discoverable at
-the configured source, populated once at construction from the shared cache.
+**SourceAlias**: `string` — The alias of the source whose packages are listed; the dialog never
+includes another source's packages.
+
+**PackageNames**: `IReadOnlyList<string>` — The distinct package names discoverable at the
+source, populated once at construction from the shared cache.
 
 **SelectedPackageName**: `string?` — The package name currently selected by the user; setting
 it recomputes `AvailableVersions` and resets `SelectedVersion` to the first (highest/latest)
@@ -28,22 +33,26 @@ discoverable versions, descending (highest first).
 
 #### Key Methods
 
-**Constructor**: Populates `PackageNames` from the configured source via the shared cache.
+**Constructor**: Populates `PackageNames` from the chosen source via the shared cache.
 
-- *Parameters*: `string sourceDirectory`, `PackageVersionCache cache`.
-- *Preconditions*: Neither parameter is null.
-- *Postconditions*: `PackageNames` reflects `cache.GetPackageNames(sourceDirectory)`; an empty
+- *Parameters*: `PackageSourceRegistry registry`, `string sourceAlias`,
+  `PackageVersionCache cache`.
+- *Preconditions*: `registry` and `cache` are not null and `sourceAlias` is not blank.
+- *Postconditions*: `PackageNames` reflects the cache's package IDs for `sourceAlias`; an empty
   source produces an empty list and `CanConfirm` starts `false`
-  (`AgentControl-SelectPackageWindowViewModel-ListPackages`).
+  (`AgentControl-SelectPackageWindowViewModel-ListPackages`). An alias that is not configured
+  throws `UnknownSourceException`.
 
-All filesystem access routes through the shared, session-scoped `PackageVersionCache` rather
-than `PackageSource` directly, so opening this dialog a second time in the same app session
-does not re-scan the filesystem.
+All source access routes through the shared, session-scoped `PackageVersionCache` rather than a
+provider directly, so opening this dialog a second time in the same app session does not query the
+source again. The asynchronous cache is awaited on a worker thread because the lists are
+populated before the dialog is shown; a fully asynchronous dialog with progress and cancellation
+belongs to the multi-source UI work.
 
 **SelectedPackageName (setter)**: Recomputes `AvailableVersions` for the newly-selected name.
 
-- *Postconditions*: `AvailableVersions` reflects `cache.GetVersionsDescending(sourceDirectory,
-  value)`'s version strings, descending; `SelectedVersion` is reset to the first entry, or
+- *Postconditions*: `AvailableVersions` reflects the cache's descending versions for
+  (`SourceAlias`, value) as version strings; `SelectedVersion` is reset to the first entry, or
   `null` if none (`AgentControl-SelectPackageWindowViewModel-VersionSelection`).
 
 **Confirm** (private, bound to `ConfirmCommand`): Raises `Confirmed` with the current
@@ -59,16 +68,20 @@ selection.
 
 #### Error Handling
 
-The constructor throws `ArgumentNullException` for a null `sourceDirectory` or `cache`.
+The constructor throws `ArgumentNullException` for a null `registry` or `cache`,
+`ArgumentException` for a blank `sourceAlias`, and `UnknownSourceException` for an alias that is
+not configured.
 `Confirm` performs a defensive null check and silently returns without raising `Confirmed` if
 either selection is somehow null, even though `ConfirmCommand`'s `CanExecute` should already
-prevent that call. No other method throws; all filesystem-failure exceptions originate from
-the underlying `PackageVersionCache`/`PackageSource` calls, not this view model itself.
+prevent that call. No other method throws; all source-failure exceptions (for example
+`DirectoryNotFoundException`) originate from the underlying `PackageVersionCache`/provider calls,
+not this view model itself.
 
 #### Dependencies
 
-- **PackageVersionCache** (`AgentPackageManagement` subsystem) — sole source of package names
-  and versions; shared with `MainWindowViewModel` and every `RepoCardViewModel`.
+- **PackageVersionCache**, **PackageSourceRegistry** (`AgentPackageManagement` subsystem) —
+  sole source of package names and versions; the cache is shared with `MainWindowViewModel` and
+  every `RepoCardViewModel`.
 - **RelayCommand** (`LauncherUI` subsystem, shared MVVM support) — backs `ConfirmCommand`.
 
 #### Callers

@@ -153,10 +153,11 @@ public sealed class MainWindowViewModelTests : IDisposable
         // persisted to disk
         var card = Assert.Single(viewModel.RepoCards);
         Assert.Equal(repoPath, card.RepoPath);
-        Assert.Equal(@"\\share\packages", viewModel.Settings.PackageSourcePath);
+        Assert.Equal(@"\\share\packages", Assert.Single(viewModel.Settings.GetEffectiveSources()).Location);
 
         var reloaded = SettingsStore.Load(configDir);
-        Assert.Equal(@"\\share\packages", reloaded.PackageSourcePath);
+        Assert.Equal(@"\\share\packages", Assert.Single(reloaded.Sources).Location);
+        Assert.Null(reloaded.PackageSourcePath);
         var recentRepo = Assert.Single(reloaded.RecentRepos);
         Assert.Equal(repoPath, recentRepo.Path);
     }
@@ -411,8 +412,51 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that ApplySettings requests a fresh Git status check specifically for a card that
-    ///     reappeared (was missing, now present) since it was last checked, so it is not left
+    ///     Test that ApplySettings only drops cached results for sources that were edited or
+    ///     removed: a card pinned to an unchanged source keeps its cached upgrade answer even
+    ///     after that source's folder disappears, because settings for a different source changed.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_OnlyEditedSourceIsInvalidated()
+    {
+        // Arrange: a repo pinned (via the Default source) to 1.0.0, source "Default" offering 2.0.0,
+        // and a second, unrelated source
+        var repoPath = CreateTempDirectory();
+        RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        var defaultDir = CreateTempDirectory();
+        CreatePackageZip(defaultDir, "contoso-agents", "2.0.0");
+        var otherDir = CreateTempDirectory();
+        var settings = new AppSettings
+        {
+            Sources =
+            [
+                PackageSourceDefinition.CreateDefaultZip(defaultDir),
+                new PackageSourceDefinition { Alias = "Other", Type = PackageSourceType.Zip, Location = otherDir }
+            ],
+            RecentRepos = [new RecentRepo { Path = repoPath }]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        Assert.True(viewModel.RepoCards[0].IsUpgradeAvailable);
+
+        // Act: the Default source's folder vanishes, and only the Other source is edited
+        Directory.Delete(defaultDir, recursive: true);
+        var updated = new AppSettings
+        {
+            Sources =
+            [
+                PackageSourceDefinition.CreateDefaultZip(defaultDir),
+                new PackageSourceDefinition { Alias = "Other", Type = PackageSourceType.Zip, Location = CreateTempDirectory() }
+            ]
+        };
+        viewModel.ApplySettings(updated);
+
+        // Assert: Default's cached answer survived (an invalidated cache would now fail to read
+        // the missing folder and report no upgrade)
+        Assert.True(viewModel.RepoCards[0].IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that ApplySettings requests a fresh Git status check specifically for a card that    ///     reappeared (was missing, now present) since it was last checked, so it is not left
     ///     showing a stale or indefinitely "not yet checked" Pull-disabled state - an
     ///     already-realized card's one-time lazy Git-status-check trigger will not fire again for
     ///     it. Cards that were already present only get the cheap refresh, avoiding a redundant

@@ -24,6 +24,8 @@ using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
+using DemaConsulting.AgentControl.Startup;
+using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 using DemaConsulting.AgentControl.Tests.GitIntegration;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
@@ -736,10 +738,11 @@ public sealed class RepoCardViewModelTests : IDisposable
 
     /// <summary>
     ///     Test that executing SelectPackageCommand with a source configured raises
-    ///     SelectPackageRequested exactly once, carrying the configured source path.
+    ///     SelectPackageRequested exactly once, carrying the alias of the configured source (the
+    ///     legacy single path migrates to the Default source).
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourcePath()
+    public void RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias()
     {
         // Arrange
         var repoRoot = CreateTempDirectory();
@@ -754,7 +757,7 @@ public sealed class RepoCardViewModelTests : IDisposable
 
         // Assert
         var raisedSource = Assert.Single(raisedWith);
-        Assert.Equal(sourceDir, raisedSource);
+        Assert.Equal("Default", raisedSource);
     }
 
     /// <summary>
@@ -1414,6 +1417,354 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.True(raised);
         Assert.NotNull(card.LastLaunchedUtc);
     }
+
+    /// <summary>
+    ///     Test that applying a package records the alias of the source it came from in the repo's
+    ///     pin (schema version 2) and on the card; a legacy single path is the Default source.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_LegacySinglePath_PinRecordsDefaultSourceAlias()
+    {
+        // Arrange: a never-pinned repo and a legacy single-folder configuration
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        var card = CreateCard(repoRoot, null, null, new AppSettings { PackageSourcePath = sourceDir });
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert
+        var pin = RepoPinStore.Load(repoRoot);
+        Assert.NotNull(pin);
+        Assert.Equal(RepoPin.CurrentSchemaVersion, pin.SchemaVersion);
+        Assert.Equal("Default", pin.Source);
+        Assert.Equal("Default", card.PinnedSource);
+    }
+
+    /// <summary>
+    ///     Test that a selection made from a named source records that alias and extracts that
+    ///     source's content, not another source's package of the same name and version.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent()
+    {
+        // Arrange: two sources offering the same package name and version with different content
+        var repoRoot = CreateTempDirectory();
+        var dirA = CreateTempDirectory();
+        var dirB = CreateTempDirectory();
+        CreatePackageZip(dirA, "contoso-agents", "1.0.0", marker: "content from A");
+        CreatePackageZip(dirB, "contoso-agents", "1.0.0", marker: "content from B");
+        var settings = new AppSettings { Sources = [ZipSource("A", dirA), ZipSource("B", dirB)] };
+        var card = CreateCard(repoRoot, null, null, settings);
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0", "B");
+
+        // Assert
+        Assert.Equal("B", RepoPinStore.Load(repoRoot)?.Source);
+        Assert.Equal("content from B", File.ReadAllText(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
+    }
+
+    /// <summary>
+    ///     Test that a pin naming a source that is not configured puts the card in an error state
+    ///     - no upgrade is offered and the problem names the source - even though another
+    ///     configured source offers a higher version of the same package.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade()
+    {
+        // Arrange: pinned to source "Gone", which is not configured; "Other" has a newer version
+        var repoRoot = CreateTempDirectory();
+        var otherDir = CreateTempDirectory();
+        CreatePackageZip(otherDir, "contoso-agents", "9.0.0");
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Gone", PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [ZipSource("Other", otherDir)] };
+        var recentRepo = new RecentRepo { Path = repoRoot };
+        var card = new RepoCardViewModel(recentRepo, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert: error state, no fallback to "Other"
+        Assert.True(card.HasSourceProblem);
+        Assert.Contains("'Gone'", card.SourceProblem, StringComparison.Ordinal);
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Null(card.LatestAvailableVersion);
+        Assert.Equal("Gone", card.PinnedSource);
+    }
+
+    /// <summary>
+    ///     Test that applying a package from a source alias that is not configured reports the
+    ///     problem and changes nothing in the repo (no extraction, pin untouched), even though
+    ///     another configured source has the package.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_UnconfiguredSourceAlias_RaisesErrorAndChangesNothing()
+    {
+        // Arrange: pinned to unconfigured "Gone", while "Other" offers a newer version
+        var repoRoot = CreateTempDirectory();
+        var otherDir = CreateTempDirectory();
+        CreatePackageZip(otherDir, "contoso-agents", "9.0.0");
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Gone", PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [ZipSource("Other", otherDir)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+        string? error = null;
+        card.ErrorOccurred += (_, message) => error = message;
+
+        // Act: try to apply the newer package naming the unconfigured source
+        card.ApplySelectedPackage("contoso-agents", "9.0.0", "Gone");
+
+        // Assert: refused with a message naming the missing source; nothing was extracted or re-pinned
+        Assert.NotNull(error);
+        Assert.Contains("'Gone'", error, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(repoRoot, ".github")));
+        Assert.Equal("1.0.0", RepoPinStore.Load(repoRoot)?.Version);
+        Assert.Equal("Gone", RepoPinStore.Load(repoRoot)?.Source);
+    }
+
+    /// <summary>
+    ///     Test that the ensure-synced-before-launch repair fails (without extracting anything)
+    ///     for a pin naming an unconfigured source, instead of repairing from another source.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_EnsureAgentFilesSynced_PinNamesUnconfiguredSource_ReturnsFalseWithoutExtracting()
+    {
+        // Arrange: managed folders missing, pinned to unconfigured "Gone"; "Other" has the package
+        var repoRoot = CreateTempDirectory();
+        var otherDir = CreateTempDirectory();
+        CreatePackageZip(otherDir, "contoso-agents", "1.0.0");
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Gone", PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [ZipSource("Other", otherDir)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+        string? error = null;
+        card.ErrorOccurred += (_, message) => error = message;
+
+        // Act
+        var synced = card.EnsureAgentFilesSyncedBeforeLaunch();
+
+        // Assert
+        Assert.False(synced);
+        Assert.Contains("'Gone'", error, StringComparison.Ordinal);
+        Assert.False(PackageZipExtractor.AllManagedFoldersExist(repoRoot));
+    }
+
+    /// <summary>
+    ///     Test that a pin to the source with the lower version is compared only against that
+    ///     source: another source offering a higher version of the same package name does not make
+    ///     an upgrade appear.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Refresh_SamePackageNameInTwoSources_ComparesOnlyAgainstPinnedSource()
+    {
+        // Arrange: A offers 9.0.0, B offers 1.0.0; the repo is pinned to B at 1.0.0
+        var repoRoot = CreateTempDirectory();
+        var dirA = CreateTempDirectory();
+        var dirB = CreateTempDirectory();
+        CreatePackageZip(dirA, "contoso-agents", "9.0.0");
+        CreatePackageZip(dirB, "contoso-agents", "1.0.0");
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "B", PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [ZipSource("A", dirA), ZipSource("B", dirB)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert: B's latest is 1.0.0, so no upgrade, and no source problem
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Equal("1.0.0", card.LatestAvailableVersion);
+        Assert.False(card.HasSourceProblem);
+    }
+
+    /// <summary>
+    ///     Test that a version 1 pin file (no source) is resolved against the Default source.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Refresh_LegacyV1PinFile_ResolvesAgainstDefaultSource()
+    {
+        // Arrange: a hand-written v1 pin and a legacy-configured source with a newer version
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        File.WriteAllText(
+            Path.Combine(repoRoot, ".agentcontrol.json"),
+            """{ "PackageName": "contoso-agents", "Version": "1.0.0" }""");
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot }, () => new AppSettings { PackageSourcePath = sourceDir }, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert
+        Assert.Equal("Default", card.PinnedSource);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("2.0.0", card.LatestAvailableVersion);
+    }
+
+    /// <summary>
+    ///     Test that a version 1 pin with no Default source configured is an error state rather
+    ///     than silently using some other source.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Refresh_LegacyV1PinFileAndNoDefaultSource_ShowsSourceProblem()
+    {
+        // Arrange: a v1 pin, but the only configured source is not called Default
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        File.WriteAllText(
+            Path.Combine(repoRoot, ".agentcontrol.json"),
+            """{ "PackageName": "contoso-agents", "Version": "1.0.0" }""");
+        var settings = new AppSettings { Sources = [ZipSource("Mine", sourceDir)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert
+        Assert.True(card.HasSourceProblem);
+        Assert.Contains("'Default'", card.SourceProblem, StringComparison.Ordinal);
+        Assert.False(card.IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that applying a package to a repo whose pin file has unknown fields keeps them, and
+    ///     keeps the AGENTS.md decline flag.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_PinWithUnknownFieldAndDecline_PreservesBoth()
+    {
+        // Arrange: a v2 pin with an unknown field and a recorded decline
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var pinPath = Path.Combine(repoRoot, ".agentcontrol.json");
+        File.WriteAllText(
+            pinPath,
+            """{ "SchemaVersion": 2, "Source": "Default", "PackageName": "contoso-agents", "Version": "1.0.0", "AgentsMdTemplateDeclined": true, "Extra": "kept" }""");
+        var card = CreateCard(repoRoot, null, null, new AppSettings { PackageSourcePath = sourceDir });
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "2.0.0");
+
+        // Assert
+        var json = File.ReadAllText(pinPath);
+        Assert.Contains("\"Extra\": \"kept\"", json, StringComparison.Ordinal);
+        Assert.True(RepoPinStore.Load(repoRoot)?.AgentsMdTemplateDeclined);
+        Assert.Equal("2.0.0", RepoPinStore.Load(repoRoot)?.Version);
+    }
+
+    /// <summary>
+    ///     Test that applying a package to a repo whose pin file was written by a newer AgentControl
+    ///     is refused up front: an error is raised, the pin file is unchanged, and the managed
+    ///     folders are not touched.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_NewerSchemaPinFile_RaisesErrorAndChangesNothing()
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var pinPath = Path.Combine(repoRoot, ".agentcontrol.json");
+        const string newerPin = """{ "SchemaVersion": 7, "PackageName": "contoso-agents", "Version": "1.0.0" }""";
+        File.WriteAllText(pinPath, newerPin);
+        var card = CreateCard(repoRoot, null, null, new AppSettings { PackageSourcePath = sourceDir });
+        string? error = null;
+        card.ErrorOccurred += (_, message) => error = message;
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "2.0.0");
+
+        // Assert
+        Assert.NotNull(error);
+        Assert.Contains("newer", error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(newerPin, File.ReadAllText(pinPath));
+        Assert.False(Directory.Exists(Path.Combine(repoRoot, ".github")));
+    }
+
+    /// <summary>
+    ///     Test that a package selected from a NuGet folder source is extracted into the repo, the
+    ///     pin records the NuGet source's alias, and release notes are raised.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes()
+    {
+        // Arrange: a NuGet folder feed holding an agent package, and a card with isolated NuGet cache
+        var repoRoot = CreateTempDirectory();
+        var feed = CreateTempDirectory();
+        var id = "agentcontrol.test." + Guid.NewGuid().ToString("N");
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "from feed", releaseNotes: "feed notes");
+        var settings = new AppSettings { Sources = [NuGetFolderSource("Feed", feed)] };
+        var card = CreateCardWithIsolatedNuGetCache(repoRoot, settings);
+        string? notes = null;
+        card.ReleaseNotesReady += (_, text) => notes = text;
+
+        // Act
+        card.ApplySelectedPackage(id, "1.0.0", "Feed");
+
+        // Assert
+        var pin = RepoPinStore.Load(repoRoot);
+        Assert.NotNull(pin);
+        Assert.Equal("Feed", pin.Source);
+        Assert.Equal(id, pin.PackageName);
+        Assert.Equal("1.0.0", pin.Version);
+        Assert.Equal("from feed", File.ReadAllText(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
+        Assert.Equal("feed notes", notes);
+    }
+
+    /// <summary>
+    ///     Test that Upgrade for a repo pinned to a NuGet source upgrades to that source's highest
+    ///     version and ensure-synced re-extracts the pinned version when managed folders are missing.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_UpgradeCommand_NuGetFolderSource_UpgradesToHighestVersion()
+    {
+        // Arrange: a repo pinned to 1.0.0 of a NuGet package whose feed also holds 2.0.0
+        var repoRoot = CreateTempDirectory();
+        var feed = CreateTempDirectory();
+        var id = "agentcontrol.test." + Guid.NewGuid().ToString("N");
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "v1");
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "2.0.0", marker: "v2");
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = id, Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [NuGetFolderSource("Feed", feed)] };
+        var card = CreateCardWithIsolatedNuGetCache(repoRoot, settings);
+        card.RefreshCheap();
+        Assert.True(card.IsUpgradeAvailable);
+
+        // Act
+        card.UpgradeCommand.Execute(null);
+
+        // Assert
+        Assert.Equal("2.0.0", RepoPinStore.Load(repoRoot)?.Version);
+        Assert.Equal("v2", File.ReadAllText(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
+        Assert.False(card.IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Creates a card whose NuGet package caches live in an isolated folder (via the startup
+    ///     configuration-directory override), so tests never touch the real user profile.
+    /// </summary>
+    private RepoCardViewModel CreateCardWithIsolatedNuGetCache(string repoRoot, AppSettings settings)
+    {
+        var startupOptions = StartupOptions.Parse(["--config-dir", CreateTempDirectory()]);
+        return new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache(), startupOptions);
+    }
+
+    /// <summary>
+    ///     Creates a zip-folder source definition.
+    /// </summary>
+    private static PackageSourceDefinition ZipSource(string alias, string folder) =>
+        new() { Alias = alias, Type = PackageSourceType.Zip, Location = folder };
+
+    /// <summary>
+    ///     Creates a NuGet folder-feed source definition.
+    /// </summary>
+    private static PackageSourceDefinition NuGetFolderSource(string alias, string folder) =>
+        new() { Alias = alias, Type = PackageSourceType.NuGet, Location = folder };
 
     /// <summary>
     ///     Creates a <see cref="RepoCardViewModel"/> for the given repo path, cached pin fields,

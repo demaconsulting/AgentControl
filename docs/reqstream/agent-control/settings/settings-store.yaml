@@ -1,7 +1,7 @@
 ---
 # Software Unit Requirements for the SettingsStore Class
 #
-# SettingsStore loads and saves the application's settings file (package source path,
+# SettingsStore loads and saves the application's settings file (package sources,
 # git/agent-tool overrides, recent-repos list, shell preference), and resolves the default
 # configuration directory under the user's application-data folder.
 
@@ -40,3 +40,50 @@ sections:
           configuration-directory override has been supplied at startup.
         tests:
           - SettingsStore_GetDefaultConfigDirectory_ReturnsPathUnderApplicationData
+
+      - id: AgentControl-SettingsStore-SourcesRoundTrip
+        title: >-
+          The SettingsStore class shall save and load the configured package sources with all
+          of their fields (alias, type, location, package IDs and trust options).
+        justification: |
+          Source definitions are the user's configuration; any field lost across a restart would
+          silently change which packages are offered or how they are checked.
+        tests:
+          - SettingsStore_SaveThenLoad_RoundTripsAllFields
+
+      - id: AgentControl-SettingsStore-LegacySourceMigration
+        title: >-
+          The SettingsStore class shall, when loading a settings file whose only package source
+          is the legacy single folder path, present it as a zip source named Default, shall let
+          a configured source list take precedence over a legacy path, and shall save the
+          sources rather than the legacy path.
+        justification: |
+          Users who configured the single package folder before multiple sources existed must
+          keep their setup without any manual step, and the old field must not be written back
+          where it could be mistaken for a second source.
+        tests:
+          - SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource
+          - SettingsStore_Load_SourcesAndLegacyPath_SourcesWin
+          - SettingsStore_Save_LegacyPackageSourcePath_WritesSourcesNotLegacyField
+
+      - id: AgentControl-SettingsStore-NoSecretsPersisted
+        title: >-
+          The SettingsStore class shall write no password, token or other secret to the
+          settings file, whatever the configured sources contain.
+        justification: |
+          The settings file is plain text under the user's profile; AgentControl must not store
+          secrets there, so no credential can leak through a backup, a synced profile or a
+          support attachment.
+        tests:
+          - SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties
+
+      - id: AgentControl-SettingsStore-AtomicSave
+        title: >-
+          The SettingsStore class shall replace the settings file atomically, so that a save
+          leaves only the settings file holding the latest content and never a partial file or a
+          stray temporary file.
+        justification: |
+          The settings file holds the user's whole configuration including the recent-repos list;
+          a crash or full disk during a save must not leave it truncated.
+        tests:
+          - SettingsStore_Save_RepeatedSaves_LeavesOnlySettingsFileWithLatestContent

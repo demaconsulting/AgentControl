@@ -29,7 +29,8 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 /// <remarks>
 ///     No Avalonia <see cref="Avalonia.Controls.Window"/> is ever constructed here, matching
 ///     <c>SettingsWindowViewModelTests</c>'s headless pattern; only real temporary
-///     directories/zip fixtures are used for the underlying <see cref="PackageVersionCache"/>.
+///     directories/zip fixtures are used behind a real <see cref="PackageSourceRegistry"/> and
+///     <see cref="PackageVersionCache"/>.
 /// </remarks>
 public sealed class SelectPackageWindowViewModelTests : IDisposable
 {
@@ -47,7 +48,7 @@ public sealed class SelectPackageWindowViewModelTests : IDisposable
         CreateFile(sourceDir, "contoso-agents-1.0.0.zip");
         CreateFile(sourceDir, "contoso-agents-2.5.0.zip");
         CreateFile(sourceDir, "contoso-agents-2.4.9.zip");
-        var viewModel = new SelectPackageWindowViewModel(sourceDir, new PackageVersionCache());
+        var viewModel = CreateViewModel(sourceDir);
 
         // Act
         viewModel.SelectedPackageName = "contoso-agents";
@@ -68,7 +69,7 @@ public sealed class SelectPackageWindowViewModelTests : IDisposable
         var sourceDir = CreateTempDirectory();
         CreateFile(sourceDir, "contoso-agents-1.0.0.zip");
         CreateFile(sourceDir, "other-package-3.0.0.zip");
-        var viewModel = new SelectPackageWindowViewModel(sourceDir, new PackageVersionCache());
+        var viewModel = CreateViewModel(sourceDir);
         viewModel.SelectedPackageName = "contoso-agents";
         Assert.Equal("1.0.0", viewModel.SelectedVersion);
 
@@ -90,7 +91,7 @@ public sealed class SelectPackageWindowViewModelTests : IDisposable
         // Arrange
         var sourceDir = CreateTempDirectory();
         CreateFile(sourceDir, "contoso-agents-1.0.0.zip");
-        var viewModel = new SelectPackageWindowViewModel(sourceDir, new PackageVersionCache());
+        var viewModel = CreateViewModel(sourceDir);
 
         // Assert: nothing selected yet
         Assert.False(viewModel.CanConfirm);
@@ -119,7 +120,7 @@ public sealed class SelectPackageWindowViewModelTests : IDisposable
         // Arrange
         var sourceDir = CreateTempDirectory();
         CreateFile(sourceDir, "contoso-agents-1.0.0.zip");
-        var viewModel = new SelectPackageWindowViewModel(sourceDir, new PackageVersionCache());
+        var viewModel = CreateViewModel(sourceDir);
         viewModel.SelectedPackageName = "contoso-agents";
         var raised = new List<(string Name, string Version)>();
         viewModel.Confirmed += (_, pair) => raised.Add(pair);
@@ -142,11 +143,66 @@ public sealed class SelectPackageWindowViewModelTests : IDisposable
     {
         // Arrange
         var sourceDir = CreateTempDirectory();
-        var viewModel = new SelectPackageWindowViewModel(sourceDir, new PackageVersionCache());
+        var viewModel = CreateViewModel(sourceDir);
 
         // Assert
         Assert.Empty(viewModel.PackageNames);
         Assert.False(viewModel.CanConfirm);
+    }
+
+    /// <summary>
+    ///     Test that with two configured sources the dialog lists only the chosen source's packages
+    ///     and versions, and reports that source's alias.
+    /// </summary>
+    [Fact]
+    public void SelectPackageWindowViewModel_TwoSources_ListsOnlyTheChosenSourcesPackagesAndReportsItsAlias()
+    {
+        // Arrange: two sources whose packages differ, one sharing a package name with different versions
+        var dirA = CreateTempDirectory();
+        var dirB = CreateTempDirectory();
+        CreateFile(dirA, "contoso-agents-9.0.0.zip");
+        CreateFile(dirA, "only-in-a-1.0.0.zip");
+        CreateFile(dirB, "contoso-agents-1.0.0.zip");
+        var registry = PackageSourceRegistry.Create(
+        [
+            new PackageSourceDefinition { Alias = "A", Type = PackageSourceType.Zip, Location = dirA },
+            new PackageSourceDefinition { Alias = "B", Type = PackageSourceType.Zip, Location = dirB }
+        ]);
+
+        // Act
+        var viewModel = new SelectPackageWindowViewModel(registry, "B", new PackageVersionCache());
+        viewModel.SelectedPackageName = "contoso-agents";
+
+        // Assert: only B's package and version are offered
+        Assert.Equal("B", viewModel.SourceAlias);
+        Assert.Equal(["contoso-agents"], viewModel.PackageNames);
+        Assert.Equal(["1.0.0"], viewModel.AvailableVersions);
+    }
+
+    /// <summary>
+    ///     Test that constructing for an alias that is not configured fails with
+    ///     <see cref="UnknownSourceException"/> rather than listing another source.
+    /// </summary>
+    [Fact]
+    public void SelectPackageWindowViewModel_Constructor_UnknownSourceAlias_ThrowsUnknownSourceException()
+    {
+        // Arrange: only source "A" exists
+        var registry = PackageSourceRegistry.Create(
+            [new PackageSourceDefinition { Alias = "A", Type = PackageSourceType.Zip, Location = CreateTempDirectory() }]);
+
+        // Act / Assert
+        Assert.Throws<UnknownSourceException>(
+            () => new SelectPackageWindowViewModel(registry, "B", new PackageVersionCache()));
+    }
+
+    /// <summary>
+    ///     Creates the view model under test over a single zip-folder source named
+    ///     <c>Default</c> at the given directory.
+    /// </summary>
+    private static SelectPackageWindowViewModel CreateViewModel(string sourceDir)
+    {
+        var registry = PackageSourceRegistry.Create([PackageSourceDefinition.CreateDefaultZip(sourceDir)]);
+        return new SelectPackageWindowViewModel(registry, PackageSourceDefinition.DefaultAlias, new PackageVersionCache());
     }
 
     /// <summary>

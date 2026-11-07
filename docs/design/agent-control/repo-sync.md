@@ -4,19 +4,37 @@
 
 ### Overview
 
-The `RepoSync` subsystem spans `PackageZipExtractor.cs` (extracts a package zip's managed
-folders into a repo, blind delete-replace), `ReleaseNotesViewerViewModel.cs` (backs the
+The `RepoSync` subsystem spans `PackageContentExtractor.cs` (applies a package's managed
+folders to a repo, blind delete-replace, from any package format presented through the content
+readers `ZipPackageContentReader.cs` and `DirectoryPackageContentReader.cs` behind
+`IPackageContentReader.cs`), `PackageZipExtractor.cs` (the zip-file entry point to it),
+`ReleaseNotesViewerViewModel.cs` (backs the
 release-notes dialog shown after a sync), and `GitIgnoreEnsurer.cs` (proactively ensures a
 repo's `.gitignore` covers the four managed folders immediately after a successful sync); the
 `ReleaseNotesViewer.axaml` view has no dedicated test file and is folded into this
 subsystem-level description. The subsystem provides the observable behavior of syncing a
-repo's agent files to a package's contents. It contains three units: `PackageZipExtractor`,
-`ReleaseNotesViewerViewModel`, and `GitIgnoreEnsurer`.
+repo's agent files to a package's contents. It contains four units: `PackageContentExtractor`,
+`PackageZipExtractor`, `ReleaseNotesViewerViewModel`, and `GitIgnoreEnsurer`; the content
+reader types are folded into the `PackageContentExtractor` unit.
 
 ### Interfaces
 
+**PackageContentExtractor.Extract**: Replaces a repo's managed agent-file folders with the
+contents of a package presented as an `IPackageContentReader` — a zip file or an unpacked
+package folder (a NuGet package's `content` folder).
+
+- *Type*: In-process .NET static method.
+- *Role*: Provider.
+- *Contract*: The same sequence as `PackageZipExtractor.Extract` below for either package
+  format, rejecting - before deleting anything - any file whose destination falls outside the
+  repo and, for a folder package, any symbolic link or junction
+  (`AgentControl-PackageContentExtractor-ExtractFromFolder`,
+  `AgentControl-PackageContentExtractor-RejectLinksAndTraversal`); also reads the package's
+  root-level release notes and `AGENTS.md` template (`AgentControl-PackageContentExtractor-ReadRootFiles`).
+- *Constraints*: Never writes to the package it reads (a NuGet package cache is shared).
+
 **PackageZipExtractor.Extract**: Replaces a repo's managed agent-file folders with a package
-zip's contents.
+zip's contents (a facade over `PackageContentExtractor` for a zip file).
 
 - *Type*: In-process .NET static method.
 - *Role*: Provider.
@@ -81,18 +99,19 @@ agent-file folders.
 
 ### Design
 
-`PackageZipExtractor` implements the upgrade/sync sequence from architecture.md's
-"Upgrade sequence and failure handling": (1) open/validate the new zip — if it opens without
-error, its contents are assumed good; (2) delete the four old folders if present; (3) extract
-the new files, excluding root-level files like `release-notes.md` and `AGENTS.md`. It is a
-static class with no persistent state; the pin-file rewrite, release-notes display, and
-AGENTS.md template offer happen in the calling `RepoCardViewModel`, deliberately *after* a
-successful extraction, so a failure partway through extraction never leaves a repo pinned to
-a version whose files were not actually applied (`AgentControl-RepoSync-Sync`).
-`PackageZipExtractor` also exposes `ReadAgentsMdTemplate`, reading a package's optional
-root-level `AGENTS.md` template without extracting it, so `RepoCardViewModel` can decide
-whether to offer it to the user after a successful sync
-(`AgentControl-RepoSync-AgentsMdTemplate`).
+`PackageContentExtractor` implements the upgrade/sync sequence for every package format, and
+`PackageZipExtractor` is the thin zip-file facade over it, kept as the stable zip API
+(`AgentControl-RepoSync-SyncFromFolderPackage`). The sequence is from architecture.md's "Upgrade
+sequence and failure handling": (1) open/validate the new zip — if it opens without error, its
+contents are assumed good; (2) delete the four old folders if present; (3) extract the new files,
+excluding root-level files like `release-notes.md` and `AGENTS.md`. It is a static class with no
+persistent state, and so is `PackageContentExtractor`; the pin-file rewrite, release-notes display,
+and AGENTS.md template offer happen in the calling `RepoCardViewModel`, deliberately *after* a
+successful extraction, so a failure partway through extraction never leaves a repo pinned to a
+version whose files were not actually applied (`AgentControl-RepoSync-Sync`). `PackageZipExtractor`
+also exposes `ReadAgentsMdTemplate`, reading a package's optional root-level `AGENTS.md` template
+without extracting it, so `RepoCardViewModel` can decide whether to offer it to the user after a
+successful sync (`AgentControl-RepoSync-AgentsMdTemplate`).
 
 `ReleaseNotesViewerViewModel` is a simple, stateless-beyond-construction display view model:
 it is constructed once per shown dialog with the repo name, package title, and release notes

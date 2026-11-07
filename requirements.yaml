@@ -18,10 +18,14 @@ includes:
   - docs/reqstream/agent-control/launcher-ui/settings-window-view-model.yaml
   - docs/reqstream/agent-control/agent-package-management.yaml
   - docs/reqstream/agent-control/agent-package-management/package-source.yaml
+  - docs/reqstream/agent-control/agent-package-management/package-source-registry.yaml
+  - docs/reqstream/agent-control/agent-package-management/zip-folder-source-provider.yaml
+  - docs/reqstream/agent-control/agent-package-management/nuget-source-provider.yaml
   - docs/reqstream/agent-control/agent-package-management/package-version.yaml
   - docs/reqstream/agent-control/agent-package-management/package-version-cache.yaml
   - docs/reqstream/agent-control/repo-sync.yaml
   - docs/reqstream/agent-control/repo-sync/git-ignore-ensurer.yaml
+  - docs/reqstream/agent-control/repo-sync/package-content-extractor.yaml
   - docs/reqstream/agent-control/repo-sync/package-zip-extractor.yaml
   - docs/reqstream/agent-control/repo-sync/release-notes-viewer-view-model.yaml
   - docs/reqstream/agent-control/repo-config.yaml
@@ -52,5 +56,6 @@ includes:
   - docs/reqstream/ots/sysml2tools.yaml
   - docs/reqstream/ots/avalonia.yaml
   - docs/reqstream/ots/serilog.yaml
+  - docs/reqstream/ots/nuget-caching.yaml
   - docs/reqstream/ots/flaui.yaml
   - docs/reqstream/ots/wixtoolset.yaml

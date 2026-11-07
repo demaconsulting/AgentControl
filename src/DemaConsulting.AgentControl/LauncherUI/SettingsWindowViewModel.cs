@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Settings;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
@@ -32,7 +33,10 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     button) never partially mutates the caller's settings. The recent-repos list is
 ///     intentionally not exposed here - it is owned exclusively by
 ///     <see cref="MainWindowViewModel"/> and is preserved by <see cref="MainWindowViewModel.ApplySettings"/>
-///     when the built <see cref="AppSettings"/> from <see cref="Save"/> is applied. Not
+///     when the built <see cref="AppSettings"/> from <see cref="Save"/> is applied. The package
+///     source field edits the location of the source named <c>Default</c> (the source a
+///     single-folder configuration migrates to) while every other configured source is carried
+///     through unchanged; a full multi-source editor is a separate piece of UI work. Not
 ///     thread-safe; every member is expected to be called from the UI thread.
 /// </remarks>
 internal sealed class SettingsWindowViewModel : ViewModelBase
@@ -42,6 +46,13 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
     ///     persist, typically <see cref="MainWindowViewModel.ApplySettings"/>.
     /// </summary>
     private readonly Action<AppSettings> _onSave;
+
+    /// <summary>
+    ///     Working copies of the sources configured when the window opened, saved back (with the
+    ///     <c>Default</c> source's location replaced by <see cref="PackageSourcePath"/>) by
+    ///     <see cref="Save"/>.
+    /// </summary>
+    private readonly List<PackageSourceDefinition> _sources;
 
     private string? _packageSourcePath;
     private string? _gitExecutablePath;
@@ -62,7 +73,8 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
         ArgumentNullException.ThrowIfNull(initial);
         ArgumentNullException.ThrowIfNull(onSave);
 
-        _packageSourcePath = initial.PackageSourcePath;
+        _sources = initial.GetEffectiveSources().Select(source => source.Clone()).ToList();
+        _packageSourcePath = FindDefaultSource(_sources)?.Location;
         _gitExecutablePath = initial.GitExecutablePath;
         _agentTool = initial.AgentTool;
         _customAgentCommand = initial.CustomAgentCommand;
@@ -108,7 +120,9 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
             ];
 
     /// <summary>
-    ///     Gets or sets the filesystem path agent package zips are enumerated from.
+    ///     Gets or sets the location of the <c>Default</c> package source (the filesystem path
+    ///     agent package zips are enumerated from); blank/<see langword="null"/> removes the
+    ///     <c>Default</c> source when saved.
     /// </summary>
     public string? PackageSourcePath
     {
@@ -186,13 +200,20 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
     ///     The returned settings' <see cref="AppSettings.RecentRepos"/> is left as a fresh empty
     ///     list; callers (specifically <see cref="MainWindowViewModel.ApplySettings"/>) are
     ///     responsible for preserving the authoritative recent-repos list, since this view model
-    ///     never owns or edits it.
+    ///     never owns or edits it. The configured sources are written to
+    ///     <see cref="AppSettings.Sources"/> (never the legacy single path): the <c>Default</c>
+    ///     source takes <see cref="PackageSourcePath"/> as its location - created as a zip source
+    ///     if it did not exist, removed if the path is blank - and all other sources are kept as
+    ///     they were.
     /// </remarks>
     private void Save()
     {
+        var sources = _sources.Select(source => source.Clone()).ToList();
+        ApplyDefaultSourceLocation(sources, PackageSourcePath);
+
         var updated = new AppSettings
         {
-            PackageSourcePath = PackageSourcePath,
+            Sources = sources,
             GitExecutablePath = GitExecutablePath,
             AgentTool = AgentTool,
             CustomAgentCommand = CustomAgentCommand,
@@ -201,5 +222,44 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
 
         _onSave(updated);
         Saved?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    ///     Finds the source named <c>Default</c>, if any.
+    /// </summary>
+    /// <param name="sources">The sources to search.</param>
+    /// <returns>The <c>Default</c> source (alias compared case-insensitively), or
+    ///     <see langword="null"/>.</returns>
+    private static PackageSourceDefinition? FindDefaultSource(IEnumerable<PackageSourceDefinition> sources) =>
+        sources.FirstOrDefault(source =>
+            string.Equals(source.Alias, PackageSourceDefinition.DefaultAlias, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    ///     Applies the single-field package source location to a source list: updates, adds or
+    ///     removes the <c>Default</c> source.
+    /// </summary>
+    /// <param name="sources">The working list to modify.</param>
+    /// <param name="location">The new <c>Default</c> location; blank removes the source.</param>
+    private static void ApplyDefaultSourceLocation(List<PackageSourceDefinition> sources, string? location)
+    {
+        var existing = FindDefaultSource(sources);
+        if (string.IsNullOrWhiteSpace(location))
+        {
+            if (existing is not null)
+            {
+                sources.Remove(existing);
+            }
+
+            return;
+        }
+
+        if (existing is not null)
+        {
+            existing.Location = location;
+        }
+        else
+        {
+            sources.Insert(0, PackageSourceDefinition.CreateDefaultZip(location));
+        }
     }
 }

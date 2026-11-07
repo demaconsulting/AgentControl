@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.Settings;
 
@@ -112,13 +113,102 @@ public class SettingsWindowViewModelTests
         // Act: execute the save command
         viewModel.SaveCommand.Execute(null);
 
-        // Assert: onSave received the edited values, and Saved was raised
+        // Assert: onSave received the edited values, and Saved was raised; the package source
+        // path is saved as the Default zip source (never the legacy single path)
         Assert.NotNull(savedSettings);
-        Assert.Equal(@"D:\packages", savedSettings.PackageSourcePath);
+        var source = Assert.Single(savedSettings.Sources);
+        Assert.Equal(PackageSourceDefinition.DefaultAlias, source.Alias);
+        Assert.Equal(PackageSourceType.Zip, source.Type);
+        Assert.Equal(@"D:\packages", source.Location);
+        Assert.Null(savedSettings.PackageSourcePath);
         Assert.Equal("git", savedSettings.GitExecutablePath);
         Assert.Equal(AgentToolKind.ClaudeCode, savedSettings.AgentTool);
         Assert.Equal("cmd", savedSettings.ShellPreference);
         Assert.True(savedRaised);
+    }
+
+    /// <summary>
+    ///     Test that saving carries every other configured source through unchanged while editing
+    ///     only the Default source's location.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_Save_OtherSourcesConfigured_PreservesThemAndEditsOnlyDefault()
+    {
+        // Arrange: a Default zip source plus a NuGet source with package IDs
+        AppSettings? savedSettings = null;
+        var initial = new AppSettings
+        {
+            Sources =
+            [
+                PackageSourceDefinition.CreateDefaultZip(@"C:\old"),
+                new PackageSourceDefinition
+                {
+                    Alias = "Feed",
+                    Type = PackageSourceType.NuGet,
+                    Location = @"\\share\feed",
+                    PackageIds = ["contoso.agents"]
+                }
+            ]
+        };
+        var viewModel = new SettingsWindowViewModel(initial, settings => savedSettings = settings);
+        Assert.Equal(@"C:\old", viewModel.PackageSourcePath);
+
+        // Act: edit the single package source field and save
+        viewModel.PackageSourcePath = @"C:\new";
+        viewModel.SaveCommand.Execute(null);
+
+        // Assert: Default moved, the NuGet source is intact, and the live settings were untouched
+        Assert.NotNull(savedSettings);
+        Assert.Equal(2, savedSettings.Sources.Count);
+        Assert.Equal(@"C:\new", savedSettings.Sources[0].Location);
+        Assert.Equal("Feed", savedSettings.Sources[1].Alias);
+        Assert.Equal(PackageSourceType.NuGet, savedSettings.Sources[1].Type);
+        Assert.Equal(["contoso.agents"], savedSettings.Sources[1].PackageIds);
+        Assert.Equal(@"C:\old", initial.Sources[0].Location);
+    }
+
+    /// <summary>
+    ///     Test that clearing the package source field removes the Default source on save but
+    ///     keeps other sources.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_Save_BlankPackageSourcePath_RemovesDefaultSourceOnly()
+    {
+        // Arrange
+        AppSettings? savedSettings = null;
+        var initial = new AppSettings
+        {
+            Sources =
+            [
+                PackageSourceDefinition.CreateDefaultZip(@"C:\old"),
+                new PackageSourceDefinition { Alias = "Other", Type = PackageSourceType.Zip, Location = @"D:\other" }
+            ]
+        };
+        var viewModel = new SettingsWindowViewModel(initial, settings => savedSettings = settings)
+        {
+            PackageSourcePath = "  "
+        };
+
+        // Act
+        viewModel.SaveCommand.Execute(null);
+
+        // Assert
+        Assert.NotNull(savedSettings);
+        Assert.Equal("Other", Assert.Single(savedSettings.Sources).Alias);
+    }
+
+    /// <summary>
+    ///     Test that a legacy single package-source path in the initial settings seeds the field
+    ///     (it is the effective Default source).
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_Constructor_LegacyPackageSourcePath_SeedsPackageSourcePathField()
+    {
+        // Arrange / Act
+        var viewModel = new SettingsWindowViewModel(new AppSettings { PackageSourcePath = @"E:\legacy" }, _ => { });
+
+        // Assert
+        Assert.Equal(@"E:\legacy", viewModel.PackageSourcePath);
     }
 
     /// <summary>

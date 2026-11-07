@@ -18,72 +18,26 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using System.IO.Compression;
-using DemaConsulting.AgentControl.Logging;
-using DemaConsulting.AgentControl.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.RepoSync;
 
 /// <summary>
-///     Implements the blind-delete-and-replace upgrade sequence for a repo's four managed agent
-///     folders, from a package zip file.
+///     Zip-package entry point to the blind-delete-and-replace upgrade sequence for a repo's four
+///     managed agent folders: a thin facade that opens a package zip and delegates to
+///     <see cref="PackageContentExtractor"/>.
 /// </summary>
 /// <remarks>
-///     Per architecture.md's "Upgrade sequence and failure handling" decision, this performs:
-///     (1) open/validate the zip; (2) delete the four known folders if present; (3) extract only
-///     those same four folders from the zip (root-level files such as <c>release-notes.md</c> and
-///     the optional <c>AGENTS.md</c> template are never extracted to disk - see
-///     <see cref="IsInsideManagedFolder"/>, whose managed-folder-prefix check already excludes any
-///     root-level entry regardless of name, so no change to the skip logic itself was needed to
-///     add the <c>AGENTS.md</c> template entry). Rewriting the <c>.agentcontrol.json</c> pin is the caller's
-///     responsibility (see the <c>RepoConfig</c> subsystem) so this class stays focused on file
-///     operations alone. There is intentionally no rollback on failure — per architecture.md, a
-///     failed upgrade is surfaced to the caller (Phase 2 will show a message box) and the
-///     developer is expected to resolve it manually. Stateless and thread-safe: every member is a
-///     pure function of its parameters plus the filesystem.
+///     Kept as the stable zip-file API (and the single entry point for checking whether the
+///     managed folders exist) so existing callers and their requirements remain valid; every rule
+///     - managed-folder list, path containment, delete-then-copy semantics, no rollback - lives in
+///     <see cref="PackageContentExtractor"/> and is shared with the unpacked-folder packages used
+///     by NuGet sources. Rewriting the <c>.agentcontrol.json</c> pin is the caller's
+///     responsibility (see the <c>RepoConfig</c> subsystem). Stateless and thread-safe: every
+///     member is a pure function of its parameters plus the filesystem.
 /// </remarks>
 internal static class PackageZipExtractor
 {
-    /// <summary>
-    ///     Fully qualified logger category name used for this static class's diagnostics.
-    /// </summary>
-    /// <remarks>
-    ///     A string category is used (rather than the generic <c>ILogger&lt;PackageZipExtractor&gt;</c>
-    ///     form) because a static class cannot be used as a generic type argument.
-    /// </remarks>
-    private const string LoggerCategoryName = "DemaConsulting.AgentControl.RepoSync.PackageZipExtractor";
-
-    /// <summary>
-    ///     Name of the root <c>.github</c> folder under which every managed agent folder lives.
-    /// </summary>
-    private const string GitHubFolderName = ".github";
-
-    /// <summary>
-    ///     The four agent folders (relative to a repo root) that are blind-deleted and replaced
-    ///     on every sync/upgrade, per architecture.md.
-    /// </summary>
-    private static readonly string[] ManagedFolders =
-    [
-        Path.Combine(GitHubFolderName, "agents"),
-        Path.Combine(GitHubFolderName, "standards"),
-        Path.Combine(GitHubFolderName, "templates"),
-        Path.Combine(GitHubFolderName, "skills")
-    ];
-
-    /// <summary>
-    ///     Name of the root-level release notes entry within a package zip; never extracted to
-    ///     disk, only readable via <see cref="ReadReleaseNotes"/>.
-    /// </summary>
-    private const string ReleaseNotesEntryName = "release-notes.md";
-
-    /// <summary>
-    ///     Name of the optional root-level AGENTS.md template entry within a package zip; never
-    ///     extracted to disk by <see cref="Extract"/> (it is a root-level entry, same as
-    ///     <see cref="ReleaseNotesEntryName"/>), only readable via <see cref="ReadAgentsMdTemplate"/>.
-    /// </summary>
-    private const string AgentsMdEntryName = "AGENTS.md";
-
     /// <summary>
     ///     Opens/validates the package zip, validates every entry's destination path, deletes the
     ///     four managed folders under <paramref name="repoRoot"/> if present, and extracts the
@@ -91,122 +45,45 @@ internal static class PackageZipExtractor
     /// </summary>
     /// <param name="zipPath">Path to the agent package zip file.</param>
     /// <param name="repoRoot">Absolute path to the repository root to sync.</param>
-    /// <param name="logger">
-    ///     Logger for extraction diagnostics, or <see langword="null"/> to fall back to
-    ///     <see cref="AppLogging.Factory"/>. Resolved fresh per call (mirroring
-    ///     <see cref="AgentToolLauncher.AgentToolLauncher.Launch"/>'s pattern) rather than a
-    ///     cached static field, so tests that configure logging after this class is first touched
-    ///     are never stuck with a stale no-op logger for the rest of the process.
-    /// </param>
+    /// <param name="logger">Logger for extraction diagnostics, or <see langword="null"/> to fall
+    ///     back to the application logging factory (see
+    ///     <see cref="PackageContentExtractor.Extract"/>).</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="zipPath"/> or
     ///     <paramref name="repoRoot"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
     ///     Thrown when the zip cannot be opened/is not a valid zip archive, when an entry's
     ///     destination path is invalid (including resolving outside <paramref name="repoRoot"/>),
     ///     when a managed folder cannot be deleted, or when extraction fails partway through. An
-    ///     invalid entry path is rejected before any managed folder is deleted, so that failure
-    ///     mode never leaves the repo partially upgraded; a delete or extraction failure can
-    ///     still do so, and per the class remarks there is no rollback for that case — it must be
-    ///     resolved manually by the caller.
+    ///     invalid entry path is rejected before any managed folder is deleted; a delete or
+    ///     extraction failure can leave the repo partially upgraded (there is no rollback).
     /// </exception>
     public static void Extract(string zipPath, string repoRoot, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(zipPath);
         ArgumentNullException.ThrowIfNull(repoRoot);
 
-        var effectiveLogger = logger ?? AppLogging.Factory.CreateLogger(LoggerCategoryName);
-
-        if (effectiveLogger.IsEnabled(LogLevel.Debug))
-        {
-            effectiveLogger.LogDebug("Extracting package '{ZipPath}' into repo '{RepoRoot}'", zipPath, repoRoot);
-        }
-
-        // Step 1: open/validate the zip. If it opens without error, its contents are assumed
-        // good per architecture.md — no checksum/signature verification is performed.
-        using var archive = OpenArchive(zipPath);
-
-        // Step 2: resolve and validate every entry's destination path up front, before anything
-        // is deleted. A malformed or path-traversing entry (one that fails SafePathCombine's
-        // containment check) must reject the whole upgrade before any managed folder is
-        // touched — otherwise a malicious/corrupt zip could blind-delete the existing managed
-        // folders and then fail partway through extraction, leaving the repo unsynced while
-        // still reporting only an "ordinary" failure to callers such as RepoCardViewModel's
-        // best-effort, never-block-launch sync path.
-        var managedEntries = new List<(ZipArchiveEntry Entry, string DestinationPath)>();
-        foreach (var entry in archive.Entries)
-        {
-            var destinationPath = ResolveManagedDestination(entry, repoRoot);
-            if (destinationPath is not null)
-            {
-                managedEntries.Add((entry, destinationPath));
-            }
-        }
-
-        // Step 3: blind-delete the four known folders (if present). Existing symbolic links or
-        // junctions in the repo's layout are the repo owner's business and are deliberately not
-        // inspected; only archive-supplied paths are validated (step 2).
-        foreach (var folder in ManagedFolders)
-        {
-            DeleteManagedFolder(repoRoot, folder, effectiveLogger);
-        }
-
-        // Step 4: extract the already-validated managed entries, skipping any non-managed/root-
-        // level files such as release-notes.md (those were never added to managedEntries above).
-        // A failure here is reported to the caller (e.g. RepoCardViewModel, which already logs
-        // it with repo/package context) rather than re-logged here, to avoid double-logging the
-        // same event.
-        try
-        {
-            foreach (var (entry, destinationPath) in managedEntries)
-            {
-                ExtractEntry(entry, destinationPath, repoRoot);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            throw new InvalidOperationException(
-                $"Failed to extract package '{zipPath}' into '{repoRoot}': {ex.Message}", ex);
-        }
-
-        if (effectiveLogger.IsEnabled(LogLevel.Information))
-        {
-            effectiveLogger.LogInformation(
-                "Extracted {EntryCount} managed file(s) from package '{ZipPath}' into repo '{RepoRoot}'",
-                managedEntries.Count, zipPath, repoRoot);
-        }
+        using var reader = ZipPackageContentReader.Open(zipPath);
+        PackageContentExtractor.Extract(reader, repoRoot, logger);
     }
 
     /// <summary>
     ///     Determines whether all four managed agent folders currently exist under a repo root.
     /// </summary>
     /// <param name="repoRoot">Absolute path to the repository root to check.</param>
-    /// <returns><see langword="true"/> if every managed folder (<see cref="ManagedFolders"/>)
-    ///     exists under <paramref name="repoRoot"/>; otherwise <see langword="false"/>.</returns>
-    /// <remarks>
-    ///     Built on the same <see cref="ManagedFolders"/> array <see cref="Extract"/> itself uses,
-    ///     so the managed-folder list has a single source of truth - callers (e.g.
-    ///     <c>RepoCardViewModel</c>'s ensure-synced-before-launch check) never need to duplicate
-    ///     it. Does not inspect folder contents; a managed folder that exists but is empty (or
-    ///     only partially populated) still counts as "existing" here.
-    /// </remarks>
+    /// <returns><see langword="true"/> if every managed folder exists under
+    ///     <paramref name="repoRoot"/>; otherwise <see langword="false"/>.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> is
     ///     <see langword="null"/>.</exception>
-    public static bool AllManagedFoldersExist(string repoRoot)
-    {
-        ArgumentNullException.ThrowIfNull(repoRoot);
-
-        return ManagedFolders.All(folder => Directory.Exists(PathHelpers.SafePathCombine(repoRoot, folder)));
-    }
+    public static bool AllManagedFoldersExist(string repoRoot) =>
+        PackageContentExtractor.AllManagedFoldersExist(repoRoot);
 
     /// <summary>
     ///     Reads the content of the package zip's root-level <c>release-notes.md</c> entry
     ///     without extracting it to disk.
     /// </summary>
     /// <param name="zipPath">Path to the agent package zip file.</param>
-    /// <returns>
-    ///     The release notes text, or <see langword="null"/> if the zip has no root-level
-    ///     <c>release-notes.md</c> entry.
-    /// </returns>
+    /// <returns>The release notes text, or <see langword="null"/> if the zip has no root-level
+    ///     <c>release-notes.md</c> entry.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="zipPath"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the zip cannot be opened or the
@@ -215,25 +92,8 @@ internal static class PackageZipExtractor
     {
         ArgumentNullException.ThrowIfNull(zipPath);
 
-        using var archive = OpenArchive(zipPath);
-
-        var entry = archive.GetEntry(ReleaseNotesEntryName);
-        if (entry is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            using var stream = entry.Open();
-            using var reader = new StreamReader(stream);
-            return reader.ReadToEnd();
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException)
-        {
-            throw new InvalidOperationException(
-                $"Failed to read '{ReleaseNotesEntryName}' from '{zipPath}': {ex.Message}", ex);
-        }
+        using var reader = ZipPackageContentReader.Open(zipPath);
+        return PackageContentExtractor.ReadReleaseNotes(reader);
     }
 
     /// <summary>
@@ -241,18 +101,8 @@ internal static class PackageZipExtractor
     ///     entry without extracting it to disk.
     /// </summary>
     /// <param name="zipPath">Path to the agent package zip file.</param>
-    /// <returns>
-    ///     The template's text, or <see langword="null"/> if the zip has no root-level
-    ///     <c>AGENTS.md</c> entry.
-    /// </returns>
-    /// <remarks>
-    ///     Mirrors <see cref="ReadReleaseNotes"/> exactly: the <c>AGENTS.md</c> entry is a second,
-    ///     optional root-level zip entry that is never extracted by <see cref="Extract"/> (the
-    ///     same managed-folder-exclusion mechanism that skips <c>release-notes.md</c> already
-    ///     skips any root-level entry). Callers (e.g. <c>RepoCardViewModel</c>) decide whether to
-    ///     offer writing this content to a repo's root, based on whether the repo already has an
-    ///     <c>AGENTS.md</c> file and whether the user previously declined the offer.
-    /// </remarks>
+    /// <returns>The template's text, or <see langword="null"/> if the zip has no root-level
+    ///     <c>AGENTS.md</c> entry.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="zipPath"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the zip cannot be opened or the
@@ -261,177 +111,7 @@ internal static class PackageZipExtractor
     {
         ArgumentNullException.ThrowIfNull(zipPath);
 
-        using var archive = OpenArchive(zipPath);
-
-        var entry = archive.GetEntry(AgentsMdEntryName);
-        if (entry is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            using var stream = entry.Open();
-            using var reader = new StreamReader(stream);
-            return reader.ReadToEnd();
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException)
-        {
-            throw new InvalidOperationException(
-                $"Failed to read '{AgentsMdEntryName}' from '{zipPath}': {ex.Message}", ex);
-        }
+        using var reader = ZipPackageContentReader.Open(zipPath);
+        return PackageContentExtractor.ReadAgentsMdTemplate(reader);
     }
-
-    /// <summary>
-    ///     Opens a package zip archive for reading, wrapping any failure in a clear exception.
-    /// </summary>
-    /// <param name="zipPath">Path to the zip file.</param>
-    /// <returns>The opened <see cref="ZipArchive"/>; the caller owns disposal.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the file does not exist, is not a
-    ///     valid zip archive, or cannot be opened for another I/O reason.</exception>
-    private static ZipArchive OpenArchive(string zipPath)
-    {
-        try
-        {
-            return ZipFile.OpenRead(zipPath);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            throw new InvalidOperationException($"Failed to open package zip '{zipPath}': {ex.Message}", ex);
-        }
-    }
-
-    /// <summary>
-    ///     Blind-deletes a single managed folder under a repo root, if it currently exists.
-    /// </summary>
-    /// <param name="repoRoot">Absolute path to the repository root.</param>
-    /// <param name="relativeFolder">The managed folder's path relative to the repo root.</param>
-    /// <param name="logger">Logger for delete diagnostics, already resolved by the caller.</param>
-    /// <exception cref="InvalidOperationException">Thrown when the folder exists but cannot be
-    ///     deleted.</exception>
-    private static void DeleteManagedFolder(string repoRoot, string relativeFolder, ILogger logger)
-    {
-        var folderPath = PathHelpers.SafePathCombine(repoRoot, relativeFolder);
-
-        if (!Directory.Exists(folderPath))
-        {
-            return;
-        }
-
-        try
-        {
-            Directory.Delete(folderPath, recursive: true);
-
-            if (logger.IsEnabled(LogLevel.Debug))
-            {
-                logger.LogDebug("Deleted managed folder '{FolderPath}'", folderPath);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Not re-logged here at Error level: the caller (Extract) wraps and rethrows this as
-            // an InvalidOperationException, and its own caller (e.g. RepoCardViewModel) already
-            // logs that failure with richer repo/package context, so logging it again here would
-            // double-log the same event.
-            throw new InvalidOperationException($"Failed to delete folder '{folderPath}': {ex.Message}", ex);
-        }
-    }
-
-    /// <summary>
-    ///     Resolves a single zip entry's destination path if it falls within one of the four
-    ///     managed folders, validating that path but not yet writing anything to disk.
-    /// </summary>
-    /// <param name="entry">The zip entry to consider.</param>
-    /// <param name="repoRoot">Absolute path to the repository root.</param>
-    /// <returns>
-    ///     The entry's absolute destination path if it falls within a managed folder; otherwise
-    ///     <see langword="null"/> (a directory entry, or a file entry that does not resolve
-    ///     inside any managed folder, including root-level files like <c>release-notes.md</c>).
-    /// </returns>
-    /// <exception cref="InvalidOperationException">Thrown when the entry's path is invalid,
-    ///     including resolving outside <paramref name="repoRoot"/>.</exception>
-    private static string? ResolveManagedDestination(ZipArchiveEntry entry, string repoRoot)
-    {
-        // Directory entries have an empty Name (only FullName ends with '/'); skip them, as
-        // CreateDirectory in ExtractEntry (driven by file entries) recreates any needed structure.
-        if (string.IsNullOrEmpty(entry.Name))
-        {
-            return null;
-        }
-
-        // Zip entries always use '/' regardless of platform; normalize before combining.
-        var relativePath = entry.FullName.Replace('/', Path.DirectorySeparatorChar);
-
-        // PathHelpers.SafePathCombine is the single source of truth for containment validation
-        // (see its own doc remarks); it throws ArgumentException/NotSupportedException both when
-        // the entry's path would resolve outside repoRoot and for other malformed-path failures,
-        // so the original message is preserved here rather than assuming every failure is a
-        // traversal attempt.
-        string destinationPath;
-        try
-        {
-            destinationPath = PathHelpers.SafePathCombine(repoRoot, relativePath);
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
-        {
-            throw new InvalidOperationException(
-                $"Zip entry '{entry.FullName}' has an invalid destination path: {ex.Message}", ex);
-        }
-
-        // The managed-folder membership check must run against the *canonical* (".."-resolved)
-        // relative path, not the raw entry-supplied one: a crafted entry such as
-        // ".github/agents/../../outside.txt" textually starts with a managed-folder prefix but
-        // resolves elsewhere. Deriving the relative path from the already-validated
-        // destinationPath closes that gap.
-        var canonicalRelativePath = Path.GetRelativePath(Path.GetFullPath(repoRoot), destinationPath);
-        return IsInsideManagedFolder(canonicalRelativePath) ? destinationPath : null;
-    }
-
-    /// <summary>
-    ///     Extracts a single zip entry to an already-validated destination path, creating any
-    ///     missing parent directories first.
-    /// </summary>
-    /// <param name="entry">The zip entry to extract.</param>
-    /// <param name="destinationPath">
-    ///     The entry's destination path, as previously resolved and validated by
-    ///     <see cref="ResolveManagedDestination"/>.
-    /// </param>
-    /// <param name="repoRoot">Absolute path to the repository root.</param>
-    /// <exception cref="InvalidOperationException">Thrown when the destination is not inside
-    ///     <paramref name="repoRoot"/> (defense in depth; already validated by
-    ///     <see cref="ResolveManagedDestination"/>).</exception>
-    private static void ExtractEntry(ZipArchiveEntry entry, string destinationPath, string repoRoot)
-    {
-        var fullRoot = Path.GetFullPath(repoRoot);
-        var rootWithSeparator = Path.EndsInDirectorySeparator(fullRoot)
-            ? fullRoot
-            : fullRoot + Path.DirectorySeparatorChar;
-        var fullDestination = Path.GetFullPath(destinationPath);
-        if (!fullDestination.StartsWith(rootWithSeparator, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"Zip entry '{entry.FullName}' resolves outside the repository root.");
-        }
-
-        var destinationDirectory = Path.GetDirectoryName(fullDestination);
-        if (!string.IsNullOrEmpty(destinationDirectory))
-        {
-            Directory.CreateDirectory(destinationDirectory);
-        }
-
-        using var source = entry.Open();
-        using var target = new FileStream(fullDestination, FileMode.Create, FileAccess.Write);
-        source.CopyTo(target);
-    }
-
-    /// <summary>
-    ///     Determines whether a zip-relative path falls within one of the four managed folders.
-    /// </summary>
-    /// <param name="relativePath">A path relative to the repo root, using OS directory
-    ///     separators.</param>
-    /// <returns><see langword="true"/> if the path is inside a managed folder; otherwise
-    ///     <see langword="false"/>.</returns>
-    private static bool IsInsideManagedFolder(string relativePath) =>
-        ManagedFolders.Any(folder =>
-            relativePath.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.Ordinal));
 }

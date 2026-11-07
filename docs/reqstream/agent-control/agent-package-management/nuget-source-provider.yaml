@@ -1,0 +1,101 @@
+---
+# Software Unit Requirements for the NuGetSourceProvider Class
+#
+# NuGetSourceProvider serves NuGet packages held in a local or network folder feed through the
+# common package-source contract, using the NuGet caching library inside storage that
+# AgentControl owns.
+
+sections:
+  - title: NuGetSourceProvider Unit Requirements
+    requirements:
+      - id: AgentControl-NuGetSourceProvider-ListVersions
+        title: >-
+          The NuGetSourceProvider class shall list the configured package IDs of its source and
+          the available versions of a named package found in its NuGet package folder,
+          including prereleases and four-part versions, labeling each with its source alias,
+          returning no versions for a package the folder does not have, reporting a folder that
+          does not exist, and honoring cancellation.
+        justification: |
+          Users pick packages and versions from what the feed actually holds, a feed cannot be
+          enumerated cheaply so the offered IDs are the configured ones, and listing must be
+          cancellable because real feeds can be slow or unreachable.
+        tests:
+          - NuGetSourceProvider_ListVersions_FolderFeedWithVersions_ReturnsAllVersionsStampedWithAlias
+          - NuGetSourceProvider_ListVersions_PackageNotInFeed_ReturnsEmptyList
+          - NuGetSourceProvider_ListVersions_FolderDoesNotExist_ThrowsDirectoryNotFoundException
+          - NuGetSourceProvider_ListVersions_AlreadyCanceled_ThrowsOperationCanceledException
+          - NuGetSourceProvider_ListPackageIds_ConfiguredIds_ReturnsDistinctSortedTrimmedIds
+
+      - id: AgentControl-NuGetSourceProvider-AcquireToPrivateCache
+        title: >-
+          The NuGetSourceProvider class shall supply a chosen version's content as a package
+          reader over the package's content folder, unpacked into a package cache private to
+          the source, so that two sources offering the same package ID and version each supply
+          their own content, and shall reject a package that has no content folder.
+        justification: |
+          A package cache shared with other sources (or with the developer's own NuGet cache)
+          could serve one source's package under another source's identity, and a package
+          without the agreed content layout must never cause a repo's managed folders to be
+          replaced with nothing.
+        tests:
+          - NuGetSourceProvider_Acquire_ExistingPackage_ReturnsReaderOverContentFolder
+          - NuGetSourceProvider_Acquire_ThenExtract_WritesManagedFoldersToRepoOnly
+          - NuGetSourceProvider_Acquire_SamePackageInTwoSources_EachSourceGetsItsOwnContent
+          - NuGetSourceProvider_Acquire_PackageWithoutContentFolder_ThrowsInvalidOperationException
+
+      - id: AgentControl-NuGetSourceProvider-ExplicitCacheRoot
+        title: >-
+          The NuGetSourceProvider class shall keep its working storage in a folder owned by
+          AgentControl, distinct for each source and derived from the source's alias and
+          location, containing only a generated configuration that places the package cache
+          inside that folder.
+        justification: |
+          NuGet discovers configuration by walking up from a starting folder; starting
+          anywhere other than a folder AgentControl owns could pick up repo or user settings
+          that redirect packages or sources.
+        tests:
+          - NuGetSourceProvider_Acquire_UsesExplicitAgentControlOwnedRootWithGeneratedConfig
+          - NuGetSourceProvider_BuildSourceKey_AliasAndLocation_StableDistinctAndFolderSafe
+
+      - id: AgentControl-NuGetSourceProvider-NoRepoNuGetConfig
+        title: >-
+          The NuGetSourceProvider class shall neither read nor write the target repo's NuGet
+          configuration or create any file in the repo while listing or supplying packages.
+        justification: |
+          Agent package information must never appear in a repo's nuget.config, and a repo's
+          own nuget.config must not be able to influence where AgentControl obtains packages.
+        tests:
+          - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig
+
+      - id: AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration
+        title: >-
+          The NuGetSourceProvider class shall not register a NuGet credential service, nor hold
+          or persist any credential.
+        justification: |
+          The NuGet credential service is process-wide; registering one here could change how
+          every other NuGet operation in the process authenticates, and AgentControl must not
+          store secrets.
+        tests:
+          - NuGetSourceProvider_ProductAssembly_DoesNotReferenceNuGetCredentialService
+
+      - id: AgentControl-NuGetSourceProvider-RejectServerLocation
+        title: >-
+          The NuGetSourceProvider class shall reject a source whose location is a server
+          address, or is not an absolute folder path, with a clear error naming the source.
+        justification: |
+          Server sources need credential handling and transport safeguards that are separate
+          work; accepting a server address now would silently skip them, and a relative folder
+          would resolve against whatever the process's current folder happens to be.
+        tests:
+          - NuGetSourceProvider_Constructor_ServerLocation_ThrowsInvalidOperationExceptionWithClearMessage
+          - NuGetSourceProvider_Constructor_RelativeLocation_ThrowsInvalidOperationException
+          - NuGetSourceProvider_Constructor_ZipTypeOrNullDefinition_Throws
+
+      - id: AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource
+        title: >-
+          The NuGetSourceProvider class shall refuse to supply the content of a package that was
+          discovered at a different source.
+        justification: |
+          Content must only ever come from the source whose alias the pin names.
+        tests:
+          - NuGetSourceProvider_Acquire_PackageFromOtherSource_ThrowsArgumentException

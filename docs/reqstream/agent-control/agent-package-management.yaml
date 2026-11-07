@@ -3,11 +3,16 @@
 #
 # PURPOSE:
 # - Define requirements for the AgentControl AgentPackageManagement subsystem
-# - AgentPackageManagement spans PackageSource.cs (discovers packages/versions at a source
-#   folder), PackageVersion.cs (parses/compares version strings), and PackageVersionCache.cs
-#   (caches per-source scan results)
+# - AgentPackageManagement spans PackageSource.cs (discovers packages/versions at a zip source
+#   folder), PackageVersion.cs (parses/compares version strings), PackageVersionCache.cs
+#   (caches per-source results), the source providers (ZipFolderSourceProvider.cs,
+#   NuGetSourceProvider.cs) behind the IPackageSourceProvider contract, and
+#   PackageSourceRegistry.cs (resolves a source alias to its provider); the supporting
+#   PackageSourceDefinition/PackageSourceType/PackageReference/IPackageSourceProvider types
+#   have no dedicated unit documents and are folded into this subsystem-level description
 # - Subsystem requirements describe the package-discovery/version-comparison behavior shared
-#   by the rest of the application
+#   by the rest of the application, and how configured package sources are modeled and
+#   resolved
 
 sections:
   - title: AgentPackageManagement Subsystem Requirements
@@ -26,9 +31,12 @@ sections:
           - AgentControl-PackageSource-DiscoverNames
           - AgentControl-PackageSource-FindLatest
           - AgentControl-PackageVersion-Parse
+          - AgentControl-PackageVersion-ExtendedVersions
           - AgentControl-PackageVersionCache-CachePackageNames
           - AgentControl-PackageVersionCache-CacheVersions
           - AgentControl-PackageVersionCache-Invalidate
+          - AgentControl-PackageVersionCache-KeyedBySource
+          - AgentControl-PackageVersionCache-InvalidateBySource
         tests:
           - PackageSource_EnumeratePackageNames_MixedDirectory_ReturnsDistinctSortedNames
 
@@ -44,7 +52,81 @@ sections:
         children:
           - AgentControl-PackageSource-DetectNewerVersion
           - AgentControl-PackageVersion-Compare
+          - AgentControl-PackageVersion-MetadataIgnoredInComparison
           - AgentControl-PackageVersionCache-CacheNewerVersion
         tests:
           - PackageSource_IsNewerVersionAvailable_SourceHasNewerVersion_ReturnsTrue
           - PackageSource_IsNewerVersionAvailable_UnparsablePin_ReturnsTrue
+
+      - id: AgentControl-AgentPackageManagement-SourceDefinitions
+        title: >-
+          The AgentPackageManagement subsystem shall describe a configured package source by a
+          unique alias, a type (zip package folder or NuGet package folder or server), a
+          location, and - for NuGet sources - the package IDs it offers, together with trust
+          options, and shall never hold a password, token or other secret in that description.
+        justification: |
+          The source description is persisted in the user's settings file, so it must carry
+          everything needed to reach a source and nothing that would turn the settings file
+          into a credential store; the derived folder-versus-server distinction must follow
+          the location so the two can never disagree.
+        tests:
+          - PackageSourceDefinition_Members_HaveNoSecretLikeProperty
+          - PackageSourceDefinition_LocationKind_DerivedFromLocation
+          - PackageSourceDefinition_Serialize_TypeAsNameAndNoDerivedLocationKind
+
+      - id: AgentControl-AgentPackageManagement-SourceResolution
+        title: >-
+          The AgentPackageManagement subsystem shall resolve a package source by its alias to
+          that source alone, and shall report an error for an alias that is not configured
+          without ever consulting, or falling back to, any other source.
+        justification: |
+          A package name is not unique across sources; resolving a pin or a request by anything
+          weaker than the source alias could fetch another source's package under the wrong
+          identity, so a missing source must be an error rather than be quietly replaced.
+        children:
+          - AgentControl-PackageSourceRegistry-ResolveAlias
+          - AgentControl-PackageSourceRegistry-MissingAliasIsError
+          - AgentControl-PackageSourceRegistry-NoCrossSourceFallback
+        tests:
+          - PackageSourceRegistry_PinToSourceB_SamePackageIdAtBothSources_OnlyBIsContacted
+          - PackageSourceRegistry_Resolve_MissingAliasWithSingleConfiguredSource_DoesNotFallBack
+
+      - id: AgentControl-AgentPackageManagement-ZipFolderSource
+        title: >-
+          The AgentPackageManagement subsystem shall offer the packages and versions found in a
+          folder of zip packages, and supply a chosen package's content, only from the
+          configured folder.
+        justification: |
+          The zip package folder is the original, still supported source type; exposing it
+          through the common source contract lets it sit beside other source types without any
+          change to how its packages are named, discovered or compared.
+        children:
+          - AgentControl-ZipFolderSourceProvider-ListAndAcquire
+          - AgentControl-ZipFolderSourceProvider-AcquireOnlyFromOwnSource
+        tests:
+          - ZipFolderSourceProvider_ListVersions_MixedFolder_ReturnsMatchingPackagesStampedWithAlias
+          - ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReturnsReaderOverZipRoot
+
+      - id: AgentControl-AgentPackageManagement-NuGetFolderSource
+        title: >-
+          The AgentPackageManagement subsystem shall offer the versions of the configured
+          packages found in a NuGet package folder, and supply a chosen version's content from
+          the package's content folder, keeping everything it creates in AgentControl's own
+          storage and never in, or influenced by, the target repo.
+        justification: |
+          Agent information must never be written into the target repo's NuGet configuration,
+          and a repo's own NuGet settings must not be able to redirect where AgentControl reads
+          or stores packages, so each NuGet source is accessed through storage that AgentControl
+          alone owns.
+        children:
+          - AgentControl-NuGetSourceProvider-ListVersions
+          - AgentControl-NuGetSourceProvider-AcquireToPrivateCache
+          - AgentControl-NuGetSourceProvider-ExplicitCacheRoot
+          - AgentControl-NuGetSourceProvider-NoRepoNuGetConfig
+          - AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration
+          - AgentControl-NuGetSourceProvider-RejectServerLocation
+          - AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource
+        tests:
+          - NuGetSourceProvider_ListVersions_FolderFeedWithVersions_ReturnsAllVersionsStampedWithAlias
+          - NuGetSourceProvider_Acquire_ExistingPackage_ReturnsReaderOverContentFolder
+          - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig

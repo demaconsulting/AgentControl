@@ -19,6 +19,8 @@ N/A - standard test environment; no external services or hardware required.
 - A first-ever run with no settings file yet produces usable default settings rather than
   failing.
 - The default configuration directory resolves under the user's application-data folder.
+- Package sources round-trip with every field, a legacy single package-folder path migrates to a
+  `Default` zip source, and no secret-like property is ever persisted.
 
 ### Test Scenarios
 
@@ -28,3 +30,14 @@ verification design), with `SettingsStore_SaveThenLoad_RoundTripsAllFields` and
 `SettingsStore_Load_NoSettingsFile_ReturnsDefaults` cited directly at the subsystem level,
 covering `AgentControl-Settings-Persistence` (children: `AgentControl-SettingsStore-Load`,
 `AgentControl-SettingsStore-Save`, `AgentControl-SettingsStore-DefaultDirectory`).
+
+**Settings_PackageSources_RoundTripMigrateAndPersistNoSecrets**: A fully populated source list
+survives a save-then-load round trip; a settings file with only the legacy single package-folder
+path loads with it as the `Default` zip source; and the persisted JSON of a fully populated source
+contains no property named like a secret. These are verified by the `SettingsStore` unit tests,
+with `SettingsStore_SaveThenLoad_RoundTripsAllFields`,
+`SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource`, and
+`SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties` cited directly at
+the subsystem level, covering `AgentControl-Settings-PackageSources` (children:
+`AgentControl-SettingsStore-SourcesRoundTrip`, `AgentControl-SettingsStore-LegacySourceMigration`,
+`AgentControl-SettingsStore-NoSecretsPersisted`, `AgentControl-SettingsStore-AtomicSave`).

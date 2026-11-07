@@ -1,0 +1,50 @@
+---
+# Software Unit Requirements for the PackageSourceRegistry Class
+#
+# PackageSourceRegistry maps a package source alias to the provider that serves that source,
+# and is the single place a source is looked up; it never falls back to another source.
+
+sections:
+  - title: PackageSourceRegistry Unit Requirements
+    requirements:
+      - id: AgentControl-PackageSourceRegistry-ResolveAlias
+        title: >-
+          The PackageSourceRegistry class shall return, for a configured source alias
+          (compared case-insensitively), the provider of exactly that source.
+        justification: |
+          Every operation on a package source starts from its alias, so the lookup must be
+          exact and case-insensitive like the alias uniqueness rule, and must always yield the
+          source that alias names.
+        tests:
+          - PackageSourceRegistry_Resolve_ConfiguredAlias_ReturnsThatSourcesProvider
+          - PackageSourceRegistry_Resolve_RepeatedCalls_CreatesProviderOnceAndLazily
+          - PackageSourceRegistry_Create_ZipAndNuGetDefinitions_ResolvesMatchingProviderKinds
+
+      - id: AgentControl-PackageSourceRegistry-MissingAliasIsError
+        title: >-
+          The PackageSourceRegistry class shall report an error naming the alias when asked
+          for a source alias that is not configured, and shall reject duplicated or blank
+          aliases when it is built.
+        justification: |
+          A pin to a removed source must stop with an actionable message instead of proceeding
+          with something else, and an ambiguous configuration (the same alias twice) must be
+          refused rather than resolved arbitrarily.
+        tests:
+          - PackageSourceRegistry_Resolve_MissingAlias_ThrowsUnknownSourceExceptionNamingAlias
+          - PackageSourceRegistry_Constructor_DuplicateOrBlankAlias_ThrowsInvalidOperationException
+          - PackageSourceRegistry_BlankAlias_ContainsFalseAndResolveThrowsArgumentException
+          - PackageSourceRegistry_Create_NuGetServerSource_ResolveThrowsInvalidOperationException
+
+      - id: AgentControl-PackageSourceRegistry-NoCrossSourceFallback
+        title: >-
+          The PackageSourceRegistry class shall never resolve a missing source alias to
+          another source, even when only one source is configured, and shall not contact any
+          other source while resolving.
+        justification: |
+          The same package ID can exist at several sources with different content; quietly
+          substituting a different source for a missing one would let an attacker, or a
+          configuration mistake, change what gets installed under an existing pin.
+        tests:
+          - PackageSourceRegistry_Resolve_MissingAliasWithSingleConfiguredSource_DoesNotFallBack
+          - PackageSourceRegistry_PinToSourceB_SamePackageIdAtBothSources_OnlyBIsContacted
+          - PackageSourceRegistry_PinToRemovedSource_ThrowsAndContactsNoOtherSource

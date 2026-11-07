@@ -3,10 +3,12 @@
 #### Verification Approach
 
 `PackageVersionCache` is verified with unit tests defined in `PackageVersionCacheTests.cs`.
-Every test uses a real temporary directory populated with real zip files, and confirms
-caching behavior by checking that a scan result is returned unchanged across repeated calls
-even after the underlying directory contents are known to have been read only once (via
-directly re-asserting cached values rather than mocking the file system).
+Most tests use a real temporary directory populated with real zip files behind a real
+`PackageSourceRegistry`, and confirm caching behavior by deleting the directory after the first
+call and showing that a repeated call still returns the cached result. The multi-source tests
+use an in-memory fake provider (`FakePackageSourceProvider`) that counts its calls, so the tests
+can assert exactly which source was queried how often, and can hold a query open to create an
+in-flight call.
 
 #### Test Environment
 
@@ -15,6 +17,10 @@ N/A - standard test environment.
 #### Acceptance Criteria
 
 - All unit tests pass with zero failures.
+- Results are cached and invalidated per source alias; the same package ID at two sources is never
+  mixed, and an unconfigured alias fails without contacting any source.
+- Invalidating one source leaves the others cached, and an in-flight query for the invalidated
+  source does not repopulate the cache.
 - Cached results are reused on repeated calls without redundant re-scanning.
 - Invalidation forces the next call to re-scan and reflects updated source-folder contents.
 - An uncached call against a missing source folder throws `DirectoryNotFoundException`.
@@ -24,7 +30,7 @@ N/A - standard test environment.
 **PackageVersionCache_CachePackageNames_ReusesResultOnRepeatedCall**: Calling
 `GetPackageNames` repeatedly against the same source folder returns the same cached result
 without re-scanning. This scenario is tested by
-`PackageVersionCache_GetPackageNames_RepeatedCall_ReturnsCachedResultWithoutRescanning`,
+`PackageVersionCache_GetPackageIds_RepeatedCall_ReturnsCachedResultWithoutRescanning`,
 covering `AgentControl-PackageVersionCache-CachePackageNames`.
 
 **PackageVersionCache_CacheVersions_DescendingCachedAndMissingDirectoryThrows**: Requesting
@@ -48,3 +54,23 @@ cache and the descending-versions cache. This scenario is tested by
 `PackageVersionCache_Invalidate_ForcesReEnumeration` and
 `PackageVersionCache_Invalidate_ClearsPackageNamesAndVersionsDescendingCaches`, covering
 `AgentControl-PackageVersionCache-Invalidate`.
+
+**PackageVersionCache_KeyedBySource_SamePackageIdInTwoSourcesStaysSeparate**: The same package
+ID offered by two sources is cached and returned separately for each, each source being queried
+once; an alias that is not configured fails with `UnknownSourceException` and no other source is
+contacted; a pin with a fourth segment or build metadata is compared by version rather than
+treated as unparsable; and no packages found is a definite "no upgrade" answer with no latest
+package. This scenario is tested by
+`PackageVersionCache_SamePackageIdInTwoSources_CachedPerSourceAlias`,
+`PackageVersionCache_UnknownAlias_ThrowsUnknownSourceExceptionWithoutContactingOtherSources`,
+`PackageVersionCache_PinWithRevisionOrMetadata_ComparedByVersionNotTreatedAsUnparsable`, and
+`PackageVersionCache_NoPackagesFound_ReturnsNoUpgradeAndNoLatest`, covering
+`AgentControl-PackageVersionCache-KeyedBySource`.
+
+**PackageVersionCache_InvalidateBySource_OnlyThatSourceIsQueriedAgain**: Invalidating one source
+(by alias, case-insensitively) forces only that source to be queried again while the other
+remains cached; a query already in flight when its source is invalidated completes without
+repopulating the cache, so the next query fetches again. This scenario is tested by
+`PackageVersionCache_InvalidateSingleSource_LeavesOtherSourcesCached` and
+`PackageVersionCache_InvalidateDuringInFlightFetch_DoesNotCacheStaleResult`, covering
+`AgentControl-PackageVersionCache-InvalidateBySource`.

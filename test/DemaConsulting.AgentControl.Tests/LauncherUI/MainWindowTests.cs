@@ -199,8 +199,10 @@ public sealed class MainWindowTests : IDisposable
         owner.Show();
         try
         {
+            var registry = PackageSourceRegistry.Create(
+                [PackageSourceDefinition.CreateDefaultZip(CreateTempDirectory())]);
             var viewModel = new SelectPackageWindowViewModel(
-                CreateTempDirectory(), new PackageVersionCache());
+                registry, PackageSourceDefinition.DefaultAlias, new PackageVersionCache());
             var dialog = new SelectPackageWindow(viewModel);
             var result = dialog.ShowDialog<(string Name, string Version)?>(owner);
 
