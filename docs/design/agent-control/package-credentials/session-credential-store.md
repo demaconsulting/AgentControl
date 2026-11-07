@@ -28,6 +28,11 @@ different sources run concurrently.
 **TryGet(origin, out credential)**: Finds the credential remembered for exactly this origin. A different
 port, scheme or host finds nothing.
 
+**TryAcquire(origin, out credential, out lease)**: Like `TryGet`, and in the same locked step takes a
+redaction lease on the secret for the caller. The lease is independent of the store's own registration, so a
+`Forget` or `Clear` caused by another operation does not end redaction for a caller that is still using the
+credential (`AgentControl-SessionCredentialStore-RegistersSecretsForRedaction`).
+
 **Set(origin, credential)**: Remembers a credential for an origin, replacing any earlier one. The secret is
 registered with `SecretRedactor` (and the replaced secret withdrawn) under a lock so each stored secret is
 registered exactly once (`AgentControl-SessionCredentialStore-RegistersSecretsForRedaction`).

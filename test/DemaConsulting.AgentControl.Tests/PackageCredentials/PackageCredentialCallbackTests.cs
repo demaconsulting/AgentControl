@@ -334,6 +334,64 @@ public sealed class PackageCredentialCallbackTests
     }
 
     /// <summary>
+    ///     Test that an operation using a remembered credential keeps it redacted until that
+    ///     operation ends, even when another operation's rejection forgets the credential (or the
+    ///     store is cleared) meanwhile; once every operation has ended, the secret is unregistered.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_ConcurrentOperationRejectsCredential_ActiveOperationStaysRedactedUntilItEnds()
+    {
+        // Arrange: a remembered credential used by two concurrent operations, A and B
+        var secret = "sec-" + Guid.NewGuid().ToString("N");
+        var store = new SessionCredentialStore();
+        store.Set(FeedOrigin.Create(FeedIndex), new NuGetCredential("svc", secret));
+        var operationA = Create(store, prompt: null);
+        var operationB = Create(store, prompt: null);
+        await operationA.GetCredentialAsync(FeedIndex, CancellationToken.None);
+        await operationB.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Act: B's server rejects the credential, so B forgets it and ends
+        operationB.Reject();
+
+        // Assert: the store no longer holds it, but A is still running and still protected, so what
+        // A logs or throws now is redacted
+        Assert.Equal(0, store.Count);
+        var thrown = new InvalidOperationException($"request failed for {secret}");
+        Assert.DoesNotContain(secret, SecretRedactor.Sanitize(thrown).ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(secret, SecretRedactor.Redact($"x {secret}"), StringComparison.Ordinal);
+
+        // Act: A ends
+        operationA.Release();
+
+        // Assert: nobody uses the secret any more, so it is no longer tracked
+        Assert.Equal($"x {secret}", SecretRedactor.Redact($"x {secret}"));
+    }
+
+    /// <summary>
+    ///     Test that clearing the store (application exit) also does not end redaction for an
+    ///     operation that still holds a lease, and that an operation that finishes by committing
+    ///     leaves the store's own registration in place.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_StoreClearedWhileOperationRuns_OperationStaysRedactedUntilItEnds()
+    {
+        // Arrange
+        var secret = "sec-" + Guid.NewGuid().ToString("N");
+        var store = new SessionCredentialStore();
+        store.Set(FeedOrigin.Create(FeedIndex), new NuGetCredential("svc", secret));
+        var operation = Create(store, prompt: null);
+        await operation.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Act
+        store.Clear();
+
+        // Assert
+        Assert.DoesNotContain(secret, SecretRedactor.Redact($"x {secret}"), StringComparison.Ordinal);
+        operation.Commit();
+        Assert.Equal($"x {secret}", SecretRedactor.Redact($"x {secret}"));
+    }
+
+    /// <summary>
     ///     Makes a callback ask the scripted prompt, which answers with a credential carrying the
     ///     given secret.
     /// </summary>

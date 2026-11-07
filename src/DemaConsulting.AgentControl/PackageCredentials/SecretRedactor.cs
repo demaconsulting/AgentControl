@@ -103,6 +103,27 @@ internal static partial class SecretRedactor
     }
 
     /// <summary>
+    ///     Registers a credential's secret on behalf of one holder - an operation that uses it - and
+    ///     returns the lease that withdraws exactly that registration.
+    /// </summary>
+    /// <remarks>
+    ///     Registrations are reference-counted, so each holder's lease keeps the secret redacted
+    ///     for as long as the holder lives, independent of every other holder: the session store
+    ///     withdrawing its own registration (a credential forgotten after another operation's
+    ///     rejection) cannot end redaction for an operation that is still running and may still
+    ///     log or throw the secret.
+    /// </remarks>
+    /// <param name="credential">The credential in use.</param>
+    /// <returns>The lease; disposing it more than once withdraws the registration only once.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="credential"/> is
+    ///     <see langword="null"/>.</exception>
+    public static IDisposable Lease(NuGetCredential credential)
+    {
+        Register(credential);
+        return new RedactionLease(credential);
+    }
+
+    /// <summary>
     ///     Withdraws one registration made by <see cref="Register"/>.
     /// </summary>
     /// <param name="credential">The credential that is no longer in use.</param>
@@ -155,9 +176,9 @@ internal static partial class SecretRedactor
             result = result.Replace(secret, Redacted, StringComparison.Ordinal);
         }
 
-        result = HeaderPattern().Replace(result, match => $"{match.Groups["head"].Value}{Redacted}");
+        result = RedactValues(result, HeaderPattern(), toEndOfLine: true);
         result = RedactUrls(result);
-        result = SecretKeyPattern().Replace(result, match => $"{match.Groups["head"].Value}{Redacted}");
+        result = RedactValues(result, SecretKeyPattern(), toEndOfLine: false);
         result = BareCredentialPattern().Replace(result, Redacted);
         return result;
     }
@@ -221,23 +242,26 @@ internal static partial class SecretRedactor
     }
 
     /// <summary>
-    ///     Matches the complete value of a secret-bearing header, or the key of a quoted
-    ///     header-like pair.
+    ///     Matches the name of a secret-bearing header and the separator that follows it; the
+    ///     value itself is found by <see cref="FindValueEnd"/>, which understands quoting and
+    ///     escaping.
     /// </summary>
     /// <returns>The compiled expression; group <c>head</c> is the header name and separator that
-    ///     stay.</returns>
+    ///     stay. The name may be followed by a quote in any of its written forms (<c>"</c>,
+    ///     <c>\"</c>, <c>\u0022</c>, <c>&amp;quot;</c>).</returns>
     [GeneratedRegex(
-        """(?<head>\b(?:proxy-authorization|authorization|x-nuget-apikey|x-api-key|set-cookie|cookie)\b(?:\s+header)?["']?\s*[:=]\s*)(?:"[^"\r\n]*"?|'[^'\r\n]*'?|[^\r\n]*)""",
+        """(?<head>(?:\b|(?<=u00(?:22|27)))(?:proxy-authorization|authorization|x-nuget-apikey|x-api-key|set-cookie|cookie)\b(?:[ \t]+header)?(?:\\*["']|\\+u00(?:22|27)|&quot;|&#3[49];)?[ \t]*[:=][ \t]*)""",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex HeaderPattern();
 
     /// <summary>
-    ///     Matches the value of a key whose name says it is secret.
+    ///     Matches the name of a key whose name says its value is secret, and the separator that
+    ///     follows it; the value itself is found by <see cref="FindValueEnd"/>.
     /// </summary>
     /// <returns>The compiled expression; group <c>head</c> is the key and separator that
     ///     stay.</returns>
     [GeneratedRegex(
-        """(?<head>\b(?:password|passwd|pwd|secret|client[_-]?secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|sig|signature)\b["']?\s*[:=]\s*)(?:"[^"\r\n]*"?|'[^'\r\n]*'?|[^\s&;,"')\]]+)""",
+        """(?<head>(?:\b|(?<=u00(?:22|27)))(?:password|passwd|pwd|secret|client[_-]?secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|sig|signature)\b(?:\\*["']|\\+u00(?:22|27)|&quot;|&#3[49];)?[ \t]*[:=][ \t]*)""",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SecretKeyPattern();
 
@@ -247,9 +271,182 @@ internal static partial class SecretRedactor
     /// </summary>
     /// <returns>The compiled expression.</returns>
     [GeneratedRegex(
-        @"\b(?:basic|bearer|negotiate|ntlm)\s+[A-Za-z0-9+/=._~-]{8,}|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*",
+        @"\b(?:basic|bearer|negotiate|ntlm)[ \t]+(?:[A-Za-z0-9+/=._~-]|\\.){8,}|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex BareCredentialPattern();
+
+    /// <summary>
+    ///     Replaces the value that follows each match of a header or key pattern.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="head">The pattern that finds the name and separator.</param>
+    /// <param name="toEndOfLine">Whether an unquoted value runs to the end of the line (headers,
+    ///     whose values may contain spaces and commas) rather than to the next delimiter.</param>
+    /// <returns>The text with each value replaced by the placeholder.</returns>
+    private static string RedactValues(string text, Regex head, bool toEndOfLine)
+    {
+        var builder = new StringBuilder(text.Length);
+        var position = 0;
+        var searchFrom = 0;
+        while (searchFrom <= text.Length)
+        {
+            var match = head.Match(text, searchFrom);
+            if (!match.Success)
+            {
+                break;
+            }
+
+            var valueStart = match.Index + match.Length;
+            var valueEnd = FindValueEnd(text, valueStart, toEndOfLine);
+            searchFrom = valueEnd;
+            if (valueEnd == valueStart && !toEndOfLine)
+            {
+                // A key with no value after it has nothing to hide
+                continue;
+            }
+
+            builder.Append(text, position, valueStart - position).Append(Redacted);
+            position = valueEnd;
+        }
+
+        return builder.Append(text, position, text.Length - position).ToString();
+    }
+
+    /// <summary>
+    ///     Finds where the value that starts at <paramref name="start"/> ends, understanding
+    ///     quoting and escaping, and redacting to the end of the line whenever it cannot be sure.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="start">The index of the first character of the value.</param>
+    /// <param name="toEndOfLine">Whether an unquoted value runs to the end of the line.</param>
+    /// <returns>The index just after the value. A value in plain quotes ends after its closing
+    ///     quote, skipping backslash escapes (<c>\"</c>, <c>\\</c>, <c>\u0022</c>) and doubled
+    ///     quotes; a value that starts with an escaped or entity-encoded quote (nested JSON, HTML)
+    ///     runs to the end of the line, as does an unterminated one.</returns>
+    private static int FindValueEnd(string text, int start, bool toEndOfLine)
+    {
+        if (start >= text.Length)
+        {
+            return start;
+        }
+
+        var c = text[start];
+        if (c is '"' or '\'')
+        {
+            return ScanQuoted(text, start + 1, c);
+        }
+
+        if (c == '\\' || text.AsSpan(start).StartsWith("&quot;", StringComparison.OrdinalIgnoreCase)
+            || text.AsSpan(start).StartsWith("&#3", StringComparison.Ordinal))
+        {
+            return EndOfLine(text, start);
+        }
+
+        return toEndOfLine ? EndOfLine(text, start) : ScanUnquoted(text, start);
+    }
+
+    /// <summary>
+    ///     Finds the end of a quoted value.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="from">The index just after the opening quote.</param>
+    /// <param name="quote">The quote character that opened the value.</param>
+    /// <returns>The index just after the closing quote - one that is neither escaped by a backslash
+    ///     nor doubled - or the end of the line when there is none.</returns>
+    private static int ScanQuoted(string text, int from, char quote)
+    {
+        var index = from;
+        while (index < text.Length)
+        {
+            var c = text[index];
+            if (c is '\r' or '\n')
+            {
+                return index;
+            }
+
+            if (c == '\\')
+            {
+                // The escaped character belongs to the value, a quote included (a line break does not)
+                var escapesLineBreak = index + 1 < text.Length && text[index + 1] is '\r' or '\n';
+                index += escapesLineBreak || index + 1 >= text.Length ? 1 : 2;
+                continue;
+            }
+
+            if (c == quote)
+            {
+                if (index + 1 < text.Length && text[index + 1] == quote)
+                {
+                    index += 2;
+                    continue;
+                }
+
+                return index + 1;
+            }
+
+            index++;
+        }
+
+        return text.Length;
+    }
+
+    /// <summary>
+    ///     Finds the end of an unquoted key value: the next delimiter, where a quote preceded by an
+    ///     odd number of backslashes is an escaped part of the value rather than a delimiter.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="start">The index of the first character of the value.</param>
+    /// <returns>The index of the delimiter, or the end of the text.</returns>
+    private static int ScanUnquoted(string text, int start)
+    {
+        var index = start;
+        for (; index < text.Length; index++)
+        {
+            var c = text[index];
+            if (!(char.IsWhiteSpace(c) || c is '&' or ';' or ',' or '\'' or '"' or ')' or ']'))
+            {
+                continue;
+            }
+
+            if (c is '\'' or '"' && CountBackslashesBefore(text, index, start) % 2 == 1)
+            {
+                continue;
+            }
+
+            break;
+        }
+
+        return index;
+    }
+
+    /// <summary>
+    ///     Counts the backslashes immediately before an index.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="index">The index.</param>
+    /// <param name="limit">The lowest index that is looked at.</param>
+    /// <returns>The length of the run of backslashes that ends just before <paramref name="index"/>.</returns>
+    private static int CountBackslashesBefore(string text, int index, int limit)
+    {
+        var count = 0;
+        for (var i = index - 1; i >= limit && text[i] == '\\'; i--)
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    ///     Finds the end of the line that contains an index.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="start">The index.</param>
+    /// <returns>The index of the next line break, or the end of the text.</returns>
+    private static int EndOfLine(string text, int start)
+    {
+        var end = text.AsSpan(start).IndexOfAny('\r', '\n');
+        return end < 0 ? text.Length : start + end;
+    }
 
     /// <summary>
     ///     Reduces every URL in the text to scheme, host, port and path.
@@ -306,9 +503,33 @@ internal static partial class SecretRedactor
     {
         var inBrackets = false;
         var index = from;
-        for (; index < text.Length; index++)
+        while (index < text.Length)
         {
             var c = text[index];
+            if (c == '\\')
+            {
+                // A backslash run before a quote: an odd run escapes the quote, which then belongs
+                // to the URL (it is a delimiter of a surrounding string that the URL runs through,
+                // e.g. a JSON string whose address is followed by more escaped text); an even run
+                // leaves the quote as a real delimiter. Other escapes (\u0022, \n) are ordinary text.
+                var run = index;
+                while (run < text.Length && text[run] == '\\')
+                {
+                    run++;
+                }
+
+                var escapesQuote = run < text.Length && text[run] is '"' or '\'' && (run - index) % 2 == 1;
+                index = escapesQuote ? run + 1 : run;
+                continue;
+            }
+
+            if (c is '"' or '\'' && index + 1 < text.Length && text[index + 1] == c)
+            {
+                // A doubled quote is an escaped quote
+                index += 2;
+                continue;
+            }
+
             if (c == '[')
             {
                 inBrackets = true;
@@ -326,6 +547,8 @@ internal static partial class SecretRedactor
             {
                 break;
             }
+
+            index++;
         }
 
         return index;
@@ -437,6 +660,33 @@ internal static partial class SecretRedactor
     /// <param name="c">The character.</param>
     /// <returns><see langword="true"/> for letters, digits, <c>+</c>, <c>-</c> and <c>.</c>.</returns>
     private static bool IsSchemeCharacter(char c) => char.IsAsciiLetterOrDigit(c) || c is '+' or '-' or '.';
+
+    /// <summary>
+    ///     One holder's registration of a secret; withdraws it exactly once.
+    /// </summary>
+    private sealed class RedactionLease : IDisposable
+    {
+        /// <summary>
+        ///     The credential, or <see langword="null"/> once the lease has been disposed.
+        /// </summary>
+        private NuGetCredential? _credential;
+
+        /// <summary>
+        ///     Initializes the lease over an already registered credential.
+        /// </summary>
+        /// <param name="credential">The credential that was registered for this lease.</param>
+        public RedactionLease(NuGetCredential credential) => _credential = credential;
+
+        /// <inheritdoc />
+        public void Dispose()
+        {
+            var credential = Interlocked.Exchange(ref _credential, null);
+            if (credential is not null)
+            {
+                Unregister(credential);
+            }
+        }
+    }
 }
 
 /// <summary>

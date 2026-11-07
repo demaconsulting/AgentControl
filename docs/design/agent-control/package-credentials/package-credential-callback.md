@@ -54,10 +54,14 @@ credential is never kept (`AgentControl-PackageCredentialCallback-CommitOnSucces
 **Reject()**: Forgets the server's remembered credential, for when the server refused one this operation
 offered, and calls `Release`.
 
-**Release()**: Withdraws the credential the user typed during this operation from `SecretRedactor`, where
-the callback registered it as soon as the prompt returned it; safe to call more than once. The owner calls it
-in a `finally`, so a typed secret never stays tracked after an operation that was canceled or failed for
-another reason; a credential that `Commit` stored stays registered by the store
+**Release()**: Ends this operation's redaction *lease* on the credential it used and is safe to call more than
+once. Every operation that uses a credential - a remembered session credential, taken with the store's
+`TryAcquire` so that finding it and leasing it are one atomic step, or one the user typed, leased as soon as
+the prompt returned it - holds its own lease on the secret, independent of the store's registration. A
+concurrent operation that causes `Forget` or `Clear` therefore cannot end redaction for an operation that is
+still running and may still log or throw the secret. The owner calls `Release` in a `finally` for every
+attempt (the silent one included), so a secret never stays tracked after an operation that was canceled or
+failed for another reason; a credential that `Commit` stored stays registered by the store
 (`AgentControl-PackageCredentialCallback-RegistersTypedSecret`).
 
 #### Error Handling

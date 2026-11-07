@@ -205,6 +205,36 @@ public sealed class SessionCredentialStoreTests
     }
 
     /// <summary>
+    ///     Test that a lease taken from the store keeps the secret redacted independently of the
+    ///     store's own registration - through replace, forget and clear - and that disposing it
+    ///     (also twice) ends exactly that registration; a missing credential yields no lease.
+    /// </summary>
+    [Fact]
+    public void SessionCredentialStore_TryAcquire_LeaseOutlivesTheStoresOwnRegistrationUntilDisposed()
+    {
+        // Arrange
+        var store = new SessionCredentialStore();
+        var origin = Origin("https://a.example.com/index.json");
+        var secret = "sec-" + Guid.NewGuid().ToString("N");
+        Assert.False(store.TryAcquire(origin, out var none, out var noLease));
+        Assert.Null(none);
+        Assert.Null(noLease);
+        store.Set(origin, new NuGetCredential("a", secret));
+        Assert.True(store.TryAcquire(origin, out var credential, out var lease));
+        Assert.Equal(secret, credential!.Secret);
+
+        // Act: the store lets go of it
+        Assert.True(store.Forget(origin));
+
+        // Assert: the lease still protects it
+        Assert.DoesNotContain(secret, SecretRedactor.Redact($"x {secret}"), StringComparison.Ordinal);
+        lease!.Dispose();
+        lease.Dispose();
+        Assert.Equal($"x {secret}", SecretRedactor.Redact($"x {secret}"));
+        Assert.Throws<ArgumentNullException>(() => store.TryAcquire(null!, out _, out _));
+    }
+
+    /// <summary>
     ///     Creates a feed origin for test setup.
     /// </summary>
     /// <param name="url">The feed URL.</param>

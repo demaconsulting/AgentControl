@@ -38,6 +38,8 @@ whether one was removed; `Clear` forgets every credential. This scenario is test
 
 **SessionCredentialStore_RegistersSecretsForRedaction**: A stored secret is removed from text by the
 redaction engine; replacing the credential withdraws the old secret and registers the new one; `Forget` and
-`Clear` withdraw the secret. This scenario is tested by
-`SessionCredentialStore_SetReplaceForgetAndClear_RegistersAndWithdrawsTheSecretForRedaction`, covering
+`Clear` withdraw the store's registration, while a lease taken with `TryAcquire` keeps the secret redacted
+until it is disposed (twice is harmless). This scenario is tested by
+`SessionCredentialStore_SetReplaceForgetAndClear_RegistersAndWithdrawsTheSecretForRedaction` and
+`SessionCredentialStore_TryAcquire_LeaseOutlivesTheStoresOwnRegistrationUntilDisposed`, covering
 `AgentControl-SessionCredentialStore-RegistersSecretsForRedaction`.

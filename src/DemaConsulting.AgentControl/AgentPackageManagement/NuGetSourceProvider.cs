@@ -430,6 +430,12 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
             // Attempt 2 - the server needs something the user has to supply: ask, once
             return await PromptAndRetryAsync(operation, store, prompt, rejected, failureMessage, cancellationToken);
         }
+        finally
+        {
+            // However the attempt ended, this operation stops using the remembered credential,
+            // and so stops holding it for redaction
+            silent.Release();
+        }
     }
 
     /// <summary>

@@ -36,20 +36,30 @@ redacted stack trace, and nothing else - no inner exception, no data, no referen
 
 #### Key Methods
 
-**SecretRedactor.Register / Unregister(credential)**: Add or withdraw one registration of the credential's
-secret together with the forms in which it appears on the wire - its URL-encoded form and the Base64 form of
-`user:secret` used by basic authentication. An empty secret registers nothing. A secret of any length is
-registered; a very short one is also replaced where it occurs inside unrelated text, which is the safe
-direction.
+**SecretRedactor.Register / Unregister / Lease(credential)**: Add or withdraw one registration of the
+credential's secret together with the forms in which it appears on the wire - its URL-encoded form and the
+Base64 form of `user:secret` used by basic authentication. Registrations are reference-counted. `Lease`
+registers on behalf of one holder and returns an idempotent `IDisposable` that withdraws exactly that
+registration, so each operation that uses a secret keeps it redacted for as long as it runs, independent of
+the session store's own registration and of every other operation. An empty secret registers nothing. A
+secret of any length is registered; a very short one is also replaced where it occurs inside unrelated text,
+which is the safe direction.
 
 **SecretRedactor.Redact(text)**: Works in layers so a secret missed by one is caught by another.
 (1) Every registered secret is replaced verbatim. (2) The *complete* value of an `Authorization`,
-`Proxy-Authorization`, API-key or cookie header is replaced up to the end of the line (or the closing quote of
-a quoted value) whatever its scheme - basic, bearer, digest, NTLM, negotiate, a custom scheme or none.
+`Proxy-Authorization`, API-key or cookie header is replaced whatever its scheme - basic, bearer, digest, NTLM,
+negotiate, a custom scheme or none. The header name is found by a pattern (which accepts the quote after it in
+every written form: `"`, `\"`, `\u0022`, `&quot;`, at any level of backslash escaping) and the value by an
+**escape-aware scanner**: a value in plain quotes ends at the first quote that is neither backslash-escaped
+(`\"`, `\\`, `\u0022` - an odd run of backslashes escapes the quote, an even run does not) nor doubled; a value
+that starts with an escaped or entity-encoded quote (nested JSON, HTML), an unterminated quoted value and any
+other header value run to the end of the line - when in doubt it redacts rather than leaks.
 (3) A small scanner (not a pattern) finds each `scheme://` address - understanding the brackets of an IPv6
-literal - and reduces it to scheme, host, port and path: user information, query string and fragment are
-removed, and an `@` anywhere before the query is treated as the end of user information so a password
-containing `/`, `?` or `#` cannot survive. Trailing sentence punctuation stays. (4) Secret-bearing keys and
+literal and the same backslash and doubled-quote escapes, so an address inside a JSON or quoted string is
+consumed through escaped delimiters up to its real terminator - and reduces it to scheme, host, port and path:
+user information, query string and fragment are removed, and an `@` anywhere before the query is treated as
+the end of user information so a password containing `/`, `?` or `#` cannot survive. Trailing sentence
+punctuation stays. (4) Secret-bearing keys (found the same way as headers, values scanned escape-aware) and
 bare credentials are replaced. Redaction is conservative: it may remove more than strictly necessary but never
 less. Text without secrets, and null, pass through unchanged (null becomes empty).
 

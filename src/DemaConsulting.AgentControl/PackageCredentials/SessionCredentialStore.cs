@@ -81,6 +81,37 @@ internal sealed class SessionCredentialStore
     }
 
     /// <summary>
+    ///     Looks up the credential remembered for a feed and, in the same step, takes a redaction
+    ///     lease on its secret for the caller, so the credential cannot become unprotected between
+    ///     being found and being used.
+    /// </summary>
+    /// <param name="origin">The feed origin.</param>
+    /// <param name="credential">The credential when the method returns <see langword="true"/>.</param>
+    /// <param name="lease">The lease that keeps the secret redacted until it is disposed, when the
+    ///     method returns <see langword="true"/>. It is independent of the store's own
+    ///     registration, so <see cref="Forget"/> or <see cref="Clear"/> by another operation does not
+    ///     end redaction for a caller that is still using the credential.</param>
+    /// <returns><see langword="true"/> when a credential is remembered for exactly this
+    ///     origin.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="origin"/> is
+    ///     <see langword="null"/>.</exception>
+    public bool TryAcquire(FeedOrigin origin, out NuGetCredential? credential, out IDisposable? lease)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        lock (_gate)
+        {
+            if (_credentials.TryGetValue(origin, out credential))
+            {
+                lease = SecretRedactor.Lease(credential);
+                return true;
+            }
+        }
+
+        lease = null;
+        return false;
+    }
+
+    /// <summary>
     ///     Remembers a credential for a feed, replacing any earlier one.
     /// </summary>
     /// <param name="origin">The feed origin the credential was typed for.</param>

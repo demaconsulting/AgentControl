@@ -58,6 +58,11 @@ constructor arguments are refused. This scenario is tested by
 
 **PackageCredentialCallback_RegistersTypedSecret**: A credential obtained from the prompt is removed from text
 by the redaction engine while the operation runs; `Release` (also when repeated) and `Reject` withdraw it;
-`Commit` leaves it registered by the store until the store forgets it. This scenario is tested by
-`PackageCredentialCallback_PromptedCredential_IsRegisteredForRedactionUntilTheOperationEnds`, covering
+`Commit` leaves it registered by the store until the store forgets it. Two concurrent operations use the same
+remembered credential: when one rejects (forgets) it the other still has it redacted until it ends, and
+clearing the store does not end redaction for a running operation; after both end the secret is no longer
+tracked. This scenario is tested by
+`PackageCredentialCallback_PromptedCredential_IsRegisteredForRedactionUntilTheOperationEnds`,
+`PackageCredentialCallback_ConcurrentOperationRejectsCredential_ActiveOperationStaysRedactedUntilItEnds` and
+`PackageCredentialCallback_StoreClearedWhileOperationRuns_OperationStaysRedactedUntilItEnds`, covering
 `AgentControl-PackageCredentialCallback-RegistersTypedSecret`.

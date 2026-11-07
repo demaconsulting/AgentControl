@@ -98,10 +98,10 @@ internal sealed class PackageCredentialCallback
     private Task<NuGetCredential?>? _answer;
 
     /// <summary>
-    ///     The typed credential this callback registered with <see cref="SecretRedactor"/> and has
-    ///     not yet released.
+    ///     This operation's redaction lease on the credential it uses (a remembered one or one the
+    ///     user typed), held until <see cref="Release"/>.
     /// </summary>
-    private NuGetCredential? _registeredCredential;
+    private IDisposable? _lease;
 
     /// <summary>
     ///     Initializes the callback for one operation against one feed.
@@ -216,23 +216,21 @@ internal sealed class PackageCredentialCallback
     }
 
     /// <summary>
-    ///     Withdraws the credential the user typed during this operation from secret redaction, for
-    ///     when the operation is over. A credential kept by <see cref="Commit"/> stays registered by
-    ///     the store; one that was not kept stops being tracked. Safe to call more than once.
+    ///     Ends this operation's redaction lease on the credential it used - a remembered session
+    ///     credential or the one the user typed - when the operation is over. A credential kept by
+    ///     <see cref="Commit"/> stays registered by the store; one that was not kept stops being
+    ///     tracked once no other operation uses it. Safe to call more than once.
     /// </summary>
     public void Release()
     {
-        NuGetCredential? credential;
+        IDisposable? lease;
         lock (_gate)
         {
-            credential = _registeredCredential;
-            _registeredCredential = null;
+            lease = _lease;
+            _lease = null;
         }
 
-        if (credential is not null)
-        {
-            SecretRedactor.Unregister(credential);
-        }
+        lease?.Dispose();
     }
 
     /// <summary>
@@ -256,9 +254,12 @@ internal sealed class PackageCredentialCallback
     /// <returns>The credential, or <see langword="null"/> when there is none.</returns>
     private async Task<NuGetCredential?> ResolveAsync(CancellationToken cancellationToken)
     {
-        // Tier: a credential the user already typed this session
-        if (_store.TryGet(_feed, out var remembered) && remembered is not null)
+        // Tier: a credential the user already typed this session; this operation takes its own
+        // redaction lease on it, so another operation forgetting the credential cannot end
+        // redaction while this one still uses it
+        if (_store.TryAcquire(_feed, out var remembered, out var lease) && remembered is not null && lease is not null)
         {
+            HoldLease(lease);
             SuppliedCredential = remembered;
             _logger?.LogDebug("Using the session credential for {FeedOrigin}.", _feed);
             return remembered;
@@ -283,14 +284,25 @@ internal sealed class PackageCredentialCallback
             return null;
         }
 
-        // From here the typed secret is in use: register it for redaction until Release
-        lock (_gate)
-        {
-            SecretRedactor.Register(entered);
-            _registeredCredential = entered;
-        }
-
+        // From here the typed secret is in use: keep it redacted until Release
+        HoldLease(SecretRedactor.Lease(entered));
         SuppliedCredential = entered;
         return entered;
+    }
+
+    /// <summary>
+    ///     Keeps a redaction lease for the credential this operation uses.
+    /// </summary>
+    /// <param name="lease">The lease to hold until <see cref="Release"/>.</param>
+    private void HoldLease(IDisposable lease)
+    {
+        IDisposable? previous;
+        lock (_gate)
+        {
+            previous = _lease;
+            _lease = lease;
+        }
+
+        previous?.Dispose();
     }
 }

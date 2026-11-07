@@ -40,24 +40,38 @@ the process-wide logger factory and therefore runs in the `RealProcess` collecti
 
 **SecretRedactingLogger_RemovesUrlSecrets**: Addresses with user information, a query string, a fragment,
 IPv6 hosts and unusual user-information characters are reduced to scheme, host, port and path, and text
-without secrets is unchanged. This scenario is tested by `SecretRedactor_Redact_UrlForms_KeepOnlySchemeHostPortAndPath`
-and `SecretRedactor_Redact_PlainText_IsUnchanged`, covering `AgentControl-SecretRedactingLogger-RemovesUrlSecrets`.
+without secrets is unchanged; addresses inside quoted and JSON strings (serialized with the default and the
+relaxed escaping, also nested) with backslash-escaped, `\u0022`-escaped, doubled and entity-style delimiters
+lose everything after the path, and the text after the real terminator is kept. This scenario is tested by
+`SecretRedactor_Redact_UrlForms_KeepOnlySchemeHostPortAndPath`, `SecretRedactor_Redact_PlainText_IsUnchanged`,
+`SecretRedactor_Redact_UrlWithEscapedQuotes_NoSuffixSurvives` and
+`SecretRedactor_Redact_JsonSerializedUrl_NeverLeaksQueryOrFragment`, covering
+`AgentControl-SecretRedactingLogger-RemovesUrlSecrets`.
 
 **SecretRedactingLogger_RemovesAuthorizationValues**: Header values of every scheme (including unknown and
 absent ones, quoted JSON and multi-line text) and bare credentials and secret-bearing keys are replaced by a
-placeholder. This scenario is tested by `SecretRedactor_Redact_AuthorizationHeaders_ValueIsReplacedWhateverTheScheme`,
-`SecretRedactor_Redact_HeaderInsideMultiLineText_KeepsOtherLines` and
-`SecretRedactor_Redact_BareCredentialsAndSecretKeys_AreReplaced`, covering
+placeholder; quoted values containing escaped quotes (`\"`, `\u0022`, `\\"`, doubled quotes, the other quote
+character, nested JSON at several levels, produced by hand and by `JsonSerializer`) are replaced up to their
+real terminator, with the text after it kept. This scenario is tested by
+`SecretRedactor_Redact_AuthorizationHeaders_ValueIsReplacedWhateverTheScheme`,
+`SecretRedactor_Redact_HeaderInsideMultiLineText_KeepsOtherLines`,
+`SecretRedactor_Redact_BareCredentialsAndSecretKeys_AreReplaced`,
+`SecretRedactor_Redact_QuotedValueWithEscapedQuotes_NoSuffixSurvives`,
+`SecretRedactor_Redact_QuotedValue_StopsAtTheRealTerminator` and
+`SecretRedactor_Redact_JsonSerializedAuthorizationValue_IsRedactedWholeAtEveryNestingLevel`, covering
 `AgentControl-SecretRedactingLogger-RemovesAuthorizationValues`.
 
 **SecretRedactingLogger_RemovesKnownSecrets**: A registered password in arbitrary text, a property value and an
 exception message (also an inner exception) is removed together with its encoded forms, registrations are
-counted, and concurrent use is safe. This scenario is tested by
+counted, concurrent use is safe, and a lease taken by one holder keeps the secret redacted after the store (or
+another operation) withdraws its own registration, until the lease ends. This scenario is tested by
 `SecretRedactor_RegisterAndUnregister_ReplacesEveryOccurrenceOfTheSecretWhileRegistered`,
 `SecretRedactor_Unregister_SecretRegisteredTwice_StaysRedactedUntilTheLastWithdrawal`,
-`SecretRedactor_RegisterAndRedact_FromManyThreads_IsThreadSafe` and
-`SecretRedactingLogger_Log_RegisteredPasswordInArbitraryTextPropertiesAndExceptions_IsRemoved`, covering
-`AgentControl-SecretRedactingLogger-RemovesKnownSecrets`.
+`SecretRedactor_RegisterAndRedact_FromManyThreads_IsThreadSafe`,
+`SecretRedactingLogger_Log_RegisteredPasswordInArbitraryTextPropertiesAndExceptions_IsRemoved`,
+`SessionCredentialStore_TryAcquire_LeaseOutlivesTheStoresOwnRegistrationUntilDisposed` and
+`PackageCredentialCallback_ConcurrentOperationRejectsCredential_ActiveOperationStaysRedactedUntilItEnds`,
+covering `AgentControl-SecretRedactingLogger-RemovesKnownSecrets`.
 
 **SecretRedactingLogger_AppliesToEveryMessage**: A message with secrets, structured properties whose values
 carry secrets (with plain value types kept), scope state as text and as pairs, and an exception whose message

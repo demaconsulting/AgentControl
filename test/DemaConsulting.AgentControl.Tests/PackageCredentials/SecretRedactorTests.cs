@@ -19,6 +19,8 @@
 // SOFTWARE.
 
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.NuGet.Caching;
 
@@ -301,6 +303,136 @@ public sealed class SecretRedactorTests
         Assert.Equal("https://h.example.com/x", SecretRedactor.RedactValue("https://h.example.com/x?sig=sentinel"));
         Assert.Equal("https://h.example.com/x", SecretRedactor.RedactValue(new Uri("https://h.example.com/x?sig=sentinel")));
         Assert.Equal("Authorization: [redacted]", SecretRedactor.RedactValue(new ToStringObject("Authorization: Digest sentinel")));
+    }
+
+    /// <summary>
+    ///     Test that a header or key value in quotes is redacted up to its real closing quote when
+    ///     the value contains escaped quotes - written as <c>\"</c>, <c>\u0022</c>, <c>\\"</c>,
+    ///     doubled quotes or the other quote character - so no suffix of the credential survives.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"Authorization":"Digest value with \"quoted\" secret-token"}""")]
+    [InlineData("""{"Authorization":"Basic abc\u0022def secret-token"}""")]
+    [InlineData("""{"Authorization":"Basic abc\\\"def secret-token"}""")]
+    [InlineData("""{"Authorization":"Basic abc\\"}""")]
+    [InlineData("""{"Proxy-Authorization":"NTLM a\"b\"c\"d secret-token"}""")]
+    [InlineData("""Authorization: "Basic it's \"secret-token\" more secret-token" """)]
+    [InlineData("""Authorization: 'Basic it\'s secret-token'""")]
+    [InlineData("""Authorization: "Basic a""b secret-token" """)]
+    [InlineData("""Authorization: 'Basic a''b secret-token' """)]
+    [InlineData("""{"password":"abc\"def secret-token"}""")]
+    [InlineData("""{"sig":"abc\u0022def secret-token"}""")]
+    [InlineData("""password='abc\'def secret-token'""")]
+    [InlineData("""password=abc\"def\"secret-token""")]
+    [InlineData("""token=abc\'def\'secret-token""")]
+    public void SecretRedactor_Redact_QuotedValueWithEscapedQuotes_NoSuffixSurvives(string text)
+    {
+        // Act
+        var redacted = SecretRedactor.Redact(text);
+
+        // Assert
+        Assert.DoesNotContain("secret-token", redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain("def", redacted.Replace("redacted", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.Contains("[redacted]", redacted, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that the part of the text after the real closing quote is kept, and that an even run
+    ///     of backslashes before a quote leaves the quote as the terminator.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"Authorization":"Basic x \"y\" z","Accept":"*/*"}""", """{"Authorization":[redacted],"Accept":"*/*"}""")]
+    [InlineData("""{"Authorization":"Basic x\\","Accept":"*/*"}""", """{"Authorization":[redacted],"Accept":"*/*"}""")]
+    [InlineData("""{"password":"a\"b","name":"keep"}""", """{"password":[redacted],"name":"keep"}""")]
+    [InlineData("""{"url":"https://h.example.com/p?sig=s\\","next":"keep"}""", """{"url":"https://h.example.com/p","next":"keep"}""")]
+    public void SecretRedactor_Redact_QuotedValue_StopsAtTheRealTerminator(string text, string expected)
+    {
+        // Act / Assert
+        Assert.Equal(expected, SecretRedactor.Redact(text));
+    }
+
+    /// <summary>
+    ///     Test that a header value inside JSON that is itself serialized into a JSON string
+    ///     (nested JSON, escaped twice) is redacted entirely, with the serializer's default and
+    ///     relaxed escaping alike.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "Basic abc\"def secret-token tail")]
+    [InlineData(true, "Basic abc\"def secret-token tail")]
+    [InlineData(false, "Digest a=\"b\", response=\"secret-token\", c=\\\"d")]
+    [InlineData(true, "Digest a=\"b\", response=\"secret-token\", c=\\\"d")]
+    [InlineData(false, "Bearer it's secret-token \\ tail")]
+    [InlineData(true, "Bearer it's secret-token \\ tail")]
+    public void SecretRedactor_Redact_JsonSerializedAuthorizationValue_IsRedactedWholeAtEveryNestingLevel(bool relaxedEscaping, string value)
+    {
+        // Arrange: the serializer writes the quotes as \u0022 by default and as \" when relaxed
+        var options = new JsonSerializerOptions
+        {
+            Encoder = relaxedEscaping ? JavaScriptEncoder.UnsafeRelaxedJsonEscaping : JavaScriptEncoder.Default
+        };
+        var headers = JsonSerializer.Serialize(new Dictionary<string, string> { ["Authorization"] = value, ["Accept"] = "*/*" }, options);
+        var nested = JsonSerializer.Serialize(new Dictionary<string, string> { ["headers"] = headers }, options);
+        var twiceNested = JsonSerializer.Serialize(new Dictionary<string, string> { ["log"] = nested }, options);
+
+        // Act / Assert
+        foreach (var text in new[] { headers, nested, twiceNested })
+        {
+            var redacted = SecretRedactor.Redact(text);
+            Assert.DoesNotContain("secret-token", redacted, StringComparison.Ordinal);
+            Assert.DoesNotContain("tail", redacted, StringComparison.Ordinal);
+            Assert.Contains("[redacted]", redacted, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a URL whose query contains escaped quotes inside a quoted or JSON string is
+    ///     reduced as a whole - nothing after an escaped, doubled or entity-encoded quote survives.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"url":"https://host/path?sig=secret-token\"&other=secret-token"}""", """{"url":"https://host/path"}""")]
+    [InlineData("""{"url":"https://host/path?sig=secret-token\u0022&other=secret-token"}""", """{"url":"https://host/path"}""")]
+    [InlineData("""{"url":"https://host/path?sig=a\\\"&other=secret-token"}""", """{"url":"https://host/path"}""")]
+    [InlineData("""{"url":"http://[::1]:5000/p?sig=a\"&other=secret-token#secret-token"}""", """{"url":"http://[::1]:5000/p"}""")]
+    [InlineData("""{"url":"https://u:secret-token@host/p?sig=a\"b"}""", """{"url":"https://host/p"}""")]
+    [InlineData("""'https://host/path?sig=it\'s&other=secret-token'""", """'https://host/path'""")]
+    [InlineData("""x "https://host/path?sig=a""b&other=secret-token" y""", """x "https://host/path" y""")]
+    [InlineData("""{"msg":"{\"url\":\"https://host/p?sig=a\\\"&o=secret-token\"}"}""", """{"msg":"{\"url\":\"https://host/p""")]
+    [InlineData("""{"msg":"{\u0022url\u0022:\u0022https://host/p?sig=a\\u0022&o=secret-token\u0022}"}""", """{"msg":"{\u0022url\u0022:\u0022https://host/p""")]
+    public void SecretRedactor_Redact_UrlWithEscapedQuotes_NoSuffixSurvives(string text, string expectedPrefix)
+    {
+        // Act
+        var redacted = SecretRedactor.Redact(text);
+
+        // Assert
+        Assert.DoesNotContain("secret-token", redacted, StringComparison.Ordinal);
+        Assert.StartsWith(expectedPrefix, redacted, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a URL inside JSON serialized by <see cref="JsonSerializer"/> (default and relaxed
+    ///     escaping, also nested) never leaks its query or fragment.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SecretRedactor_Redact_JsonSerializedUrl_NeverLeaksQueryOrFragment(bool relaxedEscaping)
+    {
+        // Arrange
+        var options = new JsonSerializerOptions
+        {
+            Encoder = relaxedEscaping ? JavaScriptEncoder.UnsafeRelaxedJsonEscaping : JavaScriptEncoder.Default
+        };
+        var url = "https://h.example.com/p?sig=a\"b&other=secret-token#secret-token";
+        var json = JsonSerializer.Serialize(new Dictionary<string, string> { ["url"] = url, ["note"] = "fetched \"" + url + "\" ok" }, options);
+        var nested = JsonSerializer.Serialize(new Dictionary<string, string> { ["log"] = json }, options);
+
+        // Act / Assert
+        foreach (var text in new[] { json, nested })
+        {
+            var redacted = SecretRedactor.Redact(text);
+            Assert.DoesNotContain("secret-token", redacted, StringComparison.Ordinal);
+            Assert.Contains("https://h.example.com/p", redacted, StringComparison.Ordinal);
+        }
     }
 
     /// <summary>
