@@ -20,6 +20,21 @@ sections:
           - SignatureVerificationSupport_IsSupportedPlatform_WindowsLinuxAndMacOsOnly
           - SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue
 
+      - id: AgentControl-SignatureVerificationSupport-FailClosedProbe
+        title: >-
+          The SignatureVerificationSupport class shall report that signature verification is not
+          supported - and shall not fail - when the check of the platform's certificate facility
+          cannot be completed for any reason.
+        justification: |
+          A broken or missing cryptographic facility can fail in many ways; the only safe
+          reading of any failure is "verification cannot be relied on", so that a requirement for
+          signed packages is refused rather than silently skipped, and the settings dialog never
+          fails because of the check.
+        tests:
+          - SignatureVerificationSupport_RunProbe_ProbeAnswers_ReturnsTheAnswer
+          - SignatureVerificationSupport_RunProbe_ProbeFails_IsNotSupportedAndNeverThrows
+          - SignatureVerificationSupport_Evaluate_NeedsPlatformAndASuccessfulProbe
+
       - id: AgentControl-SignatureVerificationSupport-UnsupportedExplanation
         title: >-
           The SignatureVerificationSupport class shall provide one fixed explanation, "Package

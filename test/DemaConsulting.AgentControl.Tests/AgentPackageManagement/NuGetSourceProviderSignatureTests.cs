@@ -192,6 +192,34 @@ public sealed class NuGetSourceProviderSignatureTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a platform whose capability probe cannot run (the probe throws) is treated as
+    ///     unable to verify: a source that requires signatures refuses to list or acquire - it fails
+    ///     closed - instead of throwing from the probe or skipping the verification.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_RequireSignedAndProbeFails_FailsClosedWithoutThrowingFromTheProbe()
+    {
+        // Arrange: support decided by a probe that fails the way a broken crypto stack does
+        var feed = CreateTempDirectory();
+        var id = UniqueId();
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0");
+        var supported = SignatureVerificationSupport.Evaluate(
+            isWindows: true, isLinux: false, isMacOS: false, () => throw new System.Security.Cryptography.CryptographicException("no chains"));
+        var provider = CreateProvider(feed, CreateTempDirectory(), requireSigned: true, signaturesSupported: supported);
+
+        // Act
+        var listing = await Assert.ThrowsAsync<PackageSourceAccessException>(
+            () => provider.ListVersionsAsync(id, CancellationToken.None));
+        var acquiring = await Assert.ThrowsAsync<PackageSourceAccessException>(
+            () => provider.AcquireAsync(new DiscoveredPackage(id, ParseVersion("1.0.0"), "1.0.0", "Feed"), CancellationToken.None));
+
+        // Assert
+        Assert.False(supported);
+        Assert.Equal(PackageSourceFailureKind.SignatureRejected, listing.Kind);
+        Assert.Equal(PackageSourceFailureKind.SignatureRejected, acquiring.Kind);
+    }
+
+    /// <summary>
     ///     Test that a platform that cannot verify signatures does not affect a source that does not
     ///     require them.
     /// </summary>

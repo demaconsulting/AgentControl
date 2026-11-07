@@ -89,10 +89,10 @@ sections:
           - AgentControl-GitCredentialClient-UnavailableIsNotAnError
           - AgentControl-GitCredentialClient-SecretsNeverLogged
         tests:
-          # The stub-git tests run on every platform; the real-git tests use an isolated
-          # credential store and are skipped only where git is not installed.
-          - GitCredentialClient_Fill_CredentialStored_ReturnsItWithTheDocumentedRequestAndEnvironment
-          - GitCredentialClient_IsAvailable_HelperConfigured_ReturnsTrueAndAsksAboutTheOrigin
-          - GitCredentialClient_Fill_ProcessHangs_IsKilledAtTheTimeLimitAndReturnsNull
-          - GitCredentialClient_AllOperations_NeverLogRequestOrResponseContent
-          - GitCredentialClient_RealGitWithIsolatedStore_MissApproveFillRejectLifeCycle
+          # Subsystem tests with the real git executable and an isolated credential store; they
+          # are skipped only where git is not installed. The stub-git evidence (exact requests,
+          # environment, time limit, log content) is in the GitCredentialClient unit tests and
+          # covers the child requirements.
+          - GitIntegrationSubsystem_SavedSignIn_KeptInOneSessionFoundInAnotherAndRemovedOnRequest
+          - GitIntegrationSubsystem_SavedSignIn_ValueWithLineBreakIsNeverStoredButEqualsIs
+          - GitIntegrationSubsystem_SavedSignIn_NoHelperConfigured_ReportsUnavailableAndNothingSaved

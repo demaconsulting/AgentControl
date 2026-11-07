@@ -215,6 +215,12 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
         ArgumentNullException.ThrowIfNull(origin);
 
         var request = BuildRequest(origin, credential: null);
+        if (request is null)
+        {
+            _logger.LogWarning("No saved credential was looked up for {FeedOrigin} because the address cannot be sent safely.", origin);
+            return null;
+        }
+
         var arguments = BuildArguments(origin, withProviderOverride: true, "credential", "fill");
         var result = await RunAsync("fill", origin, arguments, request, cancellationToken);
         if (!result.Completed || result.ExitCode != 0)
@@ -235,46 +241,51 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
     /// <inheritdoc />
     /// <remarks>
     ///     Runs <c>git credential approve</c>, which asks the helper to store the credential. A
-    ///     credential whose user name or secret contains a line break is refused (it could inject
-    ///     further keys into the request).
+    ///     credential (or origin) with a value that the <c>key=value</c> protocol cannot carry
+    ///     safely - a line feed, carriage return or NUL - is refused and
+    ///     nothing is sent (see <see cref="IsSafeValue"/>).
     /// </remarks>
     public async Task<bool> ApproveAsync(FeedOrigin origin, NuGetCredential credential, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(origin);
         ArgumentNullException.ThrowIfNull(credential);
 
-        if (!IsSafeToSend(credential))
+        var request = BuildRequest(origin, credential);
+        if (request is null)
         {
-            _logger.LogWarning("A credential for {FeedOrigin} was not saved because it contains a line break.", origin);
+            _logger.LogWarning("A credential for {FeedOrigin} was not saved because it contains a character the credential protocol cannot carry safely.", origin);
             return false;
         }
 
         using var lease = SecretRedactor.Lease(credential);
         var result = await RunAsync(
             "approve", origin, BuildArguments(origin, withProviderOverride: true, "credential", "approve"),
-            BuildRequest(origin, credential), cancellationToken);
+            request, cancellationToken);
         return result.Completed && result.ExitCode == 0;
     }
 
     /// <inheritdoc />
     /// <remarks>
     ///     Runs <c>git credential reject</c>, which asks the helper to erase the credential (or,
-    ///     without one, whatever it stores for the origin).
+    ///     without one, whatever it stores for the origin). A value the protocol cannot carry
+    ///     safely is refused as for approve; a credential that could never have been saved
+    ///     cannot be in the helper either.
     /// </remarks>
     public async Task<bool> RejectAsync(FeedOrigin origin, NuGetCredential? credential, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(origin);
 
-        if (credential is not null && !IsSafeToSend(credential))
+        var request = BuildRequest(origin, credential);
+        if (request is null)
         {
-            _logger.LogWarning("A credential for {FeedOrigin} was not removed because it contains a line break.", origin);
+            _logger.LogWarning("A credential for {FeedOrigin} was not removed because it contains a character the credential protocol cannot carry safely.", origin);
             return false;
         }
 
         using var lease = credential is null ? null : SecretRedactor.Lease(credential);
         var result = await RunAsync(
             "reject", origin, BuildArguments(origin, withProviderOverride: true, "credential", "reject"),
-            BuildRequest(origin, credential), cancellationToken);
+            request, cancellationToken);
         return result.Completed && result.ExitCode == 0;
     }
 
@@ -319,14 +330,23 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
 
     /// <summary>
     ///     Builds the request that goes to git's standard input: the feed's protocol and host and,
-    ///     when given, the credential, ended by the blank line that terminates a request.
+    ///     when given, the credential, ended by the blank line that terminates a request. A request
+    ///     is never built when any value could be misread by git's <c>key=value</c> line protocol.
     /// </summary>
     /// <param name="origin">The feed origin.</param>
     /// <param name="credential">The credential to describe, or <see langword="null"/> for a
     ///     lookup.</param>
-    /// <returns>The request text.</returns>
-    internal static string BuildRequest(FeedOrigin origin, NuGetCredential? credential)
+    /// <returns>The request text, or <see langword="null"/> when a value contains a character
+    ///     the protocol cannot carry (see <see cref="IsSafeValue"/>); a malformed
+    ///     request is never produced.</returns>
+    internal static string? BuildRequest(FeedOrigin origin, NuGetCredential? credential)
     {
+        if (!IsSafeValue(origin.Scheme) || !IsSafeValue(origin.HostAndPort)
+            || (credential is not null && (!IsSafeValue(credential.UserName) || !IsSafeValue(credential.Secret))))
+        {
+            return null;
+        }
+
         var builder = new StringBuilder();
         builder.Append("protocol=").Append(origin.Scheme).Append('\n');
         builder.Append("host=").Append(origin.HostAndPort).Append('\n');
@@ -339,6 +359,21 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
         builder.Append('\n');
         return builder.ToString();
     }
+
+    /// <summary>
+    ///     Determines whether a value can be written into a request without any chance of being
+    ///     misread. The protocol is made of lines of <c>key=value</c> ended by a blank line; git
+    ///     splits each line at the first <c>=</c>, so a value may contain <c>=</c> (Base64 padding
+    ///     in a token, for example) and any other character except a line feed or NUL. A value
+    ///     containing a line feed (injecting further keys or ending the request early), a NUL or a
+    ///     carriage return (which helpers commonly trim or mishandle) is refused rather than
+    ///     escaped: the protocol has no escape mechanism. Keys are fixed by this class and never
+    ///     come from user input.
+    /// </summary>
+    /// <param name="value">The value.</param>
+    /// <returns><see langword="true"/> when the value contains none of those characters.</returns>
+    internal static bool IsSafeValue(string value) =>
+        value.IndexOfAny(['\n', '\r', '\0']) < 0;
 
     /// <summary>
     ///     Requires a non-blank executable path and returns a resolver that always yields it.
@@ -362,15 +397,6 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return !string.IsNullOrEmpty(profile) && Directory.Exists(profile) ? profile : Path.GetTempPath();
     }
-
-    /// <summary>
-    ///     Determines whether a credential can be written into a request without the risk of a
-    ///     value injecting extra lines.
-    /// </summary>
-    /// <param name="credential">The credential.</param>
-    /// <returns><see langword="true"/> when neither value contains a line break or NUL.</returns>
-    private static bool IsSafeToSend(NuGetCredential credential) =>
-        credential.UserName.IndexOfAny(['\r', '\n', '\0']) < 0 && credential.Secret.IndexOfAny(['\r', '\n', '\0']) < 0;
 
     /// <summary>
     ///     Builds the argument list for one git invocation.

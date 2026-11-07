@@ -320,7 +320,8 @@ sections:
           The LauncherUI subsystem shall let the user forget a server's saved sign-in from the
           editor of that server source - after a confirmation that names the server and says what
           is removed, with the result shown in words, and with the action disabled and explained
-          where no credential helper can be reached.
+          where no Git credential helper is configured for the server (nothing can have been saved then) or can be
+          reached.
         justification: |
           A sign-in the user chose to keep must be revocable from the place where they see the
           server, with no surprise and with an honest result.
@@ -329,7 +330,7 @@ sections:
         tests:
           - SourceEditorWindow_ForgetSavedSignIn_ConfirmationDecidesAndResultIsShown
           - SourceEditorWindow_ForgetSavedSignIn_NoCredentialStore_ButtonDisabledWithTooltip
-          - SourceEditorViewModel_ForgetSavedSignIn_CommandAsksForConfirmationAndForgetsOnlyOnceConfirmed
+          - SourceEditorWindow_ForgetSavedSignIn_NoCredentialHelper_ButtonDisabledWithTooltip
 
       - id: AgentControl-LauncherUI-SignatureOptions
         title: >-

@@ -258,6 +258,7 @@ reviews:
       - "src/**/AgentPackageManagement/PackageSourceAccessException.cs"
       - "test/**/AgentPackageManagement/PackageSourceDefinitionTests.cs"
       - "test/**/AgentPackageManagement/PackageSourceServerLocationTests.cs"
+      - "test/**/AgentPackageManagement/AgentPackageManagementSubsystemTests.cs"
 
   - id: AgentControl-AgentPackageManagement-PackageSource
     title: Review of Agent Control PackageSource unit implementation
@@ -590,6 +591,7 @@ reviews:
       - "docs/reqstream/agent-control/git-integration.yaml"
       - "docs/design/agent-control/git-integration.md"
       - "docs/verification/agent-control/git-integration.md"
+      - "test/**/GitIntegration/GitIntegrationSubsystemTests.cs"
 
   - id: AgentControl-GitIntegration-GitClient
     title: Review of Agent Control GitClient unit implementation

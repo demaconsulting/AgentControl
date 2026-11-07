@@ -7,10 +7,11 @@ test suites (`PackageSourceTests.cs`, `PackageVersionTests.cs`, `PackageVersionC
 `PackageSourceRegistryTests.cs`, `ZipFolderSourceProviderTests.cs`,
 `NuGetSourceProviderTests.cs`, `NuGetSourceProviderServerTests.cs`, `NuGetSourceProviderSignatureTests.cs`,
 `NuGetSourceProviderSignedPackageTests.cs` and `SignatureVerificationSupportTests.cs`), each of which is documented
-in its
-own unit-level verification
+in its own unit-level verification
 design, plus `PackageSourceDefinitionTests.cs` and `PackageSourceServerLocationTests.cs`, which verify the
-supporting source model types and `PackageSourceAccessException` that have no unit of their own. Zip discovery,
+supporting source model types and `PackageSourceAccessException` that have no unit of their own, and
+`AgentPackageManagementSubsystemTests.cs`, the subsystem tests that resolve configured sources through the registry
+into providers and exercise the signature requirement and platform check together. Zip discovery,
 version parsing, and caching use real temporary
 directories containing real zip files, and the NuGet provider runs the real NuGet caching library
 against a real folder feed built on the fly and, for servers, against an in-process mock NuGet V3 feed, so
@@ -154,32 +155,33 @@ level, covering `AgentControl-AgentPackageManagement-NuGetServerSource` (childre
 `AgentControl-NuGetSourceProvider-ServerFailures`,
 `AgentControl-NuGetSourceProvider-SecretsNotLogged`, `AgentControl-NuGetSourceProvider-SavedSignIn`).
 
-**AgentPackageManagement_SignedPackages_RefusesEveryPackageThatFailsTheRequirement**: For a NuGet source that
-requires signed packages, an unsigned package is refused as a signature failure and nothing is installed for it; the
-same package is accepted when the source does not require signatures; a package cached while no signature was
-required is refused once the requirement is turned on, and a package accepted for one pinned publisher is refused
-once the pin changes; a server source refuses an unsigned package as a signature failure too. With the real signed
-package: it is accepted with no pin and with its author certificate pinned (typed in lower case with colons), and
-refused - and not installed - when another publisher's fingerprint, or only the repository countersignature's, is
-pinned. This scenario is tested by
-`NuGetSourceProvider_Acquire_RequireSignedAndPackageUnsigned_IsRejectedAndNothingIsInstalled`,
-`NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted`,
-`NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled`,
-`NuGetSourceProvider_Acquire_PinnedSignerChangedAfterPackageWasCached_RejectsTheCachedPackage` and
-`NuGetSourceProvider_Acquire_ServerRequiresSignaturesAndPackageUnsigned_IsRejectedAsASignatureFailure` cited
-directly at the subsystem level, covering `AgentControl-AgentPackageManagement-SignedPackages` (children:
+**AgentPackageManagement_SignedPackages_RefusesEveryPackageThatFailsTheRequirement**: Through the registry, which
+resolves configured sources into providers, a NuGet source that requires signed packages refuses an unsigned
+package as a signature failure while a second source over the same feed that does not require signatures supplies
+it; with the real signed package, a source that requires signatures with no pin and one pinned to the package's
+author certificate (typed in lower case with spaces) accept it - the package is installed and the provider goes on
+to its content check - and a source pinned to another publisher refuses it as "not signed by the trusted
+publisher"; a hand-edited unreadable fingerprint stops the source when it is resolved. This scenario is tested by
+`AgentPackageManagementSubsystem_RequireSignedSource_UnsignedPackageRefusedWhileOpenSourceServesIt`,
+`AgentPackageManagementSubsystem_SignedPackage_AcceptedWhenAnyOrAuthorPinnedAndRejectedWhenOtherPinned` and
+`AgentPackageManagementSubsystem_UnreadableSignerFingerprint_SourceIsRefusedWhenResolved`, covering
+`AgentControl-AgentPackageManagement-SignedPackages`. The finer evidence - the re-check of a package cached before
+the requirement or pin changed, a server source refusing an unsigned package, a repository countersignature pin
+not matching, the independence from the user's own trusted-signer settings and the generated trust configuration -
+is in the `NuGetSourceProvider` unit tests and is covered by the child requirements
 `AgentControl-NuGetSourceProvider-RequireSigned`, `AgentControl-NuGetSourceProvider-SignerPin`,
-`AgentControl-NuGetSourceProvider-SignerTrustIsolated`, `AgentControl-NuGetSourceProvider-SignatureFailureReported`,
-`AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused`).
+`AgentControl-NuGetSourceProvider-SignerTrustIsolated`, `AgentControl-NuGetSourceProvider-SignatureFailureReported`
+and `AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused`.
 
-**AgentPackageManagement_SignaturePlatformSupport_FailsClosedWhereVerificationIsUnsupported**: The platform answer is
-`true` for exactly Windows, Linux and macOS and the explanation is the documented text; a NuGet source that requires
-signatures on a platform that cannot verify them refuses both listing and acquiring with a signature failure that
-explains why, while a source that does not require signatures works as usual there. This scenario is tested by
-`SignatureVerificationSupport_IsSupportedPlatform_WindowsLinuxAndMacOsOnly`,
-`SignatureVerificationSupport_UnsupportedMessage_IsTheDocumentedExplanation` and
-`NuGetSourceProvider_RequireSignedOnUnsupportedPlatform_FailsClosedForListAndAcquire` cited directly at the
-subsystem level, covering `AgentControl-AgentPackageManagement-SignaturePlatformSupport` (children:
+**AgentPackageManagement_SignaturePlatformSupport_FailsClosedWhereVerificationIsUnsupported**: When the platform
+support check answers "not supported" - including when its probe fails - a NuGet source that requires signatures
+refuses to list with a signature failure that explains why, while a source that does not require signatures over
+the same feed works as usual. This scenario is tested by
+`AgentPackageManagementSubsystem_RequireSignedOnUnsupportedPlatform_SourceRefusesAndOthersWork`, covering
+`AgentControl-AgentPackageManagement-SignaturePlatformSupport`. The support check's own behavior (exactly Windows,
+Linux and macOS, the fail-closed probe, the documented explanation) and the provider's refusal to acquire are
+verified by the unit tests and covered by the children
 `AgentControl-SignatureVerificationSupport-PlatformSupport`,
-`AgentControl-SignatureVerificationSupport-UnsupportedExplanation`,
-`AgentControl-NuGetSourceProvider-FailClosedWithoutVerification`).
+`AgentControl-SignatureVerificationSupport-FailClosedProbe`,
+`AgentControl-SignatureVerificationSupport-UnsupportedExplanation` and
+`AgentControl-NuGetSourceProvider-FailClosedWithoutVerification`.

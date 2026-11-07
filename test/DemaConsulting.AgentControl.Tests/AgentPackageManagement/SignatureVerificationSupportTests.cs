@@ -63,6 +63,81 @@ public class SignatureVerificationSupportTests
     }
 
     /// <summary>
+    ///     Test that a probe is only trusted when it ran and said "supported".
+    /// </summary>
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void SignatureVerificationSupport_RunProbe_ProbeAnswers_ReturnsTheAnswer(bool answer, bool expected)
+    {
+        // Act
+        var supported = SignatureVerificationSupport.RunProbe(() => answer);
+
+        // Assert
+        Assert.Equal(expected, supported);
+    }
+
+    /// <summary>
+    ///     Test that a probe that fails in any way - a cryptographic error, a native library that
+    ///     cannot be loaded, an unsupported operation or anything unforeseen - means "not
+    ///     supported" (fail closed) and never throws to the caller.
+    /// </summary>
+    [Fact]
+    public void SignatureVerificationSupport_RunProbe_ProbeFails_IsNotSupportedAndNeverThrows()
+    {
+        // Arrange: the kinds of failure a certificate facility can produce, and one nobody foresaw
+        Exception[] failures =
+        [
+            new System.Security.Cryptography.CryptographicException("no crypto"),
+            new DllNotFoundException("libssl"),
+            new EntryPointNotFoundException("missing entry point"),
+            new PlatformNotSupportedException("no chains"),
+            new NotSupportedException("no chains"),
+            new InvalidOperationException("no chains"),
+            new TypeInitializationException("Chain", new InvalidProgramException())
+        ];
+
+        foreach (var failure in failures)
+        {
+            // Act
+            var supported = SignatureVerificationSupport.RunProbe(() => throw failure);
+
+            // Assert
+            Assert.False(supported, failure.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    ///     Test that support needs both a supported operating system and a probe that ran and said
+    ///     so: a failing or negative probe means "not supported" without throwing, and the probe is
+    ///     not even run on an unsupported operating system.
+    /// </summary>
+    [Fact]
+    public void SignatureVerificationSupport_Evaluate_NeedsPlatformAndASuccessfulProbe()
+    {
+        // Arrange
+        var probeRuns = 0;
+
+        // Act
+        var good = SignatureVerificationSupport.Evaluate(true, false, false, () => true);
+        var negative = SignatureVerificationSupport.Evaluate(false, true, false, () => false);
+        var failing = SignatureVerificationSupport.Evaluate(
+            false, false, true, () => throw new System.Security.Cryptography.CryptographicException("no chains"));
+        var wrongPlatform = SignatureVerificationSupport.Evaluate(false, false, false, () =>
+        {
+            probeRuns++;
+            return true;
+        });
+
+        // Assert
+        Assert.True(good);
+        Assert.False(negative);
+        Assert.False(failing);
+        Assert.False(wrongPlatform);
+        Assert.Equal(0, probeRuns);
+    }
+
+    /// <summary>
     ///     Test that the explanation shown for an unsupported platform is the documented text.
     /// </summary>
     [Fact]

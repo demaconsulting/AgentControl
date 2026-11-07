@@ -80,6 +80,45 @@ public class GitCredentialClientIntegrationTests
     }
 
     /// <summary>
+    ///     Test that a password containing <c>=</c> - including the <c>=</c> and <c>==</c> padding of a
+    ///     Base64 token - survives the real protocol unchanged: approve stores it, fill returns the
+    ///     identical password, and reject removes it.
+    /// </summary>
+    [Theory]
+    [InlineData("dG9rZW4tYWJjMTIz=")]
+    [InlineData("dG9rZW4tYWJjMTI==")]
+    [InlineData("a=b=c==")]
+    public async Task GitCredentialClient_RealGit_PasswordWithEquals_RoundTripsIdentically(string password)
+    {
+        // Arrange
+        SkipWithoutGit();
+        var folder = CreateTempDirectory();
+        try
+        {
+            var client = CreateClient(folder);
+            var credential = new NuGetCredential("svc", password);
+            var cancellation = TestContext.Current.CancellationToken;
+
+            // Act
+            Assert.True(await client.ApproveAsync(Origin, credential, cancellation));
+            var found = await client.FillAsync(Origin, cancellation);
+
+            // Assert: the identical user name and password come back
+            Assert.NotNull(found);
+            Assert.Equal("svc", found.UserName);
+            Assert.Equal(password, found.Secret);
+
+            // Act / Assert: and it can be removed again
+            Assert.True(await client.RejectAsync(Origin, credential, cancellation));
+            Assert.Null(await client.FillAsync(Origin, cancellation));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that rejecting with only the origin removes whatever is stored for it - the way a
     ///     saved sign-in is forgotten - and leaves another origin's credential alone.
     /// </summary>

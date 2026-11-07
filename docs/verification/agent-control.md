@@ -35,22 +35,26 @@ searches every file the application wrote - the settings, the repo's pin and the
 log and text files - for the password the test typed. That a credential is withheld from a second server is not
 observable end to end and is verified one level down.
 
-`AgentControl-System-CredentialSafety` also covers the opt-in to remember a sign-in, which is verified one level
-down without a user interface: remembering needs a person at the sign-in dialog and a real credential helper, and a
-test must never touch the developer's real credential store. The saved-sign-in behavior is therefore verified through
-the credential logic with a fake credential store (a later session finds the saved sign-in without asking, a rejected
-one is removed, a wrong password is never saved), through the real `git credential` protocol against a throw-away
-helper in a temporary folder, and through a stub git that records exactly what is sent, in what environment and
-within what time limit.
+`AgentControl-System-CredentialSafety` also covers the opt-in to remember a sign-in, verified end to end in
+`RememberedSignInTests.cs` with the arg-logger stub standing in for git and emulating the user's credential helper:
+when the environment variable `ARGLOGGER_CREDENTIAL_STORE` names a file, the stub answers the helper question and the
+`git credential fill|approve|reject` invocations from that file, which lives outside every folder the application
+writes to, so a test can show that the sign-in is kept only by "the helper" and can never touch the developer's real
+credential store. The saved-sign-in behavior that is not observable end to end is verified at the subsystem and unit
+levels: through the credential logic with a fake credential store (a later session finds the saved sign-in without
+asking, a rejected one is removed, a wrong password is never saved), through the real `git credential` protocol
+against a throw-away helper in a temporary folder, and through a stub git that records exactly what is sent, in what
+environment and within what time limit.
 
 `AgentControl-System-PackageAuthenticity` has one end-to-end scenario in `MultipleSourcesTests.cs`, which runs the
 published application against a real NuGet folder feed that holds an unsigned newer package, with the source
 configured to require signed packages: the upgrade is refused with a message that says the package is not validly
 signed and names the source, and the repo's files and pin are left unchanged. Producing a validly signed package
 needs a real signing certificate, so acceptance of a valid signature, the publisher pin and the independence from the
-user's own NuGet trust settings are verified one level down, against a real signed package downloaded from nuget.org
-(skipped only where nuget.org cannot be reached or the machine lacks the trust roots it needs), as disclosed in the
-`AgentPackageManagement` verification design; the platform that cannot verify signatures is simulated there.
+user's own NuGet trust settings are verified at the subsystem and unit levels, against a real signed package downloaded
+from nuget.org (skipped only where nuget.org cannot be reached or the machine lacks the trust roots it needs), as
+disclosed in the `AgentPackageManagement` verification design; the platform that cannot verify signatures is simulated
+there.
 
 ## Test Environment
 
@@ -83,9 +87,12 @@ on a fresh port.
   folder source supplies packages applied like zip packages, a NuGet server source can be added with a
   typed sign-in and supplies packages the same way, and a repo pin is only ever resolved
   against the source it names.
-- No credential typed during an end-to-end run is found in any file the application wrote.
+- No credential typed during an end-to-end run is found in any file the application wrote; a sign-in the user chose
+  to remember is found only in the user's own (emulated) credential helper, is used again without a dialog and is
+  removed by "Forget saved sign-in".
 - A source that requires signed packages is refused an unsigned package end to end and the repo is left unchanged;
-  a valid signature, the publisher pin and the platform fail-closed behavior are proven one level down.
+  a valid signature, the publisher pin and the platform fail-closed behavior are proven at the subsystem and unit
+  levels.
 
 ## Test Scenarios
 
@@ -271,29 +278,24 @@ from which it applies a package. This scenario is tested by
 and `NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig`, covering
 `AgentControl-System-NuGetSources`.
 
-**AgentControl_CredentialSafety_TypedPasswordIsNeverPersistedAndIsScopedToItsServer**: In the end-to-end
+**AgentControl_CredentialSafety_TypedPasswordIsNeverPersistedAndIsScopedToItsServer**: In the first end-to-end
 scenario described under Verification Approach, a password typed in the sign-in dialog is used for the
 connection test and again, without a second dialog, for Select Package, and is then absent from the settings
 file, the repo's pin file and every log and text file in the configuration directory; the dialog showed the
-server's origin and "Used for this session only - AgentControl does not save it." One level down, a credential
-remembered for one server is never offered to another origin and a challenge from a feed's advertised second
-host never opens the prompt, and nothing is written into the target repo's files. The dialog's remember option, the
-credential helper protocol and the removal of a rejected saved sign-in are verified one level down as described under
-Verification Approach, and an exception that reaches the process-wide handlers is logged only after its secrets are
-removed. This scenario is tested by
+server's origin and "Used for this session only - AgentControl does not save it." In the remember scenarios,
+ticking "Remember on this computer" (which then explains that the user's Git credential helper keeps it) results in
+the sign-in being handed to the emulated helper and still being found in nothing AgentControl wrote; a sign-in the
+helper already holds connects without any sign-in dialog; "Forget saved sign-in" asks for confirmation naming the
+server, leaves the sign-in alone when declined and removes it from the helper when confirmed, saying so; and with no
+helper the remember option is shown disabled and "Forget saved sign-in" is unavailable. Everything that cannot be
+observed end to end is verified at the subsystem and unit levels and covers the child requirements: that a credential
+is never offered to another origin, nothing is written into the target repo's files, the exact and never-interactive
+git requests and the refusal of values the protocol cannot carry safely, the removal of a rejected saved sign-in, and
+the redaction of an exception that reaches the process-wide handlers. This scenario is tested by
 `windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`,
-`PackageCredentials_CredentialForOneFeed_IsNeverOfferedToAnotherOrigin`,
-`NuGetSourceProvider_ListVersions_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin`,
-`NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig`,
-`RepoCardViewModel_PackageSourceFailureWithSecrets_StatusTextAndLogsAreRedacted`,
-`PackageCredentials_RememberLifeCycle_SavedByTheUsersStoreAndFoundInALaterSession`,
-`GitCredentialClient_RealGitWithIsolatedStore_MissApproveFillRejectLifeCycle`,
-`GitCredentialClient_AllOperations_NeverLogRequestOrResponseContent`,
-`NuGetSourceProvider_ListVersions_RememberTicked_SavedByTheUsersStoreAfterSuccess`,
-`NuGetSourceProvider_ListVersions_WrongPasswordOrRememberNotTicked_NothingIsSaved`,
-`NuGetSourceProvider_ListVersions_SavedSignInRejected_RemovedFromTheUsersStoreAndUserAskedOnce`,
-`PackageCredentialContext_ForgetSavedSignIn_ReportsWhatWasDone` and
-`LoggingSetup_ReportUnhandledException_ExceptionCarryingSecrets_LogsOnlyASanitizedDescription`, covering
+`windows@SettingsWindow_SignInWithRememberTicked_SavedOnlyByTheUsersCredentialHelper`,
+`windows@SettingsWindow_SavedSignIn_UsedWithoutDialogAndForgottenOnRequest` and
+`windows@SettingsWindow_NoCredentialHelper_RememberAndForgetAreUnavailable`, covering
 `AgentControl-System-CredentialSafety`. Residual risk, stated plainly: the tests prove what AgentControl
 supplies; the NuGet client, once a server has authenticated, answers 401 challenges from other hosts that
 the server's index advertises with the same credential, which is why users must only add servers they trust.
@@ -301,17 +303,14 @@ the server's index advertises with the same credential, which is why users must 
 **AgentControl_PackageAuthenticity_SignatureRequirementRefusesUnsignedPackages**: A repo pinned to a NuGet folder
 source that requires signed packages is offered the newer, unsigned package (listing does not look at signatures); the
 Upgrade action is refused with a message that says the package is not validly signed and names the source, and nothing
-is extracted and the pin is unchanged. One level down, with a real signed package, a valid signature is accepted with
-no pin and with the author's certificate pinned, and refused when another publisher is pinned, with the user's own
-NuGet trusted-signer settings unable to widen the pin; a package that was cached before the requirement was turned on
-is refused; and on a platform that cannot verify signatures a source that requires them refuses to list or supply.
-This scenario is tested by
-`windows@UpgradeMenuItem_Click_NuGetSourceRequiresSignaturesAndPackageUnsigned_IsRefusedAndRepoUnchanged`,
-`NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted`,
-`NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled`,
-`NuGetSourceProvider_Acquire_UsersConfigurationTrustsTheAuthorButOtherSignerPinned_IsStillRejected`,
-`NuGetSourceProvider_Acquire_RequirementEnabledAfterPackageWasCached_RejectsTheCachedPackage` and
-`NuGetSourceProvider_RequireSignedOnUnsupportedPlatform_FailsClosedForListAndAcquire`, covering
+is extracted and the pin is unchanged; the package chip also shows that the source requires signatures. Everything
+that needs a real signed package or a different platform is verified at the subsystem and unit levels and covers the
+child requirements: with a real signed package a valid signature is accepted with no pin and with the author's
+certificate pinned, and refused when another publisher is pinned, with the user's own NuGet trusted-signer settings
+unable to widen or narrow the pin; a package that was cached before the requirement was turned on is refused; and
+on a platform that cannot verify signatures a source that requires them refuses to list or supply. This scenario is
+tested by
+`windows@UpgradeMenuItem_Click_NuGetSourceRequiresSignaturesAndPackageUnsigned_IsRefusedAndRepoUnchanged`, covering
 `AgentControl-System-PackageAuthenticity`.
 
 **AgentControl_SourcePinIntegrity_PinBoundToSource_NoSubstitution**: With the same package id

@@ -23,6 +23,7 @@ platforms of the project's build matrix.
 - The operating-system decision is `true` for exactly Windows, Linux and macOS and `false` for any other combination.
 - `IsSupported` is `true` on the platforms of the build matrix.
 - The explanation text is exactly "Package signature verification is not supported on this platform".
+- A capability probe that returns `false` or fails in any way yields "not supported" without throwing.
 
 #### Test Scenarios
 
@@ -36,3 +37,12 @@ is supported, and no operating system flagged at all is not; on the machine runn
 documented sentence. This scenario is tested by
 `SignatureVerificationSupport_UnsupportedMessage_IsTheDocumentedExplanation`, covering
 `AgentControl-SignatureVerificationSupport-UnsupportedExplanation`.
+
+**SignatureVerificationSupport_FailClosedProbe_AnyFailureMeansUnsupported**: A probe that returns `false`, or that
+throws a cryptographic error, a missing-native-library error, an unsupported-operation error or an unforeseen
+error, is "not supported" and never throws; the whole decision is supported only for a supported operating system
+*and* a successful probe, and the probe is not run on an unsupported operating system. This scenario is tested by
+`SignatureVerificationSupport_RunProbe_ProbeAnswers_ReturnsTheAnswer`,
+`SignatureVerificationSupport_RunProbe_ProbeFails_IsNotSupportedAndNeverThrows` and
+`SignatureVerificationSupport_Evaluate_NeedsPlatformAndASuccessfulProbe`, covering
+`AgentControl-SignatureVerificationSupport-FailClosedProbe`.

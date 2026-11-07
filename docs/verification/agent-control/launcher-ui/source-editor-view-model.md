@@ -135,12 +135,18 @@ and a fingerprint carries it as 64 upper-case hexadecimal characters. This scena
 `AgentControl-SourceEditorViewModel-SignerFingerprint`.
 
 **SourceEditorViewModel_ForgetSavedSignIn_ConfirmsFirstAndReportsTheOutcome**: The action is available for a server
-with an acceptable address and a credential store, and not for a folder, an unusable address or no store, with a
-tooltip that says why; the command only asks the view to confirm, naming the server, and nothing is removed until the
-view calls the forget method; the forget method reports "nothing saved", "forgotten", a credential store that refuses
-and a failure in words, and does nothing when the action is not available. This scenario is tested by
+with an acceptable address and a Git credential helper that applies to it, and not for a folder, an unusable
+address, no credential store or a server with no helper configured, with a tooltip that says why; while the check
+for a helper is still running the action is unavailable and the tooltip says it is checking, a check that fails counts
+as "no helper" without throwing, and the helper is asked once per server origin however the rest of the address is
+edited; the command only asks the view to confirm, naming the server, and nothing is removed until the view calls the
+forget method; the forget method reports "nothing saved", "forgotten", a credential store that refuses and a failure
+in words, and does nothing when the action is not available. This scenario is tested by
 `SourceEditorViewModel_ForgetSavedSignIn_AvailableOnlyForAUsableServerWithACredentialStore`,
 `SourceEditorViewModel_ForgetSavedSignIn_CommandAsksForConfirmationAndForgetsOnlyOnceConfirmed`,
-`SourceEditorViewModel_ForgetSavedSignIn_ReportsNothingSavedRefusalAndFailureInWords` and
-`SourceEditorViewModel_ForgetSavedSignIn_NotAvailable_DoesNothing`, covering
+`SourceEditorViewModel_ForgetSavedSignIn_ReportsNothingSavedRefusalAndFailureInWords`,
+`SourceEditorViewModel_ForgetSavedSignIn_NotAvailable_DoesNothing`,
+`SourceEditorViewModel_ForgetSavedSignIn_NoCredentialHelper_UnavailableWithExplanation`,
+`SourceEditorViewModel_ForgetSavedSignIn_HelperCheckPendingThenAnswered_FollowsTheAnswer` and
+`SourceEditorViewModel_ForgetSavedSignIn_AddressEdits_AskTheHelperOncePerOrigin`, covering
 `AgentControl-SourceEditorViewModel-ForgetSavedSignIn`.

@@ -268,11 +268,11 @@ show-on-disabled setting is asserted). This scenario is tested by
 
 **LauncherUI_ForgetSavedSignIn_ConfirmationDecidesAndResultIsShown**: In the editor window of a server source,
 "Forget saved sign-in" first shows a confirmation naming the server - declining leaves the saved sign-in alone - and
-once confirmed removes it and shows the outcome in words; with no credential store the button is disabled and its
-explanation is shown on hover. This scenario is tested by
+once confirmed removes it and shows the outcome in words; with no credential store, or with no Git credential helper
+configured for the server, the button is disabled and its explanation is shown on hover. This scenario is tested by
 `SourceEditorWindow_ForgetSavedSignIn_ConfirmationDecidesAndResultIsShown`,
 `SourceEditorWindow_ForgetSavedSignIn_NoCredentialStore_ButtonDisabledWithTooltip` and
-`SourceEditorViewModel_ForgetSavedSignIn_CommandAsksForConfirmationAndForgetsOnlyOnceConfirmed`, covering
+`SourceEditorWindow_ForgetSavedSignIn_NoCredentialHelper_ButtonDisabledWithTooltip`, covering
 `AgentControl-LauncherUI-ForgetSavedSignIn`.
 
 **LauncherUI_SignatureOptions_TickEnablesFingerprintAndUnsupportedPlatformExplains**: In the editor window of a NuGet

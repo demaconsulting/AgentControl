@@ -207,14 +207,15 @@ sections:
           - AgentControl-NuGetSourceProvider-SignatureFailureReported
           - AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused
         tests:
-          # The accepted and rejected signed-package tests use a real signed package downloaded
-          # from nuget.org and are skipped only where nuget.org cannot be reached or the machine
-          # lacks the trust roots the package needs; the unsigned-package tests need no network.
-          - NuGetSourceProvider_Acquire_RequireSignedAndPackageUnsigned_IsRejectedAndNothingIsInstalled
-          - NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted
-          - NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled
-          - NuGetSourceProvider_Acquire_PinnedSignerChangedAfterPackageWasCached_RejectsTheCachedPackage
-          - NuGetSourceProvider_Acquire_ServerRequiresSignaturesAndPackageUnsigned_IsRejectedAsASignatureFailure
+          # Subsystem tests: the registry resolving configured sources into providers. The
+          # signed-package test uses a real signed package downloaded from nuget.org and is
+          # skipped only where nuget.org cannot be reached or the machine lacks the trust roots
+          # the package needs; the others need no network. The cached-package re-check and the
+          # independence from the user's own NuGet settings are verified one level down, on the
+          # provider itself, and are evidence of the child requirements.
+          - AgentPackageManagementSubsystem_RequireSignedSource_UnsignedPackageRefusedWhileOpenSourceServesIt
+          - AgentPackageManagementSubsystem_SignedPackage_AcceptedWhenAnyOrAuthorPinnedAndRejectedWhenOtherPinned
+          - AgentPackageManagementSubsystem_UnreadableSignerFingerprint_SourceIsRefusedWhenResolved
 
       - id: AgentControl-AgentPackageManagement-SignaturePlatformSupport
         title: >-
@@ -230,9 +231,8 @@ sections:
           prevented it.
         children:
           - AgentControl-SignatureVerificationSupport-PlatformSupport
+          - AgentControl-SignatureVerificationSupport-FailClosedProbe
           - AgentControl-SignatureVerificationSupport-UnsupportedExplanation
           - AgentControl-NuGetSourceProvider-FailClosedWithoutVerification
         tests:
-          - SignatureVerificationSupport_IsSupportedPlatform_WindowsLinuxAndMacOsOnly
-          - SignatureVerificationSupport_UnsupportedMessage_IsTheDocumentedExplanation
-          - NuGetSourceProvider_RequireSignedOnUnsupportedPlatform_FailsClosedForListAndAcquire
+          - AgentPackageManagementSubsystem_RequireSignedOnUnsupportedPlatform_SourceRefusesAndOthersWork

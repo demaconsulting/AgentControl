@@ -176,6 +176,29 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     private bool _isForgetting;
 
     /// <summary>
+    ///     Whether the user's Git credential helper is available for the current feed address:
+    ///     <see langword="null"/> while that is being checked (or when there is no usable address),
+    ///     otherwise the answer.
+    /// </summary>
+    private bool? _helperAvailable;
+
+    /// <summary>
+    ///     The answers already obtained, by feed origin, so typing in the address box does not ask
+    ///     git again for an origin it was already asked about.
+    /// </summary>
+    private readonly Dictionary<string, bool> _helperAnswers = [];
+
+    /// <summary>
+    ///     Cancels the check that is running for an address that has since changed.
+    /// </summary>
+    private CancellationTokenSource? _helperCheckCancellation;
+
+    /// <summary>
+    ///     The most recently started helper check.
+    /// </summary>
+    private Task _helperCheck = Task.CompletedTask;
+
+    /// <summary>
     ///     Initializes a new <see cref="SourceEditorViewModel"/>.
     /// </summary>
     /// <param name="type">The kind of source being added; ignored when
@@ -234,6 +257,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         CancelTestCommand = new RelayCommand(() => TestConnectionCommand.Cancel(), () => IsTesting);
         ForgetSavedSignInCommand = new RelayCommand(RequestForgetSavedSignIn, () => CanForgetSavedSignIn);
         PackageIds.CollectionChanged += (_, _) => OnPackageIdsChanged();
+        RefreshHelperAvailability();
     }
 
     /// <summary>
@@ -345,6 +369,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
             if (SetField(ref _location, value ?? string.Empty))
             {
                 _locationTouched = true;
+                RefreshHelperAvailability();
                 RaiseValidationChanged();
             }
         }
@@ -652,7 +677,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     public AsyncRelayCommand TestConnectionCommand { get; }
 
     /// <summary>
-    ///     Gets the command bound to the Cancel button shown while a test runs; it stops the
+    ///     Gets the command bound to the "Cancel test" button shown while a test runs; it stops the
     ///     test, including a sign-in dialog the test opened.
     /// </summary>
     public RelayCommand CancelTestCommand { get; }
@@ -670,11 +695,27 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets a value indicating whether the "Forget saved sign-in" action is available: a
-    ///     server source with an acceptable address, and a credential helper to ask.
+    ///     server source with an acceptable address, and a Git credential helper that applies to
+    ///     it (without one nothing can have been saved, so there is nothing to forget).
     /// </summary>
     public bool CanForgetSavedSignIn =>
         IsServer && !_isForgetting && _credentials?.Remembered is not null &&
-        FeedOrigin.TryParse(_location, out _);
+        _helperAvailable == true && FeedOrigin.TryParse(_location, out _);
+
+    /// <summary>
+    ///     The tooltip of the "Forget saved sign-in" button when no Git credential helper is
+    ///     available for the server.
+    /// </summary>
+    public const string NoHelperForgetTooltip =
+        "Not available: no Git credential helper is configured on this computer for this server, " +
+        "so no sign-in has been saved for it";
+
+    /// <summary>
+    ///     Gets a task that completes when the check for a Git credential helper for the current
+    ///     address has finished (already complete when no check is needed). For the view and for
+    ///     tests; the check never throws.
+    /// </summary>
+    public Task HelperCheckCompleted => _helperCheck;
 
     /// <summary>
     ///     Gets the tooltip of the "Forget saved sign-in" button: what it does, or why it is
@@ -689,10 +730,18 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
                 return "Not available: no Git credential helper can be reached from this window";
             }
 
-            return CanForgetSavedSignIn || _isForgetting
-                ? "Remove the sign-in that your Git credential helper saved for this server " +
-                  "(and the one AgentControl remembers for this session)"
-                : "Enter a valid feed address to forget its saved sign-in";
+            if (!FeedOrigin.TryParse(_location, out _))
+            {
+                return "Enter a valid feed address to forget its saved sign-in";
+            }
+
+            return _helperAvailable switch
+            {
+                null when !_isForgetting => "Checking whether a Git credential helper is available for this server...",
+                false => NoHelperForgetTooltip,
+                _ => "Remove the sign-in that your Git credential helper saved for this server " +
+                     "(and the one AgentControl remembers for this session)"
+            };
         }
     }
 
@@ -789,6 +838,71 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
             "This removes the user name and password that your Git credential helper (for example Git " +
             "Credential Manager) saved for this server, and the sign-in AgentControl remembers for this " +
             "session. You will be asked to sign in again the next time the server needs it.");
+    }
+
+    /// <summary>
+    ///     Starts finding out whether a Git credential helper applies to the current feed address,
+    ///     reusing an earlier answer for the same origin. Until the answer is known the "Forget
+    ///     saved sign-in" action is unavailable; a failed check counts as "no helper".
+    /// </summary>
+    private void RefreshHelperAvailability()
+    {
+        _helperCheckCancellation?.Cancel();
+        _helperCheckCancellation = null;
+        _helperAvailable = null;
+        _helperCheck = Task.CompletedTask;
+
+        if (!IsServer || _credentials?.Remembered is null || !FeedOrigin.TryParse(_location, out var origin) || origin is null)
+        {
+            return;
+        }
+
+        var key = origin.ToString();
+        if (_helperAnswers.TryGetValue(key, out var known))
+        {
+            _helperAvailable = known;
+            return;
+        }
+
+        var cancellation = new CancellationTokenSource();
+        _helperCheckCancellation = cancellation;
+        _helperCheck = CheckHelperAsync(origin, key, cancellation);
+    }
+
+    /// <summary>
+    ///     Asks the credential store whether a helper applies to the origin and records the
+    ///     answer, unless the address changed meanwhile.
+    /// </summary>
+    /// <param name="origin">The feed origin.</param>
+    /// <param name="key">The cache key of the origin.</param>
+    /// <param name="cancellation">The cancellation of this check.</param>
+    /// <returns>A task that completes when the check is over; it never faults.</returns>
+    private async Task CheckHelperAsync(FeedOrigin origin, string key, CancellationTokenSource cancellation)
+    {
+        bool available;
+        try
+        {
+            available = await _credentials!.Remembered!.IsAvailableAsync(origin, cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+#pragma warning disable CA1031 // Whatever goes wrong, nothing can be forgotten: treat the helper as unavailable
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            available = false;
+        }
+
+        if (cancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _helperAnswers[key] = available;
+        _helperAvailable = available;
+        RaiseForgetAvailabilityChanged();
     }
 
     /// <summary>

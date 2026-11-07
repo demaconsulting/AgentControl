@@ -242,7 +242,10 @@ public class SettingsWindowServerSourceTests
             // Assert: progress and Cancel are shown, the result is not
             Assert.True(window.FindControl<StackPanel>("SourceTestProgressPanel")!.IsVisible);
             Assert.True(window.FindControl<Button>("SourceTestCancelButton")!.IsVisible);
-            Assert.Contains("contoso-agents", window.FindControl<TextBlock>("SourceTestProgressText")!.Text, StringComparison.Ordinal);
+
+            // The test's own button says what it cancels, so it cannot be mistaken for the dialog's Cancel
+            Assert.Equal("Cancel test", window.FindControl<Button>("SourceTestCancelButton")!.Content);
+            Assert.Equal("Cancel", window.FindControl<Button>("SourceEditorCancelButton")!.Content);
             Assert.False(window.FindControl<Border>("SourceTestResultPanel")!.IsVisible);
 
             // Act: the server answers

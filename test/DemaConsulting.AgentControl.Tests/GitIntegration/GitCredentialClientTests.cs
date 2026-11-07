@@ -43,7 +43,7 @@ public class GitCredentialClientTests
     /// <summary>
     ///     A password with characters that must survive parsing and must never be logged.
     /// </summary>
-    private const string SentinelPassword = "sentinel-credential-pw=4417";
+    private const string SentinelPassword = "sentinel-credential-pw-4417";
 
     /// <summary>
     ///     Test that availability is decided by asking git which helper applies to the feed's
@@ -143,7 +143,7 @@ public class GitCredentialClientTests
             // Act
             var credential = await client.FillAsync(Origin, TestContext.Current.CancellationToken);
 
-            // Assert: the credential, with an '=' inside the password kept
+            // Assert: the credential
             Assert.NotNull(credential);
             Assert.Equal("svc", credential.UserName);
             Assert.Equal(SentinelPassword, credential.Secret);
@@ -325,14 +325,20 @@ public class GitCredentialClientTests
     }
 
     /// <summary>
-    ///     Test that a credential whose values contain a line break is never sent (it could inject
-    ///     further keys into the request), and git is not even run.
+    ///     Test that every character the <c>key=value</c> protocol cannot carry - a line feed, a
+    ///     carriage return and NUL - is refused in each value that goes into a request (user name,
+    ///     password; host and protocol of the origin are checked by the same rule), for approve and
+    ///     reject, and git is not even run, so a malformed request is never written.
     /// </summary>
     [Theory]
     [InlineData("svc\nhost=evil.example.com", "pw")]
     [InlineData("svc", "pw\r\nprotocol=http")]
+    [InlineData("svc", "pw\rx")]
+    [InlineData("svc", "pw\nx")]
+    [InlineData("sv\rc", "pw")]
     [InlineData("sv\0c", "pw")]
-    public async Task GitCredentialClient_ApproveAndReject_ValueWithLineBreak_AreRefusedWithoutRunningGit(string userName, string secret)
+    [InlineData("svc", "p\0w")]
+    public async Task GitCredentialClient_ApproveAndReject_ValueWithLineFeedCarriageReturnOrNul_AreRefusedWithoutRunningGit(string userName, string secret)
     {
         // Arrange
         var stub = GitCredentialStub.Create();
@@ -356,6 +362,92 @@ public class GitCredentialClientTests
             stub.Delete();
             Directory.Delete(folder, recursive: true);
         }
+    }
+
+    /// <summary>
+    ///     Test that a password containing <c>=</c> - including the <c>=</c> and <c>==</c> padding of
+    ///     a Base64 token - is sent to git unchanged: git splits each line at the first <c>=</c>, so
+    ///     the value may contain any number of them.
+    /// </summary>
+    [Theory]
+    [InlineData("dG9rZW4tYWJjMTIz=")]
+    [InlineData("dG9rZW4tYWJjMTI==")]
+    [InlineData("a=b=c")]
+    [InlineData("=leading")]
+    public async Task GitCredentialClient_Approve_PasswordWithEquals_IsSentUnchanged(string password)
+    {
+        // Arrange
+        var stub = GitCredentialStub.Create();
+        var folder = CreateTempDirectory();
+        try
+        {
+            var client = new GitCredentialClient(stub.Path, workingDirectory: folder);
+
+            // Act
+            var approved = await client.ApproveAsync(Origin, new NuGetCredential("svc", password), TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.True(approved);
+            var invocation = Assert.Single(stub.ReadInvocations());
+            Assert.Equal(
+                $"protocol=https\nhost=feeds.example.com:8443\nusername=svc\npassword={password}\n\n",
+                invocation.StandardInput);
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a request is built from values that contain <c>=</c>, is not built from values
+    ///     with a line break, and that a password a helper returned with <c>=</c> inside is read in
+    ///     full.
+    /// </summary>
+    [Fact]
+    public void GitCredentialClient_BuildRequestAndParse_EqualsRoundTripsAndLineBreaksAreNull()
+    {
+        // Arrange
+        var withEquals = new NuGetCredential("svc", "a=b==");
+        var withLineBreak = new NuGetCredential("svc", "pw\nusername=evil");
+
+        // Act
+        var request = GitCredentialClient.BuildRequest(Origin, withEquals);
+        var refused = GitCredentialClient.BuildRequest(Origin, withLineBreak);
+        var parsed = GitCredentialClient.ParseCredential("username=svc\npassword=a=b==\n");
+
+        // Assert
+        Assert.Equal("protocol=https\nhost=feeds.example.com:8443\nusername=svc\npassword=a=b==\n\n", request);
+        Assert.Null(refused);
+        Assert.NotNull(parsed);
+        Assert.Equal("a=b==", parsed.Secret);
+    }
+
+    /// <summary>
+    ///     Test the character rule itself: only a line feed, a carriage return and NUL are
+    ///     rejected; everything else - <c>=</c>, other control characters, Unicode separators,
+    ///     spaces and non-ASCII letters - is allowed.
+    /// </summary>
+    [Theory]
+    [InlineData("plain-Value_1.2", true)]
+    [InlineData("with space", true)]
+    [InlineData("p\u00e4ssw\u00f6rd", true)]
+    [InlineData("", true)]
+    [InlineData("a=b", true)]
+    [InlineData("a==", true)]
+    [InlineData("a\tb", true)]
+    [InlineData("a\u2028b", true)]
+    [InlineData("a\nb", false)]
+    [InlineData("a\rb", false)]
+    [InlineData("a\0b", false)]
+    public void GitCredentialClient_IsSafeValue_OnlyLineFeedCarriageReturnAndNul_AreRejected(string value, bool expected)
+    {
+        // Act
+        var safe = GitCredentialClient.IsSafeValue(value);
+
+        // Assert
+        Assert.Equal(expected, safe);
     }
 
     /// <summary>

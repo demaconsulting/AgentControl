@@ -348,28 +348,22 @@ sections:
           - AgentControl-LauncherUI-ForgetSavedSignIn
           - AgentControl-Logging-UnhandledExceptionsRedacted
         tests:
-          # The end-to-end test signs in with a sentinel password and then searches every file the
-          # application wrote - the settings, the repo pin and the log folder - for it. The
-          # end-to-end test cannot show that a credential is withheld from a second server, which
-          # is verified one level down, and the sentinel search covers the log only for what the
-          # application wrote during that flow. That nothing is written into the target repo's
-          # files is shown at unit level. Remembering a sign-in needs a real credential helper and
-          # a person at the dialog, so it is verified without a user interface: against a real git
-          # with an isolated credential store, against a stub git (arguments, environment, input,
-          # time limit and log content) and through the credential logic with a fake store.
+          # System-level evidence is end to end through the real application. The first test signs
+          # in with a sentinel password and then searches every file the application wrote - the
+          # settings, the repo pin and the log folder - for it. The next two use the arg-logger
+          # stub standing in for git with an emulated credential helper kept outside the
+          # application's folders: ticking "Remember" hands the sign-in to that helper (and the
+          # sentinel search finds it nowhere the application wrote), a sign-in the helper holds is
+          # used without any dialog and "Forget saved sign-in" removes it after a confirmation;
+          # the last shows that with no helper the choice is unavailable. What an end-to-end test
+          # cannot show - that a credential is withheld from a second server, that the exact git
+          # requests are safe and never interactive, that a rejected sign-in is removed, and that
+          # no exception text leaks a secret - is verified at the subsystem and unit levels and is
+          # evidence of the child requirements.
           - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
-          - PackageCredentials_CredentialForOneFeed_IsNeverOfferedToAnotherOrigin
-          - NuGetSourceProvider_ListVersions_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin
-          - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig
-          - RepoCardViewModel_PackageSourceFailureWithSecrets_StatusTextAndLogsAreRedacted
-          - PackageCredentials_RememberLifeCycle_SavedByTheUsersStoreAndFoundInALaterSession
-          - GitCredentialClient_RealGitWithIsolatedStore_MissApproveFillRejectLifeCycle
-          - GitCredentialClient_AllOperations_NeverLogRequestOrResponseContent
-          - NuGetSourceProvider_ListVersions_RememberTicked_SavedByTheUsersStoreAfterSuccess
-          - NuGetSourceProvider_ListVersions_WrongPasswordOrRememberNotTicked_NothingIsSaved
-          - NuGetSourceProvider_ListVersions_SavedSignInRejected_RemovedFromTheUsersStoreAndUserAskedOnce
-          - PackageCredentialContext_ForgetSavedSignIn_ReportsWhatWasDone
-          - LoggingSetup_ReportUnhandledException_ExceptionCarryingSecrets_LogsOnlyASanitizedDescription
+          - windows@SettingsWindow_SignInWithRememberTicked_SavedOnlyByTheUsersCredentialHelper
+          - windows@SettingsWindow_SavedSignIn_UsedWithoutDialogAndForgottenOnRequest
+          - windows@SettingsWindow_NoCredentialHelper_RememberAndForgetAreUnavailable
 
       - id: AgentControl-System-PackageAuthenticity
         title: >-
@@ -398,17 +392,14 @@ sections:
           - AgentControl-LauncherUI-SignatureIndicator
           - AgentControl-OTS-NuGetCaching-SignatureVerification
         tests:
-          # End to end: with a NuGet source that requires signatures the published application
+          # System level: with a NuGet source that requires signatures the published application
           # refuses to upgrade to an unsigned package and leaves the repo unchanged. Acceptance of
-          # a validly signed package, the publisher pin and the independence from the user's NuGet
-          # trust settings need a real signed package and are shown one level down against a real
-          # signed package from nuget.org (skipped only where it cannot be reached).
+          # a validly signed package, the publisher pin, the re-check of cached packages, the
+          # independence from the user's NuGet trust settings and the refusal on a platform that
+          # cannot verify need a real signed package or another platform and are verified at the
+          # subsystem and unit levels (against a real signed package from nuget.org, skipped only
+          # where it cannot be reached) as evidence of the child requirements.
           - windows@UpgradeMenuItem_Click_NuGetSourceRequiresSignaturesAndPackageUnsigned_IsRefusedAndRepoUnchanged
-          - NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted
-          - NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled
-          - NuGetSourceProvider_Acquire_UsersConfigurationTrustsTheAuthorButOtherSignerPinned_IsStillRejected
-          - NuGetSourceProvider_Acquire_RequirementEnabledAfterPackageWasCached_RejectsTheCachedPackage
-          - NuGetSourceProvider_RequireSignedOnUnsupportedPlatform_FailsClosedForListAndAcquire
 
       - id: AgentControl-System-DiagnosticLogging
         title: >-

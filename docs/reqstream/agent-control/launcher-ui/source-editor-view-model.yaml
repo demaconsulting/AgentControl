@@ -143,17 +143,23 @@ sections:
       - id: AgentControl-SourceEditorViewModel-ForgetSavedSignIn
         title: >-
           The SourceEditorViewModel class shall offer, for a NuGet package server source with an
-          acceptable address and only when the user's credential store can be reached, the action
-          "Forget saved sign-in", shall ask for confirmation naming the server before doing
-          anything, and shall report in words whether nothing was saved, the saved sign-in was
-          forgotten, or it could not be removed and must be removed with the credential store's
-          own tools.
+          acceptable address and only when a Git credential helper applies to that server, the
+          action "Forget saved sign-in" - otherwise showing it unavailable with the reason, and
+          while that is still being checked saying so - shall ask for confirmation naming the
+          server before doing anything, and shall report in words whether nothing was saved, the
+          saved sign-in was forgotten, or it could not be removed and must be removed with the
+          credential store's own tools.
         justification: |
           A remembered sign-in must be revocable from the place the user sees the server, without
           a surprise - the confirmation says which server and what will be removed - and the
-          outcome must be honest when the credential store refuses.
+          outcome must be honest when the credential store refuses. Where no helper is configured
+          nothing can have been saved, so offering the action would only suggest something that
+          cannot happen.
         tests:
           - SourceEditorViewModel_ForgetSavedSignIn_AvailableOnlyForAUsableServerWithACredentialStore
           - SourceEditorViewModel_ForgetSavedSignIn_CommandAsksForConfirmationAndForgetsOnlyOnceConfirmed
           - SourceEditorViewModel_ForgetSavedSignIn_ReportsNothingSavedRefusalAndFailureInWords
           - SourceEditorViewModel_ForgetSavedSignIn_NotAvailable_DoesNothing
+          - SourceEditorViewModel_ForgetSavedSignIn_NoCredentialHelper_UnavailableWithExplanation
+          - SourceEditorViewModel_ForgetSavedSignIn_HelperCheckPendingThenAnswered_FollowsTheAnswer
+          - SourceEditorViewModel_ForgetSavedSignIn_AddressEdits_AskTheHelperOncePerOrigin

@@ -71,7 +71,10 @@ in that repo's working directory.
 
 - A package source location must never contain credentials (a user name or password in a URL or
   path is refused), and AgentControl never stores secrets: `settings.json` holds only aliases,
-  locations, NuGet package IDs and the insecure-HTTP flag of a server source.
+  locations, NuGet package IDs, the insecure-HTTP flag of a server source and, per NuGet source, the
+  signature settings — whether signed packages are required (`RequireSignedPackages`) and the optional signer
+  fingerprint (`SignerFingerprint`), which is the SHA-256 fingerprint of a publisher's public certificate and
+  not a secret.
 - A password or token you type into the sign-in dialog is kept in memory for the current session
   only — AgentControl does not write it to the settings, a repo's pin file, the log or anywhere else — and
   offers it only to the server it was typed for, and only when that server asks for it. The dialog shows

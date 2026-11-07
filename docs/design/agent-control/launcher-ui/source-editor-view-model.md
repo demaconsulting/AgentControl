@@ -56,7 +56,8 @@ package identifier list are all acceptable.
 **TestProgressText**, **TestResultKind**, **TestResultTitle**, **TestResultDetail**: The connection
 test. It can run when the source is a server with an acceptable address and at least one package ID
 (the alias is not needed). `TestConnectionCommand` is an `AsyncRelayCommand`, so a second request while
-one runs is ignored and `CancelTestCommand` cancels it. The result is a `ConnectionTestResultKind`
+one runs is ignored and `CancelTestCommand` cancels it; the view labels its button "Cancel test" so it cannot be
+mistaken for the dialog's own Cancel button, which is visible at the same time. The result is a `ConnectionTestResultKind`
 (`None`, `Succeeded`, `Failed`, `Canceled`) with a headline and an explanation.
 
 **_providerFactory**: `Func<PackageSourceDefinition, IPackageSourceProvider>` — creates the provider the
@@ -82,10 +83,17 @@ user has typed in it. **FingerprintHelpText** says what the value is and how to 
 (`dotnet nuget verify --all <package>.nupkg`). The pin is the **author** certificate because only the author
 signature says who published a package.
 
-**CanForgetSavedSignIn**, **ForgetSavedSignInCommand**, **ForgetTooltip**, **ForgetResultText**,
-**HasForgetResult**, **ForgetConfirmationRequested**: "Forget saved sign-in". Available only for a server source
-with an acceptable address and only when the `PackageCredentialContext` has a user's credential store to ask
-(otherwise the button is shown disabled with a tooltip that says so). The command does **not** forget anything: it
+**CanForgetSavedSignIn**, **ForgetSavedSignInCommand**, **ForgetTooltip**, **NoHelperForgetTooltip**,
+**ForgetResultText**, **HasForgetResult**, **ForgetConfirmationRequested**, **HelperCheckCompleted**: "Forget
+saved sign-in". Available only for a server source with an acceptable address, only when the
+`PackageCredentialContext` has a user's credential store to ask **and** that store reports a Git credential helper
+that applies to the server's origin (without one nothing can have been saved). Otherwise the button is shown
+disabled with a tooltip that says why: no store to ask, an address that is not acceptable, "checking" while the
+helper question is still being answered, or that no helper is configured for the server (`NoHelperForgetTooltip`).
+The helper question is asked whenever the address changes to a new origin, answered once per origin (an earlier
+answer is reused while the address is edited further), superseded when the address changes again, and a failure to
+answer counts as "no helper"; `HelperCheckCompleted` is the task of the latest question, for the view and tests.
+The command does **not** forget anything: it
 raises `ForgetConfirmationRequested` with a question that names the server and says what is removed, and the view
 calls `ForgetSavedSignInAsync` only after the user agrees. A confirmation comes first because the action removes a
 secret the user may not be able to recreate from memory, and an accidental click must not do it.

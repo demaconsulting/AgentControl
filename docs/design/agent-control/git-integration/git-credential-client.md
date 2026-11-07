@@ -63,11 +63,18 @@ containing `=` survives (`AgentControl-GitCredentialClient-FillApproveReject`).
 
 **ApproveAsync(origin, credential)** and **RejectAsync(origin, credential?)**: Run `git credential approve` and
 `git credential reject` with the credential in the request, and report whether git exited successfully. Reject
-without a credential removes whatever the helper stores for the origin. A credential whose user name or secret
-contains a carriage return, line feed or NUL is refused without running git, because such a value could inject
-further keys into the request (`AgentControl-GitCredentialClient-SecretsNeverLogged`).
+without a credential removes whatever the helper stores for the origin. A credential whose user name or secret (or
+an origin whose scheme or host) contains a line feed, carriage return or NUL is refused without running git: the
+protocol is lines of `key=value` with no escape mechanism, so a line feed could inject further keys, a NUL ends the
+request, and a carriage return is commonly trimmed or mishandled by helpers; such a value is therefore never altered
+or sent (`AgentControl-GitCredentialClient-SecretsNeverLogged`). Keys are fixed by this unit and never come from user
+input. A value may contain `=` (git splits each line at the first one, and Base64 padding is common in tokens), and
+any other character, so such a password is sent - and read back - unchanged.
 
-**BuildRequest(origin, credential?)**: Builds the `key=value` lines, ended by the blank line that ends a request.
+**BuildRequest(origin, credential?)**: Builds the `key=value` lines, ended by the blank line that ends a request,
+or returns `null` when any value fails **IsSafeValue** - a malformed request is never produced.
+
+**IsSafeValue(value)**: `true` when the value contains none of a line feed, a carriage return or NUL.
 
 **ParseCredential(output)**: Parses a response into a `NuGetCredential`, or `null` when incomplete.
 

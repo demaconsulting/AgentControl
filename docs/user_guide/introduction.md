@@ -170,7 +170,8 @@ Click **Add NuGet-Package Server**. The dialog asks for:
 Before saving a server, click **Test connection**. It becomes available once the address is
 acceptable and at least one package ID is listed. AgentControl asks the server for the versions of
 the **first** package ID in your list - it reads only the version list, downloads nothing and saves
-nothing. While it works you see progress and a **Cancel** button (a server that has to refuse a
+nothing. While it works you see progress and a **Cancel test** button (separate from the dialog's own
+**Cancel**; a server that has to refuse a
 credential first can take several seconds to answer). The result tells you in words what happened:
 
 - **Connection OK** — the server answered and has the package; the number of versions found and the
@@ -342,8 +343,9 @@ How it works, so there are no surprises:
 **Forget saved sign-in.** To remove a saved sign-in yourself, open the server source in Settings (**Edit**) and
 click **Forget saved sign-in**. AgentControl asks you to confirm, naming the server, then removes the sign-in
 from your Git credential helper and from this session, and tells you the result: it was forgotten, there was
-nothing saved, or the helper could not remove it. The button is disabled, with a tooltip, when no credential
-helper can be reached. You can always remove the entry with the helper's own tools instead - for example
+nothing saved, or the helper could not remove it. The button is disabled, with a tooltip, when no Git
+credential helper is configured for the server (nothing can have been saved then) or while AgentControl is
+still checking. You can always remove the entry with the helper's own tools instead - for example
 delete the `git:https://<host>` entry in the Windows **Credential Manager**, remove the item from the macOS
 **Keychain Access**, or delete the entry from your Linux keyring.
 

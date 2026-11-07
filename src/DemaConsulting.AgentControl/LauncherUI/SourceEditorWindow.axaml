@@ -210,7 +210,7 @@
                          IsVisible="{Binding IsTesting}"
                          Command="{Binding CancelTestCommand}"
                          ToolTip.Tip="Stop the connection test (this also closes a sign-in dialog it opened)"
-                         Content="Cancel" />
+                         Content="Cancel test" />
                 <Button Name="SourceForgetSignInButton"
                          AutomationProperties.AutomationId="SourceForgetSignInButton"
                          Command="{Binding ForgetSavedSignInCommand}"

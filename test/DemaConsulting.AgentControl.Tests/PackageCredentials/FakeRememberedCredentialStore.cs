@@ -66,6 +66,12 @@ internal sealed class FakeRememberedCredentialStore : IRememberedCredentialStore
     public TimeSpan FillDelay { get; set; }
 
     /// <summary>
+    ///     Gets or sets a task <see cref="IsAvailableAsync"/> waits for before answering, so a
+    ///     check that is still running can be observed; <see langword="null"/> answers at once.
+    /// </summary>
+    public Task? AvailableGate { get; set; }
+
+    /// <summary>
     ///     Gets the calls made so far.
     /// </summary>
     public IReadOnlyList<string> Calls
@@ -114,10 +120,15 @@ internal sealed class FakeRememberedCredentialStore : IRememberedCredentialStore
     }
 
     /// <inheritdoc />
-    public Task<bool> IsAvailableAsync(FeedOrigin origin, CancellationToken cancellationToken)
+    public async Task<bool> IsAvailableAsync(FeedOrigin origin, CancellationToken cancellationToken)
     {
         Record("available", origin);
-        return Task.FromResult(Available);
+        if (AvailableGate is not null)
+        {
+            await AvailableGate.WaitAsync(cancellationToken);
+        }
+
+        return Available;
     }
 
     /// <inheritdoc />

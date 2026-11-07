@@ -129,6 +129,13 @@ internal sealed class AgentControlTestContext : IDisposable
     public string ArgLoggerOutputFile { get; }
 
     /// <summary>
+    ///     Gets or sets the file backing the arg-logger stub's emulated Git credential helper, or
+    ///     <see langword="null"/> (the default) for a stub that reports no helper. Set before
+    ///     <see cref="Launch"/>; a pre-existing file acts as sign-ins saved in an earlier session.
+    /// </summary>
+    public string? CredentialStoreFile { get; set; }
+
+    /// <summary>
     ///     Gets the launched FlaUI <see cref="Application"/>, or <see langword="null"/> before
     ///     <see cref="Launch"/> is called.
     /// </summary>
@@ -158,6 +165,11 @@ internal sealed class AgentControlTestContext : IDisposable
         startInfo.ArgumentList.Add("--config-dir");
         startInfo.ArgumentList.Add(ConfigDirectory);
         startInfo.EnvironmentVariables["ARGLOGGER_OUTPUT_FILE"] = ArgLoggerOutputFile;
+        if (CredentialStoreFile is not null)
+        {
+            // Opt in to the arg-logger stub's emulation of the user's Git credential helper
+            startInfo.EnvironmentVariables["ARGLOGGER_CREDENTIAL_STORE"] = CredentialStoreFile;
+        }
 
         // NuGet caches service indexes on disk by URL; a private cache per launch keeps a feed that
         // a test starts on a reused port from being answered with a previous run's responses

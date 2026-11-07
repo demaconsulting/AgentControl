@@ -115,6 +115,27 @@ public class SourceEditorSignatureViewModelTests
     }
 
     /// <summary>
+    ///     Test that a platform whose capability probe cannot run (the probe throws) is treated as
+    ///     unsupported by the editor: the checkbox is disabled with the explanation and nothing
+    ///     throws.
+    /// </summary>
+    [Fact]
+    public void SourceEditorViewModel_RequireSigned_ProbeFails_CheckboxDisabledWithExplanationAndNoThrow()
+    {
+        // Arrange: support decided by a probe that fails the way a broken crypto stack does
+        var supported = SignatureVerificationSupport.Evaluate(
+            isWindows: false, isLinux: true, isMacOS: false, () => throw new DllNotFoundException("libssl"));
+
+        // Act
+        var editor = CreateServerEditor(signaturesSupported: supported);
+
+        // Assert
+        Assert.False(editor.IsRequireSignedEnabled);
+        Assert.Equal("Package signature verification is not supported on this platform", editor.RequireSignedTooltip);
+        Assert.False(editor.IsFingerprintEnabled);
+    }
+
+    /// <summary>
     ///     Test that an existing source that already requires signatures keeps its settings when
     ///     edited on a platform that cannot verify them: the choice is shown (disabled) and saved
     ///     unchanged, never silently dropped.
@@ -422,6 +443,94 @@ public class SourceEditorSignatureViewModelTests
         // Assert
         Assert.False(editor.HasTestResult);
         Assert.True(editor.HasForgetResult);
+    }
+
+    /// <summary>
+    ///     Test that "Forget saved sign-in" is unavailable, with a tooltip that says why, when no
+    ///     Git credential helper applies to the server - nothing can have been saved - and that
+    ///     neither the command nor the forget method then does anything.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_ForgetSavedSignIn_NoCredentialHelper_UnavailableWithExplanation()
+    {
+        // Arrange
+        var usersStore = new FakeRememberedCredentialStore { Available = false };
+        var editor = CreateServerEditor(credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore));
+        var asked = false;
+        editor.ForgetConfirmationRequested += (_, _) => asked = true;
+
+        // Act
+        editor.Location = FeedAddress;
+        await editor.HelperCheckCompleted;
+        editor.ForgetSavedSignInCommand.Execute(null);
+        await editor.ForgetSavedSignInAsync();
+
+        // Assert
+        Assert.False(editor.CanForgetSavedSignIn);
+        Assert.False(editor.ForgetSavedSignInCommand.CanExecute(null));
+        Assert.Equal(SourceEditorViewModel.NoHelperForgetTooltip, editor.ForgetTooltip);
+        Assert.Contains("no Git credential helper is configured", editor.ForgetTooltip, StringComparison.Ordinal);
+        Assert.False(asked);
+        Assert.False(editor.HasForgetResult);
+        Assert.Equal(0, usersStore.CountOf("reject"));
+    }
+
+    /// <summary>
+    ///     Test that the action stays unavailable (with a "checking" explanation) while the check
+    ///     for a helper is still running, becomes available when it finds one, and that a check
+    ///     that fails counts as "no helper" without throwing.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_ForgetSavedSignIn_HelperCheckPendingThenAnswered_FollowsTheAnswer()
+    {
+        // Arrange: a check that waits to be released
+        var release = new TaskCompletionSource();
+        var usersStore = new FakeRememberedCredentialStore { AvailableGate = release.Task };
+        var editor = CreateServerEditor(credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore));
+
+        // Act / Assert: pending
+        editor.Location = FeedAddress;
+        Assert.False(editor.CanForgetSavedSignIn);
+        Assert.Contains("Checking", editor.ForgetTooltip, StringComparison.Ordinal);
+
+        // Act / Assert: answered "available"
+        release.SetResult();
+        await editor.HelperCheckCompleted;
+        Assert.True(editor.CanForgetSavedSignIn);
+
+        // Act / Assert: a different server whose check fails is "no helper", not an exception
+        usersStore.AvailableGate = null;
+        usersStore.ThrowOnEveryCall = true;
+        editor.Location = "https://other.example.com/v3/index.json";
+        await editor.HelperCheckCompleted;
+        Assert.False(editor.CanForgetSavedSignIn);
+        Assert.Equal(SourceEditorViewModel.NoHelperForgetTooltip, editor.ForgetTooltip);
+    }
+
+    /// <summary>
+    ///     Test that the helper is asked once per server origin however the rest of the address is
+    ///     edited, and again for a different origin.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_ForgetSavedSignIn_AddressEdits_AskTheHelperOncePerOrigin()
+    {
+        // Arrange
+        var usersStore = new FakeRememberedCredentialStore();
+        var editor = CreateServerEditor(credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore));
+
+        // Act
+        editor.Location = "https://feeds.example.com/v3/index.json";
+        await editor.HelperCheckCompleted;
+        editor.Location = "https://feeds.example.com/other/index.json";
+        await editor.HelperCheckCompleted;
+        editor.Location = "https://feeds.example.com/v3/index.json";
+        await editor.HelperCheckCompleted;
+        editor.Location = "https://another.example.com/v3/index.json";
+        await editor.HelperCheckCompleted;
+
+        // Assert
+        Assert.Equal(2, usersStore.CountOf("available"));
+        Assert.True(editor.CanForgetSavedSignIn);
     }
 
     /// <summary>

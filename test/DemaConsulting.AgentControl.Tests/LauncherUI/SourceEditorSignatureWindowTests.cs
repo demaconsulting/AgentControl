@@ -213,6 +213,28 @@ public class SourceEditorSignatureWindowTests
     });
 
     /// <summary>
+    ///     Test that the button is disabled, with the explanation shown on hover, when the Git
+    ///     credential helper is not available for the server (so nothing can have been saved).
+    /// </summary>
+    [Fact]
+    public void SourceEditorWindow_ForgetSavedSignIn_NoCredentialHelper_ButtonDisabledWithTooltip() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: a credential store that has no helper
+        var usersStore = new FakeRememberedCredentialStore { Available = false };
+        var editor = CreateServerEditor(credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore));
+        editor.Location = FeedAddress;
+        var window = new SourceEditorWindow(editor);
+        window.Show();
+        var button = window.FindControl<Button>("SourceForgetSignInButton")!;
+
+        // Assert
+        Assert.False(button.IsEffectivelyEnabled);
+        Assert.Equal(SourceEditorViewModel.NoHelperForgetTooltip, ToolTip.GetTip(button));
+        Assert.True(ToolTip.GetShowOnDisabled(button));
+        window.Close();
+    });
+
+    /// <summary>
     ///     Creates a server editor.
     /// </summary>
     /// <param name="signaturesSupported">Whether the platform is taken to support signature

@@ -44,8 +44,8 @@ shell script elsewhere). The tests pass an explicit working folder, so they neve
   exceptions.
 - A hanging git is killed, with its process tree, at the time limit and reported as "nothing"; cancelling kills it too
   and propagates the cancellation.
-- No request, response or credential appears in the log, and a credential with a line break is refused without
-  running git.
+- No request, response or credential appears in the log, and a credential (or origin) with a line feed, carriage
+  return or NUL is refused without running git, while a password containing `=` is sent and read back unchanged.
 - With a real git and an isolated helper the full miss, approve, fill, reject life cycle behaves as specified.
 
 #### Test Scenarios
@@ -110,8 +110,15 @@ documented exceptions; extra configuration passes through with `-c`. This scenar
 
 **GitCredentialClient_SecretsNeverLogged_ContentNeverReachesTheLog**: Every operation is run with a sentinel
 password in the request and the response and a recording logger; no logged line contains the password, the user name
-or any request or response line. A credential whose user name or password contains a line break is refused: no git
-process is started and the result is `false`. This scenario is tested by
-`GitCredentialClient_AllOperations_NeverLogRequestOrResponseContent` and
-`GitCredentialClient_ApproveAndReject_ValueWithLineBreak_AreRefusedWithoutRunningGit`, covering
+or any request or response line. A credential whose user name or password contains a character the line protocol
+cannot carry - a line feed, a carriage return or NUL - is refused for approve and reject: no git process is started
+and the result is `false`; the request builder yields no request for such a value. A password containing `=`,
+including the `=` and `==` padding of a Base64 token, is not refused: it is sent unchanged (checked against the stub's
+recorded input) and, against the real git, approve followed by fill returns the identical password. This scenario is
+tested by `GitCredentialClient_AllOperations_NeverLogRequestOrResponseContent`,
+`GitCredentialClient_ApproveAndReject_ValueWithLineFeedCarriageReturnOrNul_AreRefusedWithoutRunningGit`,
+`GitCredentialClient_Approve_PasswordWithEquals_IsSentUnchanged`,
+`GitCredentialClient_BuildRequestAndParse_EqualsRoundTripsAndLineBreaksAreNull`,
+`GitCredentialClient_IsSafeValue_OnlyLineFeedCarriageReturnAndNul_AreRejected` and
+`GitCredentialClient_RealGit_PasswordWithEquals_RoundTripsIdentically`, covering
 `AgentControl-GitCredentialClient-SecretsNeverLogged`.

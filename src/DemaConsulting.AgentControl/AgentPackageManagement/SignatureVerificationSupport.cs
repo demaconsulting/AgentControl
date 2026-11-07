@@ -55,15 +55,30 @@ internal static class SignatureVerificationSupport
     /// <summary>
     ///     The run-time probe result, computed once on first use.
     /// </summary>
-    private static readonly Lazy<bool> ProbeResult = new(ProbeCertificateChains);
+    private static readonly Lazy<bool> ProbeResult = new(() => RunProbe(ProbeCertificateChains));
 
     /// <summary>
     ///     Gets a value indicating whether signature verification is supported on the current
     ///     platform: the operating system is Windows, Linux or macOS and the platform's
     ///     certificate-chain facility is usable.
     /// </summary>
-    public static bool IsSupported => IsSupportedPlatform(
-        OperatingSystem.IsWindows(), OperatingSystem.IsLinux(), OperatingSystem.IsMacOS()) && ProbeResult.Value;
+    public static bool IsSupported => Evaluate(
+        OperatingSystem.IsWindows(), OperatingSystem.IsLinux(), OperatingSystem.IsMacOS(), () => ProbeResult.Value);
+
+    /// <summary>
+    ///     Decides support from the operating system and a capability probe: supported only when
+    ///     the operating system is Windows, Linux or macOS and the probe ran and said so. The probe
+    ///     is not run on any other operating system.
+    /// </summary>
+    /// <param name="isWindows">Whether the operating system is Windows.</param>
+    /// <param name="isLinux">Whether the operating system is Linux.</param>
+    /// <param name="isMacOS">Whether the operating system is macOS.</param>
+    /// <param name="probe">The capability probe; a probe that fails in any way means "not
+    ///     supported" (see <see cref="RunProbe"/>).</param>
+    /// <returns><see langword="true"/> only when the platform is supported and the probe
+    ///     succeeded.</returns>
+    internal static bool Evaluate(bool isWindows, bool isLinux, bool isMacOS, Func<bool> probe) =>
+        IsSupportedPlatform(isWindows, isLinux, isMacOS) && RunProbe(probe);
 
     /// <summary>
     ///     Decides support from the operating system alone.
@@ -77,21 +92,38 @@ internal static class SignatureVerificationSupport
         isWindows || isLinux || isMacOS;
 
     /// <summary>
+    ///     Runs a capability probe so that it can only ever answer "supported" by returning
+    ///     <see langword="true"/>: a probe that returns <see langword="false"/> or fails in any
+    ///     way (a cryptographic error, a native library that cannot be loaded, an unsupported
+    ///     operation, anything else) means verification cannot be relied on, which is "not
+    ///     supported" - the caller then fails closed.
+    /// </summary>
+    /// <param name="probe">The probe to run.</param>
+    /// <returns><see langword="true"/> only when the probe ran and returned
+    ///     <see langword="true"/>.</returns>
+    internal static bool RunProbe(Func<bool> probe)
+    {
+        try
+        {
+            return probe();
+        }
+#pragma warning disable CA1031 // Any failure of the probe, whatever its type, means "not supported"
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     ///     Checks that the platform can build a certificate chain, which signature verification
     ///     needs.
     /// </summary>
     /// <returns><see langword="true"/> when a chain object can be created and used.</returns>
     private static bool ProbeCertificateChains()
     {
-        try
-        {
-            using var chain = new X509Chain();
-            chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-            return chain.ChainPolicy is not null;
-        }
-        catch (Exception ex) when (ex is PlatformNotSupportedException or NotSupportedException or InvalidOperationException)
-        {
-            return false;
-        }
+        using var chain = new X509Chain();
+        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        return chain.ChainPolicy is not null;
     }
 }

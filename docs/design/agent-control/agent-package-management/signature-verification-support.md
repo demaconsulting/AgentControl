@@ -31,22 +31,32 @@ The unit is a stateless static class and is thread-safe.
 #### Key Methods
 
 **IsSupported**: `true` when the operating system is Windows, Linux or macOS (`IsSupportedPlatform`) *and* the
-certificate-chain probe succeeds (`AgentControl-SignatureVerificationSupport-PlatformSupport`).
+certificate-chain probe succeeds, evaluated through `Evaluate`
+(`AgentControl-SignatureVerificationSupport-PlatformSupport`).
 
 **IsSupportedPlatform(isWindows, isLinux, isMacOS)**: The operating-system decision alone, with the three
 answers as parameters so every combination can be tested on any machine. `true` for Windows, Linux or macOS;
 `false` otherwise.
 
+**Evaluate(isWindows, isLinux, isMacOS, probe)**: The whole decision with the platform and the probe as
+parameters, so a probe that fails can be exercised deterministically: supported only when the platform is
+supported and `RunProbe` of the probe says so; the probe is not run on an unsupported platform.
+
+**RunProbe(probe)**: Runs a probe so that it can only answer "supported" by returning `true`. A probe that returns
+`false` **or fails in any way** - a cryptographic error, a native library that cannot be loaded, an unsupported
+operation, anything else - is "not supported"; the failure is never propagated, so a broken crypto stack can only
+make the platform unsupported (fail closed), never throw into the editor or the provider
+(`AgentControl-SignatureVerificationSupport-FailClosedProbe`).
+
 **ProbeCertificateChains** (private): Creates an `X509Chain` with revocation checking disabled and returns `true`
-when it can be created and used. A platform whose certificate facility fails is not trusted to verify signatures:
-`PlatformNotSupportedException`, `NotSupportedException` and `InvalidOperationException` yield `false`. The probe
+when it can be created and used. It lets its failures escape to `RunProbe`. The probe
 deliberately does no network access and does not examine any certificate; it only proves the facility that
 signature verification builds on is usable.
 
 #### Error Handling
 
-No method throws for an unsupported platform; the answer is a value. A failure of the probe is turned into
-"not supported" (fail closed) rather than propagated.
+No method throws for an unsupported platform or a failing probe; the answer is a value. A failure of the probe,
+of whatever kind, is turned into "not supported" (fail closed) rather than propagated.
 
 #### Dependencies
 

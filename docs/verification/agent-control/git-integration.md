@@ -5,7 +5,8 @@
 The `GitIntegration` subsystem is verified indirectly through its constituent units' test
 suites (`GitClientTests.cs`, `CommittedAgentFilesCacheTests.cs` and `GitCredentialClientTests.cs` /
 `GitCredentialClientIntegrationTests.cs`), each documented in its
-own unit-level verification design. `GitClientTests` uses `GitStub`, a fake git executable
+own unit-level verification design, plus `GitIntegrationSubsystemTests.cs`, which drives the saved-sign-in capability
+through its contract with the real git and a throw-away credential helper. `GitClientTests` uses `GitStub`, a fake git executable
 script that records its invocation arguments and returns configured output/exit codes, so
 tests never depend on a real git installation or a real repository's actual history. The credential tests use
 `GitCredentialStub`, a similar fake that also records the environment, working folder and standard input, and -
@@ -60,14 +61,19 @@ is verified by the `GitClient` unit tests (see the `GitClient` unit verification
 directly at the subsystem level, covering `AgentControl-GitIntegration-CurrentBranch` (child:
 `AgentControl-GitClient-CurrentBranch`).
 
-**GitIntegration_SavedSignIns_UnitTestsCoverTheCredentialHelperProtocol**: Finding, keeping and removing a package
-feed's sign-in through the user's Git credential helper is verified by the `GitCredentialClient` unit tests (see the
-`GitCredentialClient` unit verification design): `GitCredentialClient_Fill_CredentialStored_ReturnsItWithTheDocumentedRequestAndEnvironment`
-(what is sent, in a never-interactive environment), `GitCredentialClient_IsAvailable_HelperConfigured_ReturnsTrueAndAsksAboutTheOrigin`
-(helper availability), `GitCredentialClient_Fill_ProcessHangs_IsKilledAtTheTimeLimitAndReturnsNull` (bounded time),
-`GitCredentialClient_AllOperations_NeverLogRequestOrResponseContent` (no secret in the log) and
-`GitCredentialClient_RealGitWithIsolatedStore_MissApproveFillRejectLifeCycle` (the real protocol against an
-isolated helper) cited directly at the subsystem level, covering `AgentControl-GitIntegration-SavedSignIns`
-(children: `AgentControl-GitCredentialClient-FillApproveReject`, `AgentControl-GitCredentialClient-HelperAvailability`,
+**GitIntegration_SavedSignIns_SubsystemTestsUseTheRealCredentialHelperProtocol**: Through the credential-store
+contract the rest of the application uses, a sign-in kept by one instance (one session) is found by another, a lookup
+before that finds nothing without any prompt, forgetting by origin removes it for every instance, a sign-in whose
+values the line-based protocol cannot carry (a line feed, carriage return or NUL) is never handed to the helper -
+nothing is stored - while a token with `=` padding is kept and found unchanged, and with no helper configured the
+subsystem reports "unavailable" and finds nothing instead of failing,
+all against the real git and a throw-away helper. This scenario is tested by
+`GitIntegrationSubsystem_SavedSignIn_KeptInOneSessionFoundInAnotherAndRemovedOnRequest`,
+`GitIntegrationSubsystem_SavedSignIn_ValueWithLineBreakIsNeverStoredButEqualsIs` and
+`GitIntegrationSubsystem_SavedSignIn_NoHelperConfigured_ReportsUnavailableAndNothingSaved`, covering
+`AgentControl-GitIntegration-SavedSignIns`. The exact requests, the never-interactive environment, the time limit
+and the absence of secrets from the log are verified against a stub git by the `GitCredentialClient` unit tests (see
+the `GitCredentialClient` unit verification design) and covered by the children
+`AgentControl-GitCredentialClient-FillApproveReject`, `AgentControl-GitCredentialClient-HelperAvailability`,
 `AgentControl-GitCredentialClient-NeverInteractive`, `AgentControl-GitCredentialClient-BoundedTime`,
-`AgentControl-GitCredentialClient-UnavailableIsNotAnError`, `AgentControl-GitCredentialClient-SecretsNeverLogged`).
+`AgentControl-GitCredentialClient-UnavailableIsNotAnError` and `AgentControl-GitCredentialClient-SecretsNeverLogged`.
