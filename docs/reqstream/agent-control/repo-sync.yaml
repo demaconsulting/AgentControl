@@ -46,10 +46,10 @@ sections:
         children:
           - AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders
         tests:
-          - windows@PackageContentExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched
-          - windows@PackageContentExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched
-          - ubuntu@PackageContentExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched
-          - ubuntu@PackageContentExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched
+          - windows@RepoSync_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched
+          - windows@RepoSync_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched
+          - ubuntu@RepoSync_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched
+          - ubuntu@RepoSync_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched
 
       - id: AgentControl-RepoSync-ReleaseNotes
         title: >-

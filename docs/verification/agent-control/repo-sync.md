@@ -17,7 +17,9 @@ hostile paths a real package reader would never produce.
 
 ### Test Environment
 
-N/A - standard test environment; no external services or hardware required.
+N/A - standard test environment; no external services or hardware required. The linked-folder
+tests need directory junctions (Windows, no privilege) or symbolic links (Linux; skipped where the
+account may not create them).
 
 ### Acceptance Criteria
 
@@ -26,6 +28,8 @@ N/A - standard test environment; no external services or hardware required.
 - An unpacked package folder is applied to a repo exactly as a zip package is, never modifying the
   package, and a hostile path or (where the platform lets a test create one) a symbolic link in
   the package is refused before anything in the repo is deleted.
+- A repo whose `.github` folder or a managed folder is a symbolic link or junction is refused
+  with nothing deleted or written, at the link target or elsewhere.
 - A sync fully replaces a repo's managed agent-file folders and never partially extracts an
   invalid zip.
 - The release-notes dialog always has coherent content, even for a package with no release
@@ -98,13 +102,16 @@ directly at the subsystem level, covering `AgentControl-RepoSync-SyncFromFolderP
 `AgentControl-PackageContentExtractor-RejectLinksAndTraversal`,
 `AgentControl-PackageContentExtractor-ReadRootFiles`, `AgentControl-Utilities-SafePaths`).
 
-**RepoSync_RefuseLinkedRepoFolders_ChangesNothing**: A repo whose `.github` folder or a managed
-folder is a symbolic link (Linux) or junction (Windows) is refused with an error, and the link
-target and the repo's other managed folders are left unchanged. This scenario is verified by the
-`PackageContentExtractor` unit tests (see their unit verification design), with
-`PackageContentExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched`,
-`PackageContentExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched`,
-`PackageContentExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched`, and
-`PackageContentExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched` cited
-directly at the subsystem level, covering `AgentControl-RepoSync-RefuseLinkedRepoFolders`
-(children: `AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`).
+**RepoSync_RefuseLinkedRepoFolders_ChangesNothing**: Extracting a package zip through the
+subsystem's `PackageZipExtractor` entry point into a repo whose `.github` folder or a managed
+folder is a symbolic link (Linux) or junction (Windows) is refused with an error naming a link; the
+link target and the repo's other managed folders are left unchanged, and a linked folder is not
+reported by `AllManagedFoldersExist` as existing. This scenario is tested by
+`RepoSync_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched`,
+`RepoSync_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched`,
+`RepoSync_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched`, and
+`RepoSync_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched` (in
+`PackageZipExtractorTests.cs`; junction tests run on Windows, symbolic-link tests on Linux and
+skip where links cannot be created), covering `AgentControl-RepoSync-RefuseLinkedRepoFolders`
+(children: `AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`, whose unit tests are
+described in the `PackageContentExtractor` unit verification design).
