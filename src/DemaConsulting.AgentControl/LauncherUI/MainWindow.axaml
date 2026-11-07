@@ -324,6 +324,15 @@
                                                     Text="{Binding PinnedSourceLabel}"
                                                     Opacity="0.7"
                                                     MaxWidth="120" TextTrimming="CharacterEllipsis" />
+                                        <materialIcons:MaterialIcon Name="PackageSignatureIcon"
+                                                                      AutomationProperties.AutomationId="PackageSignatureIcon"
+                                                                      AutomationProperties.AccessibilityView="Content"
+                                                                      AutomationProperties.Name="{Binding SignatureTooltip}"
+                                                                      Kind="ShieldCheck"
+                                                                      Width="14" Height="14"
+                                                                      IsVisible="{Binding RequiresSignature}"
+                                                                      ToolTip.Tip="{Binding SignatureTooltip}"
+                                                                      Opacity="0.9" />
                                     </StackPanel>
                                 </Border>
 

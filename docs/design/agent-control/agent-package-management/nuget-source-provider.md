@@ -18,6 +18,14 @@ it obtains credentials in a defined order, offers them only to the server's own 
 in terms the user can act on, and keeps secrets out of messages and the log
 (`AgentControl-NuGetSourceProvider-SignInOrder`, `AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin`,
 `AgentControl-NuGetSourceProvider-ServerFailures`, `AgentControl-NuGetSourceProvider-SecretsNotLogged`).
+A user who ticked "Remember on this computer" gets a saved sign-in used without a dialog
+(`AgentControl-NuGetSourceProvider-SavedSignIn`). A source can also require signed packages, optionally from one
+pinned publisher: the provider enforces that for folder and server sources on every acquisition, decides the
+trusted signers from the source's own description alone, and fails closed where signatures cannot be verified
+(`AgentControl-NuGetSourceProvider-RequireSigned`, `AgentControl-NuGetSourceProvider-SignerPin`,
+`AgentControl-NuGetSourceProvider-SignerTrustIsolated`, `AgentControl-NuGetSourceProvider-SignatureFailureReported`,
+`AgentControl-NuGetSourceProvider-FailClosedWithoutVerification`,
+`AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused`).
 
 #### Data Model
 
@@ -26,8 +34,19 @@ in terms the user can act on, and keeps secrets out of messages and the log
 **\_feed**: `FeedOrigin?` — the origin of a server source's address; `null` for a folder. It decides
 whether the provider is a server provider at all and is the only origin a credential is ever offered to.
 
-**\_credentials**: `PackageCredentialContext?` — the session credential store and the sign-in prompt, or
+**\_credentials**: `PackageCredentialContext?` — the session credential store, the sign-in prompt and the
+user's own credential store (their Git credential helper), or
 `null` for none (a server source then uses only what NuGet itself supplies).
+
+**\_requireSigned**: `bool` — whether packages from this source must be validly signed (a folder source can
+require signatures as well as a server).
+
+**\_signerFingerprint**: `string?` — the normalized 64-character SHA-256 fingerprint of the trusted publisher's
+(author) certificate, or `null` when any validly signed package is acceptable. It is only set when
+`_requireSigned` is.
+
+**\_signaturesSupported**: `bool` — whether the platform can verify signatures (`SignatureVerificationSupport`),
+injectable so tests can exercise the fail-closed behavior of a platform that cannot.
 
 **\_authenticationTimeout**: `TimeSpan` — the longest one credential exchange (a prompt or a credential
 plug-in) may take before the operation is stopped; `DefaultAuthenticationTimeout` is two minutes, because a
@@ -61,7 +80,11 @@ failure throws `InvalidOperationException` naming the source and never repeating
 definition throws `ArgumentException`, as does a supplied base folder that is not a fully qualified absolute
 path, so the root can never be resolved against the current directory or a target repo
 (`AgentControl-NuGetSourceProvider-ValidateLocation`,
-`AgentControl-NuGetSourceProvider-ExplicitCacheRoot`).
+`AgentControl-NuGetSourceProvider-ExplicitCacheRoot`). A signer fingerprint that cannot be read as a SHA-256
+fingerprint, on a source that requires signatures, throws `InvalidOperationException` (via
+`PackageSourceDefinition.GetSignaturePolicyProblem`): ignoring it would silently widen trust from one publisher to
+any signer (`AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused`). The fingerprint is normalized once,
+here.
 
 **ListPackageIdsAsync**: Returns the configured package IDs, sorted
 (`AgentControl-NuGetSourceProvider-ListVersions`).
@@ -72,35 +95,72 @@ every listed version including prereleases, naming the folder or server explicit
 is always queried and no other configured source is consulted. Only the version list is read: no package
 content is downloaded. Unlisted versions and versions the version type cannot represent are skipped; each
 result is stamped with the alias (`AgentControl-NuGetSourceProvider-ListVersions`,
-`AgentControl-NuGetSourceProvider-ServerListAndAcquire`).
+`AgentControl-NuGetSourceProvider-ServerListAndAcquire`). A source that requires signatures on a platform that
+cannot verify them refuses to list (below).
 
 **AcquireAsync**: Refuses a package from another source (`ArgumentException`), prepares the
 root, and asks the library to unpack the chosen version into the global packages folder named by
-the generated configuration, then returns a `DirectoryPackageContentReader` over the unpacked
+the generated configuration, with the signature requirement set when the source has one, then returns a
+`DirectoryPackageContentReader` over the unpacked
 folder. The call fails closed (`InvalidOperationException`) when the unpacked package did not land
 inside this source's own `packages` folder — which happens only when the `NUGET_PACKAGES`
 environment variable overrides the generated configuration and so could serve a same-ID,
 same-version package from another source (`AgentControl-NuGetSourceProvider-AcquireToPrivateCache`,
 `AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource`). A package with no `content` folder
-is rejected by the reader.
+is rejected by the reader. A signature failure is reported as `SignatureRejected` and nothing is returned for the
+package (`AgentControl-NuGetSourceProvider-RequireSigned`).
+
+**EnsureSignatureVerificationPossible** (private): When the source requires signed packages and the platform
+cannot verify signatures, throws a `PackageSourceAccessException` of kind `SignatureRejected` whose message says
+that verification is not supported on this platform, so no package can be used from the source, and what to do.
+It runs at the start of both listing and acquiring. It _fails closed_ on purpose: the alternative - ignoring the
+requirement - would install packages the user required to be checked, and a hand-edited settings file can enable the
+requirement on any machine (`AgentControl-NuGetSourceProvider-FailClosedWithoutVerification`).
+
+**DescribeSignatureFailure / SummarizeFingerprint** (private): Build the secret-free message for a refused
+package: the package and version (when known) and the source alias, then either "not validly signed, but the source
+requires signed packages" with the likely causes (unsigned, invalid signature, certificate not trusted on this
+computer) or — when a publisher is pinned — "not signed by the trusted publisher (certificate A3AF7AF1…7641)" with
+its causes. Only the first eight and last four characters of the fingerprint are shown
+(`AgentControl-NuGetSourceProvider-SignatureFailureReported`).
+
+**IsSignatureFailure** (private): Recognizes the library's signature errors — an `InvalidOperationException` whose
+message says the package failed signature verification or has no package signature, or whose inner exception is
+NuGet's signature exception — only for a source that requires signatures and never for an authentication failure.
+Such an error is wrapped as `PackageSourceFailureKind.SignatureRejected` (the original is kept only as a sanitized
+description), for folders and servers alike.
 
 **PrepareRoot / WriteConfigIfChanged**: Creates `_root` and writes its `nuget.config`, which
-contains only a `globalPackagesFolder` entry pointing at `{_root}/packages` — no sources, no
-credentials, no trust data. The file is replaced atomically and only when its content differs.
+contains a `globalPackagesFolder` entry pointing at `{_root}/packages` — no sources and no credentials — and, **only
+when the source requires signed packages**, a `trustedSigners` section that begins with `<clear />` and, when a
+publisher is pinned, continues with one `author` entry carrying the pinned certificate fingerprint with
+`hashAlgorithm="SHA256"` and `allowUntrustedRoot="false"`. The file is replaced atomically and only when its
+content differs, so a changed pin is written into the same root and applies to packages already cached. Why
+`<clear />`: the NuGet client merges the trusted signers of every configuration it discovers (the user's, the
+machine's and any in a parent folder of the root); without the clear, a signer configured elsewhere would widen
+what the source accepts (with a pin) or a list naming only other signers would narrow it (without one). With the
+clear, the source's own description is the only authority
+(`AgentControl-NuGetSourceProvider-SignerTrustIsolated`, `AgentControl-NuGetSourceProvider-SignerPin`). A source
+that does not require signatures gets neither the section nor the signature requirement.
 
 **CreateOptions**: Builds the per-call library options: the source list is exactly the one
 location, `Interactive` false (a credential plug-in may sign in silently but never opens its own
-window), the redacting logger, and — for a server — the credential callback and `AuthenticationTimeout`.
+window), the redacting logger, `RequireSignedPackages` from the source's description, and — for a server — the
+credential callback and `AuthenticationTimeout`.
 The library registers its credential dispatcher once for the process and applies these options to the one call
 only, so one source's callback and timeout never affect another operation.
 
-**RunAsync** (private): Runs one library call. A folder calls the library directly. A server call is made up
+**RunAsync** (private): Runs one library call. A folder calls the library directly (only mapping a signature
+failure to words). A server call is made up
 to **twice**, which is what gives the credential order (below): attempt 1 is _silent_ — a
-`PackageCredentialCallback` over the session store without a prompt — and only if the server then refuses with
+`PackageCredentialCallback` over the session store and the user's own credential store, without a prompt — and only
+if the server then refuses with
 HTTP 401/403 and a prompt is available does attempt 2 run with a callback that may ask the user, once
 (`PromptAndRetryAsync`). A credential the user typed is committed to the session store only after attempt 2
-succeeded; a credential the server rejected (from the store in attempt 1, or typed in attempt 2) is forgotten.
-A caller's cancellation is never turned into a failure.
+succeeded - and handed to the user's credential store at that moment when the user ticked "Remember on this
+computer"; a credential the server rejected (from the stores in attempt 1, or typed in attempt 2) is forgotten and,
+when it came from the user's credential store, removed from there. The removal is not abandoned just because the
+caller cancelled (it has its own time limit). A caller's cancellation is never turned into a failure.
 
 #### Credential Order
 
@@ -114,9 +174,13 @@ For a server source the credentials come from, in this order:
    NuGet reads is whatever its normal discovery finds starting from the AgentControl-owned root - the
    user-level NuGet configuration and any `nuget.config` in a parent folder of the root - never the
    repo's.
-2. **A credential the user already typed this session**, supplied by the silent callback of attempt 1.
+2. **A credential the user already typed this session, or saved earlier with their own Git credential helper**,
+   supplied by the silent callback of attempt 1. The helper is asked at most once per server per session, without
+   any dialog, and also when the operation may not show a dialog (a background check), which is what makes a saved
+   sign-in useful (`AgentControl-NuGetSourceProvider-SavedSignIn`).
 3. **The sign-in dialog**, supplied by attempt 2 only — at most once per operation — so a plug-in that can
-   sign in by itself never causes a dialog.
+   sign in by itself never causes a dialog. The dialog offers "Remember on this computer" only when a credential
+   helper applies to the server.
 
 A credential is only ever sent to a server when that server challenges (HTTP 401); AgentControl never sends
 one preemptively.
@@ -133,8 +197,8 @@ one preemptively.
   never persists a credential; one test observes that the process-wide service is unchanged after
   listing and acquiring, and another inspects the product assembly's type references to guard
   the design constraint (`AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration`).
-  `RequireSignedPackages` and `SignerFingerprint` on the definition are persisted but not yet
-  enforced; they belong to the package-signing work.
+  Signature enforcement likewise relies only on the per-call options and the generated per-source
+  configuration (see _PrepareRoot_), never on process-wide or machine-wide NuGet settings.
 - Callback scoping: the callback answers only requests for the server's own origin and declines every
   other host without asking the user (`AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin`).
   **Limit of that guarantee:** AgentControl itself only ever supplies a credential for the configured
@@ -165,6 +229,10 @@ cancellation. Failures of a server are reported as `PackageSourceAccessException
 - `AuthenticationFailed` — the server answered 401/403 and no credential was available (a background
   operation, or no prompt), or the credential supplied was rejected (the rejected credential is forgotten);
 - `SignInCanceled` — the user cancelled the sign-in dialog;
+- `SignatureRejected` — a package was refused for its signature (unsigned, invalid, or not signed by the pinned
+  publisher; the message names the package and the source and never a secret), or the source requires signatures on
+  a platform that cannot verify them. This is a security refusal, reported for folder and server sources alike and
+  never as an availability problem; nothing is installed for the package;
 - `TimedOut` — the sign-in took longer than `AuthenticationTimeout` and the library stopped it (distinguished
   from the caller's own cancellation, which is propagated unchanged);
 - `Unreachable` — the server could not be reached or the address did not answer as a NuGet feed (the
@@ -182,10 +250,12 @@ non-index resource after a credential was supplied makes the NuGet client retry 
 #### Dependencies
 
 - **NuGetCaching** (OTS) — `NuGetCache.ListVersionsAsync`/`EnsureCachedAsync`, `NuGetCacheOptions`
-  (including the per-call credential callback and authentication timeout), `NuGetCredential` and
-  `NuGetAuthenticationException`.
+  (including the per-call credential callback, authentication timeout and signature requirement),
+  `NuGetCredential` and `NuGetAuthenticationException`.
 - **PackageCredentials** subsystem — `FeedOrigin`, `SessionCredentialStore` and `PackageCredentialContext`,
-  `PackageCredentialCallback`, `ICredentialPrompt`, and `SecretRedactingLogger`.
+  `PackageCredentialCallback`, `ICredentialPrompt`, `IRememberedCredentialStore` (through the context) and
+  `SecretRedactingLogger`.
+- **SignatureVerificationSupport** — whether the platform can verify signatures (fail-closed decision).
 - **DirectoryPackageContentReader** (`RepoSync` subsystem) — the reader it returns.
 - **PackageVersion**, **PackageSourceDefinition**, **DiscoveredPackage**, **PackageSourceAccessException** —
   parsing, configuration, results and failure causes.

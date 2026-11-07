@@ -58,7 +58,7 @@ internal sealed partial class CredentialPromptWindow : Window
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         DataContext = viewModel;
-        viewModel.Completed += (_, credential) => Close(credential);
+        viewModel.Completed += (_, answer) => Close(answer);
 
         // However the window closes, an unanswered question counts as "cancelled"
         Closed += (_, _) => viewModel.Cancel();

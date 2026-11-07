@@ -23,7 +23,6 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using DemaConsulting.AgentControl.PackageCredentials;
-using DemaConsulting.NuGet.Caching;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
 
@@ -73,7 +72,7 @@ internal sealed class AvaloniaCredentialPrompt : ICredentialPrompt
     }
 
     /// <inheritdoc />
-    public async Task<NuGetCredential?> PromptAsync(CredentialPromptRequest request, CancellationToken cancellationToken)
+    public async Task<CredentialPromptAnswer?> PromptAsync(CredentialPromptRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -104,17 +103,18 @@ internal sealed class AvaloniaCredentialPrompt : ICredentialPrompt
     /// </summary>
     /// <param name="request">Which feed and source the credential is for.</param>
     /// <param name="cancellationToken">Closes the dialog when cancelled.</param>
-    /// <returns>The credential the user entered, or <see langword="null"/> when cancelled.</returns>
+    /// <returns>The credential the user entered and whether to remember it, or
+    ///     <see langword="null"/> when cancelled.</returns>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     was cancelled before the user answered.</exception>
-    private async Task<NuGetCredential?> ShowAsync(CredentialPromptRequest request, CancellationToken cancellationToken)
+    private async Task<CredentialPromptAnswer?> ShowAsync(CredentialPromptRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         var viewModel = new CredentialPromptViewModel(request);
         var window = new CredentialPromptWindow(viewModel);
-        var answer = new TaskCompletionSource<NuGetCredential?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        viewModel.Completed += (_, credential) => answer.TrySetResult(credential);
+        var answer = new TaskCompletionSource<CredentialPromptAnswer?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.Completed += (_, given) => answer.TrySetResult(given);
 
         // A cancelled operation withdraws the question: cancelling the view model closes the window
         using var registration = cancellationToken.Register(() => Dispatcher.UIThread.Post(viewModel.Cancel));
@@ -129,8 +129,8 @@ internal sealed class AvaloniaCredentialPrompt : ICredentialPrompt
             window.Show();
         }
 
-        var credential = await answer.Task;
+        var given = await answer.Task;
         cancellationToken.ThrowIfCancellationRequested();
-        return credential;
+        return given;
     }
 }

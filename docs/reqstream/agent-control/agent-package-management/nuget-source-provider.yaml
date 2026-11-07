@@ -130,7 +130,8 @@ sections:
           this order what NuGet itself knows for that address (a source in the user's NuGet
           configuration with the same address and its stored credentials, and NuGet credential
           provider plug-ins running without interaction), the credential the user already entered
-          during the session, and only then ask the user - at most once per operation, and only
+          during the session or saved earlier with their own Git credential helper, and only then
+          ask the user - at most once per operation, and only
           after the server has refused the earlier choices - and shall remember a credential the
           user entered only after the operation succeeded.
         justification: |
@@ -198,3 +199,122 @@ sections:
           Content must only ever come from the source whose alias the pin names.
         tests:
           - NuGetSourceProvider_Acquire_PackageFromOtherSource_ThrowsArgumentException
+
+      - id: AgentControl-NuGetSourceProvider-SavedSignIn
+        title: >-
+          The NuGetSourceProvider class shall, for a server that asks for credentials, use a
+          sign-in the user saved with their own Git credential helper without asking - also when
+          no dialog may be shown, as for a background check - looking for it once per server per
+          session, shall remove a saved sign-in the server rejects from the helper and then ask
+          the user once, shall hand a sign-in to the helper only when the user chose to remember
+          it and the operation succeeded, and shall never save a sign-in the server rejected or
+          the user did not choose to remember.
+        justification: |
+          A saved sign-in is only useful if it is used without a dialog, including for work the
+          user did not start; a saved sign-in that stopped working must not be offered again and
+          again; and what the user chose not to keep, or what was never shown to work, must not be
+          kept.
+        tests:
+          - NuGetSourceProvider_ListVersions_SavedSignInExists_UsedWithoutAsking
+          - NuGetSourceProvider_ListVersions_NoPromptButSavedSignIn_BackgroundCheckSucceeds
+          - NuGetSourceProvider_ListVersions_SavedSignInRejected_RemovedFromTheUsersStoreAndUserAskedOnce
+          - NuGetSourceProvider_ListVersions_RememberTicked_SavedByTheUsersStoreAfterSuccess
+          - NuGetSourceProvider_ListVersions_WrongPasswordOrRememberNotTicked_NothingIsSaved
+
+      - id: AgentControl-NuGetSourceProvider-RequireSigned
+        title: >-
+          The NuGetSourceProvider class shall, for a source that requires signed packages, refuse
+          to supply a package that is unsigned, validly signed by nobody trusted or invalidly
+          signed - leaving nothing installed for it - for a NuGet package folder and for a NuGet
+          package server alike, checking the package whether it is downloaded now or already held
+          in the source's private cache, and shall accept an unsigned package from a source that
+          does not require signatures.
+        justification: |
+          The requirement is a promise about every package the source supplies; if a package
+          already in the private cache escaped the check, turning the requirement on later (or
+          changing the pin) would leave unchecked packages in use, and a folder source is as open
+          to tampering as a server.
+        tests:
+          - NuGetSourceProvider_Acquire_RequireSignedAndPackageUnsigned_IsRejectedAndNothingIsInstalled
+          - NuGetSourceProvider_Acquire_SignaturesNotRequired_UnsignedPackageIsAccepted
+          - NuGetSourceProvider_Acquire_RequirementEnabledAfterPackageWasCached_RejectsTheCachedPackage
+          - NuGetSourceProvider_Acquire_SignedPackageAndNoPinnedSigner_SignatureIsAccepted
+          - NuGetSourceProvider_Acquire_ServerRequiresSignaturesAndPackageUnsigned_IsRejectedAsASignatureFailure
+
+      - id: AgentControl-NuGetSourceProvider-SignerPin
+        title: >-
+          The NuGetSourceProvider class shall, for a source that pins a publisher's certificate
+          fingerprint, accept only a package whose author signature was made with exactly that
+          certificate - refusing a package signed by another publisher and a package whose
+          repository countersignature, not its author signature, matches the pin - and shall apply
+          a changed pin to packages already held in the source's private cache.
+        justification: |
+          Without a pin any validly signed package from an unrelated publisher is accepted, which
+          does not answer the question an organization cares about - who published this; the pin
+          names the publisher, and only the author's signature says who that is.
+        tests:
+          - NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted
+          - NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled
+          - NuGetSourceProvider_Acquire_RepositoryCertificatePinned_IsNotTheAuthorAndIsRejected
+          - NuGetSourceProvider_Acquire_PinnedSignerChangedAfterPackageWasCached_RejectsTheCachedPackage
+
+      - id: AgentControl-NuGetSourceProvider-SignerTrustIsolated
+        title: >-
+          The NuGetSourceProvider class shall decide which signers a source trusts from the
+          source's own description alone - the pinned publisher when there is one and otherwise
+          any validly signed package - so that trusted signers configured elsewhere on the machine
+          or for the user can neither add a publisher to, nor remove the pinned publisher from,
+          what the source accepts, and shall write no trust configuration for a source that does
+          not require signatures.
+        justification: |
+          A trusted-signers list in the user's or machine's NuGet configuration is for the user's
+          own projects; if it were honored here, anyone able to edit it could widen the set of
+          publishers an agent package may come from, and a list that happened to exclude the
+          pinned publisher would silently break the source.
+        tests:
+          - NuGetSourceProvider_PinnedSigner_GeneratesTrustedSignersWithOnlyThatAuthor
+          - NuGetSourceProvider_RequireSignedWithoutPin_ClearsInheritedSignersAndNoRequirementWritesNone
+          - NuGetSourceProvider_PinnedSignerChanged_RewritesTheConfigurationInTheSameRoot
+          - NuGetSourceProvider_Acquire_UsersConfigurationTrustsTheAuthorButOtherSignerPinned_IsStillRejected
+          - NuGetSourceProvider_Acquire_UsersConfigurationTrustsOnlyAnotherSignerAndNoneIsPinned_SignatureIsAccepted
+
+      - id: AgentControl-NuGetSourceProvider-SignatureFailureReported
+        title: >-
+          The NuGetSourceProvider class shall report a package refused for its signature as a
+          signature failure, distinct from an unreachable or unauthorized source, with a message
+          that names the package and the source, says whether the source pins a publisher (naming
+          the start and end of its fingerprint), explains the likely causes, and contains no
+          secret.
+        justification: |
+          The user must be able to tell a security refusal from a network problem and know what to
+          check - whether the package is unsigned, signed by someone else or damaged - without the
+          message revealing a credential or the full pinned certificate.
+        tests:
+          - NuGetSourceProvider_Acquire_RequireSignedAndPackageUnsigned_IsRejectedAndNothingIsInstalled
+          - NuGetSourceProvider_Acquire_PinnedSignerAndPackageUnsigned_MessageNamesTheTrustedPublisher
+          - NuGetSourceProvider_Acquire_ServerRequiresSignaturesAndPackageUnsigned_IsRejectedAsASignatureFailure
+
+      - id: AgentControl-NuGetSourceProvider-FailClosedWithoutVerification
+        title: >-
+          The NuGetSourceProvider class shall refuse to list or supply any package from a source
+          that requires signed packages when the platform cannot verify signatures, reporting a
+          signature failure that explains why, and shall work as usual on such a platform for a
+          source that does not require signatures.
+        justification: |
+          Skipping verification would silently install packages the user required to be checked;
+          refusing is safe and tells the user what to change, while a source with no requirement
+          is unaffected.
+        tests:
+          - NuGetSourceProvider_RequireSignedOnUnsupportedPlatform_FailsClosedForListAndAcquire
+          - NuGetSourceProvider_SignaturesNotRequiredOnUnsupportedPlatform_WorksAsUsual
+
+      - id: AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused
+        title: >-
+          The NuGetSourceProvider class shall refuse to be created for a source that requires
+          signed packages and carries a trusted-signer fingerprint that cannot be read as a SHA-256
+          fingerprint, rather than ignore the fingerprint.
+        justification: |
+          Ignoring a fingerprint that cannot be read would silently widen the trust from one named
+          publisher to every validly signed package, defeating the pin the user set.
+        tests:
+          - NuGetSourceProvider_Constructor_InvalidFingerprint_RefusesWhenSignaturesAreRequired

@@ -81,7 +81,12 @@ directly.
 Calls `SettingsStore.Load(Options?.ConfigDirectory)` so the launcher window opens with the
 user's recent repos and preferences already populated, constructs a `MainWindowViewModel`
 from the loaded settings and `Options`, and assigns the new `MainWindow` as the desktop
-lifetime's main window.
+lifetime's main window. It also creates the process-wide credential facilities handed to the
+`MainWindowViewModel`: one `SessionCredentialStore` (cleared when the desktop lifetime exits), the sign-in dialog
+(`AvaloniaCredentialPrompt`) and a `GitCredentialClient` that reaches the user's Git credential helper through the
+git executable resolved on every call in the same order as every other git call (the per-user setting, else the
+startup override, else `git`). This is the only place `GitIntegration` and `PackageCredentials` meet
+(`AgentControl-System-CredentialSafety`).
 
 ### Error Handling
 
@@ -108,6 +113,9 @@ handler.
 - **MainWindowViewModel**, **MainWindow** (`LauncherUI` subsystem) — `App` constructs the
   view-model from loaded settings and options, and assigns the window as the desktop
   lifetime's main window.
+- **SessionCredentialStore**, **PackageCredentialContext** (`PackageCredentials` subsystem),
+  **AvaloniaCredentialPrompt** (`LauncherUI`), **GitCredentialClient** (`GitIntegration`) — `App` creates them and
+  hands the context to the view-model; the store is cleared at exit.
 - **Serilog** (OTS) — `Program.Main`'s `finally` block calls `Log.CloseAndFlush()` to flush
   the diagnostic log pipeline configured by `LoggingSetup`. See `docs/design/ots/serilog.md`.
 - **Avalonia** (OTS) — `BuildAvaloniaApp` configures the `AppBuilder`, and `App` derives from

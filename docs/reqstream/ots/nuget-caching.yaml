@@ -60,3 +60,39 @@ sections:
               - NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt
               - NuGetSourceProvider_ListVersions_SignInTakesTooLong_ThrowsTimedOut
               - NuGetSourceProvider_ListVersions_NuGetConfigHasCredentialsForTheFeed_SignsInWithoutPrompting
+
+          - id: AgentControl-OTS-NuGetCaching-SignatureVerification
+            title: >-
+              DemaConsulting.NuGet.Caching shall, when asked to require signed packages, refuse a
+              package that is unsigned or whose signature is invalid or untrusted - both when it
+              downloads the package and when the package is already in the cache - shall decide
+              which signers are trusted from the trusted-signers list of the NuGet configuration
+              found from the supplied starting folder, a list that begins with a clear entry
+              applying alone, and shall report the refusal as an error that identifies a signature
+              failure.
+            justification: |
+              AgentControl's per-source signature requirement and publisher pin (the
+              NuGetSourceProvider unit) rely on the library for the verification itself and on its
+              reading of the trusted-signers list from the generated per-source configuration.
+              There is no vendor evidence packaged with the library and no separate OTS test
+              project in this repository, so the evidence is the NuGetSourceProvider tests: those
+              with a real signed package (downloaded once per run from nuget.org, its hash
+              verified) show a valid signature accepted, an author pin honored and a different pin
+              refused, with the user's own NuGet trusted-signers settings unable to widen or
+              narrow the result; those with an unsigned package show the refusal, including of a
+              package already cached. The signed-package tests are skipped only where nuget.org
+              cannot be reached or the machine lacks the trust roots the package needs - the same
+              precedent the other runtime OTS items follow, cited honestly as indirect rather than
+              as dedicated library tests.
+            tags: [ots]
+            tests:
+              # Indirect evidence only, via the NuGetSourceProvider signature tests - see
+              # justification above.
+              - NuGetSourceProvider_Acquire_RequireSignedAndPackageUnsigned_IsRejectedAndNothingIsInstalled
+              - NuGetSourceProvider_Acquire_RequirementEnabledAfterPackageWasCached_RejectsTheCachedPackage
+              - NuGetSourceProvider_Acquire_SignedPackageAndNoPinnedSigner_SignatureIsAccepted
+              - NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted
+              - NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled
+              - NuGetSourceProvider_Acquire_UsersConfigurationTrustsTheAuthorButOtherSignerPinned_IsStillRejected
+              - NuGetSourceProvider_Acquire_UsersConfigurationTrustsOnlyAnotherSignerAndNoneIsPinned_SignatureIsAccepted
+              - NuGetSourceProvider_Acquire_PinnedSignerChangedAfterPackageWasCached_RejectsTheCachedPackage

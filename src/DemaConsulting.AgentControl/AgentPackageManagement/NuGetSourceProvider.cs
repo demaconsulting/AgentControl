@@ -66,19 +66,39 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     <c>nuget.config</c> whose address equals this source's address (compared ignoring case and
 ///     a trailing slash) contributes its <c>packageSourceCredentials</c> up front, and installed
 ///     NuGet credential-provider plug-ins (for example Azure Artifacts) run non-interactively when
-///     the server challenges. Second, a credential the user already typed this session. Third,
+///     the server challenges. Second, a credential the user already typed this session, or one
+///     the user saved earlier with their own Git credential helper (looked up once per feed per
+///     session, without any dialog). Third,
 ///     when a prompt is available, a dialog asks the user, at most once per operation. To keep
-///     that order the first attempt of an operation is silent (session credential only); only if
+///     that order the first attempt of an operation is silent (no dialog); only if
 ///     the server then refuses does a second attempt ask the user, so a plug-in that can sign in
 ///     by itself never causes a dialog. A credential the user typed is remembered for the session
-///     only after the operation succeeded, and forgotten when a server rejects it. Credentials
+///     only after the operation succeeded, and forgotten when a server rejects it. A credential the
+///     user asked to remember is handed to their own Git credential helper at that moment (and a
+///     saved one the server rejects is removed from the helper), so AgentControl itself never
+///     stores a secret (see <see cref="IRememberedCredentialStore"/>). Credentials
 ///     are offered only to the feed's own origin (see <see cref="PackageCredentialCallback"/>).
 ///     </para>
 ///     <para>
+///     <b>Signatures.</b> When the source requires signed packages
+///     (<see cref="PackageSourceDefinition.RequireSignedPackages"/>) the library is told to
+///     require a valid signature, on a fresh download and again whenever the package is already in
+///     the private cache. Without a pinned signer any validly signed package that chains to a
+///     trusted root is accepted; with one
+///     (<see cref="PackageSourceDefinition.SignerFingerprint"/>) the generated per-source
+///     <c>nuget.config</c> holds a <c>trustedSigners</c> allow-list with exactly that author
+///     certificate, so only packages signed by that publisher are accepted. The list starts with
+///     <c>&lt;clear /&gt;</c>, so trusted signers in the user's own NuGet configuration can neither
+///     widen nor narrow what the source accepts. A signature failure is reported as
+///     <see cref="PackageSourceFailureKind.SignatureRejected"/> with a secret-free message, and a
+///     source that requires signatures on a platform where verification is not supported
+///     (<see cref="SignatureVerificationSupport"/>) refuses to list or acquire packages: it fails
+///     closed instead of silently skipping verification. Zip packages carry no signatures and are
+///     not affected.
+///     </para>
+///     <para>
 ///     Failures that the user can act on are reported as
-///     <see cref="PackageSourceAccessException"/> with a secret-free message. The
-///     <see cref="PackageSourceDefinition.RequireSignedPackages"/> and
-///     <see cref="PackageSourceDefinition.SignerFingerprint"/> settings are not enforced yet.
+///     <see cref="PackageSourceAccessException"/> with a secret-free message.
 ///     Thread-safe: shared state is limited to a one-time, locked preparation of the per-source
 ///     root.
 ///     </para>
@@ -103,6 +123,11 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     ///     Name of the per-source sub-folder used as NuGet's global packages folder.
     /// </summary>
     private const string PackagesFolderName = "packages";
+
+    /// <summary>
+    ///     The name of the <c>trustedSigners</c> entry generated for a pinned publisher.
+    /// </summary>
+    private const string PinnedSignerName = "AgentControl pinned signer";
 
     /// <summary>
     ///     Number of hexadecimal characters of the location hash used to disambiguate per-source
@@ -149,6 +174,23 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     private readonly string _root;
 
     /// <summary>
+    ///     Whether packages from this source must be validly signed.
+    /// </summary>
+    private readonly bool _requireSigned;
+
+    /// <summary>
+    ///     The normalized SHA-256 fingerprint of the trusted publisher's certificate, or
+    ///     <see langword="null"/> when any validly signed package is acceptable.
+    /// </summary>
+    private readonly string? _signerFingerprint;
+
+    /// <summary>
+    ///     Whether the platform can verify signatures; a source that requires them refuses to work
+    ///     when it cannot.
+    /// </summary>
+    private readonly bool _signaturesSupported;
+
+    /// <summary>
     ///     Serializes the one-time preparation of <see cref="_root"/>.
     /// </summary>
     private readonly object _prepareLock = new();
@@ -173,6 +215,9 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     ///     application logger. Secrets are removed from everything it receives.</param>
     /// <param name="authenticationTimeout">The longest a credential exchange may take, or
     ///     <see langword="null"/> for <see cref="DefaultAuthenticationTimeout"/>.</param>
+    /// <param name="signatureVerificationSupported">Whether the platform can verify package
+    ///     signatures, or <see langword="null"/> to ask <see cref="SignatureVerificationSupport"/>.
+    ///     Supplied so tests can exercise the fail-closed behavior of a platform that cannot.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="definition"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when the definition is not a NuGet source, has
@@ -180,14 +225,16 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     ///     path.</exception>
     /// <exception cref="InvalidOperationException">Thrown when a server location is not an
     ///     acceptable feed address (see
-    ///     <see cref="PackageSourceDefinition.GetServerLocationProblem"/>), or a folder location
-    ///     is not an absolute path.</exception>
+    ///     <see cref="PackageSourceDefinition.GetServerLocationProblem"/>), a folder location
+    ///     is not an absolute path, or the signer fingerprint is not a valid SHA-256 fingerprint
+    ///     (see <see cref="PackageSourceDefinition.GetSignaturePolicyProblem"/>).</exception>
     public NuGetSourceProvider(
         PackageSourceDefinition definition,
         string? rootBase = null,
         PackageCredentialContext? credentials = null,
         ILogger? logger = null,
-        TimeSpan? authenticationTimeout = null)
+        TimeSpan? authenticationTimeout = null,
+        bool? signatureVerificationSupported = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentException.ThrowIfNullOrWhiteSpace(definition.Alias);
@@ -216,6 +263,21 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
             throw new InvalidOperationException(
                 $"The location of NuGet source '{definition.Alias}' must be an absolute folder path.");
         }
+
+        // A signer fingerprint that cannot be read stops the source rather than being ignored:
+        // ignoring it would silently widen trust from one publisher to any signer
+        var signatureProblem = definition.GetSignaturePolicyProblem();
+        if (signatureProblem is not null)
+        {
+            throw new InvalidOperationException(signatureProblem);
+        }
+
+        _requireSigned = definition.RequireSignedPackages;
+        _signerFingerprint = _requireSigned &&
+                             PackageSourceDefinition.TryNormalizeFingerprint(definition.SignerFingerprint, out var fingerprint)
+            ? fingerprint
+            : null;
+        _signaturesSupported = signatureVerificationSupported ?? SignatureVerificationSupport.IsSupported;
 
         Alias = definition.Alias;
         _location = location;
@@ -278,6 +340,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
         EnsureLocationExists();
+        EnsureSignatureVerificationPossible();
         PrepareRoot();
 
         // Ask the library for every listed version (prereleases included, as pins may be
@@ -315,6 +378,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         }
 
         EnsureLocationExists();
+        EnsureSignatureVerificationPossible();
         PrepareRoot();
 
         // The library unpacks the package into the global packages folder configured in the
@@ -324,7 +388,8 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
                 package.PackageName, package.Version.Original, _root, options, cancellationToken),
             $"Package '{package.PackageName}' {package.Version.Original} could not be downloaded from source " +
             $"'{Alias}' ({_feed}). It may no longer exist there, or the server may be unreachable.",
-            cancellationToken);
+            cancellationToken,
+            DescribeSignatureFailure(package));
 
         // Fail closed if the package did not land inside this source's private cache (the
         // NUGET_PACKAGES environment variable overrides the generated configuration): a shared
@@ -382,32 +447,49 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     /// <param name="cancellationToken">The caller's token; its cancellation is never turned into a
     ///     failure.</param>
     /// <returns>The library call's result.</returns>
+    /// <param name="signatureFailureMessage">Describes a signature failure of the package being
+    ///     acquired, or <see langword="null"/> when no signature is checked by this call.</param>
     /// <exception cref="PackageSourceAccessException">Thrown with a user-readable, secret-free
     ///     message when the server refuses access, the user declines to sign in, the sign-in
-    ///     times out, or the server cannot be used.</exception>
+    ///     times out, a signature requirement is not met, or the server cannot be used.</exception>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is canceled.</exception>
     private async Task<T> RunAsync<T>(
-        Func<NuGetCacheOptions, Task<T>> operation, string failureMessage, CancellationToken cancellationToken)
+        Func<NuGetCacheOptions, Task<T>> operation,
+        string failureMessage,
+        CancellationToken cancellationToken,
+        string? signatureFailureMessage = null)
     {
-        // A folder has no credentials and no server to be unreachable; keep its behavior as is
+        // A folder has no credentials and no server to be unreachable; keep its behavior as is,
+        // apart from reporting a signature failure in words
         if (_feed is null)
         {
-            return await operation(CreateOptions(null));
+            try
+            {
+                return await operation(CreateOptions(null));
+            }
+            catch (InvalidOperationException ex) when (IsSignatureFailure(ex))
+            {
+                _nugetLogger.LogWarning(ex, "A package from source {Alias} failed signature verification.", Alias);
+                throw new PackageSourceAccessException(
+                    PackageSourceFailureKind.SignatureRejected, signatureFailureMessage ?? DescribeSignatureFailure(null), ex);
+            }
         }
 
         var store = _credentials?.Store ?? new SessionCredentialStore();
         var prompt = _credentials?.Prompt;
 
-        // Attempt 1 - silent: the session credential, then whatever NuGet itself supplies
+        // Attempt 1 - silent: the session credential, then a saved sign-in, then whatever NuGet
+        // itself supplies
         var silent = CreateCallback(store, prompt: null, previousCredentialRejected: false);
         try
         {
-            return await AttemptAsync(operation, silent, failureMessage, cancellationToken);
+            return await AttemptAsync(operation, silent, failureMessage, signatureFailureMessage, cancellationToken);
         }
         catch (NuGetAuthenticationException ex)
         {
-            // A remembered credential that the server refused must never be reused
+            // A remembered credential that the server refused must never be reused (and one
+            // saved on this computer is removed from there too)
             var rejected = silent.SuppliedCredential is not null;
             if (prompt is null || cancellationToken.IsCancellationRequested)
             {
@@ -416,7 +498,9 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
                 var failure = CreateAuthenticationFailure(rejected, userDeclined: false, ex);
                 if (rejected)
                 {
-                    silent.Reject();
+                    // Removing a rejected credential is not abandoned just because the caller
+                    // cancelled; the credential helper call has its own time limit
+                    await silent.RejectAsync(CancellationToken.None);
                 }
 
                 throw failure;
@@ -424,11 +508,12 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
 
             if (rejected)
             {
-                silent.Reject();
+                await silent.RejectAsync(CancellationToken.None);
             }
 
             // Attempt 2 - the server needs something the user has to supply: ask, once
-            return await PromptAndRetryAsync(operation, store, prompt, rejected, failureMessage, cancellationToken);
+            return await PromptAndRetryAsync(
+                operation, store, prompt, rejected, failureMessage, signatureFailureMessage, cancellationToken);
         }
         finally
         {
@@ -447,6 +532,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     /// <param name="previousCredentialRejected">Whether the first attempt had used a credential
     ///     that the server rejected.</param>
     /// <param name="failureMessage">The message for a non-authentication failure.</param>
+    /// <param name="signatureFailureMessage">The message for a signature failure.</param>
     /// <param name="cancellationToken">The caller's token.</param>
     /// <returns>The library call's result.</returns>
     /// <exception cref="PackageSourceAccessException">Thrown when the user declines, the server
@@ -457,15 +543,17 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         ICredentialPrompt prompt,
         bool previousCredentialRejected,
         string failureMessage,
+        string? signatureFailureMessage,
         CancellationToken cancellationToken)
     {
         var prompting = CreateCallback(store, prompt, previousCredentialRejected);
         try
         {
-            var result = await AttemptAsync(operation, prompting, failureMessage, cancellationToken);
+            var result = await AttemptAsync(operation, prompting, failureMessage, signatureFailureMessage, cancellationToken);
 
-            // Only a credential that worked is kept for the session
-            prompting.Commit();
+            // Only a credential that worked is kept for the session (and, when the user asked,
+            // saved by their credential helper)
+            await prompting.CommitAsync(CancellationToken.None);
             return result;
         }
         catch (NuGetAuthenticationException ex)
@@ -474,7 +562,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
             // still registered, then forget the credential
             var failure = CreateAuthenticationFailure(
                 previousCredentialRejected || prompting.SuppliedCredential is not null, prompting.UserDeclined, ex);
-            prompting.Reject();
+            await prompting.RejectAsync(CancellationToken.None);
             throw failure;
         }
         finally
@@ -491,21 +579,31 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     /// <param name="operation">The library call.</param>
     /// <param name="callback">The credential callback for this attempt.</param>
     /// <param name="failureMessage">The message for a non-authentication failure.</param>
+    /// <param name="signatureFailureMessage">The message for a signature failure, or
+    ///     <see langword="null"/> when this call checks no signature.</param>
     /// <param name="cancellationToken">The caller's token.</param>
     /// <returns>The library call's result.</returns>
     /// <exception cref="NuGetAuthenticationException">Thrown, unchanged, when the server refused
     ///     access; the caller decides what to do next.</exception>
-    /// <exception cref="PackageSourceAccessException">Thrown when the sign-in timed out or the
-    ///     server could not be used.</exception>
+    /// <exception cref="PackageSourceAccessException">Thrown when the sign-in timed out, a
+    ///     signature requirement was not met, or the server could not be used.</exception>
     private async Task<T> AttemptAsync<T>(
         Func<NuGetCacheOptions, Task<T>> operation,
         PackageCredentialCallback callback,
         string failureMessage,
+        string? signatureFailureMessage,
         CancellationToken cancellationToken)
     {
         try
         {
             return await operation(CreateOptions(callback));
+        }
+        catch (InvalidOperationException ex) when (IsSignatureFailure(ex))
+        {
+            // A signature failure is a security decision, not an availability problem: say so
+            _nugetLogger.LogWarning(ex, "A package from source {FeedOrigin} failed signature verification.", _feed);
+            throw new PackageSourceAccessException(
+                PackageSourceFailureKind.SignatureRejected, signatureFailureMessage ?? DescribeSignatureFailure(null), ex);
         }
         catch (NuGetAuthenticationException)
         {
@@ -576,7 +674,74 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     /// <returns>The callback.</returns>
     private PackageCredentialCallback CreateCallback(
         SessionCredentialStore store, ICredentialPrompt? prompt, bool previousCredentialRejected) =>
-        new(_feed!, Alias, store, prompt, previousCredentialRejected, _nugetLogger);
+        new(_feed!, Alias, store, prompt, previousCredentialRejected, _nugetLogger, _credentials?.Remembered);
+
+    /// <summary>
+    ///     Determines whether an exception from the NuGet library is a signature failure: the
+    ///     package is unsigned, its signature is invalid, or its signer is not trusted.
+    /// </summary>
+    /// <remarks>
+    ///     The library reports these as <see cref="InvalidOperationException"/> whose message says
+    ///     the package failed signature verification or has no package signature (and whose inner
+    ///     exception, when there is one, is NuGet's signature exception). Only a source that
+    ///     requires signatures can see one.
+    /// </remarks>
+    /// <param name="exception">The exception the library threw.</param>
+    /// <returns><see langword="true"/> when the source requires signatures and the exception
+    ///     reports a signature failure.</returns>
+    private bool IsSignatureFailure(InvalidOperationException exception) =>
+        _requireSigned &&
+        exception is not (NuGetAuthenticationException or PackageSourceAccessException) &&
+        (exception.Message.Contains("signature verification", StringComparison.OrdinalIgnoreCase) ||
+         exception.Message.Contains("package signature", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(exception.InnerException?.GetType().Name, "SignatureException", StringComparison.Ordinal));
+
+    /// <summary>
+    ///     Describes, in words and without any secret, why a package was refused because of its
+    ///     signature.
+    /// </summary>
+    /// <param name="package">The package being acquired, or <see langword="null"/> when it is not
+    ///     known.</param>
+    /// <returns>A message naming the package and the source, and saying whether the source is
+    ///     pinned to a trusted publisher.</returns>
+    private string DescribeSignatureFailure(DiscoveredPackage? package)
+    {
+        var subject = package is null
+            ? $"A package from source '{Alias}'"
+            : $"Package '{package.PackageName}' {package.Version.Original} from source '{Alias}'";
+        return _signerFingerprint is null
+            ? $"{subject} is not validly signed, but the source requires signed packages. It may be unsigned, " +
+              "its signature may be invalid, or its certificate may not be trusted on this computer."
+            : $"{subject} is not signed by the trusted publisher (certificate {SummarizeFingerprint(_signerFingerprint)}). " +
+              "It may be unsigned, signed by someone else, or its signature may be invalid.";
+    }
+
+    /// <summary>
+    ///     Shortens a fingerprint for display: its first eight and last four characters.
+    /// </summary>
+    /// <param name="fingerprint">The 64-character fingerprint.</param>
+    /// <returns>The shortened form, for example <c>A3AF7AF1…7641</c>.</returns>
+    internal static string SummarizeFingerprint(string fingerprint) =>
+        fingerprint.Length > 12 ? $"{fingerprint[..8]}…{fingerprint[^4..]}" : fingerprint;
+
+    /// <summary>
+    ///     Refuses to work when the source requires signed packages but the platform cannot verify
+    ///     signatures: accepting packages unverified would silently defeat the requirement.
+    /// </summary>
+    /// <exception cref="PackageSourceAccessException">Thrown with kind
+    ///     <see cref="PackageSourceFailureKind.SignatureRejected"/> when the source requires
+    ///     signatures and verification is unsupported here.</exception>
+    private void EnsureSignatureVerificationPossible()
+    {
+        if (_requireSigned && !_signaturesSupported)
+        {
+            throw new PackageSourceAccessException(
+                PackageSourceFailureKind.SignatureRejected,
+                $"Source '{Alias}' requires signed packages, but {SignatureVerificationSupport.UnsupportedMessage.ToLowerInvariant()}, " +
+                "so no package can be used from it. Edit the source on a platform that supports it, or turn " +
+                "off \"Require signed packages\" for it if you accept that risk.");
+        }
+    }
 
     /// <summary>
     ///     Formats a duration for a message.
@@ -607,6 +772,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         Sources = [_location],
         Interactive = false,
         Logger = _nugetLogger,
+        RequireSignedPackages = _requireSigned,
         CredentialCallback = callback?.Callback,
         AuthenticationTimeout = callback is null ? null : _authenticationTimeout
     };
@@ -660,21 +826,46 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     ///     Writes the generated per-source NuGet configuration unless the file already holds the
     ///     same content, replacing it atomically so concurrent processes never see a partial file.
     /// </summary>
+    /// <remarks>
+    ///     The file redirects the global packages folder into the root and - only when the source
+    ///     requires signed packages - states which signers are trusted: a <c>trustedSigners</c>
+    ///     section that begins with <c>&lt;clear /&gt;</c> (so no signer configured elsewhere on
+    ///     the machine applies) followed, when a publisher is pinned, by an <c>author</c> entry
+    ///     for that publisher's certificate fingerprint. No sources, credentials or signature
+    ///     mode are written: the library applies the signature requirement itself.
+    /// </remarks>
     /// <param name="configPath">Path of the <c>nuget.config</c> to write.</param>
     private void WriteConfigIfChanged(string configPath)
     {
-        // Only the global packages folder is set: no sources, credentials or other trust data
         var packagesFolder = Path.GetFullPath(Path.Combine(_root, PackagesFolderName));
-        var document = new XDocument(
-            new XDeclaration("1.0", "utf-8", null),
+        var configuration = new XElement(
+            "configuration",
             new XElement(
-                "configuration",
+                "config",
                 new XElement(
-                    "config",
+                    "add",
+                    new XAttribute("key", "globalPackagesFolder"),
+                    new XAttribute("value", packagesFolder))));
+        if (_requireSigned)
+        {
+            var trustedSigners = new XElement("trustedSigners", new XElement("clear"));
+            if (_signerFingerprint is not null)
+            {
+                trustedSigners.Add(
                     new XElement(
-                        "add",
-                        new XAttribute("key", "globalPackagesFolder"),
-                        new XAttribute("value", packagesFolder)))));
+                        "author",
+                        new XAttribute("name", PinnedSignerName),
+                        new XElement(
+                            "certificate",
+                            new XAttribute("fingerprint", _signerFingerprint),
+                            new XAttribute("hashAlgorithm", "SHA256"),
+                            new XAttribute("allowUntrustedRoot", "false"))));
+            }
+
+            configuration.Add(trustedSigners);
+        }
+
+        var document = new XDocument(new XDeclaration("1.0", "utf-8", null), configuration);
         var content = document.Declaration + Environment.NewLine + document.Root;
 
         if (File.Exists(configPath) && File.ReadAllText(configPath) == content)

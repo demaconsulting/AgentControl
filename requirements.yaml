@@ -28,6 +28,7 @@ includes:
   - docs/reqstream/agent-control/agent-package-management/package-source-registry.yaml
   - docs/reqstream/agent-control/agent-package-management/zip-folder-source-provider.yaml
   - docs/reqstream/agent-control/agent-package-management/nuget-source-provider.yaml
+  - docs/reqstream/agent-control/agent-package-management/signature-verification-support.yaml
   - docs/reqstream/agent-control/agent-package-management/package-version.yaml
   - docs/reqstream/agent-control/agent-package-management/package-version-cache.yaml
   - docs/reqstream/agent-control/repo-sync.yaml
@@ -42,6 +43,7 @@ includes:
   - docs/reqstream/agent-control/agent-tool-launcher/agent-tool-launcher.yaml
   - docs/reqstream/agent-control/git-integration.yaml
   - docs/reqstream/agent-control/git-integration/git-client.yaml
+  - docs/reqstream/agent-control/git-integration/git-credential-client.yaml
   - docs/reqstream/agent-control/git-integration/committed-agent-files-cache.yaml
   - docs/reqstream/agent-control/settings.yaml
   - docs/reqstream/agent-control/settings/settings-store.yaml

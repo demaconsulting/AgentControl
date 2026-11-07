@@ -194,7 +194,7 @@ public sealed class PackageCredentialCallbackTests
         Assert.Equal(0, store.Count);
 
         // Act
-        callback.Commit();
+        await callback.CommitAsync(CancellationToken.None);
 
         // Assert
         Assert.True(store.TryGet(FeedOrigin.Create(FeedIndex), out var stored));
@@ -213,7 +213,7 @@ public sealed class PackageCredentialCallbackTests
         await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
 
         // Act
-        callback.Commit();
+        await callback.CommitAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal(0, store.Count);
@@ -233,7 +233,7 @@ public sealed class PackageCredentialCallbackTests
         await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
 
         // Act
-        callback.Reject();
+        await callback.RejectAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal(0, store.Count);
@@ -320,13 +320,13 @@ public sealed class PackageCredentialCallbackTests
         // Act / Assert: rejected
         var rejectCallback = await PromptAsync(store, rejected);
         Assert.DoesNotContain(rejected, SecretRedactor.Redact(rejected), StringComparison.Ordinal);
-        rejectCallback.Reject();
+        await rejectCallback.RejectAsync(CancellationToken.None);
         Assert.Equal(rejected, SecretRedactor.Redact(rejected));
         Assert.Equal(0, store.Count);
 
         // Act / Assert: committed - the store keeps tracking it until it is forgotten
         var commitCallback = await PromptAsync(store, committed);
-        commitCallback.Commit();
+        await commitCallback.CommitAsync(CancellationToken.None);
         Assert.DoesNotContain(committed, SecretRedactor.Redact(committed), StringComparison.Ordinal);
         Assert.Equal(1, store.Count);
         Assert.True(store.Forget(FeedOrigin.Create(FeedIndex)));
@@ -351,7 +351,7 @@ public sealed class PackageCredentialCallbackTests
         await operationB.GetCredentialAsync(FeedIndex, CancellationToken.None);
 
         // Act: B's server rejects the credential, so B forgets it and ends
-        operationB.Reject();
+        await operationB.RejectAsync(CancellationToken.None);
 
         // Assert: the store no longer holds it, but A is still running and still protected, so what
         // A logs or throws now is redacted
@@ -387,8 +387,349 @@ public sealed class PackageCredentialCallbackTests
 
         // Assert
         Assert.DoesNotContain(secret, SecretRedactor.Redact($"x {secret}"), StringComparison.Ordinal);
-        operation.Commit();
+        await operation.CommitAsync(CancellationToken.None);
         Assert.Equal($"x {secret}", SecretRedactor.Redact($"x {secret}"));
+    }
+
+    /// <summary>
+    ///     Test that a sign-in the user saved earlier is used without asking, the user's credential
+    ///     store is asked once, and the credential is remembered for the session as one that the
+    ///     store holds too.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_GetCredential_SavedCredentialExists_UsesItWithoutPrompting()
+    {
+        // Arrange
+        var origin = FeedOrigin.Create(FeedIndex);
+        var remembered = new FakeRememberedCredentialStore();
+        var saved = new NuGetCredential("svc", "pw-saved-" + Guid.NewGuid().ToString("N"));
+        remembered.Save(origin, saved);
+        var store = new SessionCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        var callback = Create(store, prompt, remembered: remembered);
+
+        // Act
+        var credential = await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(saved, credential);
+        Assert.Equal(0, prompt.AskCount);
+        Assert.True(callback.SuppliedCredentialWasSaved);
+        Assert.Equal(1, remembered.CountOf("fill"));
+        Assert.True(store.IsFromRememberedStore(origin));
+        callback.Release();
+    }
+
+    /// <summary>
+    ///     Test that a silent callback (the background upgrade check) also reads a saved sign-in,
+    ///     because looking one up needs no dialog.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_GetCredential_SilentCallbackAndSavedCredential_UsesIt()
+    {
+        // Arrange
+        var remembered = new FakeRememberedCredentialStore();
+        remembered.Save(FeedOrigin.Create(FeedIndex), new NuGetCredential("svc", "pw-silent-" + Guid.NewGuid().ToString("N")));
+        var callback = Create(new SessionCredentialStore(), prompt: null, remembered: remembered);
+
+        // Act
+        var credential = await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(credential);
+        Assert.False(callback.WasPrompted);
+        callback.Release();
+    }
+
+    /// <summary>
+    ///     Test that the user's credential store is asked once per feed for the whole session: a
+    ///     miss is not repeated by the next operation, which goes straight to the prompt.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_GetCredential_NothingSaved_LooksUpOncePerSessionThenPrompts()
+    {
+        // Arrange
+        var remembered = new FakeRememberedCredentialStore();
+        var store = new SessionCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential("typed", "typed-pw"));
+
+        // Act: two operations in a row, as two upgrade checks would be
+        var first = Create(store, prompt, remembered: remembered);
+        var second = Create(store, prompt, remembered: remembered);
+        await first.GetCredentialAsync(FeedIndex, CancellationToken.None);
+        await second.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Assert: one lookup only, and the user was asked each time because nothing was kept
+        Assert.Equal(1, remembered.CountOf("fill"));
+        Assert.Equal(2, prompt.AskCount);
+        first.Release();
+        second.Release();
+    }
+
+    /// <summary>
+    ///     Test that operations that start at the same moment share one lookup and all get its
+    ///     result (at application start-up several repo cards check the same server at once).
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_GetCredential_ConcurrentOperations_ShareOneLookup()
+    {
+        // Arrange
+        var remembered = new FakeRememberedCredentialStore { FillDelay = TimeSpan.FromMilliseconds(300) };
+        remembered.Save(FeedOrigin.Create(FeedIndex), new NuGetCredential("svc", "pw-shared-" + Guid.NewGuid().ToString("N")));
+        var store = new SessionCredentialStore();
+        var callbacks = Enumerable.Range(0, 5).Select(_ => Create(store, prompt: null, remembered: remembered)).ToList();
+
+        // Act
+        var credentials = await Task.WhenAll(callbacks.Select(callback => callback.GetCredentialAsync(FeedIndex, CancellationToken.None)));
+
+        // Assert
+        Assert.Equal(1, remembered.CountOf("fill"));
+        Assert.All(credentials, credential => Assert.NotNull(credential));
+        callbacks.ForEach(callback => callback.Release());
+    }
+
+    /// <summary>
+    ///     Test that a credential already known this session is used without consulting the user's
+    ///     credential store at all.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_GetCredential_SessionCredentialExists_DoesNotConsultTheUsersStore()
+    {
+        // Arrange
+        var remembered = new FakeRememberedCredentialStore();
+        var store = new SessionCredentialStore();
+        store.Set(FeedOrigin.Create(FeedIndex), new NuGetCredential("svc", "pw-session-first-test"));
+        var callback = Create(store, prompt: null, remembered: remembered);
+
+        // Act
+        await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Assert
+        Assert.Empty(remembered.Calls);
+        callback.Release();
+    }
+
+    /// <summary>
+    ///     Test that a credential store that throws is not a failure: the user is asked instead and
+    ///     the dialog does not offer to remember.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_GetCredential_UsersStoreThrows_FallsThroughToPromptWithoutRememberOption()
+    {
+        // Arrange
+        var remembered = new FakeRememberedCredentialStore { ThrowOnEveryCall = true };
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential("typed", "typed-pw-broken-store"), remember: true);
+        var callback = Create(new SessionCredentialStore(), prompt, remembered: remembered);
+
+        // Act
+        var credential = await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("typed-pw-broken-store", credential!.Secret);
+        Assert.False(Assert.Single(prompt.Requests).CanRemember);
+        Assert.False(callback.RememberRequested);
+        callback.Release();
+    }
+
+    /// <summary>
+    ///     Test that the prompt is told whether a sign-in can be remembered: yes when a credential
+    ///     helper is available, no when none is configured or there is no store at all.
+    /// </summary>
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task PackageCredentialCallback_GetCredential_Prompting_ReportsWhetherRememberingIsPossible(bool available, bool expected)
+    {
+        // Arrange
+        var remembered = new FakeRememberedCredentialStore { Available = available };
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(null);
+        var callback = Create(new SessionCredentialStore(), prompt, remembered: remembered);
+
+        // Act
+        await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expected, Assert.Single(prompt.Requests).CanRemember);
+    }
+
+    /// <summary>
+    ///     Test that without any user's credential store the prompt is told that remembering is
+    ///     not possible.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_GetCredential_NoUsersStore_PromptCannotRemember()
+    {
+        // Arrange
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(null);
+        var callback = Create(new SessionCredentialStore(), prompt);
+
+        // Act
+        await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Assert
+        Assert.False(Assert.Single(prompt.Requests).CanRemember);
+    }
+
+    /// <summary>
+    ///     Test that a credential the user asked to remember is handed to their credential store
+    ///     once the operation succeeded, and then counts as saved.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_Commit_RememberTicked_ApprovesInTheUsersStore()
+    {
+        // Arrange
+        var origin = FeedOrigin.Create(FeedIndex);
+        var remembered = new FakeRememberedCredentialStore();
+        var store = new SessionCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential("typed", "typed-pw-remember"), remember: true);
+        var callback = Create(store, prompt, remembered: remembered);
+        await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Assert before the commit: nothing is saved just because it was typed
+        Assert.Equal(0, remembered.CountOf("approve"));
+
+        // Act
+        await callback.CommitAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, remembered.CountOf("approve"));
+        Assert.Equal("typed-pw-remember", remembered.Peek(origin)!.Secret);
+        Assert.True(store.IsFromRememberedStore(origin));
+    }
+
+    /// <summary>
+    ///     Test that without the user's choice to remember, nothing is ever handed to their
+    ///     credential store.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_Commit_RememberNotTicked_NeverApproves()
+    {
+        // Arrange
+        var remembered = new FakeRememberedCredentialStore();
+        var store = new SessionCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential("typed", "typed-pw-forget-me"), remember: false);
+        var callback = Create(store, prompt, remembered: remembered);
+        await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Act
+        await callback.CommitAsync(CancellationToken.None);
+
+        // Assert: kept for the session only
+        Assert.Equal(0, remembered.CountOf("approve"));
+        Assert.True(store.TryGet(FeedOrigin.Create(FeedIndex), out _));
+        Assert.False(store.IsFromRememberedStore(FeedOrigin.Create(FeedIndex)));
+    }
+
+    /// <summary>
+    ///     Test that a credential store that refuses (or fails) to keep the credential does not fail
+    ///     the operation: the credential is still kept for the session, not marked as saved.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PackageCredentialCallback_Commit_UsersStoreRefusesOrFails_StillKeepsTheSessionCredential(bool throws)
+    {
+        // Arrange: a store that is available for the dialog but then fails to save
+        var remembered = new FakeRememberedCredentialStore { RefuseChanges = !throws };
+        var store = new SessionCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential("typed", "typed-pw-refused"), remember: true);
+        var callback = Create(store, prompt, remembered: remembered);
+        await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
+        remembered.ThrowOnEveryCall = throws;
+
+        // Act
+        await callback.CommitAsync(CancellationToken.None);
+
+        // Assert
+        var origin = FeedOrigin.Create(FeedIndex);
+        Assert.True(store.TryGet(origin, out _));
+        Assert.False(store.IsFromRememberedStore(origin));
+    }
+
+    /// <summary>
+    ///     Test that a saved credential the feed rejects is forgotten for the session and removed
+    ///     from the user's credential store, and that the next operation asks the user once.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_Reject_SavedCredential_IsRemovedFromTheUsersStoreAndTheNextOperationPrompts()
+    {
+        // Arrange
+        var origin = FeedOrigin.Create(FeedIndex);
+        var remembered = new FakeRememberedCredentialStore();
+        remembered.Save(origin, new NuGetCredential("svc", "pw-rejected-" + Guid.NewGuid().ToString("N")));
+        var store = new SessionCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential("typed", "typed-pw-after-reject"));
+        var silent = Create(store, prompt: null, remembered: remembered);
+        await silent.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Act: the feed rejects what the silent attempt offered
+        await silent.RejectAsync(CancellationToken.None);
+        var asking = Create(store, prompt, previousCredentialRejected: true, remembered: remembered);
+        var typed = await asking.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, remembered.CountOf("reject"));
+        Assert.Null(remembered.Peek(origin));
+        Assert.Equal(0, store.Count);
+        Assert.Equal("typed-pw-after-reject", typed!.Secret);
+        Assert.Equal(1, prompt.AskCount);
+        Assert.Equal(1, remembered.CountOf("fill"));
+        asking.Release();
+    }
+
+    /// <summary>
+    ///     Test that a credential that was only typed this session is not looked for in, or removed
+    ///     from, the user's credential store when the feed rejects it.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_Reject_SessionOnlyCredential_LeavesTheUsersStoreAlone()
+    {
+        // Arrange
+        var remembered = new FakeRememberedCredentialStore();
+        var store = new SessionCredentialStore();
+        store.Set(FeedOrigin.Create(FeedIndex), new NuGetCredential("svc", "pw-session-only-test"));
+        var callback = Create(store, prompt: null, remembered: remembered);
+        await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Act
+        await callback.RejectAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(0, store.Count);
+        Assert.Empty(remembered.Calls);
+    }
+
+    /// <summary>
+    ///     Test that rejecting a credential never forgets a newer credential that another operation
+    ///     stored for the same feed in the meantime (the late rejection concerns only the credential
+    ///     that operation offered).
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_Reject_CredentialReplacedMeanwhile_KeepsTheNewerCredential()
+    {
+        // Arrange: an operation uses credential A
+        var origin = FeedOrigin.Create(FeedIndex);
+        var store = new SessionCredentialStore();
+        store.Set(origin, new NuGetCredential("svc", "pw-old-A-" + Guid.NewGuid().ToString("N")));
+        var slow = Create(store, prompt: null);
+        await slow.GetCredentialAsync(FeedIndex, CancellationToken.None);
+
+        // Act: meanwhile another operation signed in again (credential B), then A's rejection arrives
+        var newer = new NuGetCredential("svc", "pw-new-B-" + Guid.NewGuid().ToString("N"));
+        store.Set(origin, newer);
+        await slow.RejectAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(store.TryGet(origin, out var current));
+        Assert.Equal(newer, current);
     }
 
     /// <summary>
@@ -413,8 +754,12 @@ public sealed class PackageCredentialCallbackTests
     /// <param name="store">The session store.</param>
     /// <param name="prompt">The prompt, or <see langword="null"/> for a silent callback.</param>
     /// <param name="previousCredentialRejected">Whether an earlier credential was rejected.</param>
+    /// <param name="remembered">The user's credential store, or <see langword="null"/> for none.</param>
     /// <returns>The callback.</returns>
     private static PackageCredentialCallback Create(
-        SessionCredentialStore store, ICredentialPrompt? prompt, bool previousCredentialRejected = false) =>
-        new(FeedOrigin.Create(FeedIndex), "Feed", store, prompt, previousCredentialRejected);
+        SessionCredentialStore store,
+        ICredentialPrompt? prompt,
+        bool previousCredentialRejected = false,
+        IRememberedCredentialStore? remembered = null) =>
+        new(FeedOrigin.Create(FeedIndex), "Feed", store, prompt, previousCredentialRejected, remembered: remembered);
 }

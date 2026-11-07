@@ -84,8 +84,8 @@ public class CredentialPromptViewModelTests
     {
         // Arrange
         var viewModel = Create();
-        var answers = new List<DemaConsulting.NuGet.Caching.NuGetCredential?>();
-        viewModel.Completed += (_, credential) => answers.Add(credential);
+        var answers = new List<CredentialPromptAnswer?>();
+        viewModel.Completed += (_, given) => answers.Add(given);
         viewModel.UserName = "  svc  ";
         viewModel.Password = " pw with spaces ";
 
@@ -97,8 +97,9 @@ public class CredentialPromptViewModelTests
         // Assert
         var answer = Assert.Single(answers);
         Assert.NotNull(answer);
-        Assert.Equal("svc", answer.UserName);
-        Assert.Equal(" pw with spaces ", answer.Secret);
+        Assert.Equal("svc", answer.Credential.UserName);
+        Assert.Equal(" pw with spaces ", answer.Credential.Secret);
+        Assert.False(answer.Remember);
     }
 
     /// <summary>
@@ -110,8 +111,8 @@ public class CredentialPromptViewModelTests
     {
         // Arrange
         var viewModel = Create();
-        var answers = new List<DemaConsulting.NuGet.Caching.NuGetCredential?>();
-        viewModel.Completed += (_, credential) => answers.Add(credential);
+        var answers = new List<CredentialPromptAnswer?>();
+        viewModel.Completed += (_, given) => answers.Add(given);
 
         // Act: an incomplete sign-in is ignored, then cancel
         viewModel.SignInCommand.Execute(null);
@@ -120,6 +121,61 @@ public class CredentialPromptViewModelTests
 
         // Assert
         Assert.Null(Assert.Single(answers));
+    }
+
+    /// <summary>
+    ///     Test that "Remember on this computer" is off by default, that ticking it answers with the
+    ///     remember choice and changes the note to say the Git credential helper keeps it.
+    /// </summary>
+    [Fact]
+    public void CredentialPromptViewModel_Remember_TickedWhenAvailable_AnswersWithRememberAndChangesTheNote()
+    {
+        // Arrange
+        var viewModel = Create(canRemember: true);
+        var answers = new List<CredentialPromptAnswer?>();
+        viewModel.Completed += (_, given) => answers.Add(given);
+        viewModel.UserName = "svc";
+        viewModel.Password = "pw";
+
+        // Assert: unchecked by default, enabled, explained
+        Assert.True(viewModel.CanRemember);
+        Assert.False(viewModel.Remember);
+        Assert.Equal(CredentialPromptViewModel.SessionNoteText, viewModel.NoteText);
+        Assert.Equal(CredentialPromptViewModel.RememberEnabledTooltip, viewModel.RememberTooltip);
+
+        // Act
+        viewModel.Remember = true;
+        viewModel.SignInCommand.Execute(null);
+
+        // Assert
+        Assert.Equal(CredentialPromptViewModel.RememberedNoteText, viewModel.NoteText);
+        Assert.True(Assert.Single(answers)!.Remember);
+    }
+
+    /// <summary>
+    ///     Test that when no Git credential helper is available the option cannot be turned on, says
+    ///     why, and the answer never asks to remember.
+    /// </summary>
+    [Fact]
+    public void CredentialPromptViewModel_Remember_NoCredentialHelper_IsDisabledAndNeverRemembers()
+    {
+        // Arrange
+        var viewModel = Create(canRemember: false);
+        var answers = new List<CredentialPromptAnswer?>();
+        viewModel.Completed += (_, given) => answers.Add(given);
+        viewModel.UserName = "svc";
+        viewModel.Password = "pw";
+
+        // Act: try to tick it anyway
+        viewModel.Remember = true;
+        viewModel.SignInCommand.Execute(null);
+
+        // Assert
+        Assert.False(viewModel.CanRemember);
+        Assert.False(viewModel.Remember);
+        Assert.Contains("no Git credential helper", viewModel.RememberTooltip, StringComparison.Ordinal);
+        Assert.Equal(CredentialPromptViewModel.SessionNoteText, viewModel.NoteText);
+        Assert.False(Assert.Single(answers)!.Remember);
     }
 
     /// <summary>
@@ -137,8 +193,11 @@ public class CredentialPromptViewModelTests
     /// </summary>
     /// <param name="indexUrl">The feed address.</param>
     /// <param name="previousRejected">Whether a previous credential was rejected.</param>
+    /// <param name="canRemember">Whether a Git credential helper can keep the sign-in.</param>
     /// <returns>The view model.</returns>
     private static CredentialPromptViewModel Create(
-        string indexUrl = "https://feeds.example.com/v3/index.json", bool previousRejected = false) =>
-        new(new CredentialPromptRequest(FeedOrigin.Create(new Uri(indexUrl)), "Feed", previousRejected));
+        string indexUrl = "https://feeds.example.com/v3/index.json",
+        bool previousRejected = false,
+        bool canRemember = false) =>
+        new(new CredentialPromptRequest(FeedOrigin.Create(new Uri(indexUrl)), "Feed", previousRejected, canRemember));
 }

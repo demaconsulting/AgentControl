@@ -35,6 +35,9 @@ environment setup is required beyond the assembly-wide `TestLoggingFixture`.
 - A log entry written through the initialized pipeline appears in a rolling log file named
   `agentcontrol-*.log` under the configuration directory's `logs` subfolder, with the entry's
   content present verbatim in that file.
+- An exception handed to the unhandled and unobserved exception safety-net entry points is logged without any secret
+  - a registered credential, an authorization value, address user information or query string, in the message or an
+  inner exception - and an unhandled object that is not an exception is tolerated.
 
 ### Test Scenarios
 
@@ -55,5 +58,15 @@ is invoked once by `TestLoggingFixture` before any test in
 `DemaConsulting.AgentControl.Tests` runs; any passing test in that assembly is therefore
 additional indirect evidence that initialization succeeded without throwing. This scenario is
 evidenced indirectly by `GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue` (an arbitrary,
-already passing test cited only to demonstrate the fixture ran successfully), covering
 `AgentControl-Logging-DiagnosticFile`.
+
+**LoggingSetup_UnhandledExceptionsRedacted_NoSecretReachesTheLog**: The two safety-net entry points
+(`ReportUnhandledException` and `ReportUnobservedTaskException`) are called directly with a recording logger, because
+raising a real process-wide unhandled exception would terminate the test process. An exception whose message, inner
+exception, address and `Authorization` value carry a sentinel password, user information and query string is logged
+at critical level without any of them - the recorded text keeps the exception type and the readable remainder of its
+message - and the terminating flag is passed through; an unobserved task exception (an aggregate of such exceptions)
+is redacted the same way; an unhandled object that is not an exception is tolerated. This scenario is tested by
+`LoggingSetup_ReportUnhandledException_ExceptionCarryingSecrets_LogsOnlyASanitizedDescription` and
+`LoggingSetup_ReportUnobservedAndNonExceptionObjects_AreRedactedAndTolerated`, covering
+`AgentControl-Logging-UnhandledExceptionsRedacted`.

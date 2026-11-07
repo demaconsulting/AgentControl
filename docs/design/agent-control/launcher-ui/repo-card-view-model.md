@@ -11,7 +11,8 @@ orchestration, pull-eligibility checks) is implemented here or delegated to `Git
 `PackageSourceRegistry`, `PackageContentExtractor`, `RepoPinStore`, and `AgentToolLauncher`
 rather than in any view code-behind, so this class is fully unit-testable without an Avalonia
 window. Every package-source operation is bound to the source named in the repo's pin
-(`AgentControl-RepoCardViewModel-SourceAwareness`).
+(`AgentControl-RepoCardViewModel-SourceAwareness`), and the card shows whether that source requires signed
+packages (`AgentControl-RepoCardViewModel-SignatureIndicator`).
 
 #### Data Model
 
@@ -93,7 +94,7 @@ supplied (so automated tests never touch the user profile), otherwise in the per
 `CreateSourceRegistry(allowPrompt)` also hands NuGet server sources the application's
 `PackageCredentialContext`: with `allowPrompt` true (a read the user started) the sign-in dialog may
 open, with false (background work) the registry gets `WithoutPrompt()`, a context that shares the
-session credentials but can never ask.
+session credentials and the user's saved sign-in (read without any dialog) but can never ask.
 
 **Chip properties**: the view binds the card's chips to derived properties
 (`AgentControl-RepoCardViewModel-DisplayInfo`, `AgentControl-RepoCardViewModel-UpgradeBadge`):
@@ -105,6 +106,15 @@ session credentials but can never ask.
   `PinnedSourceLabel`, the source's alias shown as muted text beside the icon so the source is
   recognizable at a glance without hovering (a pin written before sources existed reports the legacy
   `Default` alias). Hidden for a missing repo or when nothing is pinned.
+- *Signature shield* — `RequiresSignature` is `true` only when the pinned source is a **NuGet** source whose
+  definition requires signed packages (not for a zip source, a source that is not configured, or a source without
+  the requirement), and `SignatureTooltip` says "Signature required (any trusted signer)" or, when the source pins a
+  publisher, "Signature required (signer pinned: A3AF7AF1…7641)" naming only the start and end of the fingerprint
+  (`NuGetSourceProvider.SummarizeFingerprint`). The main window shows a small shield icon inside the package chip
+  while `RequiresSignature` holds, and exposes it to assistive technology under the same text, so the requirement is
+  not conveyed by an icon alone. Both properties are derived from the pinned source's definition, so they are
+  raised again whenever the card refreshes after the source changed
+  (`AgentControl-RepoCardViewModel-SignatureIndicator`).
 - *No-package chip* — `HasNoPackageChip` and its tooltip, shown instead of the package chip for a
   present repo with no pin; clicking it opens Select Package.
 - *Upgrade chip* — `IsUpgradeAvailable`, `UpgradeChipText` (the version an upgrade would move to)

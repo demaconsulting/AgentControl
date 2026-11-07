@@ -346,7 +346,8 @@ sections:
       - id: AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt
         title: >-
           The RepoCardViewModel class shall, when it checks a server source for an upgrade in the
-          background, use only the credentials already entered during the session and never ask
+          background, use only the credentials already entered during the session or saved by the
+          user's own credential store and never ask
           the user to sign in, shall instead show a package source problem that says a sign-in is
           needed and how to give it, and shall allow a check the user asks for to ask the user to
           sign in.
@@ -358,3 +359,20 @@ sections:
           - RepoCardViewModel_RefreshUpgradeStatusAsync_AnonymousServer_OffersNewerVersion
           - RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains
           - RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential
+
+      - id: AgentControl-RepoCardViewModel-SignatureIndicator
+        title: >-
+          The RepoCardViewModel class shall indicate that the pinned package's source requires
+          signed packages - only when the pinned source is a NuGet source that requires them, not
+          for a zip source, a source that is not configured or a source without the requirement -
+          with a tooltip that says signatures are required and either that any trusted signer is
+          accepted or the start and end of the pinned publisher's certificate fingerprint, and
+          shall update the indication when the source's requirement changes.
+        justification: |
+          The user should see at a glance, on the card of the repo the package is installed in,
+          that its packages are checked and how strictly, so a source whose requirement was
+          switched off or never pinned is noticed.
+        tests:
+          - RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip
+          - RepoCardViewModel_NoSignatureRequirement_ShowsNoShield
+          - RepoCardViewModel_SourceRequirementChanges_RaisesChangeNotificationsForTheShield

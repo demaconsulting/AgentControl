@@ -38,10 +38,9 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     that need credentials obtain them from the user or from the operating system's own
 ///     mechanisms at the moment of use and never persist them here. A reflection test guards that
 ///     property. <see cref="AllowInsecureHttp"/> is enforced for server sources;
-///     <see cref="RequireSignedPackages"/> and
-///     <see cref="SignerFingerprint"/> are persisted now so settings files stay compatible; their
-///     enforcement belongs to the package-signing work, and local-folder sources
-///     ignore them. Mutable with public getters/setters so
+///     <see cref="RequireSignedPackages"/> and <see cref="SignerFingerprint"/> are enforced for
+///     NuGet sources (folder and server) and ignored by zip sources. Mutable with public
+///     getters/setters so
 ///     <see cref="System.Text.Json.JsonSerializer"/> round-trips it without custom converters. Not
 ///     thread-safe.
 ///     </para>
@@ -92,15 +91,21 @@ internal sealed partial class PackageSourceDefinition
 
     /// <summary>
     ///     Gets or sets whether packages from this source must be validly signed. Defaults to
-    ///     <see langword="false"/>. Persisted now; enforced by the package-signing work.
+    ///     <see langword="false"/>. Applies to NuGet sources (a folder or a server); a zip
+    ///     package carries no signature, so a zip source ignores it. Enforced by
+    ///     <see cref="NuGetSourceProvider"/>, which refuses an unsigned or invalidly signed
+    ///     package and, where verification is not supported, refuses to acquire packages at all.
     /// </summary>
     public bool RequireSignedPackages { get; set; }
 
     /// <summary>
-    ///     Gets or sets the expected SHA-256 fingerprint of the package author's signing
-    ///     certificate, or <see langword="null"/> for none. Not a secret: it is a trust decision
-    ///     owned by the user and so lives here rather than in a repo. Persisted now; enforced by
-    ///     the package-signing work.
+    ///     Gets or sets the SHA-256 fingerprint of the signing certificate of the publisher
+    ///     (the package author) whose packages are trusted, or <see langword="null"/> for none: any
+    ///     package that is validly signed and chains to a trusted root is then accepted, including
+    ///     one signed by an unrelated publisher. Not a secret: it is a trust decision owned by the
+    ///     user and so lives here rather than in a repo. Only used when
+    ///     <see cref="RequireSignedPackages"/> is set; stored as 64 upper-case hexadecimal
+    ///     characters (see <see cref="TryNormalizeFingerprint"/>).
     /// </summary>
     public string? SignerFingerprint { get; set; }
 
@@ -194,6 +199,79 @@ internal sealed partial class PackageSourceDefinition
             ? "Plain http would send your password unprotected. Use an https address, or tick " +
               "\"Allow insecure HTTP\" if you are sure this feed is on a trusted network."
             : null;
+    }
+
+    /// <summary>
+    ///     The number of hexadecimal characters in a SHA-256 fingerprint.
+    /// </summary>
+    public const int FingerprintLength = 64;
+
+    /// <summary>
+    ///     Normalizes the text of a SHA-256 certificate fingerprint.
+    /// </summary>
+    /// <param name="text">The text a user typed or pasted: 64 hexadecimal characters, optionally
+    ///     separated by colons, spaces or hyphens (as certificate viewers and
+    ///     <c>dotnet nuget verify</c> print them), in any letter case.</param>
+    /// <param name="normalized">The fingerprint as 64 upper-case hexadecimal characters when the
+    ///     method returns <see langword="true"/>; otherwise an empty string.</param>
+    /// <returns><see langword="true"/> when the text holds exactly 64 hexadecimal digits once the
+    ///     separators are removed.</returns>
+    public static bool TryNormalizeFingerprint(string? text, out string normalized)
+    {
+        normalized = string.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var digits = new System.Text.StringBuilder(FingerprintLength);
+        foreach (var character in text)
+        {
+            if (character is ':' or '-' || char.IsWhiteSpace(character))
+            {
+                continue;
+            }
+
+            if (!Uri.IsHexDigit(character))
+            {
+                return false;
+            }
+
+            digits.Append(char.ToUpperInvariant(character));
+        }
+
+        if (digits.Length != FingerprintLength)
+        {
+            return false;
+        }
+
+        normalized = digits.ToString();
+        return true;
+    }
+
+    /// <summary>
+    ///     Checks the signature settings of a NuGet source: a signer fingerprint, when one is
+    ///     given for a source that requires signatures, must be a valid SHA-256 fingerprint.
+    /// </summary>
+    /// <remarks>
+    ///     A fingerprint that cannot be read must stop the source from being used rather than be
+    ///     ignored, because ignoring it would silently widen trust from "this publisher" to "any
+    ///     signer". The message never repeats the text of the fingerprint.
+    /// </remarks>
+    /// <returns><see langword="null"/> when the settings are acceptable (including a source that
+    ///     does not require signatures, or a zip source); otherwise a message the user can act
+    ///     on.</returns>
+    public string? GetSignaturePolicyProblem()
+    {
+        if (Type != PackageSourceType.NuGet || !RequireSignedPackages || string.IsNullOrWhiteSpace(SignerFingerprint))
+        {
+            return null;
+        }
+
+        return TryNormalizeFingerprint(SignerFingerprint, out _)
+            ? null
+            : $"The trusted signer fingerprint of source '{Alias}' is not a SHA-256 fingerprint " +
+              $"({FingerprintLength} hexadecimal characters).";
     }
 
     /// <summary>

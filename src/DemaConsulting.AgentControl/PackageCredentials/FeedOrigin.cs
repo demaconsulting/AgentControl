@@ -163,10 +163,20 @@ internal sealed class FeedOrigin : IEquatable<FeedOrigin>
     ///     scheme's default.
     /// </summary>
     /// <returns>The text form, safe to display and to log.</returns>
-    public override string ToString()
+    public override string ToString() => $"{Scheme}://{HostAndPort}";
+
+    /// <summary>
+    ///     Gets the host (in brackets for an IPv6 address) followed by <c>:port</c> when the port
+    ///     is not the scheme's default - the <c>host</c> form that Git's credential protocol and
+    ///     URL-scoped configuration use.
+    /// </summary>
+    public string HostAndPort
     {
-        var host = Host.Contains(':', StringComparison.Ordinal) ? $"[{Host}]" : Host;
-        var defaultPort = IsSecure ? 443 : 80;
-        return Port == defaultPort ? $"{Scheme}://{host}" : $"{Scheme}://{host}:{Port}";
+        get
+        {
+            var host = Host.Contains(':', StringComparison.Ordinal) ? $"[{Host}]" : Host;
+            var defaultPort = IsSecure ? 443 : 80;
+            return Port == defaultPort ? host : $"{host}:{Port}";
+        }
     }
 }

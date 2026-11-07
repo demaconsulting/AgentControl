@@ -21,7 +21,11 @@ any Avalonia control. The subsystem contains
 six units: `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
 `SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`. It depends on the
 `AgentPackageManagement` subsystem (sources, providers, failure causes) and on the `PackageCredentials`
-subsystem (`PackageCredentialContext`, and the `ICredentialPrompt` that `AvaloniaCredentialPrompt` implements).
+subsystem (`PackageCredentialContext`, and the `ICredentialPrompt` that `AvaloniaCredentialPrompt` implements) and
+on `SignatureVerificationSupport` (whether the signature requirement can be offered). The repo card's package chip
+shows a small shield (`RequiresSignature`, `SignatureTooltip` of `RepoCardViewModel`) when the pinned NuGet source
+requires signed packages, with an automation identifier `PackageSignatureIcon`
+(`AgentControl-LauncherUI-SignatureIndicator`).
 
 ### Interfaces
 
@@ -95,10 +99,23 @@ definition, and tests a server source's connection.
 
 - *Type*: In-process .NET interface implementation (asynchronous), shown as a modal dialog.
 - *Role*: Provider (to the `PackageCredentials` subsystem).
-- *Contract*: Returns the credential the user typed in the sign-in dialog, or no credential when the user
+- *Contract*: Returns the answer the user gave in the sign-in dialog - the credential they typed and whether
+  they ticked "Remember on this computer" - or no answer when the user
   cancels or the dialog is closed; cancelling the supplied token closes the dialog
-  (`AgentControl-LauncherUI-SignIn`).
+  (`AgentControl-LauncherUI-SignIn`, `AgentControl-LauncherUI-RememberSignIn`).
 - *Constraints*: See *Sign-in dialog* in the design below.
+
+**SourceEditorViewModel signature options and ForgetSavedSignInCommand**: The "Package signatures" section of
+a NuGet source's editor and the "Forget saved sign-in" action of a server source's editor.
+
+- *Type*: In-process .NET properties and `ICommand`, plus an event asking the view to confirm.
+- *Role*: Provider.
+- *Contract*: A NuGet source (folder or server) can require signed packages and pin the publisher's certificate
+  fingerprint; the checkbox is disabled with an explanation where the platform cannot verify signatures; a zip
+  source has no such section (`AgentControl-LauncherUI-SignatureOptions`). A server source can forget the saved
+  sign-in, but only after the view has shown a confirmation and the user agreed
+  (`AgentControl-LauncherUI-ForgetSavedSignIn`).
+- *Constraints*: The fingerprint is saved normalized, and only while signatures are required.
 
 ### Design
 
@@ -160,7 +177,17 @@ its Save command stays disabled while anything is invalid. For a server it also 
 the result in words (*Connection OK* with the version count and newest; *Sign-in failed*; *Sign-in canceled*;
 *Package not found*; *Timed out*; *Server unreachable*; *Connection failed*), and shows example addresses for
 JFrog Artifactory and Azure Artifacts
-(`AgentControl-LauncherUI-TestConnection`, `AgentControl-LauncherUI-PackageSources`).
+(`AgentControl-LauncherUI-TestConnection`, `AgentControl-LauncherUI-PackageSources`). For a NuGet source it also
+offers the **Package signatures** section: a "Require signed packages" checkbox (off by default; disabled, with
+its tooltip shown even though it is disabled, where `SignatureVerificationSupport` says signatures cannot be
+verified) with help text that explains the limit of requiring signatures without a pinned publisher, and a
+"Trusted signer certificate fingerprint (SHA-256)" field that is enabled only while signatures are required,
+accepts the fingerprint as pasted and explains how to find it. A server's editor also has **Forget saved
+sign-in**: the view shows a `ConfirmationWindow` that names the server, and only on "Yes" calls the view model, which
+reports the outcome in words below the button; the button is disabled, with a tooltip saying why, when no
+credential helper can be reached from the window. `SettingsWindowViewModel` passes the application's
+`PackageCredentialContext` to the editor for that purpose
+(`AgentControl-LauncherUI-SignatureOptions`, `AgentControl-LauncherUI-ForgetSavedSignIn`).
 
 `AsyncRelayCommand` is the asynchronous counterpart of `RelayCommand`: it runs a task-returning
 operation with a cancellation token, ignores a new request while one is running, exposes
@@ -173,7 +200,8 @@ while one runs. Upgrade availability is determined by a separate background chec
 and after settings are applied, so that one slow or unreachable source delays only the cards
 pinned to it (`AgentControl-LauncherUI-ResponsiveOperations`). That background check never opens the
 sign-in dialog (`RefreshUpgradeStatusAsync` defaults to `allowPrompt: false`): for a server it uses the
-credentials already typed this session and otherwise sets the card's source problem to say a sign-in is
+credentials already typed this session or saved with the user's Git credential helper (read without any dialog)
+and otherwise sets the card's source problem to say a sign-in is
 needed and to use the card's menu > Refresh, which is a check the user started and so may ask
 (`AgentControl-LauncherUI-BackgroundChecksDoNotPrompt`).
 
@@ -189,8 +217,14 @@ second dialog appears after the first is answered rather than on top of it. The 
 (the Settings window, the Select Package window or the main window), shows the server that will receive the
 credential prominently (scheme, host and port, a phishing-resistance cue), the source alias, a warning when
 the server uses plain `http`, a notice when the last credential was rejected, the user name and a masked
-password or token field, and the sentence "Used for this session only - AgentControl does not save it." -
-there is no "remember" option in this version. Sign in is enabled only when both fields are filled; Cancel,
+password or token field, and a note that says what becomes of the credential - "Used for this session only -
+AgentControl does not save it." - together with the **"Remember on this computer (saved by your Git credential
+helper)"** checkbox. The checkbox is unticked by default (keeping a secret is the user's explicit decision); it is
+enabled only when the question says a credential helper can keep the sign-in, and is otherwise shown disabled with
+a tooltip that explains why (and is never acted on), so the option is discoverable but never a promise that cannot
+be kept. Ticking it changes the note to "Saved by your Git credential helper on this computer - AgentControl does
+not store it.", so the dialog always states who keeps the secret
+(`AgentControl-LauncherUI-RememberSignIn`). Sign in is enabled only when both fields are filled; Cancel,
 Escape and closing the window all answer "no credential". Cancelling the question's token (the operation was
 cancelled or timed out) closes the dialog as a cancel. The typed password is handed to the caller and never
 logged.

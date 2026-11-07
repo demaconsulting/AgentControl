@@ -36,7 +36,7 @@ internal sealed class FakeCredentialPrompt : ICredentialPrompt
     /// <summary>
     ///     The answers still to give, in order; the last answer repeats when the queue is empty.
     /// </summary>
-    private readonly Queue<NuGetCredential?> _answers = new();
+    private readonly Queue<CredentialPromptAnswer?> _answers = new();
 
     /// <summary>
     ///     The questions asked so far.
@@ -46,7 +46,7 @@ internal sealed class FakeCredentialPrompt : ICredentialPrompt
     /// <summary>
     ///     The answer given when the queue has run out.
     /// </summary>
-    private NuGetCredential? _lastAnswer;
+    private CredentialPromptAnswer? _lastAnswer;
 
     /// <summary>
     ///     Gets or sets a value indicating whether a question is never answered (it completes only
@@ -78,16 +78,17 @@ internal sealed class FakeCredentialPrompt : ICredentialPrompt
     ///     cancelled dialog.
     /// </summary>
     /// <param name="credential">The answer.</param>
-    public void EnqueueAnswer(NuGetCredential? credential)
+    /// <param name="remember">Whether the "user" ticks "Remember on this computer".</param>
+    public void EnqueueAnswer(NuGetCredential? credential, bool remember = false)
     {
         lock (_answers)
         {
-            _answers.Enqueue(credential);
+            _answers.Enqueue(credential is null ? null : new CredentialPromptAnswer(credential, remember));
         }
     }
 
     /// <inheritdoc />
-    public async Task<NuGetCredential?> PromptAsync(CredentialPromptRequest request, CancellationToken cancellationToken)
+    public async Task<CredentialPromptAnswer?> PromptAsync(CredentialPromptRequest request, CancellationToken cancellationToken)
     {
         lock (_requests)
         {

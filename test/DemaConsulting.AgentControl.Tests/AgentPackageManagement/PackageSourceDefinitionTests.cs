@@ -273,6 +273,76 @@ public class PackageSourceDefinitionTests
     }
 
     /// <summary>
+    ///     Test that a certificate fingerprint is accepted as users copy it - any letter case,
+    ///     separated by colons, spaces or hyphens - and normalized to 64 upper-case hexadecimal
+    ///     characters.
+    /// </summary>
+    [Theory]
+    [InlineData("A3AF7AF11EBB8EF729D2D91548509717E7E0FF55A129ABC3AEAA8A6940267641")]
+    [InlineData("a3af7af11ebb8ef729d2d91548509717e7e0ff55a129abc3aeaa8a6940267641")]
+    [InlineData("A3:AF:7A:F1:1E:BB:8E:F7:29:D2:D9:15:48:50:97:17:E7:E0:FF:55:A1:29:AB:C3:AE:AA:8A:69:40:26:76:41")]
+    [InlineData("  a3 af 7a f1 1e bb 8e f7 29 d2 d9 15 48 50 97 17 e7 e0 ff 55 a1 29 ab c3 ae aa 8a 69 40 26 76 41  ")]
+    [InlineData("A3-AF-7A-F1-1E-BB-8E-F7-29-D2-D9-15-48-50-97-17-E7-E0-FF-55-A1-29-AB-C3-AE-AA-8A-69-40-26-76-41")]
+    public void PackageSourceDefinition_TryNormalizeFingerprint_ValidSpellings_NormalizeToUpperCaseHex(string text)
+    {
+        // Act
+        var ok = PackageSourceDefinition.TryNormalizeFingerprint(text, out var normalized);
+
+        // Assert
+        Assert.True(ok);
+        Assert.Equal("A3AF7AF11EBB8EF729D2D91548509717E7E0FF55A129ABC3AEAA8A6940267641", normalized);
+    }
+
+    /// <summary>
+    ///     Test that text that is not exactly 64 hexadecimal digits is refused.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("A3AF")]
+    [InlineData("A3AF7AF11EBB8EF729D2D91548509717E7E0FF55A129ABC3AEAA8A69402676410")]
+    [InlineData("G000000000000000000000000000000000000000000000000000000000000000")]
+    [InlineData("000000000000000000000000000000000000000000000000000000000000000.")]
+    public void PackageSourceDefinition_TryNormalizeFingerprint_InvalidText_IsRefused(string? text)
+    {
+        // Act
+        var ok = PackageSourceDefinition.TryNormalizeFingerprint(text, out var normalized);
+
+        // Assert
+        Assert.False(ok);
+        Assert.Equal(string.Empty, normalized);
+    }
+
+    /// <summary>
+    ///     Test that the signature settings are only a problem when they cannot be applied: an
+    ///     unreadable fingerprint on a NuGet source that requires signatures. Zip sources, sources
+    ///     that do not require signatures and empty fingerprints are fine, and the message never
+    ///     repeats the fingerprint text.
+    /// </summary>
+    [Fact]
+    public void PackageSourceDefinition_GetSignaturePolicyProblem_OnlyAnUnreadableFingerprintOfARequiringNuGetSource()
+    {
+        // Arrange
+        var invalid = "not-a-fingerprint-4419";
+        PackageSourceDefinition Make(PackageSourceType type, bool require, string? fingerprint) =>
+            new() { Alias = "S", Type = type, Location = @"C:\a", RequireSignedPackages = require, SignerFingerprint = fingerprint };
+
+        // Act
+        var problem = Make(PackageSourceType.NuGet, true, invalid).GetSignaturePolicyProblem();
+
+        // Assert
+        Assert.NotNull(problem);
+        Assert.Contains("SHA-256 fingerprint", problem, StringComparison.Ordinal);
+        Assert.DoesNotContain(invalid, problem, StringComparison.Ordinal);
+        Assert.Null(Make(PackageSourceType.NuGet, true, "A3:AF:7A:F1:1E:BB:8E:F7:29:D2:D9:15:48:50:97:17:E7:E0:FF:55:A1:29:AB:C3:AE:AA:8A:69:40:26:76:41").GetSignaturePolicyProblem());
+        Assert.Null(Make(PackageSourceType.NuGet, true, null).GetSignaturePolicyProblem());
+        Assert.Null(Make(PackageSourceType.NuGet, true, "  ").GetSignaturePolicyProblem());
+        Assert.Null(Make(PackageSourceType.NuGet, false, invalid).GetSignaturePolicyProblem());
+        Assert.Null(Make(PackageSourceType.Zip, true, invalid).GetSignaturePolicyProblem());
+    }
+
+    /// <summary>
     ///     Test that a package reference carries the alias, ID and version text, and renders
     ///     without any location.
     /// </summary>

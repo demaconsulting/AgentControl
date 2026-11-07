@@ -4,7 +4,9 @@ package AgentControl {
         /*
          * Presentation layer: the recent-repos main window, per-repo cards, the
          * package-selection window, the settings window, the package-source editor window
-         * and the sign-in dialog. Also spans the Avalonia .axaml Views (including
+         * (including its signed-package options and "Forget saved sign-in") and the sign-in
+         * dialog (including its "Remember on this computer" option). Also spans the Avalonia
+         * .axaml Views (including
          * CredentialPromptWindow) and shared MVVM support types (RelayCommand,
          * AsyncRelayCommand, ViewModelBase, PackageSourceIcons, PackageSourceItemViewModel,
          * SelectPackageSourceViewModel, AvaloniaCredentialPrompt, ConnectionTestResultKind,

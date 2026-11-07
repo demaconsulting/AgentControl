@@ -2,8 +2,8 @@
 
 #### Verification Approach
 
-`RepoCardViewModel` is verified with unit tests defined in `RepoCardViewModelTests.cs` and, for NuGet server
-sources, `RepoCardServerSourceTests.cs`. Every
+`RepoCardViewModel` is verified with unit tests defined in `RepoCardViewModelTests.cs`, for NuGet server
+sources, `RepoCardServerSourceTests.cs` and, for the signature indicator, `RepoCardSignatureTests.cs`. Every
 test substitutes a stub script for the git executable (via `GitStub`, mirroring
 `GitClientTests`) and uses real temporary directories/zip fixtures for package-source and
 pin-file checks, so these tests never depend on a real git installation, a real repository,
@@ -36,6 +36,8 @@ invocations are not parallelized with other tests using real process launches).
 - A NuGet folder source can be selected from, upgraded from, and applied to a repo.
 - A background upgrade check never opens the sign-in dialog and explains on the card what to do; a check the
   user starts may ask once, and the credential is then remembered for the session.
+- The signature shield and its tooltip appear only for a pinned NuGet source that requires signed packages and follow
+  a change of that requirement.
 
 #### Test Scenarios
 
@@ -279,3 +281,14 @@ card - reuses the remembered credential without asking. This scenario is tested 
 `RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains` and
 `RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential`,
 in `RepoCardServerSourceTests.cs`, covering `AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`.
+
+**RepoCardViewModel_SignatureIndicator_ShieldOnlyForNuGetSourcesThatRequireSignatures**: A card pinned to a NuGet
+source that requires signed packages reports `RequiresSignature` and a tooltip that says signatures are required and
+either that any trusted signer is accepted or - for a source that pins a publisher - the start and end of the
+fingerprint only; a source without the requirement, a zip source and a pinned source that is not configured report
+no shield; when the source's requirement changes and the card refreshes, the card raises change notifications for
+the shield and its tooltip. This scenario is tested by
+`RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip`,
+`RepoCardViewModel_NoSignatureRequirement_ShowsNoShield` and
+`RepoCardViewModel_SourceRequirementChanges_RaisesChangeNotificationsForTheShield`, in
+`RepoCardSignatureTests.cs`, covering `AgentControl-RepoCardViewModel-SignatureIndicator`.

@@ -93,7 +93,7 @@ public class CredentialPromptWindowTests
         try
         {
             var dialog = new CredentialPromptWindow(CreateViewModel());
-            var result = dialog.ShowDialog<NuGetCredential?>(owner);
+            var result = dialog.ShowDialog<CredentialPromptAnswer?>(owner);
             dialog.FindControl<TextBox>("CredentialPromptUserNameTextBox")!.Text = "svc";
             dialog.FindControl<TextBox>("CredentialPromptPasswordTextBox")!.Text = "secret-pw";
 
@@ -101,10 +101,11 @@ public class CredentialPromptWindowTests
             DialogWindowTests.Click(dialog, "CredentialPromptSignInButton");
 
             // Assert
-            var credential = await result;
-            Assert.NotNull(credential);
-            Assert.Equal("svc", credential.UserName);
-            Assert.Equal("secret-pw", credential.Secret);
+            var answer = await result;
+            Assert.NotNull(answer);
+            Assert.Equal("svc", answer.Credential.UserName);
+            Assert.Equal("secret-pw", answer.Credential.Secret);
+            Assert.False(answer.Remember);
         }
         finally
         {
@@ -125,22 +126,22 @@ public class CredentialPromptWindowTests
         {
             // Act / Assert: the Cancel button
             var byButton = new CredentialPromptWindow(CreateViewModel());
-            var buttonResult = byButton.ShowDialog<NuGetCredential?>(owner);
+            var buttonResult = byButton.ShowDialog<CredentialPromptAnswer?>(owner);
             DialogWindowTests.Click(byButton, "CredentialPromptCancelButton");
             Assert.Null(await buttonResult);
 
             // Act / Assert: the Escape key
             var byKey = new CredentialPromptWindow(CreateViewModel());
-            var keyResult = byKey.ShowDialog<NuGetCredential?>(owner);
+            var keyResult = byKey.ShowDialog<CredentialPromptAnswer?>(owner);
             byKey.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape });
             Assert.Null(await keyResult);
 
             // Act / Assert: closing the window (the title-bar button)
             var viewModel = CreateViewModel();
-            var answered = new List<NuGetCredential?>();
-            viewModel.Completed += (_, credential) => answered.Add(credential);
+            var answered = new List<CredentialPromptAnswer?>();
+            viewModel.Completed += (_, given) => answered.Add(given);
             var byClose = new CredentialPromptWindow(viewModel);
-            var closeResult = byClose.ShowDialog<NuGetCredential?>(owner);
+            var closeResult = byClose.ShowDialog<CredentialPromptAnswer?>(owner);
             byClose.Close();
             Assert.Null(await closeResult);
             Assert.Null(Assert.Single(answered));
@@ -186,10 +187,10 @@ public class CredentialPromptWindowTests
                 DialogWindowTests.Click(dialog, "CredentialPromptSignInButton");
 
                 // Assert
-                var credential = await pending;
-                Assert.NotNull(credential);
-                Assert.Equal("svc", credential.UserName);
-                Assert.Equal("worker-pw", credential.Secret);
+                var answer = await pending;
+                Assert.NotNull(answer);
+                Assert.Equal("svc", answer.Credential.UserName);
+                Assert.Equal("worker-pw", answer.Credential.Secret);
             }
             finally
             {
@@ -293,6 +294,71 @@ public class CredentialPromptWindowTests
     });
 
     /// <summary>
+    ///     Test that the "Remember on this computer" checkbox is unchecked and enabled when a Git
+    ///     credential helper is available, and ticking it makes the dialog answer with the choice
+    ///     and say that the helper saves it.
+    /// </summary>
+    [Fact]
+    public void CredentialPromptWindow_CanRemember_CheckboxEnabledUncheckedAndAnswersRemember() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange
+        var owner = new Window();
+        owner.Show();
+        try
+        {
+            var dialog = new CredentialPromptWindow(CreateViewModel(canRemember: true));
+            var result = dialog.ShowDialog<CredentialPromptAnswer?>(owner);
+            var checkBox = dialog.FindControl<CheckBox>("CredentialPromptRememberCheckBox")!;
+
+            // Assert: offered, off by default, with the documented label and tooltip
+            Assert.True(checkBox.IsEffectivelyEnabled);
+            Assert.False(checkBox.IsChecked);
+            Assert.Equal(CredentialPromptViewModel.RememberLabel, checkBox.Content);
+            Assert.Equal(CredentialPromptViewModel.RememberEnabledTooltip, ToolTip.GetTip(checkBox));
+
+            // Act
+            checkBox.IsChecked = true;
+            dialog.FindControl<TextBox>("CredentialPromptUserNameTextBox")!.Text = "svc";
+            dialog.FindControl<TextBox>("CredentialPromptPasswordTextBox")!.Text = "pw";
+
+            // Assert: the note now says who keeps it
+            Assert.Equal(
+                CredentialPromptViewModel.RememberedNoteText,
+                dialog.FindControl<TextBlock>("CredentialPromptSessionNoteText")!.Text);
+            DialogWindowTests.Click(dialog, "CredentialPromptSignInButton");
+            Assert.True((await result)!.Remember);
+        }
+        finally
+        {
+            owner.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that without a Git credential helper the checkbox is disabled, still unchecked, and
+    ///     carries a tooltip that explains why - and that the tooltip is shown for the disabled
+    ///     control.
+    /// </summary>
+    [Fact]
+    public void CredentialPromptWindow_CannotRemember_CheckboxDisabledWithExplanatoryTooltip() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var window = new CredentialPromptWindow(CreateViewModel(canRemember: false));
+        window.Show();
+        var checkBox = window.FindControl<CheckBox>("CredentialPromptRememberCheckBox")!;
+
+        // Assert
+        Assert.False(checkBox.IsEffectivelyEnabled);
+        Assert.False(checkBox.IsChecked);
+        Assert.Equal(CredentialPromptViewModel.RememberUnavailableTooltip, ToolTip.GetTip(checkBox));
+        Assert.True(ToolTip.GetShowOnDisabled(checkBox));
+        Assert.Equal(
+            CredentialPromptViewModel.SessionNoteText,
+            window.FindControl<TextBlock>("CredentialPromptSessionNoteText")!.Text);
+        window.Close();
+    });
+
+    /// <summary>
     ///     Test that a null request is refused.
     /// </summary>
     [Fact]
@@ -339,8 +405,9 @@ public class CredentialPromptWindowTests
     /// </summary>
     /// <param name="indexUrl">The feed address.</param>
     /// <param name="rejected">Whether an earlier credential was rejected.</param>
+    /// <param name="canRemember">Whether a Git credential helper can keep the sign-in.</param>
     /// <returns>The view model.</returns>
     private static CredentialPromptViewModel CreateViewModel(
-        string indexUrl = "https://feeds.example.com/v3/index.json", bool rejected = false) =>
-        new(new CredentialPromptRequest(FeedOrigin.Create(new Uri(indexUrl)), "Feed", rejected));
+        string indexUrl = "https://feeds.example.com/v3/index.json", bool rejected = false, bool canRemember = false) =>
+        new(new CredentialPromptRequest(FeedOrigin.Create(new Uri(indexUrl)), "Feed", rejected, canRemember));
 }

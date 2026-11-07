@@ -6,8 +6,9 @@
 # - AgentPackageManagement spans PackageSource.cs (discovers packages/versions at a zip source
 #   folder), PackageVersion.cs (parses/compares version strings), PackageVersionCache.cs
 #   (caches per-source results), the source providers (ZipFolderSourceProvider.cs,
-#   NuGetSourceProvider.cs) behind the IPackageSourceProvider contract, and
-#   PackageSourceRegistry.cs (resolves a source alias to its provider); the supporting
+#   NuGetSourceProvider.cs) behind the IPackageSourceProvider contract, PackageSourceRegistry.cs
+#   (resolves a source alias to its provider) and SignatureVerificationSupport.cs (tells whether
+#   the platform can verify package signatures); the supporting
 #   PackageSourceDefinition/PackageSourceType/PackageReference/IPackageSourceProvider/
 #   PackageSourceAccessException types have no dedicated unit documents and are folded into
 #   this subsystem-level description
@@ -68,14 +69,21 @@ sections:
           identify a location that embeds a credential (such as URL user information) so it is
           never persisted, and shall identify a server address that is not an https address of a
           service index ending in index.json (accepting http only when the source explicitly
-          allows it).
+          allows it). The trust options are whether signed packages are required and, optionally,
+          the fingerprint of the one publisher's certificate to trust; the description shall
+          accept a fingerprint written with or without separators and in either letter case, hold
+          it in one normalized form, and identify a fingerprint of a source that requires signed
+          packages that cannot be read as a SHA-256 fingerprint.
         justification: |
           The source description is persisted in the user's settings file, so it must carry
           everything needed to reach a source and nothing that would turn the settings file
           into a credential store; the derived folder-versus-server distinction must follow
           the location so the two can never disagree; and a server address that would send a
           sign-in unprotected or be treated as another protocol must be caught where the source
-          is described, so every user of the description applies the same rules.
+          is described, so every user of the description applies the same rules. A fingerprint
+          that is pasted from a certificate viewer or a tool is written in many ways, and one that
+          cannot be read must be caught rather than ignored, because ignoring it would widen the
+          trust from one publisher to any signer.
         tests:
           - PackageSourceDefinition_Members_HaveNoSecretLikeProperty
           - PackageSourceDefinition_LocationKind_DerivedFromLocation
@@ -84,6 +92,9 @@ sections:
           - PackageSourceDefinition_GetCredentialProblem_OrdinaryLocation_ReturnsNull
           - PackageSourceDefinition_GetServerLocationProblem_AcceptableAddress_ReturnsNull
           - PackageSourceDefinition_GetServerLocationProblem_UnacceptableAddress_ReturnsClearMessage
+          - PackageSourceDefinition_TryNormalizeFingerprint_ValidSpellings_NormalizeToUpperCaseHex
+          - PackageSourceDefinition_TryNormalizeFingerprint_InvalidText_IsRefused
+          - PackageSourceDefinition_GetSignaturePolicyProblem_OnlyAnUnreadableFingerprintOfARequiringNuGetSource
 
       - id: AgentControl-AgentPackageManagement-SourceResolution
         title: >-
@@ -159,6 +170,7 @@ sections:
           - AgentControl-NuGetSourceProvider-ServerListAndAcquire
           - AgentControl-NuGetSourceProvider-ValidateLocation
           - AgentControl-NuGetSourceProvider-SignInOrder
+          - AgentControl-NuGetSourceProvider-SavedSignIn
           - AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin
           - AgentControl-NuGetSourceProvider-ServerFailures
           - AgentControl-NuGetSourceProvider-SecretsNotLogged
@@ -168,3 +180,59 @@ sections:
           - NuGetSourceProvider_ListVersions_ServerNeedsSignIn_PromptsOnceAndRemembersCredentialForTheSession
           - NuGetSourceProvider_Constructor_PlainHttp_RefusedUnlessInsecureHttpIsAllowed
           - PackageSourceDefinition_GetServerLocationProblem_UnacceptableAddress_ReturnsClearMessage
+
+      - id: AgentControl-AgentPackageManagement-SignedPackages
+        title: >-
+          The AgentPackageManagement subsystem shall, for a NuGet package folder or server source
+          that requires signed packages, supply only a package that carries a valid signature -
+          and, when the source pins a publisher's certificate, only one signed by that publisher -
+          checking it every time the package is supplied, whether it was just downloaded or is
+          already held in the source's private cache, so that a changed requirement or pin takes
+          effect at once; shall not let trust settings outside the source's own description widen
+          or narrow what the source accepts; shall report a refused package as a signature failure
+          in words that name the package and the source but no secret; and shall leave a package
+          that fails the check uninstalled.
+        justification: |
+          A package that is installed into a repo is instructions an AI agent will follow, so a
+          package from an untrusted publisher, or one tampered with in transit or on a share, is a
+          real attack; requiring a signature, ideally from one named publisher, lets an organization
+          decide who may publish to its sources. The check must not depend on whether the package
+          happened to be downloaded just now, and must not be weakened or strengthened by whatever
+          signers the user's machine happens to trust for other purposes. A zip package carries no
+          signature, so the requirement applies to NuGet sources only.
+        children:
+          - AgentControl-NuGetSourceProvider-RequireSigned
+          - AgentControl-NuGetSourceProvider-SignerPin
+          - AgentControl-NuGetSourceProvider-SignerTrustIsolated
+          - AgentControl-NuGetSourceProvider-SignatureFailureReported
+          - AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused
+        tests:
+          # The accepted and rejected signed-package tests use a real signed package downloaded
+          # from nuget.org and are skipped only where nuget.org cannot be reached or the machine
+          # lacks the trust roots the package needs; the unsigned-package tests need no network.
+          - NuGetSourceProvider_Acquire_RequireSignedAndPackageUnsigned_IsRejectedAndNothingIsInstalled
+          - NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted
+          - NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled
+          - NuGetSourceProvider_Acquire_PinnedSignerChangedAfterPackageWasCached_RejectsTheCachedPackage
+          - NuGetSourceProvider_Acquire_ServerRequiresSignaturesAndPackageUnsigned_IsRejectedAsASignatureFailure
+
+      - id: AgentControl-AgentPackageManagement-SignaturePlatformSupport
+        title: >-
+          The AgentPackageManagement subsystem shall know whether the current platform can verify
+          package signatures, shall refuse to list or supply packages from a source that requires
+          signed packages when it cannot - rather than skip the verification and install
+          unchecked packages - and shall give the same explanation wherever the requirement
+          cannot be honored.
+        justification: |
+          A signature requirement that is silently skipped is worse than none, because the user
+          believes packages are being checked; a settings file edited by hand can require
+          signatures on any machine, so the refusal must not depend on the settings dialog having
+          prevented it.
+        children:
+          - AgentControl-SignatureVerificationSupport-PlatformSupport
+          - AgentControl-SignatureVerificationSupport-UnsupportedExplanation
+          - AgentControl-NuGetSourceProvider-FailClosedWithoutVerification
+        tests:
+          - SignatureVerificationSupport_IsSupportedPlatform_WindowsLinuxAndMacOsOnly
+          - SignatureVerificationSupport_UnsupportedMessage_IsTheDocumentedExplanation
+          - NuGetSourceProvider_RequireSignedOnUnsupportedPlatform_FailsClosedForListAndAcquire

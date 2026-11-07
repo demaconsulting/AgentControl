@@ -35,6 +35,23 @@ searches every file the application wrote - the settings, the repo's pin and the
 log and text files - for the password the test typed. That a credential is withheld from a second server is not
 observable end to end and is verified one level down.
 
+`AgentControl-System-CredentialSafety` also covers the opt-in to remember a sign-in, which is verified one level
+down without a user interface: remembering needs a person at the sign-in dialog and a real credential helper, and a
+test must never touch the developer's real credential store. The saved-sign-in behavior is therefore verified through
+the credential logic with a fake credential store (a later session finds the saved sign-in without asking, a rejected
+one is removed, a wrong password is never saved), through the real `git credential` protocol against a throw-away
+helper in a temporary folder, and through a stub git that records exactly what is sent, in what environment and
+within what time limit.
+
+`AgentControl-System-PackageAuthenticity` has one end-to-end scenario in `MultipleSourcesTests.cs`, which runs the
+published application against a real NuGet folder feed that holds an unsigned newer package, with the source
+configured to require signed packages: the upgrade is refused with a message that says the package is not validly
+signed and names the source, and the repo's files and pin are left unchanged. Producing a validly signed package
+needs a real signing certificate, so acceptance of a valid signature, the publisher pin and the independence from the
+user's own NuGet trust settings are verified one level down, against a real signed package downloaded from nuget.org
+(skipped only where nuget.org cannot be reached or the machine lacks the trust roots it needs), as disclosed in the
+`AgentPackageManagement` verification design; the platform that cannot verify signatures is simulated there.
+
 ## Test Environment
 
 End-to-end tests in `DemaConsulting.AgentControl.UiTests` run only on Windows (tagged
@@ -67,6 +84,8 @@ on a fresh port.
   typed sign-in and supplies packages the same way, and a repo pin is only ever resolved
   against the source it names.
 - No credential typed during an end-to-end run is found in any file the application wrote.
+- A source that requires signed packages is refused an unsigned package end to end and the repo is left unchanged;
+  a valid signature, the publisher pin and the platform fail-closed behavior are proven one level down.
 
 ## Test Scenarios
 
@@ -153,11 +172,15 @@ communicated for persistence. The Add NuGet-Package Server dialog is also exerci
 until "Allow insecure HTTP" is ticked, **Test connection** against the mock server opens the sign-in dialog
 (which names the server's origin and says the credential is used for this session only), the connection test
 then reports success, and after saving the source is listed as "Not checked" and persisted with its
-insecure-HTTP choice. This scenario is tested by
+insecure-HTTP choice. The editor of a NuGet source also offers the signature options - a "Require signed packages"
+checkbox and the publisher's certificate fingerprint field - verified with headless window tests: ticking the box
+enables the field, an unreadable fingerprint blocks saving and a readable one is saved normalized. This scenario is
+tested by
 `windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt`,
 `windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt`,
-`windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`, and
-`SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved`,
+`windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`,
+`SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved` and
+`SourceEditorWindow_SignatureOptions_TickingEnablesTheFingerprintAndValidatesIt`,
 covering `AgentControl-System-Settings`.
 
 **AgentControl_ResponsiveOperations_SlowAndFailingSources_DoNotBlock**: An apply waiting on a slow
@@ -254,14 +277,42 @@ connection test and again, without a second dialog, for Select Package, and is t
 file, the repo's pin file and every log and text file in the configuration directory; the dialog showed the
 server's origin and "Used for this session only - AgentControl does not save it." One level down, a credential
 remembered for one server is never offered to another origin and a challenge from a feed's advertised second
-host never opens the prompt, and nothing is written into the target repo's files. This scenario is tested by
+host never opens the prompt, and nothing is written into the target repo's files. The dialog's remember option, the
+credential helper protocol and the removal of a rejected saved sign-in are verified one level down as described under
+Verification Approach, and an exception that reaches the process-wide handlers is logged only after its secrets are
+removed. This scenario is tested by
 `windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`,
 `PackageCredentials_CredentialForOneFeed_IsNeverOfferedToAnotherOrigin`,
-`NuGetSourceProvider_ListVersions_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin` and
-`NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig`, covering
+`NuGetSourceProvider_ListVersions_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin`,
+`NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig`,
+`RepoCardViewModel_PackageSourceFailureWithSecrets_StatusTextAndLogsAreRedacted`,
+`PackageCredentials_RememberLifeCycle_SavedByTheUsersStoreAndFoundInALaterSession`,
+`GitCredentialClient_RealGitWithIsolatedStore_MissApproveFillRejectLifeCycle`,
+`GitCredentialClient_AllOperations_NeverLogRequestOrResponseContent`,
+`NuGetSourceProvider_ListVersions_RememberTicked_SavedByTheUsersStoreAfterSuccess`,
+`NuGetSourceProvider_ListVersions_WrongPasswordOrRememberNotTicked_NothingIsSaved`,
+`NuGetSourceProvider_ListVersions_SavedSignInRejected_RemovedFromTheUsersStoreAndUserAskedOnce`,
+`PackageCredentialContext_ForgetSavedSignIn_ReportsWhatWasDone` and
+`LoggingSetup_ReportUnhandledException_ExceptionCarryingSecrets_LogsOnlyASanitizedDescription`, covering
 `AgentControl-System-CredentialSafety`. Residual risk, stated plainly: the tests prove what AgentControl
 supplies; the NuGet client, once a server has authenticated, answers 401 challenges from other hosts that
 the server's index advertises with the same credential, which is why users must only add servers they trust.
+
+**AgentControl_PackageAuthenticity_SignatureRequirementRefusesUnsignedPackages**: A repo pinned to a NuGet folder
+source that requires signed packages is offered the newer, unsigned package (listing does not look at signatures); the
+Upgrade action is refused with a message that says the package is not validly signed and names the source, and nothing
+is extracted and the pin is unchanged. One level down, with a real signed package, a valid signature is accepted with
+no pin and with the author's certificate pinned, and refused when another publisher is pinned, with the user's own
+NuGet trusted-signer settings unable to widen the pin; a package that was cached before the requirement was turned on
+is refused; and on a platform that cannot verify signatures a source that requires them refuses to list or supply.
+This scenario is tested by
+`windows@UpgradeMenuItem_Click_NuGetSourceRequiresSignaturesAndPackageUnsigned_IsRefusedAndRepoUnchanged`,
+`NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted`,
+`NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled`,
+`NuGetSourceProvider_Acquire_UsersConfigurationTrustsTheAuthorButOtherSignerPinned_IsStillRejected`,
+`NuGetSourceProvider_Acquire_RequirementEnabledAfterPackageWasCached_RejectsTheCachedPackage` and
+`NuGetSourceProvider_RequireSignedOnUnsupportedPlatform_FailsClosedForListAndAcquire`, covering
+`AgentControl-System-PackageAuthenticity`.
 
 **AgentControl_SourcePinIntegrity_PinBoundToSource_NoSubstitution**: With the same package id
 offered by two sources, a pin to the second source resolves only against it and the first source

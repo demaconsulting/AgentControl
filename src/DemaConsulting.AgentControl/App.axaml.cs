@@ -21,6 +21,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.Settings;
@@ -72,10 +73,16 @@ internal sealed class App : Application
             var settings = SettingsStore.Load(Options?.ConfigDirectory);
 
             // The session credential store holds what the user types into the sign-in dialog, in
-            // memory only; it is emptied when the application exits
+            // memory only; it is emptied when the application exits. A sign-in can only outlive
+            // the session in the user's own Git credential helper, reached through the git
+            // executable the user configured (the setting, else the startup override, else "git")
             var credentialStore = new SessionCredentialStore();
-            var credentials = new PackageCredentialContext(credentialStore, new AvaloniaCredentialPrompt());
-            var viewModel = new MainWindowViewModel(settings, Options, Options?.ConfigDirectory, credentials);
+            MainWindowViewModel? viewModel = null;
+            var rememberedCredentials = new GitCredentialClient(
+                () => ResolveGitExecutablePath(viewModel?.Settings ?? settings, Options));
+            var credentials = new PackageCredentialContext(
+                credentialStore, new AvaloniaCredentialPrompt(), rememberedCredentials);
+            viewModel = new MainWindowViewModel(settings, Options, Options?.ConfigDirectory, credentials);
             desktop.Exit += (_, _) => credentialStore.Clear();
 
             desktop.MainWindow = new MainWindow
@@ -86,4 +93,17 @@ internal sealed class App : Application
 
         base.OnFrameworkInitializationCompleted();
     }
+
+    /// <summary>
+    ///     Resolves the git executable to run: the per-user setting if configured, otherwise the
+    ///     startup-time override, otherwise <c>"git"</c> (found through <c>PATH</c>) - the same
+    ///     order every other git call in the application uses.
+    /// </summary>
+    /// <param name="settings">The current application settings.</param>
+    /// <param name="options">The startup options, or <see langword="null"/> for none.</param>
+    /// <returns>The git executable path or command name.</returns>
+    private static string ResolveGitExecutablePath(AppSettings settings, StartupOptions? options) =>
+        !string.IsNullOrWhiteSpace(settings.GitExecutablePath)
+            ? settings.GitExecutablePath
+            : options?.GitExecutableOverride ?? "git";
 }

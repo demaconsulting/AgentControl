@@ -537,6 +537,32 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public string PinnedSourceLabel => PinnedSource ?? RepoPin.LegacySourceAlias;
 
     /// <summary>
+    ///     Gets a value indicating whether the pinned package's source requires signed packages,
+    ///     so the agent package chip shows a small shield. A zip source, a source that is not
+    ///     configured and a source without the requirement show none.
+    /// </summary>
+    public bool RequiresSignature =>
+        PinnedSourceDefinition is { Type: PackageSourceType.NuGet, RequireSignedPackages: true };
+
+    /// <summary>
+    ///     Gets the tooltip of the signature shield: that signed packages are required and, when
+    ///     the source is pinned to a publisher, the start of that certificate's fingerprint.
+    /// </summary>
+    public string SignatureTooltip
+    {
+        get
+        {
+            var source = PinnedSourceDefinition;
+            if (source is null || !PackageSourceDefinition.TryNormalizeFingerprint(source.SignerFingerprint, out var fingerprint))
+            {
+                return "Signature required (any trusted signer)";
+            }
+
+            return $"Signature required (signer pinned: {NuGetSourceProvider.SummarizeFingerprint(fingerprint)})";
+        }
+    }
+
+    /// <summary>
     ///     Gets the tooltip of the agent package chip: which package and version the agent files
     ///     came from and from which source (by alias and kind).
     /// </summary>
@@ -731,6 +757,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(PackageChipTooltip));
         OnPropertyChanged(nameof(PinnedSourceIcon));
         OnPropertyChanged(nameof(PinnedSourceLabel));
+        OnPropertyChanged(nameof(RequiresSignature));
+        OnPropertyChanged(nameof(SignatureTooltip));
         OnPropertyChanged(nameof(UpgradeTooltip));
         OnPropertyChanged(nameof(LaunchButtonText));
         OnPropertyChanged(nameof(LaunchTooltip));

@@ -408,7 +408,10 @@ internal sealed partial class MainWindow : Window
         }
 
         var settingsViewModel = new SettingsWindowViewModel(
-            viewModel.Settings, viewModel.ApplySettings, providerFactory: viewModel.CreateConnectionTestProvider);
+            viewModel.Settings,
+            viewModel.ApplySettings,
+            providerFactory: viewModel.CreateConnectionTestProvider,
+            credentials: viewModel.Credentials);
         var settingsWindow = new SettingsWindow(settingsViewModel);
         await settingsWindow.ShowDialog(this);
     }

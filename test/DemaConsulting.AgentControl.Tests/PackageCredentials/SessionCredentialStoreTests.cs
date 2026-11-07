@@ -235,6 +235,104 @@ public sealed class SessionCredentialStoreTests
     }
 
     /// <summary>
+    ///     Test that forgetting a credential by value removes it only while it is still the
+    ///     remembered one: a newer credential for the same feed survives a late rejection of an
+    ///     older one.
+    /// </summary>
+    [Fact]
+    public void SessionCredentialStore_ForgetExactCredential_OnlyRemovesTheSameCredential()
+    {
+        // Arrange
+        var store = new SessionCredentialStore();
+        var origin = Origin("https://feeds.example.com/v3/index.json");
+        var older = new NuGetCredential("svc", "pw-older-" + Guid.NewGuid().ToString("N"));
+        var newer = new NuGetCredential("svc", "pw-newer-" + Guid.NewGuid().ToString("N"));
+        store.Set(origin, newer);
+
+        // Act / Assert: the older credential is not the remembered one, so nothing is forgotten
+        Assert.False(store.Forget(origin, older));
+        Assert.True(store.TryGet(origin, out var kept));
+        Assert.Equal(newer, kept);
+
+        // Act / Assert: the remembered one is forgotten
+        Assert.True(store.Forget(origin, new NuGetCredential(newer.UserName, newer.Secret)));
+        Assert.Equal(0, store.Count);
+        Assert.False(store.Forget(origin, newer));
+        Assert.Equal(newer.Secret, SecretRedactor.Redact(newer.Secret));
+        Assert.Throws<ArgumentNullException>(() => store.Forget(null!, newer));
+        Assert.Throws<ArgumentNullException>(() => store.Forget(origin, null!));
+    }
+
+    /// <summary>
+    ///     Test that a credential knows whether it came from, or was saved to, the user's own
+    ///     credential store - reported with the lease in one step - and that replacing or forgetting
+    ///     it clears the mark.
+    /// </summary>
+    [Fact]
+    public void SessionCredentialStore_FromRememberedStoreMark_FollowsTheCredential()
+    {
+        // Arrange
+        var store = new SessionCredentialStore();
+        var origin = Origin("https://feeds.example.com/v3/index.json");
+        Assert.False(store.IsFromRememberedStore(origin));
+
+        // Act / Assert: marked when set so
+        store.Set(origin, new NuGetCredential("svc", "pw-marked-" + Guid.NewGuid().ToString("N")), fromRememberedStore: true);
+        Assert.True(store.IsFromRememberedStore(origin));
+        Assert.True(store.TryAcquire(origin, out _, out var lease, out var marked));
+        Assert.True(marked);
+        lease!.Dispose();
+
+        // Act / Assert: replaced by a credential that is not saved
+        store.Set(origin, new NuGetCredential("svc", "pw-plain-" + Guid.NewGuid().ToString("N")));
+        Assert.False(store.IsFromRememberedStore(origin));
+
+        // Act / Assert: forgetting clears it too
+        store.Set(origin, new NuGetCredential("svc", "pw-marked-again-" + Guid.NewGuid().ToString("N")), fromRememberedStore: true);
+        store.Forget(origin);
+        Assert.False(store.IsFromRememberedStore(origin));
+        Assert.False(store.TryAcquire(origin, out _, out var none, out var notMarked));
+        Assert.Null(none);
+        Assert.False(notMarked);
+        Assert.Throws<ArgumentNullException>(() => store.IsFromRememberedStore(null!));
+    }
+
+    /// <summary>
+    ///     Test that the once-per-origin lookup of the user's credential store runs a single time
+    ///     however many callers ask (also at once), runs again for another origin, and is started
+    ///     afresh after the store is cleared.
+    /// </summary>
+    [Fact]
+    public async Task SessionCredentialStore_EnsureRememberedLookup_RunsOncePerOrigin()
+    {
+        // Arrange
+        var store = new SessionCredentialStore();
+        var first = Origin("https://feeds.example.com/v3/index.json");
+        var second = Origin("https://other.example.com/v3/index.json");
+        var runs = 0;
+        Task Lookup()
+        {
+            Interlocked.Increment(ref runs);
+            return Task.Delay(100, TestContext.Current.CancellationToken);
+        }
+
+        // Act: many callers at once for the first origin, then another origin
+        await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => store.EnsureRememberedLookupAsync(first, Lookup)));
+        await store.EnsureRememberedLookupAsync(first, Lookup);
+        await store.EnsureRememberedLookupAsync(second, Lookup);
+
+        // Assert
+        Assert.Equal(2, runs);
+
+        // Act: after the store is cleared the lookup is allowed again
+        store.Clear();
+        await store.EnsureRememberedLookupAsync(first, Lookup);
+        Assert.Equal(3, runs);
+        await Assert.ThrowsAsync<ArgumentNullException>(() => store.EnsureRememberedLookupAsync(null!, Lookup));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => store.EnsureRememberedLookupAsync(first, null!));
+    }
+
+    /// <summary>
     ///     Creates a feed origin for test setup.
     /// </summary>
     /// <param name="url">The feed URL.</param>

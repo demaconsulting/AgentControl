@@ -74,6 +74,8 @@ internal static class TestSettingsWriter
     ///     <paramref name="packageSourcePath"/> becomes the <c>Default</c> zip source), or
     ///     <see langword="null"/> for the older single-folder format.</param>
     /// <param name="nuGetPackageIds">The package IDs offered by the <c>Feed</c> source.</param>
+    /// <param name="nuGetRequireSigned">Whether the <c>Feed</c> source requires signed
+    ///     packages.</param>
     public static void Write(
         string configDirectory,
         string argLoggerStubExePath,
@@ -82,7 +84,8 @@ internal static class TestSettingsWriter
         string? pinnedPackageName = null,
         string? pinnedPackageVersion = null,
         string? nuGetFeedPath = null,
-        IReadOnlyList<string>? nuGetPackageIds = null)
+        IReadOnlyList<string>? nuGetPackageIds = null,
+        bool nuGetRequireSigned = false)
     {
         Directory.CreateDirectory(configDirectory);
 
@@ -125,7 +128,8 @@ internal static class TestSettingsWriter
                 Alias = "Feed",
                 Type = "NuGet",
                 Location = nuGetFeedPath,
-                PackageIds = nuGetPackageIds ?? []
+                PackageIds = nuGetPackageIds ?? [],
+                RequireSignedPackages = nuGetRequireSigned
             });
             settings["Sources"] = sources;
         }

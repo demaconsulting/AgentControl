@@ -32,12 +32,15 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     The dialog exists so a credential is only ever typed into a window that says, prominently,
 ///     which server will receive it: <see cref="OriginText"/> is the feed's scheme, host and port.
 ///     A feed on plain <c>http</c> is flagged with a warning because what is typed would cross the
-///     network unprotected. The dialog states that the credential is used for this session only:
-///     AgentControl keeps it in memory and never saves it.
+///     network unprotected. The dialog states what becomes of the credential: it is used for this
+///     session only (AgentControl keeps it in memory and never saves it) unless the user ticks
+///     "Remember on this computer", an opt-in that is off by default and disabled - with an
+///     explanatory tooltip - when no Git credential helper is available; the credential is then
+///     saved by the user's own helper, never by AgentControl.
 ///     </para>
 ///     <para>
 ///     The view model holds the typed password only until the dialog closes and raises
-///     <see cref="Completed"/> exactly once, with a credential or <see langword="null"/> when the
+///     <see cref="Completed"/> exactly once, with an answer or <see langword="null"/> when the
 ///     user cancelled. It never logs or otherwise exposes the password. Not thread-safe; every
 ///     member is expected to be called from the UI thread.
 ///     </para>
@@ -53,6 +56,11 @@ internal sealed class CredentialPromptViewModel : ViewModelBase
     ///     Backing field for <see cref="Password"/>.
     /// </summary>
     private string _password = string.Empty;
+
+    /// <summary>
+    ///     Backing field for <see cref="Remember"/>.
+    /// </summary>
+    private bool _remember;
 
     /// <summary>
     ///     Whether <see cref="Completed"/> has been raised already.
@@ -73,6 +81,7 @@ internal sealed class CredentialPromptViewModel : ViewModelBase
         SourceAlias = request.SourceAlias;
         IsInsecure = !request.Origin.IsSecure;
         PreviousCredentialRejected = request.PreviousCredentialRejected;
+        CanRemember = request.CanRemember;
         SignInCommand = new RelayCommand(SignIn, () => CanSignIn);
         CancelCommand = new RelayCommand(Cancel);
     }
@@ -107,9 +116,72 @@ internal sealed class CredentialPromptViewModel : ViewModelBase
         $"The package source '{SourceAlias}' needs a user name and a password or access token.";
 
     /// <summary>
-    ///     The sentence that states how long the credential is kept; shown in the dialog.
+    ///     The sentence that states how long the credential is kept when it is not remembered;
+    ///     shown in the dialog.
     /// </summary>
     public const string SessionNoteText = "Used for this session only - AgentControl does not save it.";
+
+    /// <summary>
+    ///     The sentence that states where the credential is kept when the user chose to remember
+    ///     it; shown in the dialog instead of <see cref="SessionNoteText"/>.
+    /// </summary>
+    public const string RememberedNoteText =
+        "Saved by your Git credential helper on this computer - AgentControl does not store it.";
+
+    /// <summary>
+    ///     The text of the "Remember" checkbox.
+    /// </summary>
+    public const string RememberLabel = "Remember on this computer (saved by your Git credential helper)";
+
+    /// <summary>
+    ///     The tooltip of the "Remember" checkbox when it can be used.
+    /// </summary>
+    public const string RememberEnabledTooltip =
+        "Keep this sign-in in your Git credential helper (for example Git Credential Manager) so you " +
+        "are not asked again on this computer. You can forget it later in the source's settings.";
+
+    /// <summary>
+    ///     The tooltip of the "Remember" checkbox when no Git credential helper is available.
+    /// </summary>
+    public const string RememberUnavailableTooltip =
+        "Not available: no Git credential helper is configured on this computer, so a sign-in cannot be " +
+        "saved. Install Git with a credential helper (for example Git Credential Manager) to enable this.";
+
+    /// <summary>
+    ///     Gets a value indicating whether the user's Git credential helper can keep this sign-in,
+    ///     so the "Remember" checkbox can be used. When <see langword="false"/> the checkbox is
+    ///     shown disabled, with <see cref="RememberTooltip"/> explaining why.
+    /// </summary>
+    public bool CanRemember { get; }
+
+    /// <summary>
+    ///     Gets or sets a value indicating whether the sign-in is to be saved by the user's Git
+    ///     credential helper. Off by default, and never on while <see cref="CanRemember"/> is
+    ///     <see langword="false"/>.
+    /// </summary>
+    public bool Remember
+    {
+        get => _remember;
+        set
+        {
+            if (SetField(ref _remember, value && CanRemember))
+            {
+                OnPropertyChanged(nameof(NoteText));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets the tooltip of the "Remember" checkbox: what ticking it does, or why it cannot be
+    ///     ticked.
+    /// </summary>
+    public string RememberTooltip => CanRemember ? RememberEnabledTooltip : RememberUnavailableTooltip;
+
+    /// <summary>
+    ///     Gets the sentence that says what happens to the credential: used for this session only,
+    ///     or saved by the Git credential helper when "Remember" is ticked.
+    /// </summary>
+    public string NoteText => _remember ? RememberedNoteText : SessionNoteText;
 
     /// <summary>
     ///     Gets or sets the user name.
@@ -158,10 +230,10 @@ internal sealed class CredentialPromptViewModel : ViewModelBase
     public RelayCommand CancelCommand { get; }
 
     /// <summary>
-    ///     Raised once when the question is answered: carrying the credential the user entered, or
-    ///     <see langword="null"/> when the user cancelled.
+    ///     Raised once when the question is answered: carrying the credential the user entered
+    ///     (and whether to remember it), or <see langword="null"/> when the user cancelled.
     /// </summary>
-    public event EventHandler<NuGetCredential?>? Completed;
+    public event EventHandler<CredentialPromptAnswer?>? Completed;
 
     /// <summary>
     ///     Cancels the question as if the user pressed "Cancel" (for example when the operation
@@ -179,14 +251,14 @@ internal sealed class CredentialPromptViewModel : ViewModelBase
             return;
         }
 
-        Complete(new NuGetCredential(_userName.Trim(), _password));
+        Complete(new CredentialPromptAnswer(new NuGetCredential(_userName.Trim(), _password), Remember));
     }
 
     /// <summary>
     ///     Raises <see cref="Completed"/> once, however many times it is called.
     /// </summary>
-    /// <param name="credential">The answer.</param>
-    private void Complete(NuGetCredential? credential)
+    /// <param name="answer">The answer.</param>
+    private void Complete(CredentialPromptAnswer? answer)
     {
         if (_completed)
         {
@@ -194,7 +266,7 @@ internal sealed class CredentialPromptViewModel : ViewModelBase
         }
 
         _completed = true;
-        Completed?.Invoke(this, credential);
+        Completed?.Invoke(this, answer);
     }
 
     /// <summary>

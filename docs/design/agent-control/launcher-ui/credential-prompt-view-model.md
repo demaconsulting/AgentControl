@@ -6,11 +6,13 @@
 
 `CredentialPromptViewModel` backs the sign-in dialog that asks the user for the user name and password (or
 access token) a package server needs. The dialog exists so a credential is only ever typed into a window that
-says, prominently, which server will receive it, and that the credential is kept for this session only. It
-satisfies `AgentControl-CredentialPromptViewModel-ShowsDestination` and
+says, prominently, which server will receive it and what becomes of it: kept for this session only, or - when the
+user ticks "Remember on this computer" - saved by their own Git credential helper. It
+satisfies `AgentControl-CredentialPromptViewModel-ShowsDestination`,
+`AgentControl-CredentialPromptViewModel-RememberOption` and
 `AgentControl-CredentialPromptViewModel-SignIn`, and together with `CredentialPromptWindow` and
 `AvaloniaCredentialPrompt` (view-layer types documented in the `LauncherUI` subsystem design) provides
-`AgentControl-LauncherUI-SignIn`.
+`AgentControl-LauncherUI-SignIn` and `AgentControl-LauncherUI-RememberSignIn`.
 
 #### Data Model
 
@@ -26,8 +28,19 @@ encrypted.
 **PreviousCredentialRejected**: `bool` - a credential was already supplied for this server during this
 operation and was rejected, so the dialog says the last sign-in did not work.
 
-**SessionNoteText** (constant): "Used for this session only - AgentControl does not save it." There is no
-"remember" option in this version.
+**CanRemember**: `bool` - copied from the request: a credential helper applies to the server, so the sign-in
+can be kept. When it is `false` the "Remember" checkbox is shown **disabled** (with an explanatory tooltip, shown
+even though the control is disabled) rather than hidden, so the user learns that the option exists and why it is
+unavailable.
+
+**Remember**: `bool` - the "Remember on this computer (saved by your Git credential helper)" choice. **Off by
+default** (keeping a secret is the user's explicit decision) and forced off while `CanRemember` is `false`, so the
+answer can never ask for something that cannot be done. **RememberTooltip** explains what ticking it does, or why
+it cannot be ticked.
+
+**SessionNoteText** (constant) / **RememberedNoteText** (constant) / **NoteText**: "Used for this session only -
+AgentControl does not save it." while "Remember" is off, and "Saved by your Git credential helper on this computer -
+AgentControl does not store it." once it is ticked. The note always says who keeps the secret.
 
 **UserName** / **Password**: the two entered values. The password is held only until the dialog closes and is
 never logged or exposed other than in the answer; the window masks it.
@@ -35,18 +48,19 @@ never logged or exposed other than in the answer; the window masks it.
 **CanSignIn**: `bool` - both a non-blank user name and a non-empty password have been entered.
 
 **SignInCommand** / **CancelCommand**: the commands bound to the buttons. **Completed** is raised exactly once
-with the answer.
+with the answer (a `CredentialPromptAnswer`, or `null` when cancelled).
 
 #### Key Methods
 
-**Constructor(request)**: Copies the display facts from the `CredentialPromptRequest`; throws
-`ArgumentNullException` for a null request.
+**Constructor(request)**: Copies the display facts, including `CanRemember`, from the `CredentialPromptRequest`;
+throws `ArgumentNullException` for a null request.
 
-**SignIn** (via `SignInCommand`): When `CanSignIn`, completes with a `NuGetCredential` whose user name is
-trimmed and whose password is exactly as typed (a trimmed password could fail for no visible reason); does
-nothing otherwise.
+**SignIn** (via `SignInCommand`): When `CanSignIn`, completes with a `CredentialPromptAnswer` holding a
+`NuGetCredential` whose user name is
+trimmed and whose password is exactly as typed (a trimmed password could fail for no visible reason), and the
+`Remember` choice; does nothing otherwise.
 
-**Cancel**: Completes with no credential. It is also called by the window when it is closed by any other
+**Cancel**: Completes with no answer. It is also called by the window when it is closed by any other
 means (the title-bar button, Escape) and by `AvaloniaCredentialPrompt` when the operation that asked is
 cancelled, so every way out is an answer.
 
@@ -60,8 +74,8 @@ false and signing in does nothing.
 
 #### Dependencies
 
-- **ICredentialPrompt** / **CredentialPromptRequest**, **FeedOrigin** (`PackageCredentials` subsystem) - the
-  request and the origin text.
+- **ICredentialPrompt** / **CredentialPromptRequest** / **CredentialPromptAnswer**, **FeedOrigin**
+  (`PackageCredentials` subsystem) - the request, the answer and the origin text.
 - **NuGetCaching** (OTS) - the `NuGetCredential` it returns.
 - **RelayCommand**, **ViewModelBase** (`LauncherUI`) - command and change-notification support.
 

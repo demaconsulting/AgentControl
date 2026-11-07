@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.Settings;
 using Microsoft.Extensions.Logging;
 using Serilog;
@@ -143,13 +144,7 @@ internal static class LoggingSetup
 
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
-            if (logger.IsEnabled(LogLevel.Critical))
-            {
-                logger.LogCritical(
-                    e.ExceptionObject as Exception,
-                    "Unhandled exception reached AppDomain.UnhandledException (IsTerminating={IsTerminating})",
-                    e.IsTerminating);
-            }
+            ReportUnhandledException(logger, e.ExceptionObject, e.IsTerminating);
 
             // The process is terminating regardless; flush now so the entry is not lost.
             Log.CloseAndFlush();
@@ -157,11 +152,51 @@ internal static class LoggingSetup
 
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
-            logger.LogError(e.Exception, "Unobserved task exception");
+            ReportUnobservedTaskException(logger, e.Exception);
 
             // Mark observed so the finalizer thread does not escalate this into a process crash;
             // the log entry above is the record of the failure.
             e.SetObserved();
         };
+    }
+
+    /// <summary>
+    ///     Writes an exception that reached <see cref="AppDomain.UnhandledException"/> to the log,
+    ///     with every secret removed from it first.
+    /// </summary>
+    /// <remarks>
+    ///     This handler sees every exception in the process, including ones whose messages carry a
+    ///     credential, an <c>Authorization</c> value or a URL with user information (for example a
+    ///     failure inside a network call), so the exception is never handed to the log as it is:
+    ///     it passes through <see cref="SecretRedactingLogger"/>, which logs only a sanitized stand-in
+    ///     (the redacted type name, message chain and stack trace).
+    /// </remarks>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="exceptionObject">The unhandled exception object (not necessarily an
+    ///     <see cref="Exception"/>).</param>
+    /// <param name="isTerminating">Whether the runtime is terminating because of it.</param>
+    internal static void ReportUnhandledException(
+        Microsoft.Extensions.Logging.ILogger logger, object? exceptionObject, bool isTerminating)
+    {
+        var safeLogger = new SecretRedactingLogger(logger);
+        if (safeLogger.IsEnabled(LogLevel.Critical))
+        {
+            safeLogger.LogCritical(
+                exceptionObject as Exception,
+                "Unhandled exception reached AppDomain.UnhandledException (IsTerminating={IsTerminating})",
+                isTerminating);
+        }
+    }
+
+    /// <summary>
+    ///     Writes an unobserved task exception to the log, with every secret removed from it first
+    ///     (see <see cref="ReportUnhandledException"/>).
+    /// </summary>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="exception">The unobserved exception (usually an
+    ///     <see cref="AggregateException"/>).</param>
+    internal static void ReportUnobservedTaskException(Microsoft.Extensions.Logging.ILogger logger, Exception exception)
+    {
+        new SecretRedactingLogger(logger).LogError(exception, "Unobserved task exception");
     }
 }

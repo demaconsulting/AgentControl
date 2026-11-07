@@ -5,17 +5,22 @@
 The `LauncherUI` subsystem is verified by the combined unit tests of its six units
 (`MainWindowViewModelTests.cs`, `RepoCardViewModelTests.cs` and `RepoCardServerSourceTests.cs`,
 `SelectPackageWindowViewModelTests.cs` and `SelectPackageRetryTests.cs`,
-`SettingsWindowViewModelTests.cs`, `SourceEditorViewModelTests.cs` and
-`SourceEditorServerViewModelTests.cs`, `CredentialPromptViewModelTests.cs`), plus
+`SettingsWindowViewModelTests.cs`, `SourceEditorViewModelTests.cs`,
+`SourceEditorServerViewModelTests.cs` and `SourceEditorSignatureViewModelTests.cs`,
+`CredentialPromptViewModelTests.cs`), plus
 `AsyncRelayCommandTests.cs` for the shared asynchronous
 command, which together
 exercise the full recent-repos/card/select-package/settings/sign-in interaction surface without ever
 constructing an Avalonia `Window`. The windows themselves are exercised by headless Avalonia tests
 (`DialogWindowTests.cs`, `MainWindowTests.cs`, `SettingsWindowServerSourceTests.cs` for the Settings
-window, the source editor window and its connection test, and `CredentialPromptWindowTests.cs` for the sign-in
-dialog and `AvaloniaCredentialPrompt`), and the end-to-end flows - adding a zip and a
+window, the source editor window and its connection test, `SourceEditorSignatureWindowTests.cs` for the signature
+section and "Forget saved sign-in" of the source editor, `RepoCardSignatureTests.cs` for the signature shield in the
+main window's package chip, and `CredentialPromptWindowTests.cs` for the sign-in
+dialog, its "Remember on this computer" option and `AvaloniaCredentialPrompt`), and the end-to-end flows -
+adding a zip and a
 NuGet folder source through the dialogs, adding a NuGet server and testing its connection with a typed
-sign-in, selecting a package from the NuGet sources, and the
+sign-in, selecting a package from the NuGet sources, a source that requires signed packages refusing an unsigned
+upgrade, and the
 chips on a repo card - by the FlaUI `DemaConsulting.AgentControl.UiTests` project. At the
 subsystem boundary, collaborating subsystems
 (`AgentPackageManagement`, `RepoSync`, `RepoConfig`, `GitIntegration`, `AgentToolLauncher`,
@@ -65,6 +70,11 @@ executable.
 - A NuGet server source can be added, tested (with progress, Cancel and a plain-language result) and listed
   as "Not checked"; the sign-in dialog shows which server receives the credential, masks the password, answers
   once, and is shown one at a time; background upgrade checks never open it.
+- The sign-in dialog's "Remember on this computer" option is off by default, enabled only when a credential helper
+  can keep the sign-in and otherwise disabled with a tooltip that explains why, and the answer carries the choice.
+- The source editor offers the signature options for NuGet sources only (disabled with the reason where unsupported)
+  and, for a server, "Forget saved sign-in" only after a confirmation; the repo card's package chip shows the signature
+  shield only when the pinned source requires signed packages.
 
 ### Test Scenarios
 
@@ -245,6 +255,44 @@ questions one at a time, and refuses a null request. This scenario is tested by
 `AvaloniaCredentialPrompt_PromptAsync_TokenCancelled_ClosesDialogAndThrows` and
 `AvaloniaCredentialPrompt_PromptAsync_TwoQuestionsAtOnce_AreShownOneAtATime`, covering
 `AgentControl-LauncherUI-SignIn`.
+
+**LauncherUI_RememberSignIn_OptionOfferedOnlyWhenItCanBeKept**: With a request that says a credential helper is
+available the sign-in window shows the "Remember on this computer" checkbox enabled and unchecked, and ticking it
+makes the dialog answer with the choice and say that the helper saves it; without a credential helper the checkbox is
+disabled, still unchecked, and carries a tooltip that explains why - shown for the disabled control (the tooltip's
+show-on-disabled setting is asserted). This scenario is tested by
+`CredentialPromptWindow_CanRemember_CheckboxEnabledUncheckedAndAnswersRemember`,
+`CredentialPromptWindow_CannotRemember_CheckboxDisabledWithExplanatoryTooltip` and
+`CredentialPromptViewModel_Remember_TickedWhenAvailable_AnswersWithRememberAndChangesTheNote`, covering
+`AgentControl-LauncherUI-RememberSignIn`.
+
+**LauncherUI_ForgetSavedSignIn_ConfirmationDecidesAndResultIsShown**: In the editor window of a server source,
+"Forget saved sign-in" first shows a confirmation naming the server - declining leaves the saved sign-in alone - and
+once confirmed removes it and shows the outcome in words; with no credential store the button is disabled and its
+explanation is shown on hover. This scenario is tested by
+`SourceEditorWindow_ForgetSavedSignIn_ConfirmationDecidesAndResultIsShown`,
+`SourceEditorWindow_ForgetSavedSignIn_NoCredentialStore_ButtonDisabledWithTooltip` and
+`SourceEditorViewModel_ForgetSavedSignIn_CommandAsksForConfirmationAndForgetsOnlyOnceConfirmed`, covering
+`AgentControl-LauncherUI-ForgetSavedSignIn`.
+
+**LauncherUI_SignatureOptions_TickEnablesFingerprintAndUnsupportedPlatformExplains**: In the editor window of a NuGet
+source the signature section shows the unchecked checkbox, the help text that explains the limit of requiring
+signatures without a pinned publisher, and the disabled fingerprint field; ticking the checkbox enables the field, an
+unreadable fingerprint shows an error and disables Save, and a readable one is saved in its normalized form; where
+verification is unsupported the checkbox is disabled and its tooltip, which gives the reason, is shown even though the
+control is disabled; a zip-package editor has no signature section. This scenario is tested by
+`SourceEditorWindow_SignatureOptions_TickingEnablesTheFingerprintAndValidatesIt`,
+`SourceEditorWindow_SignatureOptions_UnsupportedPlatform_CheckboxDisabledWithTooltip`,
+`SourceEditorWindow_ZipSource_HasNoSignatureSection` and
+`SourceEditorViewModel_Fingerprint_ValidationFollowsTheRules`, covering
+`AgentControl-LauncherUI-SignatureOptions`.
+
+**LauncherUI_SignatureIndicator_ShieldShownOnlyWhenSignaturesAreRequired**: The main window's package chip shows the
+shield icon, with the card's tooltip, only for a card whose pinned source requires signatures; the card's properties
+name the start and end of a pinned fingerprint only. This scenario is tested by
+`MainWindow_PackageChip_ShowsShieldOnlyWhenSignaturesAreRequired` and
+`RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip`, covering
+`AgentControl-LauncherUI-SignatureIndicator`.
 
 **LauncherUI_BackgroundChecksDoNotPrompt_UserStartedChecksMay**: A background upgrade check against a
 server that needs a sign-in never opens the dialog and puts the instruction on the card; a check the user

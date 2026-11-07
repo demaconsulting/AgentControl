@@ -9,14 +9,18 @@ and discovers what each one offers. It spans `PackageSource.cs` (discovers packa
 a zip source folder), `PackageVersion.cs` (parses/compares version strings),
 `PackageVersionCache.cs` (caches per-source results), the source providers behind the
 `IPackageSourceProvider` contract (`ZipFolderSourceProvider.cs`, `NuGetSourceProvider.cs`) and
-`PackageSourceRegistry.cs` (resolves a source alias to its provider). It provides the
+`PackageSourceRegistry.cs` (resolves a source alias to its provider) and
+`SignatureVerificationSupport.cs` (tells whether the platform can verify package signatures). It provides the
 package-discovery (`AgentControl-AgentPackageManagement-DiscoverPackages`) and
 version-comparison/upgrade-detection behavior
 (`AgentControl-AgentPackageManagement-UpgradeDetection`) shared by the rest of the application:
 `LauncherUI` uses it to populate the package-selection window and compute the upgrade-available
-badge. The subsystem contains six units: `PackageSource`, `PackageVersion`,
-`PackageVersionCache`, `PackageSourceRegistry`, `ZipFolderSourceProvider`, and
-`NuGetSourceProvider`. The supporting types `PackageSourceDefinition`, `PackageSourceType`,
+badge. It also provides the package-authenticity behavior
+(`AgentControl-AgentPackageManagement-SignedPackages`, `AgentControl-AgentPackageManagement-SignaturePlatformSupport`,
+which support `AgentControl-System-PackageAuthenticity`). The subsystem contains seven units: `PackageSource`,
+`PackageVersion`, `PackageVersionCache`, `PackageSourceRegistry`, `ZipFolderSourceProvider`,
+`NuGetSourceProvider` and `SignatureVerificationSupport`. The supporting types `PackageSourceDefinition`,
+`PackageSourceType`,
 `PackageReference`, `IPackageSourceProvider`, `PackageSourceAccessException` (with its
 `PackageSourceFailureKind`) and the `DiscoveredPackage` record have no dedicated
 unit documents and are folded into this subsystem-level description. The subsystem depends on the
@@ -38,9 +42,19 @@ unit documents and are folded into this subsystem-level description. The subsyst
 - *Constraints*: Missing folders surface as `DirectoryNotFoundException`, other failures as
   `InvalidOperationException` with a user-safe message. A server source reports the cause as a
   `PackageSourceAccessException` (derived from `InvalidOperationException`), whose `PackageSourceFailureKind`
-  - `AuthenticationFailed`, `SignInCanceled`, `NotFound`, `Unreachable`, `TimedOut` - lets a caller react
+  - `AuthenticationFailed`, `SignInCanceled`, `NotFound`, `Unreachable`, `TimedOut`, `SignatureRejected` - lets a
+  caller react
   (the connection test, the Select Package window, the card's background check) and whose message never
   contains a secret or more of the server's address than its scheme, host and port.
+
+**SignatureVerificationSupport.IsSupported**: Tells whether package signatures can be verified here.
+
+- *Type*: In-process .NET static property.
+- *Role*: Provider.
+- *Contract*: `true` on Windows, Linux and macOS when the platform's certificate-chain facility works, `false`
+  elsewhere; `UnsupportedMessage` is the one explanation used wherever the signature requirement cannot be honored
+  (`AgentControl-AgentPackageManagement-SignaturePlatformSupport`).
+- *Constraints*: Stateless; never throws.
 
 **PackageSourceRegistry.Resolve**: Resolves a source alias to the provider of exactly that
 source.
@@ -117,7 +131,12 @@ address: an absolute `https` address (`http` only when `AllowInsecureHttp` is se
 service index, so ending in `index.json`, with no credential - NuGet treats an address that does not end in
 `.json` as the older V2 protocol, which AgentControl does not rely on
 (`AgentControl-AgentPackageManagement-SourceDefinitions`). `RequireSignedPackages` and `SignerFingerprint`
-are persisted but not yet enforced; they belong to the package-signing work. A
+are the per-source trust options (see *Package authenticity* below). `TryNormalizeFingerprint` accepts the
+fingerprint as it is pasted from a tool or certificate viewer - hexadecimal with optional colons, dashes or
+spaces, in either letter case - and reduces it to 64 upper-case hexadecimal characters; `GetSignaturePolicyProblem`
+reports a fingerprint that cannot be read on a NuGet source that requires signatures, which every consumer treats
+as an error rather than ignoring the fingerprint (ignoring it would silently widen trust from one publisher to any
+signer). A
 `PackageReference` is the identity a repo pin records: source alias, package ID and the exact
 version text — a package ID is never unique across sources, so a package is only ever identified
 together with its source. `DiscoveredPackage` is a package version found at a source, carrying
@@ -129,12 +148,43 @@ provider contract (`AgentControl-AgentPackageManagement-ZipFolderSource`).
 all of its state in AgentControl-owned, per-source storage and never touching the target repo
 (`AgentControl-AgentPackageManagement-NuGetFolderSource`). For a server it additionally signs in, using in
 order what NuGet itself knows (a `nuget.config` source with the same address, credential-provider
-plug-ins running non-interactively), the credential the user already typed this session, and only then the
+plug-ins running non-interactively), the credential the user already typed this session or saved earlier with
+their own Git credential helper, and only then the
 sign-in dialog - at most once per operation - through the `PackageCredentials` subsystem, and maps every
 failure to a `PackageSourceAccessException` with a secret-free message
 (`AgentControl-AgentPackageManagement-NuGetServerSource`). Listing a server's versions never downloads a
 package. Both hand a package's content to the
 `RepoSync` subsystem as an `IPackageContentReader`.
+
+**Package authenticity.** A NuGet source (folder or server) can require signed packages and optionally pin the
+publisher's certificate. The decisions, in the order a reader will ask about them:
+
+- *Where it is enforced.* In `NuGetSourceProvider`, through the NuGet caching library's own signature requirement,
+  on a fresh download and again on every acquisition of a package already held in the source's private cache, so
+  turning the requirement on later, or changing the pin, takes effect at once and a package cached earlier is not
+  trusted by default. Folder and server sources are treated alike; a zip package carries no signature, so zip
+  sources ignore the options (`AgentControl-AgentPackageManagement-SignedPackages`).
+- *What the pin is.* The SHA-256 fingerprint of the package **author** certificate (the publisher), not of the
+  repository countersignature: the author's signature says who published the package, whereas a repository
+  countersignature says only which feed served it. The fingerprint lives in the user's per-source definition in the
+  settings file, never in a repo's pin file, so a repo cannot choose its own trusted publisher.
+- *Who decides what is trusted.* Only the source's own description. The provider writes a per-source
+  `nuget.config` whose `trustedSigners` section begins with `<clear />` and, when a publisher is pinned, adds one
+  author entry for that fingerprint. The `<clear />` is essential: without it the NuGet client would merge the
+  trusted signers of the user's and the machine's configuration into the result, so with a pinned publisher
+  another configured signer would *widen* what the source accepts and, with no pin, a configuration that lists
+  only some other signers would *narrow* it from "any validly signed package" to those signers. Tests that fail
+  without the `<clear />` prove both directions. A source that does not require
+  signatures gets no trust configuration at all.
+- *Why pin.* Without a pin, any validly signed package that chains to a trusted root is accepted, including one
+  signed by an unrelated publisher; the settings dialog and the user guide say so and recommend pinning.
+- *Platforms.* Verification is supported on Windows, Linux and macOS (`SignatureVerificationSupport`). Where it is
+  not supported the settings dialog shows the option disabled with an explanation, and `NuGetSourceProvider`
+  *fails closed* — it refuses to list or acquire for a source whose settings require signatures — instead of
+  skipping the check (`AgentControl-AgentPackageManagement-SignaturePlatformSupport`).
+- *Failures.* A refusal is reported as `PackageSourceFailureKind.SignatureRejected` with a message that names the
+  package and the source, says whether a publisher is pinned (naming only the start and end of its fingerprint) and
+  lists the likely causes; it is never reported as an unreachable or unauthorized source.
 
 **Version handling.** `PackageVersion` is a pure value type implementing
 `IComparable<PackageVersion>`: it parses a release (`major.minor.patch`), four-part, prerelease

@@ -451,14 +451,16 @@ public class SettingsWindowViewModelTests
 
     /// <summary>
     ///     Test that the saved source list reflects added, edited and removed sources in order,
-    ///     carrying settings the dialog does not show.
+    ///     carrying the signature settings of a source whose folder was edited.
     /// </summary>
     [Fact]
     public void SettingsWindowViewModel_Save_AfterAddEditRemove_WritesResultingSourcesInOrder()
     {
-        // Arrange: a NuGet source with a signer fingerprint the editor does not show, a zip source
+        // Arrange: a NuGet source that requires signatures from a pinned signer, a zip source
+        const string fingerprint = "A3AF7AF11EBB8EF729D2D91548509717E7E0FF55A129ABC3AEAA8A6940267641";
         var feed = NuGetSource("Feed", @"C:\feed", "contoso.agents");
-        feed.SignerFingerprint = "ABCDEF";
+        feed.RequireSignedPackages = true;
+        feed.SignerFingerprint = fingerprint;
         AppSettings? savedSettings = null;
         var viewModel = new SettingsWindowViewModel(
             new AppSettings { Sources = [feed, ZipSource("Old", @"C:\old")] },
@@ -484,7 +486,8 @@ public class SettingsWindowViewModelTests
         Assert.Equal(["Feed", "New"], savedSettings.Sources.Select(source => source.Alias));
         Assert.Equal(FullPath("feed2"), savedSettings.Sources[0].Location);
         Assert.Equal(["contoso.agents"], savedSettings.Sources[0].PackageIds);
-        Assert.Equal("ABCDEF", savedSettings.Sources[0].SignerFingerprint);
+        Assert.Equal(fingerprint, savedSettings.Sources[0].SignerFingerprint);
+        Assert.True(savedSettings.Sources[0].RequireSignedPackages);
     }
 
     /// <summary>

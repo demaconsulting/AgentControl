@@ -131,6 +131,8 @@ Each source has an **alias**, the short name shown in the app and recorded in a 
    folder. A location that contains a user name or password is refused, and so is a web address
    (a web address is a server, which has its own button).
 4. For a NuGet-package folder, enter each package ID and click **Add**; at least one is required.
+   A NuGet source (folder or server) also has a **Package signatures** section, where you can require signed
+   packages (see [Requiring Signed Packages](#requiring-signed-packages)).
 5. Messages under each field say what is wrong, and **Save** stays disabled until everything is
    valid. Then save the source, and save the Settings window to keep the change.
 
@@ -188,6 +190,76 @@ The test may open the sign-in dialog, exactly as selecting a package would. If y
 address, the insecure-HTTP tick or the package IDs, the last result is cleared, because it described
 the old values.
 
+## Requiring Signed Packages
+
+A **NuGet-package folder** or **NuGet-package server** source can insist that every package it supplies
+is **validly signed**. An agent package changes the instructions your AI agent follows in a repo, so this
+is how an organization decides who may publish what reaches those repos. In the source's dialog, under
+**Package signatures**:
+
+- **Require signed packages** — off by default. When it is on, AgentControl never installs a package from
+  this source that is unsigned, whose signature is invalid, or whose signer your computer does not trust.
+  The check is made **every time** a package is used, including one AgentControl downloaded earlier, so
+  turning the option on later, or changing the fingerprint, takes effect immediately.
+- **Trusted signer certificate fingerprint (SHA-256)** — optional, and **recommended**. Without a
+  fingerprint, *any* validly signed package that chains to a certificate authority your computer trusts is
+  accepted, including a package signed by an unrelated publisher. With a fingerprint, only packages signed
+  by that publisher are accepted. The field is usable only while the checkbox is ticked. Paste the
+  fingerprint as you find it - 64 hexadecimal characters, in upper or lower case, with or without colons,
+  dashes or spaces; AgentControl saves it in one normalized form, and a value that is not a SHA-256
+  fingerprint is reported and stops you saving.
+
+**What the fingerprint is.** It is the SHA-256 fingerprint of the package **author** certificate - the
+certificate of the publisher who signed the package, not the repository countersignature that a feed such
+as nuget.org adds. Pinning the repository's certificate therefore does not match, and the package is
+refused. To find the fingerprint of a package you trust, run
+
+```text
+dotnet nuget verify --all contoso-agents.1.2.0.nupkg
+```
+
+and read the **SHA256 hash** printed under the *Author* signature's signer certificate; a certificate viewer
+on the signing certificate shows the same value as its SHA-256 (thumbprint) fingerprint.
+
+**Your own NuGet settings are ignored for this.** The trusted signers you may have configured in your
+user-level or machine-level NuGet configuration neither add publishers to nor remove the pinned publisher
+from what a source accepts; the source's own dialog decides alone. A **zip-package** folder has no signature
+requirement, because a zip file carries no signature.
+
+**When a package is refused.** The upgrade or selection stops, nothing is installed, the repo is left as it
+was, and a message names the package and the source. For a source with no pinned publisher it reads *"Package
+'contoso-agents' 1.2.0 from source 'Feed' is not validly signed, but the source requires signed packages. It
+may be unsigned, its signature may be invalid, or its certificate may not be trusted on this computer."* For
+a source with a pinned publisher it reads *"... is not signed by the trusted publisher (certificate
+A3AF7AF1…7641). It may be unsigned, signed by someone else, or its signature may be invalid."* - only the
+start and end of the fingerprint are shown. A repo card whose pinned source requires signatures shows a small
+**shield** in its package chip; hover over it to see whether any trusted signer is accepted or the signer is
+pinned.
+
+**Platforms.** Signature verification works on Windows, Linux and macOS. On any other platform the checkbox
+is **disabled** and hovering over it says *"Package signature verification is not supported on this
+platform"*; and if a settings file that was edited by hand requires signatures there anyway, AgentControl
+refuses to list or supply packages from that source - it **fails closed** - rather than silently skipping
+the check.
+
+**Certificates and revocation.** Verification needs the computer to trust the certificate chain of the
+signer, which on Windows, macOS and most Linux systems means the operating system's trust store. A package
+signed with a certificate from a private authority needs that authority in the trust store. NuGet also
+checks whether certificates have been revoked, which needs network access to the certificate authority; on a
+computer that is offline, or behind a firewall that blocks it, verification of an otherwise good package can
+fail, in which case the message above is shown.
+
+**Signing your own packages** (for authors): sign a package with a code-signing certificate, then publish it.
+Sign with the same certificate every time, so the fingerprint your consumers pin stays valid until the
+certificate is renewed:
+
+```text
+dotnet nuget sign <package>.nupkg --certificate-path <signing.pfx>
+    --certificate-password <password> --timestamper <timestamp-server-url>
+```
+
+(One command, shown on two lines.)
+
 ## Signing In
 
 When a server needs credentials for something you started - **Test connection**, **Select
@@ -201,7 +273,10 @@ window you were using. It shows:
   credential you gave last time was rejected;
 - a **user name** box and a masked **password or token** box (for Azure Artifacts, use a personal
   access token as the password);
-- the sentence **"Used for this session only - AgentControl does not save it."**
+- the sentence **"Used for this session only - AgentControl does not save it."**;
+- a **"Remember on this computer (saved by your Git credential helper)"** checkbox, unticked by default
+  (see [Remembering a Sign-In](#remembering-a-sign-in)). Ticking it changes the sentence to **"Saved by your
+  Git credential helper on this computer - AgentControl does not store it."**
 
 **Sign in** is enabled only when both boxes are filled. **Cancel**, pressing Escape or closing the
 window all mean "do not sign in". What happens next:
@@ -215,16 +290,62 @@ window all mean "do not sign in". What happens next:
   operation and reports *Timed out*, so an abandoned dialog never holds anything up forever.
 - **Success** — the credential is remembered **in memory for the rest of this session**, so the next
   operation on the same server (selecting a package after testing the connection, for example) does
-  not ask again. It is forgotten if the server ever rejects it, and when you close AgentControl.
+  not ask again. It is forgotten if the server ever rejects it, and when you close AgentControl - unless
+  you ticked **Remember on this computer**.
 
 Only one sign-in dialog is shown at a time; if two sources need one at once, the second waits for the
 first.
 
 **Background checks never open the dialog.** When AgentControl starts, after you change Settings, and
 when you add a repo, it checks each repo's pinned source for upgrades in the background. For a server
-that needs a sign-in, that check uses a credential you already typed this session and otherwise does
+that needs a sign-in, that check uses a credential you already typed this session (or saved, see below)
+and otherwise does
 **not** ask: the card shows a **Package source problem** chip saying the source needs a sign-in. Use
 the card's "..." menu > **Refresh** (or Select Package / Upgrade) - actions you start - to sign in.
+
+## Remembering a Sign-In
+
+By default AgentControl keeps what you type for the current session only. If you do not want to type a
+token every time you start AgentControl, you can **opt in, for one sign-in at a time**, by ticking
+**Remember on this computer (saved by your Git credential helper)** in the sign-in dialog.
+
+**AgentControl never stores the secret itself.** It hands the sign-in to your **Git credential helper** - the
+program Git already uses on your computer to keep the passwords for your Git remotes - and asks it for the
+sign-in again when it is needed:
+
+- On **Windows** the helper is normally **Git Credential Manager**, which keeps the secret in the **Windows
+  Credential Manager** (look for an entry named like `git:https://<host>`).
+- On **macOS** the helper keeps it in the **keychain** (Git Credential Manager or the `osxkeychain` helper).
+- On **Linux** it is usually **libsecret** (the GNOME keyring or another *secret service*) or Git Credential
+  Manager; a plain `credential-store` helper keeps it in a **file** (`~/.git-credentials`) that is not
+  encrypted, so prefer a helper that uses the system keyring.
+
+To see whether a helper is configured, run `git config credential.helper` in a terminal; it prints the helper's
+name (for example `manager`, `osxkeychain` or `libsecret`). If it prints nothing, no helper is configured, and
+the checkbox is **disabled** with a tooltip that says so (hover over it); install Git with a credential helper
+(for example Git Credential Manager) to enable it. A helper that is configured only for some hosts counts as
+available only for those hosts.
+
+How it works, so there are no surprises:
+
+- **Off by default**, and decided each time you sign in. Nothing is saved unless you tick the box, and only
+  **after the sign-in worked**: a wrong password is never saved.
+- **What is read.** When a server needs a sign-in, AgentControl asks the helper for an entry for that server's
+  exact **scheme, host and port** (for example `https://pkgs.dev.azure.com`), **once per server per session**,
+  without any dialog - also for the background checks - and never for any other server. If the helper has
+  nothing, you are asked as usual.
+- **A saved sign-in that stops working** (for example the token expired) is **removed** from the helper when
+  the server rejects it, and you are asked once.
+- **No window from Git.** AgentControl runs Git with prompts disabled and gives it ten seconds, so a helper
+  that wants to ask something simply counts as "nothing saved".
+
+**Forget saved sign-in.** To remove a saved sign-in yourself, open the server source in Settings (**Edit**) and
+click **Forget saved sign-in**. AgentControl asks you to confirm, naming the server, then removes the sign-in
+from your Git credential helper and from this session, and tells you the result: it was forgotten, there was
+nothing saved, or the helper could not remove it. The button is disabled, with a tooltip, when no credential
+helper can be reached. You can always remove the entry with the helper's own tools instead - for example
+delete the `git:https://<host>` entry in the Windows **Credential Manager**, remove the item from the macOS
+**Keychain Access**, or delete the entry from your Linux keyring.
 
 ## Where Credentials Come From
 
@@ -256,7 +377,8 @@ For a server, AgentControl looks for credentials in this order and asks you only
    entry for you (with `--username` and `--password`; add `--store-password-in-clear-text` where the
    platform cannot encrypt it). Credentials stored in your NuGet configuration are yours to protect -
    AgentControl only reads them. AgentControl never reads or writes the `nuget.config` of a repo.
-2. **A credential you already typed in this session.**
+2. **A credential you already typed in this session, or one you saved earlier with "Remember on this
+   computer"** (kept by your Git credential helper; see [Remembering a Sign-In](#remembering-a-sign-in)).
 3. **The sign-in dialog**, at most once per operation, and only after the server has refused the
    first two.
 
@@ -278,27 +400,32 @@ are requested from. If you do not trust a feed's operator, do not sign in to it.
 
 Select a row and click **Edit** to change its location (a server's feed address and insecure-HTTP
 choice) or (for NuGet) its package IDs; the alias is fixed, and a server opens the same dialog as when
-adding, including **Test connection**. **Remove** asks for confirmation. Removing a source is allowed
+adding, including **Test connection**, the signature options and **Forget saved sign-in** (see
+[Remembering a Sign-In](#remembering-a-sign-in)). **Remove** asks for confirmation. Removing a source is allowed
 even when repos are pinned to it, but the confirmation tells you how many are: those repos will show a
 **Package source problem** chip until a source with that alias is configured again.
 
 ## What Is Stored
 
 Sources are saved in your per-user `settings.json` (in AgentControl's folder under your user
-profile) as alias, kind, location, package IDs and - for a server - the insecure-HTTP choice. Each
+profile) as alias, kind, location, package IDs and - for a server - the insecure-HTTP choice and - for a
+NuGet source - whether signed packages are required and the optional publisher fingerprint (a fingerprint is
+public information, not a secret). Each
 repo's `.agentcontrol.json` pin records the package name, exact version and **the alias of its
 source**. AgentControl never reads or writes a repo's own `nuget.config`, and keeps its NuGet caches
 in its own folder under your user profile.
 
 | Item | Stored? |
 | :--- | :--- |
-| Alias, kind, location or feed address, package IDs, insecure-HTTP choice | Yes, in `settings.json` |
+| Alias, kind, location, feed address, package IDs, insecure-HTTP choice, signature options | Yes, in `settings.json` |
 | Package name, exact version and source alias of a repo | Yes, in the repo's `.agentcontrol.json` |
-| The user name and password or token you type in the sign-in dialog | **Never** - kept in memory for the session |
+| The user name and password or token you type in the sign-in dialog | **Never by AgentControl** - memory only |
+| The same sign-in, when you tick **Remember on this computer** | Only by **your Git credential helper** |
 | Secrets in the log, the settings, a pin file or the repo | **Never** - the log redacts them |
 
 The log removes passwords, authorization headers (whatever their scheme) and the query strings and user
-information of addresses, and the same clean-up is applied to the error messages AgentControl shows.
+information of addresses, and the same clean-up is applied to the error messages AgentControl shows -
+and to any unexpected error that reaches AgentControl's last-resort handlers before it is written to the log.
 
 A source location that contains a user name, password, query string or fragment is refused, so a
 secret cannot end up in `settings.json` by being pasted into an address.
@@ -351,7 +478,9 @@ version of the pinned package is available at the source named in the pin (shown
 upgrade chip). Upgrading:
 
 1. Opens and validates the new package. If it opens without error, its contents are
-   assumed good — no checksum or signature verification is performed.
+   assumed good - unless the source requires signed packages (see
+   [Requiring Signed Packages](#requiring-signed-packages)), in which case a package that is not validly
+   signed (or not signed by the pinned publisher) is refused and nothing is changed.
 2. Deletes the four managed agent folders under the repo root, if present.
 3. Extracts the new files into those same four folders.
 4. Ensures your `.gitignore` covers the four managed folders (adding them if not already
@@ -418,8 +547,9 @@ Open Settings from the gear icon on the toolbar to configure:
 - **Package sources** — the list of configured package sources, with **Add Zip-Package Folder**,
   **Add NuGet-Package Folder**, **Add NuGet-Package Server**, **Edit** and **Remove** (see
   [Package Sources](#package-sources)).
-  No checksum or signature
-  verification is performed on packages by AgentControl — the security and integrity of the
+  A NuGet source can require signed packages (see [Requiring Signed Packages](#requiring-signed-packages));
+  a source that does not require them is not checked - no checksum or signature
+  verification is performed on its packages by AgentControl, so the security and integrity of such a
   shared folder or server is the responsibility of whoever maintains it.
 - **Git executable path override** — a specific `git` executable to use instead of resolving
   `git` from the process `PATH`.
@@ -664,7 +794,8 @@ A minimal `.nuspec` listing the files explicitly:
 ```
 
 Pack it with `nuget pack` or `dotnet pack`, and copy the resulting `.nupkg` into the folder the
-source points to.
+source points to. If the source requires signed packages, sign it first (see
+[Requiring Signed Packages](#requiring-signed-packages)).
 
 When you pack with an **SDK-style project** instead, use an explicit `PackagePath` that names the
 `.github` folder, because wildcard globbing may skip dot-folders:

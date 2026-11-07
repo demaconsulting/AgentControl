@@ -558,6 +558,179 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
     }
 
     /// <summary>
+    ///     Test that a sign-in the user saved earlier with their credential helper is used without
+    ///     asking - even though a prompt is available - and that the credential is remembered for
+    ///     the session as one that the user's store holds too.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_ListVersions_SavedSignInExists_UsedWithoutAsking()
+    {
+        // Arrange: a protected feed, a saved sign-in, and a prompt that must not be used
+        var id = UniqueId();
+        var feed = await StartFeedAsync(id, "1.0.0");
+        RequireSignIn(feed);
+        var origin = FeedOrigin.Create(new Uri(feed.IndexUrl));
+        var usersStore = new FakeRememberedCredentialStore();
+        usersStore.Save(origin, new NuGetCredential(FeedUser, SentinelPassword));
+        var store = new SessionCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        var provider = CreateProvider(feed, new PackageCredentialContext(store, prompt, usersStore));
+
+        // Act
+        var versions = await provider.ListVersionsAsync(id, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("1.0.0", Assert.Single(versions).Version.ToString());
+        Assert.Equal(0, prompt.AskCount);
+        Assert.Equal(1, usersStore.CountOf("fill"));
+        Assert.True(store.IsFromRememberedStore(origin));
+    }
+
+    /// <summary>
+    ///     Test that background work (no prompt available) also signs in with a saved sign-in, so a
+    ///     repo card's upgrade check does not need the user once they chose to remember the sign-in.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_ListVersions_NoPromptButSavedSignIn_BackgroundCheckSucceeds()
+    {
+        // Arrange
+        var id = UniqueId();
+        var feed = await StartFeedAsync(id, "1.0.0");
+        RequireSignIn(feed);
+        var usersStore = new FakeRememberedCredentialStore();
+        usersStore.Save(FeedOrigin.Create(new Uri(feed.IndexUrl)), new NuGetCredential(FeedUser, SentinelPassword));
+        var provider = CreateProvider(feed, new PackageCredentialContext(new SessionCredentialStore(), null, usersStore));
+
+        // Act
+        var versions = await provider.ListVersionsAsync(id, CancellationToken.None);
+
+        // Assert
+        Assert.Single(versions);
+    }
+
+    /// <summary>
+    ///     Test that a saved sign-in the server rejects (the password was changed, say) is removed
+    ///     from the user's credential store and forgotten for the session, and the user is then asked
+    ///     exactly once - with the dialog saying the last sign-in did not work and offering to
+    ///     remember the new one.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_ListVersions_SavedSignInRejected_RemovedFromTheUsersStoreAndUserAskedOnce()
+    {
+        // Arrange: the saved password is stale, the user types the right one
+        var id = UniqueId();
+        var feed = await StartFeedAsync(id, "1.0.0");
+        RequireSignIn(feed);
+        var origin = FeedOrigin.Create(new Uri(feed.IndexUrl));
+        var usersStore = new FakeRememberedCredentialStore();
+        usersStore.Save(origin, new NuGetCredential(FeedUser, "stale-" + SentinelPassword));
+        var store = new SessionCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential(FeedUser, SentinelPassword));
+        var provider = CreateProvider(feed, new PackageCredentialContext(store, prompt, usersStore));
+
+        // Act
+        var versions = await provider.ListVersionsAsync(id, CancellationToken.None);
+
+        // Assert
+        Assert.Single(versions);
+        Assert.Equal(1, usersStore.CountOf("reject"));
+        Assert.Null(usersStore.Peek(origin));
+        var request = Assert.Single(prompt.Requests);
+        Assert.True(request.PreviousCredentialRejected);
+        Assert.True(request.CanRemember);
+        Assert.False(store.IsFromRememberedStore(origin));
+        Assert.True(store.TryGet(origin, out var kept));
+        Assert.Equal(SentinelPassword, kept!.Secret);
+    }
+
+    /// <summary>
+    ///     Test that a credential the user typed and chose to remember is handed to their credential
+    ///     store once the server has accepted it, and that the session then counts it as saved.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_ListVersions_RememberTicked_SavedByTheUsersStoreAfterSuccess()
+    {
+        // Arrange
+        var id = UniqueId();
+        var feed = await StartFeedAsync(id, "1.0.0");
+        RequireSignIn(feed);
+        var origin = FeedOrigin.Create(new Uri(feed.IndexUrl));
+        var usersStore = new FakeRememberedCredentialStore();
+        var store = new SessionCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential(FeedUser, SentinelPassword), remember: true);
+        var provider = CreateProvider(feed, new PackageCredentialContext(store, prompt, usersStore));
+
+        // Act
+        await provider.ListVersionsAsync(id, CancellationToken.None);
+
+        // Assert
+        Assert.True(Assert.Single(prompt.Requests).CanRemember);
+        Assert.Equal(1, usersStore.CountOf("approve"));
+        Assert.Equal(SentinelPassword, usersStore.Peek(origin)!.Secret);
+        Assert.True(store.IsFromRememberedStore(origin));
+    }
+
+    /// <summary>
+    ///     Test that a credential the server rejects is never handed to the user's credential store,
+    ///     even when the user ticked Remember, and that without ticking it nothing is ever saved.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task NuGetSourceProvider_ListVersions_WrongPasswordOrRememberNotTicked_NothingIsSaved(bool rememberTicked)
+    {
+        // Arrange: a wrong password with Remember ticked, or the right password without it
+        var id = UniqueId();
+        var feed = await StartFeedAsync(id, "1.0.0");
+        RequireSignIn(feed);
+        var usersStore = new FakeRememberedCredentialStore();
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(
+            new NuGetCredential(FeedUser, rememberTicked ? "wrong-" + SentinelPassword : SentinelPassword), rememberTicked);
+        var provider = CreateProvider(feed, new PackageCredentialContext(new SessionCredentialStore(), prompt, usersStore));
+
+        // Act
+        try
+        {
+            await provider.ListVersionsAsync(id, CancellationToken.None);
+        }
+        catch (PackageSourceAccessException)
+        {
+            // The wrong password is rejected by the server; what matters is what was saved
+        }
+
+        // Assert
+        Assert.Equal(0, usersStore.CountOf("approve"));
+    }
+
+    /// <summary>
+    ///     Test that a server source that requires signed packages refuses an unsigned package with
+    ///     a signature failure (not a "server unreachable" one), on every platform, and installs
+    ///     nothing.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_Acquire_ServerRequiresSignaturesAndPackageUnsigned_IsRejectedAsASignatureFailure()
+    {
+        // Arrange
+        var id = UniqueId();
+        var feed = await StartFeedAsync(id, "1.0.0");
+        var definition = Definition(feed.IndexUrl, allowInsecureHttp: true, packageIds: ["any.package"]);
+        definition.RequireSignedPackages = true;
+        var provider = new NuGetSourceProvider(definition, CreateTempDirectory());
+        var package = Assert.Single(await provider.ListVersionsAsync(id, CancellationToken.None));
+
+        // Act
+        var ex = await Assert.ThrowsAsync<PackageSourceAccessException>(
+            () => provider.AcquireAsync(package, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(PackageSourceFailureKind.SignatureRejected, ex.Kind);
+        Assert.Contains($"Package '{id}' 1.0.0 from source 'Feed' is not validly signed", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Starts a mock feed carrying versions of one package and tracks it for disposal.
     /// </summary>
     /// <param name="packageId">The package ID.</param>

@@ -22,7 +22,11 @@
             <Setter Property="Foreground" Value="#E5534B" />
         </Style>
     </Window.Styles>
-    <StackPanel Margin="16" Spacing="6">
+    <!-- The form scrolls when the window is taller than the screen allows (the window limits its own
+         height on opening); the Save and Cancel buttons stay visible below it -->
+    <Grid Margin="16" RowDefinitions="*,Auto">
+    <ScrollViewer Grid.Row="0" Name="SourceEditorScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Spacing="6" Margin="0,0,12,0">
 
         <!-- Alias: the name repos use to refer to this source; fixed once the source exists -->
         <TextBlock Text="Alias" FontWeight="Bold" />
@@ -148,6 +152,43 @@
                         Foreground="Red" FontSize="12" TextWrapping="Wrap" />
         </StackPanel>
 
+        <!-- Package signatures (NuGet sources only): require a valid signature, optionally pinned to
+             one publisher's certificate. Disabled, with an explanation on hover, where the platform
+             cannot verify signatures. -->
+        <StackPanel Name="SourceEditorSignatureSection"
+                     AutomationProperties.AutomationId="SourceEditorSignatureSection"
+                     IsVisible="{Binding ShowSignatureOptions}" Spacing="6" Margin="0,8,0,0">
+            <TextBlock Text="Package signatures" FontWeight="Bold" />
+            <CheckBox Name="SourceRequireSignedCheckBox"
+                       AutomationProperties.AutomationId="SourceRequireSignedCheckBox"
+                       IsEnabled="{Binding IsRequireSignedEnabled}"
+                       IsChecked="{Binding RequireSignedPackages}"
+                       ToolTip.Tip="{Binding RequireSignedTooltip}"
+                       ToolTip.ShowOnDisabled="True"
+                       Content="Require signed packages" />
+            <TextBlock Name="SourceSignatureHelpText"
+                        AutomationProperties.AutomationId="SourceSignatureHelpText"
+                        Text="{x:Static vm:SourceEditorViewModel.SignatureHelpText}"
+                        FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+            <TextBlock Text="Trusted signer certificate fingerprint (SHA-256)" Margin="0,2,0,0" />
+            <TextBox Name="SourceSignerFingerprintTextBox"
+                      AutomationProperties.AutomationId="SourceSignerFingerprintTextBox"
+                      IsEnabled="{Binding IsFingerprintEnabled}"
+                      PlaceholderText="Optional - for example A3:AF:7A:F1:1B:B8:EB:F7:..."
+                      ToolTip.Tip="Only packages signed by the publisher with this certificate are accepted"
+                      ToolTip.ShowOnDisabled="True"
+                      Text="{Binding SignerFingerprint}" />
+            <TextBlock Name="SourceFingerprintHelpText"
+                        AutomationProperties.AutomationId="SourceFingerprintHelpText"
+                        Text="{x:Static vm:SourceEditorViewModel.FingerprintHelpText}"
+                        FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+            <TextBlock Name="SourceFingerprintErrorText"
+                        AutomationProperties.AutomationId="SourceFingerprintErrorText"
+                        IsVisible="{Binding FingerprintError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Text="{Binding FingerprintError}"
+                        Foreground="Red" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+
         <!-- Test connection (servers only): try the address before saving. Shows progress with a
              Cancel button while it runs, then the outcome in words. -->
         <StackPanel Name="SourceEditorTestSection"
@@ -170,7 +211,22 @@
                          Command="{Binding CancelTestCommand}"
                          ToolTip.Tip="Stop the connection test (this also closes a sign-in dialog it opened)"
                          Content="Cancel" />
+                <Button Name="SourceForgetSignInButton"
+                         AutomationProperties.AutomationId="SourceForgetSignInButton"
+                         Command="{Binding ForgetSavedSignInCommand}"
+                         ToolTip.Tip="{Binding ForgetTooltip}"
+                         ToolTip.ShowOnDisabled="True">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <materialIcons:MaterialIcon Kind="KeyRemove" />
+                        <TextBlock Text="{x:Static vm:SourceEditorViewModel.ForgetLabel}" />
+                    </StackPanel>
+                </Button>
             </StackPanel>
+            <TextBlock Name="SourceForgetResultText"
+                        AutomationProperties.AutomationId="SourceForgetResultText"
+                        IsVisible="{Binding HasForgetResult}"
+                        Text="{Binding ForgetResultText}"
+                        FontSize="12" Opacity="0.85" TextWrapping="Wrap" />
 
             <!-- Progress while the test runs -->
             <StackPanel Name="SourceTestProgressPanel"
@@ -210,8 +266,10 @@
                 </StackPanel>
             </Border>
         </StackPanel>
+    </StackPanel>
+    </ScrollViewer>
 
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">
             <Button Name="SourceEditorCancelButton"
                      AutomationProperties.AutomationId="SourceEditorCancelButton"
                      ToolTip.Tip="Close without saving this source"
@@ -225,5 +283,5 @@
                      Content="Save"
                      Command="{Binding SaveCommand}" />
         </StackPanel>
-    </StackPanel>
+    </Grid>
 </Window>

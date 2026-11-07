@@ -98,3 +98,62 @@ sections:
           - SourceEditorViewModel_SaveCommand_ValidNuGetSource_SavesPackageIds
           - SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved
           - SourceEditorViewModel_SaveCommand_InvalidEditor_DoesNotRaiseSaved
+
+      - id: AgentControl-SourceEditorViewModel-SignatureOptions
+        title: >-
+          The SourceEditorViewModel class shall offer, for a NuGet package folder or server source
+          and not for a zip source, the choice "Require signed packages", off by default, with an
+          explanation of what it does and that - without a pinned publisher - any validly signed
+          package, including one from an unrelated publisher, is accepted so pinning is
+          recommended; shall show that choice disabled, with the explanation that package
+          signature verification is not supported on this platform, where signatures cannot be
+          verified; shall keep the saved settings of an existing source it is opened on there; and
+          shall save the choice with the source.
+        justification: |
+          Requiring signed packages is a security control the user should be able to turn on where
+          it works, understand the limit of when no publisher is pinned, and never be led to
+          believe is active where it cannot be; a zip package carries no signature, so offering it
+          there would be misleading.
+        tests:
+          - SourceEditorViewModel_SignatureOptions_OfferedForNuGetOnlyAndOffByDefault
+          - SourceEditorViewModel_RequireSigned_SupportedPlatform_CheckboxEnabledAndTickingEnablesTheFingerprint
+          - SourceEditorViewModel_RequireSigned_UnsupportedPlatform_CheckboxDisabledWithExplanation
+          - SourceEditorViewModel_EditExistingRequiringSource_UnsupportedPlatform_KeepsTheSettings
+          - SourceEditorViewModel_Save_ZipNeverRequiresSignaturesAndFolderCan
+          - SourceEditorViewModel_Save_RequireSignedWithoutFingerprint_PinsNothing
+
+      - id: AgentControl-SourceEditorViewModel-SignerFingerprint
+        title: >-
+          The SourceEditorViewModel class shall let the user pin the trusted publisher by typing
+          or pasting the SHA-256 fingerprint of its signing certificate - usable only while signed
+          packages are required, optional, accepted with or without colons, dashes or spaces and in
+          either letter case, explained with how to find it - shall explain what is wrong with text
+          that is not such a fingerprint without blocking a source that leaves it empty, and shall
+          save a usable fingerprint in one normalized form and none when it is not in use.
+        justification: |
+          Fingerprints are copied from tools and certificate viewers in many spellings; accepting
+          them as pasted and saving one form avoids needless errors, while an unreadable
+          fingerprint must be caught in the dialog because it would otherwise stop the source from
+          working or, worse, be ignored.
+        tests:
+          - SourceEditorViewModel_Fingerprint_ValidationFollowsTheRules
+          - SourceEditorViewModel_Fingerprint_NotInUse_IsIgnoredAndNotSaved
+          - SourceEditorViewModel_Save_RequireSignedWithFingerprint_SavesTheNormalizedFingerprint
+
+      - id: AgentControl-SourceEditorViewModel-ForgetSavedSignIn
+        title: >-
+          The SourceEditorViewModel class shall offer, for a NuGet package server source with an
+          acceptable address and only when the user's credential store can be reached, the action
+          "Forget saved sign-in", shall ask for confirmation naming the server before doing
+          anything, and shall report in words whether nothing was saved, the saved sign-in was
+          forgotten, or it could not be removed and must be removed with the credential store's
+          own tools.
+        justification: |
+          A remembered sign-in must be revocable from the place the user sees the server, without
+          a surprise - the confirmation says which server and what will be removed - and the
+          outcome must be honest when the credential store refuses.
+        tests:
+          - SourceEditorViewModel_ForgetSavedSignIn_AvailableOnlyForAUsableServerWithACredentialStore
+          - SourceEditorViewModel_ForgetSavedSignIn_CommandAsksForConfirmationAndForgetsOnlyOnceConfirmed
+          - SourceEditorViewModel_ForgetSavedSignIn_ReportsNothingSavedRefusalAndFailureInWords
+          - SourceEditorViewModel_ForgetSavedSignIn_NotAvailable_DoesNothing

@@ -15,6 +15,9 @@ N/A - standard test environment.
 
 - A credential is found only for the exact origin it was stored under, and a later `Set` replaces it.
 - `Forget` removes only the named origin's credential; `Clear` removes all of them.
+- Forgetting an exact rejected credential leaves a different one that was stored for the same origin meanwhile.
+- The record of whether a credential came from the user's credential store follows the credential.
+- The look-up of the user's credential store runs once per origin per session however many callers ask.
 - Serializing or printing the store never reveals a stored secret.
 - Null arguments are refused.
 
@@ -35,6 +38,24 @@ whether one was removed; `Clear` forgets every credential. This scenario is test
 `SessionCredentialStore_Forget_StoredOrigin_RemovesOnlyThatCredential` and
 `SessionCredentialStore_Clear_StoredCredentials_ForgetsAll`, covering
 `AgentControl-SessionCredentialStore-ForgetAndClear`.
+
+**SessionCredentialStore_ForgetExactCredential**: Forgetting a rejected credential removes the origin's entry only
+when it is still that exact credential; a different credential stored for the origin meanwhile is kept and the call
+reports that nothing was removed. This scenario is tested by
+`SessionCredentialStore_ForgetExactCredential_OnlyRemovesTheSameCredential`, covering
+`AgentControl-SessionCredentialStore-ForgetExactCredential`.
+
+**SessionCredentialStore_RememberedOrigin**: A credential stored as coming from the user's credential store is
+reported as such; storing a different credential without the mark clears it; forgetting the credential drops it, and
+the longer `TryAcquire` reports it with the credential. This scenario is tested by
+`SessionCredentialStore_FromRememberedStoreMark_FollowsTheCredential`, covering
+`AgentControl-SessionCredentialStore-RememberedOrigin`.
+
+**SessionCredentialStore_RememberedLookupOnce**: Several simultaneous and later requests for the same origin run the
+look-up delegate once and all wait for the same task; another origin runs its own look-up; after the store is cleared
+the look-up is allowed again. This scenario is tested by
+`SessionCredentialStore_EnsureRememberedLookup_RunsOncePerOrigin`, covering
+`AgentControl-SessionCredentialStore-RememberedLookupOnce`.
 
 **SessionCredentialStore_RegistersSecretsForRedaction**: A stored secret is removed from text by the
 redaction engine; replacing the credential withdraws the old secret and registers the new one; `Forget` and

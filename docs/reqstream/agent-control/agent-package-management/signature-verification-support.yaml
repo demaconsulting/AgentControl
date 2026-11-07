@@ -1,0 +1,33 @@
+---
+# Software Unit Requirements for the SignatureVerificationSupport Class
+#
+# SignatureVerificationSupport tells whether the current platform can verify NuGet package
+# signatures, so the option to require signed packages is only offered where it can be honored.
+
+sections:
+  - title: SignatureVerificationSupport Unit Requirements
+    requirements:
+      - id: AgentControl-SignatureVerificationSupport-PlatformSupport
+        title: >-
+          The SignatureVerificationSupport class shall report that package signature verification
+          is supported on Windows, Linux and macOS - provided the platform's certificate-chain
+          facility works - and that it is not supported on any other platform.
+        justification: |
+          Requiring signatures is only meaningful where verification really happens; the supported
+          platforms are those on which the verification is exercised by the project's automated
+          builds, and a platform whose certificate facility fails cannot be trusted to verify.
+        tests:
+          - SignatureVerificationSupport_IsSupportedPlatform_WindowsLinuxAndMacOsOnly
+          - SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue
+
+      - id: AgentControl-SignatureVerificationSupport-UnsupportedExplanation
+        title: >-
+          The SignatureVerificationSupport class shall provide one fixed explanation, "Package
+          signature verification is not supported on this platform", for use wherever the
+          requirement cannot be honored.
+        justification: |
+          The settings dialog and the refusal message must say the same thing for the same
+          reason, so the user can recognize that an option is unavailable because of the platform
+          and not because of something they did.
+        tests:
+          - SignatureVerificationSupport_UnsupportedMessage_IsTheDocumentedExplanation

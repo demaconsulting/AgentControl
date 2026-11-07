@@ -17,6 +17,7 @@ words:
   - agentcontrol
   - abbrevref
   - apikey
+  - askpass
   - ARGLOGGER
   - arglogger
   - ARGLOGGERSTUB
@@ -26,14 +27,23 @@ words:
   - contoso
   - esac
   - favorited
+  - findstr
   - gitdir
   - headlessly
   - HMAC
+  - libsecret
   - lsfiles
+  - metacharacters
   - Mvvm
   - MVVM
+  - Newtonsoft
   - NTLM
+  - osxkeychain
   - Postconditions
+  - timestamper
+  - unticked
+  - unticking
+  - urlmatch
   - Inlines
   - inlines
   - renderable

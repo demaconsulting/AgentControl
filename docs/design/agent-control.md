@@ -29,6 +29,7 @@ flowchart TD
         PackageSourceRegistry
         ZipFolderSourceProvider
         NuGetSourceProvider
+        SignatureVerificationSupport
     end
     subgraph PackageCredentials
         FeedOrigin
@@ -50,6 +51,7 @@ flowchart TD
     end
     subgraph GitIntegration
         GitClient
+        GitCredentialClient
         CommittedAgentFilesCache
     end
     subgraph Settings
@@ -76,10 +78,13 @@ flowchart TD
     ZipFolderSourceProvider --> PackageSource
     NuGetSourceProvider --> PackageCredentialCallback
     NuGetSourceProvider --> SecretRedactingLogger
+    NuGetSourceProvider --> SignatureVerificationSupport
+    SourceEditorViewModel --> SignatureVerificationSupport
     PackageCredentialCallback --> SessionCredentialStore
     PackageCredentialCallback --> FeedOrigin
     SettingsWindowViewModel --> SourceEditorViewModel
     PackageCredentialCallback -.->|ICredentialPrompt| CredentialPromptViewModel
+    PackageCredentialCallback -.->|IRememberedCredentialStore| GitCredentialClient
     PackageVersionCache --> PackageSourceRegistry
     RepoCardViewModel --> PackageContentExtractor
     PackageZipExtractor --> PackageContentExtractor
@@ -96,7 +101,9 @@ logging (`Logging`), and hands off to Avalonia's classic desktop lifetime, which
 (`Settings`) and shows `MainWindowViewModel`'s window (`LauncherUI`). From there, `LauncherUI`'s
 view-models orchestrate the remaining subsystems: `AgentPackageManagement` for discovering available
 package versions (and, for a NuGet package server, signing in through `PackageCredentials`, which keeps
-credentials in memory only and offers them only to the server they were typed for), `RepoSync` for
+credentials in memory only - unless the user opts in to having their own Git credential helper, reached through
+`GitIntegration`, keep one - and offers them only to the server they were typed for; and, for a source that requires
+signed packages, refusing any package that is not validly signed), `RepoSync` for
 extracting a package zip's managed folders (from a zip or an
 unpacked NuGet package folder) into a repo and displaying release notes, `RepoConfig` for persisting
 each repo's pin, `GitIntegration` for status/pull/branch queries, and `AgentToolLauncher` for
@@ -145,9 +152,14 @@ alias.
   `https` and end in `index.json`; plain `http` is accepted only when the user explicitly ticks
   "Allow insecure HTTP" for that source. A server that needs credentials is signed in to as described under
   *Credentials* below. Nothing about a
-  source is ever written to the target repo, including its NuGet configuration. No
-  checksum or signature verification is performed (signature enforcement is later work); the
-  security and integrity of a shared folder or server is the responsibility of whoever maintains it.
+  source is ever written to the target repo, including its NuGet configuration. A NuGet source (folder or
+  server) can require signed packages, optionally from one publisher whose certificate fingerprint the user pins:
+  a package that does not meet the requirement is never installed, whether it was just downloaded or was already
+  in the source's private cache, the user's own NuGet trust settings neither widen nor narrow the requirement,
+  and on a platform that cannot verify signatures the requirement is not offered and a source whose settings
+  require it is refused (`AgentControl-System-PackageAuthenticity`). A zip package carries no signature, and a source
+  that does not require signatures is not checked; the integrity of such a shared folder or server is the
+  responsibility of whoever maintains it.
 - *Constraints*: AgentControl never stores a password or token. Users must only add servers they trust
   (see *Risk Control Measures*).
 
@@ -157,14 +169,17 @@ alias.
 - *Role*: Consumer (the user supplies them; `PackageCredentials` hands them to the NuGet client).
 - *Contract*: Credentials come, in order, from what NuGet itself knows (a `nuget.config` source with the
   same address and its stored credentials, or an installed credential-provider plug-in running without
-  interaction), from what the user already typed this session, and only then from the sign-in dialog, at most
-  once per operation (`AgentControl-System-NuGetSources`, `AgentControl-System-CredentialSafety`). A
-  credential the user types is kept in memory for the session only and is offered only to the server it was
+  interaction), from what the user already typed this session or saved earlier in their own Git credential helper,
+  and only then from the sign-in dialog, at most once per operation (`AgentControl-System-NuGetSources`,
+  `AgentControl-System-CredentialSafety`). A
+  credential the user types is kept in memory for the session only - unless the user ticks "Remember on this
+  computer", in which case the user's own Git credential helper keeps it, never AgentControl - and is offered only
+  to the server it was
   typed for; it is sent to a server only when that server challenges (HTTP 401), never preemptively. Work the
   user did not start (the background upgrade check) never opens the dialog
   (`AgentControl-System-ResponsiveOperations`).
-- *Constraints*: No credential is ever written to the settings file, a repo's pin file, a repo, or the log
-  (`AgentControl-System-CredentialSafety`).
+- *Constraints*: No credential is ever written by AgentControl to the settings file, a repo's pin file, a repo,
+  or the log (`AgentControl-System-CredentialSafety`).
 
 **Per-Repo Pin File**: `.agentcontrol.json` at each tracked repo's root.
 
@@ -227,12 +242,17 @@ override for hermetic testing).
 - **Serilog** (`AgentControl-OTS-Serilog-WriteLogFile`): structured-logging library backing
   the `Logging` subsystem's rolling diagnostic log file. See `docs/design/ots/serilog.md`.
 - **NuGetCaching** (`AgentControl-OTS-NuGetCaching-ListAndCache`,
-  `AgentControl-OTS-NuGetCaching-ServerAccess`): the DemaConsulting.NuGet.Caching
-  library that lists the versions of, and unpacks, packages from NuGet package folder and server sources
+  `AgentControl-OTS-NuGetCaching-ServerAccess`, `AgentControl-OTS-NuGetCaching-SignatureVerification`): the
+  DemaConsulting.NuGet.Caching
+  library that lists the versions of, unpacks and - when a source requires signed packages - verifies the signatures
+  of, packages from NuGet package folder and server sources
   for `NuGetSourceProvider`, and whose `NuGetCredential` type and credential callback `PackageCredentials`
   uses. See `docs/design/ots/nuget-caching.md`. `PackageCredentials` also uses
   `Microsoft.Extensions.Logging` (the logger abstraction the library takes), which ships with the
   application's logging stack.
+- **The user's git executable and Git credential helper** (not a software item of this system): when the user
+  ticks "Remember on this computer", `GitCredentialClient` asks them - through `git credential` - to keep, find and
+  remove a package server's sign-in, so that AgentControl never stores a secret itself.
 - **FlaUI** (`AgentControl-OTS-FlaUI-DriveUiTests`): drives the published application's UI
   via Windows UI Automation for end-to-end test scenarios. See `docs/design/ots/flaui.md`.
 - **WiX Toolset** (`AgentControl-OTS-WixToolset-BuildInstaller`): packages the published
@@ -250,13 +270,25 @@ untrusted input: pins are bound to their source alias and never resolved elsewhe
 that rejects links and path traversal, and no secret is ever stored (see
 `docs/design/agent-control/agent-package-management.md` and `repo-sync.md`). **Credentials for package
 servers** are the other accepted risk area and are controlled as follows (`AgentControl-System-CredentialSafety`):
-a credential is never persisted (not in the settings file, a pin file, the log or a repo), is kept in memory
-for the session only and cleared at exit, is asked for only through a dialog that shows which server receives
-it, is offered by AgentControl only to the origin (scheme, host and port) of the configured server - a
+a credential is never persisted by AgentControl (not in the settings file, a pin file, the log or a repo), is kept
+in memory for the session only and cleared at exit, is asked for only through a dialog that shows which server
+receives it, is offered by AgentControl only to the origin (scheme, host and port) of the configured server - a
 redirect target or any other host is answered with no credential and never triggers a dialog - and is only
 sent to a server that challenges it (HTTP 401), never preemptively; plain `http` needs an explicit per-source
 opt-in; and the NuGet client's log output is redacted so secrets, authorization headers and addresses with
-query strings never reach the log (see `docs/design/agent-control/package-credentials.md`). **Residual risk,
+query strings never reach the log - and so is any exception that reaches the process-wide unhandled-exception
+handlers (see `docs/design/agent-control/package-credentials.md` and `logging.md`). The one exception to "in
+memory for the session only" is the user's explicit, per-credential, off-by-default choice "Remember on this
+computer": the credential is then kept by the user's own Git credential helper in the operating system's protected
+store - never by AgentControl - and is used without asking, removed when the server rejects it, and forgettable
+from the source's editor (`AgentControl-PackageCredentials-RememberOnRequest`,
+`AgentControl-GitIntegration-SavedSignIns`; see `docs/design/agent-control/git-integration/git-credential-client.md`).
+**Package authenticity** (`AgentControl-System-PackageAuthenticity`) is controlled per source: a NuGet source can
+require signed packages and pin the publisher's certificate; every acquisition is checked, including of a package
+already cached, the user's own NuGet trust settings cannot widen or narrow the requirement (the source's generated
+configuration clears every inherited trusted signer), and where signatures cannot be verified a source that requires
+them is refused rather than skipped (see `docs/design/agent-control/agent-package-management.md`). **Residual
+risk,
 stated honestly:** the origin scoping is a guarantee about what AgentControl itself supplies. Once a server
 has authenticated, the NuGet client answers HTTP 401 challenges from *other* hosts that the server's own
 service index advertises for package resources with the same credential - observed in testing, where a
@@ -284,7 +316,8 @@ an unwanted or repeated file write.
    (`PackageSourceRegistry`/`PackageVersionCache`) against the source the pin names - and only
    that source - showing an error state when that source is not configured. The background check
    never opens the sign-in dialog: for a server that needs credentials it uses a credential already
-   typed this session or sets the card's source problem to say a sign-in is needed
+   typed this session or saved with the user's Git credential helper, or sets the card's source problem to say a
+   sign-in is needed
    (`AgentControl-System-ResponsiveOperations`).
 4. User actions on a card dispatch to the relevant subsystem: Pull to `GitClient.Pull`
    (gated on a clean working tree, `AgentControl-System-Pull`); Launch to
@@ -294,7 +327,9 @@ an unwanted or repeated file write.
    (`IPackageSourceProvider.ListVersionsAsync`/`AcquireAsync`) - for a NuGet server the provider signs
    in as needed, asking through `AvaloniaCredentialPrompt` and the `CredentialPromptViewModel` dialog
    when the user started the action and keeping what was typed in `SessionCredentialStore` once the
-   operation succeeded - followed by
+   operation succeeded (and, when the user ticked "Remember on this computer", in their Git credential helper
+   through `GitCredentialClient`), and - when the source requires signed packages - checking the package's
+   signature before it is handed on - followed by
    `PackageContentExtractor.Extract` and `RepoPinStore.Save` recording the source alias
    (`AgentControl-System-SelectPackage`, `AgentControl-System-PinFile`); Upgrade to the pin's
    source's latest version followed by the same extract/pin/`ReleaseNotesViewerViewModel`
@@ -326,6 +361,10 @@ an unwanted or repeated file write.
   (`AgentControl-System-TestIsolation`).
 - Path safety: all caller-supplied path components are validated by `PathHelpers.SafePathCombine`
   before file-system use.
-- Credential safety: a credential for a package server is never persisted, is kept in memory for the
-  session, is offered only to the server's origin and never reaches the log
-  (`AgentControl-System-CredentialSafety`); users must only add servers they trust.
+- Credential safety: a credential for a package server is never persisted by AgentControl, is kept in memory for
+  the session (or, only when the user explicitly chooses, by their own Git credential helper), is offered only to
+  the server's origin and never reaches the log (`AgentControl-System-CredentialSafety`); users must only add
+  servers they trust.
+- Package authenticity: a source that requires signed packages never supplies one that fails the check, never
+  skips the check, and decides trusted signers from its own description alone
+  (`AgentControl-System-PackageAuthenticity`). Signature verification is supported on Windows, Linux and macOS.

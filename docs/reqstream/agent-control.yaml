@@ -265,24 +265,28 @@ sections:
       - id: AgentControl-System-Settings
         title: >-
           The tool shall let the user configure the package sources - including testing a package
-          server's connection before saving it - a git executable override, the agent tool
+          server's connection before saving it and, for a NuGet source, requiring signed packages
+          from it - a git executable override, the agent tool
           selection, and a shell/terminal preference.
         tags: [system]
         justification: |
           The package source locations, git installation, preferred agentic CLI tool, and
           preferred terminal all vary by company/developer, so they must be user-editable
           rather than hardcoded; a server source depends on an address and a sign-in that the
-          user can only get right if they can try it.
+          user can only get right if they can try it; and whether a source's packages must be
+          signed is a per-source decision that belongs with the source.
         children:
           - AgentControl-LauncherUI-Settings
           - AgentControl-LauncherUI-PackageSources
           - AgentControl-LauncherUI-TestConnection
+          - AgentControl-LauncherUI-SignatureOptions
           - AgentControl-Settings-Persistence
         tests:
           - windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt
           - windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt
           - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
+          - SourceEditorWindow_SignatureOptions_TickingEnablesTheFingerprintAndValidatesIt
 
       - id: AgentControl-System-ResponsiveOperations
         title: >-
@@ -308,39 +312,103 @@ sections:
 
       - id: AgentControl-System-CredentialSafety
         title: >-
-          The tool shall never persist a credential it is given for a package source - not in its
-          settings, a repo's pin file, its log or the target repo - shall keep a credential the
-          user types only for the current session, shall never show or log one (whether it
-          appears in a message, a header, an address or an exception), and shall offer a
+          The tool shall never itself persist a credential it is given for a package source - not
+          in its settings, a repo's pin file, its log or the target repo - shall keep a credential
+          the user types only for the current session unless the user explicitly chooses
+          "Remember on this computer", in which case only the user's own Git credential helper
+          keeps it and never the tool, shall use a credential saved there without asking and remove
+          it from there when the server rejects it or the user asks to forget it, shall never show
+          or log one (whether it appears in a message, a header, an address or an exception,
+          including an exception no part of the tool was prepared for), and shall offer a
           credential only to the server it was typed for.
         tags: [system, security]
         justification: |
-          Package servers need credentials, but a credential that is written anywhere outlives
-          the session and can leak through backups, synced profiles, shared logs or a commit;
-          and a credential offered to a host other than the one it was typed for is a credential
-          given away. The tool therefore asks for a credential only when it is needed, keeps it in
-          memory, and uses it only for its own server. A server's own index can still direct the
-          NuGet client to resources on other hosts that then challenge it, so users must only add
-          servers they trust.
+          Package servers need credentials, but a credential that is written anywhere by the tool
+          outlives the session and can leak through backups, synced profiles, shared logs or a
+          commit; and a credential offered to a host other than the one it was typed for is a
+          credential given away. The tool therefore asks for a credential only when it is needed,
+          keeps it in memory, and uses it only for its own server. Typing a token every session is
+          a real burden, so the user may opt in, per credential, to having their own Git credential
+          helper - the operating system's protected store they already trust with their other
+          secrets - keep it; the tool itself never stores a secret, the choice is off by default,
+          and the saved credential can be forgotten from the tool and is removed when it stops
+          working. A server's own index can still direct the NuGet client to resources on other
+          hosts that then challenge it, so users must only add servers they trust.
         children:
           - AgentControl-Settings-PackageSources
           - AgentControl-AgentPackageManagement-SourceDefinitions
           - AgentControl-PackageCredentials-SessionOnly
           - AgentControl-PackageCredentials-ScopedToFeedOrigin
           - AgentControl-PackageCredentials-SecretsNeverLogged
+          - AgentControl-PackageCredentials-RememberOnRequest
+          - AgentControl-PackageCredentials-ForgetSavedSignIn
+          - AgentControl-GitIntegration-SavedSignIns
           - AgentControl-LauncherUI-SignIn
+          - AgentControl-LauncherUI-RememberSignIn
+          - AgentControl-LauncherUI-ForgetSavedSignIn
+          - AgentControl-Logging-UnhandledExceptionsRedacted
         tests:
           # The end-to-end test signs in with a sentinel password and then searches every file the
           # application wrote - the settings, the repo pin and the log folder - for it. The
           # end-to-end test cannot show that a credential is withheld from a second server, which
           # is verified one level down, and the sentinel search covers the log only for what the
           # application wrote during that flow. That nothing is written into the target repo's
-          # files is shown at unit level.
+          # files is shown at unit level. Remembering a sign-in needs a real credential helper and
+          # a person at the dialog, so it is verified without a user interface: against a real git
+          # with an isolated credential store, against a stub git (arguments, environment, input,
+          # time limit and log content) and through the credential logic with a fake store.
           - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
           - PackageCredentials_CredentialForOneFeed_IsNeverOfferedToAnotherOrigin
           - NuGetSourceProvider_ListVersions_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin
           - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig
           - RepoCardViewModel_PackageSourceFailureWithSecrets_StatusTextAndLogsAreRedacted
+          - PackageCredentials_RememberLifeCycle_SavedByTheUsersStoreAndFoundInALaterSession
+          - GitCredentialClient_RealGitWithIsolatedStore_MissApproveFillRejectLifeCycle
+          - GitCredentialClient_AllOperations_NeverLogRequestOrResponseContent
+          - NuGetSourceProvider_ListVersions_RememberTicked_SavedByTheUsersStoreAfterSuccess
+          - NuGetSourceProvider_ListVersions_WrongPasswordOrRememberNotTicked_NothingIsSaved
+          - NuGetSourceProvider_ListVersions_SavedSignInRejected_RemovedFromTheUsersStoreAndUserAskedOnce
+          - PackageCredentialContext_ForgetSavedSignIn_ReportsWhatWasDone
+          - LoggingSetup_ReportUnhandledException_ExceptionCarryingSecrets_LogsOnlyASanitizedDescription
+
+      - id: AgentControl-System-PackageAuthenticity
+        title: >-
+          The tool shall let the user require, for each NuGet package source, that packages are
+          validly signed - optionally only by one publisher whose signing-certificate fingerprint
+          the user pins - shall never install a package that does not meet its source's
+          requirement, whether the package was just downloaded or was already on the computer,
+          shall not let the user's own NuGet trust settings widen or narrow the requirement, and,
+          on a platform that cannot verify signatures, shall not offer the requirement and shall
+          refuse to use a source whose settings require it rather than skip the check.
+        tags: [system, security]
+        justification: |
+          An agent package changes the instructions an AI agent follows in a developer's repo, so
+          an organization needs to control who may publish what reaches those repos; a signature
+          from a pinned publisher proves who published a package and that it was not altered since,
+          whether it arrives from a server or a shared folder. A requirement that is quietly not
+          enforced - for a package that was cached earlier, because of a machine-wide trust
+          setting, or because the platform cannot verify - is worse than none, because it creates
+          trust that is not earned. Zip packages carry no signature, so the requirement covers
+          NuGet sources only.
+        children:
+          - AgentControl-AgentPackageManagement-SignedPackages
+          - AgentControl-AgentPackageManagement-SignaturePlatformSupport
+          - AgentControl-AgentPackageManagement-SourceDefinitions
+          - AgentControl-LauncherUI-SignatureOptions
+          - AgentControl-LauncherUI-SignatureIndicator
+          - AgentControl-OTS-NuGetCaching-SignatureVerification
+        tests:
+          # End to end: with a NuGet source that requires signatures the published application
+          # refuses to upgrade to an unsigned package and leaves the repo unchanged. Acceptance of
+          # a validly signed package, the publisher pin and the independence from the user's NuGet
+          # trust settings need a real signed package and are shown one level down against a real
+          # signed package from nuget.org (skipped only where it cannot be reached).
+          - windows@UpgradeMenuItem_Click_NuGetSourceRequiresSignaturesAndPackageUnsigned_IsRefusedAndRepoUnchanged
+          - NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted
+          - NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled
+          - NuGetSourceProvider_Acquire_UsersConfigurationTrustsTheAuthorButOtherSignerPinned_IsStillRejected
+          - NuGetSourceProvider_Acquire_RequirementEnabledAfterPackageWasCached_RejectsTheCachedPackage
+          - NuGetSourceProvider_RequireSignedOnUnsupportedPlatform_FailsClosedForListAndAcquire
 
       - id: AgentControl-System-DiagnosticLogging
         title: >-

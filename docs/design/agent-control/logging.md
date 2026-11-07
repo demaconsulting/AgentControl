@@ -40,7 +40,13 @@ here.
   `AgentControl-OTS-Serilog-WriteLogFile`). Also installs process-wide safety-net handlers for
   `AppDomain.UnhandledException` and `TaskScheduler.UnobservedTaskException` so exceptions
   that would otherwise crash the process or silently vanish are always recorded before the
-  process potentially terminates.
+  process potentially terminates. These handlers see *every* exception in the process, including
+  ones whose message quotes a credential, an `Authorization` value or an address with user
+  information, so they never pass an exception to the log as it is: `ReportUnhandledException` and
+  `ReportUnobservedTaskException` write through a `SecretRedactingLogger` (`PackageCredentials` subsystem), which logs
+  only a sanitized stand-in with the redacted type name, message chain and stack trace
+  (`AgentControl-Logging-UnhandledExceptionsRedacted`). The unhandled object need not be an `Exception`; that case
+  is tolerated.
 - *Constraints*: Throws `InvalidOperationException` when the `logs` directory cannot be
   created (e.g. permissions, invalid path). Not safe to call more than once concurrently; in
   practice it is called exactly once, synchronously, from `Program.Main`.

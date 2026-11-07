@@ -246,13 +246,14 @@ public class SourceEditorViewModelTests
 
     /// <summary>
     ///     Test that editing an existing source keeps its alias fixed, never reports the source's
-    ///     own alias as a duplicate, preserves settings the dialog does not show, and does not
-    ///     modify the source it was given.
+    ///     own alias as a duplicate, preserves its signature settings, and does not modify the
+    ///     source it was given.
     /// </summary>
     [Fact]
     public void SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved()
     {
-        // Arrange: a NuGet source with settings the dialog does not show
+        // Arrange: a NuGet source that requires signatures from a pinned signer
+        const string fingerprint = "A3AF7AF11EBB8EF729D2D91548509717E7E0FF55A129ABC3AEAA8A6940267641";
         var existing = new PackageSourceDefinition
         {
             Alias = "Feed",
@@ -260,9 +261,9 @@ public class SourceEditorViewModelTests
             Location = FullPath("feed"),
             PackageIds = ["a.agents"],
             RequireSignedPackages = true,
-            SignerFingerprint = "ABCDEF"
+            SignerFingerprint = fingerprint
         };
-        var editor = new SourceEditorViewModel(PackageSourceType.Zip, existing, _ => true);
+        var editor = new SourceEditorViewModel(PackageSourceType.Zip, existing, _ => true, signatureVerificationSupported: true);
         PackageSourceDefinition? saved = null;
         editor.Saved += (_, definition) => saved = definition;
 
@@ -283,7 +284,7 @@ public class SourceEditorViewModelTests
         Assert.Equal(FullPath("feed2"), saved.Location);
         Assert.Equal(["a.agents", "b.agents"], saved.PackageIds);
         Assert.True(saved.RequireSignedPackages);
-        Assert.Equal("ABCDEF", saved.SignerFingerprint);
+        Assert.Equal(fingerprint, saved.SignerFingerprint);
         Assert.Equal(FullPath("feed"), existing.Location);
         Assert.Equal(["a.agents"], existing.PackageIds);
     }

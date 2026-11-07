@@ -22,6 +22,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
@@ -44,6 +45,11 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 internal sealed partial class SourceEditorWindow : Window
 {
     /// <summary>
+    ///     The smallest height the window is limited to, however small the screen reports itself
+    ///     to be, so the form never becomes unusably short.
+    /// </summary>
+    private const double MinimumUsableHeight = 360;
+    /// <summary>
     ///     Initializes a new <see cref="SourceEditorWindow"/> with no bound view model; used by
     ///     the Avalonia XAML previewer/loader only. Production code should use
     ///     <see cref="SourceEditorWindow(SourceEditorViewModel)"/>.
@@ -65,10 +71,66 @@ internal sealed partial class SourceEditorWindow : Window
         ArgumentNullException.ThrowIfNull(viewModel);
         DataContext = viewModel;
         viewModel.Saved += (_, definition) => Close(definition);
+        viewModel.ForgetConfirmationRequested += async (_, question) => await ConfirmAndForgetAsync(viewModel, question);
 
         // A connection test still running when the dialog closes (including a sign-in dialog it
         // opened) is abandoned rather than left running unseen
         Closed += (_, _) => viewModel.TestConnectionCommand.Cancel();
+
+        // The form is long (a server source has many sections), so it never grows taller than the
+        // screen's usable area; beyond that the form scrolls and Save/Cancel stay in view
+        Opened += (_, _) => LimitHeightToScreen();
+
+        // Progress, the outcome of a connection test and the outcome of forgetting a sign-in appear
+        // at the bottom of the form; scroll them into view instead of leaving them below the fold
+        viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(SourceEditorViewModel.IsTesting) or nameof(SourceEditorViewModel.HasTestResult)
+                or nameof(SourceEditorViewModel.HasForgetResult))
+            {
+                Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("SourceEditorScrollViewer")?.ScrollToEnd());
+            }
+        };
+    }
+
+    /// <summary>
+    ///     Limits the window's height to what fits on the screen it opened on (the working area,
+    ///     which excludes the taskbar, less a margin), so the form scrolls instead of running off
+    ///     the screen and hiding the Save button.
+    /// </summary>
+    private void LimitHeightToScreen()
+    {
+        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
+        if (screen is null)
+        {
+            return;
+        }
+
+        const double margin = 40;
+        MaxHeight = Math.Max(MinimumUsableHeight, (screen.WorkingArea.Height / screen.Scaling) - margin);
+
+        // Keep the title bar on the screen when the window had opened taller than the area
+        var top = screen.WorkingArea.Y;
+        if (Position.Y < top)
+        {
+            Position = new Avalonia.PixelPoint(Position.X, top + (int)(margin / 2));
+        }
+    }
+
+    /// <summary>
+    ///     Asks the user to confirm forgetting the saved sign-in and forgets it only if they
+    ///     agree.
+    /// </summary>
+    /// <param name="viewModel">The editor view model that performs the forgetting.</param>
+    /// <param name="question">The confirmation question to show.</param>
+    /// <returns>A task that completes when the user has answered and any forgetting is done.</returns>
+    private async Task ConfirmAndForgetAsync(SourceEditorViewModel viewModel, string question)
+    {
+        var confirmed = await new ConfirmationWindow(question).ShowDialog<bool>(this);
+        if (confirmed)
+        {
+            await viewModel.ForgetSavedSignInAsync();
+        }
     }
 
     /// <summary>

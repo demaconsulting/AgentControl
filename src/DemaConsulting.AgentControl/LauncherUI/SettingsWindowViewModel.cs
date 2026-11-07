@@ -20,6 +20,7 @@
 
 using System.Collections.ObjectModel;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.Settings;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
@@ -65,6 +66,12 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     ///     <see langword="null"/> lets the editor create a plain one.
     /// </summary>
     private readonly Func<PackageSourceDefinition, IPackageSourceProvider>? _providerFactory;
+
+    /// <summary>
+    ///     The credential facilities passed to the server editor for "Forget saved sign-in", or
+    ///     <see langword="null"/> when there are none.
+    /// </summary>
+    private readonly PackageCredentialContext? _credentials;
 
     /// <summary>
     ///     How many recent repos are pinned to each source alias (compared case-insensitively),
@@ -125,19 +132,23 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     /// <param name="providerFactory">Creates the provider the server editor's "Test connection"
     ///     uses (so the application can give it the session credentials); <see langword="null"/>
     ///     uses a plain one. Supplied so tests can use a fake.</param>
+    /// <param name="credentials">The credential facilities the server editor's "Forget saved
+    ///     sign-in" uses, or <see langword="null"/> when there are none.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="initial"/> or
     ///     <paramref name="onSave"/> is <see langword="null"/>.</exception>
     public SettingsWindowViewModel(
         AppSettings initial,
         Action<AppSettings> onSave,
         Func<string, CancellationToken, Task<bool>>? folderExists = null,
-        Func<PackageSourceDefinition, IPackageSourceProvider>? providerFactory = null)
+        Func<PackageSourceDefinition, IPackageSourceProvider>? providerFactory = null,
+        PackageCredentialContext? credentials = null)
     {
         ArgumentNullException.ThrowIfNull(initial);
         ArgumentNullException.ThrowIfNull(onSave);
 
         _folderExists = folderExists ?? ((path, token) => Task.Run(() => Directory.Exists(path), token));
         _providerFactory = providerFactory;
+        _credentials = credentials;
         _pinnedRepoCounts = initial.RecentRepos
             .Where(repo => !string.IsNullOrEmpty(repo.PinnedSource))
             .GroupBy(repo => repo.PinnedSource!, StringComparer.OrdinalIgnoreCase)
@@ -367,7 +378,8 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
             editing?.Definition,
             alias => Sources.Any(item => string.Equals(item.Alias, alias, StringComparison.OrdinalIgnoreCase)),
             server,
-            _providerFactory);
+            _providerFactory,
+            _credentials);
         editor.Saved += (_, definition) =>
         {
             if (editing is null)

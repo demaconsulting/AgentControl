@@ -3,15 +3,20 @@
 #### Verification Approach
 
 `SourceEditorViewModel` is verified with unit tests defined in `SourceEditorViewModelTests.cs` (folder
-sources) and `SourceEditorServerViewModelTests.cs` (server sources and the connection test).
+sources), `SourceEditorServerViewModelTests.cs` (server sources and the connection test) and
+`SourceEditorSignatureViewModelTests.cs` (the signature options and "Forget saved sign-in").
 No Avalonia `Window` is constructed; the tests drive the view model's properties and commands
 directly and observe its validation messages, test results and `Saved` event, with the alias-exists
-callback supplied by the test. The connection test runs against a `FakePackageSourceProvider` supplied
+callback supplied by the test. The platform answer for signature verification is injected, so both the supported
+and the unsupported platform are tested on any machine; the user's credential store is a
+`FakeRememberedCredentialStore` inside a real `PackageCredentialContext`, so forgetting a saved sign-in is observed
+through what the fake received. The connection test runs against a `FakePackageSourceProvider` supplied
 through the provider factory: it can be gated (to hold a test in the "running" state while cancel and the
 change-while-running rules are checked), return versions, return none, or throw a
 `PackageSourceAccessException` of a given failure kind or another exception, so every outcome of the test is
 reached without a network. The editor window is exercised by the headless Avalonia tests in
-`DialogWindowTests.cs` and `SettingsWindowServerSourceTests.cs` and end to end by the FlaUI tests, which add a
+`DialogWindowTests.cs`, `SettingsWindowServerSourceTests.cs` and `SourceEditorSignatureWindowTests.cs` and end to
+end by the FlaUI tests, which add a
 zip source, a NuGet folder source and a NuGet server (with its sign-in) through the dialogs.
 
 #### Test Environment
@@ -31,6 +36,12 @@ N/A - standard test environment.
 - Editing an existing source keeps its alias and any value of it the dialog does not show.
 - The connection test needs a valid address and a package ID, lists the first package ID only, shows progress
   and a Cancel action, reports each outcome in plain words, and drops its result when the address changes.
+- The signature options appear for NuGet folder and server sources and not for a zip source, start off, and where
+  verification is unsupported the checkbox is disabled with the explanation while an existing requiring source keeps
+  its settings; the fingerprint is usable only while signatures are required, is validated and saved normalized (and
+  not at all when unused); an unreadable fingerprint blocks saving.
+- "Forget saved sign-in" is available only for a usable server address with a credential store, asks for confirmation
+  naming the server before doing anything, forgets only after the view confirms, and reports every outcome in words.
 
 #### Test Scenarios
 
@@ -98,3 +109,38 @@ not raise `Saved`. This scenario is tested by
 `SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved`, and
 `SourceEditorViewModel_SaveCommand_InvalidEditor_DoesNotRaiseSaved`, covering
 `AgentControl-SourceEditorViewModel-Save`.
+
+**SourceEditorViewModel_SignatureOptions_OfferedForNuGetAndDisabledWhereUnsupported**: The signature options are
+offered for NuGet folders and servers and not for a zip folder, start unchecked with the fingerprint field unusable;
+where verification is supported the checkbox is enabled, explains what it does (including the limit of using it
+without a pinned publisher) and ticking it enables the fingerprint field; where it is not supported the checkbox is
+disabled with the documented explanation; an existing source that requires signatures, opened where they cannot be
+verified, shows the choice disabled and saves it unchanged; a zip source never saves a requirement while a NuGet
+folder source can; a source saved with the requirement and no fingerprint pins nothing. This scenario is tested by
+`SourceEditorViewModel_SignatureOptions_OfferedForNuGetOnlyAndOffByDefault`,
+`SourceEditorViewModel_RequireSigned_SupportedPlatform_CheckboxEnabledAndTickingEnablesTheFingerprint`,
+`SourceEditorViewModel_RequireSigned_UnsupportedPlatform_CheckboxDisabledWithExplanation`,
+`SourceEditorViewModel_EditExistingRequiringSource_UnsupportedPlatform_KeepsTheSettings`,
+`SourceEditorViewModel_Save_ZipNeverRequiresSignaturesAndFolderCan` and
+`SourceEditorViewModel_Save_RequireSignedWithoutFingerprint_PinsNothing`, covering
+`AgentControl-SourceEditorViewModel-SignatureOptions`.
+
+**SourceEditorViewModel_SignerFingerprint_ValidatedAndSavedNormalized**: An unreadable fingerprint is reported only
+after the user typed it and blocks saving, an empty one is fine and a readable one in any common spelling is
+accepted; a fingerprint that is not in use neither blocks the save nor is saved; a source saved with the requirement
+and a fingerprint carries it as 64 upper-case hexadecimal characters. This scenario is tested by
+`SourceEditorViewModel_Fingerprint_ValidationFollowsTheRules`,
+`SourceEditorViewModel_Fingerprint_NotInUse_IsIgnoredAndNotSaved` and
+`SourceEditorViewModel_Save_RequireSignedWithFingerprint_SavesTheNormalizedFingerprint`, covering
+`AgentControl-SourceEditorViewModel-SignerFingerprint`.
+
+**SourceEditorViewModel_ForgetSavedSignIn_ConfirmsFirstAndReportsTheOutcome**: The action is available for a server
+with an acceptable address and a credential store, and not for a folder, an unusable address or no store, with a
+tooltip that says why; the command only asks the view to confirm, naming the server, and nothing is removed until the
+view calls the forget method; the forget method reports "nothing saved", "forgotten", a credential store that refuses
+and a failure in words, and does nothing when the action is not available. This scenario is tested by
+`SourceEditorViewModel_ForgetSavedSignIn_AvailableOnlyForAUsableServerWithACredentialStore`,
+`SourceEditorViewModel_ForgetSavedSignIn_CommandAsksForConfirmationAndForgetsOnlyOnceConfirmed`,
+`SourceEditorViewModel_ForgetSavedSignIn_ReportsNothingSavedRefusalAndFailureInWords` and
+`SourceEditorViewModel_ForgetSavedSignIn_NotAvailable_DoesNothing`, covering
+`AgentControl-SourceEditorViewModel-ForgetSavedSignIn`.

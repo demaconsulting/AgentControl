@@ -51,7 +51,15 @@ internal enum PackageSourceFailureKind
     /// <summary>
     ///     Signing in took longer than the allowed time and was stopped.
     /// </summary>
-    TimedOut
+    TimedOut,
+
+    /// <summary>
+    ///     A package was found but its signature does not satisfy the source's requirement: it is
+    ///     unsigned, invalidly signed, or not signed by the trusted publisher the source is
+    ///     pinned to - or the source requires signatures and the platform cannot verify them, so
+    ///     the package is refused unseen.
+    /// </summary>
+    SignatureRejected
 }
 
 /// <summary>

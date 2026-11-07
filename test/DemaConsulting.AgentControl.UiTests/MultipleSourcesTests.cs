@@ -107,6 +107,79 @@ public sealed class MultipleSourcesTests
     }
 
     /// <summary>
+    ///     A repo pinned to a NuGet folder source that requires signed packages is refused an upgrade
+    ///     to an unsigned package with a message saying so: nothing is extracted and the pin keeps
+    ///     its version.
+    /// </summary>
+    [Fact]
+    public void UpgradeMenuItem_Click_NuGetSourceRequiresSignaturesAndPackageUnsigned_IsRefusedAndRepoUnchanged()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        const string packageName = "contoso-agents";
+        var feedDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-feed-" + Guid.NewGuid());
+
+        try
+        {
+            NuGetFixturePackageBuilder.Create(feedDirectory, packageName, "1.0.0", "feed 1.0.0");
+            NuGetFixturePackageBuilder.Create(feedDirectory, packageName, "2.0.0", "feed 2.0.0", "# feed 2.0.0\n");
+
+            using var context = new AgentControlTestContext(
+                pinnedPackageName: packageName,
+                pinnedPackageVersion: "1.0.0",
+                nuGetFeedPath: feedDirectory,
+                nuGetPackageIds: [packageName],
+                pinnedSource: "Feed",
+                nuGetRequireSigned: true);
+            var pinPath = Path.Combine(context.RepoPath, ".agentcontrol.json");
+            var pinBefore = File.ReadAllText(pinPath);
+            var mainWindow = context.Launch();
+
+            // The chip carries the signature shield (named for assistive technology with what it
+            // means), and the newer unsigned version is still offered, because listing versions
+            // does not look at signatures
+            var shield = Retry.WhileNull(
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("PackageSignatureIcon")),
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200)).Result;
+            Assert.NotNull(shield);
+            Assert.Equal("Signature required (any trusted signer)", shield.Name);
+            Assert.NotNull(Retry.WhileNull(
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeAvailableBadge")),
+                timeout: TimeSpan.FromSeconds(30),
+                interval: TimeSpan.FromMilliseconds(200)).Result);
+
+            mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MoreActionsButton"))?.AsButton()?.Invoke();
+            var upgradeMenuItem = Retry.WhileNull(
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeMenuItem")),
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200)).Result?.AsMenuItem();
+            Assert.NotNull(upgradeMenuItem);
+            upgradeMenuItem.Click();
+
+            // The refusal is explained in a message box
+            var messageWindow = context.WaitForWindowWithDescendant("MessageText", TimeSpan.FromSeconds(30));
+            Assert.NotNull(messageWindow);
+            var message = messageWindow.FindFirstDescendant(cf => cf.ByAutomationId("MessageText"))?.Name;
+            Assert.NotNull(message);
+            Assert.Contains("is not validly signed", message, StringComparison.Ordinal);
+            Assert.Contains("'Feed'", message, StringComparison.Ordinal);
+
+            // Nothing was extracted and the pin is untouched
+            Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));
+            Assert.Equal(pinBefore, File.ReadAllText(pinPath));
+        }
+        finally
+        {
+            TryDelete(feedDirectory);
+        }
+    }
+
+    /// <summary>
     ///     A repo pinned to a source that is not configured shows a package source problem and is
     ///     offered no upgrade from another source, even though the configured zip source has a
     ///     higher version of the same package name; its pin file is left unchanged.

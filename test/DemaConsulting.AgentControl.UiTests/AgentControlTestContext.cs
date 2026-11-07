@@ -68,13 +68,16 @@ internal sealed class AgentControlTestContext : IDisposable
     /// <param name="nuGetPackageIds">The package IDs offered by the <c>Feed</c> source.</param>
     /// <param name="pinnedSource">The source alias to record in the repo's pin file, or
     ///     <see langword="null"/> to write a pin that names no source.</param>
+    /// <param name="nuGetRequireSigned">Whether the <c>Feed</c> source requires signed
+    ///     packages.</param>
     public AgentControlTestContext(
         string? packageSourcePath = null,
         string? pinnedPackageName = null,
         string? pinnedPackageVersion = null,
         string? nuGetFeedPath = null,
         IReadOnlyList<string>? nuGetPackageIds = null,
-        string? pinnedSource = null)
+        string? pinnedSource = null,
+        bool nuGetRequireSigned = false)
     {
         var root = Directory.CreateTempSubdirectory("AgentControlUiTests-");
         RootDirectory = root.FullName;
@@ -94,7 +97,8 @@ internal sealed class AgentControlTestContext : IDisposable
             pinnedPackageName,
             pinnedPackageVersion,
             nuGetFeedPath,
-            nuGetPackageIds);
+            nuGetPackageIds,
+            nuGetRequireSigned);
 
         if (pinnedPackageName is not null && pinnedPackageVersion is not null)
         {

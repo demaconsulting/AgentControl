@@ -273,7 +273,8 @@ sections:
           server needs credentials for something the user started, shall show in that dialog which
           server will receive the credential (warning about plain http and about a credential that
           was just rejected), shall mask the password and state that it is used for this session
-          only and is not saved, shall show one such dialog at a time in front of the window that
+          only and is not saved (unless the user chooses to remember it, see the requirement for
+          remembering a sign-in), shall show one such dialog at a time in front of the window that
           started the action whichever thread asked, and shall close it, as if canceled, when the
           operation is canceled.
         justification: |
@@ -296,11 +297,83 @@ sections:
           - AvaloniaCredentialPrompt_PromptAsync_TokenCancelled_ClosesDialogAndThrows
           - AvaloniaCredentialPrompt_PromptAsync_TwoQuestionsAtOnce_AreShownOneAtATime
 
+      - id: AgentControl-LauncherUI-RememberSignIn
+        title: >-
+          The LauncherUI subsystem shall let the user choose, in the sign-in dialog, to remember
+          the sign-in on this computer in their Git credential helper - an option that is off by
+          default, that says the helper and not AgentControl keeps the secret, and that is
+          disabled with an explanation, and never acted on, when no credential helper can keep it
+          - and shall return that choice with the credential.
+        justification: |
+          Retyping a token every session is a burden, but keeping a secret is the user's decision
+          to make knowingly; the dialog is where they make it, so it must say who keeps the secret
+          and must not offer a choice the application cannot honor.
+        children:
+          - AgentControl-CredentialPromptViewModel-RememberOption
+        tests:
+          - CredentialPromptWindow_CanRemember_CheckboxEnabledUncheckedAndAnswersRemember
+          - CredentialPromptWindow_CannotRemember_CheckboxDisabledWithExplanatoryTooltip
+          - CredentialPromptViewModel_Remember_TickedWhenAvailable_AnswersWithRememberAndChangesTheNote
+
+      - id: AgentControl-LauncherUI-ForgetSavedSignIn
+        title: >-
+          The LauncherUI subsystem shall let the user forget a server's saved sign-in from the
+          editor of that server source - after a confirmation that names the server and says what
+          is removed, with the result shown in words, and with the action disabled and explained
+          where no credential helper can be reached.
+        justification: |
+          A sign-in the user chose to keep must be revocable from the place where they see the
+          server, with no surprise and with an honest result.
+        children:
+          - AgentControl-SourceEditorViewModel-ForgetSavedSignIn
+        tests:
+          - SourceEditorWindow_ForgetSavedSignIn_ConfirmationDecidesAndResultIsShown
+          - SourceEditorWindow_ForgetSavedSignIn_NoCredentialStore_ButtonDisabledWithTooltip
+          - SourceEditorViewModel_ForgetSavedSignIn_CommandAsksForConfirmationAndForgetsOnlyOnceConfirmed
+
+      - id: AgentControl-LauncherUI-SignatureOptions
+        title: >-
+          The LauncherUI subsystem shall let the user, in the editor of a NuGet-package folder or
+          server source, require signed packages and pin the publisher's certificate fingerprint -
+          explaining the limit of requiring signatures without a pinned publisher and how to find
+          the fingerprint, accepting the fingerprint as typed or pasted, and, where the platform
+          cannot verify signatures, showing the option disabled with the reason - and shall offer
+          no such options for a zip-package source.
+        justification: |
+          The signature requirement is a per-source security control; the people who set it need
+          to understand what it does and does not guarantee and be given the means to pin a
+          publisher, and a platform that cannot honor it must say so instead of hiding the option
+          or pretending.
+        children:
+          - AgentControl-SourceEditorViewModel-SignatureOptions
+          - AgentControl-SourceEditorViewModel-SignerFingerprint
+        tests:
+          - SourceEditorWindow_SignatureOptions_TickingEnablesTheFingerprintAndValidatesIt
+          - SourceEditorWindow_SignatureOptions_UnsupportedPlatform_CheckboxDisabledWithTooltip
+          - SourceEditorWindow_ZipSource_HasNoSignatureSection
+          - SourceEditorViewModel_Fingerprint_ValidationFollowsTheRules
+
+      - id: AgentControl-LauncherUI-SignatureIndicator
+        title: >-
+          The LauncherUI subsystem shall show, in the agent package chip of a repo card whose
+          pinned package comes from a NuGet source that requires signed packages, a shield with a
+          tooltip that says signatures are required and whether any trusted signer is accepted or
+          the publisher is pinned, and no shield otherwise.
+        justification: |
+          A glance at the repo list should show which repos receive checked packages and how
+          strictly, without opening the settings.
+        children:
+          - AgentControl-RepoCardViewModel-SignatureIndicator
+        tests:
+          - MainWindow_PackageChip_ShowsShieldOnlyWhenSignaturesAreRequired
+          - RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip
+
       - id: AgentControl-LauncherUI-BackgroundChecksDoNotPrompt
         title: >-
           The LauncherUI subsystem shall not open a sign-in dialog for work the user did not
           start - the background upgrade check at start-up and after settings change - but use the
-          credentials already entered during the session and otherwise explain on the card that a
+          credentials already entered during the session or saved by the user's credential store
+          and otherwise explain on the card that a
           sign-in is needed and how to give it, while a check the user starts may ask.
         justification: |
           A dialog that appears unprompted while the user is doing something else is disruptive

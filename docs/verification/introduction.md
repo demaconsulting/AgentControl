@@ -26,7 +26,7 @@ This document covers the verification design for the following software items:
       **SettingsWindowViewModel**, **SourceEditorViewModel**, **CredentialPromptViewModel**
   - **AgentPackageManagement** subsystem
     - **PackageSource**, **PackageVersion**, **PackageVersionCache**, **PackageSourceRegistry**,
-      **ZipFolderSourceProvider**, **NuGetSourceProvider**
+      **ZipFolderSourceProvider**, **NuGetSourceProvider**, **SignatureVerificationSupport**
   - **PackageCredentials** subsystem
     - **FeedOrigin**, **SessionCredentialStore**, **PackageCredentialCallback**,
       **SecretRedactingLogger**
@@ -37,7 +37,7 @@ This document covers the verification design for the following software items:
   - **AgentToolLauncher** subsystem
     - **ShellDetector**, **AgentToolLauncher**
   - **GitIntegration** subsystem
-    - **GitClient**, **CommittedAgentFilesCache**
+    - **GitClient**, **CommittedAgentFilesCache**, **GitCredentialClient**
   - **Settings** subsystem
     - **SettingsStore**
   - **Logging** subsystem (no dedicated unit — indirect-only test coverage, disclosed below)

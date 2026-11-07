@@ -5,12 +5,30 @@
 ### Overview
 
 The `GitIntegration` subsystem spans `GitClient.cs` (invokes the configured git executable
-for status, pull, branch, and committed-files queries) and `CommittedAgentFilesCache.cs`
-(caches the committed-agent-files-changed check keyed by HEAD commit hash). It provides the
-observable git-derived status/actions surfaced on each repo card. The subsystem contains two
-units: `GitClient` and `CommittedAgentFilesCache`.
+for status, pull, branch, and committed-files queries), `CommittedAgentFilesCache.cs`
+(caches the committed-agent-files-changed check keyed by HEAD commit hash) and
+`GitCredentialClient.cs` (keeps, finds and removes a package feed's sign-in in the user's own Git
+credential helper). It provides the observable git-derived status/actions surfaced on
+each repo card and the saved sign-ins of package servers
+(`AgentControl-GitIntegration-SavedSignIns`, which supports `AgentControl-System-CredentialSafety`).
+The subsystem contains three units: `GitClient`, `CommittedAgentFilesCache` and `GitCredentialClient`.
 
 ### Interfaces
+
+**GitCredentialClient (as IRememberedCredentialStore)**: Finds, keeps and removes a package feed's sign-in
+and reports whether a credential helper applies to the feed.
+
+- *Type*: In-process .NET asynchronous interface (`IRememberedCredentialStore`, owned by the
+  `PackageCredentials` subsystem) implemented over an external git process.
+- *Role*: Provider.
+- *Contract*: `IsAvailableAsync`, `FillAsync`, `ApproveAsync` and `RejectAsync` act on the feed's origin only;
+  an unavailable store is reported as "nothing" or `false`, never as an exception
+  (`AgentControl-GitCredentialClient-FillApproveReject`, `AgentControl-GitCredentialClient-HelperAvailability`,
+  `AgentControl-GitCredentialClient-UnavailableIsNotAnError`).
+- *Constraints*: Never interactive, bounded by a time limit that kills the whole process tree, never logs a
+  request or response (`AgentControl-GitCredentialClient-NeverInteractive`,
+  `AgentControl-GitCredentialClient-BoundedTime`, `AgentControl-GitCredentialClient-SecretsNeverLogged`).
+  Only a cancelled token surfaces as `OperationCanceledException`.
 
 **GitClient.IsWorkingTreeClean**: Reports whether a repo's working tree is clean.
 
@@ -83,3 +101,13 @@ on every refresh. By contrast, working-tree dirty/clean state is deliberately **
 this way (per the same architecture.md decision) since it reflects uncommitted local edits
 independent of any commit; `RepoCardViewModel`'s full `Refresh` recomputes it lazily rather
 than eagerly for every card at app launch.
+
+`GitCredentialClient` is a separate concern from `GitClient`, and deliberately a separate unit: `GitClient` asks
+questions *about a repo* and runs inside it, whereas `GitCredentialClient` talks to the user's credential helper
+about a *package feed* and runs from the user's profile folder, so a repo's configuration cannot influence it.
+Both use the same git executable (the settings path or the `--git-path` override, resolved per call). The credential
+client implements an interface owned by the `PackageCredentials` subsystem (`IRememberedCredentialStore`), so the
+dependency between the subsystems points from `GitIntegration` to `PackageCredentials` only; `App` connects the two.
+Why Git's credential helper, the `--get-urlmatch` availability check, the origin-scoped generic-provider override, the
+never-interactive environment, the time limit with process-tree kill and the neutral working folder are explained in
+the *GitCredentialClient Design*.

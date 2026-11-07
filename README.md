@@ -52,7 +52,12 @@ in that repo's working directory.
 - **Protected package servers**: a server source is added with its feed address (https; plain http only
   after an explicit "Allow insecure HTTP" tick), can be checked with **Test connection** before it is saved,
   and asks you to sign in only when the server needs it. Credentials are used for the current session
-  only and are never saved
+  only and are never saved by AgentControl; you can opt in, per sign-in, to **Remember on this computer**,
+  which has your own Git credential helper keep it (AgentControl itself never stores a secret)
+- **Signed-package enforcement**: a NuGet source (folder or server) can **Require signed packages**,
+  optionally pinned to your publisher's certificate fingerprint. A package that is not validly signed (or
+  not signed by that publisher) is never installed — even one already downloaded earlier — and a platform
+  that cannot verify signatures refuses such a source instead of skipping the check
 - **Responsive**: package sources are read in the background with progress and a Cancel button, so a
   slow or offline network share or server never freezes the window, and one unreachable source does not
   hide the packages or upgrades of the others
@@ -68,12 +73,26 @@ in that repo's working directory.
   path is refused), and AgentControl never stores secrets: `settings.json` holds only aliases,
   locations, NuGet package IDs and the insecure-HTTP flag of a server source.
 - A password or token you type into the sign-in dialog is kept in memory for the current session
-  only — it is not written to the settings, a repo's pin file, the log or anywhere else — and AgentControl
+  only — AgentControl does not write it to the settings, a repo's pin file, the log or anywhere else — and
   offers it only to the server it was typed for, and only when that server asks for it. The dialog shows
   the server that will receive it. A server on plain `http` is flagged and needs an explicit opt-in.
+- **Remember on this computer** (off by default, and disabled with an explanation when no Git credential
+  helper is configured) hands the sign-in to your own Git credential helper — Git Credential Manager,
+  the macOS keychain, libsecret or the credential-store file — after it has been shown to work. AgentControl
+  itself never stores a secret. A saved sign-in is read back once per server per session, without a dialog and
+  only for that server's exact scheme, host and port; if the server rejects it, it is removed from the helper
+  and you are asked once. **Forget saved sign-in** in the server source's editor removes it too.
 - Credentials AgentControl does not need to ask for are reused: a `nuget.config` source with the same
   address (and its stored credentials) and NuGet credential-provider plug-ins such as the Azure Artifacts
   Credential Provider are tried before the dialog. Background checks never open the dialog.
+- **Signed packages.** Per NuGet source you can require validly signed packages and, recommended, pin the
+  publisher by the SHA-256 fingerprint of the package **author** certificate. Without a pin, any validly
+  signed package from any publisher your machine trusts is accepted. The check is made every time a package is
+  used, including one already in AgentControl's cache; your own NuGet trusted-signer settings neither widen nor
+  narrow it; verification is supported on Windows, Linux and macOS, and elsewhere a source that requires
+  signatures is refused (fails closed) rather than skipped. Zip packages carry no signatures.
+- Exceptions that reach AgentControl's last-resort handlers are logged only after secrets (passwords,
+  authorization values, URL user information and query strings) have been removed from them.
 - **Only add servers you trust.** A server's own index tells the NuGet client where its package resources
   are, and once a server has authenticated, the NuGet client can answer sign-in challenges from other hosts
   that the index names with the same credential. AgentControl itself only ever offers a credential to the
@@ -162,7 +181,8 @@ The Settings window lets you configure:
   folder can be found; a server shows **Not checked** because AgentControl contacts it only when it is
   needed). Use **Add Zip-Package Folder**, **Add NuGet-Package Folder** or **Add NuGet-Package Server**
   to add a source, and **Edit** or **Remove** to change one; a NuGet source also lists the package
-  IDs it offers, and a server can be checked with **Test connection** before it is saved. An alias cannot
+  IDs it offers, a server can be checked with **Test connection** before it is saved, and a NuGet source can
+  **Require signed packages** (optionally pinned to a publisher's certificate fingerprint). An alias cannot
   be changed once created, because repo pins refer to it. A single
   package source folder configured in an earlier version appears as a zip source named `Default`.
   See the [User Guide][link-guide] chapter "Package Sources".

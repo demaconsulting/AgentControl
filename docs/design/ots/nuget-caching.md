@@ -10,7 +10,8 @@ DemaConsulting.NuGet.Caching backs the `NuGetSourceProvider` unit of AgentContro
 source - a folder feed or a NuGet V3 server - and unpacks a chosen version into a package cache, using
 NuGet's own client libraries, so AgentControl does not implement the NuGet protocol, authentication
 challenges or package extraction itself (`AgentControl-OTS-NuGetCaching-ListAndCache`,
-`AgentControl-OTS-NuGetCaching-ServerAccess`). Like Serilog, it ships as part of the AgentControl
+`AgentControl-OTS-NuGetCaching-ServerAccess`,
+`AgentControl-OTS-NuGetCaching-SignatureVerification`). Like Serilog, it ships as part of the AgentControl
 application itself, so it also has a corresponding SysML2 part (`docs/sysml2/model/ots.sysml`).
 It is a prerelease library, so it is isolated behind the `IPackageSourceProvider` contract and its
 version is pinned exactly in the project file. The `NuGetCredential` type it defines is also used by the
@@ -40,7 +41,15 @@ version is pinned exactly in the project file. The `NuGetCredential` type it def
   root folder, which AgentControl uses to give each source a private package cache, and the credentials of
   a `nuget.config` source with the same address (`packageSourceCredentials`) found by the same discovery.
 
-Not used: signature requirements (`RequireSignedPackages`), which belong to the package-signing work.
+- `NuGetCacheOptions.RequireSignedPackages`, which makes the library verify a package's signature - on a fresh
+  download and on a package already in the cache - and fail with an error that identifies a signature failure
+  when the package is unsigned, invalidly signed or signed by an untrusted signer. The library verifies
+  signatures explicitly on Windows, Linux and macOS (NuGet's own verification is skipped on Linux and macOS unless
+  an environment variable opts in). The signers it trusts are the `trustedSigners` of the `nuget.config` it
+  discovers from the supplied root; AgentControl generates that file, beginning the section with `<clear />` so
+  that signers configured by the user or the machine do not apply, and adding one `author` entry (the publisher's
+  certificate SHA-256 fingerprint, `allowUntrustedRoot="false"`) when the source pins a publisher
+  (`AgentControl-OTS-NuGetCaching-SignatureVerification`).
 
 ### Integration Pattern
 
@@ -48,8 +57,9 @@ The library is consumed as a NuGet package reference in the main project. Every 
 `NuGetSourceProvider` passes an AgentControl-owned root folder (one per source, under the
 per-user local application-data folder unless a base folder is supplied) so NuGet's configuration
 discovery starts there and never at the target repository or the current directory; the folder
-contains a generated `nuget.config` that only redirects the global packages folder into the same
-folder. The provider names the configured folder or server address as the only source for each call, verifies the
+contains a generated `nuget.config` that redirects the global packages folder into the same
+folder and - only for a source that requires signed packages - states the trusted signers (see _Features Used_).
+The provider names the configured folder or server address as the only source for each call, verifies the
 unpacked package landed inside that private cache (failing closed if the `NUGET_PACKAGES`
 environment variable redirected it), and reads the package's `content` folder through
 `DirectoryPackageContentReader`, never modifying the package cache. Cancellation tokens are passed
@@ -60,7 +70,8 @@ it is first used, and applies each call's `CredentialCallback`, `Interactive` an
 that call only, so AgentControl never registers a credential service itself (a requirement of the
 `NuGetSourceProvider` unit, checked by tests) and one source's callback cannot answer another operation's
 challenge. For a server the provider makes up to two calls per operation: a silent one, whose callback
-answers only from the session store so that NuGet's own providers get their turn, and - only if the server
+answers only from the session store and the user's saved sign-in so that NuGet's own providers get their turn, and -
+only if the server
 still refuses and the user can be asked - one whose callback may open the sign-in dialog. The library has no
 initialization or disposal requirements of its own. The single-file, self-contained publish used for the
 installer includes the library and its NuGet client dependencies.
