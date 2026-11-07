@@ -145,9 +145,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private bool _gitStatusUnavailable;
     private bool _gitStatusChecked;
     private string? _statusMessage;
+    /// <summary>Backing field for <see cref="IsBusy"/>.</summary>
     private bool _isBusy;
+
+    /// <summary>Backing field for <see cref="CanCancelOperation"/>.</summary>
     private bool _canCancelOperation;
+
+    /// <summary>Backing field for <see cref="BusyMessage"/>.</summary>
     private string? _busyMessage;
+
+    /// <summary>Backing field for <see cref="IsCheckingUpgrade"/>.</summary>
     private bool _isCheckingUpgrade;
 
     /// <summary>
