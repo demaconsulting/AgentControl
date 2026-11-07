@@ -53,7 +53,12 @@ start time, executable and `--config-dir`). Every command validates the record b
 - the process must be alive (a record of an exited instance is stale: exit 3);
 - the process must have started when the record says (this detects a process id that Windows reused for another
   program);
-- the process command line must carry the recorded `--config-dir` (when the command line can be read).
+- the process command line must carry a `--config-dir` argument that names exactly the recorded folder (the command line
+  is split with the Windows rules and the paths are compared after normalization, so a nested folder or one that only
+  shares a prefix does not match; checked when the command line can be read).
+
+The validated process handle is opened before the check and kept for the whole command, so `quit` (waiting, `--kill`) and
+failed-`launch` cleanup act on that process only and never on an unrelated program that reused the process id.
 
 All UI Automation lookups are scoped to the process id of the instance, never to a window title.
 
@@ -129,8 +134,9 @@ dialogs can repeat the main window's ids, so every element command accepts two s
 - `--item <repo name | index>` limits the lookup to one item of `RepoListBox`: the card whose `RepoNameText` is the
   given name (exact, ignoring case; else a unique part of the name), or the card at that zero-based index. A name that
   fits several cards is refused (use the index). Example: `click LaunchButton --item my-repo`,
-  `read RepoPinnedVersionText --item 0 --raw`. `--item-list <id>` names another list whose items should be searched
-  (matched by any text the item shows).
+  `read RepoPinnedVersionText --item 0 --raw`. The repo list is virtualized, so an index counts the cards that are
+  currently realized (those scrolled out of view may not exist); prefer names. `--item-list <id>` names another list whose
+  items should be searched (matched by any text the item shows).
 - `--window <title>` limits the lookup to the windows of the instance with that title (exact, ignoring case; else a
   part of the title), for example `type GitExecutablePathTextBox "C:\tools\git.exe" --window "AgentControl Settings"`.
 
@@ -228,6 +234,9 @@ Creates a ready-to-use sandbox in a new (or empty) folder for manual exploration
   2.0.0. `--packages zip` (the default) writes `{name}-{version}.zip` with `.github\agents`, `.github\standards`,
   `.github\templates`, `.github\skills\...`, `release-notes.md` and `AGENTS.md`; `nupkg` writes
   `{name}.{version}.nupkg` with the same files under `content\` and a minimal `{name}.nuspec`; `both` writes both.
+  **The current AgentControl (main) cannot consume `.nupkg` packages yet**: NuGet package sources arrive with the
+  multi-source packages feature, so with the current application use `zip`. The option and the output note
+  (`NOTE .nupkg packages ...`) exist so fixtures for that feature can already be prepared.
 - `<dir>\repo\` (with `--repo`, implied by `--pin`) - a git repository (`git` from the PATH: `git init -b main` and one
   commit). `--pin contoso-agents@1.0.0` also commits an `.agentcontrol.json` pin, so the card shows a pinned version and
   an upgrade badge; without a pin the repo is "never synced" and its card offers `SelectPackageMenuItem`.

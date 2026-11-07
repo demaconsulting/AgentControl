@@ -198,34 +198,115 @@ internal sealed class InstanceRegistry
         !string.IsNullOrEmpty(alias) && alias.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
 
     /// <summary>
-    ///     Tests whether a process command line carries a <c>--config-dir</c> with the recorded folder.
+    ///     Tests whether a process command line carries a <c>--config-dir</c> argument that names exactly the recorded folder.
     /// </summary>
+    /// <remarks>
+    ///     The command line is split into arguments with the Windows rules, and the value after the last <c>--config-dir</c>
+    ///     (the application keeps the last one) is compared with the recorded folder after both are made absolute and stripped
+    ///     of trailing separators; the comparison ignores case. A folder inside the recorded one, or one that merely shares
+    ///     its prefix, is a different folder. The application accepts only the two-argument form (<c>--config-dir &lt;dir&gt;</c>).
+    /// </remarks>
     /// <param name="commandLine">The process command line.</param>
     /// <param name="configDir">The recorded config folder.</param>
     /// <returns><see langword="true"/> when the command line names the folder after <c>--config-dir</c>.</returns>
     internal static bool CommandLineHasConfigDir(string commandLine, string configDir)
     {
-        var wanted = Path.TrimEndingDirectorySeparator(configDir);
-        var flag = commandLine.IndexOf("--config-dir", StringComparison.OrdinalIgnoreCase);
-        if (flag < 0)
+        var arguments = WindowsCommandLine.Split(commandLine);
+        var flag = arguments.FindLastIndex(argument => string.Equals(argument, "--config-dir", StringComparison.Ordinal));
+        return flag >= 0 && flag + 1 < arguments.Count && SamePath(arguments[flag + 1], configDir);
+    }
+
+    /// <summary>
+    ///     Tests whether two folder paths name the same folder: absolute, without trailing separators, ignoring case.
+    /// </summary>
+    /// <param name="left">The first path.</param>
+    /// <param name="right">The second path.</param>
+    /// <returns><see langword="true"/> when they are equal after normalization; <see langword="false"/> also for an invalid path.</returns>
+    internal static bool SamePath(string left, string right)
+    {
+        try
+        {
+            return string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
             return false;
         }
+    }
 
-        // The folder must end where the argument ends (a longer folder name sharing the prefix is another folder)
-        var at = commandLine.IndexOf(wanted, flag, StringComparison.OrdinalIgnoreCase);
-        while (at >= 0)
+    /// <summary>
+    ///     Opens a handle to the process of a record and proves it is the recorded instance.
+    /// </summary>
+    /// <remarks>
+    ///     The handle is opened <b>before</b> the record is validated and stays open, which keeps Windows from handing the
+    ///     process id to another program meanwhile: whatever is done through the returned handle (waiting, killing) acts on
+    ///     the validated process and never on a program that reused the id.
+    /// </remarks>
+    /// <param name="record">The record.</param>
+    /// <param name="state">The verdict on the record.</param>
+    /// <returns>The process handle (the caller disposes it), or <see langword="null"/> when the instance is gone or the id was reused.</returns>
+    internal Process? TryOpenValidated(InstanceRecord record, out InstanceState state)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        Process process;
+        try
         {
-            var end = at + wanted.Length;
-            if (end >= commandLine.Length || char.IsWhiteSpace(commandLine[end]) || commandLine[end] is '"' or '\\' or '/')
-            {
-                return true;
-            }
-
-            at = commandLine.IndexOf(wanted, at + 1, StringComparison.OrdinalIgnoreCase);
+            process = Process.GetProcessById(record.Pid);
+        }
+        catch (ArgumentException)
+        {
+            state = InstanceState.NotRunning;
+            return null;
         }
 
-        return false;
+        state = Validate(record);
+        if (state == InstanceState.Running && !HasExited(process))
+        {
+            return process;
+        }
+
+        state = state == InstanceState.Running ? InstanceState.NotRunning : state;
+        process.Dispose();
+        return null;
+    }
+
+    /// <summary>
+    ///     Opens a handle to the live instance of an alias (see <see cref="TryOpenValidated"/>).
+    /// </summary>
+    /// <param name="alias">The alias.</param>
+    /// <param name="record">The alias's record, or <see langword="null"/> when there is none.</param>
+    /// <param name="state">The verdict (<see cref="InstanceState.NotRunning"/> when there is no record).</param>
+    /// <returns>The validated process handle, or <see langword="null"/> when the alias has no live instance.</returns>
+    internal Process? TryOpenLive(string alias, out InstanceRecord? record, out InstanceState state)
+    {
+        record = TryLoad(alias);
+        if (record is null)
+        {
+            state = InstanceState.NotRunning;
+            return null;
+        }
+
+        return TryOpenValidated(record, out state);
+    }
+
+    /// <summary>
+    ///     Tests whether a process handle's process has exited.
+    /// </summary>
+    /// <param name="process">The process.</param>
+    /// <returns><see langword="true"/> when it has exited (or its state cannot be read).</returns>
+    private static bool HasExited(Process process)
+    {
+        try
+        {
+            return process.HasExited;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return true;
+        }
     }
 
     /// <summary>

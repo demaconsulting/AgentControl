@@ -204,12 +204,12 @@ internal static partial class Commands
     /// <exception cref="PuppetException">Thrown with <see cref="ExitCodes.Obscured"/> when the input would not land on the instance.</exception>
     private static void Guard(AttachContext context, ScreenPoint at, string what)
     {
-        // Another window (typically the terminal running the Puppet) may have taken the foreground back since
-        // BringToFront: try again a few times before giving up
-        for (var attempt = 0; attempt < 3 && !InputDriver.IsOwnedBy(at, context.ProcessId); attempt++)
+        // Another window (typically the terminal running the Puppet, or a transient shell window right after a launch) may
+        // have the foreground: try to bring the instance back a few times before giving up
+        for (var attempt = 0; attempt < 5 && !InputDriver.IsOwnedBy(at, context.ProcessId); attempt++)
         {
             InputDriver.BringToFront(context);
-            Thread.Sleep(200);
+            Thread.Sleep(250);
         }
 
         if (!InputDriver.IsOwnedBy(at, context.ProcessId))

@@ -96,7 +96,7 @@ internal static partial class Commands
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // A half-started instance would hold the alias and a window; do not leave it behind
-            KillQuietly(pid);
+            KillQuietly(process);
             registry.Delete(alias);
             throw;
         }
@@ -136,7 +136,11 @@ internal static partial class Commands
     {
         var alias = ValidAlias(parsed);
         var registry = InstanceRegistry.CreateDefault();
-        if (registry.TryGetLive(alias, out var state) is not { } record)
+
+        // The validated handle stays open for the whole command, so the process id cannot be reused meanwhile:
+        // waiting and killing act on the recorded instance only
+        using var instance = registry.TryOpenLive(alias, out var record, out var state);
+        if (instance is null || record is null)
         {
             // A record that no longer describes a live instance is stale: forget it
             registry.Delete(alias);
@@ -144,7 +148,7 @@ internal static partial class Commands
         }
 
         RequestClose(alias, record.Pid);
-        if (WaitForExit(record.Pid, QuitTimeout))
+        if (WaitForExit(instance, QuitTimeout))
         {
             registry.Delete(alias);
             return Ok($"OK quit instance={alias} pid={record.Pid}");
@@ -152,8 +156,8 @@ internal static partial class Commands
 
         if (parsed.HasOption("kill"))
         {
-            KillQuietly(record.Pid);
-            WaitForExit(record.Pid, QuitTimeout);
+            KillQuietly(instance);
+            WaitForExit(instance, QuitTimeout);
             registry.Delete(alias);
             return Ok($"OK killed instance={alias} pid={record.Pid}");
         }
@@ -257,47 +261,39 @@ internal static partial class Commands
     }
 
     /// <summary>
-    ///     Waits for a process to exit.
+    ///     Waits for a validated process to exit.
     /// </summary>
-    /// <param name="pid">The process id.</param>
+    /// <param name="process">The validated process handle (it keeps the process id from being reused).</param>
     /// <param name="timeout">How long to wait.</param>
     /// <returns><see langword="true"/> when the process is gone.</returns>
-    private static bool WaitForExit(int pid, TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            try
-            {
-                using var process = Process.GetProcessById(pid);
-                if (process.HasExited)
-                {
-                    return true;
-                }
-            }
-            catch (ArgumentException)
-            {
-                return true;
-            }
-
-            Thread.Sleep(100);
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    ///     Ends a process and its children, ignoring the case that it is already gone.
-    /// </summary>
-    /// <param name="pid">The process id.</param>
-    private static void KillQuietly(int pid)
+    private static bool WaitForExit(Process process, TimeSpan timeout)
     {
         try
         {
-            using var process = Process.GetProcessById(pid);
+            return process.WaitForExit(timeout);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // The process object no longer describes a running process: it is gone
+            return true;
+        }
+    }
+
+    /// <summary>
+    ///     Ends a validated process and its children, ignoring the case that it is already gone.
+    /// </summary>
+    /// <remarks>
+    ///     The process is addressed through its handle, never through its numeric id, so a process id that was reused by an
+    ///     unrelated program is never touched.
+    /// </remarks>
+    /// <param name="process">The validated process handle.</param>
+    private static void KillQuietly(Process process)
+    {
+        try
+        {
             process.Kill(entireProcessTree: true);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             // Already exited: that is what was wanted
         }

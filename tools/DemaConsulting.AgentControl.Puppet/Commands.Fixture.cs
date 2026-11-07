@@ -32,12 +32,18 @@ internal static partial class Commands
     /// <returns>The exit code.</returns>
     internal static int Fixture(ParsedCommand parsed)
     {
-        var result = FixtureBuilder.Build(FixtureOptions.Parse(parsed), new ProcessGitRunner());
+        var options = FixtureOptions.Parse(parsed);
+        var result = FixtureBuilder.Build(options, new ProcessGitRunner());
         Console.WriteLine($"FIXTURE root=\"{result.Root}\"");
         Console.WriteLine($"PACKAGES dir=\"{result.PackagesDirectory}\" count={result.Packages.Count}");
         foreach (var package in result.Packages)
         {
             Console.WriteLine($"  package \"{package}\"");
+        }
+
+        if (options.Formats is PackageFormats.Nupkg or PackageFormats.Both)
+        {
+            Console.WriteLine($"NOTE {FixtureBuilder.NupkgNote}");
         }
 
         if (result.RepoDirectory is { } repo)

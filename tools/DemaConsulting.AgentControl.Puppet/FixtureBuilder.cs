@@ -209,6 +209,13 @@ internal sealed class ProcessGitRunner : IGitRunner
 internal static partial class FixtureBuilder
 {
     /// <summary>
+    ///     The note printed when the fixture contains <c>.nupkg</c> packages.
+    /// </summary>
+    internal const string NupkgNote =
+        ".nupkg packages are prepared for NuGet package sources, which the current AgentControl (main) cannot consume yet; " +
+        "they arrive with the multi-source packages feature. Use zip packages with the current application.";
+
+    /// <summary>
     ///     The sample packages written to the package source: name and version.
     /// </summary>
     internal static readonly IReadOnlyList<(string Name, string Version)> SamplePackages =

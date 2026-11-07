@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using System.Diagnostics;
 using System.Globalization;
 using DemaConsulting.AgentControl.Puppet.Automation;
 using FlaUI.Core.AutomationElements;
@@ -54,23 +53,11 @@ internal static partial class Commands
     private static AttachContext Attach(ParsedCommand parsed)
     {
         var alias = ValidAlias(parsed);
-        var registry = InstanceRegistry.CreateDefault();
-        var record = registry.TryGetLive(alias, out var state);
-        if (record is null)
-        {
-            throw new PuppetException(ExitCodes.NotRunning, NotRunningCode, NotRunningMessage(alias, state));
-        }
 
-        Process process;
-        try
-        {
-            process = Process.GetProcessById(record.Pid);
-        }
-        catch (ArgumentException)
-        {
-            throw new PuppetException(ExitCodes.NotRunning, NotRunningCode, NotRunningMessage(alias, InstanceState.NotRunning));
-        }
-
+        // The handle is opened before the record is validated and is the one FlaUI attaches to, so a process id that
+        // was reused by another program can never be driven
+        var process = InstanceRegistry.CreateDefault().TryOpenLive(alias, out _, out var state)
+            ?? throw new PuppetException(ExitCodes.NotRunning, NotRunningCode, NotRunningMessage(alias, state));
         return AttachContext.TryAttach(alias, process, out var error)
             ?? throw new PuppetException(ExitCodes.NotRunning, "ATTACH_FAILED", error);
     }

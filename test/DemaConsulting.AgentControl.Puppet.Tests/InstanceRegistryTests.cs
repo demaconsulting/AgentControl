@@ -245,6 +245,16 @@ public sealed class InstanceRegistryTests : IDisposable
     [InlineData("AgentControl.exe --config-dir c:\\CFG\\ONE", true)]
     [InlineData("AgentControl.exe --config-dir C:\\cfg\\two", false)]
     [InlineData("AgentControl.exe --config-dir C:\\cfg\\one2", false)]
+    [InlineData("AgentControl.exe --config-dir \"C:\\cfg\\one\\other\"", false)]
+    [InlineData("AgentControl.exe --config-dir C:\\cfg\\one\\other --git-path git", false)]
+    [InlineData("AgentControl.exe --config-dir C:\\cfg", false)]
+    [InlineData("AgentControl.exe --config-dir C:\\cfg\\one\\", true)]
+    [InlineData("AgentControl.exe --config-dir \"C:\\cfg\\one\\\\\"", true)]
+    [InlineData("AgentControl.exe --config-dir C:\\cfg\\one\\..\\one", true)]
+    [InlineData("AgentControl.exe --config-dir=C:\\cfg\\one", false)]
+    [InlineData("AgentControl.exe --config-dir", false)]
+    [InlineData("AgentControl.exe --config-dir C:\\cfg\\two --config-dir C:\\cfg\\one", true)]
+    [InlineData("AgentControl.exe --config-dir C:\\cfg\\one --config-dir C:\\cfg\\two", false)]
     [InlineData("AgentControl.exe --git-path C:\\cfg\\one", false)]
     [InlineData("AgentControl.exe", false)]
     public void InstanceRegistry_CommandLineHasConfigDir_ChecksFolderAfterFlag(string commandLine, bool expected)
@@ -281,6 +291,81 @@ public sealed class InstanceRegistryTests : IDisposable
             () => Assert.Equal(InstanceState.NotRunning, staleState),
             () => Assert.Null(none),
             () => Assert.Equal(InstanceState.NotRunning, noneState));
+    }
+
+    /// <summary>
+    ///     Validates that a config folder with spaces is matched when quoted (as <c>launch</c> writes it, with the trailing
+    ///     backslash doubled) and that a folder nested inside it or sharing its prefix is not.
+    /// </summary>
+    [Fact]
+    public void InstanceRegistry_CommandLineHasConfigDir_FolderWithSpaces_MatchesExactlyOnly()
+    {
+        // Arrange
+        const string recorded = @"C:\my cfg\one two";
+        var written = $"\"C:\\app\\x.exe\" {LaunchOptions.JoinArguments(["--config-dir", recorded + "\\"])}";
+
+        // Act
+        var exact = InstanceRegistry.CommandLineHasConfigDir(written, recorded);
+        var nested = InstanceRegistry.CommandLineHasConfigDir("x.exe --config-dir \"C:\\my cfg\\one two\\inner dir\"", recorded);
+        var prefix = InstanceRegistry.CommandLineHasConfigDir("x.exe --config-dir \"C:\\my cfg\\one two plus\"", recorded);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.True(exact, written),
+            () => Assert.False(nested),
+            () => Assert.False(prefix));
+    }
+
+    /// <summary>
+    ///     Validates that a handle is opened for a live, matching process, and that a reused id or a stale record yields no handle.
+    /// </summary>
+    [Fact]
+    public void InstanceRegistry_TryOpenValidated_OpensOnlyTheRecordedProcess()
+    {
+        // Arrange: this test process stands in for the instance
+        var registry = Registry();
+        var self = Environment.ProcessId;
+        _processes.Add(self, Started, CommandLine(@"C:\cfg\one"));
+        var matching = Record("a", self);
+        var reused = matching with { StartTimeUtc = Started.AddDays(-2) };
+        var otherConfig = matching with { ConfigDir = @"C:\cfg\one\inner" };
+        var gone = Record("b", int.MaxValue);
+
+        // Act
+        using var opened = registry.TryOpenValidated(matching, out var matchingState);
+        var reusedHandle = registry.TryOpenValidated(reused, out var reusedState);
+        var otherHandle = registry.TryOpenValidated(otherConfig, out var otherState);
+        var goneHandle = registry.TryOpenValidated(gone, out var goneState);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(self, opened?.Id),
+            () => Assert.Equal(InstanceState.Running, matchingState),
+            () => Assert.Null(reusedHandle),
+            () => Assert.Equal(InstanceState.PidReused, reusedState),
+            () => Assert.Null(otherHandle),
+            () => Assert.Equal(InstanceState.ConfigMismatch, otherState),
+            () => Assert.Null(goneHandle),
+            () => Assert.Equal(InstanceState.NotRunning, goneState));
+    }
+
+    /// <summary>
+    ///     Validates that an alias without a record has no live handle.
+    /// </summary>
+    [Fact]
+    public void InstanceRegistry_TryOpenLive_NoRecord_IsNotRunning()
+    {
+        // Arrange
+        var registry = Registry();
+
+        // Act
+        var handle = registry.TryOpenLive("nothing", out var record, out var state);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Null(handle),
+            () => Assert.Null(record),
+            () => Assert.Equal(InstanceState.NotRunning, state));
     }
 
     /// <summary>
