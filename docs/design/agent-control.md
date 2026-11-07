@@ -19,7 +19,7 @@ flowchart TD
         RepoCardViewModel
         SelectPackageWindowViewModel
         SettingsWindowViewModel
-    end
+        SourceEditorViewModel
     subgraph AgentPackageManagement
         PackageSource
         PackageVersion
@@ -242,7 +242,8 @@ an unwanted or repeated file write.
    (`AgentControl-System-SelectPackage`, `AgentControl-System-PinFile`); Upgrade to the pin's
    source's latest version followed by the same extract/pin/`ReleaseNotesViewerViewModel`
    display sequence (`AgentControl-System-Upgrade`); Settings to
-   `SettingsWindowViewModel.Save`, applied back through `MainWindowViewModel.ApplySettings`
+   `SettingsWindowViewModel.Save` (sources are added and edited through `SourceEditorViewModel`),
+   applied back through `MainWindowViewModel.ApplySettings`
    (`AgentControl-System-Settings`); and, after a Select Package, Upgrade, or Launch-time
    re-extraction genuinely occurs, `RepoCardViewModel` decides whether to offer the package's
    optional root-level `AGENTS.md` template (`PackageContentExtractor.ReadAgentsMdTemplate`),

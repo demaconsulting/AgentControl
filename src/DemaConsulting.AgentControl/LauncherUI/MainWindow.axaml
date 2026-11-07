@@ -379,7 +379,7 @@
                                          IsVisible="{Binding IsWorkingTreeDirty}"
                                          ToolTip.Tip="{Binding PullTooltip}">
                                     <StackPanel Orientation="Horizontal" Spacing="4">
-                                        <materialIcons:MaterialIcon Kind="PencilCircleOutline" />
+                                        <materialIcons:MaterialIcon Kind="FileEditOutline" />
                                         <TextBlock Name="DirtyWorkingTreeBadge"
                                                     AutomationProperties.AutomationId="DirtyWorkingTreeBadge"
                                                     Text="Uncommitted changes" />

@@ -47,7 +47,7 @@ public sealed class SelectPackageWindowViewModelTests
     {
         // Arrange: two sources
         var a = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
-        var b = new FakePackageSourceProvider("B", ("fabrikam-agents", "2.0.0"));
+        var b = new FakePackageSourceProvider("B", ("second-agents", "2.0.0"));
 
         // Act
         var viewModel = CreateViewModel(a, b);
@@ -84,7 +84,7 @@ public sealed class SelectPackageWindowViewModelTests
     {
         // Arrange
         var a = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"), ("other", "1.0.0"));
-        var b = new FakePackageSourceProvider("B", ("fabrikam-agents", "2.0.0"));
+        var b = new FakePackageSourceProvider("B", ("second-agents", "2.0.0"));
         var viewModel = CreateViewModel(a, b);
         Assert.True(viewModel.IsLoading);
 
@@ -292,7 +292,7 @@ public sealed class SelectPackageWindowViewModelTests
         // Arrange: a package is selected at source A
         var viewModel = CreateViewModel(
             new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0")),
-            new FakePackageSourceProvider("B", ("fabrikam-agents", "2.0.0")));
+            new FakePackageSourceProvider("B", ("second-agents", "2.0.0")));
         await viewModel.LoadAsync(CancellationToken.None);
         viewModel.SelectedPackageName = "contoso-agents";
         await viewModel.PendingVersionsLoad;
@@ -305,7 +305,7 @@ public sealed class SelectPackageWindowViewModelTests
         Assert.Null(viewModel.SelectedPackageName);
         Assert.Null(viewModel.SelectedVersion);
         Assert.Empty(viewModel.AvailableVersions);
-        Assert.Equal(["fabrikam-agents"], viewModel.PackageNames);
+        Assert.Equal(["second-agents"], viewModel.PackageNames);
         Assert.False(viewModel.CanConfirm);
     }
 

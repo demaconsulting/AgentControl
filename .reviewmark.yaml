@@ -127,10 +127,17 @@ reviews:
       - "src/**/LauncherUI/SelectPackageWindow.axaml.cs"
       - "src/**/LauncherUI/SettingsWindow.axaml"
       - "src/**/LauncherUI/SettingsWindow.axaml.cs"
+      - "src/**/LauncherUI/SourceEditorWindow.axaml"
+      - "src/**/LauncherUI/SourceEditorWindow.axaml.cs"
       - "src/**/LauncherUI/RelayCommand.cs"
+      - "src/**/LauncherUI/AsyncRelayCommand.cs"
       - "src/**/LauncherUI/ViewModelBase.cs"
+      - "src/**/LauncherUI/PackageSourceIcons.cs"
+      - "src/**/LauncherUI/PackageSourceItemViewModel.cs"
+      - "src/**/LauncherUI/SelectPackageSourceViewModel.cs"
       - "src/**/LauncherUI/FavoriteIconConverter.cs"
       - "src/**/LauncherUI/FavoriteColorConverter.cs"
+      - "test/**/LauncherUI/AsyncRelayCommandTests.cs"
 
   - id: AgentControl-LauncherUI-MainWindowViewModel
     title: Review of Agent Control MainWindowViewModel unit implementation
@@ -159,6 +166,7 @@ reviews:
       - "docs/verification/agent-control/launcher-ui/repo-card-view-model.md"
       - "src/**/LauncherUI/RepoCardViewModel.cs"
       - "test/**/LauncherUI/RepoCardViewModelTests.cs"
+      - "test/**/LauncherUI/RepoCardViewModelTestExtensions.cs"
 
   - id: AgentControl-LauncherUI-SelectPackageWindowViewModel
     title: Review of Agent Control SelectPackageWindowViewModel unit implementation
@@ -187,6 +195,20 @@ reviews:
       - "docs/verification/agent-control/launcher-ui/settings-window-view-model.md"
       - "src/**/LauncherUI/SettingsWindowViewModel.cs"
       - "test/**/LauncherUI/SettingsWindowViewModelTests.cs"
+
+  - id: AgentControl-LauncherUI-SourceEditorViewModel
+    title: Review of Agent Control SourceEditorViewModel unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/launcher-ui.md
+      - docs/reqstream/agent-control/launcher-ui.yaml
+    paths:
+      - "docs/reqstream/agent-control/launcher-ui/source-editor-view-model.yaml"
+      - "docs/design/agent-control/launcher-ui/source-editor-view-model.md"
+      - "docs/verification/agent-control/launcher-ui/source-editor-view-model.md"
+      - "src/**/LauncherUI/SourceEditorViewModel.cs"
+      - "test/**/LauncherUI/SourceEditorViewModelTests.cs"
 
   # AgentControl - AgentPackageManagement
   - id: AgentControl-AgentPackageManagement

@@ -11,25 +11,68 @@ sections:
       - id: AgentControl-RepoCardViewModel-DisplayInfo
         title: >-
           The RepoCardViewModel class shall expose the repo's leaf folder name as its display
-          name, and its pinned package name/version when a pin file exists.
+          name, and - when a pin file exists - a chip text naming the pinned package and its
+          version together with a tooltip and icon that say which configured source it came
+          from and of what kind (a zip folder or a NuGet folder, or not configured), and - when
+          no package is pinned - a distinct "no agent package" state.
         justification: |
-          A developer identifies a repo card primarily by its folder name; the pinned
-          package/version tells them at a glance which agent package version is installed.
+          A developer identifies a repo card primarily by its folder name; the chip tells them
+          at a glance which agent package, which version and from where, instead of an
+          unlabeled version number.
         tests:
           - RepoCardViewModel_RepoName_ReturnsLeafFolderName
           - RepoCardViewModel_Refresh_PinFileExists_PopulatesPinnedFields
+          - RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip
+          - RepoCardViewModel_PackageChip_PinnedToNuGetFolderSource_ShowsNuGetFolderIconAndKind
+          - RepoCardViewModel_PackageChip_PinnedSourceNotConfigured_ShowsUnknownSource
+          - RepoCardViewModel_NoPackageChip_NeverPinnedRepo_ShowsNoPackageChipOnly
+          - RepoCardViewModel_Chips_MissingRepo_ShowNeitherPackageChip
 
       - id: AgentControl-RepoCardViewModel-UpgradeBadge
         title: >-
           The RepoCardViewModel class shall indicate an upgrade is available only when the
-          package source has a version newer than the repo's pinned version.
+          pinned package's source has a version newer than the repo's pinned version, and shall
+          then expose the version an upgrade would move to and a tooltip naming both versions.
         justification: |
-          Prevents the upgrade badge from appearing when the repo is already current, or when
-          no package source is configured to compare against.
+          Prevents the upgrade chip from appearing when the repo is already current, or when
+          no package source is configured to compare against; naming the target version tells
+          the developer what the upgrade is.
         tests:
           - RepoCardViewModel_Refresh_NewerVersionAtSource_SetsUpgradeAvailableTrue
           - RepoCardViewModel_Refresh_AlreadyOnLatestVersion_SetsUpgradeAvailableFalse
           - RepoCardViewModel_Refresh_NoPackageSourceConfigured_SetsUpgradeAvailableFalse
+          - RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions
+
+      - id: AgentControl-RepoCardViewModel-LaunchLabel
+        title: >-
+          The RepoCardViewModel class shall label its Launch action with the short name of the
+          configured agent tool, falling back to a plain "Launch" when the tool has no usable
+          short name or the name is too long, and shall update the label when the configured
+          tool changes.
+        justification: |
+          A button that names the tool it will start is clearer than a generic one, but a long
+          command name must not widen the card's buttons.
+        tests:
+          - RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack
+          - RepoCardViewModel_LaunchButtonText_AgentToolChanged_UpdatesAfterRefreshCheap
+
+      - id: AgentControl-RepoCardViewModel-ResponsiveOperations
+        title: >-
+          The RepoCardViewModel class shall read package sources, apply packages and pull
+          without blocking its caller, shall report that an operation is running and disable
+          the card's other actions while it runs, shall ignore a second request for an
+          operation while one runs, shall let the user cancel a cancellable operation without
+          reporting an error or changing the repo's pin, and shall let a newer upgrade check
+          supersede an older one still waiting.
+        justification: |
+          A slow or unreachable source must never freeze the window; a double click must not
+          apply a package twice; and an answer that arrives after the sources changed must not
+          overwrite the newer state.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_SourceSlow_DoesNotBlockAndShowsChecking
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_Cancelled_ThrowsAndKeepsPreviousState
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded
 
       - id: AgentControl-RepoCardViewModel-PullGating
         title: >-
@@ -93,7 +136,8 @@ sections:
       - id: AgentControl-RepoCardViewModel-Launch
         title: >-
           The RepoCardViewModel class shall launch the configured agent tool in the repo's
-          working directory, recording the launch timestamp on success, and shall raise an
+          working directory, recording the launch timestamp on success, shall launch even when
+          the user cancels the wait for the pre-launch sync, and shall raise an
           error when no agent tool command is configured.
         justification: |
           Launch is the primary action of AgentControl; the launch timestamp feeds the
@@ -102,6 +146,7 @@ sections:
         tests:
           - RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded
           - RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred
+          - RepoCardViewModel_LaunchCommand_PreLaunchSyncCancelledByUser_StillLaunches
 
       - id: AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch
         title: >-

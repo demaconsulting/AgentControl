@@ -24,6 +24,7 @@ input-files:
   - docs/design/agent-control/launcher-ui/repo-card-view-model.md
   - docs/design/agent-control/launcher-ui/select-package-window-view-model.md
   - docs/design/agent-control/launcher-ui/settings-window-view-model.md
+  - docs/design/agent-control/launcher-ui/source-editor-view-model.md
   - docs/design/agent-control/agent-package-management.md
   - docs/design/agent-control/agent-package-management/package-source.md
   - docs/design/agent-control/agent-package-management/package-source-registry.md

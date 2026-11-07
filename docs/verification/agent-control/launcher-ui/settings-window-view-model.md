@@ -4,7 +4,10 @@
 
 `SettingsWindowViewModel` is verified with unit tests defined in
 `SettingsWindowViewModelTests.cs`. No Avalonia `Window` is constructed; tests exercise the
-view-model class directly against real `AppSettings` values, so no mocking is required.
+view-model class directly against real `AppSettings` values and an injected folder-exists check
+(so no real folders are needed and a check can be made slow or failing on purpose). The window
+is exercised by the headless Avalonia tests in `DialogWindowTests.cs` and, end to end with the
+editor dialogs, by the FlaUI tests.
 
 #### Test Environment
 
@@ -13,17 +16,21 @@ N/A - standard test environment.
 #### Acceptance Criteria
 
 - All unit tests pass with zero failures.
-- Editable properties are seeded from the current application settings on construction.
-- A null initial settings value is rejected.
+- Editable properties and the source list are seeded from the current application settings on
+  construction, and a null initial settings value is rejected.
 - The custom-agent-tool indicator reflects only whether the selected tool is a well-known
   built-in tool.
-- Saving invokes the owner's callback with the current values and raises `Saved`.
+- Saving invokes the owner's callback with the current values, including the edited source list,
+  and raises `Saved`.
 - `AvailableShellPreferences` is non-empty, has no duplicate entries, starts with a blank
   auto-detect entry, and contains the expected OS-appropriate preset names.
-- A package source field that embeds a credential is refused with a message that does not repeat
-  it, and nothing is saved.
-- Saving writes the package source field as the Default source (never the legacy path), keeps all
-  other configured sources unchanged, and removes the Default source when the field is blank.
+- A source location that embeds a credential is refused with a message that does not repeat it,
+  and nothing is saved.
+- The source list shows each source and a folder status without blocking the caller; a folder
+  that cannot be examined shows as missing and pending checks are abandoned on dispose.
+- Add, edit and remove change the list as documented, and a removal's warning names the repos
+  pinned to the source.
+- A new source's alias must differ from every configured alias, ignoring case.
 
 #### Test Scenarios
 
@@ -42,9 +49,11 @@ settings value with `ArgumentNullException`. This scenario is tested by
 `AgentControl-SettingsWindowViewModel-CustomAgentTool`.
 
 **SettingsWindowViewModel_Save_InvokesCallbackAndRaisesSaved**: `SaveCommand` invokes the
-`onSave` callback with the current property values and raises `Saved`. This scenario is
-tested by
-`SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved`,
+`onSave` callback with the current property values and raises `Saved`; a location holding a URL
+with user information and a sentinel password does not invoke the callback or raise `Saved`,
+sets `HasError`, and the message does not contain the password. This scenario is tested by
+`SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved` and
+`SettingsWindowViewModel_Save_SourceLocationWithEmbeddedCredential_IsRefusedWithErrorMessage`,
 covering `AgentControl-SettingsWindowViewModel-Save`.
 
 **SettingsWindowViewModel_ShellPreferencePresets_NonEmptyBlankFirstNoDuplicatesAndOsAppropriate**:
@@ -56,21 +65,34 @@ no duplicate entries, and for matching the expected preset names for the OS the 
 `SettingsWindowViewModel_AvailableShellPreferences_CurrentOs_ContainsExpectedPresets`, covering
 `AgentControl-SettingsWindowViewModel-ShellPreferencePresets`.
 
-**SettingsWindowViewModel_DefaultSource_EditedWhileOtherSourcesPreserved**: Saving with an edited
-package source field writes a single `Default` zip source and no legacy path; with a `Default` zip
-source and a NuGet source configured, only the `Default` location changes and the NuGet source
-(with its package IDs) is carried through while the live settings stay untouched; a blank field
-removes `Default` but keeps other sources; a legacy single path in the initial settings seeds the
-field. This scenario is tested by
-`SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved`,
-`SettingsWindowViewModel_Save_OtherSourcesConfigured_PreservesThemAndEditsOnlyDefault`,
-`SettingsWindowViewModel_Save_BlankPackageSourcePath_RemovesDefaultSourceOnly`, and
-`SettingsWindowViewModel_Constructor_LegacyPackageSourcePath_SeedsPackageSourcePathField`,
-covering `AgentControl-SettingsWindowViewModel-DefaultSource`.
+**SettingsWindowViewModel_SourceList_ListsSourcesAndChecksFoldersWithoutBlocking**: The configured
+sources are listed in order, an empty configuration reports no sources, a slow folder check shows
+a "checking" state and then its result while the constructor returns immediately, a missing or
+failing check shows as missing, and disposing cancels pending checks. This scenario is tested by
+`SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder`,
+`SettingsWindowViewModel_Constructor_NoSources_ReportsHasNoSources`,
+`SettingsWindowViewModel_Constructor_FolderCheckSlow_ShowsCheckingThenResultWithoutBlocking`,
+`SettingsWindowViewModel_FolderCheck_MissingOrFailing_ShowsMissing`, and
+`SettingsWindowViewModel_Dispose_CancelsPendingFolderChecks`, covering
+`AgentControl-SettingsWindowViewModel-SourceList`.
 
-**SettingsWindowViewModel_Save_CredentialBearingPath_IsRefused**: Saving with a package source
-field holding a URL with user information and a sentinel password does not invoke the save
-callback or raise `Saved`, sets `HasError`, and the message does not contain the password. This
+**SettingsWindowViewModel_AddEditRemoveSource_ChangeListAndWarnBeforeRemoval**: The add commands
+request an editor for each source kind; saving an editor adds and selects a zip or NuGet source
+(keeping the NuGet package identifiers), an edit replaces the source in place keeping its alias,
+the remove command requests a removal for the selected source, a removal's warning names the
+pinned repos before the source is removed, and the saved settings hold the resulting list in
+order. This scenario is tested by
+`SettingsWindowViewModel_AddCommands_RaiseEditorRequestedForNewSourceOfEachKind`,
+`SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource`,
+`SettingsWindowViewModel_AddNuGetFolderSource_EditorSaved_KeepsPackageIds`,
+`SettingsWindowViewModel_EditSource_EditorSaved_ReplacesSourceInPlaceKeepingAlias`,
+`SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource`,
+`SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves`, and
+`SettingsWindowViewModel_Save_AfterAddEditRemove_WritesResultingSourcesInOrder`, covering
+`AgentControl-SettingsWindowViewModel-AddEditRemoveSource`.
+
+**SettingsWindowViewModel_AliasUnique_DuplicateIgnoringCaseCannotBeSaved**: An editor created for a
+new source cannot be saved with an alias already configured under a different letter case. This
 scenario is tested by
-`SettingsWindowViewModel_Save_PackageSourcePathWithEmbeddedCredential_IsRefusedWithErrorMessage`,
-covering `AgentControl-SettingsWindowViewModel-Save`.
+`SettingsWindowViewModel_AddSource_AliasAlreadyConfiguredIgnoringCase_EditorCannotSave`, covering
+`AgentControl-SettingsWindowViewModel-AliasUnique`.

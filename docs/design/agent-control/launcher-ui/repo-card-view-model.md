@@ -34,7 +34,7 @@ reads as `Default`).
 source cannot be used, chiefly an alias that is not among the configured sources. When set, no
 upgrade is offered and no other source is ever consulted
 (`AgentControl-RepoCardViewModel-SourceAwareness`); the main window shows it as a warning badge
-on the card, with the reason as its tooltip. Set by `RefreshUpgradeStatus`; cleared when
+on the card, with the reason as its tooltip. Set by the cheap refresh; cleared when
 the pin or settings no longer have the problem.
 
 **CurrentBranch**, **HasCommittedAgentFiles**: `string?`/`bool` — Resolved via `GitClient`,
@@ -80,32 +80,55 @@ which would otherwise hide the explanation precisely when it is most needed.
 
 **IsPackageSelectionNeeded**: `bool` (derived) — `PinnedPackageName is null`.
 
-**Source access and the synchronous bridge.** The card builds a `PackageSourceRegistry` from the
-current settings' effective sources for each operation (`CreateSourceRegistry`) and calls the
-asynchronous providers through a private `RunBlocking` helper that runs the operation on a worker
-thread and waits for it, so its existing synchronous commands neither deadlock on the UI thread's
-synchronization context nor change shape. This blocks the calling thread exactly as the former
-direct folder scans did; moving these commands to true asynchronous execution with progress and
-cancellation is part of the source-aware UI work. NuGet sources keep their private caches under a
-`nuget` folder inside the startup configuration-directory override when one is supplied (so
-automated tests never touch the user profile), otherwise in the per-user default.
+**Source access and asynchronous operations.** The card builds a `PackageSourceRegistry` from the
+current settings' effective sources for each operation (`CreateSourceRegistry`) and awaits the
+asynchronous providers, so reading a source, extracting a package and pulling never run on the UI
+thread. `LaunchCommand`, `PullCommand`, `UpgradeCommand` and `RefreshCommand` are
+`AsyncRelayCommand` instances: a second request while one runs is ignored, and while one runs
+**IsBusy** is set, **BusyMessage** says what is happening and **CanCancelOperation** lets
+`CancelOperationCommand` cancel it (`AgentControl-RepoCardViewModel-ResponsiveOperations`).
+Cancelling is not an error and leaves the repo's pin unchanged. NuGet sources keep their private
+caches under a `nuget` folder inside the startup configuration-directory override when one is
+supplied (so automated tests never touch the user profile), otherwise in the per-user default.
+
+**Chip properties**: the view binds the card's chips to derived properties
+(`AgentControl-RepoCardViewModel-DisplayInfo`, `AgentControl-RepoCardViewModel-UpgradeBadge`):
+
+- *Package chip* — `HasPackageChip`, `PackageChipText` (package name and version),
+  `PackageChipTooltip` (names the package, version, source alias and source kind, or says the
+  pinned source is not configured), and the source kind's icon from `PackageSourceIcons`. Hidden
+  for a missing repo or when nothing is pinned.
+- *No-package chip* — `HasNoPackageChip` and its tooltip, shown instead of the package chip for a
+  present repo with no pin; clicking it opens Select Package.
+- *Upgrade chip* — `IsUpgradeAvailable`, `UpgradeChipText` (the version an upgrade would move to)
+  and `UpgradeChipTooltip` (both versions); `IsCheckingUpgrade` shows that the background check is
+  still running.
+- *Branch chip* — the branch name with a tooltip.
+- *Status chips* — uncommitted changes, committed agent files, folder missing and package source
+  problem (whose tooltip is the actual problem), each color-coded amber or red
+  (`AgentControl-LauncherUI-StatusBadges`).
+- *Launch label* — `LaunchButtonText` is "Launch" followed by the short display name of the
+  configured agent tool, or plain "Launch" when the name is unknown or longer than ten characters
+  (`AgentControl-RepoCardViewModel-LaunchLabel`).
 
 **_logger**: `ILogger<RepoCardViewModel>` (private, via `AppLogging.Factory.CreateLogger<RepoCardViewModel>()`)
 — Used to log the real work this view model performs (launch, pull, upgrade/apply-package,
 AGENTS.md accept/decline), mirroring the logging convention already established by `GitClient`
 and `AgentToolLauncher`. Every call site is guarded by `_logger.IsEnabled(...)`.
 
-**LaunchCommand, PullCommand, UpgradeCommand, SelectPackageCommand, RefreshCommand,
-FavoriteToggleCommand, RemoveCommand**: `RelayCommand` — see Interfaces in
-`docs/design/agent-control/launcher-ui.md`.
+**LaunchCommand, PullCommand, UpgradeCommand, RefreshCommand**: `AsyncRelayCommand`;
+**SelectPackageCommand, FavoriteToggleCommand, RemoveCommand, CancelOperationCommand**:
+`RelayCommand` — see Interfaces in `docs/design/agent-control/launcher-ui.md`.
 
 #### Key Methods
 
-**RefreshCheap**: Runs every cheap per-repo check (missing-repo, pin, branch,
-committed-files badge via `HEAD`-hash cache, upgrade status). Deliberately excludes the
+**RefreshCheap**: Runs every cheap per-repo check (missing-repo, pin, the source problem of a pin
+naming an unconfigured source, branch, committed-files badge via `HEAD`-hash cache). It is
+synchronous and never reads a package source, so it is safe to call eagerly for every recent repo
+at app launch; upgrade availability is determined separately by `RefreshUpgradeStatusAsync`.
+Deliberately excludes the
 working-tree dirty check, which is not cacheable and is deferred/lazy per architecture.md's
-repo-fact caching strategy, so this method is safe to call eagerly for every recent repo at
-app launch (`AgentControl-RepoCardViewModel-CommittedFilesBadge`). When the repo is found to be
+repo-fact caching strategy (`AgentControl-RepoCardViewModel-CommittedFilesBadge`). When the repo is found to be
 missing, also invalidates `GitStatusChecked`/`GitStatusUnavailable` (not just `CanPull`), since
 a cached Git-status result from before the repo disappeared is no longer trustworthy once it
 reappears; this method itself never re-checks Git status on a missing-to-present transition
@@ -121,9 +144,14 @@ checked" state until its next manual refresh
 constructor — computed lazily instead, on demand via `RefreshCommand` or once when a card
 first becomes visible.
 
-**Refresh**: Convenience entry point equivalent to `RefreshCheap` followed by
-`RefreshDirtyStatus`, for callers (e.g. adding a brand-new repo) wanting an immediate full
-refresh.
+**Refresh** / **RefreshAsync**: Convenience entry point equivalent to `RefreshCheap` followed by
+`RefreshDirtyStatus` and the upgrade check, for callers (e.g. adding a brand-new repo) wanting an
+immediate full refresh; `RefreshCommand` runs it asynchronously.
+
+**RefreshUpgradeStatusAsync**: Checks, in the background, whether the pin's source offers a
+newer version than the pinned one, using the shared cache. A check started later supersedes one
+still waiting, so a result for settings that have since changed is discarded; cancellation leaves
+the previous state in place (`AgentControl-RepoCardViewModel-ResponsiveOperations`).
 
 **Launch**: Launches the configured agentic CLI tool in the repo's working directory.
 
@@ -132,12 +160,12 @@ refresh.
 - *Postconditions*: On success, `StatusMessage` is set and `LaunchRecorded` is raised
   (`AgentControl-RepoCardViewModel-Launch`); on failure, `ErrorOccurred` is raised.
 
-Calls `EnsureAgentFilesSyncedBeforeLaunch` purely for its best-effort sync side effect, then
+Calls `EnsureAgentFilesSyncedBeforeLaunchAsync` purely for its best-effort sync side effect, then
 always proceeds to resolve the shell/agent command and spawn the process regardless of that
 call's outcome — the agent-package sync state (missing pin, missing managed folders, failed
-re-extraction) never gates the launch.
+re-extraction) never gates the launch, and neither does the user cancelling the wait for the sync.
 
-**EnsureAgentFilesSyncedBeforeLaunch** (internal): Best-effort attempt to sync the repo's four
+**EnsureAgentFilesSyncedBeforeLaunchAsync** (internal): Best-effort attempt to sync the repo's four
 managed agent folders with the pinned package version before `Launch` spawns the process. This
 is an informational side action only — it never blocks `Launch`.
 
@@ -167,21 +195,21 @@ is an informational side action only — it never blocks `Launch`.
 throwing for a failed pull.
 
 **Upgrade**: Finds the latest package at the pin's source for the pinned package name, then
-applies it via `ApplyPackageAndShowReleaseNotes` (`AgentControl-RepoCardViewModel-Upgrade`). An
+applies it via `ApplyPackageAndShowReleaseNotesAsync` (`AgentControl-RepoCardViewModel-Upgrade`). An
 unconfigured source or a failing source is reported through `ErrorOccurred`.
 
-**ApplySelectedPackage**: Resolves the exact user-selected package name/version at the chosen
-source, then applies it via `ApplyPackageAndShowReleaseNotes`.
+**ApplySelectedPackageAsync**: Resolves the exact user-selected package at the chosen source,
+then applies it via `ApplyPackageAndShowReleaseNotesAsync`.
 
-- *Parameters*: `string packageName`, `string version`, `string? sourceAlias = null` (the source
-  the selection was made from; when omitted the interim default is the `Default` source, else the
-  first configured source).
+- *Parameters*: `PackageReference selection` (source alias, package name, version) and a
+  cancellation token.
 - *Postconditions*: On success, the pin and release notes are updated exactly as `Upgrade`
-  (`AgentControl-RepoCardViewModel-ApplySelectedPackage`); on a version no longer available at
-  the source, raises `ErrorOccurred` without mutating the existing pin.
+  (`AgentControl-RepoCardViewModel-ApplySelectedPackage`), the pin recording the selection's source;
+  on a version no longer available at the source, raises `ErrorOccurred` without mutating the
+  existing pin; cancellation leaves the pin unchanged.
 
-**ApplyPackageAndShowReleaseNotes** (private): Shared extract-and-pin sequence reused by
-`Upgrade` and `ApplySelectedPackage`: first loads the repo's existing pin (a newer-schema pin
+**ApplyPackageAndShowReleaseNotesAsync** (private): Shared extract-and-pin sequence reused by
+`Upgrade` and `ApplySelectedPackageAsync`: first loads the repo's existing pin (a newer-schema pin
 aborts here with its actionable message while the repo is still untouched; a corrupt one is
 tolerated and replaced), acquires the package from its provider, extracts it
 (blind-delete-and-replace), proactively ensures the repo's `.gitignore` covers the four managed
@@ -194,7 +222,7 @@ sequence ends.
 
 **MaybeOfferAgentsMdTemplate** (private): Decides whether to offer the package's optional
 root-level `AGENTS.md` template, called immediately after every successful extraction in both
-`ApplyPackageAndShowReleaseNotes` and `EnsureAgentFilesSyncedBeforeLaunch`'s re-extraction
+`ApplyPackageAndShowReleaseNotesAsync` and `EnsureAgentFilesSyncedBeforeLaunchAsync`'s re-extraction
 branch — never as an independent, standing per-launch poll.
 
 - *Parameters*: `IPackageContentReader reader` — the package just successfully extracted.
@@ -239,32 +267,32 @@ the view layer after the user answers "No".
 
 **EnsureGitIgnoreCoversManagedFolders** (private): Best-effort, non-blocking wrapper around
 `GitIgnoreEnsurer.Ensure` called immediately after every successful extraction in
-`ApplyPackageAndShowReleaseNotes`, before the pin-file write. Deliberately wrapped in its own
-try/catch, separate from `ApplyPackageAndShowReleaseNotes`'s outer catch, so a `.gitignore` I/O
+`ApplyPackageAndShowReleaseNotesAsync`, before the pin-file write. Deliberately wrapped in its own
+try/catch, separate from `ApplyPackageAndShowReleaseNotesAsync`'s outer catch, so a `.gitignore` I/O
 failure can never abort the pin write or release-notes display that follow it — mirroring the
-non-blocking idiom already established by `EnsureAgentFilesSyncedBeforeLaunch`.
+non-blocking idiom already established by `EnsureAgentFilesSyncedBeforeLaunchAsync`.
 
 **SelectPackage** (private): Validates at least one package source is configured, then raises
-`SelectPackageRequested` carrying the alias of the source to select from (the `Default` source,
-else the first configured one, until the dialog can offer a choice) for the view layer to show the
-dialog (`AgentControl-RepoCardViewModel-SelectPackage`).
+`SelectPackageRequested` (a plain event) for the view layer to show the dialog, which starts on
+the source the repo is pinned to when it has one
+(`AgentControl-RepoCardViewModel-SelectPackage`).
 
-**RefreshUpgradeStatus** (private): Re-checks the upgrade badge at the pin's source via the shared
-cache. A pin naming a source that is not configured sets `SourceProblem`, offers no upgrade, and
-never looks elsewhere; an unreachable or failing source simply means no upgrade is offered.
+**EvaluatePinnedSource** (private): Part of the cheap refresh. A pin naming a source that is not
+configured sets `SourceProblem` and never looks elsewhere. An unreachable or failing source is
+reported by the background upgrade check as "no upgrade offered".
 
 #### Error Handling
 
 `Launch` catches `InvalidOperationException`/`ArgumentException` from
 `AgentToolLauncher.BuildProcessStartInfo`/`Launch` and raises `ErrorOccurred`.
-`EnsureAgentFilesSyncedBeforeLaunch` catches `InvalidOperationException` (extraction failure, or an
+`EnsureAgentFilesSyncedBeforeLaunchAsync` catches `InvalidOperationException` (extraction failure, or an
 unconfigured pinned source via `UnknownSourceException`) and `DirectoryNotFoundException`
 (unreachable source), raising `ErrorOccurred` as a non-blocking warning for each rather than
 propagating or blocking the launch. `Pull` catches `InvalidOperationException` from `GitClient.Pull`
 and reports it via `ErrorOccurred`. `RefreshGitStatus`/`RefreshBranchAndCommittedFiles` catch
 `InvalidOperationException` from `GitClient` and degrade to "unknown"/`false` rather than
 propagating, since these run as part of routine, frequent UI refreshes.
-`ApplyPackageAndShowReleaseNotes` catches `InvalidOperationException` and
+`ApplyPackageAndShowReleaseNotesAsync` catches `InvalidOperationException` and
 `DirectoryNotFoundException`, raising `ErrorOccurred` without applying a partial pin update; its
 read of a prior pin's `AgentsMdTemplateDeclined` value is guarded by its own inner try/catch that
 treats an `InvalidOperationException` (corrupt/unreadable existing pin file) as "no persisted
@@ -289,8 +317,8 @@ throwing (it never calls `RepoPinStore`, so `InvalidOperationException` cannot o
 `DeclineAgentsMdTemplate` catches those same four exception types plus `InvalidOperationException`
 from `RepoPinStore.Load`/`Save` and likewise raises `ErrorOccurred` rather than throwing. The
 constructor throws `ArgumentNullException` for a null `recentRepo`, `getSettings`, or
-`packageVersionCache`. `ApplySelectedPackage` throws `ArgumentNullException` for a null
-`packageName` or `version`.
+`packageVersionCache`. `ApplySelectedPackageAsync` throws `ArgumentNullException` for a null
+`selection`.
 
 #### Dependencies
 
@@ -317,7 +345,9 @@ constructor throws `ArgumentNullException` for a null `recentRepo`, `getSettings
   `AgentToolLauncher`.
 - **SelectPackageWindowViewModel** (`LauncherUI` subsystem) — constructed by the view layer
   in response to `SelectPackageRequested`; its `Confirmed` event is wired to
-  `ApplySelectedPackage`.
+  `ApplySelectedPackageAsync`.
+- **AsyncRelayCommand**, **PackageSourceIcons** (`LauncherUI` subsystem) — back the asynchronous
+  commands and supply the source-kind icon of the package chip.
 
 #### Callers
 

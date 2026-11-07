@@ -16,7 +16,8 @@ sections:
       - id: AgentControl-System-RecentRepos
         title: >-
           The tool shall display a recent-repos list showing each repo's display name, full
-          path, pinned package/version, current git branch, and status badges.
+          path, labeled chips for its pinned package with version and source, an available
+          upgrade, and its current git branch, and status warnings.
         tags: [system]
         justification: |
           A developer managing several repos needs an at-a-glance view of each repo's sync
@@ -25,10 +26,12 @@ sections:
         children:
           - AgentControl-LauncherUI-RecentReposDisplay
           - AgentControl-LauncherUI-StatusBadges
+          - AgentControl-LauncherUI-RepoCardChips
           - AgentControl-GitIntegration-DetectCommittedFiles
           - AgentControl-GitIntegration-CurrentBranch
         tests:
           - windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId
+          - windows@RepoCard_PinnedRepoWithNewerVersion_ShowsPackageAndUpgradeChips
 
       - id: AgentControl-System-AddRemoveRepo
         title: >-
@@ -92,8 +95,8 @@ sections:
 
       - id: AgentControl-System-SelectPackage
         title: >-
-          The tool shall let the user select an initial agent package name and version for a
-          repo that has no existing pin.
+          The tool shall let the user select an initial agent package, from a chosen configured
+          source, and its version for a repo that has no existing pin.
         tags: [system]
         justification: |
           A newly added repo has no prior pin to upgrade from; without an explicit
@@ -104,6 +107,7 @@ sections:
           - AgentControl-AgentPackageManagement-DiscoverPackages
         tests:
           - windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders
+          - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
 
       - id: AgentControl-System-Upgrade
         title: >-
@@ -181,12 +185,15 @@ sections:
           - AgentControl-AgentPackageManagement-NuGetFolderSource
         tests:
           # End to end: the published application runs with a zip source and a NuGet folder
-          # source configured side by side (the Settings window still edits only the Default
-          # source, so the multi-source settings file is seeded directly), and the older
-          # single-folder settings file used by the other UI tests exercises the Default-source
-          # migration. The persistence round trip and migration are also verified at unit level.
+          # source configured side by side, sources are added through the Settings dialogs and
+          # a package is selected from the NuGet source; the older single-folder settings file
+          # used by the other UI tests exercises the Default-source migration. The persistence
+          # round trip and migration are also verified at unit level.
           - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
           - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
+          - windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt
+          - windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt
+          - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
           - SettingsStore_SaveThenLoad_RoundTripsAllFields
           - SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource
 
@@ -239,22 +246,39 @@ sections:
 
       - id: AgentControl-System-Settings
         title: >-
-          The tool shall let the user configure the package source path, a git executable
+          The tool shall let the user configure the package sources, a git executable
           override, the agent tool selection, and a shell/terminal preference.
         tags: [system]
         justification: |
-          The package source location, git installation, preferred agentic CLI tool, and
+          The package source locations, git installation, preferred agentic CLI tool, and
           preferred terminal all vary by company/developer, so they must be user-editable
           rather than hardcoded.
         children:
           - AgentControl-LauncherUI-Settings
+          - AgentControl-LauncherUI-PackageSources
           - AgentControl-Settings-Persistence
         tests:
-          # No dedicated FlaUI end-to-end test opens the Settings window (UiTests pre-seed
-          # settings JSON directly via TestSettingsWriter instead); this system requirement is
-          # therefore verified via the underlying view-model's own unit test - a disclosed
-          # granularity limitation, not a fabricated end-to-end claim.
+          - windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt
+          - windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
+
+      - id: AgentControl-System-ResponsiveOperations
+        title: >-
+          The tool shall remain responsive while it reads package sources or applies a
+          package, shall show that the operation is running, and shall let the user cancel it.
+        tags: [system]
+        justification: |
+          Package sources are often network shares or servers that can be slow or offline; a
+          window that freezes while waiting looks like a crash.
+        children:
+          - AgentControl-LauncherUI-ResponsiveOperations
+        tests:
+          # Verified at unit level with deliberately slow and failing sources: a frozen UI
+          # thread is not observable through UI automation without an artificially slow share,
+          # so the end-to-end tests cover only the happy path of the same flows.
+          - RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged
+          - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked
+          - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
 
       - id: AgentControl-System-DiagnosticLogging
         title: >-

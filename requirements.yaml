@@ -16,6 +16,7 @@ includes:
   - docs/reqstream/agent-control/launcher-ui/repo-card-view-model.yaml
   - docs/reqstream/agent-control/launcher-ui/select-package-window-view-model.yaml
   - docs/reqstream/agent-control/launcher-ui/settings-window-view-model.yaml
+  - docs/reqstream/agent-control/launcher-ui/source-editor-view-model.yaml
   - docs/reqstream/agent-control/agent-package-management.yaml
   - docs/reqstream/agent-control/agent-package-management/package-source.yaml
   - docs/reqstream/agent-control/agent-package-management/package-source-registry.yaml

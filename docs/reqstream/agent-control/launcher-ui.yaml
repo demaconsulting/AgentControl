@@ -134,12 +134,14 @@ sections:
 
       - id: AgentControl-LauncherUI-SelectPackage
         title: >-
-          The LauncherUI subsystem shall let the user browse available package name/version
-          pairs from the configured package source and apply one to a repo with no existing
-          pin.
+          The LauncherUI subsystem shall let the user choose a configured package source, then
+          browse the package name/version pairs it offers and apply one to a repo with no
+          existing pin, recording the source in the pin.
         justification: |
           A repo with no pin has no prior version to upgrade from, so an explicit
-          package/version selection window is the only way to establish the initial pin.
+          source/package/version selection window is the only way to establish the initial pin;
+          the source is part of the choice because the same package name may exist in several
+          sources.
         children:
           - AgentControl-RepoCardViewModel-SelectPackage
           - AgentControl-SelectPackageWindowViewModel-ListPackages
@@ -150,7 +152,7 @@ sections:
         tests:
           - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias
           - SelectPackageWindowViewModel_SelectPackageName_PopulatesVersionsDescendingAndDefaultsToLatest
-          - SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithSelectedPair
+          - SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithFullPackageReference
           - RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady
 
       - id: AgentControl-LauncherUI-Upgrade
@@ -191,9 +193,8 @@ sections:
 
       - id: AgentControl-LauncherUI-Settings
         title: >-
-          The LauncherUI subsystem shall let the user view and edit the package source path,
-          git executable override, agent tool selection, and shell preference, and persist
-          changes on save.
+          The LauncherUI subsystem shall let the user view and edit the git executable
+          override, agent tool selection, and shell preference, and persist changes on save.
         justification: |
           These preferences vary per developer/company and must be editable through the UI
           rather than requiring manual configuration-file edits.
@@ -207,6 +208,71 @@ sections:
           - SettingsWindowViewModel_Constructor_SeedsPropertiesFromInitialSettings
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
           - MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields
+
+      - id: AgentControl-LauncherUI-PackageSources
+        title: >-
+          The LauncherUI subsystem shall let the user see the configured package sources with
+          their kind, location and whether their folder can be found, add a zip-package folder
+          source or a NuGet-package folder source through a dialog that only accepts a valid
+          source, edit a source without renaming it, and remove a source after being warned
+          about the repos pinned to it.
+        justification: |
+          Several sources are only usable if the developer can manage them in the application
+          rather than in a settings file; accepting only valid sources, keeping aliases fixed
+          and warning before removal protect the pins that refer to a source by alias.
+        children:
+          - AgentControl-SettingsWindowViewModel-SourceList
+          - AgentControl-SettingsWindowViewModel-AddEditRemoveSource
+          - AgentControl-SettingsWindowViewModel-AliasUnique
+          - AgentControl-SourceEditorViewModel-Validation
+          - AgentControl-SourceEditorViewModel-PackageIds
+          - AgentControl-SourceEditorViewModel-Save
+        tests:
+          - SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder
+          - SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource
+          - SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves
+          - SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved
+
+      - id: AgentControl-LauncherUI-RepoCardChips
+        title: >-
+          The LauncherUI subsystem shall describe each repo card with labeled chips - the
+          pinned agent package with its version and source, the version an available upgrade
+          would move to, the current branch, and status warnings - and shall name the
+          configured agent tool on the card's Launch action.
+        justification: |
+          Unlabeled version numbers and icons leave a developer guessing what a card is telling
+          them; each fact is stated in words with a tooltip that explains it in full.
+        children:
+          - AgentControl-RepoCardViewModel-DisplayInfo
+          - AgentControl-RepoCardViewModel-UpgradeBadge
+          - AgentControl-RepoCardViewModel-LaunchLabel
+        tests:
+          - RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip
+          - RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions
+          - RepoCardViewModel_BranchChip_BranchKnown_ShowsBranchWithTooltip
+          - RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack
+
+      - id: AgentControl-LauncherUI-ResponsiveOperations
+        title: >-
+          The LauncherUI subsystem shall keep the window responsive while package sources are
+          read or packages are applied, shall show progress, shall let the user cancel such an
+          operation, shall run only one such operation per repo at a time, and shall show a
+          source that cannot be read as an inline problem without affecting other sources or
+          repos.
+        justification: |
+          Package sources are often network shares that can be slow or offline; a frozen window
+          would be mistaken for a crash and a repeated click must not apply a package twice.
+        children:
+          - AgentControl-RepoCardViewModel-ResponsiveOperations
+          - AgentControl-MainWindowViewModel-BackgroundUpgradeCheck
+          - AgentControl-SelectPackageWindowViewModel-AsyncLoading
+          - AgentControl-SelectPackageWindowViewModel-SourceFailureIsolation
+        tests:
+          - AsyncRelayCommand_ExecuteAsync_WhileRunning_DoesNotRunOperationTwice
+          - AsyncRelayCommand_Cancel_Running_SignalsTokenAndIsNotAnError
+          - RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged
+          - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked
+          - SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline
 
       - id: AgentControl-LauncherUI-About
         title: >-
@@ -241,7 +307,6 @@ sections:
           user needs to see that the source is missing so they can restore it.
         children:
           - AgentControl-RepoCardViewModel-SourceAwareness
-          - AgentControl-SettingsWindowViewModel-DefaultSource
           - AgentControl-MainWindowViewModel-InvalidateChangedSources
           - AgentControl-SelectPackageWindowViewModel-SourceScoped
         tests:

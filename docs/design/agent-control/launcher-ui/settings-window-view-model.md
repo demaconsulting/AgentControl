@@ -5,23 +5,24 @@
 #### Purpose
 
 `SettingsWindowViewModel` backs the settings window: it edits a working copy of
-`AppSettings`'s user-configurable fields (the package source path - which edits the `Default`
-package source -, git executable override, agent tool selection, custom command, shell
-preference) and persists them on `Save`. It edits a
+`AppSettings`'s user-configurable fields (the list of package sources, git executable override,
+agent tool selection, custom command, shell preference) and persists them on `Save`. It edits a
 copy rather than the live `AppSettings` instance so that closing the window without saving
 never partially mutates the caller's settings.
 
 #### Data Model
 
-**PackageSourcePath**: `string?` — The location of the package source named `Default` (the
-source a single-folder configuration migrates to), seeded from `AppSettings.GetEffectiveSources`.
-Blank removes the `Default` source on save; a non-blank value creates it as a zip source if
-absent (`AgentControl-SettingsWindowViewModel-DefaultSource`). This single field is an interim
-editor: every other configured source is carried through a save unchanged until a full
-multi-source editor exists.
+**Sources**: `ObservableCollection<PackageSourceItemViewModel>` — One row per configured package
+source, built from `AppSettings.GetEffectiveSources` (so a previously configured single
+package-source folder appears as the source named `Default`). Each row wraps a private clone of
+the `PackageSourceDefinition`, so the live settings are never mutated, and exposes the alias, a
+kind icon and label (from `PackageSourceIcons`), the location, the number of repos pinned to it,
+and a status text (`AgentControl-SettingsWindowViewModel-SourceList`).
 
-**\_sources**: `List<PackageSourceDefinition>` — private working copies (clones) of the configured
-sources taken at construction, so the live settings are never mutated.
+**SelectedSource**: `PackageSourceItemViewModel?` — The row the Edit and Remove commands act on.
+
+**HasNoSources**: `bool` (derived) — `true` while the list is empty, so the window can show a
+hint instead of a blank list.
 
 **GitExecutablePath**, **CustomAgentCommand**, **ShellPreference**:
 `string?` — Editable copies of the corresponding `AppSettings` fields.
@@ -45,18 +46,43 @@ shell" decision. Each list is prefixed with a blank (`string.Empty`) entry repre
 The backing control is an editable `ComboBox`, so a user may still type a custom shell path not
 present in this list (`AgentControl-SettingsWindowViewModel-ShellPreferencePresets`).
 
+**ErrorMessage** / **HasError**: `string?` / `bool` — A message shown in red when a save is
+refused.
+
 Notably absent: the recent-repos list is intentionally not exposed here — it is owned
 exclusively by `MainWindowViewModel` and is preserved by `MainWindowViewModel.ApplySettings`
-when the `AppSettings` built by `Save` is applied.
+when the `AppSettings` built by `Save` is applied. The recent-repos list is only read to count
+the repos pinned to each source.
 
 #### Key Methods
 
-**Constructor**: Seeds editable properties from the current settings.
+**Constructor**: Seeds editable properties from the current settings and starts the status
+check of every source.
 
-- *Parameters*: `AppSettings initial`, `Action<AppSettings> onSave`.
-- *Preconditions*: Neither parameter is null.
-- *Postconditions*: Every editable property equals its corresponding field on `initial`
-  (`AgentControl-SettingsWindowViewModel-Seed`).
+- *Parameters*: `AppSettings initial`, `Action<AppSettings> onSave`, and an optional folder-exists
+  check (so tests need no real folders).
+- *Preconditions*: `initial` and `onSave` are not null.
+- *Postconditions*: Every editable property equals its corresponding field on `initial`, and
+  `Sources` lists the configured sources in order
+  (`AgentControl-SettingsWindowViewModel-Seed`). Each row shows a "checking" status until its
+  background folder check completes; a folder that cannot be examined, or that does not exist,
+  shows as missing. The checks run on worker threads, so constructing the view model never
+  waits for a slow location.
+
+**AddZipSourceCommand**, **AddNuGetFolderSourceCommand**, **EditSourceCommand**: Raise
+`EditorRequested` asking the window to open a `SourceEditorViewModel`, created by
+`CreateEditor`, for a new source of the chosen kind or for the selected source. When the editor
+reports `Saved`, the resulting definition is appended to `Sources` and selected, or replaces the
+edited row in place keeping its position (`AgentControl-SettingsWindowViewModel-AddEditRemoveSource`).
+The editor's alias check refuses an alias already configured, ignoring case
+(`AgentControl-SettingsWindowViewModel-AliasUnique`). Because the editor works on the source's
+own definition, any value of that source the dialog does not show is carried through an edit
+unchanged.
+
+**RemoveSourceCommand**: Raises `RemoveRequested` for the selected source so the window can ask
+for confirmation. `GetRemovalWarning` builds the confirmation text, which, when repos are
+pinned to the source, states how many and that they will show a package source problem
+afterwards; `RemoveSource` then removes the row.
 
 **Save** (private, bound to `SaveCommand`): Builds an `AppSettings` from the current editable
 properties and invokes the `onSave` callback.
@@ -64,36 +90,42 @@ properties and invokes the `onSave` callback.
 - *Parameters*: None.
 - *Returns*: `void`.
 - *Postconditions*: `onSave` has been invoked with a new `AppSettings` reflecting the current
-  property values; `Saved` has been raised (`AgentControl-SettingsWindowViewModel-Save`). The
-  configured sources are written to `AppSettings.Sources` (never the legacy path): clones of the
-  working sources with the `Default` source updated, created at the front, or removed according to
-  `PackageSourcePath`, and all other sources unchanged
-  (`AgentControl-SettingsWindowViewModel-DefaultSource`).
+  property values, whose `Sources` are clones of the current rows in order and whose legacy
+  single-path field is empty; `Saved` has been raised
+  (`AgentControl-SettingsWindowViewModel-Save`).
 
 The returned `AppSettings.RecentRepos` is left as a fresh empty list; callers (specifically
 `MainWindowViewModel.ApplySettings`) are responsible for preserving the authoritative
 recent-repos list, since this view model never owns or edits it.
 
+**Dispose**: Cancels the folder checks still running and releases their cancellation source;
+the window calls it when it closes (`AgentControl-SettingsWindowViewModel-SourceList`).
+
 #### Error Handling
 
 The constructor throws `ArgumentNullException` for a null `initial` or `onSave`. `Save` checks
 every source location with `PackageSourceDefinition.GetCredentialProblem`: a location embedding a
-credential (for example a URL with user information typed into the package source field) is not
+credential (for example a URL with user information) is not
 saved - `onSave` is not invoked, `Saved` is not raised, and `ErrorMessage` (shown in red in the
 window, and never containing the location) explains why. Any failure persisting the resulting
 `AppSettings` (e.g. `InvalidOperationException` from `SettingsStore.Save`) originates from the
-`onSave` callback, not from this view model.
+`onSave` callback, not from this view model. A failing folder check is not an error: the row
+shows the source as missing.
 
 #### Dependencies
 
 - **AppSettings**, **AgentToolKind** (`Settings` subsystem) — the data types this view model
   edits a working copy of.
-- **PackageSourceDefinition** (`AgentPackageManagement` subsystem) — the source data type it
-  clones and edits.
-- **RelayCommand** (`LauncherUI` subsystem, shared MVVM support) — backs `SaveCommand`.
+- **PackageSourceDefinition**, **PackageSourceType** (`AgentPackageManagement` subsystem) — the
+  source data type it clones and edits.
+- **SourceEditorViewModel**, **PackageSourceItemViewModel**, **PackageSourceIcons** (`LauncherUI`
+  subsystem) — the add/edit dialog's view model and the list row support.
+- **RelayCommand** (`LauncherUI` subsystem, shared MVVM support) — backs the commands.
 
 #### Callers
 
 - **MainWindow** (code-behind) — constructs `SettingsWindowViewModel` from
   `MainWindowViewModel.Settings` with `onSave` bound to `MainWindowViewModel.ApplySettings`,
   when the user opens the Settings window.
+- **SettingsWindow** (code-behind) — subscribes to `EditorRequested` and `RemoveRequested` to
+  show the `SourceEditorWindow` and the removal confirmation.

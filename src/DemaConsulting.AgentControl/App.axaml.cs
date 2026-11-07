@@ -69,7 +69,7 @@ internal sealed class App : Application
             // launcher window opens with the user's recent repos and preferences already
             // populated.
             var settings = SettingsStore.Load(Options?.ConfigDirectory);
-            var viewModel = new MainWindowViewModel(settings, Options);
+            var viewModel = new MainWindowViewModel(settings, Options, Options?.ConfigDirectory);
 
             desktop.MainWindow = new MainWindow
             {

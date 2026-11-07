@@ -1,9 +1,8 @@
 ---
 # Software Unit Requirements for the SettingsWindowViewModel Class
 #
-# SettingsWindowViewModel backs the settings dialog: the package source path (which edits the
-# Default package source), git executable override, agent tool selection, and shell
-# preference.
+# SettingsWindowViewModel backs the settings dialog: the list of package sources (add, edit and
+# remove), git executable override, agent tool selection, and shell preference.
 
 sections:
   - title: SettingsWindowViewModel Unit Requirements
@@ -35,8 +34,9 @@ sections:
       - id: AgentControl-SettingsWindowViewModel-Save
         title: >-
           The SettingsWindowViewModel class shall, on save, pass its current property values
-          to its owner and signal that settings were saved, except that it shall refuse to
-          save, showing an explanation, a package source location that embeds a credential.
+          and its list of package sources to its owner and signal that settings were saved,
+          except that it shall refuse to save, showing an explanation, a package source
+          location that embeds a credential.
         justification: |
           Persisting settings and notifying the caller must happen together so the main window
           can immediately apply the new configuration (e.g. invalidate cached package
@@ -44,7 +44,7 @@ sections:
           user can correct it, because AgentControl never stores secrets.
         tests:
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
-          - SettingsWindowViewModel_Save_PackageSourcePathWithEmbeddedCredential_IsRefusedWithErrorMessage
+          - SettingsWindowViewModel_Save_SourceLocationWithEmbeddedCredential_IsRefusedWithErrorMessage
 
       - id: AgentControl-SettingsWindowViewModel-ShellPreferencePresets
         title: >-
@@ -61,17 +61,50 @@ sections:
           - SettingsWindowViewModel_AvailableShellPreferences_NoDuplicateEntries
           - SettingsWindowViewModel_AvailableShellPreferences_CurrentOs_ContainsExpectedPresets
 
-      - id: AgentControl-SettingsWindowViewModel-DefaultSource
+      - id: AgentControl-SettingsWindowViewModel-SourceList
         title: >-
-          The SettingsWindowViewModel class shall let the user edit the location of the package
-          source named Default - creating it when absent and removing it when blank - and shall
-          carry every other configured source through a save unchanged.
+          The SettingsWindowViewModel class shall list every configured package source in order
+          with its alias, kind and location - presenting a previously configured single
+          package-source folder as the source named Default - and shall show, without blocking
+          the caller, whether each source's folder can currently be found, treating a folder
+          that cannot be examined as not found and abandoning checks still running when the
+          window is disposed.
         justification: |
-          Until the settings dialog can edit several sources, the single package-folder field
-          must keep working as it always has, and saving it must not discard sources that were
-          configured another way.
+          A developer must see what is configured and whether it is usable at a glance; a folder
+          check against a network share that does not answer must never freeze the window.
         tests:
-          - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
-          - SettingsWindowViewModel_Save_OtherSourcesConfigured_PreservesThemAndEditsOnlyDefault
-          - SettingsWindowViewModel_Save_BlankPackageSourcePath_RemovesDefaultSourceOnly
-          - SettingsWindowViewModel_Constructor_LegacyPackageSourcePath_SeedsPackageSourcePathField
+          - SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder
+          - SettingsWindowViewModel_Constructor_NoSources_ReportsHasNoSources
+          - SettingsWindowViewModel_Constructor_FolderCheckSlow_ShowsCheckingThenResultWithoutBlocking
+          - SettingsWindowViewModel_FolderCheck_MissingOrFailing_ShowsMissing
+          - SettingsWindowViewModel_Dispose_CancelsPendingFolderChecks
+
+      - id: AgentControl-SettingsWindowViewModel-AddEditRemoveSource
+        title: >-
+          The SettingsWindowViewModel class shall let the user add a zip-package folder source
+          or a NuGet-package folder source, edit the selected source in place, and remove the
+          selected source, shall carry settings it does not show through an edit unchanged, and
+          shall describe - before a removal - how many repos are pinned to the source being
+          removed and that they will show a package source problem.
+        justification: |
+          Sources are added, corrected and retired over time; removing one that repos are pinned
+          to is allowed (the pin is the repos' own record) but the developer must be told what
+          will happen to those repos first.
+        tests:
+          - SettingsWindowViewModel_AddCommands_RaiseEditorRequestedForNewSourceOfEachKind
+          - SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource
+          - SettingsWindowViewModel_AddNuGetFolderSource_EditorSaved_KeepsPackageIds
+          - SettingsWindowViewModel_EditSource_EditorSaved_ReplacesSourceInPlaceKeepingAlias
+          - SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource
+          - SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves
+          - SettingsWindowViewModel_Save_AfterAddEditRemove_WritesResultingSourcesInOrder
+
+      - id: AgentControl-SettingsWindowViewModel-AliasUnique
+        title: >-
+          The SettingsWindowViewModel class shall refuse a new source whose alias equals an
+          already configured alias when compared ignoring case.
+        justification: |
+          Repos pin to a source by alias, so two sources with the same alias would make a pin
+          ambiguous.
+        tests:
+          - SettingsWindowViewModel_AddSource_AliasAlreadyConfiguredIgnoringCase_EditorCannotSave

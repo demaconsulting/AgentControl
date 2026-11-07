@@ -23,7 +23,7 @@ This document covers the verification design for the following software items:
     bootstrap responsibility, which has no dedicated unit test file)
   - **LauncherUI** subsystem
     - **MainWindowViewModel**, **RepoCardViewModel**, **SelectPackageWindowViewModel**,
-      **SettingsWindowViewModel**
+      **SettingsWindowViewModel**, **SourceEditorViewModel**
   - **AgentPackageManagement** subsystem
     - **PackageSource**, **PackageVersion**, **PackageVersionCache**, **PackageSourceRegistry**,
       **ZipFolderSourceProvider**, **NuGetSourceProvider**

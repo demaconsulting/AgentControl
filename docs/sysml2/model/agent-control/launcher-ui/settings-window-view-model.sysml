@@ -1,6 +1,6 @@
 package AgentControl {
     part def SettingsWindowViewModel {
-        doc /* Settings dialog view-model: package source path, git override, agent tool, shell preference. */
+        doc /* Settings dialog view-model: package sources list, git override, agent tool, shell preference. */
 
         comment sourceRef /* Source: src/DemaConsulting.AgentControl/LauncherUI/SettingsWindowViewModel.cs */
         comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/LauncherUI/SettingsWindowViewModelTests.cs */

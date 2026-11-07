@@ -18,14 +18,16 @@ This user guide covers:
 
 - Installing AgentControl
 - Adding a repository to the recent-repos list
-- Reading a repo card's badges, branch, and pinned-version display
+- Reading a repo card's chips: pinned package, upgrade, branch, and status warnings
+- Configuring package sources (zip-package folders and NuGet-package folders)
 - Selecting an initial agent package for a never-pinned repo, and upgrading an
   already-pinned repo
 - Launch behavior, including ensure-synced-before-launch semantics
 - Pulling the latest commits for a repo
-- Configuring per-user settings (package source, git executable, agent tool, shell)
+- Configuring per-user settings (package sources, git executable, agent tool, shell)
 - The About dialog
-- Authoring agent packages so AgentControl can discover and apply them
+- Authoring agent packages (zip files and NuGet packages) so AgentControl can discover and
+  apply them
 
 # Installation
 
@@ -49,39 +51,113 @@ recent-repos list as a card.
 
 Each repo card shows:
 
-- The repo's display name (a user-editable alias) and full path
-- Its pinned package name and version (once selected), read from the repo's
-  `.agentcontrol.json` file
-- Its current git branch name
-- A row of status badges, each with its own hover tooltip:
-  - **Upgrade available** — the repo's pin is behind the newest version discoverable at the
-    configured package source
-  - **Committed agent files** — one or more of `.github/agents`, `.github/standards`,
-    `.github/templates`, `.github/skills` are tracked by git at `HEAD` in this repo. This is
-    purely advisory: AgentControl does not modify git tracking state itself, it only warns
-    that content meant to stay untracked (via `.gitignore`) appears to have been committed.
-    Separately, AgentControl proactively ensures your `.gitignore` covers these four folders
-    immediately after every Select-Package/Upgrade (see below), which makes this situation
-    much less likely to occur going forward — but this badge itself remains unchanged and
-    still purely advisory.
-  - **Missing** — the repo path no longer exists on disk (for example, a deleted folder or an
-    unmounted network/removable drive). This suppresses the card's other badges and actions,
-    and offers a "Remove from list" action instead (the card is never auto-removed, since the
-    path may reappear, such as a drive being remounted)
-  - **Dirty working tree** — the repo has uncommitted local changes; this suppresses/disables
-    the Pull action for that card
+- The repo's name (its folder name) and, in smaller muted text below, its full path (hover for the
+  full text if it is shortened)
+- A row of **chips** — small rounded labels, each with a hover tooltip that explains it in full
+  (see [Reading the Chips](#reading-the-chips) below)
 - A favorite star toggle, letting you pin specific repos above the default
   most-recently-launched sort order
+- A **Launch** button labelled with your agent tool (see [Launching](#launching))
+- A **Git Pull** button (see [Pulling Changes](#pulling-changes))
 - A "..." menu offering Refresh, **Select Package...** or **Upgrade** (mutually exclusive —
   see below), and Remove
 - A manual **Refresh** action that re-checks the repo's git state and committed-agent-files
-  badge without waiting for the next app launch
-- A **Pull** button (see [Pulling Changes](#pulling-changes))
-- A **Launch** button (see [Launching](#launching))
+  chip without waiting for the next app launch
 
 Removing a repo from the list prompts for confirmation first, since it is a destructive
 action against AgentControl's own recent-repos state (it does not touch the repository
 itself).
+
+## Reading the Chips
+
+- **Agent package chip** (robot icon) — the agent package the repo is pinned to and its
+  version, for example `contoso-agents 1.0.0`. A small icon beside the version shows the kind of
+  source the package came from (a folder of zips, or a folder of NuGet packages), and the tooltip
+  names it: "Agent files: contoso-agents 1.0.0 from source 'Default' (zip folder)". If the source
+  is not configured, the tooltip says so.
+- **Upgrade chip** (amber, up arrow) — the version an upgrade would move to, for example
+  `1.1.0`. It appears only when the source the repo is pinned to has a newer version. Use the
+  card's "..." menu > **Upgrade** to apply it. While AgentControl is still checking the source,
+  the chip is not shown yet; a slow or unreachable source never blocks the window.
+- **No agent package chip** (grey) — the repo has no pin yet. Click it, or use "..." > **Select
+  Package...**, to choose one.
+- **Branch chip** — the repo's current git branch.
+- **Uncommitted changes** (amber) — the repo has uncommitted local changes; this disables the
+  **Git Pull** action for that card.
+- **Committed agent files** (amber) — one or more of `.github/agents`, `.github/standards`,
+  `.github/templates`, `.github/skills` are tracked by git at `HEAD` in this repo. This is
+  purely advisory: AgentControl does not modify git tracking state itself, it only warns
+  that content meant to stay untracked (via `.gitignore`) appears to have been committed.
+  Separately, AgentControl proactively ensures your `.gitignore` covers these four folders
+  immediately after every Select-Package/Upgrade (see below), which makes this situation
+  much less likely to occur going forward.
+- **Folder missing** (red) — the repo path no longer exists on disk (for example, a deleted
+  folder or an unmounted network/removable drive). This suppresses the card's other chips and
+  actions, and offers a "Remove from list" action instead (the card is never auto-removed, since
+  the path may reappear, such as a drive being remounted).
+- **Package source problem** (red) — the source the repo is pinned to is not configured (for
+  example it was removed or renamed in Settings). The tooltip states the problem. No upgrade is
+  offered and no other source is ever used instead; restore the source with the same alias in
+  Settings to resolve it.
+
+# Package Sources
+
+AgentControl takes agent packages from one or more **package sources**, which you manage in
+Settings. Two kinds of source are supported:
+
+- **Zip-package folder** — a folder (local, mapped drive, or UNC share) holding agent package
+  zip files named `{package-name}-{version}.zip`.
+- **NuGet-package folder** — a folder (local, mapped drive, or UNC share) holding `.nupkg`
+  files, as a NuGet "folder feed" does. A feed folder cannot be listed cheaply, so you also give
+  the **package IDs** it offers.
+
+Each source has an **alias**, the short name shown in the app and recorded in a repo's pin.
+
+## Adding a Source
+
+1. Open Settings (the gear icon) and, in the **Package sources** list, click **Add Zip-Package
+   Folder** or **Add NuGet-Package Folder**.
+2. Type an **alias**. It must be unique (letters are compared ignoring case) and cannot be
+   changed later, because repo pins refer to it.
+3. Enter the **location** as a full folder path, or use **Browse** to pick the folder. A
+   location that contains a user name or password is refused, and so is a web address (servers
+   are not supported yet).
+4. For a NuGet-package folder, enter each package ID and click **Add**; at least one is required.
+5. Messages under each field say what is wrong, and **Save** stays disabled until everything is
+   valid. Then save the source, and save the Settings window to keep the change.
+
+Each row of the list shows the alias, an icon for the kind of source, the location (hover for
+the full text) and a status: whether the folder can currently be found. The status is checked in
+the background, so an offline network share never freezes Settings.
+
+## Editing and Removing a Source
+
+Select a row and click **Edit** to change its location or (for NuGet) its package IDs; the alias
+is fixed. **Remove** asks for confirmation. Removing a source is allowed even when repos are
+pinned to it, but the confirmation tells you how many are: those repos will show a **Package
+source problem** chip until a source with that alias is configured again.
+
+## What Is Stored
+
+Sources are saved in your per-user `settings.json` (in AgentControl's folder under your user
+profile) as alias, kind, location and package IDs. Nothing secret is ever stored: AgentControl
+has no credentials for these folders and uses your normal file access. Each repo's
+`.agentcontrol.json` pin records the package name, exact version and **the alias of its source**.
+AgentControl never reads or writes a repo's own `nuget.config`, and keeps its NuGet caches in
+its own folder under your user profile.
+
+## Moving From a Single Package Source Folder
+
+Earlier versions had a single "package source folder". If your settings still have one, it
+appears automatically as a zip-package folder source named **Default**, and repos pinned before
+sources existed are treated as pinned to `Default`, so nothing needs to be redone.
+
+## A Pin Never Falls Back
+
+A repo is only ever served from the source its pin names. If two sources offer a package with the
+same name, the one in the pin wins even if the other has a higher version; if the pinned source
+is missing, you see an error rather than a quiet substitution. This stops a package of the same
+name in another place from being installed under your repo's pin.
 
 # Selecting and Upgrading Agent Packages
 
@@ -91,25 +167,29 @@ never both, depending on whether the repo already has a pin.
 ## Selecting an Initial Package
 
 A repo with no `.agentcontrol.json` pin yet (for example, a repo just added to the list)
-shows **Select Package...**. Choosing it opens a dialog that:
+shows **Select Package...**. Choosing it opens a dialog with three columns:
 
-1. Lists the distinct package base names discoverable at the configured package source
-   directory.
-2. Once you pick a name, lists that package's discoverable versions in descending order,
-   defaulting the selection to the latest.
-3. On confirm, runs the same extract-and-pin sequence as an upgrade: validate the zip, delete
-   the four managed folders if present, extract the new files, ensure your `.gitignore`
-   covers the four managed folders, write the `.agentcontrol.json` pin, show the release
-   notes, then offer the `AGENTS.md` template if applicable (see
-   [AGENTS.md Template Offer](#agentsmd-template-offer) below).
+1. **Source** — every configured package source, with its kind icon and alias. Each source loads
+   in the background with a progress indicator; if a source cannot be read (for example, an
+   offline share), its error appears in the dialog and the other sources still work.
+2. **Package** — the packages the selected source offers.
+3. **Version** — once you pick a package, its versions in descending order, defaulting the
+   selection to the latest.
+
+On confirm, AgentControl runs the same extract-and-pin sequence as an upgrade: validate the
+package, delete the four managed folders if present, extract the new files, ensure your
+`.gitignore` covers the four managed folders, write the `.agentcontrol.json` pin (naming the
+source), show the release notes, then offer the `AGENTS.md` template if applicable (see
+[AGENTS.md Template Offer](#agentsmd-template-offer) below). While this runs the card shows
+that it is busy and offers **Cancel**.
 
 ## Upgrading an Already-Pinned Repo
 
 Once a repo has a pin, its "..." menu shows **Upgrade** instead, appearing whenever a newer
-version of the pinned package is discoverable at the package source (shown by the
-upgrade-available badge). Upgrading:
+version of the pinned package is available at the source named in the pin (shown by the
+upgrade chip). Upgrading:
 
-1. Opens and validates the new package zip. If it opens without error, its contents are
+1. Opens and validates the new package. If it opens without error, its contents are
    assumed good — no checksum or signature verification is performed.
 2. Deletes the four managed agent folders under the repo root, if present.
 3. Extracts the new files into those same four folders.
@@ -129,7 +209,9 @@ previous package's contents.
 
 # Launching
 
-Click **Launch** on a repo card to start your configured agentic CLI tool in that repo's
+Click **Launch** on a repo card (the button names your configured agent tool, for example
+**Launch Copilot**, or just **Launch** when the tool has a long or unknown name) to start your
+configured agentic CLI tool in that repo's
 working directory. Launching is **never blocked** by agent-package sync state — an agentic
 CLI tool remains useful whether or not any agent files are present, and may even help you
 migrate away from agent files you've committed to the repo.
@@ -137,7 +219,7 @@ migrate away from agent files you've committed to the repo.
 Before starting the tool, Launch makes a best-effort attempt to keep the repo synced, purely
 as an informational side action:
 
-- If the repo has **committed agent files** (see the warning badge above), the four managed
+- If the repo has **committed agent files** (see the warning chip above), the four managed
   folders are never touched — no delete, no extract — and Launch proceeds straight to
   starting the tool with an informational status message.
 - Otherwise, if the repo has **no pin yet**, Launch proceeds anyway with an informational
@@ -151,30 +233,31 @@ as an informational side action:
   during this check; upgrading always remains a separate, deliberate action. If this
   re-extraction attempt fails (for example, the package source is unreachable, or the pinned
   version is no longer available), a non-blocking warning is shown, but the tool is still
-  launched. A successful re-extraction here also offers the package's `AGENTS.md` template if
+  launched. If you cancel the wait, the tool is launched as well. A successful re-extraction
+  here also offers the package's `AGENTS.md` template if
   applicable, consistent with Select Package and Upgrade (see
   [AGENTS.md Template Offer](#agentsmd-template-offer) below).
 
 # Pulling Changes
 
-The **Pull** button on a repo card runs `git pull` in that repo's working directory. It stays
+The **Git Pull** button on a repo card runs `git pull` in that repo's working directory. It stays
 visible but is disabled (with a tooltip explaining why) whenever the repo's working tree has
 uncommitted changes, the repo is missing, or the repo's Git status could not be determined
 (for example, the folder is not a Git repository, or git could not be run). It also starts
 disabled, with a "Git status has not been checked yet" tooltip, briefly while a repo card is
-first realized, before its initial (deferred) Git status check has completed. The "Dirty
-working tree" badge, if shown, specifically denotes a confirmed dirty working tree - it is not
-shown when Pull is disabled because of a missing repo, an undetermined status, or a status
+first realized, before its initial (deferred) Git status check has completed. The
+"Uncommitted changes" chip, if shown, specifically denotes a confirmed dirty working tree - it is not
+shown when Git Pull is disabled because of a missing repo, an undetermined status, or a status
 check that simply hasn't run yet.
 
 # Settings
 
 Open Settings from the gear icon on the toolbar to configure:
 
-- **Package source path** — the filesystem path from which agent package zip files are
-  discovered. This may be a local drive, a mapped network drive, or a UNC path; it is edited
-  via a textbox with a folder-browse dialog. No authentication, checksum, or signature
-  verification is performed on this path by AgentControl — the security and integrity of the
+- **Package sources** — the list of configured package sources, with **Add Zip-Package Folder**,
+  **Add NuGet-Package Folder**, **Edit** and **Remove** (see [Package Sources](#package-sources)).
+  No authentication, checksum, or signature
+  verification is performed on these folders by AgentControl — the security and integrity of the
   shared location is the responsibility of whoever maintains it.
 - **Git executable path override** — a specific `git` executable to use instead of resolving
   `git` from the process `PATH`.
@@ -198,12 +281,15 @@ scrollable list of this application's direct third-party dependencies and their 
 
 This section is the reference for teams that build and publish agent packages for
 AgentControl to discover and apply — not for developers who only consume packages through
-the app's own Select Package/Upgrade UI.
+the app's own Select Package/Upgrade UI. A package can be published as a **zip file** in a
+zip-package folder, or as a **NuGet package** in a NuGet-package folder; both carry the same
+content (see [Managed Folders](#managed-folders) and the sections after it), differing only in
+where the content sits and how the name and version are found.
 
 ## Package File Naming
 
-An agent package is a single `.zip` file placed in the configured package source directory,
-named:
+An agent package published as a zip is a single `.zip` file placed in a zip-package folder
+source, named:
 
 ```text
 {package-name}-{version}.zip
@@ -240,7 +326,7 @@ this ambiguity, rather than relying on any escaping mechanism (none exists).
 
 ## Version Format
 
-Versions must exactly match:
+The package version in a **zip file name** must exactly match:
 
 ```text
 MAJOR.MINOR.PATCH[-PRERELEASE]
@@ -253,15 +339,21 @@ MAJOR.MINOR.PATCH[-PRERELEASE]
   identifier may itself contain further hyphens, e.g. `1.2.0-beta-2` is a valid version with
   prerelease identifier `beta-2`). A trailing `-` with nothing after it is invalid.
 - Build-metadata suffixes (a trailing `+...` segment, as permitted by full Semantic
-  Versioning 2.0.0) are **not** supported — package file names must never carry one.
+  Versioning 2.0.0) are **not** supported in zip file names — they must never carry one.
 - A version with a prerelease identifier always sorts as lower precedence than the same
   `MAJOR.MINOR.PATCH` without one (for example, `1.0.0-beta` is considered older than
   `1.0.0`), matching standard semantic-versioning precedence rules.
 
 Valid examples: `1.0.0`, `2.4.13`, `1.2.0-beta`, `1.2.0-beta.1`, `1.2.0-rc-2`.
 
-Invalid examples: `1.0` (only two components), `1.0.0.0` (four components), `1.0.0-`
-(empty prerelease), `1.0.0+build.5` (build metadata is unsupported).
+Invalid examples for zip file names: `1.0` (only two components), `1.0.0.0` (four components),
+`1.0.0-` (empty prerelease), `1.0.0+build.5` (build metadata is unsupported).
+
+NuGet packages carry their version in the package, so they may use NuGet's wider version forms:
+three or four numeric components (`1.2.0` or `1.2.0.1`; `1.2.0.0` equals `1.2.0`), an optional
+prerelease, and optional build metadata after `+` (`1.2.0+build.5`). Build metadata is kept in
+the pin as written but is ignored when versions are compared, so `1.2.0+a` and `1.2.0+b` are the
+same version. Prerelease labels compare ignoring letter case.
 
 ## Managed Folders
 
@@ -339,14 +431,87 @@ the repo root if the repo lacks one and the user accepts the offer.
 
 ## Publishing a Package
 
-Place the finished zip file directly in the directory configured as the **package source
-path** in AgentControl's Settings (a local drive, mapped network drive, or UNC share).
+For a zip package, place the finished zip file directly in a folder configured as a
+**zip-package folder** source in AgentControl's Settings (a local drive, mapped network drive, or
+UNC share).
 AgentControl's package source directory scan discovers every `*.zip` file there on demand —
 there is no publish command, index file, or registration step beyond copying the zip into
 that directory. Publishing a new version alongside older versions of the same package (for
 example, keeping both `contoso-agents-1.1.0.zip` and `contoso-agents-1.2.0.zip` in the same
 directory) is expected and normal: existing repos remain pinned to whichever version they
 last synced until a developer explicitly upgrades.
+
+For a NuGet package, see the next section.
+
+## Authoring a NuGet Package
+
+A **NuGet-package folder** source reads `.nupkg` files from a folder feed. Package authors need to
+know three things:
+
+1. **The package ID and version** come from the package's `.nuspec` (or project properties). The
+   consumer adds the package ID to the NuGet source's package ID list in Settings; AgentControl
+   offers exactly the listed IDs and finds their versions in the folder.
+2. **The content lives under `content/`.** Inside the package, use the zip layout rooted at
+   `content/` (there is no mapping from other layouts and no fallback):
+
+   ```text
+   contoso-agents.1.2.0.nupkg
+   └── content/
+       ├── release-notes.md
+       ├── AGENTS.md
+       └── .github/
+           ├── agents/
+           ├── standards/
+           ├── templates/
+           └── skills/
+   ```
+
+   `content/release-notes.md` and `content/AGENTS.md` are optional and behave as described
+   above; only the four `.github` subtrees are extracted into a repo.
+3. **A package without a `content` folder is not an agent package** and is refused with an
+   error.
+
+A minimal `.nuspec` listing the files explicitly:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>contoso-agents</id>
+    <version>1.2.0</version>
+    <authors>Contoso</authors>
+    <description>Contoso agent files for AgentControl.</description>
+  </metadata>
+  <files>
+    <file src="agents\**" target="content\.github\agents" />
+    <file src="standards\**" target="content\.github\standards" />
+    <file src="templates\**" target="content\.github\templates" />
+    <file src="skills\**" target="content\.github\skills" />
+    <file src="release-notes.md" target="content" />
+    <file src="AGENTS.md" target="content" />
+  </files>
+</package>
+```
+
+Pack it with `nuget pack` or `dotnet pack`, and copy the resulting `.nupkg` into the folder the
+source points to.
+
+When you pack with an **SDK-style project** instead, use an explicit `PackagePath` that names the
+`.github` folder, because wildcard globbing may skip dot-folders:
+
+```xml
+<ItemGroup>
+  <None Include="agents\**" Pack="true" PackagePath="content\.github\agents" />
+  <None Include="standards\**" Pack="true" PackagePath="content\.github\standards" />
+  <None Include="templates\**" Pack="true" PackagePath="content\.github\templates" />
+  <None Include="skills\**" Pack="true" PackagePath="content\.github\skills" />
+  <None Include="release-notes.md" Pack="true" PackagePath="content" />
+  <None Include="AGENTS.md" Pack="true" PackagePath="content" />
+</ItemGroup>
+```
+
+Inspect the produced `.nupkg` (it is a zip file) to confirm the `content/.github/...` entries are
+present before publishing.
 
 ## References
 

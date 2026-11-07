@@ -2,11 +2,17 @@
 
 ### Verification Approach
 
-The `LauncherUI` subsystem is verified by the combined unit tests of its four units
+The `LauncherUI` subsystem is verified by the combined unit tests of its five units
 (`MainWindowViewModelTests.cs`, `RepoCardViewModelTests.cs`,
-`SelectPackageWindowViewModelTests.cs`, `SettingsWindowViewModelTests.cs`), which together
+`SelectPackageWindowViewModelTests.cs`, `SettingsWindowViewModelTests.cs`,
+`SourceEditorViewModelTests.cs`), plus `AsyncRelayCommandTests.cs` for the shared asynchronous
+command, which together
 exercise the full recent-repos/card/select-package/settings interaction surface without ever
-constructing an Avalonia `Window`. At the subsystem boundary, collaborating subsystems
+constructing an Avalonia `Window`. The windows themselves are exercised by headless Avalonia tests
+(`DialogWindowTests.cs`, `MainWindowTests.cs`), and the end-to-end flows - adding a zip and a
+NuGet folder source through the dialogs, selecting a package from the NuGet source, and the
+chips on a repo card - by the FlaUI `DemaConsulting.AgentControl.UiTests` project. At the
+subsystem boundary, collaborating subsystems
 (`AgentPackageManagement`, `RepoSync`, `RepoConfig`, `GitIntegration`, `AgentToolLauncher`,
 `Settings`) are exercised through their real implementations against real temporary
 directories and package-zip fixtures, and git is substituted with a stub script (`GitStub`,
@@ -109,12 +115,12 @@ by `RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue`,
 `AgentControl-LauncherUI-Pull`.
 
 **LauncherUI_SelectPackage_BrowseAndApplyToUnpinnedRepo**: The select-package request is
-raised with the configured source path, the selection window populates versions descending
-and defaults to latest, confirming raises the selected pair, and applying the selected package
+raised, the selection window populates versions descending and defaults to latest, confirming
+raises the full package reference (source, package, version), and applying the selected package
 updates the pin, extracts the files, and raises release-notes-ready. This scenario is tested
 by `RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias`,
 `SelectPackageWindowViewModel_SelectPackageName_PopulatesVersionsDescendingAndDefaultsToLatest`,
-`SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithSelectedPair`, and
+`SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithFullPackageReference`, and
 `RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady`,
 covering `AgentControl-LauncherUI-SelectPackage`.
 
@@ -162,12 +168,45 @@ and `DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat`, cove
 
 **LauncherUI_SourceAwareActions_UnitTestsCoverPinBindingAndTargetedInvalidation**: Source-aware
 select/upgrade/launch-sync behavior is verified by the `RepoCardViewModel`,
-`SettingsWindowViewModel`, `MainWindowViewModel`, and `SelectPackageWindowViewModel` unit tests
+`SettingsWindowViewModel`, `SourceEditorViewModel`, `MainWindowViewModel`, and `SelectPackageWindowViewModel` unit tests
 (see their unit verification designs), with
 `RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade` and
 `RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent`
 cited directly at the subsystem level, covering `AgentControl-LauncherUI-SourceAwareActions`
 (children: `AgentControl-RepoCardViewModel-SourceAwareness`,
-`AgentControl-SettingsWindowViewModel-DefaultSource`,
 `AgentControl-MainWindowViewModel-InvalidateChangedSources`,
 `AgentControl-SelectPackageWindowViewModel-SourceScoped`).
+
+**LauncherUI_PackageSources_ManageSourcesThroughSettingsAndEditor**: The settings view model
+lists, adds, edits and removes sources (warning about pinned repos before a removal), and the
+source editor validates what is entered and only saves a valid source; the
+dialogs are exercised end to end by adding a zip folder source and a NuGet folder source
+through the real windows. This scenario is tested by
+`SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder`,
+`SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource`,
+`SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves`, and
+`SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved`, covering
+`AgentControl-LauncherUI-PackageSources`.
+
+**LauncherUI_RepoCardChips_PackageUpgradeBranchAndLaunchLabel**: A card pinned to a zip source
+shows its package chip with name, version and source in the tooltip, an upgrade chip names the
+target version, a branch chip shows the branch, and the Launch label names the configured tool.
+This scenario is tested by
+`RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip`,
+`RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions`,
+`RepoCardViewModel_BranchChip_BranchKnown_ShowsBranchWithTooltip`, and
+`RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack`, covering
+`AgentControl-LauncherUI-RepoCardChips`.
+
+**LauncherUI_ResponsiveOperations_AsyncCommandsBackgroundChecksAndIsolatedFailures**: The
+asynchronous command ignores a repeated request while running and treats cancellation as no
+error; a package apply that is waiting on a slow source reports busy and cancels without changing
+the pin; the background upgrade refresh keeps checking other cards when one source is
+unreachable; and the Select Package dialog loads the other sources and shows an inline error for
+the unreachable one. This scenario is tested by
+`AsyncRelayCommand_ExecuteAsync_WhileRunning_DoesNotRunOperationTwice`,
+`AsyncRelayCommand_Cancel_Running_SignalsTokenAndIsNotAnError`,
+`RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged`,
+`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked`, and
+`SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline`,
+covering `AgentControl-LauncherUI-ResponsiveOperations`.

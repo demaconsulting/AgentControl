@@ -13,15 +13,17 @@ git/agent-tool command overrides isolate each test from a real `%APPDATA%\AgentC
 folder and from any real git installation or agentic CLI tool, per architecture.md's
 testability strategy (`AgentControl-System-TestIsolation`).
 
-Two system-level requirements have no dedicated FlaUI end-to-end scenario and are verified one
+One system-level requirement has no dedicated FlaUI end-to-end scenario and is verified one
 level down instead, with the limitation disclosed rather than a fabricated end-to-end claim:
 
-- `AgentControl-System-Settings` — the UiTests project pre-seeds settings JSON directly via
-  `TestSettingsWriter` rather than driving the Settings window through the UI, so this
-  requirement is verified via `SettingsWindowViewModel`'s own unit test instead.
 - `AgentControl-System-DiagnosticLogging` — no test directly inspects the diagnostic log
   file's contents; the only test-suite touch point is indirect, via `TestLoggingFixture.cs`
   (see the `Logging` subsystem verification design for the full disclosure).
+
+`AgentControl-System-ResponsiveOperations` is verified mainly at unit level, with deliberately
+slow and failing package sources, because a frozen UI thread is not observable through UI
+automation without an artificially slow share; the end-to-end tests cover the happy path of
+the same flows.
 
 ## Test Environment
 
@@ -33,7 +35,7 @@ an isolated temporary configuration directory (via `--config-dir`) and stub git/
 executables (via `--git-path`/`--agent-tool-command`, built with
 `DemaConsulting.AgentControl.ArgLoggerStub`) so no test depends on, or mutates, a real git
 installation, a real agentic CLI tool, or a developer's actual `%APPDATA%\AgentControl\`
-folder. Unit tests that back the two disclosed exceptions above run on .NET 10 on any
+folder. Unit tests that back the disclosed exceptions above run on .NET 10 on any
 supported platform with no additional environment setup
 (`AgentControl-Platform-Net10`).
 
@@ -57,8 +59,11 @@ supported platform with no additional environment setup
 **AgentControl_RecentRepos_MainWindowLaunch_DisplaysRepoCards**: The published application is
 launched with a pre-seeded settings file containing recent repos; the main window becomes
 visible and locatable by its expected `AutomationId`, confirming the recent-repos list (with
-each card's name, path, pin, branch, and status badges) is displayed on startup. This scenario
-is tested by `windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId`, covering
+each card's name, path, pin, branch, and status badges) is displayed on startup; a card pinned
+to a package with a newer version available shows the package chip (name, version and source)
+and the upgrade chip. This scenario
+is tested by `windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId` and
+`windows@RepoCard_PinnedRepoWithNewerVersion_ShowsPackageAndUpgradeChips`, covering
 `AgentControl-System-RecentRepos`.
 
 **AgentControl_AddRemoveRepo_RemoveMenuItem_RequiresConfirmation**: The remove menu item is
@@ -92,8 +97,11 @@ configured git executable and gated on a clean working tree. This scenario is te
 **AgentControl_SelectPackage_SelectPackageMenuItem_AppliesChosenPackageAndSyncsFolders**: The
 Select Package menu item is clicked on an unpinned repo card, a package name/version is chosen
 and confirmed; the repo's pin is set and its managed agent-file folders are synced to match,
-proving the initial-pin selection flow works end-to-end. This scenario is tested by
-`windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders`, covering
+proving the initial-pin selection flow works end-to-end. A second scenario chooses the NuGet
+folder source in the dialog, selects its package and version, and confirms that the card then
+shows the package chip naming that source. These scenarios are tested by
+`windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders` and
+`windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip`, covering
 `AgentControl-System-SelectPackage`.
 
 **AgentControl_Upgrade_UpgradeMenuItem_SyncsManagedFoldersAndShowsReleaseNotes**: The Upgrade
@@ -117,13 +125,27 @@ and `windows@AgentsMdTemplateOffer_Decline_DoesNotWriteFileAndDoesNotReprompt`, 
 `RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile`, covering
 `AgentControl-System-AgentsMdTemplate`.
 
-**AgentControl_Settings_SaveCommand_PersistsEditedPreferences**: `SettingsWindowViewModel`'s
-`SaveCommand` is executed with edited package-source path, git/agent-tool overrides, and shell
-preference; the `onSave` callback receives the current values and `Saved` is raised, proving
-edited preferences are captured and communicated for persistence. Per the disclosed
-granularity limitation above, this scenario is tested at the view-model level by
+**AgentControl_Settings_SourceDialogs_AddSourcesAndPersistPreferences**: The Settings window is
+opened, a zip-package folder source is added through the add dialog and appears in the sources
+list, and a NuGet-package folder source is added through its dialog, which cannot be saved until
+a package ID is listed; after saving, the settings file in the isolated configuration directory
+holds both sources. `SettingsWindowViewModel`'s `SaveCommand` is also executed with edited
+git/agent-tool overrides and shell preference, proving the edited preferences are captured and
+communicated for persistence. This scenario is tested by
+`windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt`,
+`windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt`, and
 `SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved`,
 covering `AgentControl-System-Settings`.
+
+**AgentControl_ResponsiveOperations_SlowAndFailingSources_DoNotBlock**: An apply waiting on a slow
+source reports busy, ignores a repeated request and can be cancelled without changing the pin,
+and the background upgrade refresh still checks the cards of reachable sources when another
+source is unreachable; the end-to-end selection of a package through the dialog confirms the
+happy path of the same flow. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged`,
+`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked`, and
+`windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip`, covering
+`AgentControl-System-ResponsiveOperations`.
 
 **AgentControl_DiagnosticLogging_AnyPassingTest_ConfirmsSerilogInitializedWithoutThrowing**:
 Per the `Logging` subsystem's test-evidence disclosure, no test directly inspects the
@@ -171,15 +193,19 @@ correctly on .NET 10. This scenario is tested by `Program_Version_ReturnsNonEmpt
 covering `AgentControl-Platform-Net10`.
 
 **AgentControl_MultipleSources_SettingsRoundTripAndLegacyMigration**: Settings holding several
-sources are saved and loaded back with every field intact, and a legacy settings file that holds
-only the single package-source folder is loaded as one zip source named `Default`, proving the tool
+sources are saved and loaded back with every field intact, a legacy settings file that holds
+only the single package-source folder is loaded as one zip source named `Default`, and sources of
+both kinds are added through the Settings dialogs and persisted, proving the tool
 supports several configured sources and carries the earlier setup forward. The published
-application is also run with a zip source and a NuGet folder source configured side by side (the
-settings file is seeded directly because the Settings window still edits only the `Default`
-source). This scenario is tested by
+application is also run with a zip source and a NuGet folder source configured side by side. This
+scenario is tested by
 `windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly`,
 `windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes` (older single-folder
-settings migrated to `Default`), `SettingsStore_SaveThenLoad_RoundTripsAllFields` and
+settings migrated to `Default`),
+`windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt`,
+`windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt`,
+`windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip`,
+`SettingsStore_SaveThenLoad_RoundTripsAllFields` and
 `SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource`, covering
 `AgentControl-System-MultipleSources`.
 

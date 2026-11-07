@@ -1913,7 +1913,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     [InlineData((int)AgentToolKind.CopilotCli, null, "Launch Copilot")]
     [InlineData((int)AgentToolKind.Cursor, null, "Launch Cursor")]
     [InlineData((int)AgentToolKind.ClaudeCode, null, "Launch Claude")]
-    [InlineData((int)AgentToolKind.Custom, "/opt/tools/mytool.exe --flag", "Launch mytool")]
+    [InlineData((int)AgentToolKind.Custom, "/opt/tools/tool.exe --flag", "Launch tool")]
     [InlineData((int)AgentToolKind.Custom, "\"/opt/my tools/helper.exe\" --flag", "Launch helper")]
     [InlineData((int)AgentToolKind.Custom, "a-very-long-tool-name --flag", "Launch")]
     [InlineData((int)AgentToolKind.Custom, "", "Launch")]

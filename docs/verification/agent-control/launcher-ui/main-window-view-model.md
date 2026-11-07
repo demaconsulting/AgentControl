@@ -24,6 +24,8 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - Applying updated settings preserves the recent-repos list and invalidates the shared
   package-version cache.
 - Applying settings drops cached package results only for sources that were edited or removed.
+- Constructing the view model reads no package source; upgrade availability is checked in the
+  background, and an unreachable source affects only the cards pinned to it.
 
 #### Test Scenarios
 
@@ -111,3 +113,13 @@ message does not contain it, the live settings instance is unchanged, and no set
 written. This scenario is tested by
 `MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings`,
 covering `AgentControl-MainWindowViewModel-ApplySettings`.
+
+**MainWindowViewModel_BackgroundUpgradeCheck_ConstructionReadsNoSourceAndFailuresAreIsolated**:
+Constructing the view model with a pinned repo reads no package source until the upgrade refresh
+begins; when the refresh runs with one source unreachable, the cards pinned to the other source
+are still checked and show their upgrade; and adding a pinned repo checks its upgrade status in
+the background. This scenario is tested by
+`MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins`,
+`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked`, and
+`MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground`, covering
+`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`.

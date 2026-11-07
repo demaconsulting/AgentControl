@@ -50,11 +50,22 @@ cache passed to every `RepoCardViewModel`, per architecture.md's repo-fact cachi
 - *Preconditions*: `settings` is not null.
 - *Postconditions*: One `RepoCardViewModel` exists per `RecentRepo` in `settings.RecentRepos`;
   each card's cheap refresh (`RefreshCheap`) has run; `DisplayedRepoCards` reflects the
-  initial sort/filter (`AgentControl-MainWindowViewModel-PopulateRecentRepos`).
+  initial sort/filter (`AgentControl-MainWindowViewModel-PopulateRecentRepos`). No package source
+  has been read (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`).
 
 Only the cheap per-card checks run eagerly at construction — the working-tree dirty check is
 deferred/lazy, per architecture.md's repo-fact caching strategy, so startup stays fast even
 with many tracked repos.
+
+**BeginUpgradeRefresh**: Starts checking every card's upgrade availability in the background.
+
+- *Returns*: A task that completes when the checks have finished (the window ignores it; tests
+  await it).
+- *Postconditions*: Each card's `RefreshUpgradeStatusAsync` runs a few cards at a time, so a slow or
+  unreachable source delays only the cards pinned to it, and a check still running for earlier
+  settings is cancelled. The window calls it once it is shown; `AddRepo` checks the new card's
+  upgrade status the same way, and `ApplySettings` starts a new round against the new sources
+  (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`).
 
 **AddRepo**: Adds a repository to the recent-repos list.
 

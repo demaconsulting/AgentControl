@@ -1,40 +1,72 @@
 ---
 # Software Unit Requirements for the SelectPackageWindowViewModel Class
 #
-# SelectPackageWindowViewModel backs the package-selection dialog, letting the user browse
-# package names and versions available at the configured package source and confirm a choice.
+# SelectPackageWindowViewModel backs the package-selection dialog, letting the user choose a
+# package source, then a package name and version offered by it, and confirm the choice as a
+# source/package/version reference. Sources are read asynchronously, each on its own.
 
 sections:
   - title: SelectPackageWindowViewModel Unit Requirements
     requirements:
       - id: AgentControl-SelectPackageWindowViewModel-ListPackages
         title: >-
-          The SelectPackageWindowViewModel class shall list the package names discovered at
-          the configured package source, and shall present an empty list when the source has
-          no packages.
+          The SelectPackageWindowViewModel class shall list every configured package source
+          without reading any of them until asked, shall list the package names discovered at
+          the selected source, and shall present an empty list, reported as empty rather than
+          as a failure, when the source has no packages.
         justification: |
-          The developer must choose from the packages actually available, never from a
-          stale or fabricated list.
+          The developer must choose from the sources and packages actually available, never
+          from a stale or fabricated list.
         tests:
-          - SelectPackageWindowViewModel_EmptySource_EmptyPackageNamesAndCanConfirmFalse
+          - SelectPackageWindowViewModel_Constructor_ListsEverySourceWithoutReadingAny
+          - SelectPackageWindowViewModel_Constructor_PreferredSourceAlias_SelectsThatSourceOrFirst
+          - SelectPackageWindowViewModel_LoadAsync_ReadsEverySourceAndShowsSelectedSourcesPackages
+          - SelectPackageWindowViewModel_LoadAsync_SourceWithNoPackages_ReportsEmptyNotError
+
+      - id: AgentControl-SelectPackageWindowViewModel-AsyncLoading
+        title: >-
+          The SelectPackageWindowViewModel class shall read the sources and a package's
+          versions without blocking its caller, shall show that it is loading, shall let the
+          loading be cancelled, and shall discard the late result of a version load that a
+          newer package selection has superseded.
+        justification: |
+          A source on a slow or unreachable share must not freeze the dialog, and an answer to
+          a question the user has already moved past must not overwrite the list they are
+          looking at.
+        tests:
+          - SelectPackageWindowViewModel_LoadAsync_Cancelled_ThrowsOperationCanceledException
+          - SelectPackageWindowViewModel_SelectPackageName_VersionsSlow_ShowsProgressWithoutBlocking
+          - SelectPackageWindowViewModel_ChangeSelectedPackageName_SupersedesSlowerEarlierLoad
+
+      - id: AgentControl-SelectPackageWindowViewModel-SourceFailureIsolation
+        title: >-
+          The SelectPackageWindowViewModel class shall report a source that cannot be read, or
+          a package whose versions cannot be read, as an inline explanation for that source or
+          package only, without preventing the other sources from loading or being selected.
+        justification: |
+          With several sources configured, one share being offline is expected; it must not
+          stop the developer from selecting a package from a source that works.
+        tests:
+          - SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline
+          - SelectPackageWindowViewModel_SelectPackageName_VersionReadFails_ShowsInlineError
 
       - id: AgentControl-SelectPackageWindowViewModel-VersionSelection
         title: >-
           The SelectPackageWindowViewModel class shall list a selected package's available
           versions in descending order, defaulting to the newest, and shall recompute the
-          version list when the selected package name changes.
+          version list when the selected source or package name changes.
         justification: |
           Presenting versions newest-first with the newest pre-selected minimizes clicks for
           the common case of wanting the latest version, while still allowing the developer to
           pick an older one deliberately.
         tests:
           - SelectPackageWindowViewModel_SelectPackageName_PopulatesVersionsDescendingAndDefaultsToLatest
-          - SelectPackageWindowViewModel_ChangeSelectedPackageName_RecomputesVersionsAndResetsSelection
+          - SelectPackageWindowViewModel_ChangeSelectedSource_ClearsPackageAndVersionSelection
 
       - id: AgentControl-SelectPackageWindowViewModel-ConfirmGating
         title: >-
-          The SelectPackageWindowViewModel class shall permit confirmation only when both a
-          package name and version are selected.
+          The SelectPackageWindowViewModel class shall permit confirmation only when a source,
+          a package name and a version are all selected.
         justification: |
           Prevents the developer from confirming an incomplete or ambiguous selection.
         tests:
@@ -42,21 +74,22 @@ sections:
 
       - id: AgentControl-SelectPackageWindowViewModel-Confirm
         title: >-
-          The SelectPackageWindowViewModel class shall signal the confirmed package
-          name/version pair when the user confirms their selection.
+          The SelectPackageWindowViewModel class shall signal the confirmed source alias,
+          package name and version together when the user confirms their selection.
         justification: |
-          The confirmed pair is what the owning RepoCardViewModel applies as the repo's new
-          pin, so the exact chosen values must be communicated accurately.
+          The confirmed reference is what the owning RepoCardViewModel applies as the repo's new
+          pin, so the exact chosen values, including the source, must be communicated
+          accurately.
         tests:
-          - SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithSelectedPair
+          - SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithFullPackageReference
 
       - id: AgentControl-SelectPackageWindowViewModel-SourceScoped
         title: >-
           The SelectPackageWindowViewModel class shall list the packages and versions of
-          exactly one named package source, report that source's alias with the selection, and
-          never include another source's packages.
+          exactly the selected package source, never including another source's, even when two
+          sources offer the same package name.
         justification: |
-          The selection is recorded in the repo's pin together with its source, so the dialog
-          must offer, and report, one source at a time.
+          The selection is recorded in the repo's pin together with its source, so the versions
+          offered must be those of the source the user chose.
         tests:
-          - SelectPackageWindowViewModel_TwoSources_ListsOnlyTheChosenSourcesPackagesAndReportsItsAlias
+          - SelectPackageWindowViewModel_SamePackageInTwoSources_UsesOnlySelectedSource

@@ -34,20 +34,49 @@ invocations are not parallelized with other tests using real process launches).
 
 #### Test Scenarios
 
-**RepoCardViewModel_DisplayInfo_ExposesFolderNameAndPin**: The card's display name resolves to
-the repo's leaf folder name, and a `Refresh` after a pin file is written populates the pinned
-package name/version fields. This scenario is tested by
-`RepoCardViewModel_RepoName_ReturnsLeafFolderName` and
-`RepoCardViewModel_Refresh_PinFileExists_PopulatesPinnedFields`, covering
+**RepoCardViewModel_DisplayInfo_ExposesFolderNameAndPackageChip**: The card's display name
+resolves to the repo's leaf folder name, a `Refresh` after a pin file is written populates the
+pinned package name/version fields, and the package chip text and tooltip name the package, its
+version and the source - with the source kind's icon for a zip folder and a NuGet folder, and an
+explicit "not configured" description when the pinned source does not exist. A repo with no pin
+shows only the "no agent package" chip, and a missing repo shows neither package chip. This
+scenario is tested by
+`RepoCardViewModel_RepoName_ReturnsLeafFolderName`,
+`RepoCardViewModel_Refresh_PinFileExists_PopulatesPinnedFields`,
+`RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip`,
+`RepoCardViewModel_PackageChip_PinnedToNuGetFolderSource_ShowsNuGetFolderIconAndKind`,
+`RepoCardViewModel_PackageChip_PinnedSourceNotConfigured_ShowsUnknownSource`,
+`RepoCardViewModel_NoPackageChip_NeverPinnedRepo_ShowsNoPackageChipOnly`, and
+`RepoCardViewModel_Chips_MissingRepo_ShowNeitherPackageChip`, covering
 `AgentControl-RepoCardViewModel-DisplayInfo`.
 
-**RepoCardViewModel_UpgradeBadge_ReflectsSourceComparisonOnly**: The upgrade-available badge
-is set true only when a newer version exists at a configured source, and false both when the
-repo is already on the latest version and when no source is configured. This scenario is
+**RepoCardViewModel_UpgradeBadge_ReflectsSourceComparisonOnly**: The upgrade chip is shown
+only when a newer version exists at the pin's source, and not when the repo is already on the
+latest version or when no source is configured; when shown it states the target version and its
+tooltip both versions. This scenario is
 tested by `RepoCardViewModel_Refresh_NewerVersionAtSource_SetsUpgradeAvailableTrue`,
-`RepoCardViewModel_Refresh_AlreadyOnLatestVersion_SetsUpgradeAvailableFalse`, and
-`RepoCardViewModel_Refresh_NoPackageSourceConfigured_SetsUpgradeAvailableFalse`, covering
-`AgentControl-RepoCardViewModel-UpgradeBadge`.
+`RepoCardViewModel_Refresh_AlreadyOnLatestVersion_SetsUpgradeAvailableFalse`,
+`RepoCardViewModel_Refresh_NoPackageSourceConfigured_SetsUpgradeAvailableFalse`, and
+`RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions`,
+covering `AgentControl-RepoCardViewModel-UpgradeBadge`.
+
+**RepoCardViewModel_LaunchLabel_NamesToolOrFallsBack**: The Launch label names the configured
+agent tool when it has a short display name, falls back to "Launch" for an unknown or long
+name, and follows a change of the configured tool after a cheap refresh. This scenario is tested
+by `RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack` and
+`RepoCardViewModel_LaunchButtonText_AgentToolChanged_UpdatesAfterRefreshCheap`, covering
+`AgentControl-RepoCardViewModel-LaunchLabel`.
+
+**RepoCardViewModel_ResponsiveOperations_BusyIgnoresRepeatCancelAndSupersede**: An apply that
+is waiting on a slow source reports busy, ignores a second request and, when cancelled, leaves
+the pin unchanged; an upgrade check against a slow source does not block the caller and shows a
+"checking" state; a cancelled check throws and keeps the previous state; and the result of an
+older check is discarded when a newer one has started. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged`,
+`RepoCardViewModel_RefreshUpgradeStatusAsync_SourceSlow_DoesNotBlockAndShowsChecking`,
+`RepoCardViewModel_RefreshUpgradeStatusAsync_Cancelled_ThrowsAndKeepsPreviousState`, and
+`RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded`, covering
+`AgentControl-RepoCardViewModel-ResponsiveOperations`.
 
 **RepoCardViewModel_PullGating_CleanTreeEnablesDirtyOrFailureDisables**: A clean working tree
 sets `CanPull` true, a dirty working tree sets it false, and a git status failure also sets it
@@ -84,10 +113,12 @@ failure status message is set instead). This scenario is tested by
 
 **RepoCardViewModel_Launch_RecordsTimestampOrRaisesErrorWhenUnconfigured**: `LaunchCommand`
 succeeds and records the launch timestamp (raising `LaunchRecorded`) when a command is
-configured, and raises `ErrorOccurred` instead when no agent-tool command is configured. This
+configured, raises `ErrorOccurred` instead when no agent-tool command is configured, and still
+launches when the user cancels the wait for the pre-launch sync. This
 scenario is tested by
-`RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded` and
-`RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred`, covering
+`RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded`,
+`RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred`, and
+`RepoCardViewModel_LaunchCommand_PreLaunchSyncCancelledByUser_StillLaunches`, covering
 `AgentControl-RepoCardViewModel-Launch`.
 
 **RepoCardViewModel_EnsureSyncedBeforeLaunch_NeverBlocksLaunchOnBestEffortSyncOutcome**: The

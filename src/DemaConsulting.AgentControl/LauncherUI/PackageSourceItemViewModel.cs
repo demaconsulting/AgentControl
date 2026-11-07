@@ -71,7 +71,7 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     public string Alias => Definition.Alias;
 
     /// <summary>
-    ///     Gets the source's location, shown ellipsized with the full text in a tooltip.
+    ///     Gets the source's location, shown shortened with the full text in a tooltip.
     /// </summary>
     public string Location => Definition.Location;
 

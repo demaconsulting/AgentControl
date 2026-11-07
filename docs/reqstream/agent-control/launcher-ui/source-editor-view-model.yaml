@@ -1,0 +1,55 @@
+---
+# Software Unit Requirements for the SourceEditorViewModel Class
+#
+# SourceEditorViewModel backs the dialog that adds or edits one package source - a folder of zip
+# packages or a NuGet package folder.
+
+sections:
+  - title: SourceEditorViewModel Unit Requirements
+    requirements:
+      - id: AgentControl-SourceEditorViewModel-Validation
+        title: >-
+          The SourceEditorViewModel class shall permit saving a source only when its alias is
+          valid and not already used, its location is a full folder path that is not a web
+          address and does not embed a credential, and - for a NuGet package folder - at least
+          one package ID is listed, shall explain the first rule each field breaks without
+          repeating a credential, and shall show no error for a field the user has not yet
+          touched.
+        justification: |
+          A source that the application would later refuse to use or save must not be
+          acceptable in the dialog; credentials must never be stored, so they are stopped where
+          the user types them.
+        tests:
+          - SourceEditorViewModel_Constructor_NewSourceOfEachKind_HasMatchingTitleAndSections
+          - SourceEditorViewModel_NewEmptyEditor_CannotSaveButShowsNoErrorsYet
+          - SourceEditorViewModel_Alias_Invalid_ReportsProblemAndBlocksSave
+          - SourceEditorViewModel_Location_Invalid_ReportsProblemAndBlocksSave
+          - SourceEditorViewModel_NuGetSource_NoPackageIds_CannotSaveUntilOneIsAdded
+          - SourceEditorViewModel_Constructor_NullAliasCheck_ThrowsArgumentNullException
+
+      - id: AgentControl-SourceEditorViewModel-PackageIds
+        title: >-
+          The SourceEditorViewModel class shall let the user add and remove the package IDs a
+          NuGet package folder offers, refusing an ID that is malformed or already listed
+          (ignoring case).
+        justification: |
+          A NuGet folder is not scanned for packages, so the listed IDs define what it offers;
+          malformed or duplicate entries would produce failures later.
+        tests:
+          - SourceEditorViewModel_AddPackageId_InvalidOrDuplicate_IsRefused
+          - SourceEditorViewModel_RemovePackageId_RemovesSelectedId
+
+      - id: AgentControl-SourceEditorViewModel-Save
+        title: >-
+          The SourceEditorViewModel class shall, on save, signal the resulting source
+          definition with a trimmed location and, for an edit, the original source's alias and
+          settings the dialog does not show, shall not change the source it was given, and
+          shall not signal a save while the source is invalid.
+        justification: |
+          Repos pin to a source by alias, so an edit must never rename it; settings managed
+          elsewhere must survive an edit.
+        tests:
+          - SourceEditorViewModel_SaveCommand_ValidZipSource_RaisesSavedWithDefinition
+          - SourceEditorViewModel_SaveCommand_ValidNuGetSource_SavesPackageIds
+          - SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved
+          - SourceEditorViewModel_SaveCommand_InvalidEditor_DoesNotRaiseSaved
