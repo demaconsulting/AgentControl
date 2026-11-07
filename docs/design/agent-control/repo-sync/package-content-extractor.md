@@ -53,13 +53,26 @@ repo if present, and copies the same four folders from the package into the repo
   membership in a managed folder decided on the canonical (`..`-resolved) relative path *before*
   anything is deleted, so a path that escapes the repo (or a link inside a folder package, which
   `ListFiles` rejects) fails the whole call with the repo untouched
-  (`AgentControl-PackageContentExtractor-RejectLinksAndTraversal`). A delete or copy I/O failure can
+  (`AgentControl-PackageContentExtractor-RejectLinksAndTraversal`). Containment is also checked
+  against the repo's real layout, still before anything is deleted: `FindLinkedComponent` walks
+  every existing folder from just below the repo root down to each managed folder and to each
+  file's destination folder, and a symbolic link, junction or other reparse point
+  (`FileAttributes.ReparsePoint` or a link target) — or a component whose type cannot be
+  determined — refuses the whole extraction with a clear error, so a link can never redirect the
+  delete or copy outside the repo and a refused extraction changes nothing
+  (`AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`). The repo root itself and the
+  components above it are never inspected, because a root may legitimately be reached through a
+  link such as a redirected user profile; only components at or below the root must be link-free.
+  `CopyFile` repeats the check on its destination chain just before creating directories, as
+  defense in depth. A delete or copy I/O failure can
   still leave the repo partially upgraded — there is intentionally no rollback, per
   architecture.md's "Upgrade sequence and failure handling" decision. Nothing is ever written to
   the package.
 
-**AllManagedFoldersExist**: Reports whether all four managed folders exist under a repo root,
-without inspecting contents.
+**AllManagedFoldersExist**: Reports whether all four managed folders exist under a repo root as
+ordinary folders, without inspecting contents. A managed folder that is a link, or sits below a
+linked `.github`, is not valid, so a caller that skips syncing when the folders exist falls
+through to `Extract`, which refuses the link with a clear error.
 
 **ReadReleaseNotes / ReadAgentsMdTemplate**: Return the package's root-level `release-notes.md`
 or `AGENTS.md` text, or `null` when absent, without copying anything to disk
@@ -68,7 +81,8 @@ or `AGENTS.md` text, or `null` when absent, without copying anything to disk
 #### Error Handling
 
 `ArgumentNullException` for null arguments; `InvalidOperationException` for a package that cannot
-be read, a path that is invalid or resolves outside the repo, a link in a folder package, a missing
+be read, a path that is invalid or resolves outside the repo, a link in a folder package, a link in
+the repo's `.github`/managed-folder/destination chain, a missing
 `content` folder, a managed folder that cannot be deleted, or a copy that fails partway through
 (wrapping `IOException`/`UnauthorizedAccessException`/`ArgumentException`/`NotSupportedException`
 with a message naming the package or file). Delete and copy failures are wrapped and not

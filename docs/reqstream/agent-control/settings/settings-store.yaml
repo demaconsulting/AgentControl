@@ -11,13 +11,18 @@ sections:
       - id: AgentControl-SettingsStore-Load
         title: >-
           The SettingsStore class shall load previously saved settings, returning default
-          settings when no settings file exists yet.
+          settings when no settings file exists yet, and shall treat a settings file that
+          explicitly sets a list (the package sources, the recent repos or a source's package
+          IDs) to null as holding an empty list.
         justification: |
           A first-ever run of AgentControl has no settings file; the application must still
           start successfully with a well-defined default configuration rather than failing.
+          A hand-edited or tool-written file with an explicit null must not crash startup either.
         tests:
           - SettingsStore_SaveThenLoad_RoundTripsAllFields
           - SettingsStore_Load_NoSettingsFile_ReturnsDefaults
+          - SettingsStore_Load_ExplicitJsonNulls_NormalizedToEmptyCollections
+          - SettingsStore_Load_NullSourcesWithLegacyPath_MigratesToDefaultZipSource
 
       - id: AgentControl-SettingsStore-Save
         title: >-

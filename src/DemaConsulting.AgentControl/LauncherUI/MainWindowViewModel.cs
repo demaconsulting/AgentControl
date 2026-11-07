@@ -271,7 +271,7 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// <summary>
     ///     Replaces the current settings with <paramref name="updated"/> (preserving the
     ///     recent-repos list, which is only ever mutated via <see cref="AddRepo"/>/
-    ///     <see cref="RemoveRepo"/>), persists them, invalidates the shared
+    ///     <see cref="RemoveRepo"/>), persists them (adopting them only if that succeeds), invalidates the shared
     ///     <see cref="PackageVersionCache"/> for each package source that was changed or removed
     ///     (cached results for an edited source would otherwise be silently reused; sources that
     ///     did not change keep theirs), and
@@ -300,7 +300,8 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="updated"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when a source location embeds a
-    ///     credential; the current settings are left unchanged.</exception>
+    ///     credential or the settings file cannot be written; the current settings are left
+    ///     unchanged (the candidate is adopted only after it has been persisted).</exception>
     public void ApplySettings(AppSettings updated)
     {
         ArgumentNullException.ThrowIfNull(updated);
@@ -323,11 +324,13 @@ internal sealed class MainWindowViewModel : ViewModelBase
             }
         }
 
+        // Persist the candidate first and adopt it only once that succeeds: if the write fails,
+        // the exception propagates to the caller (which shows it) while the live settings stay as
+        // they were, so a later save (favorite, launch, ...) can never write the rejected values
         updated.RecentRepos = _settings.RecentRepos;
+        SettingsStore.Save(updated, _configDirectory);
         _settings = updated;
         OnPropertyChanged(nameof(Settings));
-
-        SaveSettings();
 
         InvalidateChangedSources(previousSources, updated.GetEffectiveSources());
         foreach (var card in RepoCards)

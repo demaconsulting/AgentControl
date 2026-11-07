@@ -34,6 +34,10 @@ skipped). Junction tests run on Windows only (they skip elsewhere) and need no p
   at the package folder, the content folder, any directory leading to a file, or the file itself
   are refused, with the repo's managed folders untouched.
 - Release notes and the AGENTS.md template are read from a folder package, or reported absent.
+- A repo whose `.github` folder, a managed folder, or a folder on a destination path is a symbolic
+  link or junction is refused with nothing deleted or written (the link target is unchanged and
+  other managed folders survive), a linked managed folder is not reported as existing, and a repo
+  root reached through a link still extracts.
 
 #### Test Scenarios
 
@@ -74,6 +78,27 @@ scenario is tested by
 `DirectoryPackageContentReader_Open_ContentFolderIsJunction_ThrowsInvalidOperationException`, and
 `DirectoryPackageContentReader_OpenRead_JunctionParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException`,
 covering `AgentControl-PackageContentExtractor-RejectLinksAndTraversal`.
+
+**PackageContentExtractor_RefuseLinkedRepoFolders_BeforeAnyChange**: With the repo's `.github`
+folder linked to an outside folder holding content, with one managed folder linked (while another,
+ordinary, managed folder holds a file), and with a destination subfolder inside a managed folder
+linked, extraction fails with a message naming a link, the outside folder's snapshot is identical
+afterwards, and the ordinary folder's file survives. `AllManagedFoldersExist` returns false when
+one managed folder is a link and true when all four are ordinary. A repo root reached through a
+link extracts normally into the real repo. Each is shown with junctions on Windows (`windows@`)
+and symbolic links on Linux (`ubuntu@`). This scenario is tested by
+`PackageContentExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched`,
+`PackageContentExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched`,
+`PackageContentExtractor_Extract_DestinationSubfolderIsJunction_RefusesAndLeavesTargetUntouched`,
+`PackageContentExtractor_Extract_RepoRootUnderJunction_Succeeds`,
+`PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsJunction_ReturnsFalse`,
+`PackageContentExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched`,
+`PackageContentExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched`,
+`PackageContentExtractor_Extract_DestinationSubfolderIsSymlink_RefusesAndLeavesTargetUntouched`,
+`PackageContentExtractor_Extract_RepoRootUnderSymlink_Succeeds`,
+`PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsSymlink_ReturnsFalse`, and
+`PackageContentExtractor_AllManagedFoldersExist_AllFoldersOrdinary_ReturnsTrue`, covering
+`AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`.
 
 **PackageContentExtractor_ReadRootFiles_ReturnsTextOrNull**: Release notes and the AGENTS.md
 template are returned from a folder package's content root, and `null` when absent; null

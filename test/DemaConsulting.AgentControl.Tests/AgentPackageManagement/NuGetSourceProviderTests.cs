@@ -404,6 +404,25 @@ public sealed class NuGetSourceProviderTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a definition whose package-ID list is null (as an explicit JSON null can
+    ///     produce) is tolerated and offers no packages instead of crashing the constructor.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_Constructor_NullPackageIds_OffersNoPackages()
+    {
+        // Arrange
+        var definition = CreateDefinition("Feed", CreateTempDirectory());
+        definition.PackageIds = null!;
+
+        // Act
+        var provider = new NuGetSourceProvider(definition, CreateTempDirectory());
+        var ids = await provider.ListPackageIdsAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Empty(ids);
+    }
+
+    /// <summary>
     ///     Test that a zip-type definition is rejected, and a null definition is rejected.
     /// </summary>
     [Fact]

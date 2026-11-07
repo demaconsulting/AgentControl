@@ -66,7 +66,9 @@ internal static class SettingsStore
     ///     The persisted settings, or a fresh default <see cref="AppSettings"/> instance if no
     ///     settings file exists yet (first run) — this is expected, not an error. A legacy
     ///     <c>PackageSourcePath</c> in the file is migrated into <c>Sources</c> as the
-    ///     <c>Default</c> zip source when no sources are configured.
+    ///     <c>Default</c> zip source when no sources are configured. Explicit JSON <c>null</c>
+    ///     values for the source list, the recent-repos list or a source's package IDs are
+    ///     normalized to empty collections.
     /// </returns>
     /// <exception cref="InvalidOperationException">Thrown when the settings file exists but
     ///     cannot be read or contains invalid JSON.</exception>
@@ -86,6 +88,10 @@ internal static class SettingsStore
         {
             var json = File.ReadAllText(filePath);
             var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+
+            // An explicit JSON null bypasses the collection initializers; restore empty values
+            // before anything (including migration) touches them
+            settings.NormalizeNulls();
 
             // Carry a legacy single package-folder setting forward as the "Default" source
             settings.MigrateLegacySource();

@@ -456,6 +456,229 @@ public sealed class PackageContentExtractorTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a repo whose <c>.github</c> folder is a directory junction is refused without
+    ///     deleting or writing anything, including at the junction's target.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched() =>
+        AssertGitHubFolderLinkRefused(CreateJunctionOrSkip);
+
+    /// <summary>
+    ///     Test that a repo whose <c>.github</c> folder is a symbolic link is refused without
+    ///     deleting or writing anything, including at the link's target.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched() =>
+        AssertGitHubFolderLinkRefused(TryCreateDirectorySymlinkOrSkip);
+
+    /// <summary>
+    ///     Test that a repo with a managed folder that is a directory junction is refused before
+    ///     any managed folder is deleted, and the junction's target is untouched.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched() =>
+        AssertManagedFolderLinkRefused(CreateJunctionOrSkip);
+
+    /// <summary>
+    ///     Test that a repo with a managed folder that is a symbolic link is refused before any
+    ///     managed folder is deleted, and the link's target is untouched.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched() =>
+        AssertManagedFolderLinkRefused(TryCreateDirectorySymlinkOrSkip);
+
+    /// <summary>
+    ///     Test that a link on a package file's destination path below a managed folder (a
+    ///     subfolder that is a junction) is refused before anything is deleted.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_DestinationSubfolderIsJunction_RefusesAndLeavesTargetUntouched() =>
+        AssertDestinationSubfolderLinkRefused(CreateJunctionOrSkip);
+
+    /// <summary>
+    ///     Test that a link on a package file's destination path below a managed folder (a
+    ///     subfolder that is a symbolic link) is refused before anything is deleted.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_DestinationSubfolderIsSymlink_RefusesAndLeavesTargetUntouched() =>
+        AssertDestinationSubfolderLinkRefused(TryCreateDirectorySymlinkOrSkip);
+
+    /// <summary>
+    ///     Test that a repo root that itself lives under a junction is accepted: only components
+    ///     at or below the repo root must be link-free.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_RepoRootUnderJunction_Succeeds() =>
+        AssertRepoRootUnderLinkSucceeds(CreateJunctionOrSkip);
+
+    /// <summary>
+    ///     Test that a repo root that itself lives under a symbolic link is accepted: only
+    ///     components at or below the repo root must be link-free.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_RepoRootUnderSymlink_Succeeds() =>
+        AssertRepoRootUnderLinkSucceeds(TryCreateDirectorySymlinkOrSkip);
+
+    /// <summary>
+    ///     Test that a managed folder that is a directory junction does not count as an existing
+    ///     managed folder, so callers do not treat the repo as already synced.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsJunction_ReturnsFalse() =>
+        AssertLinkedManagedFolderIsNotValid(CreateJunctionOrSkip);
+
+    /// <summary>
+    ///     Test that a managed folder that is a symbolic link does not count as an existing
+    ///     managed folder, so callers do not treat the repo as already synced.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsSymlink_ReturnsFalse() =>
+        AssertLinkedManagedFolderIsNotValid(TryCreateDirectorySymlinkOrSkip);
+
+    /// <summary>
+    ///     Test that all four ordinary managed folders count as existing.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_AllManagedFoldersExist_AllFoldersOrdinary_ReturnsTrue()
+    {
+        // Arrange
+        var repo = CreateTempDirectory();
+        foreach (var folder in new[] { "agents", "standards", "templates", "skills" })
+        {
+            Directory.CreateDirectory(Path.Combine(repo, ".github", folder));
+        }
+
+        // Act / Assert
+        Assert.True(PackageContentExtractor.AllManagedFoldersExist(repo));
+    }
+
+    /// <summary>
+    ///     Scenario: <c>&lt;repo&gt;/.github</c> is a link to an outside folder holding content;
+    ///     extraction must be refused and the outside folder must be unchanged.
+    /// </summary>
+    /// <param name="createLink">Creates the directory link (link path, target).</param>
+    private void AssertGitHubFolderLinkRefused(Action<string, string> createLink)
+    {
+        // Arrange: .github is a link to an outside folder that holds managed-looking content
+        var outside = CreateTempDirectory();
+        Directory.CreateDirectory(Path.Combine(outside, "agents"));
+        File.WriteAllText(Path.Combine(outside, "agents", "precious.md"), "precious");
+        File.WriteAllText(Path.Combine(outside, "unrelated.md"), "unrelated");
+        var before = SnapshotTree(outside);
+        var repo = CreateTempDirectory();
+        var link = Path.Combine(repo, ".github");
+        createLink(link, outside);
+        var package = CreatePackageFolder((".github/agents/new.md", "new"));
+        using var reader = DirectoryPackageContentReader.Open(package);
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => PackageContentExtractor.Extract(reader, repo));
+
+        // Assert: refused with a clear error, nothing deleted or written through the link
+        Assert.Contains("link", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(before, SnapshotTree(outside));
+        Assert.NotNull(new DirectoryInfo(link).LinkTarget);
+    }
+
+    /// <summary>
+    ///     Scenario: a managed folder is a link to an outside folder; extraction must be refused
+    ///     before any other managed folder is deleted, and the outside folder must be unchanged.
+    /// </summary>
+    /// <param name="createLink">Creates the directory link (link path, target).</param>
+    private void AssertManagedFolderLinkRefused(Action<string, string> createLink)
+    {
+        // Arrange: .github/agents is a link to an outside folder; .github/standards is ordinary
+        var outside = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(outside, "precious.md"), "precious");
+        var before = SnapshotTree(outside);
+        var repo = CreateTempDirectory();
+        var standards = Path.Combine(repo, ".github", "standards");
+        Directory.CreateDirectory(standards);
+        File.WriteAllText(Path.Combine(standards, "keep.md"), "keep me");
+        createLink(Path.Combine(repo, ".github", "agents"), outside);
+        var package = CreatePackageFolder((".github/agents/new.md", "new"), (".github/standards/new.md", "new"));
+        using var reader = DirectoryPackageContentReader.Open(package);
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => PackageContentExtractor.Extract(reader, repo));
+
+        // Assert: refused, the link target is unchanged, and the ordinary folder was not deleted
+        Assert.Contains("link", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(before, SnapshotTree(outside));
+        Assert.Equal("keep me", File.ReadAllText(Path.Combine(standards, "keep.md")));
+        Assert.False(File.Exists(Path.Combine(standards, "new.md")));
+    }
+
+    /// <summary>
+    ///     Scenario: a subfolder on a destination path is a link; extraction must be refused
+    ///     before the managed folders are deleted, and the outside folder must be unchanged.
+    /// </summary>
+    /// <param name="createLink">Creates the directory link (link path, target).</param>
+    private void AssertDestinationSubfolderLinkRefused(Action<string, string> createLink)
+    {
+        // Arrange: .github/agents is ordinary but its "sub" folder is a link to an outside folder
+        var outside = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(outside, "precious.md"), "precious");
+        var before = SnapshotTree(outside);
+        var repo = CreateTempDirectory();
+        var agents = Path.Combine(repo, ".github", "agents");
+        Directory.CreateDirectory(agents);
+        File.WriteAllText(Path.Combine(agents, "keep.md"), "keep me");
+        createLink(Path.Combine(agents, "sub"), outside);
+        var package = CreatePackageFolder((".github/agents/sub/new.md", "new"));
+        using var reader = DirectoryPackageContentReader.Open(package);
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => PackageContentExtractor.Extract(reader, repo));
+
+        // Assert
+        Assert.Contains("link", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(before, SnapshotTree(outside));
+        Assert.Equal("keep me", File.ReadAllText(Path.Combine(agents, "keep.md")));
+    }
+
+    /// <summary>
+    ///     Scenario: the repo root is reached through a link; extraction must still succeed
+    ///     because only components at or below the root are checked.
+    /// </summary>
+    /// <param name="createLink">Creates the directory link (link path, target).</param>
+    private void AssertRepoRootUnderLinkSucceeds(Action<string, string> createLink)
+    {
+        // Arrange: the repo is reached through a link (like a redirected user profile)
+        var realRepo = CreateTempDirectory();
+        var linkedRoot = Path.Combine(CreateTempDirectory(), "linked-repo");
+        createLink(linkedRoot, realRepo);
+        var package = CreatePackageFolder((".github/agents/new.md", "new"));
+        using var reader = DirectoryPackageContentReader.Open(package);
+
+        // Act
+        PackageContentExtractor.Extract(reader, linkedRoot);
+
+        // Assert: the content landed in the real repo
+        Assert.Equal("new", File.ReadAllText(Path.Combine(realRepo, ".github", "agents", "new.md")));
+    }
+
+    /// <summary>
+    ///     Scenario: one of the four managed folders is a link; the folders must not be reported
+    ///     as all existing.
+    /// </summary>
+    /// <param name="createLink">Creates the directory link (link path, target).</param>
+    private void AssertLinkedManagedFolderIsNotValid(Action<string, string> createLink)
+    {
+        // Arrange: three ordinary managed folders and a fourth that is a link
+        var repo = CreateTempDirectory();
+        foreach (var folder in new[] { "agents", "standards", "templates" })
+        {
+            Directory.CreateDirectory(Path.Combine(repo, ".github", folder));
+        }
+
+        createLink(Path.Combine(repo, ".github", "skills"), CreateTempDirectory());
+
+        // Act / Assert
+        Assert.False(PackageContentExtractor.AllManagedFoldersExist(repo));
+    }
+
+    /// <summary>
     ///     Test that a null reader or repo root is rejected.
     /// </summary>
     [Fact]

@@ -93,7 +93,7 @@ sections:
           "not yet checked", or wrong-executable Pull-disabled state, without re-checking the
           Git status of every other already-present, unchanged-executable repo. It shall
           refuse, leaving the current settings unchanged, updated settings whose package source
-          location embeds a credential.
+          location embeds a credential, and updated settings that cannot be saved to disk.
         justification: |
           A settings change (e.g. a new package source path) must take effect immediately for
           subsequent upgrade checks, without discarding the developer's tracked repos. Because
@@ -115,6 +115,7 @@ sections:
           - MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus
           - MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus
           - MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings
+          - MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive
 
       - id: AgentControl-MainWindowViewModel-InvalidateChangedSources
         title: >-

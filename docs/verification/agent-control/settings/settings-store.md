@@ -32,6 +32,11 @@ loading them back returns all fields unchanged, and loading when no settings fil
 returns default settings. This scenario is tested by
 `SettingsStore_SaveThenLoad_RoundTripsAllFields` and
 `SettingsStore_Load_NoSettingsFile_ReturnsDefaults`, covering
+`AgentControl-SettingsStore-Load`. Settings files with an explicit JSON null for the source list,
+the recent-repos list, a source's package IDs (or its alias/location, or a null list entry) load
+as empty collections and can be saved, and a null source list still migrates a legacy path;
+these are tested by `SettingsStore_Load_ExplicitJsonNulls_NormalizedToEmptyCollections` and
+`SettingsStore_Load_NullSourcesWithLegacyPath_MigratesToDefaultZipSource`, also covering
 `AgentControl-SettingsStore-Load`.
 
 **SettingsStore_Save_CreatesDirectoryAndRejectsNull**: Saving when the configuration

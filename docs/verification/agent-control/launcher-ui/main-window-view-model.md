@@ -115,6 +115,12 @@ written. This scenario is tested by
 `MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings`,
 covering `AgentControl-MainWindowViewModel-ApplySettings`.
 
+**MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive**: `ApplySettings` against
+a configuration location that cannot be written throws `InvalidOperationException`, and the live
+settings instance is still the previous one with its previous values and recent repos. This
+scenario is tested by `MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive`,
+covering `AgentControl-MainWindowViewModel-ApplySettings`.
+
 **MainWindowViewModel_BackgroundUpgradeCheck_ConstructionReadsNoSourceAndFailuresAreIsolated**:
 Constructing the view model with a pinned repo reads no package source until the upgrade refresh
 begins; when the refresh runs with one source unreachable, the cards pinned to the other source

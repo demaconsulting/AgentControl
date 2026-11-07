@@ -97,3 +97,14 @@ directly at the subsystem level, covering `AgentControl-RepoSync-SyncFromFolderP
 `AgentControl-PackageContentExtractor-ExtractFromFolder`,
 `AgentControl-PackageContentExtractor-RejectLinksAndTraversal`,
 `AgentControl-PackageContentExtractor-ReadRootFiles`, `AgentControl-Utilities-SafePaths`).
+
+**RepoSync_RefuseLinkedRepoFolders_ChangesNothing**: A repo whose `.github` folder or a managed
+folder is a symbolic link (Linux) or junction (Windows) is refused with an error, and the link
+target and the repo's other managed folders are left unchanged. This scenario is verified by the
+`PackageContentExtractor` unit tests (see their unit verification design), with
+`PackageContentExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched`,
+`PackageContentExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched`,
+`PackageContentExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched`, and
+`PackageContentExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched` cited
+directly at the subsystem level, covering `AgentControl-RepoSync-RefuseLinkedRepoFolders`
+(children: `AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`).

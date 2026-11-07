@@ -312,6 +312,22 @@ internal sealed partial class PackageSourceDefinition
     }
 
     /// <summary>
+    ///     Replaces a <see langword="null"/> alias, location or package-ID list (which an explicit
+    ///     JSON <c>null</c> produces despite the non-nullable declarations) with an empty value and
+    ///     drops null package IDs.
+    /// </summary>
+    /// <remarks>
+    ///     Called for each source by <see cref="Settings.AppSettings.NormalizeNulls"/> after
+    ///     deserialization. Idempotent.
+    /// </remarks>
+    internal void NormalizeNulls()
+    {
+        Alias ??= string.Empty;
+        Location ??= string.Empty;
+        PackageIds = PackageIds is null ? [] : [.. PackageIds.Where(id => id is not null)];
+    }
+
+    /// <summary>
     ///     Creates an independent copy so an editor can change a working copy without mutating
     ///     the live settings.
     /// </summary>

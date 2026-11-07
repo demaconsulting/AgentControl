@@ -57,7 +57,8 @@ forever.
 and the provider's own diagnostics only ever see the wrapped logger.
 
 **\_packageIds**: the package IDs the user configured for the source, trimmed, blank-dropped and
-de-duplicated case-insensitively. A feed cannot be enumerated cheaply, so these are the packages
+de-duplicated case-insensitively (a null list, as an explicit JSON null can produce, counts as
+none). A feed cannot be enumerated cheaply, so these are the packages
 offered.
 
 **\_root**: `string` — the AgentControl-owned folder passed to the NuGet library as its starting

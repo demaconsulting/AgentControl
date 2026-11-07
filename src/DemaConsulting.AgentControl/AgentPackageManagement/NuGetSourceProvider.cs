@@ -284,7 +284,8 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         _credentials = credentials;
         _authenticationTimeout = authenticationTimeout ?? DefaultAuthenticationTimeout;
         _nugetLogger = new SecretRedactingLogger(logger ?? AppLogging.Factory.CreateLogger<NuGetSourceProvider>());
-        _packageIds = definition.PackageIds
+        // A definition built from JSON with an explicit null list is tolerated as "no package IDs"
+        _packageIds = (definition.PackageIds ?? [])
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)

@@ -31,6 +31,11 @@ package folder (a NuGet package's `content` folder).
   (`AgentControl-PackageContentExtractor-ExtractFromFolder`,
   `AgentControl-PackageContentExtractor-RejectLinksAndTraversal`); also reads the package's
   root-level release notes and `AGENTS.md` template (`AgentControl-PackageContentExtractor-ReadRootFiles`).
+  It also refuses - before deleting or writing anything - to work in a repo whose `.github`
+  folder, a managed folder or a destination folder is a symbolic link or junction, since the
+  delete and copy would follow it outside the repo; the repo root itself may be reached through a
+  link (`AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`,
+  `AgentControl-RepoSync-RefuseLinkedRepoFolders`).
 - *Constraints*: Never writes to the package it reads (a NuGet package cache is shared).
 
 **PackageZipExtractor.Extract**: Replaces a repo's managed agent-file folders with a package
@@ -52,8 +57,8 @@ present on disk.
 
 - *Type*: In-process .NET static method.
 - *Role*: Provider.
-- *Contract*: Returns `false` if any of the four folders is missing
-  (`AgentControl-PackageZipExtractor-AllManagedFoldersExist`); used by
+- *Contract*: Returns `false` if any of the four folders is missing or is a symbolic link or
+  junction (`AgentControl-PackageZipExtractor-AllManagedFoldersExist`); used by
   `RepoCardViewModel`'s ensure-synced-before-launch check to decide whether a re-extraction is
   needed without re-scanning file contents.
 - *Constraints*: Performs only existence checks, not content verification.

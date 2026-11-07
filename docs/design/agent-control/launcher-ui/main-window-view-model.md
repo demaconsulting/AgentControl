@@ -103,7 +103,10 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
 - *Returns*: `void`.
 - *Preconditions*: `updated` is not null.
 - *Postconditions*: The live settings instance is replaced (preserving the existing recent-
-  repos list, since `SettingsWindowViewModel` never owns it), persisted, the shared
+  repos list, since `SettingsWindowViewModel` never owns it) only after the candidate has been
+  persisted successfully — if the write fails, the previous instance stays live, so a later save
+  (favorite, launch) can never persist a rejected candidate and the exception reaches the caller to
+  show; the shared
   `PackageVersionCache` is invalidated for each package source that was edited or removed (the
   sources before and after are compared by alias and by `PackageSourceDefinition.IsEquivalentTo`;
   unchanged sources keep their cached results)
@@ -137,7 +140,7 @@ by `LastLaunchedUtc` descending with nulls last, stable otherwise
 `AddRepo` throws `ArgumentException` for a null, empty, or whitespace `repoPath`.
 `RemoveRepo`/`ApplySettings` throw `ArgumentNullException` for a null argument, and `ApplySettings`
 throws `InvalidOperationException` before adopting anything when a source location embeds a
-credential, leaving the current settings in place. `SaveSettings`
+credential or when the settings file cannot be written, leaving the current settings in place. `SaveSettings`
 propagates `InvalidOperationException` from `SettingsStore.Save` if the settings file cannot
 be written. `TryLoadPin` (private) catches `InvalidOperationException` from `RepoPinStore.Load`
 and returns `null`, so a corrupt or unreadable pin file never prevents `AddRepo` from

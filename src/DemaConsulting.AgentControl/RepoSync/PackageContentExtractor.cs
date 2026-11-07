@@ -45,9 +45,14 @@ namespace DemaConsulting.AgentControl.RepoSync;
 ///     The same sequence, managed-folder list and containment rules apply to every package
 ///     format; only how files are listed and read differs between readers. Every destination path
 ///     is validated with <see cref="PathHelpers.SafePathCombine"/> before anything is deleted, so
-///     a path-traversing entry can never cause a partial upgrade. The package itself is only ever
-///     read: nothing is written to a zip or to a NuGet package cache. Stateless and thread-safe:
-///     every member is a pure function of its parameters plus the filesystem.
+///     a path-traversing entry can never cause a partial upgrade. Containment is also checked
+///     against the repo's actual layout: before anything is deleted or written, every existing
+///     folder at or below the repo root on the way to each managed folder and destination is
+///     checked, and the extraction is refused if any is a symbolic link or junction (which
+///     would redirect the delete and copy outside the repository). The repo root itself and
+///     the components above it may be links and are not inspected. The package itself is only
+///     ever read: nothing is written to a zip or to a NuGet package cache. Stateless and
+///     thread-safe: every member is a pure function of its parameters plus the filesystem.
 ///     </para>
 /// </remarks>
 internal static class PackageContentExtractor
@@ -107,11 +112,14 @@ internal static class PackageContentExtractor
     ///     <paramref name="repoRoot"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
     ///     Thrown when the package cannot be read, when a file's destination path is invalid
-    ///     (including resolving outside <paramref name="repoRoot"/>), when a managed folder cannot
-    ///     be deleted, or when copying fails partway through. An invalid path is rejected before
-    ///     any managed folder is deleted, so that failure mode never leaves the repo partially
-    ///     upgraded; a delete or copy failure can still do so, and per the class remarks there is
-    ///     no rollback for that case.
+    ///     (including resolving outside <paramref name="repoRoot"/>), when the repo's
+    ///     <c>.github</c> folder, a managed folder or a folder on a destination path is a symbolic
+    ///     link or junction, when a managed folder cannot
+    ///     be deleted, or when copying fails partway through. An invalid path or a linked folder is
+    ///     rejected before
+    ///     any managed folder is deleted, so those failure modes never leave the repo partially
+    ///     upgraded (or touch anything outside it); a delete or copy failure can still do so, and
+    ///     per the class remarks there is no rollback for that case.
     /// </exception>
     public static void Extract(IPackageContentReader reader, string repoRoot, ILogger? logger = null)
     {
@@ -144,15 +152,38 @@ internal static class PackageContentExtractor
             }
         }
 
-        // Step 3: blind-delete the four known folders (if present). Existing symbolic links or
-        // junctions in the repo's layout are the repo owner's business and are deliberately not
-        // inspected; only package-supplied paths are validated (step 2).
+        // Step 3: refuse to touch a repo whose managed-folder chain is redirected. Destination
+        // containment above is purely lexical: if <repo>/.github (or a managed folder, or a
+        // folder on a file's destination path) is a symbolic link or junction, the delete and
+        // copy below would follow it and delete/write outside the repository. Every existing
+        // component at or below the repo root is checked here, before anything is deleted, so a
+        // refused extraction leaves the repo (and the link target) untouched. The repo root
+        // itself may legitimately live under a linked path (for example a redirected user
+        // profile) and so is never inspected, nor are components above it.
+        var directoriesToCheck = ManagedFolders
+            .Select(folder => PathHelpers.SafePathCombine(repoRoot, folder))
+            .Concat(managedFiles.Select(file => Path.GetDirectoryName(file.DestinationPath)!))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var directory in directoriesToCheck)
+        {
+            var linked = FindLinkedComponent(repoRoot, directory);
+            if (linked is not null)
+            {
+                throw new InvalidOperationException(
+                    $"Refusing to extract package '{reader.Description}' into '{repoRoot}': '{linked}' is a " +
+                    "symbolic link or junction (or its type could not be determined), so deleting or " +
+                    "writing through it could affect files outside the repository. Nothing was changed.");
+            }
+        }
+
+        // Step 4: blind-delete the four known folders (if present). Links at or below the repo
+        // root were refused in step 3, so these deletes can only affect the repo's own folders.
         foreach (var folder in ManagedFolders)
         {
             DeleteManagedFolder(repoRoot, folder, effectiveLogger);
         }
 
-        // Step 4: copy the already-validated managed files, skipping any non-managed/root-level
+        // Step 5: copy the already-validated managed files, skipping any non-managed/root-level
         // files such as release-notes.md (those were never added to managedFiles above). A
         // failure here is reported to the caller (e.g. RepoCardViewModel, which already logs it
         // with repo/package context) rather than re-logged here, to avoid double-logging.
@@ -178,16 +209,21 @@ internal static class PackageContentExtractor
     }
 
     /// <summary>
-    ///     Determines whether all four managed agent folders currently exist under a repo root.
+    ///     Determines whether all four managed agent folders currently exist under a repo root as
+    ///     ordinary (non-linked) folders.
     /// </summary>
     /// <param name="repoRoot">Absolute path to the repository root to check.</param>
     /// <returns><see langword="true"/> if every managed folder exists under
-    ///     <paramref name="repoRoot"/>; otherwise <see langword="false"/>.</returns>
+    ///     <paramref name="repoRoot"/> and neither it nor any folder between the repo root and it
+    ///     is a symbolic link or junction; otherwise <see langword="false"/>.</returns>
     /// <remarks>
     ///     Built on the same <see cref="ManagedFolders"/> array <see cref="Extract"/> itself uses,
     ///     so the managed-folder list has a single source of truth - callers never need to
     ///     duplicate it. Does not inspect folder contents; a managed folder that exists but is
-    ///     empty still counts as "existing" here.
+    ///     empty still counts as "existing" here. A linked folder is deliberately not "valid", so
+    ///     a caller that skips syncing when the folders exist falls through to
+    ///     <see cref="Extract"/>, which refuses the link with a clear error. The repo root itself
+    ///     is not inspected (it may legitimately live under a linked path).
     /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> is
     ///     <see langword="null"/>.</exception>
@@ -195,7 +231,11 @@ internal static class PackageContentExtractor
     {
         ArgumentNullException.ThrowIfNull(repoRoot);
 
-        return ManagedFolders.All(folder => Directory.Exists(PathHelpers.SafePathCombine(repoRoot, folder)));
+        return ManagedFolders.All(folder =>
+        {
+            var folderPath = PathHelpers.SafePathCombine(repoRoot, folder);
+            return Directory.Exists(folderPath) && FindLinkedComponent(repoRoot, folderPath) is null;
+        });
     }
 
     /// <summary>
@@ -232,6 +272,53 @@ internal static class PackageContentExtractor
     {
         ArgumentNullException.ThrowIfNull(reader);
         return reader.ReadText(AgentsMdEntryName);
+    }
+
+    /// <summary>
+    ///     Walks every existing folder from just below the repo root down to a target folder and
+    ///     returns the first one that is a symbolic link, junction or other reparse point.
+    /// </summary>
+    /// <param name="repoRoot">Absolute path to the repository root; it and everything above it
+    ///     are deliberately not inspected, because the root may legitimately live under a linked
+    ///     path (such as a redirected user profile).</param>
+    /// <param name="directoryPath">The absolute folder path, inside <paramref name="repoRoot"/>,
+    ///     to walk down to.</param>
+    /// <returns>The path of the first linked component, or <see langword="null"/> when every
+    ///     existing component is an ordinary folder (or does not exist yet). A component whose
+    ///     type cannot be determined (an I/O or permission failure) is reported as linked, so an
+    ///     unverifiable chain is refused rather than trusted.</returns>
+    private static string? FindLinkedComponent(string repoRoot, string directoryPath)
+    {
+        var fullRoot = Path.GetFullPath(repoRoot);
+        var relative = Path.GetRelativePath(fullRoot, Path.GetFullPath(directoryPath));
+
+        var current = fullRoot;
+        var separators = new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
+        foreach (var part in relative.Split(separators, StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, part);
+
+            try
+            {
+                // File.GetAttributes does not follow a final link, so the link itself is seen;
+                // a missing component means nothing deeper exists to be redirected either
+                var attributes = File.GetAttributes(current);
+                if (attributes.HasFlag(FileAttributes.ReparsePoint) || new DirectoryInfo(current).LinkTarget is not null)
+                {
+                    return current;
+                }
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return current;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -339,6 +426,16 @@ internal static class PackageContentExtractor
         var destinationDirectory = Path.GetDirectoryName(fullDestination);
         if (!string.IsNullOrEmpty(destinationDirectory))
         {
+            // Defense in depth: re-verify the chain just before creating directories and writing,
+            // in case a link appeared after the up-front check in Extract
+            var linked = FindLinkedComponent(fullRoot, destinationDirectory);
+            if (linked is not null)
+            {
+                throw new InvalidOperationException(
+                    $"Package entry '{relativePath}' would be written through '{linked}', which is a " +
+                    "symbolic link or junction (or its type could not be determined).");
+            }
+
             Directory.CreateDirectory(destinationDirectory);
         }
 

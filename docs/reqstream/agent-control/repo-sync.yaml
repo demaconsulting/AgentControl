@@ -35,6 +35,22 @@ sections:
           - PackageZipExtractor_Extract_ExistingManagedFolder_ReplacesOldContents
           - PackageZipExtractor_Extract_InvalidZipFile_ThrowsInvalidOperationException
 
+      - id: AgentControl-RepoSync-RefuseLinkedRepoFolders
+        title: >-
+          The RepoSync subsystem shall refuse to replace a repo's managed agent-file folders when
+          the repo's .github folder or a managed folder is a symbolic link or junction, changing
+          nothing inside or outside the repo.
+        justification: |
+          A repo can contain links the developer did not intend a sync to follow; replacing
+          managed folders through one would delete or overwrite files outside the repository.
+        children:
+          - AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders
+        tests:
+          - windows@PackageContentExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched
+          - windows@PackageContentExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched
+          - ubuntu@PackageContentExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched
+          - ubuntu@PackageContentExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched
+
       - id: AgentControl-RepoSync-ReleaseNotes
         title: >-
           The RepoSync subsystem shall read a package's release notes from its zip without

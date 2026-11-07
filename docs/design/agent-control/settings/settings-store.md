@@ -36,7 +36,10 @@ path.
 - *Parameters*: `string? configDirectory = null` (defaults to `GetDefaultConfigDirectory`).
 - *Returns*: `AppSettings`.
 - *Postconditions*: Returns a fresh default `AppSettings` instance if no settings file exists
-  yet — first run is expected, not an error (`AgentControl-SettingsStore-Load`).
+  yet — first run is expected, not an error (`AgentControl-SettingsStore-Load`). An explicit JSON
+  `null` for the source list, the recent-repos list or a source's package IDs (which bypasses the
+  property initializers) is normalized to an empty collection by `AppSettings.NormalizeNulls`
+  before migration runs, so it can never crash migration, startup or a source provider.
 
 **Save**: Saves `AppSettings` to a configuration directory, creating the directory if needed.
 

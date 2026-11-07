@@ -128,6 +128,7 @@ sections:
           - AgentControl-RepoSync-Sync
           - AgentControl-RepoSync-ReleaseNotes
           - AgentControl-RepoSync-GitIgnorePrevention
+          - AgentControl-RepoSync-RefuseLinkedRepoFolders
           - AgentControl-AgentPackageManagement-UpgradeDetection
         tests:
           - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes

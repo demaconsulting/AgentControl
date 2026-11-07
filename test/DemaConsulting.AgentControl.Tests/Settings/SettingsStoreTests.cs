@@ -231,6 +231,77 @@ public class SettingsStoreTests
     }
 
     /// <summary>
+    ///     Test that explicit JSON nulls for the source list, recent-repos list and a source's
+    ///     package IDs load as empty collections instead of crashing migration or startup.
+    /// </summary>
+    /// <param name="json">A settings file containing an explicit null.</param>
+    [Theory]
+    [InlineData("""{ "Sources": null }""")]
+    [InlineData("""{ "Sources": null, "PackageSourcePath": "C:\\legacy" }""")]
+    [InlineData("""{ "RecentRepos": null }""")]
+    [InlineData("""{ "Sources": [ { "Alias": "Feed", "Type": "NuGet", "Location": "C:\\feed", "PackageIds": null } ] }""")]
+    [InlineData("""{ "Sources": [ null ], "RecentRepos": [ null ] }""")]
+    [InlineData("""{ "Sources": [ { "Alias": null, "Location": null, "PackageIds": [ null ] } ] }""")]
+    public void SettingsStore_Load_ExplicitJsonNulls_NormalizedToEmptyCollections(string json)
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(configDir, "settings.json"), json);
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert: no null collection survives, and the effective sources and a save work
+            Assert.NotNull(loaded.Sources);
+            Assert.NotNull(loaded.RecentRepos);
+            Assert.All(loaded.Sources, source =>
+            {
+                Assert.NotNull(source.PackageIds);
+                Assert.NotNull(source.Alias);
+                Assert.NotNull(source.Location);
+                Assert.DoesNotContain(null!, source.PackageIds);
+            });
+            _ = loaded.GetEffectiveSources();
+            SettingsStore.Save(loaded, configDir);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a null source list still migrates the legacy path, exactly as a missing one
+    ///     does.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_NullSourcesWithLegacyPath_MigratesToDefaultZipSource()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                """{ "Sources": null, "PackageSourcePath": "C:\\legacy" }""");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert
+            var source = Assert.Single(loaded.Sources);
+            Assert.Equal("Default", source.Alias);
+            Assert.Equal(@"C:\legacy", source.Location);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that when a settings file has both a Sources list and a legacy path, the Sources
     ///     list wins and the legacy path is ignored (not added as another source).
     /// </summary>

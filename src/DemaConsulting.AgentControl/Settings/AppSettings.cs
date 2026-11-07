@@ -81,6 +81,35 @@ internal sealed class AppSettings
     }
 
     /// <summary>
+    ///     Replaces every collection (and source text field) that an explicit JSON <c>null</c> may
+    ///     have left <see langword="null"/> with an empty value, and drops null list entries.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="System.Text.Json.JsonSerializer"/> bypasses a property's initializer when the
+    ///     file says <c>"Sources": null</c> (or <c>"RecentRepos"</c>/<c>"PackageIds"</c>), and the
+    ///     property is then really <see langword="null"/> despite its non-nullable type, which
+    ///     would crash migration, startup and the source providers. Called by
+    ///     <see cref="SettingsStore.Load"/> straight after deserialization so the rest of the
+    ///     application can rely on the declared non-null types. Idempotent.
+    /// </remarks>
+    public void NormalizeNulls()
+    {
+        // The declared types are non-nullable, but JSON null can still put null in them
+        Sources = Sources is null ? [] : [.. Sources.Where(source => source is not null)];
+        RecentRepos = RecentRepos is null ? [] : [.. RecentRepos.Where(repo => repo is not null)];
+
+        foreach (var source in Sources)
+        {
+            source.NormalizeNulls();
+        }
+
+        foreach (var repo in RecentRepos)
+        {
+            repo.Path ??= string.Empty;
+        }
+    }
+
+    /// <summary>
     ///     Moves a legacy <see cref="PackageSourcePath"/> into <see cref="Sources"/> as the
     ///     <c>Default</c> zip source, then clears the legacy value.
     /// </summary>

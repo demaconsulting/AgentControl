@@ -403,6 +403,35 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a failed settings write leaves the previous settings live, so a later save
+    ///     (for example when a repo is marked as a favorite) can never persist the rejected candidate.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive()
+    {
+        // Arrange: a configuration "directory" that is really a file, so every write fails; a later
+        // save (such as toggling a favorite) would otherwise persist the rejected candidate
+        var repoPath = CreateTempDirectory();
+        var blockingFile = Path.Combine(CreateTempDirectory(), "not-a-directory");
+        File.WriteAllText(blockingFile, "blocker");
+        var settings = new AppSettings
+        {
+            GitExecutablePath = "previous-git",
+            RecentRepos = [new RecentRepo { Path = repoPath }]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: blockingFile);
+        var rejected = new AppSettings { GitExecutablePath = "rejected-git" };
+
+        // Act
+        Assert.Throws<InvalidOperationException>(() => viewModel.ApplySettings(rejected));
+
+        // Assert: the previous instance is still live and keeps its values
+        Assert.Same(settings, viewModel.Settings);
+        Assert.Equal("previous-git", viewModel.Settings.GitExecutablePath);
+        Assert.Single(viewModel.Settings.RecentRepos);
+    }
+
+    /// <summary>
     ///     Test that ApplySettings invalidates the shared PackageVersionCache, so a changed
     ///     package-source path is reflected immediately rather than served from a stale cache.
     /// </summary>

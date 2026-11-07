@@ -56,6 +56,32 @@ sections:
           - windows@DirectoryPackageContentReader_Open_ContentFolderIsJunction_ThrowsInvalidOperationException
           - windows@DirectoryPackageContentReader_OpenRead_JunctionParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException
 
+      - id: AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders
+        title: >-
+          The PackageContentExtractor class shall refuse to extract into a repo - deleting and
+          writing nothing, and reporting a clear error - when the repo's .github folder, a
+          managed agent folder or a folder on the path of a file to be written is a symbolic
+          link or junction, shall not treat a linked managed folder as an existing one, and
+          shall accept a repo whose root itself is reached through a link, because only folders
+          at or below the repo root are checked.
+        justification: |
+          Deleting and copying through a link in the repo would delete or write files outside
+          the repository, wherever the link points; refusing before anything is changed keeps
+          a sync from ever escaping the repo, while a repo root reached through a link (such as
+          a redirected user profile) is legitimate and must keep working.
+        tests:
+          - windows@PackageContentExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched
+          - windows@PackageContentExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched
+          - windows@PackageContentExtractor_Extract_DestinationSubfolderIsJunction_RefusesAndLeavesTargetUntouched
+          - windows@PackageContentExtractor_Extract_RepoRootUnderJunction_Succeeds
+          - windows@PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsJunction_ReturnsFalse
+          - ubuntu@PackageContentExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched
+          - ubuntu@PackageContentExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched
+          - ubuntu@PackageContentExtractor_Extract_DestinationSubfolderIsSymlink_RefusesAndLeavesTargetUntouched
+          - ubuntu@PackageContentExtractor_Extract_RepoRootUnderSymlink_Succeeds
+          - ubuntu@PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsSymlink_ReturnsFalse
+          - PackageContentExtractor_AllManagedFoldersExist_AllFoldersOrdinary_ReturnsTrue
+
       - id: AgentControl-PackageContentExtractor-ReadRootFiles
         title: >-
           The PackageContentExtractor class shall read a package's root-level release notes and

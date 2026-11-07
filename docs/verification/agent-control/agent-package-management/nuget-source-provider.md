@@ -113,7 +113,9 @@ trimmed, de-duplicated and sorted. This scenario is tested by
 `NuGetSourceProvider_ListVersions_PackageNotInFeed_ReturnsEmptyList`,
 `NuGetSourceProvider_ListVersions_FolderDoesNotExist_ThrowsDirectoryNotFoundException`,
 `NuGetSourceProvider_ListVersions_AlreadyCanceled_ThrowsOperationCanceledException`, and
-`NuGetSourceProvider_ListPackageIds_ConfiguredIds_ReturnsDistinctSortedTrimmedIds`, covering
+`NuGetSourceProvider_ListPackageIds_ConfiguredIds_ReturnsDistinctSortedTrimmedIds`, and
+`NuGetSourceProvider_Constructor_NullPackageIds_OffersNoPackages` (a definition whose package-ID
+list is null offers no packages rather than crashing), covering
 `AgentControl-NuGetSourceProvider-ListVersions`.
 
 **NuGetSourceProvider_Acquire_ReaderOverContentFolderInPrivateCache**: Acquiring a package

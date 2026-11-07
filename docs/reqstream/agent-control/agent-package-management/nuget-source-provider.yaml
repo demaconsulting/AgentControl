@@ -25,6 +25,7 @@ sections:
           - NuGetSourceProvider_ListVersions_FolderDoesNotExist_ThrowsDirectoryNotFoundException
           - NuGetSourceProvider_ListVersions_AlreadyCanceled_ThrowsOperationCanceledException
           - NuGetSourceProvider_ListPackageIds_ConfiguredIds_ReturnsDistinctSortedTrimmedIds
+          - NuGetSourceProvider_Constructor_NullPackageIds_OffersNoPackages
 
       - id: AgentControl-NuGetSourceProvider-AcquireToPrivateCache
         title: >-
