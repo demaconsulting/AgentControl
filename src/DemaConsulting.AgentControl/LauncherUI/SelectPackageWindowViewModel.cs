@@ -70,12 +70,39 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     /// </summary>
     private int _versionsGeneration;
 
+    /// <summary>
+    ///     Backing field for <see cref="SelectedSource"/>.
+    /// </summary>
     private SelectPackageSourceViewModel? _selectedSource;
+
+    /// <summary>
+    ///     Backing field for <see cref="SelectedPackageName"/>.
+    /// </summary>
     private string? _selectedPackageName;
+
+    /// <summary>
+    ///     Backing field for <see cref="SelectedVersion"/>.
+    /// </summary>
     private string? _selectedVersion;
+
+    /// <summary>
+    ///     Backing field for <see cref="AvailableVersions"/>.
+    /// </summary>
     private IReadOnlyList<string> _availableVersions = [];
+
+    /// <summary>
+    ///     Backing field for <see cref="IsLoading"/>.
+    /// </summary>
     private bool _isLoading;
+
+    /// <summary>
+    ///     Backing field for <see cref="IsLoadingVersions"/>.
+    /// </summary>
     private bool _isLoadingVersions;
+
+    /// <summary>
+    ///     Backing field for <see cref="VersionsError"/>.
+    /// </summary>
     private string? _versionsError;
 
     /// <summary>

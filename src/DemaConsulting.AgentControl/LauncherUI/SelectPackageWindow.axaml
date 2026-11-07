@@ -120,10 +120,13 @@
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
             <Button Name="SelectPackageCancelButton"
                      AutomationProperties.AutomationId="SelectPackageCancelButton"
+                     ToolTip.Tip="Close without selecting a package"
                      Content="Cancel"
                      Click="CancelButton_Click" />
             <Button Name="SelectPackageConfirmButton"
                      AutomationProperties.AutomationId="SelectPackageConfirmButton"
+                     ToolTip.Tip="Pin the repo to the selected package and version (choose a source, package and version first)"
+                     ToolTip.ShowOnDisabled="True"
                      Classes="accent"
                      Content="Select"
                      Command="{Binding ConfirmCommand}" />

@@ -1,15 +1,15 @@
 // Copyright (c) DEMA Consulting
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in all
 // copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -34,8 +34,19 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 /// </remarks>
 internal sealed class SelectPackageSourceViewModel : ViewModelBase
 {
+    /// <summary>
+    ///     Backing field for <c>IsLoading</c>: true until the package list has loaded or failed.
+    /// </summary>
     private bool _isLoading = true;
+
+    /// <summary>
+    ///     Backing field for <c>ErrorMessage</c>: why the source could not be read, if it could not.
+    /// </summary>
     private string? _errorMessage;
+
+    /// <summary>
+    ///     Backing field for <c>PackageNames</c>: the packages the source offers once loaded.
+    /// </summary>
     private IReadOnlyList<string> _packageNames = [];
 
     /// <summary>

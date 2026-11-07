@@ -76,10 +76,29 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private readonly List<Task> _statusChecks = [];
 
+    /// <summary>
+    ///     Backing field for <see cref="SelectedSource"/>.
+    /// </summary>
     private PackageSourceItemViewModel? _selectedSource;
+
+    /// <summary>
+    ///     Backing field for <see cref="GitExecutablePath"/>.
+    /// </summary>
     private string? _gitExecutablePath;
+
+    /// <summary>
+    ///     Backing field for <see cref="AgentTool"/>.
+    /// </summary>
     private AgentToolKind _agentTool;
+
+    /// <summary>
+    ///     Backing field for <see cref="CustomAgentCommand"/>.
+    /// </summary>
     private string? _customAgentCommand;
+
+    /// <summary>
+    ///     Backing field for <see cref="ShellPreference"/>.
+    /// </summary>
     private string? _shellPreference;
 
     /// <summary>

@@ -45,6 +45,7 @@
             <Button Grid.Column="1"
                      Name="SourceBrowseButton"
                      AutomationProperties.AutomationId="SourceBrowseButton"
+                     ToolTip.Tip="Choose the package folder with a folder picker"
                      Content="Browse..."
                      Click="BrowseButton_Click" />
         </Grid>
@@ -79,6 +80,8 @@
                 <Button Grid.Column="1"
                          Name="SourceAddPackageIdButton"
                          AutomationProperties.AutomationId="SourceAddPackageIdButton"
+                         ToolTip.Tip="Add the typed package ID to the list of packages this source offers"
+                         ToolTip.ShowOnDisabled="True"
                          Content="Add"
                          Command="{Binding AddPackageIdCommand}" />
             </Grid>
@@ -98,6 +101,8 @@
                 <Button Grid.Column="1"
                          Name="SourceRemovePackageIdButton"
                          AutomationProperties.AutomationId="SourceRemovePackageIdButton"
+                         ToolTip.Tip="Remove the selected package ID from the list"
+                         ToolTip.ShowOnDisabled="True"
                          Content="Remove"
                          VerticalAlignment="Top"
                          Command="{Binding RemovePackageIdCommand}" />
@@ -112,10 +117,13 @@
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">
             <Button Name="SourceEditorCancelButton"
                      AutomationProperties.AutomationId="SourceEditorCancelButton"
+                     ToolTip.Tip="Close without saving this source"
                      Content="Cancel"
                      Click="CancelButton_Click" />
             <Button Name="SourceEditorSaveButton"
                      AutomationProperties.AutomationId="SourceEditorSaveButton"
+                     ToolTip.Tip="Save this source (available when the alias, location and package IDs are valid)"
+                     ToolTip.ShowOnDisabled="True"
                      Classes="accent"
                      Content="Save"
                      Command="{Binding SaveCommand}" />

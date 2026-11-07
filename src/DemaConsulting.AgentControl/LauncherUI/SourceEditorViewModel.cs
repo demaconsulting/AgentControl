@@ -1,15 +1,15 @@
 // Copyright (c) DEMA Consulting
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in all
 // copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -65,11 +65,34 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     /// </summary>
     private readonly PackageSourceDefinition? _existing;
 
+    /// <summary>
+    ///     Backing field for <see cref="Alias"/>.
+    /// </summary>
     private string _alias;
+
+    /// <summary>
+    ///     Backing field for <see cref="Location"/>.
+    /// </summary>
     private string _location;
+
+    /// <summary>
+    ///     Backing field for <see cref="NewPackageId"/>.
+    /// </summary>
     private string _newPackageId = string.Empty;
+
+    /// <summary>
+    ///     Backing field for <see cref="SelectedPackageId"/>.
+    /// </summary>
     private string? _selectedPackageId;
+
+    /// <summary>
+    ///     Whether the user has typed in the alias field, so its error is only shown after that.
+    /// </summary>
     private bool _aliasTouched;
+
+    /// <summary>
+    ///     Whether the user has typed in the location field, so its error is only shown after that.
+    /// </summary>
     private bool _locationTouched;
 
     /// <summary>
