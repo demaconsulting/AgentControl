@@ -23,10 +23,13 @@ This document covers the verification design for the following software items:
     bootstrap responsibility, which has no dedicated unit test file)
   - **LauncherUI** subsystem
     - **MainWindowViewModel**, **RepoCardViewModel**, **SelectPackageWindowViewModel**,
-      **SettingsWindowViewModel**, **SourceEditorViewModel**
+      **SettingsWindowViewModel**, **SourceEditorViewModel**, **CredentialPromptViewModel**
   - **AgentPackageManagement** subsystem
     - **PackageSource**, **PackageVersion**, **PackageVersionCache**, **PackageSourceRegistry**,
       **ZipFolderSourceProvider**, **NuGetSourceProvider**
+  - **PackageCredentials** subsystem
+    - **FeedOrigin**, **SessionCredentialStore**, **PackageCredentialCallback**,
+      **SecretRedactingLogger**
   - **RepoSync** subsystem
     - **PackageContentExtractor**, **PackageZipExtractor**, **ReleaseNotesViewerViewModel**
   - **RepoConfig** subsystem
@@ -79,6 +82,7 @@ test/
 ├── DemaConsulting.AgentControl.Tests/    — unit and integration tests (xUnit v3)
 │   ├── LauncherUI/
 │   ├── AgentPackageManagement/
+│   ├── PackageCredentials/
 │   ├── RepoSync/
 │   ├── RepoConfig/
 │   ├── AgentToolLauncher/

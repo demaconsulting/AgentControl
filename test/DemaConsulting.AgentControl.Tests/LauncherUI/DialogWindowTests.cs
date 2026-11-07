@@ -35,7 +35,9 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 public class DialogWindowTests
 {
     /// <summary>
-    ///     Raises a <see cref="Button.ClickEvent"/> on the named button, as a user click would.
+    ///     Clicks the named button the way a user's click does: raises <see cref="Button.ClickEvent"/>
+    ///     (for handlers wired in code-behind) and runs the button's <see cref="Button.Command"/>
+    ///     (for buttons bound to a view-model command), which raising the event alone does not.
     /// </summary>
     /// <param name="window">The window containing the button.</param>
     /// <param name="name">The button's XAML name.</param>
@@ -44,6 +46,10 @@ public class DialogWindowTests
         var button = window.FindControl<Button>(name);
         Assert.NotNull(button);
         button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (button.Command is { } command && command.CanExecute(button.CommandParameter))
+        {
+            command.Execute(button.CommandParameter);
+        }
     }
 
     /// <summary>

@@ -46,7 +46,9 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     private bool _folderFound;
 
     /// <summary>
-    ///     Initializes a new <see cref="PackageSourceItemViewModel"/> in the "checking" state.
+    ///     Initializes a new <see cref="PackageSourceItemViewModel"/>: in the "checking" state for a
+    ///     folder source, and straight to "not checked" for a server (which is only contacted when
+    ///     needed, never merely to list it).
     /// </summary>
     /// <param name="definition">The source this row shows; the row keeps this instance, so the
     ///     owner must pass a copy it is willing to let the row hold.</param>
@@ -60,12 +62,26 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
 
         Definition = definition;
         PinnedRepoCount = pinnedRepoCount;
+
+        // A server needs the network (and perhaps a sign-in) to be checked, so the row never does
+        // that on its own; the editor's "Test connection" is the way to check one
+        if (IsServer)
+        {
+            _isChecking = false;
+        }
     }
 
     /// <summary>
     ///     Gets the source this row shows.
     /// </summary>
     public PackageSourceDefinition Definition { get; }
+
+    /// <summary>
+    ///     Gets a value indicating whether the source is a server (an address) rather than a
+    ///     folder.
+    /// </summary>
+    public bool IsServer => Definition.Type == PackageSourceType.NuGet &&
+                            Definition.LocationKind == PackageSourceLocationKind.Server;
 
     /// <summary>
     ///     Gets how many recent repos are pinned to this source.
@@ -108,14 +124,16 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Gets a value indicating whether the folder check finished and found the folder.
+    ///     Gets a value indicating whether the folder check finished and found the folder (always
+    ///     <see langword="false"/> for a server, which has no folder).
     /// </summary>
-    public bool IsAvailable => !_isChecking && _folderFound;
+    public bool IsAvailable => !_isChecking && !IsServer && _folderFound;
 
     /// <summary>
-    ///     Gets a value indicating whether the folder check finished and did not find the folder.
+    ///     Gets a value indicating whether the folder check finished and did not find the folder
+    ///     (always <see langword="false"/> for a server).
     /// </summary>
-    public bool IsMissing => !_isChecking && !_folderFound;
+    public bool IsMissing => !_isChecking && !IsServer && !_folderFound;
 
     /// <summary>
     ///     Gets the short status text shown at the end of the row.
@@ -129,6 +147,11 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     {
         get
         {
+            if (IsServer)
+            {
+                return MaterialIconKind.HelpCircleOutline;
+            }
+
             if (_isChecking)
             {
                 return MaterialIconKind.ProgressClock;
@@ -145,6 +168,12 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     {
         get
         {
+            if (IsServer)
+            {
+                return "AgentControl contacts this server only when it is needed (selecting a package, " +
+                       "checking for upgrades), so it is not checked here. Use Edit > Test connection to check it now.";
+            }
+
             if (_isChecking)
             {
                 return "Checking whether the folder can be reached...";
@@ -163,6 +192,11 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     /// <returns>The status text.</returns>
     private string GetStatusText()
     {
+        if (IsServer)
+        {
+            return "Not checked";
+        }
+
         if (_isChecking)
         {
             return "Checking...";
@@ -187,6 +221,12 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
         Func<string, CancellationToken, Task<bool>> folderExists, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(folderExists);
+
+        // A server has no folder to look for; its row is already in its final state
+        if (IsServer)
+        {
+            return;
+        }
 
         bool found;
         try

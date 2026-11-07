@@ -155,6 +155,10 @@ internal sealed class AgentControlTestContext : IDisposable
         startInfo.ArgumentList.Add(ConfigDirectory);
         startInfo.EnvironmentVariables["ARGLOGGER_OUTPUT_FILE"] = ArgLoggerOutputFile;
 
+        // NuGet caches service indexes on disk by URL; a private cache per launch keeps a feed that
+        // a test starts on a reused port from being answered with a previous run's responses
+        startInfo.EnvironmentVariables["NUGET_HTTP_CACHE_PATH"] = Path.Combine(RootDirectory, "nuget-http-cache");
+
         // Record which terminal windows already exist so only windows created by this launch
         // can ever be considered for cleanup.
         Automation = new UIA3Automation();

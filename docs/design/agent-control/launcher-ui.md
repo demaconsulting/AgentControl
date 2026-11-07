@@ -6,20 +6,22 @@
 
 The `LauncherUI` subsystem is the Avalonia-based user interface a developer interacts with
 directly. It spans the recent-repos main window, per-repo cards, the package-selection
-window, the settings window and the package-source editor window (`MainWindowViewModel`,
-`RepoCardViewModel`, `SelectPackageWindowViewModel`, `SettingsWindowViewModel`,
-`SourceEditorViewModel`), plus their `.axaml` Views (`MainWindow`, `AboutWindow`,
-`ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`, `SettingsWindow`,
-`SourceEditorWindow`) and shared MVVM support types (`RelayCommand`, `AsyncRelayCommand`,
-`ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
-`SelectPackageSourceViewModel`, `FavoriteIconConverter`, `FavoriteColorConverter`,
-`ThirdPartyDependencies`), which are folded
+window, the settings window, the package-source editor window and the sign-in dialog
+(`MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`, `SettingsWindowViewModel`,
+`SourceEditorViewModel`, `CredentialPromptViewModel`), plus their `.axaml` Views (`MainWindow`,
+`AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`, `SettingsWindow`,
+`SourceEditorWindow`, `CredentialPromptWindow`) and shared MVVM support types (`RelayCommand`,
+`AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
+`SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`,
+`FavoriteIconConverter`, `FavoriteColorConverter`, `ThirdPartyDependencies`), which are folded
 into this subsystem-level description rather than given separate unit files; `ThirdPartyDependencies`
 and `AsyncRelayCommand` are the exceptions with dedicated test files
 (`ThirdPartyDependenciesTests.cs`, `AsyncRelayCommandTests.cs`), since each is independent of
 any Avalonia control. The subsystem contains
-five units: `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
-`SettingsWindowViewModel`, and `SourceEditorViewModel`.
+six units: `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
+`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`. It depends on the
+`AgentPackageManagement` subsystem (sources, providers, failure causes) and on the `PackageCredentials`
+subsystem (`PackageCredentialContext`, and the `ICredentialPrompt` that `AvaloniaCredentialPrompt` implements).
 
 ### Interfaces
 
@@ -76,14 +78,27 @@ selection.
   data of every edited or removed source (`AgentControl-LauncherUI-Settings`).
 - *Constraints*: None beyond standard `ICommand` semantics.
 
-**SourceEditorViewModel.SaveCommand**: Accepts an edited package source definition.
+**SourceEditorViewModel.SaveCommand** / **TestConnectionCommand**: Accepts an edited package source
+definition, and tests a server source's connection.
 
-- *Type*: In-process .NET `ICommand`.
+- *Type*: In-process .NET `ICommand` (`TestConnectionCommand` is an `AsyncRelayCommand`).
 - *Role*: Provider.
-- *Contract*: Executable only while the alias, location and (for a NuGet folder source) package
-  identifiers are valid; raises `Saved` with the resulting source definition for the settings
+- *Contract*: `SaveCommand` is executable only while the alias, location and (for a NuGet source) package
+  identifiers are valid - for a server, an `https` address ending in `index.json`, or `http` only while
+  "Allow insecure HTTP" is ticked; it raises `Saved` with the resulting source definition for the settings
   view model to add to or replace in its list (`AgentControl-LauncherUI-PackageSources`).
-- *Constraints*: The alias of an existing source cannot be changed.
+  `TestConnectionCommand` lists the versions of the first package ID, with progress and a Cancel action, and
+  reports a plain-language result; it may open the sign-in dialog (`AgentControl-LauncherUI-TestConnection`).
+- *Constraints*: The alias of an existing source cannot be changed. The test saves nothing.
+
+**ICredentialPrompt.PromptAsync** (implemented by `AvaloniaCredentialPrompt`): Asks the user to sign in.
+
+- *Type*: In-process .NET interface implementation (asynchronous), shown as a modal dialog.
+- *Role*: Provider (to the `PackageCredentials` subsystem).
+- *Contract*: Returns the credential the user typed in the sign-in dialog, or no credential when the user
+  cancels or the dialog is closed; cancelling the supplied token closes the dialog
+  (`AgentControl-LauncherUI-SignIn`).
+- *Constraints*: See *Sign-in dialog* in the design below.
 
 ### Design
 
@@ -101,8 +116,9 @@ the pin via `RepoPinStore`, checks upgrade availability via `PackageSourceRegist
 source, when that source is not configured - `AgentControl-LauncherUI-SourceAwareActions`), resolves
 git status/branch via `GitClient`/`CommittedAgentFilesCache`, and drives
 Launch/Pull/Upgrade/Select-Package/Favorite/Remove. The card presents its state as chips: a package
-chip (robot icon, package name and version, a small icon for the source kind, and a tooltip naming
-the source), an amber upgrade chip showing the version an upgrade would move to, a grey "No agent
+chip (robot icon, package name and version, the source's alias as muted text beside a small icon for the
+source kind - a server has its own network-server icon - and a tooltip naming the source), an amber
+upgrade chip showing the version an upgrade would move to, a grey "No agent
 package" chip when nothing is pinned, a branch chip, and color-coded status chips (uncommitted
 changes, committed agent files, folder missing, package source problem with the actual problem in
 its tooltip); the Launch button is labelled with a short name of the configured agent tool
@@ -118,8 +134,10 @@ the user confirms (`AgentControl-LauncherUI-RemoveRepo`).
 `SelectPackageWindowViewModel` backs the package-selection dialog opened from a card with no
 existing pin. It shows three columns - source, package, version. Selecting a source loads that
 source's package names from `PackageVersionCache` in the background, with a progress indicator
-and cancellation; a source that cannot be read shows its error inline and never blocks the other
-sources. Selecting a package lists its versions in descending order (defaulting to latest), and
+and cancellation; a source that cannot be read shows its error inline, with a **Retry** button that reads
+only that source (or, when only a package's versions failed, only those) again, and never blocks the other
+sources (`AgentControl-LauncherUI-ResponsiveOperations`). Selecting a package lists its versions in
+descending order (defaulting to latest), and
 confirming reports the full package reference - source alias, name and version - so the pin
 records the source. The three-column layout was chosen over a grouped single list because the
 same package name can exist in several sources and the user must see which source they pick from.
@@ -127,15 +145,22 @@ same package name can exist in several sources and the user must see which sourc
 construction and exposes `IsCustomAgentToolSelected` to drive the settings window's
 custom-command entry field visibility. It lists the configured package sources as
 `PackageSourceItemViewModel` rows (alias, kind icon from `PackageSourceIcons`, shortened
-location, and a folder-exists status computed on a background thread), offers Add Zip-Package
-Folder, Add NuGet-Package Folder, Edit and Remove, and asks the window to open a
+location, and a folder-exists status computed on a background thread; a server source shows "Not checked"
+because it is never contacted merely to draw the list), offers Add Zip-Package Folder, Add NuGet-Package
+Folder, **Add NuGet-Package Server**, Edit and Remove, and asks the window to open a
 `SourceEditorViewModel` dialog for adding and editing; removal asks for confirmation and warns
-that repos pinned to the source will show a source problem. A further "add" action for another
-source kind fits beside the existing two buttons. `SourceEditorViewModel` validates the alias
+that repos pinned to the source will show a source problem. `SourceEditorViewModel` validates the alias
 (required, unique ignoring case, fixed once the source exists), the location (absolute folder
-path, no embedded credentials) and, for a NuGet folder, a non-empty list of package
+path, no embedded credentials; for a server an `https` address ending in `index.json`, or `http` only after an
+explicit "Allow insecure HTTP" tick, whose warning is shown while it is on) and, for a NuGet source, a non-empty
+list of package
 identifiers, reusing the `PackageSourceDefinition` validation of `AgentPackageManagement`;
-its Save command stays disabled while anything is invalid.
+its Save command stays disabled while anything is invalid. For a server it also offers
+**Test connection**, which lists the versions of the first package ID with progress and Cancel, and states
+the result in words (*Connection OK* with the version count and newest; *Sign-in failed*; *Sign-in canceled*;
+*Package not found*; *Timed out*; *Server unreachable*; *Connection failed*), and shows example addresses for
+JFrog Artifactory and Azure Artifacts
+(`AgentControl-LauncherUI-TestConnection`, `AgentControl-LauncherUI-PackageSources`).
 
 `AsyncRelayCommand` is the asynchronous counterpart of `RelayCommand`: it runs a task-returning
 operation with a cancellation token, ignores a new request while one is running, exposes
@@ -146,7 +171,29 @@ while one runs. Upgrade availability is determined by a separate background chec
 (`RefreshUpgradeStatusAsync`, where a newer check supersedes an older one), which
 `MainWindowViewModel` starts a few cards at a time after construction, after a repo is added
 and after settings are applied, so that one slow or unreachable source delays only the cards
-pinned to it (`AgentControl-LauncherUI-ResponsiveOperations`).
+pinned to it (`AgentControl-LauncherUI-ResponsiveOperations`). That background check never opens the
+sign-in dialog (`RefreshUpgradeStatusAsync` defaults to `allowPrompt: false`): for a server it uses the
+credentials already typed this session and otherwise sets the card's source problem to say a sign-in is
+needed and to use the card's menu > Refresh, which is a check the user started and so may ask
+(`AgentControl-LauncherUI-BackgroundChecksDoNotPrompt`).
+
+**Sign-in dialog.** When a NuGet server needs credentials for something the user started - Select Package,
+Upgrade, Refresh, or the editor's Test connection - the `PackageCredentials` subsystem calls
+`ICredentialPrompt`, which `AvaloniaCredentialPrompt` implements
+(`AgentControl-LauncherUI-SignIn`). The NuGet library asks on worker threads while a window can only be shown
+on the UI thread, so each question is marshalled with `Dispatcher.UIThread.InvokeAsync` and the caller awaits
+asynchronously, which means an operation started from a UI-thread command cannot deadlock against its own
+dialog. Questions are serialized with a `SemaphoreSlim` gate, so if two sources need a sign-in at once the
+second dialog appears after the first is answered rather than on top of it. The dialog
+(`CredentialPromptWindow`, backed by `CredentialPromptViewModel`) is modal over the top-most visible window
+(the Settings window, the Select Package window or the main window), shows the server that will receive the
+credential prominently (scheme, host and port, a phishing-resistance cue), the source alias, a warning when
+the server uses plain `http`, a notice when the last credential was rejected, the user name and a masked
+password or token field, and the sentence "Used for this session only - AgentControl does not save it." -
+there is no "remember" option in this version. Sign in is enabled only when both fields are filled; Cancel,
+Escape and closing the window all answer "no credential". Cancelling the question's token (the operation was
+cancelled or timed out) closes the dialog as a cancel. The typed password is handed to the caller and never
+logged.
 
 `RepoCardViewModel` reuses the existing modal `ConfirmationWindow` (the same Yes/No dialog
 shown for Remove confirmation) to offer a package's optional root-level `AGENTS.md` template
@@ -169,8 +216,10 @@ foreground via `AvaloniaProperty.UnsetValue`), so a favorited repo's star also r
 "activated" through color rather than relying solely on the filled-vs-outline glyph shape.
 The `.axaml` Views other than `MainWindow`
 (`AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`,
-`SettingsWindow`, `SourceEditorWindow`) contain no logic beyond Avalonia's XAML-loading boilerplate and
-`AutomationProperties.AutomationId` assignments that let FlaUI locate controls; all behavior
+`SettingsWindow`, `SourceEditorWindow`, `CredentialPromptWindow`) contain no logic beyond Avalonia's XAML-loading boilerplate,
+`AutomationProperties.AutomationId` assignments that let FlaUI locate controls, and - for the dialogs that
+return an answer or pick a folder - closing the window with the view model's answer, treating any other close
+as a cancel, or opening the folder picker; all behavior
 lives in the view models above. `MainWindow`'s code-behind is the one exception: it owns
 dialog-orchestration, view-layer plumbing that requires a live Avalonia `Window` — subscribing
 to each `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`,

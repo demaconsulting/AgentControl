@@ -29,3 +29,34 @@ sections:
               - NuGetSourceProvider_ListVersions_FolderFeedWithVersions_ReturnsAllVersionsStampedWithAlias
               - NuGetSourceProvider_Acquire_ExistingPackage_ReturnsReaderOverContentFolder
               - NuGetSourceProvider_Acquire_UsesExplicitAgentControlOwnedRootWithGeneratedConfig
+
+          - id: AgentControl-OTS-NuGetCaching-ServerAccess
+            title: >-
+              DemaConsulting.NuGet.Caching shall list the versions of a package on a NuGet V3
+              server without downloading it and download a chosen version, shall obtain the
+              credentials for an address that asks for them from a callback supplied for each
+              call - and also from the user's NuGet configuration and non-interactive credential
+              providers - shall stop a credential exchange that takes longer than a time supplied
+              for the call, and shall report a refused access (HTTP 401 or 403) distinctly from
+              other failures.
+            justification: |
+              AgentControl's NuGet package server sources (the NuGetSourceProvider unit) rely on
+              the library for every network and authentication step, and on its per-call options
+              (the credential callback, the exchange time limit, the single source to use) to scope
+              a credential to one source and one operation, because the NuGet credential service
+              it registers is shared by the whole process. There is no vendor evidence packaged
+              with the library and no separate OTS test project in this repository, so the only
+              evidence is the NuGetSourceProvider server tests, which exercise the real library
+              against an in-process NuGet V3 feed over plain HTTP - the same precedent the other
+              runtime OTS items follow, cited honestly as indirect rather than as dedicated
+              library tests.
+            tags: [ots]
+            tests:
+              # Indirect evidence only, via the NuGetSourceProvider server tests - see
+              # justification above.
+              - NuGetSourceProvider_ListVersions_AnonymousServer_ReturnsVersionsWithoutDownloading
+              - NuGetSourceProvider_Acquire_AnonymousServer_DownloadsPackageAndExposesContent
+              - NuGetSourceProvider_ListVersions_ServerNeedsSignIn_PromptsOnceAndRemembersCredentialForTheSession
+              - NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt
+              - NuGetSourceProvider_ListVersions_SignInTakesTooLong_ThrowsTimedOut
+              - NuGetSourceProvider_ListVersions_NuGetConfigHasCredentialsForTheFeed_SignsInWithoutPrompting

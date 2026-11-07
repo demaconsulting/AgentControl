@@ -2,12 +2,15 @@
 
 #### Verification Approach
 
-`RepoCardViewModel` is verified with unit tests defined in `RepoCardViewModelTests.cs`. Every
+`RepoCardViewModel` is verified with unit tests defined in `RepoCardViewModelTests.cs` and, for NuGet server
+sources, `RepoCardServerSourceTests.cs`. Every
 test substitutes a stub script for the git executable (via `GitStub`, mirroring
 `GitClientTests`) and uses real temporary directories/zip fixtures for package-source and
 pin-file checks, so these tests never depend on a real git installation, a real repository,
-or a real package source. No Avalonia `Window` is ever constructed; only the view-model class
-itself is under test.
+or a real package source. The server-source tests start the in-process `MockNuGetFeed` (Kestrel, plain HTTP on
+a fresh loopback port, optionally requiring a Basic sign-in) and a `FakeCredentialPrompt`, with the NuGet HTTP
+cache isolated per test process (`HttpCacheIsolation`). No Avalonia `Window` is ever constructed; only the
+view-model class itself is under test.
 
 #### Test Environment
 
@@ -31,13 +34,16 @@ invocations are not parallelized with other tests using real process launches).
   an unconfigured source gives an error state and no upgrade, and nothing is extracted from any other
   source; a pin from a newer schema stops an apply before the repo is touched.
 - A NuGet folder source can be selected from, upgraded from, and applied to a repo.
+- A background upgrade check never opens the sign-in dialog and explains on the card what to do; a check the
+  user starts may ask once, and the credential is then remembered for the session.
 
 #### Test Scenarios
 
 **RepoCardViewModel_DisplayInfo_ExposesFolderNameAndPackageChip**: The card's display name
 resolves to the repo's leaf folder name, a `Refresh` after a pin file is written populates the
 pinned package name/version fields, and the package chip text and tooltip name the package, its
-version and the source - with the source kind's icon for a zip folder and a NuGet folder, and an
+version and the source - with the source kind's icon for a zip folder, a NuGet folder and a NuGet server
+(the server's icon differs from the other two, and the source's alias is shown as text beside it), and an
 explicit "not configured" description when the pinned source does not exist. A repo with no pin
 shows only the "no agent package" chip, and a missing repo shows neither package chip. This
 scenario is tested by
@@ -45,6 +51,7 @@ scenario is tested by
 `RepoCardViewModel_Refresh_PinFileExists_PopulatesPinnedFields`,
 `RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip`,
 `RepoCardViewModel_PackageChip_PinnedToNuGetFolderSource_ShowsNuGetFolderIconAndKind`,
+`RepoCardViewModel_PinnedToServerSource_ChipShowsAliasAndServerIcon`,
 `RepoCardViewModel_PackageChip_PinnedSourceNotConfigured_ShowsUnknownSource`,
 `RepoCardViewModel_NoPackageChip_NeverPinnedRepo_ShowsNoPackageChipOnly`, and
 `RepoCardViewModel_Chips_MissingRepo_ShowNeitherPackageChip`, covering
@@ -260,3 +267,15 @@ configuration-directory override), by
 `RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes`
 and `RepoCardViewModel_UpgradeCommand_NuGetFolderSource_UpgradesToHighestVersion`, covering
 `AgentControl-RepoCardViewModel-SourceAwareness`.
+
+**RepoCardViewModel_BackgroundChecksNeverPrompt_UserStartedChecksMay**: Against an in-process mock NuGet
+server (see the `NuGetSourceProvider` verification; plain HTTP with the source's explicit opt-in), an
+anonymous server answers the upgrade check with the newer version; a background check (the default,
+`allowPrompt` false) against a server that requires a sign-in never calls the scripted prompt and sets the
+card's source problem to say a sign-in is needed and to use the card's menu > Refresh; a check the user
+requested (`allowPrompt` true) asks once, finds the upgrade, and a later background check - even by another
+card - reuses the remembered credential without asking. This scenario is tested by
+`RepoCardViewModel_RefreshUpgradeStatusAsync_AnonymousServer_OffersNewerVersion`,
+`RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains` and
+`RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential`,
+in `RepoCardServerSourceTests.cs`, covering `AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`.

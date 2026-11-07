@@ -90,14 +90,21 @@ thread. `LaunchCommand`, `PullCommand`, `UpgradeCommand` and `RefreshCommand` ar
 Cancelling is not an error and leaves the repo's pin unchanged. NuGet sources keep their private
 caches under a `nuget` folder inside the startup configuration-directory override when one is
 supplied (so automated tests never touch the user profile), otherwise in the per-user default.
+`CreateSourceRegistry(allowPrompt)` also hands NuGet server sources the application's
+`PackageCredentialContext`: with `allowPrompt` true (a read the user started) the sign-in dialog may
+open, with false (background work) the registry gets `WithoutPrompt()`, a context that shares the
+session credentials but can never ask.
 
 **Chip properties**: the view binds the card's chips to derived properties
 (`AgentControl-RepoCardViewModel-DisplayInfo`, `AgentControl-RepoCardViewModel-UpgradeBadge`):
 
 - *Package chip* — `HasPackageChip`, `PackageChipText` (package name and version),
   `PackageChipTooltip` (names the package, version, source alias and source kind, or says the
-  pinned source is not configured), and the source kind's icon from `PackageSourceIcons`. Hidden
-  for a missing repo or when nothing is pinned.
+  pinned source is not configured), the source kind's icon from `PackageSourceIcons` (a server
+  source has its own network-server icon, distinct from the zip-folder and NuGet-folder icons), and
+  `PinnedSourceLabel`, the source's alias shown as muted text beside the icon so the source is
+  recognizable at a glance without hovering (a pin written before sources existed reports the legacy
+  `Default` alias). Hidden for a missing repo or when nothing is pinned.
 - *No-package chip* — `HasNoPackageChip` and its tooltip, shown instead of the package chip for a
   present repo with no pin; clicking it opens Select Package.
 - *Upgrade chip* — `IsUpgradeAvailable`, `UpgradeChipText` (the version an upgrade would move to)
@@ -151,7 +158,15 @@ immediate full refresh; `RefreshCommand` runs it asynchronously.
 **RefreshUpgradeStatusAsync**: Checks, in the background, whether the pin's source offers a
 newer version than the pinned one, using the shared cache. A check started later supersedes one
 still waiting, so a result for settings that have since changed is discarded; cancellation leaves
-the previous state in place (`AgentControl-RepoCardViewModel-ResponsiveOperations`).
+the previous state in place (`AgentControl-RepoCardViewModel-ResponsiveOperations`). Its
+`allowPrompt` parameter defaults to `false`, which is what the background check at start-up, after a
+repo is added and after settings change uses: it reads a server through the remembered session
+credentials and **never opens the sign-in dialog**. A server that then answers that it needs a sign-in
+(`PackageSourceFailureKind.AuthenticationFailed`) sets `SourceProblem` to the provider's secret-free message
+followed by *Use the card's "..." menu > Refresh to sign in*, so the card says what to do instead of
+interrupting the user. The card's **Refresh** command runs the same check with `allowPrompt` true, and the
+Select Package and Upgrade actions the user chooses use a source registry that may open the dialog
+(`AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`).
 
 **Launch**: Launches the configured agentic CLI tool in the repo's working directory.
 
@@ -324,8 +339,11 @@ constructor throws `ArgumentNullException` for a null `recentRepo`, `getSettings
 
 - **RepoPinStore** (`RepoConfig` subsystem) — reads/writes the repo's pin.
 - **PackageSourceRegistry**, **IPackageSourceProvider**, **PackageVersionCache**,
-  **DiscoveredPackage** (`AgentPackageManagement` subsystem) — source resolution at the pin's
-  alias, package discovery, acquisition, and upgrade-availability checks.
+  **DiscoveredPackage**, **PackageSourceAccessException** (`AgentPackageManagement` subsystem) — source
+  resolution at the pin's alias, package discovery, acquisition, upgrade-availability checks, and the
+  failure cause that distinguishes "needs a sign-in" from other failures.
+- **PackageCredentialContext** (`PackageCredentials` subsystem) — the session credentials and sign-in prompt
+  handed to server sources; `WithoutPrompt` for background work.
 - **PackageContentExtractor**, **PackageZipExtractor** (`RepoSync` subsystem) — extracts a
   package into the repo, reads its release notes, and reads an optional root-level `AGENTS.md`
   template via `ReadAgentsMdTemplate`; `PackageZipExtractor.AllManagedFoldersExist` checks whether

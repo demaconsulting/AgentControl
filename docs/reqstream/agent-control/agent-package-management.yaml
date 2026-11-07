@@ -8,8 +8,9 @@
 #   (caches per-source results), the source providers (ZipFolderSourceProvider.cs,
 #   NuGetSourceProvider.cs) behind the IPackageSourceProvider contract, and
 #   PackageSourceRegistry.cs (resolves a source alias to its provider); the supporting
-#   PackageSourceDefinition/PackageSourceType/PackageReference/IPackageSourceProvider types
-#   have no dedicated unit documents and are folded into this subsystem-level description
+#   PackageSourceDefinition/PackageSourceType/PackageReference/IPackageSourceProvider/
+#   PackageSourceAccessException types have no dedicated unit documents and are folded into
+#   this subsystem-level description
 # - Subsystem requirements describe the package-discovery/version-comparison behavior shared
 #   by the rest of the application, and how configured package sources are modeled and
 #   resolved
@@ -63,20 +64,26 @@ sections:
           The AgentPackageManagement subsystem shall describe a configured package source by a
           unique alias, a type (zip package folder or NuGet package folder or server), a
           location, and - for NuGet sources - the package IDs it offers, together with trust
-          options, shall never hold a password, token or other secret in that description, and
-          shall identify a location that embeds a credential (such as URL user information) so
-          it is never persisted.
+          options, shall never hold a password, token or other secret in that description, shall
+          identify a location that embeds a credential (such as URL user information) so it is
+          never persisted, and shall identify a server address that is not an https address of a
+          service index ending in index.json (accepting http only when the source explicitly
+          allows it).
         justification: |
           The source description is persisted in the user's settings file, so it must carry
           everything needed to reach a source and nothing that would turn the settings file
           into a credential store; the derived folder-versus-server distinction must follow
-          the location so the two can never disagree.
+          the location so the two can never disagree; and a server address that would send a
+          sign-in unprotected or be treated as another protocol must be caught where the source
+          is described, so every user of the description applies the same rules.
         tests:
           - PackageSourceDefinition_Members_HaveNoSecretLikeProperty
           - PackageSourceDefinition_LocationKind_DerivedFromLocation
           - PackageSourceDefinition_Serialize_TypeAsNameAndNoDerivedLocationKind
           - PackageSourceDefinition_GetCredentialProblem_CredentialBearingLocation_ReturnsMessageWithoutSecret
           - PackageSourceDefinition_GetCredentialProblem_OrdinaryLocation_ReturnsNull
+          - PackageSourceDefinition_GetServerLocationProblem_AcceptableAddress_ReturnsNull
+          - PackageSourceDefinition_GetServerLocationProblem_UnacceptableAddress_ReturnsClearMessage
 
       - id: AgentControl-AgentPackageManagement-SourceResolution
         title: >-
@@ -128,9 +135,36 @@ sections:
           - AgentControl-NuGetSourceProvider-ExplicitCacheRoot
           - AgentControl-NuGetSourceProvider-NoRepoNuGetConfig
           - AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration
-          - AgentControl-NuGetSourceProvider-RejectServerLocation
+          - AgentControl-NuGetSourceProvider-ValidateLocation
           - AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource
         tests:
           - NuGetSourceProvider_ListVersions_FolderFeedWithVersions_ReturnsAllVersionsStampedWithAlias
           - NuGetSourceProvider_Acquire_ExistingPackage_ReturnsReaderOverContentFolder
           - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerSource
+        title: >-
+          The AgentPackageManagement subsystem shall offer the versions of the configured
+          packages found on a NuGet package server, and supply a chosen version's content, only
+          from an https address of the server's service index (http only when the source
+          explicitly allows it), signing in only through the credential facilities it is given,
+          offering a credential only to the server's own origin, reporting each failure in terms
+          the user can act on, and never letting a secret reach a message or the log.
+        justification: |
+          Teams publish agent packages to servers such as JFrog Artifactory or Azure Artifacts;
+          reaching them safely means encrypted transport by default, credentials that are used
+          only for the server they were entered for and never kept beyond the session, and error
+          messages that say what to do without revealing a secret.
+        children:
+          - AgentControl-NuGetSourceProvider-ServerListAndAcquire
+          - AgentControl-NuGetSourceProvider-ValidateLocation
+          - AgentControl-NuGetSourceProvider-SignInOrder
+          - AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin
+          - AgentControl-NuGetSourceProvider-ServerFailures
+          - AgentControl-NuGetSourceProvider-SecretsNotLogged
+          - AgentControl-PackageSourceRegistry-MissingAliasIsError
+        tests:
+          - NuGetSourceProvider_ListVersions_AnonymousServer_ReturnsVersionsWithoutDownloading
+          - NuGetSourceProvider_ListVersions_ServerNeedsSignIn_PromptsOnceAndRemembersCredentialForTheSession
+          - NuGetSourceProvider_Constructor_PlainHttp_RefusedUnlessInsecureHttpIsAllowed
+          - PackageSourceDefinition_GetServerLocationProblem_UnacceptableAddress_ReturnsClearMessage

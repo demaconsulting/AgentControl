@@ -27,14 +27,17 @@ using DemaConsulting.AgentControl.AgentPackageManagement;
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     Modal dialog that adds or edits one zip-package folder or NuGet-package folder source via a
+///     Modal dialog that adds or edits one zip-package folder, NuGet-package folder or
+///     NuGet-package server source via a
 ///     <see cref="SourceEditorViewModel"/>, mirroring <see cref="ConfirmationWindow"/>'s
 ///     <see cref="Window.ShowDialog{TResult}(Window)"/> convention.
 /// </summary>
 /// <remarks>
-///     All validation and the resulting definition live in <see cref="SourceEditorViewModel"/>;
+///     All validation, the connection test and the resulting definition live in
+///     <see cref="SourceEditorViewModel"/>;
 ///     this code-behind only wires the folder-browse dialog (which requires a live
-///     <see cref="IStorageProvider"/>), the "Cancel" button, and closes the window with the saved
+///     <see cref="IStorageProvider"/>), the "Cancel" button, abandons a running connection test
+///     when the window closes, and closes the window with the saved
 ///     <see cref="PackageSourceDefinition"/> once <see cref="SourceEditorViewModel.Saved"/> fires
 ///     (or with <see langword="null"/> when canceled).
 /// </remarks>
@@ -62,6 +65,10 @@ internal sealed partial class SourceEditorWindow : Window
         ArgumentNullException.ThrowIfNull(viewModel);
         DataContext = viewModel;
         viewModel.Saved += (_, definition) => Close(definition);
+
+        // A connection test still running when the dialog closes (including a sign-in dialog it
+        // opened) is abandoned rather than left running unseen
+        Closed += (_, _) => viewModel.TestConnectionCommand.Cancel();
     }
 
     /// <summary>

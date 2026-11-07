@@ -2,15 +2,20 @@
 
 ### Verification Approach
 
-The `LauncherUI` subsystem is verified by the combined unit tests of its five units
-(`MainWindowViewModelTests.cs`, `RepoCardViewModelTests.cs`,
-`SelectPackageWindowViewModelTests.cs`, `SettingsWindowViewModelTests.cs`,
-`SourceEditorViewModelTests.cs`), plus `AsyncRelayCommandTests.cs` for the shared asynchronous
+The `LauncherUI` subsystem is verified by the combined unit tests of its six units
+(`MainWindowViewModelTests.cs`, `RepoCardViewModelTests.cs` and `RepoCardServerSourceTests.cs`,
+`SelectPackageWindowViewModelTests.cs` and `SelectPackageRetryTests.cs`,
+`SettingsWindowViewModelTests.cs`, `SourceEditorViewModelTests.cs` and
+`SourceEditorServerViewModelTests.cs`, `CredentialPromptViewModelTests.cs`), plus
+`AsyncRelayCommandTests.cs` for the shared asynchronous
 command, which together
-exercise the full recent-repos/card/select-package/settings interaction surface without ever
+exercise the full recent-repos/card/select-package/settings/sign-in interaction surface without ever
 constructing an Avalonia `Window`. The windows themselves are exercised by headless Avalonia tests
-(`DialogWindowTests.cs`, `MainWindowTests.cs`), and the end-to-end flows - adding a zip and a
-NuGet folder source through the dialogs, selecting a package from the NuGet source, and the
+(`DialogWindowTests.cs`, `MainWindowTests.cs`, `SettingsWindowServerSourceTests.cs` for the Settings
+window, the source editor window and its connection test, and `CredentialPromptWindowTests.cs` for the sign-in
+dialog and `AvaloniaCredentialPrompt`), and the end-to-end flows - adding a zip and a
+NuGet folder source through the dialogs, adding a NuGet server and testing its connection with a typed
+sign-in, selecting a package from the NuGet sources, and the
 chips on a repo card - by the FlaUI `DemaConsulting.AgentControl.UiTests` project. At the
 subsystem boundary, collaborating subsystems
 (`AgentPackageManagement`, `RepoSync`, `RepoConfig`, `GitIntegration`, `AgentToolLauncher`,
@@ -28,6 +33,16 @@ element. `FavoriteIconConverter`/`FavoriteColorConverter`, the favorite-star gly
 shape/color converters, are likewise visual-only value converters with no bound text content
 to assert and remain visual-inspection-only elements; `RepoCardViewModel.IsFavorite` itself
 (the state they render) is covered indirectly by the sort-order scenario below.
+
+The server-source tests use scripted fakes at the subsystem boundary instead of a network: a
+`FakePackageSourceProvider` (which can be gated to simulate a slow source and can be told to throw
+a given exception, including a `PackageSourceAccessException` of each failure kind) stands behind the view
+models, and `FakeCredentialPrompt` stands in for the sign-in dialog; the real `NuGetSourceProvider` against
+a mock NuGet server is verified in the `AgentPackageManagement` subsystem. The headless window tests rely on
+two test-infrastructure properties that were corrected in this pass: `HeadlessTestApp.RunAsync` now waits for
+the asynchronous body to finish (it previously returned without waiting, so an assertion failing inside an
+asynchronous headless test never failed the test), and the `DialogWindowTests.Click` helper now also executes a
+button's bound `Command` (raising the click event alone does not run a view-model command).
 
 ### Test Environment
 
@@ -47,6 +62,9 @@ executable.
   underlying state for both normal and boundary conditions.
 - The AGENTS.md template offer fires at most once per repo, never overwrites an existing
   `AGENTS.md`, and a decline is honored on every subsequent sync for that repo.
+- A NuGet server source can be added, tested (with progress, Cancel and a plain-language result) and listed
+  as "Not checked"; the sign-in dialog shows which server receives the credential, masks the password, answers
+  once, and is shown one at a time; background upgrade checks never open it.
 
 ### Test Scenarios
 
@@ -181,18 +199,69 @@ cited directly at the subsystem level, covering `AgentControl-LauncherUI-SourceA
 lists, adds, edits and removes sources (warning about pinned repos before a removal), and the
 source editor validates what is entered and only saves a valid source; the
 dialogs are exercised end to end by adding a zip folder source and a NuGet folder source
-through the real windows. This scenario is tested by
+through the real windows. A NuGet server is added through its own button and editor window (feed address,
+examples, "Allow insecure HTTP" off by default, test button), an invalid or plain-http address blocks Save
+until fixed or explicitly allowed, and a saved server is listed as "Not checked" without any folder check or
+network access. This scenario is tested by
 `SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder`,
 `SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource`,
-`SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves`, and
-`SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved`, covering
+`SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves`,
+`SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved`,
+`SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor`,
+`SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt`,
+`SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls` and
+`SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave`, covering
 `AgentControl-LauncherUI-PackageSources`.
 
+**LauncherUI_TestConnection_ProgressCancelAndPlainLanguageResult**: In the server editor, the test lists the
+versions of the first package ID through a scripted provider; while it runs the dialog shows progress and a
+Cancel button, and afterwards it shows a headline and detail for each outcome (connection OK with count and
+newest, package not found, sign-in failed, sign-in canceled, timed out, server unreachable, other failure);
+closing the window while a test runs cancels it, and the application's view model hands the editor a real NuGet
+provider wired to the same credential facilities as the cards. This scenario is tested by
+`SourceEditorWindow_TestConnection_ShowsProgressCancelAndResult`,
+`SourceEditorWindow_ClosedWhileTesting_CancelsTheTest`,
+`SourceEditorViewModel_TestConnection_ServerAnswers_ReportsVersionCountAndLatest`,
+`SourceEditorViewModel_TestConnection_PackageMissing_ReportsPackageNotFound`,
+`SourceEditorViewModel_TestConnection_ProviderFails_ReportsHeadlineAndMessage`,
+`SourceEditorViewModel_TestConnection_CancelWhileRunning_StopsWithCanceledResult` and
+`MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials`, covering
+`AgentControl-LauncherUI-TestConnection`.
+
+**LauncherUI_SignIn_DialogShowsDestinationMasksPasswordAndAnswersOnce**: The sign-in window, shown
+headlessly, displays the server's origin and the sentence "Used for this session only - AgentControl does not
+save it.", masks the password box and keeps Sign in disabled until both fields are filled; a plain-http server
+shows a warning and a previously rejected credential shows a notice; Sign in closes with the typed credential
+while Cancel, Escape and closing the window all answer no credential. `AvaloniaCredentialPrompt`, asked from a
+worker thread, shows the dialog on the UI thread and returns the typed credential, reports a cancel as no
+credential, closes the dialog and throws a cancellation when its token is cancelled, shows two simultaneous
+questions one at a time, and refuses a null request. This scenario is tested by
+`CredentialPromptWindow_Shown_ShowsOriginSessionNoteAndMaskedPassword`,
+`CredentialPromptWindow_InsecureAndRejected_ShowWarningAndRejectedNotice`,
+`CredentialPromptWindow_SignInClicked_ReturnsTheTypedCredential`,
+`CredentialPromptWindow_CancelEscapeOrClose_ReturnNoCredential`,
+`AvaloniaCredentialPrompt_PromptAsync_FromWorkerThread_ShowsDialogAndReturnsCredential`,
+`AvaloniaCredentialPrompt_PromptAsync_UserCancels_ReturnsNull`,
+`AvaloniaCredentialPrompt_PromptAsync_TokenCancelled_ClosesDialogAndThrows` and
+`AvaloniaCredentialPrompt_PromptAsync_TwoQuestionsAtOnce_AreShownOneAtATime`, covering
+`AgentControl-LauncherUI-SignIn`.
+
+**LauncherUI_BackgroundChecksDoNotPrompt_UserStartedChecksMay**: A background upgrade check against a
+server that needs a sign-in never opens the dialog and puts the instruction on the card; a check the user
+starts opens it once, finds the upgrade, and a later background check - even for another card - reuses the
+remembered credential without asking. This scenario is tested by
+`RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains` and
+`RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential`,
+covering `AgentControl-LauncherUI-BackgroundChecksDoNotPrompt`.
+
 **LauncherUI_RepoCardChips_PackageUpgradeBranchAndLaunchLabel**: A card pinned to a zip source
-shows its package chip with name, version and source in the tooltip, an upgrade chip names the
+shows its package chip with name, version and source in the tooltip, a card pinned to a server source shows
+the source's alias beside the server icon (a different icon from the zip and NuGet-folder icons), an upgrade
+chip names the
 target version, a branch chip shows the branch, and the Launch label names the configured tool.
 This scenario is tested by
 `RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip`,
+`RepoCardViewModel_PinnedToServerSource_ChipShowsAliasAndServerIcon`,
 `RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions`,
 `RepoCardViewModel_BranchChip_BranchKnown_ShowsBranchWithTooltip`, and
 `RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack`, covering
@@ -203,10 +272,12 @@ asynchronous command ignores a repeated request while running and treats cancell
 error; a package apply that is waiting on a slow source reports busy and cancels without changing
 the pin; the background upgrade refresh keeps checking other cards when one source is
 unreachable; and the Select Package dialog loads the other sources and shows an inline error for
-the unreachable one. This scenario is tested by
+the unreachable one, and the failed read can be retried on its own without touching the other sources. This
+scenario is tested by
 `AsyncRelayCommand_ExecuteAsync_WhileRunning_DoesNotRunOperationTwice`,
 `AsyncRelayCommand_Cancel_Running_SignalsTokenAndIsNotAnError`,
 `RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged`,
-`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked`, and
-`SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline`,
+`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked`,
+`SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline`, and
+`SelectPackageWindowViewModel_Retry_SourceFailedThenAnswers_LoadsOnlyThatSource`,
 covering `AgentControl-LauncherUI-ResponsiveOperations`.

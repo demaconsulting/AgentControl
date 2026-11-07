@@ -4,6 +4,7 @@ resource-path:
   - docs/verification/agent-control
   - docs/verification/agent-control/launcher-ui
   - docs/verification/agent-control/agent-package-management
+  - docs/verification/agent-control/package-credentials
   - docs/verification/agent-control/repo-sync
   - docs/verification/agent-control/repo-config
   - docs/verification/agent-control/agent-tool-launcher
@@ -25,6 +26,7 @@ input-files:
   - docs/verification/agent-control/launcher-ui/select-package-window-view-model.md
   - docs/verification/agent-control/launcher-ui/settings-window-view-model.md
   - docs/verification/agent-control/launcher-ui/source-editor-view-model.md
+  - docs/verification/agent-control/launcher-ui/credential-prompt-view-model.md
   - docs/verification/agent-control/agent-package-management.md
   - docs/verification/agent-control/agent-package-management/package-source.md
   - docs/verification/agent-control/agent-package-management/package-source-registry.md
@@ -32,6 +34,11 @@ input-files:
   - docs/verification/agent-control/agent-package-management/nuget-source-provider.md
   - docs/verification/agent-control/agent-package-management/package-version.md
   - docs/verification/agent-control/agent-package-management/package-version-cache.md
+  - docs/verification/agent-control/package-credentials.md
+  - docs/verification/agent-control/package-credentials/feed-origin.md
+  - docs/verification/agent-control/package-credentials/session-credential-store.md
+  - docs/verification/agent-control/package-credentials/package-credential-callback.md
+  - docs/verification/agent-control/package-credentials/secret-redacting-logger.md
   - docs/verification/agent-control/repo-sync.md
   - docs/verification/agent-control/repo-sync/package-content-extractor.md
   - docs/verification/agent-control/repo-sync/package-zip-extractor.md

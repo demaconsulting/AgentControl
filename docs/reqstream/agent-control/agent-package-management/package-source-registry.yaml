@@ -23,17 +23,19 @@ sections:
       - id: AgentControl-PackageSourceRegistry-MissingAliasIsError
         title: >-
           The PackageSourceRegistry class shall report an error naming the alias when asked
-          for a source alias that is not configured, and shall reject duplicated or blank
-          aliases when it is built.
+          for a source alias that is not configured, shall reject duplicated or blank
+          aliases when it is built, and shall refuse to provide a plain-http server source
+          whose definition does not allow insecure http.
         justification: |
           A pin to a removed source must stop with an actionable message instead of proceeding
-          with something else, and an ambiguous configuration (the same alias twice) must be
-          refused rather than resolved arbitrarily.
+          with something else, an ambiguous configuration (the same alias twice) must be
+          refused rather than resolved arbitrarily, and a server source that is not
+          acceptable must stop where it is resolved rather than be contacted.
         tests:
           - PackageSourceRegistry_Resolve_MissingAlias_ThrowsUnknownSourceExceptionNamingAlias
           - PackageSourceRegistry_Constructor_DuplicateOrBlankAlias_ThrowsInvalidOperationException
           - PackageSourceRegistry_BlankAlias_ContainsFalseAndResolveThrowsArgumentException
-          - PackageSourceRegistry_Create_NuGetServerSource_ResolveThrowsInvalidOperationException
+          - PackageSourceRegistry_Create_NuGetServerSource_ResolvesHttpsAndRefusesPlainHttpWithoutOptIn
 
       - id: AgentControl-PackageSourceRegistry-NoCrossSourceFallback
         title: >-

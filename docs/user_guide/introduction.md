@@ -19,7 +19,8 @@ This user guide covers:
 - Installing AgentControl
 - Adding a repository to the recent-repos list
 - Reading a repo card's chips: pinned package, upgrade, branch, and status warnings
-- Configuring package sources (zip-package folders and NuGet-package folders)
+- Configuring package sources (zip-package folders, NuGet-package folders and NuGet-package
+  servers), including testing a server's connection and signing in to it
 - Selecting an initial agent package for a never-pinned repo, and upgrading an
   already-pinned repo
 - Launch behavior, including ensure-synced-before-launch semantics
@@ -71,10 +72,11 @@ itself).
 ## Reading the Chips
 
 - **Agent package chip** (robot icon) — the agent package the repo is pinned to and its
-  version, for example `contoso-agents 1.0.0`. A small icon beside the version shows the kind of
-  source the package came from (a folder of zips, or a folder of NuGet packages), and the tooltip
-  names it: "Agent files: contoso-agents 1.0.0 from source 'Default' (zip folder)". If the source
-  is not configured, the tooltip says so.
+  version, for example `contoso-agents 1.0.0`. Beside the version, a small icon shows the kind of
+  source the package came from (a folder of zips, a folder of NuGet packages, or a NuGet server) and
+  the source's **alias** is shown as muted text next to it, so you can see where the package came
+  from without hovering. The tooltip names the source in full: "Agent files: contoso-agents 1.0.0
+  from source 'Default' (zip folder)". If the source is not configured, the tooltip says so.
 - **Upgrade chip** (amber, up arrow) — the version an upgrade would move to, for example
   `1.1.0`. It appears only when the source the repo is pinned to has a newer version. Use the
   card's "..." menu > **Upgrade** to apply it. While AgentControl is still checking the source,
@@ -96,55 +98,209 @@ itself).
   actions, and offers a "Remove from list" action instead (the card is never auto-removed, since
   the path may reappear, such as a drive being remounted).
 - **Package source problem** (red) — the source the repo is pinned to is not configured (for
-  example it was removed or renamed in Settings). The tooltip states the problem. No upgrade is
+  example it was removed or renamed in Settings), or it is a server that needs a sign-in. The
+  tooltip states the problem. No upgrade is
   offered and no other source is ever used instead; restore the source with the same alias in
-  Settings to resolve it.
+  Settings to resolve a missing source, or, for a server that needs a sign-in, use the card's
+  "..." menu > **Refresh** to sign in (see [Signing In](#signing-in)).
 
 # Package Sources
 
 AgentControl takes agent packages from one or more **package sources**, which you manage in
-Settings. Two kinds of source are supported:
+Settings. Three kinds of source are supported:
 
 - **Zip-package folder** — a folder (local, mapped drive, or UNC share) holding agent package
   zip files named `{package-name}-{version}.zip`.
 - **NuGet-package folder** — a folder (local, mapped drive, or UNC share) holding `.nupkg`
   files, as a NuGet "folder feed" does. A feed folder cannot be listed cheaply, so you also give
   the **package IDs** it offers.
+- **NuGet-package server** — a NuGet feed served over the web, such as JFrog Artifactory or Azure
+  Artifacts. You give its **feed address** and, as for a folder, the **package IDs** you want from it.
+  A server may need you to sign in (see [Signing In](#signing-in)).
 
 Each source has an **alias**, the short name shown in the app and recorded in a repo's pin.
 
 ## Adding a Source
 
 1. Open Settings (the gear icon) and, in the **Package sources** list, click **Add Zip-Package
-   Folder** or **Add NuGet-Package Folder**.
+   Folder**, **Add NuGet-Package Folder** or **Add NuGet-Package Server** (see
+   [Adding a NuGet-Package Server](#adding-a-nuget-package-server) for the last one).
 2. Type an **alias**. It must be unique (letters are compared ignoring case) and cannot be
    changed later, because repo pins refer to it.
-3. Enter the **location** as a full folder path, or use **Browse** to pick the folder. A
-   location that contains a user name or password is refused, and so is a web address (servers
-   are not supported yet).
+3. For a folder, enter the **location** as a full folder path, or use **Browse** to pick the
+   folder. A location that contains a user name or password is refused, and so is a web address
+   (a web address is a server, which has its own button).
 4. For a NuGet-package folder, enter each package ID and click **Add**; at least one is required.
 5. Messages under each field say what is wrong, and **Save** stays disabled until everything is
    valid. Then save the source, and save the Settings window to keep the change.
 
 Each row of the list shows the alias, an icon for the kind of source, the location (hover for
-the full text) and a status: whether the folder can currently be found. The status is checked in
-the background, so an offline network share never freezes Settings.
+the full text) and a status. For a folder the status is whether the folder can currently be
+found, checked in the background so an offline network share never freezes Settings. A server
+shows **Not checked**: AgentControl contacts a server only when it is needed - when you select a
+package, check for upgrades or press **Test connection** - never just to draw the list, because
+that could mean a wait, or a sign-in, for a window you only opened to look.
+
+## Adding a NuGet-Package Server
+
+Click **Add NuGet-Package Server**. The dialog asks for:
+
+- **Alias** — as for any source.
+- **Feed address** — the address of the feed's NuGet V3 **service index**. It must start with
+  `https://` and end in `index.json`, and it must not contain a user name, password, query string
+  or fragment. Typical addresses:
+
+  ```text
+  JFrog Artifactory: https://<host>/artifactory/api/nuget/v3/<repo>/index.json
+  Azure Artifacts:   https://pkgs.dev.azure.com/<org>/_packaging/<feed>/nuget/v3/index.json
+  ```
+
+- **Allow insecure HTTP** — off by default. A plain `http://` address is refused until you tick it,
+  and ticking it shows a warning: anything you type into the sign-in dialog for that server would
+  cross the network unprotected. Tick it only for a feed on a network you trust (for example a
+  test server on your own machine).
+- **Package IDs** — the packages you want from this server, at least one. A server cannot be
+  listed cheaply, so you name the packages. Package IDs use the same names as the NuGet packages
+  themselves.
+
+## Testing the Connection
+
+Before saving a server, click **Test connection**. It becomes available once the address is
+acceptable and at least one package ID is listed. AgentControl asks the server for the versions of
+the **first** package ID in your list - it reads only the version list, downloads nothing and saves
+nothing. While it works you see progress and a **Cancel** button (a server that has to refuse a
+credential first can take several seconds to answer). The result tells you in words what happened:
+
+- **Connection OK** — the server answered and has the package; the number of versions found and the
+  latest one are shown.
+- **Sign-in failed** — the server refused access (HTTP 401 or 403): the user name, password or
+  token is wrong, or the account may not read this feed.
+- **Sign-in canceled** — you closed the sign-in dialog without signing in.
+- **Package not found** — the server answered, but it has no package with that ID. Check the ID, and
+  that your account may see it.
+- **Timed out** — signing in took longer than the allowed time (see [Signing In](#signing-in)).
+- **Server unreachable** — the server could not be reached, or the address did not answer as a NuGet
+  feed. Check that the address ends in `index.json` and that the server is reachable from your
+  machine.
+- **Connection failed** — anything else; the message says what.
+
+The test may open the sign-in dialog, exactly as selecting a package would. If you change the
+address, the insecure-HTTP tick or the package IDs, the last result is cleared, because it described
+the old values.
+
+## Signing In
+
+When a server needs credentials for something you started - **Test connection**, **Select
+Package...**, **Upgrade**, or a card's **Refresh** - AgentControl opens a **sign-in dialog** over the
+window you were using. It shows:
+
+- the **server that will receive what you type** (for example `https://pkgs.dev.azure.com`) in large
+  text, so you can check it is the server you meant;
+- the alias of the source it is for;
+- a warning when the server uses plain `http` (what you type is not encrypted), and a notice when the
+  credential you gave last time was rejected;
+- a **user name** box and a masked **password or token** box (for Azure Artifacts, use a personal
+  access token as the password);
+- the sentence **"Used for this session only - AgentControl does not save it."**
+
+**Sign in** is enabled only when both boxes are filled. **Cancel**, pressing Escape or closing the
+window all mean "do not sign in". What happens next:
+
+- **Wrong user name or password** — the server refuses it, AgentControl forgets it, and the operation
+  reports *Sign-in failed*. It asks only once per operation and never loops; start the action again
+  (for example with **Retry** in the Select Package dialog) to get a fresh dialog, which tells you the
+  last attempt was rejected.
+- **Cancel** — the operation stops with *Sign-in canceled*; nothing is remembered.
+- **Taking too long** — if the sign-in is not completed within **2 minutes** AgentControl stops the
+  operation and reports *Timed out*, so an abandoned dialog never holds anything up forever.
+- **Success** — the credential is remembered **in memory for the rest of this session**, so the next
+  operation on the same server (selecting a package after testing the connection, for example) does
+  not ask again. It is forgotten if the server ever rejects it, and when you close AgentControl.
+
+Only one sign-in dialog is shown at a time; if two sources need one at once, the second waits for the
+first.
+
+**Background checks never open the dialog.** When AgentControl starts, after you change Settings, and
+when you add a repo, it checks each repo's pinned source for upgrades in the background. For a server
+that needs a sign-in, that check uses a credential you already typed this session and otherwise does
+**not** ask: the card shows a **Package source problem** chip saying the source needs a sign-in. Use
+the card's "..." menu > **Refresh** (or Select Package / Upgrade) - actions you start - to sign in.
+
+## Where Credentials Come From
+
+For a server, AgentControl looks for credentials in this order and asks you only as a last resort:
+
+1. **What NuGet itself already knows.** If your own NuGet configuration (`nuget.config`) lists a
+   source whose address is the same as the source's feed address (letters and a trailing slash are
+   ignored), the credentials stored there are used. Installed NuGet **credential providers**, such as
+   the Azure Artifacts Credential Provider, are also run, but only without interaction (they can sign
+   in silently, for example with your Windows or Visual Studio identity, but never open a window of their
+   own). A configuration entry for an Azure Artifacts feed looks like this:
+
+   ```xml
+   <configuration>
+     <packageSources>
+       <add key="Contoso" value="https://pkgs.dev.azure.com/contoso/_packaging/agents/nuget/v3/index.json" />
+     </packageSources>
+     <packageSourceCredentials>
+       <Contoso>
+         <add key="Username" value="you@contoso.com" />
+         <add key="ClearTextPassword" value="<personal access token>" />
+       </Contoso>
+     </packageSourceCredentials>
+   </configuration>
+   ```
+
+   Put it in your user-level NuGet configuration (`%AppData%\NuGet\NuGet.Config`). The
+   `dotnet nuget add source` and `dotnet nuget update source` commands can create and update such an
+   entry for you (with `--username` and `--password`; add `--store-password-in-clear-text` where the
+   platform cannot encrypt it). Credentials stored in your NuGet configuration are yours to protect -
+   AgentControl only reads them. AgentControl never reads or writes the `nuget.config` of a repo.
+2. **A credential you already typed in this session.**
+3. **The sign-in dialog**, at most once per operation, and only after the server has refused the
+   first two.
+
+A credential is only ever sent to a server when that server asks for it (an HTTP 401 answer) -
+AgentControl never sends one ahead of time - and AgentControl offers it only to the server it was
+for. A different server, a different port, or an address the first server redirects to is never given
+your credential by AgentControl and never causes a sign-in dialog.
+
+## Only Add Servers You Trust
+
+AgentControl itself only ever offers your credential to the feed address you configured. There is one
+limit it cannot remove: a feed's own index says where its package resources live, and once a server has
+authenticated, the NuGet client answers sign-in challenges from other hosts that the index names with
+the same credential. In testing, a second server named by a feed's index received an `Authorization`
+header. So **add only servers you trust**, because the feed you add decides where package downloads
+are requested from. If you do not trust a feed's operator, do not sign in to it.
 
 ## Editing and Removing a Source
 
-Select a row and click **Edit** to change its location or (for NuGet) its package IDs; the alias
-is fixed. **Remove** asks for confirmation. Removing a source is allowed even when repos are
-pinned to it, but the confirmation tells you how many are: those repos will show a **Package
-source problem** chip until a source with that alias is configured again.
+Select a row and click **Edit** to change its location (a server's feed address and insecure-HTTP
+choice) or (for NuGet) its package IDs; the alias is fixed, and a server opens the same dialog as when
+adding, including **Test connection**. **Remove** asks for confirmation. Removing a source is allowed
+even when repos are pinned to it, but the confirmation tells you how many are: those repos will show a
+**Package source problem** chip until a source with that alias is configured again.
 
 ## What Is Stored
 
 Sources are saved in your per-user `settings.json` (in AgentControl's folder under your user
-profile) as alias, kind, location and package IDs. Nothing secret is ever stored: AgentControl
-has no credentials for these folders and uses your normal file access. Each repo's
-`.agentcontrol.json` pin records the package name, exact version and **the alias of its source**.
-AgentControl never reads or writes a repo's own `nuget.config`, and keeps its NuGet caches in
-its own folder under your user profile.
+profile) as alias, kind, location, package IDs and - for a server - the insecure-HTTP choice. Each
+repo's `.agentcontrol.json` pin records the package name, exact version and **the alias of its
+source**. AgentControl never reads or writes a repo's own `nuget.config`, and keeps its NuGet caches
+in its own folder under your user profile.
+
+| Item | Stored? |
+| :--- | :--- |
+| Alias, kind, location or feed address, package IDs, insecure-HTTP choice | Yes, in `settings.json` |
+| Package name, exact version and source alias of a repo | Yes, in the repo's `.agentcontrol.json` |
+| The user name and password or token you type in the sign-in dialog | **Never** - kept in memory for the session |
+| Secrets in the log, the settings, a pin file or the repo | **Never** - the log redacts them |
+
+The log removes passwords, authorization headers and the query strings of addresses.
+
+A source location that contains a user name, password, query string or fragment is refused, so a
+secret cannot end up in `settings.json` by being pasted into an address.
 
 ## Moving From a Single Package Source Folder
 
@@ -171,10 +327,14 @@ shows **Select Package...**. Choosing it opens a dialog with three columns:
 
 1. **Source** — every configured package source, with its kind icon and alias. Each source loads
    in the background with a progress indicator; if a source cannot be read (for example, an
-   offline share), its error appears in the dialog and the other sources still work.
+   offline share, or a server that could not be reached), its error appears in the dialog with a
+   **Retry** button that reads just that source again, and the other sources still work. A server
+   that needs a sign-in opens the [sign-in dialog](#signing-in) when you select it.
 2. **Package** — the packages the selected source offers.
 3. **Version** — once you pick a package, its versions in descending order, defaulting the
-   selection to the latest.
+   selection to the latest. If the versions cannot be read, the error is shown with **Retry**
+   beside it. Reading a server can take several seconds, and a cancelled or failed sign-in can be
+   retried from here without closing the dialog.
 
 On confirm, AgentControl runs the same extract-and-pin sequence as an upgrade: validate the
 package, delete the four managed folders if present, extract the new files, ensure your
@@ -255,10 +415,11 @@ check that simply hasn't run yet.
 Open Settings from the gear icon on the toolbar to configure:
 
 - **Package sources** — the list of configured package sources, with **Add Zip-Package Folder**,
-  **Add NuGet-Package Folder**, **Edit** and **Remove** (see [Package Sources](#package-sources)).
-  No authentication, checksum, or signature
-  verification is performed on these folders by AgentControl — the security and integrity of the
-  shared location is the responsibility of whoever maintains it.
+  **Add NuGet-Package Folder**, **Add NuGet-Package Server**, **Edit** and **Remove** (see
+  [Package Sources](#package-sources)).
+  No checksum or signature
+  verification is performed on packages by AgentControl — the security and integrity of the
+  shared folder or server is the responsibility of whoever maintains it.
 - **Git executable path override** — a specific `git` executable to use instead of resolving
   `git` from the process `PATH`.
 - **Agent tool selection** — which agentic CLI tool Launch starts: GitHub Copilot CLI,

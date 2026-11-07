@@ -20,6 +20,7 @@
 
 using System.Collections.ObjectModel;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.Settings;
 using DemaConsulting.AgentControl.Startup;
@@ -89,15 +90,23 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// <param name="startupOptions">Test-only startup overrides, or <see langword="null"/>.</param>
     /// <param name="configDirectory">The configuration directory settings are persisted to, or
     ///     <see langword="null"/> to use the default.</param>
+    /// <param name="credentials">The credential facilities (session store and sign-in prompt) that
+    ///     NuGet server sources use, shared by every card and by the settings window's connection
+    ///     test; <see langword="null"/> for none.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
-    public MainWindowViewModel(AppSettings settings, StartupOptions? startupOptions = null, string? configDirectory = null)
+    public MainWindowViewModel(
+        AppSettings settings,
+        StartupOptions? startupOptions = null,
+        string? configDirectory = null,
+        PackageCredentialContext? credentials = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
         _settings = settings;
         _startupOptions = startupOptions;
         _configDirectory = configDirectory;
+        Credentials = credentials;
 
         RepoCards = [];
         DisplayedRepoCards = [];
@@ -176,6 +185,12 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     <see cref="SettingsWindowViewModel"/> from the main window's code-behind.
     /// </summary>
     public AppSettings Settings => _settings;
+
+    /// <summary>
+    ///     Gets the credential facilities that NuGet server sources use to sign in, or
+    ///     <see langword="null"/> when there are none.
+    /// </summary>
+    internal PackageCredentialContext? Credentials { get; }
 
     /// <summary>
     ///     Adds a repository to the recent-repos list (most-recently-used position) and persists
@@ -513,7 +528,19 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// <param name="recentRepo">The recent-repos entry to create a card for.</param>
     /// <returns>The created card, not yet refreshed.</returns>
     private RepoCardViewModel CreateCard(RecentRepo recentRepo) =>
-        new(recentRepo, () => _settings, _packageVersionCache, _startupOptions);
+        new(recentRepo, () => _settings, _packageVersionCache, _startupOptions, credentials: Credentials);
+
+    /// <summary>
+    ///     Creates the provider that the settings window's "Test connection" lists versions
+    ///     through for a source being edited, with the same credential facilities and cache
+    ///     location the cards use.
+    /// </summary>
+    /// <param name="definition">The source as currently edited (not yet saved).</param>
+    /// <returns>A provider that can sign in through the application's sign-in dialog.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the definition is not an
+    ///     acceptable NuGet source.</exception>
+    internal IPackageSourceProvider CreateConnectionTestProvider(PackageSourceDefinition definition) =>
+        new NuGetSourceProvider(definition, RepoCardViewModel.GetNuGetRootBase(_startupOptions), Credentials);
 
     /// <summary>
     ///     Attempts to load the pin file for a newly-added repo, tolerating a repo that has never

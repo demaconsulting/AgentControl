@@ -17,7 +17,12 @@ source, built from `AppSettings.GetEffectiveSources` (so a previously configured
 package-source folder appears as the source named `Default`). Each row wraps a private clone of
 the `PackageSourceDefinition`, so the live settings are never mutated, and exposes the alias, a
 kind icon and label (from `PackageSourceIcons`), the location, the number of repos pinned to it,
-and a status text (`AgentControl-SettingsWindowViewModel-SourceList`).
+and a status text (`AgentControl-SettingsWindowViewModel-SourceList`). A folder row's status is computed
+in the background ("Checking", then found or missing). A server row shows **"Not checked"** from the start:
+AgentControl contacts a server only when it is needed (selecting a package, checking for upgrades, or the
+editor's **Test connection**), never just to draw the list, since doing so could mean a network wait and a
+sign-in dialog for a window that was only opened to look. The row's icon and tooltip explain this and point
+to *Edit > Test connection*.
 
 **SelectedSource**: `PackageSourceItemViewModel?` — The row the Edit and Remove commands act on.
 
@@ -59,8 +64,10 @@ the repos pinned to each source.
 **Constructor**: Seeds editable properties from the current settings and starts the status
 check of every source.
 
-- *Parameters*: `AppSettings initial`, `Action<AppSettings> onSave`, and an optional folder-exists
-  check (so tests need no real folders).
+- *Parameters*: `AppSettings initial`, `Action<AppSettings> onSave`, an optional folder-exists
+  check (so tests need no real folders), and an optional provider factory that the editor's
+  **Test connection** uses (so the application can give the test the session credentials, and
+  tests can use a fake).
 - *Preconditions*: `initial` and `onSave` are not null.
 - *Postconditions*: Every editable property equals its corresponding field on `initial`, and
   `Sources` lists the configured sources in order
@@ -69,9 +76,12 @@ check of every source.
   shows as missing. The checks run on worker threads, so constructing the view model never
   waits for a slow location.
 
-**AddZipSourceCommand**, **AddNuGetFolderSourceCommand**, **EditSourceCommand**: Raise
+**AddZipSourceCommand**, **AddNuGetFolderSourceCommand**, **AddNuGetServerSourceCommand**,
+**EditSourceCommand**: Raise
 `EditorRequested` asking the window to open a `SourceEditorViewModel`, created by
-`CreateEditor`, for a new source of the chosen kind or for the selected source. When the editor
+`CreateEditor` (which passes the provider factory on), for a new source of the chosen kind
+("Add Zip-Package Folder", "Add NuGet-Package Folder", "Add NuGet-Package Server") or for the
+selected source; editing a source whose location is a web address opens the server editor. When the editor
 reports `Saved`, the resulting definition is appended to `Sources` and selected, or replaces the
 edited row in place keeping its position (`AgentControl-SettingsWindowViewModel-AddEditRemoveSource`).
 The editor's alias check refuses an alias already configured, ignoring case
@@ -120,12 +130,15 @@ shows the source as missing.
   source data type it clones and edits.
 - **SourceEditorViewModel**, **PackageSourceItemViewModel**, **PackageSourceIcons** (`LauncherUI`
   subsystem) — the add/edit dialog's view model and the list row support.
+- **IPackageSourceProvider** (`AgentPackageManagement` subsystem) — the type of the provider the
+  optional factory creates for the connection test.
 - **RelayCommand** (`LauncherUI` subsystem, shared MVVM support) — backs the commands.
 
 #### Callers
 
 - **MainWindow** (code-behind) — constructs `SettingsWindowViewModel` from
-  `MainWindowViewModel.Settings` with `onSave` bound to `MainWindowViewModel.ApplySettings`,
+  `MainWindowViewModel.Settings` with `onSave` bound to `MainWindowViewModel.ApplySettings` and the
+  provider factory bound to `MainWindowViewModel.CreateConnectionTestProvider`,
   when the user opens the Settings window.
 - **SettingsWindow** (code-behind) — subscribes to `EditorRequested` and `RemoveRequested` to
   show the `SourceEditorWindow` and the removal confirmation.

@@ -41,12 +41,17 @@ code-behind.
 **_packageVersionCache**: `PackageVersionCache` — The shared, session-scoped package-version
 cache passed to every `RepoCardViewModel`, per architecture.md's repo-fact caching strategy.
 
+**Credentials**: `PackageCredentialContext?` — The session credential store and sign-in prompt created by
+`App`, passed to every `RepoCardViewModel` and to the connection-test provider so that a sign-in made in one
+place is remembered for all of them; `null` (tests, or no sign-in facilities) leaves server sources with only
+what NuGet itself supplies.
+
 #### Key Methods
 
 **Constructor**: Populates `RepoCards` from the loaded settings.
 
 - *Parameters*: `AppSettings settings`, `StartupOptions? startupOptions = null`,
-  `string? configDirectory = null`.
+  `string? configDirectory = null`, `PackageCredentialContext? credentials = null`.
 - *Preconditions*: `settings` is not null.
 - *Postconditions*: One `RepoCardViewModel` exists per `RecentRepo` in `settings.RecentRepos`;
   each card's cheap refresh (`RefreshCheap`) has run; `DisplayedRepoCards` reflects the
@@ -113,6 +118,12 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
   `GitClient` runs with no timeout — for every tracked repo on every settings save
   (`AgentControl-MainWindowViewModel-ApplySettings`).
 
+**CreateConnectionTestProvider**: Creates the `NuGetSourceProvider` that the settings window's
+**Test connection** lists versions through for a source being edited, with the same credential facilities
+and cache location the cards use, so a sign-in made during a test is remembered for the session and not
+asked for again when a package is selected (`AgentControl-MainWindowViewModel-ConnectionTestProvider`).
+`MainWindow` passes it to `SettingsWindowViewModel` as the provider factory.
+
 **UpdateDisplayedRepoCards** (private): Recomputes `DisplayedRepoCards` from `RepoCards` — a
 case-insensitive substring match against `FilterText` on repo name or path
 (`AgentControl-MainWindowViewModel-SearchFilter`), sorted by favorite status descending then
@@ -141,10 +152,13 @@ succeeding.
 - **SettingsStore** (`Settings` subsystem) — `SaveSettings` persists the live `AppSettings`.
 - **PackageVersionCache** (`AgentPackageManagement` subsystem) — shared across all cards;
   invalidated per source by `ApplySettings` when a package source was edited or removed.
+- **PackageCredentialContext** (`PackageCredentials` subsystem) — the session credentials and sign-in
+  prompt it holds and passes on; **NuGetSourceProvider** (`AgentPackageManagement`) — created by
+  `CreateConnectionTestProvider`.
 
 #### Callers
 
-- **App** — constructs `MainWindowViewModel` in `OnFrameworkInitializationCompleted` and
-  assigns it as `MainWindow.DataContext`.
+- **App** — constructs `MainWindowViewModel` in `OnFrameworkInitializationCompleted`, passing the
+  process-wide `PackageCredentialContext`, and assigns it as `MainWindow.DataContext`.
 - **MainWindow** (code-behind) — calls `AddRepo`, `RemoveRepo`, and reads `Settings` to open
-  `SettingsWindow`.
+  `SettingsWindow`, passing `CreateConnectionTestProvider` as its provider factory.

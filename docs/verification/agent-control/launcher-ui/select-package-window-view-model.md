@@ -3,7 +3,7 @@
 #### Verification Approach
 
 `SelectPackageWindowViewModel` is verified with unit tests defined in
-`SelectPackageWindowViewModelTests.cs`. No Avalonia `Window` is constructed in these tests,
+`SelectPackageWindowViewModelTests.cs` and `SelectPackageRetryTests.cs`. No Avalonia `Window` is constructed in these tests,
 matching `SettingsWindowViewModelTests`'s pattern; they use real temporary directories and
 package-zip fixtures behind a real `PackageSourceRegistry` and `PackageVersionCache`, plus
 deliberately slow and failing source providers to prove the dialog does not block and isolates
@@ -25,6 +25,7 @@ N/A - standard test environment.
 - A newer package selection supersedes a slower earlier one.
 - Confirmation is permitted only when a source, a package name and a version are selected.
 - The confirmed package reference matches exactly what the user selected, including the source.
+- A failed read of a source or of a package's versions can be retried on its own.
 
 #### Test Scenarios
 
@@ -82,3 +83,15 @@ source's versions. This scenario is tested by
 
 Argument validation is covered by
 `SelectPackageWindowViewModel_Constructor_NullArguments_ThrowsArgumentNullException`.
+
+**SelectPackageWindowViewModel_Retry_ReadsOnlyWhatFailed**: When a package's versions could not be read,
+the error is shown with Retry offered, and retrying reads them again and shows the versions; a retry that
+fails again keeps the error and Retry available; a source that could not be read is read again by Retry
+without touching the other source; and with nothing failed Retry does nothing. The failures are scripted with
+`FakePackageSourceProvider`, whose version listing can be told to throw and whose gate lets a test hold a read
+in progress. This scenario is tested by
+`SelectPackageWindowViewModel_Retry_VersionsFailedThenServerAnswers_ShowsVersions`,
+`SelectPackageWindowViewModel_Retry_StillFailing_KeepsErrorAndRetryAvailable`,
+`SelectPackageWindowViewModel_Retry_SourceFailedThenAnswers_LoadsOnlyThatSource` and
+`SelectPackageWindowViewModel_Retry_NothingFailed_DoesNothing`, covering
+`AgentControl-SelectPackageWindowViewModel-Retry`.

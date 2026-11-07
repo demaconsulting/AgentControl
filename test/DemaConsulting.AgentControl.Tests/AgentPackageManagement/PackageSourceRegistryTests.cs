@@ -189,25 +189,33 @@ public class PackageSourceRegistryTests
     }
 
     /// <summary>
-    ///     Test that resolving a NuGet server source through the default factory fails with a
-    ///     clear error rather than being silently accepted.
+    ///     Test that resolving a NuGet server source through the default factory yields a NuGet
+    ///     provider for a valid https address, and fails with a clear error for plain http that
+    ///     was not explicitly allowed.
     /// </summary>
     [Fact]
-    public void PackageSourceRegistry_Create_NuGetServerSource_ResolveThrowsInvalidOperationException()
+    public void PackageSourceRegistry_Create_NuGetServerSource_ResolvesHttpsAndRefusesPlainHttpWithoutOptIn()
     {
         // Arrange
         var registry = PackageSourceRegistry.Create(
         [
             new PackageSourceDefinition
             {
-                Alias = "Server",
+                Alias = "Secure",
                 Type = PackageSourceType.NuGet,
                 Location = "https://feeds.example.com/v3/index.json"
+            },
+            new PackageSourceDefinition
+            {
+                Alias = "Plain",
+                Type = PackageSourceType.NuGet,
+                Location = "http://feeds.example.com/v3/index.json"
             }
         ]);
 
         // Act / Assert
-        Assert.Throws<InvalidOperationException>(() => registry.Resolve("Server"));
+        Assert.IsType<NuGetSourceProvider>(registry.Resolve("Secure"));
+        Assert.Throws<InvalidOperationException>(() => registry.Resolve("Plain"));
     }
 
     /// <summary>

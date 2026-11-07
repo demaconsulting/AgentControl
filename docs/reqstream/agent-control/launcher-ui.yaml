@@ -4,12 +4,15 @@
 # PURPOSE:
 # - Define requirements for the AgentControl LauncherUI subsystem
 # - LauncherUI spans the recent-repos main window, per-repo cards, the package-selection
-#   window, and the settings window (MainWindowViewModel, RepoCardViewModel,
-#   SelectPackageWindowViewModel, SettingsWindowViewModel), plus their Avalonia .axaml Views
-#   and shared MVVM support types (RelayCommand, ViewModelBase, FavoriteIconConverter,
-#   FavoriteColorConverter, ThirdPartyDependencies), which are folded into this
-#   subsystem-level description rather than given separate unit files (ThirdPartyDependencies
-#   is the one exception with a dedicated test file, ThirdPartyDependenciesTests.cs)
+#   window, the settings window, the package-source editor and the sign-in dialog
+#   (MainWindowViewModel, RepoCardViewModel, SelectPackageWindowViewModel,
+#   SettingsWindowViewModel, SourceEditorViewModel, CredentialPromptViewModel), plus their
+#   Avalonia .axaml Views (including CredentialPromptWindow and the AvaloniaCredentialPrompt
+#   that shows it) and shared MVVM support types (RelayCommand, ViewModelBase,
+#   FavoriteIconConverter, FavoriteColorConverter, ThirdPartyDependencies), which are folded
+#   into this subsystem-level description rather than given separate unit files
+#   (ThirdPartyDependencies is the one exception with a dedicated test file,
+#   ThirdPartyDependenciesTests.cs)
 # - Subsystem requirements describe the aggregate UI behavior a user experiences
 
 sections:
@@ -213,32 +216,108 @@ sections:
         title: >-
           The LauncherUI subsystem shall let the user see the configured package sources with
           their kind, location and whether their folder can be found, add a zip-package folder
-          source or a NuGet-package folder source through a dialog that only accepts a valid
-          source, edit a source without renaming it, and remove a source after being warned
-          about the repos pinned to it.
+          source, a NuGet-package folder source or a NuGet-package server source through a
+          dialog that only accepts a valid source, edit a source without renaming it, and remove
+          a source after being warned about the repos pinned to it, and shall list a server
+          source as not checked rather than contact it merely to show the list.
         justification: |
           Several sources are only usable if the developer can manage them in the application
           rather than in a settings file; accepting only valid sources, keeping aliases fixed
-          and warning before removal protect the pins that refer to a source by alias.
+          and warning before removal protect the pins that refer to a source by alias, and a
+          server that may need a sign-in must never be contacted just to draw the list.
         children:
           - AgentControl-SettingsWindowViewModel-SourceList
           - AgentControl-SettingsWindowViewModel-AddEditRemoveSource
           - AgentControl-SettingsWindowViewModel-AliasUnique
           - AgentControl-SourceEditorViewModel-Validation
           - AgentControl-SourceEditorViewModel-PackageIds
+          - AgentControl-SourceEditorViewModel-ServerSource
           - AgentControl-SourceEditorViewModel-Save
         tests:
           - SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder
           - SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource
           - SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves
           - SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved
+          - SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor
+          - SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt
+          - SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls
+          - SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave
+
+      - id: AgentControl-LauncherUI-TestConnection
+        title: >-
+          The LauncherUI subsystem shall let the user test a NuGet-package server source from its
+          editor dialog before saving it, showing progress and a Cancel action while the test
+          runs and then a plain-language result that says whether the connection works and, when
+          it does not, whether the sign-in failed or was canceled, the package was not found, the
+          server timed out or the server could not be reached.
+        justification: |
+          A server source depends on an address, a package ID and often a sign-in; letting the
+          developer find out which of them is wrong while the dialog is still open is far
+          friendlier than discovering it later in a window that cannot say what failed, and a
+          test against a slow or unreachable server must not freeze the dialog.
+        children:
+          - AgentControl-SourceEditorViewModel-TestConnection
+          - AgentControl-MainWindowViewModel-ConnectionTestProvider
+        tests:
+          - SourceEditorWindow_TestConnection_ShowsProgressCancelAndResult
+          - SourceEditorWindow_ClosedWhileTesting_CancelsTheTest
+          - SourceEditorViewModel_TestConnection_ServerAnswers_ReportsVersionCountAndLatest
+          - SourceEditorViewModel_TestConnection_PackageMissing_ReportsPackageNotFound
+          - SourceEditorViewModel_TestConnection_ProviderFails_ReportsHeadlineAndMessage
+          - SourceEditorViewModel_TestConnection_CancelWhileRunning_StopsWithCanceledResult
+          - MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials
+
+      - id: AgentControl-LauncherUI-SignIn
+        title: >-
+          The LauncherUI subsystem shall ask the user to sign in, in a dialog, when a package
+          server needs credentials for something the user started, shall show in that dialog which
+          server will receive the credential (warning about plain http and about a credential that
+          was just rejected), shall mask the password and state that it is used for this session
+          only and is not saved, shall show one such dialog at a time in front of the window that
+          started the action whichever thread asked, and shall close it, as if canceled, when the
+          operation is canceled.
+        justification: |
+          A package server's credential has to come from the user, and the dialog is the one place
+          it is typed; showing where it goes protects against typing it into a look-alike request,
+          and showing it in front of the right window, one at a time, keeps two concurrent
+          operations from leaving the user with a hidden or stacked dialog.
+        children:
+          - AgentControl-CredentialPromptViewModel-ShowsDestination
+          - AgentControl-CredentialPromptViewModel-SignIn
+        tests:
+          # The dialog itself and the object that shows it are views with no separate unit
+          # document, so their behavior is verified by headless window tests at this level.
+          - CredentialPromptWindow_Shown_ShowsOriginSessionNoteAndMaskedPassword
+          - CredentialPromptWindow_InsecureAndRejected_ShowWarningAndRejectedNotice
+          - CredentialPromptWindow_SignInClicked_ReturnsTheTypedCredential
+          - CredentialPromptWindow_CancelEscapeOrClose_ReturnNoCredential
+          - AvaloniaCredentialPrompt_PromptAsync_FromWorkerThread_ShowsDialogAndReturnsCredential
+          - AvaloniaCredentialPrompt_PromptAsync_UserCancels_ReturnsNull
+          - AvaloniaCredentialPrompt_PromptAsync_TokenCancelled_ClosesDialogAndThrows
+          - AvaloniaCredentialPrompt_PromptAsync_TwoQuestionsAtOnce_AreShownOneAtATime
+
+      - id: AgentControl-LauncherUI-BackgroundChecksDoNotPrompt
+        title: >-
+          The LauncherUI subsystem shall not open a sign-in dialog for work the user did not
+          start - the background upgrade check at start-up and after settings change - but use the
+          credentials already entered during the session and otherwise explain on the card that a
+          sign-in is needed and how to give it, while a check the user starts may ask.
+        justification: |
+          A dialog that appears unprompted while the user is doing something else is disruptive
+          and hard to trust as a sign-in request; the user should sign in only for an action they
+          chose to take, with the card saying which one.
+        children:
+          - AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential
 
       - id: AgentControl-LauncherUI-RepoCardChips
         title: >-
           The LauncherUI subsystem shall describe each repo card with labeled chips - the
-          pinned agent package with its version and source, the version an available upgrade
-          would move to, the current branch, and status warnings - and shall name the
-          configured agent tool on the card's Launch action.
+          pinned agent package with its version and source (the source's alias beside an icon
+          for its kind), the version an available upgrade would move to, the current branch, and
+          status warnings - and shall name the configured agent tool on the card's Launch action.
         justification: |
           Unlabeled version numbers and icons leave a developer guessing what a card is telling
           them; each fact is stated in words with a tooltip that explains it in full.
@@ -248,6 +327,7 @@ sections:
           - AgentControl-RepoCardViewModel-LaunchLabel
         tests:
           - RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip
+          - RepoCardViewModel_PinnedToServerSource_ChipShowsAliasAndServerIcon
           - RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions
           - RepoCardViewModel_BranchChip_BranchKnown_ShowsBranchWithTooltip
           - RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack
@@ -256,23 +336,27 @@ sections:
         title: >-
           The LauncherUI subsystem shall keep the window responsive while package sources are
           read or packages are applied, shall show progress, shall let the user cancel such an
-          operation, shall run only one such operation per repo at a time, and shall show a
-          source that cannot be read as an inline problem without affecting other sources or
-          repos.
+          operation, shall run only one such operation per repo at a time, shall show a source
+          that cannot be read as an inline problem without affecting other sources or repos, and
+          shall let the user retry just the read that failed.
         justification: |
-          Package sources are often network shares that can be slow or offline; a frozen window
-          would be mistaken for a crash and a repeated click must not apply a package twice.
+          Package sources are often network shares or servers that can be slow or offline; a
+          frozen window would be mistaken for a crash, a repeated click must not apply a package
+          twice, and a transient failure (a server that was briefly unreachable, a sign-in that
+          was canceled) should be recoverable without closing the dialog.
         children:
           - AgentControl-RepoCardViewModel-ResponsiveOperations
           - AgentControl-MainWindowViewModel-BackgroundUpgradeCheck
           - AgentControl-SelectPackageWindowViewModel-AsyncLoading
           - AgentControl-SelectPackageWindowViewModel-SourceFailureIsolation
+          - AgentControl-SelectPackageWindowViewModel-Retry
         tests:
           - AsyncRelayCommand_ExecuteAsync_WhileRunning_DoesNotRunOperationTwice
           - AsyncRelayCommand_Cancel_Running_SignalsTokenAndIsNotAnError
           - RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged
           - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked
           - SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline
+          - SelectPackageWindowViewModel_Retry_SourceFailedThenAnswers_LoadsOnlyThatSource
 
       - id: AgentControl-LauncherUI-About
         title: >-

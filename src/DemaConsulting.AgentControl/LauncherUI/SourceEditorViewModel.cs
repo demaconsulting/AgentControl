@@ -25,20 +25,28 @@ using DemaConsulting.AgentControl.AgentPackageManagement;
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     View model for the dialog that adds or edits one package source: a zip-package folder or a
-///     NuGet-package folder (a server source is added by a later piece of work).
+///     View model for the dialog that adds or edits one package source: a zip-package folder, a
+///     NuGet-package folder or a NuGet-package server.
 /// </summary>
 /// <remarks>
 ///     <para>
 ///     The dialog exists so a source can only be saved when it is valid: the alias is unique
 ///     (case-insensitively) among the configured sources and is fixed once the source exists
 ///     (repos pin to it by alias, so renaming would silently break their pins), the location is
-///     a full folder path that carries no credentials, and a NuGet folder lists at least one
-///     package ID. The same <see cref="PackageSourceDefinition"/> rules the application applies
-///     when it saves settings are used here, so a source accepted by the dialog is never refused
-///     later. Validation messages appear only for fields the user has already touched so an
-///     empty new-source dialog is not covered in errors, but <see cref="CanSave"/> is false
-///     until every rule is met.
+///     a full folder path - or, for a server, an <c>https</c> feed address ending in
+///     <c>index.json</c> (<c>http</c> only when "Allow insecure HTTP" is ticked) - that carries
+///     no credentials, and a NuGet source lists at least one package ID. The same
+///     <see cref="PackageSourceDefinition"/> rules the application applies when it saves settings
+///     are used here, so a source accepted by the dialog is never refused later. Validation
+///     messages appear only for fields the user has already touched so an empty new-source dialog
+///     is not covered in errors, but <see cref="CanSave"/> is false until every rule is met.
+///     </para>
+///     <para>
+///     A server source can be tried before it is saved: <see cref="TestConnectionCommand"/> lists
+///     the versions of the first package ID, showing progress that the user can cancel, and then
+///     states the outcome in words (connected, sign-in failed, package not found, server
+///     unreachable, timed out). The test may ask the user to sign in, like any other use of the
+///     server. It reads nothing but a version list and changes nothing.
 ///     </para>
 ///     <para>
 ///     When editing, a copy of the source is changed; everything the dialog does not show is
@@ -66,6 +74,11 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     private readonly PackageSourceDefinition? _existing;
 
     /// <summary>
+    ///     Creates the provider that the connection test lists versions through.
+    /// </summary>
+    private readonly Func<PackageSourceDefinition, IPackageSourceProvider> _providerFactory;
+
+    /// <summary>
     ///     Backing field for <see cref="Alias"/>.
     /// </summary>
     private string _alias;
@@ -76,6 +89,11 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     private string _location;
 
     /// <summary>
+    ///     Backing field for <see cref="AllowInsecureHttp"/>.
+    /// </summary>
+    private bool _allowInsecureHttp;
+
+    /// <summary>
     ///     Backing field for <see cref="NewPackageId"/>.
     /// </summary>
     private string _newPackageId = string.Empty;
@@ -84,6 +102,21 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     ///     Backing field for <see cref="SelectedPackageId"/>.
     /// </summary>
     private string? _selectedPackageId;
+
+    /// <summary>
+    ///     Backing field for <see cref="TestResultKind"/>.
+    /// </summary>
+    private ConnectionTestResultKind _testResultKind;
+
+    /// <summary>
+    ///     Backing field for <see cref="TestResultTitle"/>.
+    /// </summary>
+    private string _testResultTitle = string.Empty;
+
+    /// <summary>
+    ///     Backing field for <see cref="TestResultDetail"/>.
+    /// </summary>
+    private string _testResultDetail = string.Empty;
 
     /// <summary>
     ///     Whether the user has typed in the alias field, so its error is only shown after that.
@@ -105,23 +138,41 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     /// <param name="aliasExists">Tells whether an alias is already used by a configured source
     ///     (compared case-insensitively by the caller). When editing, the edited source's own
     ///     alias is never reported as a duplicate.</param>
+    /// <param name="isServer">Whether a new NuGet source is a server (an address) rather than a
+    ///     folder; ignored when <paramref name="existing"/> is supplied (its location decides) and
+    ///     for a zip source.</param>
+    /// <param name="providerFactory">Creates the provider the connection test uses;
+    ///     <see langword="null"/> creates a real <see cref="NuGetSourceProvider"/> without
+    ///     credential facilities. Supplied so the application can give it the session
+    ///     credentials and so tests can use a fake.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="aliasExists"/> is
     ///     <see langword="null"/>.</exception>
     public SourceEditorViewModel(
-        PackageSourceType type, PackageSourceDefinition? existing, Func<string, bool> aliasExists)
+        PackageSourceType type,
+        PackageSourceDefinition? existing,
+        Func<string, bool> aliasExists,
+        bool isServer = false,
+        Func<PackageSourceDefinition, IPackageSourceProvider>? providerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(aliasExists);
 
         _existing = existing?.Clone();
         _aliasExists = aliasExists;
+        _providerFactory = providerFactory ?? (definition => new NuGetSourceProvider(definition));
         Type = existing?.Type ?? type;
+        IsServer = Type == PackageSourceType.NuGet &&
+                   (existing is not null ? existing.LocationKind == PackageSourceLocationKind.Server : isServer);
         _alias = existing?.Alias ?? string.Empty;
         _location = existing?.Location ?? string.Empty;
+        _allowInsecureHttp = existing?.AllowInsecureHttp ?? false;
         PackageIds = [.. existing?.PackageIds ?? []];
 
         AddPackageIdCommand = new RelayCommand(AddPackageId, () => GetPackageIdProblem(_newPackageId) is null);
         RemovePackageIdCommand = new RelayCommand(RemovePackageId, () => _selectedPackageId is not null);
         SaveCommand = new RelayCommand(Save, () => CanSave);
+        TestConnectionCommand = new AsyncRelayCommand(TestConnectionAsync, OnTestFailed, () => CanTestConnection);
+        TestConnectionCommand.IsRunningChanged += (_, _) => OnTestRunningChanged();
+        CancelTestCommand = new RelayCommand(() => TestConnectionCommand.Cancel(), () => IsTesting);
         PackageIds.CollectionChanged += (_, _) => OnPackageIdsChanged();
     }
 
@@ -129,6 +180,12 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     ///     Gets the kind of source this dialog edits.
     /// </summary>
     public PackageSourceType Type { get; }
+
+    /// <summary>
+    ///     Gets a value indicating whether the source is a NuGet-package server (an address)
+    ///     rather than a folder.
+    /// </summary>
+    public bool IsServer { get; }
 
     /// <summary>
     ///     Gets a value indicating whether a new source is being added (as opposed to an existing
@@ -143,29 +200,62 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     public bool IsAliasEditable => IsNew;
 
     /// <summary>
-    ///     Gets a value indicating whether the source is a NuGet-package folder, which lists the
-    ///     package IDs it offers; a zip-package folder offers whatever zips it contains.
+    ///     Gets a value indicating whether the source is a NuGet-package source (folder or
+    ///     server), which lists the package IDs it offers; a zip-package folder offers whatever
+    ///     zips it contains.
     /// </summary>
     public bool IsNuGet => Type == PackageSourceType.NuGet;
 
     /// <summary>
     ///     Gets the dialog's title, naming the action and the kind of source.
     /// </summary>
-    public string Title => (IsNew, IsNuGet) switch
+    public string Title => (IsNew, IsNuGet, IsServer) switch
     {
-        (true, true) => "Add NuGet-Package Folder",
-        (true, false) => "Add Zip-Package Folder",
-        (false, true) => "Edit NuGet-Package Folder",
+        (true, true, true) => "Add NuGet-Package Server",
+        (true, true, false) => "Add NuGet-Package Folder",
+        (true, false, _) => "Add Zip-Package Folder",
+        (false, true, true) => "Edit NuGet-Package Server",
+        (false, true, false) => "Edit NuGet-Package Folder",
         _ => "Edit Zip-Package Folder"
     };
 
     /// <summary>
-    ///     Gets a short explanation of what kind of folder to enter, shown beside the location
+    ///     Gets the label of the location field: a folder, or the address of a feed.
+    /// </summary>
+    public string LocationLabel => IsServer ? "Feed address" : "Folder";
+
+    /// <summary>
+    ///     Gets the placeholder shown in the empty location field.
+    /// </summary>
+    public string LocationPlaceholder => IsServer
+        ? "https://host/path/index.json"
+        : "Local, mapped-drive, or UNC folder";
+
+    /// <summary>
+    ///     Gets a short explanation of what kind of location to enter, shown beside the location
     ///     field.
     /// </summary>
-    public string LocationHelp => IsNuGet
-        ? "A folder of NuGet packages (.nupkg files) - a local, mapped-drive or UNC path."
-        : "A folder of agent package zips named {name}-{version}.zip - a local, mapped-drive or UNC path.";
+    public string LocationHelp => (IsNuGet, IsServer) switch
+    {
+        (true, true) => "The address of the feed's NuGet V3 service index. It must end in index.json.",
+        (true, false) => "A folder of NuGet packages (.nupkg files) - a local, mapped-drive or UNC path.",
+        _ => "A folder of agent package zips named {name}-{version}.zip - a local, mapped-drive or UNC path."
+    };
+
+    /// <summary>
+    ///     The example feed addresses for the two most common servers, shown for a server source.
+    /// </summary>
+    public const string LocationExamplesText =
+        "JFrog Artifactory: https://<host>/artifactory/api/nuget/v3/<repo>/index.json\n" +
+        "Azure Artifacts: https://pkgs.dev.azure.com/<org>/_packaging/<feed>/nuget/v3/index.json";
+
+    /// <summary>
+    ///     Gets the explanation shown above the package ID list.
+    /// </summary>
+    public string PackageIdsHelp => IsServer
+        ? "The agent packages this server offers (the NuGet package IDs), at least one. " +
+          "A server cannot be listed cheaply, so name the packages you want."
+        : "The agent packages this folder offers (the NuGet package IDs), at least one.";
 
     /// <summary>
     ///     Gets or sets the source's alias, the name repos use to refer to it.
@@ -184,7 +274,8 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Gets or sets the folder the source reads packages from.
+    ///     Gets or sets the folder (or, for a server, the feed address) the source reads packages
+    ///     from.
     /// </summary>
     public string Location
     {
@@ -198,6 +289,29 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
             }
         }
     }
+
+    /// <summary>
+    ///     Gets or sets a value indicating whether a plain <c>http</c> feed address is accepted.
+    ///     Off by default: a password sent over plain http crosses the network unprotected.
+    /// </summary>
+    public bool AllowInsecureHttp
+    {
+        get => _allowInsecureHttp;
+        set
+        {
+            if (SetField(ref _allowInsecureHttp, value))
+            {
+                OnPropertyChanged(nameof(ShowInsecureWarning));
+                RaiseValidationChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether the warning about plain http is shown: a server source
+    ///     with "Allow insecure HTTP" ticked.
+    /// </summary>
+    public bool ShowInsecureWarning => IsServer && _allowInsecureHttp;
 
     /// <summary>
     ///     Gets the package IDs a NuGet-package folder offers.
@@ -254,18 +368,116 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     public string? NewPackageIdError => _newPackageId.Length == 0 ? null : GetPackageIdProblem(_newPackageId);
 
     /// <summary>
-    ///     Gets the reason a NuGet-package folder cannot be saved for want of package IDs, or
+    ///     Gets the reason a NuGet source cannot be saved for want of package IDs, or
     ///     <see langword="null"/> when it has at least one (or is not a NuGet source).
     /// </summary>
-    public string? PackageIdsError => IsNuGet && PackageIds.Count == 0
-        ? "Add at least one package ID; a NuGet-package folder only offers the packages listed here."
-        : null;
+    public string? PackageIdsError
+    {
+        get
+        {
+            if (!IsNuGet || PackageIds.Count > 0)
+            {
+                return null;
+            }
+
+            var kind = IsServer ? "server" : "folder";
+            return $"Add at least one package ID; a NuGet-package {kind} only offers the packages listed here.";
+        }
+    }
 
     /// <summary>
     ///     Gets a value indicating whether the source can be saved: every rule is met.
     /// </summary>
     public bool CanSave =>
         GetAliasProblem() is null && GetLocationProblem() is null && (!IsNuGet || PackageIds.Count > 0);
+
+    /// <summary>
+    ///     Gets a value indicating whether the connection can be tested now: a server whose
+    ///     address is acceptable and that lists at least one package ID to look for. The alias is
+    ///     not needed.
+    /// </summary>
+    public bool CanTestConnection =>
+        IsServer && _location.Trim().Length > 0 && GetLocationProblem() is null && PackageIds.Count > 0;
+
+    /// <summary>
+    ///     Gets the reason the connection cannot be tested yet, shown as the disabled button's
+    ///     tooltip, or the button's normal explanation when it can.
+    /// </summary>
+    public string TestConnectionTooltip => CanTestConnection || IsTesting
+        ? "Check that the server answers and lists the first package ID (you may be asked to sign in)"
+        : "Enter a valid feed address and add at least one package ID to test the connection";
+
+    /// <summary>
+    ///     Gets a value indicating whether a connection test is running, so the dialog shows
+    ///     progress and a Cancel button.
+    /// </summary>
+    public bool IsTesting => TestConnectionCommand.IsRunning;
+
+    /// <summary>
+    ///     Gets the text shown beside the progress indicator while a test runs.
+    /// </summary>
+    public string TestProgressText => PackageIds.Count > 0
+        ? $"Contacting the server and looking for '{PackageIds[0]}'... (you may be asked to sign in)"
+        : "Contacting the server...";
+
+    /// <summary>
+    ///     Gets the outcome of the last connection test, or <see cref="ConnectionTestResultKind.None"/>
+    ///     when none has run since the address or package IDs last changed.
+    /// </summary>
+    public ConnectionTestResultKind TestResultKind
+    {
+        get => _testResultKind;
+        private set
+        {
+            if (SetField(ref _testResultKind, value))
+            {
+                OnPropertyChanged(nameof(HasTestResult));
+                OnPropertyChanged(nameof(TestSucceeded));
+                OnPropertyChanged(nameof(TestFailed));
+                OnPropertyChanged(nameof(TestWasCanceled));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether there is a test result to show.
+    /// </summary>
+    public bool HasTestResult => _testResultKind != ConnectionTestResultKind.None;
+
+    /// <summary>
+    ///     Gets a value indicating whether the last test connected and found the package.
+    /// </summary>
+    public bool TestSucceeded => _testResultKind == ConnectionTestResultKind.Succeeded;
+
+    /// <summary>
+    ///     Gets a value indicating whether the last test failed.
+    /// </summary>
+    public bool TestFailed => _testResultKind == ConnectionTestResultKind.Failed;
+
+    /// <summary>
+    ///     Gets a value indicating whether the last test was stopped by the user.
+    /// </summary>
+    public bool TestWasCanceled => _testResultKind == ConnectionTestResultKind.Canceled;
+
+    /// <summary>
+    ///     Gets the one-line headline of the last test result, such as "Connection OK" or "Sign-in
+    ///     failed".
+    /// </summary>
+    public string TestResultTitle
+    {
+        get => _testResultTitle;
+        private set => SetField(ref _testResultTitle, value);
+    }
+
+    /// <summary>
+    ///     Gets the explanation that goes with <see cref="TestResultTitle"/>, in words a user can
+    ///     act on and without any secret.
+    /// </summary>
+    public string TestResultDetail
+    {
+        get => _testResultDetail;
+        private set => SetField(ref _testResultDetail, value);
+    }
 
     /// <summary>
     ///     Gets the command that adds <see cref="NewPackageId"/> to <see cref="PackageIds"/>.
@@ -285,6 +497,18 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     public RelayCommand SaveCommand { get; }
 
     /// <summary>
+    ///     Gets the command bound to the "Test connection" button; executable while
+    ///     <see cref="CanTestConnection"/> is <see langword="true"/> and no test is running.
+    /// </summary>
+    public AsyncRelayCommand TestConnectionCommand { get; }
+
+    /// <summary>
+    ///     Gets the command bound to the Cancel button shown while a test runs; it stops the
+    ///     test, including a sign-in dialog the test opened.
+    /// </summary>
+    public RelayCommand CancelTestCommand { get; }
+
+    /// <summary>
     ///     Raised when the user saves a valid source, carrying the resulting definition, so the
     ///     owner can store it and the window can close.
     /// </summary>
@@ -301,15 +525,137 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     /// <summary>
     ///     Builds the source definition the dialog describes: a copy of the edited source (so
     ///     settings the dialog does not show are preserved) or a new definition, with the typed
-    ///     location and, for NuGet, the package IDs.
+    ///     location and, for NuGet, the package IDs and (for a server) the insecure-HTTP choice.
     /// </summary>
-    /// <returns>The definition. Call only when <see cref="CanSave"/> is <see langword="true"/>.</returns>
-    private PackageSourceDefinition BuildDefinition()
+    /// <param name="forTest">Whether the definition is for a connection test, which does not need
+    ///     an alias (a placeholder is used when none was typed yet).</param>
+    /// <returns>The definition. Call only when <see cref="CanSave"/> is <see langword="true"/>
+    ///     (or <see cref="CanTestConnection"/> when <paramref name="forTest"/>).</returns>
+    private PackageSourceDefinition BuildDefinition(bool forTest = false)
     {
-        var definition = _existing?.Clone() ?? new PackageSourceDefinition { Alias = _alias.Trim(), Type = Type };
+        var alias = _alias.Trim().Length > 0 || !forTest ? _alias.Trim() : "Connection test";
+        var definition = _existing?.Clone() ?? new PackageSourceDefinition { Alias = alias, Type = Type };
         definition.Location = _location.Trim();
         definition.PackageIds = IsNuGet ? [.. PackageIds] : [];
+        if (IsServer)
+        {
+            definition.AllowInsecureHttp = _allowInsecureHttp;
+        }
+
         return definition;
+    }
+
+    /// <summary>
+    ///     Lists the versions of the first package ID through the source's provider and reports
+    ///     the outcome in <see cref="TestResultKind"/>, <see cref="TestResultTitle"/> and
+    ///     <see cref="TestResultDetail"/>.
+    /// </summary>
+    /// <remarks>
+    ///     Only the version list is read, never a package, so the test is cheap and changes
+    ///     nothing. Every failure is turned into a sentence that says what to do; a cancelled
+    ///     test is a neutral outcome, not an error.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancelled by <see cref="CancelTestCommand"/>.</param>
+    /// <returns>A task that completes when the outcome is shown.</returns>
+    /// <exception cref="OperationCanceledException">Thrown, after the outcome is recorded, when
+    ///     the test was cancelled.</exception>
+    private async Task TestConnectionAsync(CancellationToken cancellationToken)
+    {
+        ClearTestResult();
+        var packageId = PackageIds[0];
+        try
+        {
+            var provider = _providerFactory(BuildDefinition(forTest: true));
+            var versions = await provider.ListVersionsAsync(packageId, cancellationToken);
+            if (versions.Count == 0)
+            {
+                SetTestResult(
+                    ConnectionTestResultKind.Failed,
+                    "Package not found",
+                    $"The server answered, but it has no package '{packageId}'. Check the package ID (and that " +
+                    "your account may see it).");
+                return;
+            }
+
+            var latest = versions.Max(package => package.Version)!;
+            var count = versions.Count == 1 ? "1 version" : $"{versions.Count} versions";
+            SetTestResult(
+                ConnectionTestResultKind.Succeeded,
+                "Connection OK",
+                $"Found {count} of '{packageId}' (latest {latest}).");
+        }
+        catch (OperationCanceledException)
+        {
+            SetTestResult(ConnectionTestResultKind.Canceled, "Test canceled", "The connection test was stopped.");
+            throw;
+        }
+        catch (PackageSourceAccessException ex)
+        {
+            SetTestResult(ConnectionTestResultKind.Failed, GetFailureTitle(ex.Kind), ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            SetTestResult(ConnectionTestResultKind.Failed, "Connection failed", ex.Message);
+        }
+    }
+
+    /// <summary>
+    ///     Reports an unexpected failure of the test (anything the test did not anticipate) so the
+    ///     dialog never stays silent.
+    /// </summary>
+    /// <param name="exception">The failure.</param>
+    private void OnTestFailed(Exception exception) =>
+        SetTestResult(
+            ConnectionTestResultKind.Failed,
+            "Connection failed",
+            $"The test could not be completed: {exception.Message}");
+
+    /// <summary>
+    ///     Chooses the headline for a failure.
+    /// </summary>
+    /// <param name="kind">The cause.</param>
+    /// <returns>The headline.</returns>
+    private static string GetFailureTitle(PackageSourceFailureKind kind) => kind switch
+    {
+        PackageSourceFailureKind.AuthenticationFailed => "Sign-in failed",
+        PackageSourceFailureKind.SignInCanceled => "Sign-in canceled",
+        PackageSourceFailureKind.NotFound => "Package not found",
+        PackageSourceFailureKind.TimedOut => "Timed out",
+        _ => "Server unreachable"
+    };
+
+    /// <summary>
+    ///     Records the outcome of a test.
+    /// </summary>
+    /// <param name="kind">The outcome.</param>
+    /// <param name="title">The headline.</param>
+    /// <param name="detail">The explanation.</param>
+    private void SetTestResult(ConnectionTestResultKind kind, string title, string detail)
+    {
+        TestResultTitle = title;
+        TestResultDetail = detail;
+        TestResultKind = kind;
+    }
+
+    /// <summary>
+    ///     Forgets the last test result, for when the thing it described changed.
+    /// </summary>
+    private void ClearTestResult()
+    {
+        TestResultKind = ConnectionTestResultKind.None;
+        TestResultTitle = string.Empty;
+        TestResultDetail = string.Empty;
+    }
+
+    /// <summary>
+    ///     Reacts to a test starting or finishing: the progress area and both buttons follow.
+    /// </summary>
+    private void OnTestRunningChanged()
+    {
+        OnPropertyChanged(nameof(IsTesting));
+        OnPropertyChanged(nameof(TestProgressText));
+        OnPropertyChanged(nameof(TestConnectionTooltip));
+        CancelTestCommand.RaiseCanExecuteChanged();
     }
 
     /// <summary>
@@ -356,7 +702,8 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
 
     /// <summary>
     ///     Raises the change notifications that follow any edit of the field values or package
-    ///     IDs.
+    ///     IDs. A connection test result describes the address and package IDs it was run with,
+    ///     so it is dropped once either changes.
     /// </summary>
     private void RaiseValidationChanged()
     {
@@ -364,7 +711,14 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         OnPropertyChanged(nameof(LocationError));
         OnPropertyChanged(nameof(PackageIdsError));
         OnPropertyChanged(nameof(CanSave));
+        OnPropertyChanged(nameof(CanTestConnection));
+        OnPropertyChanged(nameof(TestConnectionTooltip));
         SaveCommand.RaiseCanExecuteChanged();
+        TestConnectionCommand.RaiseCanExecuteChanged();
+        if (!IsTesting)
+        {
+            ClearTestResult();
+        }
     }
 
     /// <summary>
@@ -415,6 +769,20 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     private string? GetLocationProblem()
     {
         var location = _location.Trim();
+
+        // A server address has its own rules (https, index.json, no credentials)
+        if (IsServer)
+        {
+            var server = new PackageSourceDefinition
+            {
+                Alias = _alias,
+                Type = Type,
+                Location = location,
+                AllowInsecureHttp = _allowInsecureHttp
+            };
+            return server.GetServerLocationProblem();
+        }
+
         if (location.Length == 0)
         {
             return "Enter the folder the packages are in.";

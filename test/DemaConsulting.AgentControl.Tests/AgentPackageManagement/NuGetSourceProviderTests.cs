@@ -329,24 +329,22 @@ public sealed class NuGetSourceProviderTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a server (http/https) location is rejected with a clear message, since server
-    ///     sources are not supported yet.
+    ///     Test that a plain <c>http</c> server location is rejected with a clear message unless
+    ///     the source explicitly allows insecure HTTP.
     /// </summary>
-    [Theory]
-    [InlineData("https://feeds.example.com/v3/index.json")]
-    [InlineData("http://feeds.example.com/v3/index.json")]
-    public void NuGetSourceProvider_Constructor_ServerLocation_ThrowsInvalidOperationExceptionWithClearMessage(
-        string location)
+    [Fact]
+    public void NuGetSourceProvider_Constructor_PlainHttpWithoutOptIn_ThrowsInvalidOperationExceptionWithClearMessage()
     {
         // Arrange
-        var definition = CreateDefinition("Server", location);
+        var definition = CreateDefinition("Server", "http://feeds.example.com/v3/index.json");
 
         // Act
         var ex = Assert.Throws<InvalidOperationException>(() => new NuGetSourceProvider(definition, CreateTempDirectory()));
 
-        // Assert: the message names the problem and the source
-        Assert.Contains("server", ex.Message, StringComparison.OrdinalIgnoreCase);
+        // Assert: the message names the source and the remedy
         Assert.Contains("Server", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Plain http", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Allow insecure HTTP", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

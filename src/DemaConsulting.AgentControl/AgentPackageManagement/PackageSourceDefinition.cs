@@ -37,9 +37,10 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     By design this type has no password, token, key, or any other credential member: sources
 ///     that need credentials obtain them from the user or from the operating system's own
 ///     mechanisms at the moment of use and never persist them here. A reflection test guards that
-///     property. <see cref="AllowInsecureHttp"/>, <see cref="RequireSignedPackages"/> and
+///     property. <see cref="AllowInsecureHttp"/> is enforced for server sources;
+///     <see cref="RequireSignedPackages"/> and
 ///     <see cref="SignerFingerprint"/> are persisted now so settings files stay compatible; their
-///     enforcement belongs to the NuGet server and package-signing work, and local-folder sources
+///     enforcement belongs to the package-signing work, and local-folder sources
 ///     ignore them. Mutable with public getters/setters so
 ///     <see cref="System.Text.Json.JsonSerializer"/> round-trips it without custom converters. Not
 ///     thread-safe.
@@ -84,7 +85,8 @@ internal sealed partial class PackageSourceDefinition
 
     /// <summary>
     ///     Gets or sets whether a plain <c>http</c> server location is permitted. Defaults to
-    ///     <see langword="false"/>. Persisted now; enforced by the NuGet server work.
+    ///     <see langword="false"/>, which makes a server location that is not <c>https</c> a
+    ///     validation error (see <see cref="GetServerLocationProblem"/>).
     /// </summary>
     public bool AllowInsecureHttp { get; set; }
 
@@ -142,6 +144,55 @@ internal sealed partial class PackageSourceDefinition
         return embedsCredential
             ? $"The location of source '{Alias}' must not contain a user name, password, token or query string; " +
               "AgentControl never stores credentials."
+            : null;
+    }
+
+    /// <summary>
+    ///     Checks that <see cref="Location"/> is an acceptable NuGet server feed address: an
+    ///     absolute <c>https</c> URL (or <c>http</c> only when <see cref="AllowInsecureHttp"/> is
+    ///     set) of a V3 service index, carrying no credential.
+    /// </summary>
+    /// <remarks>
+    ///     The V3 service index URL must end in <c>index.json</c> because NuGet treats only URLs
+    ///     ending in <c>.json</c> as V3 and uses anything else (including <c>index.json</c> followed
+    ///     by a query string) as the legacy V2 protocol, which AgentControl does not rely on.
+    ///     Plain <c>http</c> is refused by default because the credential the user types would
+    ///     cross the network unprotected. The messages never repeat the location, so a secret
+    ///     embedded in it cannot reach an error display or a log.
+    /// </remarks>
+    /// <returns><see langword="null"/> when the location is acceptable; otherwise a message the
+    ///     user can act on.</returns>
+    public string? GetServerLocationProblem()
+    {
+        var location = Location?.Trim() ?? string.Empty;
+        if (location.Length == 0)
+        {
+            return "Enter the address of the NuGet feed, for example https://host/path/index.json.";
+        }
+
+        // Anything that is not an absolute web address is not a server feed
+        if (!Uri.TryCreate(location, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return "Enter a web address that starts with https:// and ends in index.json.";
+        }
+
+        // Credentials in the address are refused before anything else, with their own message
+        var credentialProblem = GetCredentialProblem();
+        if (credentialProblem is not null)
+        {
+            return credentialProblem;
+        }
+
+        if (!uri.AbsolutePath.EndsWith("/index.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The address of a NuGet feed must end in index.json (the V3 service index), " +
+                   "for example https://host/path/index.json.";
+        }
+
+        return uri.Scheme == Uri.UriSchemeHttp && !AllowInsecureHttp
+            ? "Plain http would send your password unprotected. Use an https address, or tick " +
+              "\"Allow insecure HTTP\" if you are sure this feed is on a trusted network."
             : null;
     }
 

@@ -78,13 +78,24 @@
                               AutomationProperties.AutomationId="SelectPackageNameList"
                               ItemsSource="{Binding PackageNames}"
                               SelectedItem="{Binding SelectedPackageName, Mode=TwoWay}" />
-                    <TextBlock Name="SelectPackageSourceErrorText"
-                                AutomationProperties.AutomationId="SelectPackageSourceErrorText"
-                                IsVisible="{Binding HasSourceError}"
-                                Text="{Binding SourceErrorMessage}"
-                                Classes="sourceFailed"
-                                TextWrapping="Wrap" Margin="8"
-                                VerticalAlignment="Top" />
+                    <StackPanel IsVisible="{Binding HasSourceError}" Margin="8" Spacing="6"
+                                 VerticalAlignment="Top">
+                        <TextBlock Name="SelectPackageSourceErrorText"
+                                    AutomationProperties.AutomationId="SelectPackageSourceErrorText"
+                                    Text="{Binding SourceErrorMessage}"
+                                    Classes="sourceFailed"
+                                    TextWrapping="Wrap" />
+                        <Button Name="SelectPackageSourceRetryButton"
+                                 AutomationProperties.AutomationId="SelectPackageSourceRetryButton"
+                                 ToolTip.Tip="Read this source again"
+                                 Command="{Binding RetryCommand}"
+                                 HorizontalAlignment="Left">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <materialIcons:MaterialIcon Kind="Refresh" />
+                                <TextBlock Text="Retry" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
                     <TextBlock Name="SelectPackageEmptyText"
                                 AutomationProperties.AutomationId="SelectPackageEmptyText"
                                 IsVisible="{Binding HasNoPackages}"
@@ -101,13 +112,24 @@
                               AutomationProperties.AutomationId="SelectPackageVersionList"
                               ItemsSource="{Binding AvailableVersions}"
                               SelectedItem="{Binding SelectedVersion, Mode=TwoWay}" />
-                    <TextBlock Name="SelectPackageVersionsErrorText"
-                                AutomationProperties.AutomationId="SelectPackageVersionsErrorText"
-                                IsVisible="{Binding HasVersionsError}"
-                                Text="{Binding VersionsError}"
-                                Classes="sourceFailed"
-                                TextWrapping="Wrap" Margin="8"
-                                VerticalAlignment="Top" />
+                    <StackPanel IsVisible="{Binding HasVersionsError}" Margin="8" Spacing="6"
+                                 VerticalAlignment="Top">
+                        <TextBlock Name="SelectPackageVersionsErrorText"
+                                    AutomationProperties.AutomationId="SelectPackageVersionsErrorText"
+                                    Text="{Binding VersionsError}"
+                                    Classes="sourceFailed"
+                                    TextWrapping="Wrap" />
+                        <Button Name="SelectPackageVersionsRetryButton"
+                                 AutomationProperties.AutomationId="SelectPackageVersionsRetryButton"
+                                 ToolTip.Tip="Read the versions again (a server that needs a sign-in asks again)"
+                                 Command="{Binding RetryCommand}"
+                                 HorizontalAlignment="Left">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <materialIcons:MaterialIcon Kind="Refresh" />
+                                <TextBlock Text="Retry" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
                     <ProgressBar Name="SelectPackageVersionsProgress"
                                   AutomationProperties.AutomationId="SelectPackageVersionsProgress"
                                   IsIndeterminate="True" Height="4"

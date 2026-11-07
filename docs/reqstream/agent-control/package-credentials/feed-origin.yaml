@@ -1,0 +1,39 @@
+---
+# Software Unit Requirements for the FeedOrigin Class
+#
+# FeedOrigin is the identity - scheme, host and port - of a package server, which is the unit a
+# credential is scoped to.
+
+sections:
+  - title: FeedOrigin Unit Requirements
+    requirements:
+      - id: AgentControl-FeedOrigin-NormalizedOrigin
+        title: >-
+          The FeedOrigin class shall reduce a package server's web address to its scheme, host
+          and port, treating differences in letter case and an explicit default port as the same
+          origin, and shall refuse an address that is not an absolute http or https address or
+          that embeds a user name or password, without repeating the address in its message.
+        justification: |
+          A credential is tied to an origin, so two spellings of one server must compare equal
+          (or the user would be asked twice) while an address that already carries a credential
+          must never be accepted as a server identity; the text form is shown to the user and
+          logged, so it must hold nothing but the origin.
+        tests:
+          - FeedOrigin_TryParse_FullFeedUrl_KeepsSchemeHostAndPortOnly
+          - FeedOrigin_Equals_ExplicitDefaultPort_EqualsOriginWithoutPort
+          - FeedOrigin_TryParse_UserInfo_IsRefused
+          - FeedOrigin_TryParse_NotAWebAddress_IsRefused
+          - FeedOrigin_Create_UserInfo_ThrowsWithoutRepeatingTheSecret
+          - FeedOrigin_ToString_Ipv6AndPorts_BracketsHostAndKeepsPorts
+
+      - id: AgentControl-FeedOrigin-MatchesSameOriginOnly
+        title: >-
+          The FeedOrigin class shall report that an address belongs to the origin only when its
+          scheme, host and port are all equal to the origin's, so that a different port, scheme
+          or sub-domain, a relative address or no address never matches.
+        justification: |
+          Credential scoping is only as strong as the match: a server on another port or
+          sub-domain is a different party and must not receive the credential.
+        tests:
+          - FeedOrigin_Matches_VariousUris_OnlyTheSameOriginMatches
+          - FeedOrigin_Matches_NullOrRelativeUri_ReturnsFalse

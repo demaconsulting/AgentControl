@@ -44,12 +44,17 @@ in that repo's working directory.
 - **Configurable agent tool**: choose GitHub Copilot CLI, Cursor, Claude Code, or a custom
   command line, plus a shell/terminal preference
 - **Multiple package sources**: configure any number of agent package sources, each with its
-  own alias — a folder of zip packages, or a folder of NuGet packages (local drive, mapped
-  drive, or UNC share). A repo's pin records the alias of the source it came from and is only
+  own alias — a folder of zip packages, a folder of NuGet packages (local drive, mapped
+  drive, or UNC share), or a **NuGet-package server** such as JFrog Artifactory or Azure Artifacts.
+  A repo's pin records the alias of the source it came from and is only
   ever resolved against that source: if the source is removed or renamed, AgentControl shows a
   package source problem for the repo instead of quietly using another source
+- **Protected package servers**: a server source is added with its feed address (https; plain http only
+  after an explicit "Allow insecure HTTP" tick), can be checked with **Test connection** before it is saved,
+  and asks you to sign in only when the server needs it. Credentials are used for the current session
+  only and are never saved
 - **Responsive**: package sources are read in the background with progress and a Cancel button, so a
-  slow or offline network share never freezes the window, and one unreachable source does not
+  slow or offline network share or server never freezes the window, and one unreachable source does not
   hide the packages or upgrades of the others
 - **Upgrade notifications**: an upgrade chip and release-notes viewer let you see when a newer agent
   package version is available and what changed before you apply it
@@ -61,7 +66,18 @@ in that repo's working directory.
 
 - A package source location must never contain credentials (a user name or password in a URL or
   path is refused), and AgentControl never stores secrets: `settings.json` holds only aliases,
-  locations and NuGet package IDs.
+  locations, NuGet package IDs and the insecure-HTTP flag of a server source.
+- A password or token you type into the sign-in dialog is kept in memory for the current session
+  only — it is not written to the settings, a repo's pin file, the log or anywhere else — and AgentControl
+  offers it only to the server it was typed for, and only when that server asks for it. The dialog shows
+  the server that will receive it. A server on plain `http` is flagged and needs an explicit opt-in.
+- Credentials AgentControl does not need to ask for are reused: a `nuget.config` source with the same
+  address (and its stored credentials) and NuGet credential-provider plug-ins such as the Azure Artifacts
+  Credential Provider are tried before the dialog. Background checks never open the dialog.
+- **Only add servers you trust.** A server's own index tells the NuGet client where its package resources
+  are, and once a server has authenticated, the NuGet client can answer sign-in challenges from other hosts
+  that the index names with the same credential. AgentControl itself only ever offers a credential to the
+  server's own address, but cannot stop the NuGet client from doing that.
 - A repo's pin names its source by alias, and a package is only ever taken from that source; a
   missing source is an error, never a fallback to another source with a package of the same name.
 - AgentControl never reads or writes the target repo's `nuget.config`, and keeps its NuGet
@@ -97,7 +113,8 @@ A repo that has never been synced shows a grey **No agent package** chip, and a 
 Package...** action (in place of **Upgrade**) in its card's "..." menu. The dialog shows three
 columns: the configured package sources, the packages of the selected source, and that package's
 available versions (defaulting to the latest). Choosing one extracts it into the repo and pins it
-together with the source's alias.
+together with the source's alias. If a source is a server that needs a sign-in, a sign-in dialog opens
+when you choose it; if reading a source fails, a **Retry** button appears beside the message.
 
 ### Upgrading
 
@@ -142,9 +159,11 @@ working tree is clean.
 The Settings window lets you configure:
 
 - **Package sources** — a list of the configured sources (alias, kind, location and whether the
-  folder can be found). Use **Add Zip-Package Folder** or **Add NuGet-Package Folder** to add a
-  source, and **Edit** or **Remove** to change one; a NuGet-package folder also lists the package
-  IDs it offers. An alias cannot be changed once created, because repo pins refer to it. A single
+  folder can be found; a server shows **Not checked** because AgentControl contacts it only when it is
+  needed). Use **Add Zip-Package Folder**, **Add NuGet-Package Folder** or **Add NuGet-Package Server**
+  to add a source, and **Edit** or **Remove** to change one; a NuGet source also lists the package
+  IDs it offers, and a server can be checked with **Test connection** before it is saved. An alias cannot
+  be changed once created, because repo pins refer to it. A single
   package source folder configured in an earlier version appears as a zip source named `Default`.
   See the [User Guide][link-guide] chapter "Package Sources".
 - **Git executable override** — a specific `git` executable to use instead of resolving it
@@ -164,7 +183,8 @@ third-party dependencies and their licenses.
 
 ## Authoring agent packages
 
-Agent packages are either plain zip files or NuGet packages following a naming and content
+Agent packages are either plain zip files or NuGet packages (served from a folder or a NuGet
+server) following a naming and content
 convention that AgentControl's package sources and extractor understand. See the
 [**Authoring Agent Packages**](docs/user_guide/introduction.md#authoring-agent-packages)
 section of the [User Guide][link-guide] for the full, source-verified guide to naming,

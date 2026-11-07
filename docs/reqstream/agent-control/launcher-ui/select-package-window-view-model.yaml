@@ -93,3 +93,19 @@ sections:
           offered must be those of the source the user chose.
         tests:
           - SelectPackageWindowViewModel_SamePackageInTwoSources_UsesOnlySelectedSource
+
+      - id: AgentControl-SelectPackageWindowViewModel-Retry
+        title: >-
+          The SelectPackageWindowViewModel class shall offer to retry a read that failed - the
+          selected source's package list, or the selected package's versions - reading only that
+          again, leaving the other sources and any successful result untouched, and shall offer
+          nothing to retry when nothing failed.
+        justification: |
+          A failure on a server is often transient (it was briefly unreachable) or needs another
+          sign-in attempt; the user should be able to try again in place, without closing the
+          dialog and without re-reading the sources that already worked.
+        tests:
+          - SelectPackageWindowViewModel_Retry_VersionsFailedThenServerAnswers_ShowsVersions
+          - SelectPackageWindowViewModel_Retry_StillFailing_KeepsErrorAndRetryAvailable
+          - SelectPackageWindowViewModel_Retry_SourceFailedThenAnswers_LoadsOnlyThatSource
+          - SelectPackageWindowViewModel_Retry_NothingFailed_DoesNothing

@@ -17,6 +17,12 @@ includes:
   - docs/reqstream/agent-control/launcher-ui/select-package-window-view-model.yaml
   - docs/reqstream/agent-control/launcher-ui/settings-window-view-model.yaml
   - docs/reqstream/agent-control/launcher-ui/source-editor-view-model.yaml
+  - docs/reqstream/agent-control/launcher-ui/credential-prompt-view-model.yaml
+  - docs/reqstream/agent-control/package-credentials.yaml
+  - docs/reqstream/agent-control/package-credentials/feed-origin.yaml
+  - docs/reqstream/agent-control/package-credentials/session-credential-store.yaml
+  - docs/reqstream/agent-control/package-credentials/package-credential-callback.yaml
+  - docs/reqstream/agent-control/package-credentials/secret-redacting-logger.yaml
   - docs/reqstream/agent-control/agent-package-management.yaml
   - docs/reqstream/agent-control/agent-package-management/package-source.yaml
   - docs/reqstream/agent-control/agent-package-management/package-source-registry.yaml

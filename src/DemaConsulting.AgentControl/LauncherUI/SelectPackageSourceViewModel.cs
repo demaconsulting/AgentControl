@@ -158,6 +158,16 @@ internal sealed class SelectPackageSourceViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Marks the row as loading again, for a retry after a failure: clears the error so the
+    ///     row shows progress until <see cref="SetLoaded"/> or <see cref="SetFailed"/> is called.
+    /// </summary>
+    public void BeginLoading()
+    {
+        ErrorMessage = null;
+        IsLoading = true;
+    }
+
+    /// <summary>
     ///     Records the packages the source offers and ends the loading state.
     /// </summary>
     /// <param name="packageNames">The package names read from the source.</param>

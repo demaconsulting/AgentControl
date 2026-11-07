@@ -36,11 +36,12 @@ their source types. This scenario is tested by
 **PackageSourceRegistry_MissingAlias_IsAnErrorNamingTheAlias**: An alias that is not configured
 throws `UnknownSourceException` carrying and naming the alias; duplicate and blank aliases are
 rejected at construction; blank aliases are never contained and rejected by `Resolve`; a NuGet
-server source fails when resolved. This scenario is tested by
+server source with an `https` address resolves to a `NuGetSourceProvider` while a plain-`http` one, whose
+definition does not allow insecure HTTP, fails when resolved. This scenario is tested by
 `PackageSourceRegistry_Resolve_MissingAlias_ThrowsUnknownSourceExceptionNamingAlias`,
 `PackageSourceRegistry_Constructor_DuplicateOrBlankAlias_ThrowsInvalidOperationException`,
 `PackageSourceRegistry_BlankAlias_ContainsFalseAndResolveThrowsArgumentException`, and
-`PackageSourceRegistry_Create_NuGetServerSource_ResolveThrowsInvalidOperationException`, covering
+`PackageSourceRegistry_Create_NuGetServerSource_ResolvesHttpsAndRefusesPlainHttpWithoutOptIn`, covering
 `AgentControl-PackageSourceRegistry-MissingAliasIsError`.
 
 **PackageSourceRegistry_NoFallback_NeverUsesAnotherSource**: With a single configured source

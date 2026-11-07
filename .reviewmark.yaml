@@ -129,6 +129,10 @@ reviews:
       - "src/**/LauncherUI/SettingsWindow.axaml.cs"
       - "src/**/LauncherUI/SourceEditorWindow.axaml"
       - "src/**/LauncherUI/SourceEditorWindow.axaml.cs"
+      - "src/**/LauncherUI/CredentialPromptWindow.axaml"
+      - "src/**/LauncherUI/CredentialPromptWindow.axaml.cs"
+      - "src/**/LauncherUI/AvaloniaCredentialPrompt.cs"
+      - "src/**/LauncherUI/ConnectionTestResultKind.cs"
       - "src/**/LauncherUI/RelayCommand.cs"
       - "src/**/LauncherUI/AsyncRelayCommand.cs"
       - "src/**/LauncherUI/ViewModelBase.cs"
@@ -138,6 +142,9 @@ reviews:
       - "src/**/LauncherUI/FavoriteIconConverter.cs"
       - "src/**/LauncherUI/FavoriteColorConverter.cs"
       - "test/**/LauncherUI/AsyncRelayCommandTests.cs"
+      - "test/**/LauncherUI/CredentialPromptWindowTests.cs"
+      - "test/**/LauncherUI/DialogWindowTests.cs"
+      - "test/**/LauncherUI/HeadlessTestApp.cs"
 
   - id: AgentControl-LauncherUI-MainWindowViewModel
     title: Review of Agent Control MainWindowViewModel unit implementation
@@ -166,6 +173,7 @@ reviews:
       - "docs/verification/agent-control/launcher-ui/repo-card-view-model.md"
       - "src/**/LauncherUI/RepoCardViewModel.cs"
       - "test/**/LauncherUI/RepoCardViewModelTests.cs"
+      - "test/**/LauncherUI/RepoCardServerSourceTests.cs"
       - "test/**/LauncherUI/RepoCardViewModelTestExtensions.cs"
 
   - id: AgentControl-LauncherUI-SelectPackageWindowViewModel
@@ -181,6 +189,7 @@ reviews:
       - "docs/verification/agent-control/launcher-ui/select-package-window-view-model.md"
       - "src/**/LauncherUI/SelectPackageWindowViewModel.cs"
       - "test/**/LauncherUI/SelectPackageWindowViewModelTests.cs"
+      - "test/**/LauncherUI/SelectPackageRetryTests.cs"
 
   - id: AgentControl-LauncherUI-SettingsWindowViewModel
     title: Review of Agent Control SettingsWindowViewModel unit implementation
@@ -195,6 +204,7 @@ reviews:
       - "docs/verification/agent-control/launcher-ui/settings-window-view-model.md"
       - "src/**/LauncherUI/SettingsWindowViewModel.cs"
       - "test/**/LauncherUI/SettingsWindowViewModelTests.cs"
+      - "test/**/LauncherUI/SettingsWindowServerSourceTests.cs"
 
   - id: AgentControl-LauncherUI-SourceEditorViewModel
     title: Review of Agent Control SourceEditorViewModel unit implementation
@@ -209,6 +219,21 @@ reviews:
       - "docs/verification/agent-control/launcher-ui/source-editor-view-model.md"
       - "src/**/LauncherUI/SourceEditorViewModel.cs"
       - "test/**/LauncherUI/SourceEditorViewModelTests.cs"
+      - "test/**/LauncherUI/SourceEditorServerViewModelTests.cs"
+
+  - id: AgentControl-LauncherUI-CredentialPromptViewModel
+    title: Review of Agent Control CredentialPromptViewModel unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/launcher-ui.md
+      - docs/reqstream/agent-control/launcher-ui.yaml
+    paths:
+      - "docs/reqstream/agent-control/launcher-ui/credential-prompt-view-model.yaml"
+      - "docs/design/agent-control/launcher-ui/credential-prompt-view-model.md"
+      - "docs/verification/agent-control/launcher-ui/credential-prompt-view-model.md"
+      - "src/**/LauncherUI/CredentialPromptViewModel.cs"
+      - "test/**/LauncherUI/CredentialPromptViewModelTests.cs"
 
   # AgentControl - AgentPackageManagement
   - id: AgentControl-AgentPackageManagement
@@ -224,7 +249,9 @@ reviews:
       - "src/**/AgentPackageManagement/PackageSourceDefinition.cs"
       - "src/**/AgentPackageManagement/PackageSourceType.cs"
       - "src/**/AgentPackageManagement/PackageReference.cs"
+      - "src/**/AgentPackageManagement/PackageSourceAccessException.cs"
       - "test/**/AgentPackageManagement/PackageSourceDefinitionTests.cs"
+      - "test/**/AgentPackageManagement/PackageSourceServerLocationTests.cs"
 
   - id: AgentControl-AgentPackageManagement-PackageSource
     title: Review of Agent Control PackageSource unit implementation
@@ -310,7 +337,82 @@ reviews:
       - "docs/verification/agent-control/agent-package-management/nuget-source-provider.md"
       - "src/**/AgentPackageManagement/NuGetSourceProvider.cs"
       - "test/**/AgentPackageManagement/NuGetSourceProviderTests.cs"
+      - "test/**/AgentPackageManagement/NuGetSourceProviderServerTests.cs"
       - "test/**/AgentPackageManagement/NuGetFeedBuilder.cs"
+      - "test/**/AgentPackageManagement/MockNuGetFeed.cs"
+      - "test/**/AgentPackageManagement/HttpCacheIsolation.cs"
+
+  # AgentControl - PackageCredentials
+  - id: AgentControl-PackageCredentials
+    title: Review of Agent Control PackageCredentials subsystem architecture and interfaces
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+    paths:
+      - "docs/reqstream/agent-control/package-credentials.yaml"
+      - "docs/design/agent-control/package-credentials.md"
+      - "docs/verification/agent-control/package-credentials.md"
+      - "src/**/PackageCredentials/ICredentialPrompt.cs"
+      - "src/**/PackageCredentials/PackageCredentialContext.cs"
+      - "test/**/PackageCredentials/PackageCredentialsSubsystemTests.cs"
+      - "test/**/PackageCredentials/FakeCredentialPrompt.cs"
+
+  - id: AgentControl-PackageCredentials-FeedOrigin
+    title: Review of Agent Control FeedOrigin unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/package-credentials.md
+      - docs/reqstream/agent-control/package-credentials.yaml
+    paths:
+      - "docs/reqstream/agent-control/package-credentials/feed-origin.yaml"
+      - "docs/design/agent-control/package-credentials/feed-origin.md"
+      - "docs/verification/agent-control/package-credentials/feed-origin.md"
+      - "src/**/PackageCredentials/FeedOrigin.cs"
+      - "test/**/PackageCredentials/FeedOriginTests.cs"
+
+  - id: AgentControl-PackageCredentials-SessionCredentialStore
+    title: Review of Agent Control SessionCredentialStore unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/package-credentials.md
+      - docs/reqstream/agent-control/package-credentials.yaml
+    paths:
+      - "docs/reqstream/agent-control/package-credentials/session-credential-store.yaml"
+      - "docs/design/agent-control/package-credentials/session-credential-store.md"
+      - "docs/verification/agent-control/package-credentials/session-credential-store.md"
+      - "src/**/PackageCredentials/SessionCredentialStore.cs"
+      - "test/**/PackageCredentials/SessionCredentialStoreTests.cs"
+
+  - id: AgentControl-PackageCredentials-PackageCredentialCallback
+    title: Review of Agent Control PackageCredentialCallback unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/package-credentials.md
+      - docs/reqstream/agent-control/package-credentials.yaml
+    paths:
+      - "docs/reqstream/agent-control/package-credentials/package-credential-callback.yaml"
+      - "docs/design/agent-control/package-credentials/package-credential-callback.md"
+      - "docs/verification/agent-control/package-credentials/package-credential-callback.md"
+      - "src/**/PackageCredentials/PackageCredentialCallback.cs"
+      - "test/**/PackageCredentials/PackageCredentialCallbackTests.cs"
+
+  - id: AgentControl-PackageCredentials-SecretRedactingLogger
+    title: Review of Agent Control SecretRedactingLogger unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/package-credentials.md
+      - docs/reqstream/agent-control/package-credentials.yaml
+    paths:
+      - "docs/reqstream/agent-control/package-credentials/secret-redacting-logger.yaml"
+      - "docs/design/agent-control/package-credentials/secret-redacting-logger.md"
+      - "docs/verification/agent-control/package-credentials/secret-redacting-logger.md"
+      - "src/**/PackageCredentials/SecretRedactingLogger.cs"
+      - "test/**/PackageCredentials/SecretRedactingLoggerTests.cs"
+      - "test/**/PackageCredentials/ListLogger.cs"
 
   # AgentControl - RepoSync
   - id: AgentControl-RepoSync

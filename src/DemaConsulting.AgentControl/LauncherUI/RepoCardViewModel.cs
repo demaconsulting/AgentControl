@@ -21,6 +21,7 @@
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Logging;
+using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
@@ -116,6 +117,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private readonly Func<AppSettings, PackageSourceRegistry>? _registryFactory;
 
     /// <summary>
+    ///     The credential facilities (session store and sign-in prompt) NuGet server sources use,
+    ///     or <see langword="null"/> when there are none.
+    /// </summary>
+    private readonly PackageCredentialContext? _credentials;
+
+    /// <summary>
     ///     The longest agent tool name (in characters) that is spelled out in the Launch button
     ///     label; a longer name would make the button too wide, so the label falls back to a plain
     ///     "Launch".
@@ -174,6 +181,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="registryFactory">Builds the registry of configured sources from the settings;
     ///     <see langword="null"/> uses the real providers. Supplied so tests can substitute
     ///     in-memory sources whose timing they control.</param>
+    /// <param name="credentials">The credential facilities NuGet server sources use to sign in,
+    ///     or <see langword="null"/> for none.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="recentRepo"/>,
     ///     <paramref name="getSettings"/>, or <paramref name="packageVersionCache"/> is
     ///     <see langword="null"/>.</exception>
@@ -182,7 +191,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         Func<AppSettings> getSettings,
         PackageVersionCache packageVersionCache,
         Startup.StartupOptions? startupOptions = null,
-        Func<AppSettings, PackageSourceRegistry>? registryFactory = null)
+        Func<AppSettings, PackageSourceRegistry>? registryFactory = null,
+        PackageCredentialContext? credentials = null)
     {
         ArgumentNullException.ThrowIfNull(recentRepo);
         ArgumentNullException.ThrowIfNull(getSettings);
@@ -193,6 +203,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         _packageVersionCache = packageVersionCache;
         _startupOptions = startupOptions;
         _registryFactory = registryFactory;
+        _credentials = credentials;
 
         LaunchCommand = new AsyncRelayCommand(LaunchAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
         PullCommand = new AsyncRelayCommand(PullAsync, ReportUnexpectedFailure, () => CanPull && !IsMissing && !IsBusy);
@@ -518,6 +529,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public MaterialIconKind PinnedSourceIcon => PackageSourceIcons.GetIcon(PinnedSourceDefinition);
 
     /// <summary>
+    ///     Gets the alias of the pinned package's source, shown as muted text beside the source
+    ///     icon in the agent package chip so the source is recognizable at a glance without
+    ///     hovering (a pin written before sources existed reports the legacy <c>Default</c>
+    ///     alias).
+    /// </summary>
+    public string PinnedSourceLabel => PinnedSource ?? RepoPin.LegacySourceAlias;
+
+    /// <summary>
     ///     Gets the tooltip of the agent package chip: which package and version the agent files
     ///     came from and from which source (by alias and kind).
     /// </summary>
@@ -622,16 +641,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Builds a <see cref="PackageSourceRegistry"/> from the current settings' configured
     ///     sources, for the "Select Package..." dialog (and this card's own source lookups).
     /// </summary>
+    /// <param name="allowPrompt">Whether a NuGet server in the registry may open the sign-in
+    ///     dialog; <see langword="false"/> for background work.</param>
     /// <returns>A registry over the sources in effect right now (a snapshot: callers build a new
     ///     one after settings change).</returns>
     /// <exception cref="InvalidOperationException">Thrown when the configured sources are invalid
     ///     (for example a duplicated alias).</exception>
-    internal PackageSourceRegistry CreateSourceRegistry()
+    internal PackageSourceRegistry CreateSourceRegistry(bool allowPrompt = true)
     {
         var settings = _getSettings();
-        return _registryFactory is not null
-            ? _registryFactory(settings)
-            : PackageSourceRegistry.Create(settings.GetEffectiveSources(), GetNuGetRootBase());
+        if (_registryFactory is not null)
+        {
+            return _registryFactory(settings);
+        }
+
+        // Work the user did not ask for (the background upgrade check) shares the session
+        // credentials but is never allowed to open the sign-in dialog
+        var credentials = allowPrompt ? _credentials : _credentials?.WithoutPrompt();
+        return PackageSourceRegistry.Create(settings.GetEffectiveSources(), GetNuGetRootBase(_startupOptions), credentials);
     }
 
     /// <summary>
@@ -640,12 +667,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     supplied at startup (so automated tests never touch the real user profile), otherwise
     ///     <see langword="null"/> for the per-user default.
     /// </summary>
-    /// <returns>The override base folder, or <see langword="null"/> for the default. Never the
-    ///     repo this card represents.</returns>
-    private string? GetNuGetRootBase() =>
-        string.IsNullOrWhiteSpace(_startupOptions?.ConfigDirectory)
+    /// <param name="startupOptions">The startup overrides, or <see langword="null"/>.</param>
+    /// <returns>The override base folder, or <see langword="null"/> for the default. Never a
+    ///     repo.</returns>
+    internal static string? GetNuGetRootBase(Startup.StartupOptions? startupOptions) =>
+        string.IsNullOrWhiteSpace(startupOptions?.ConfigDirectory)
             ? null
-            : Path.Combine(Path.GetFullPath(_startupOptions.ConfigDirectory), "nuget");
+            : Path.Combine(Path.GetFullPath(startupOptions.ConfigDirectory), "nuget");
 
     /// <summary>
     ///     Determines the short name of the configured agent tool for the Launch button label.
@@ -702,6 +730,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(PackageChipText));
         OnPropertyChanged(nameof(PackageChipTooltip));
         OnPropertyChanged(nameof(PinnedSourceIcon));
+        OnPropertyChanged(nameof(PinnedSourceLabel));
         OnPropertyChanged(nameof(UpgradeTooltip));
         OnPropertyChanged(nameof(LaunchButtonText));
         OnPropertyChanged(nameof(LaunchTooltip));
@@ -964,7 +993,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RunOperationAsync("Refreshing...", cancellable: true, async token =>
         {
             RefreshCheap();
-            await RefreshUpgradeStatusAsync(token);
+
+            // The user asked for this refresh, so a server that needs a sign-in may ask for it
+            await RefreshUpgradeStatusAsync(token, allowPrompt: true);
             RefreshDirtyStatus();
         }, cancellationToken);
 
@@ -1997,10 +2028,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     the card.
     /// </remarks>
     /// <param name="cancellationToken">Cancels reading the source.</param>
+    /// <param name="allowPrompt">Whether a server that needs a sign-in may open the sign-in
+    ///     dialog. <see langword="false"/> (the default) for the background check at start-up and
+    ///     after settings change, which must never interrupt the user with a dialog: it uses a
+    ///     remembered credential if there is one and otherwise reports that a sign-in is needed.
+    ///     <see langword="true"/> when the user asked for the check.</param>
     /// <returns>A task that completes when the card's upgrade state is current.</returns>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is cancelled; the card keeps its previous upgrade state.</exception>
-    public async Task RefreshUpgradeStatusAsync(CancellationToken cancellationToken = default)
+    public async Task RefreshUpgradeStatusAsync(CancellationToken cancellationToken = default, bool allowPrompt = false)
     {
         var generation = ++_upgradeCheckGeneration;
         if (!EvaluatePinnedSource())
@@ -2015,7 +2051,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         IsCheckingUpgrade = true;
         try
         {
-            var registry = CreateSourceRegistry();
+            var registry = CreateSourceRegistry(allowPrompt);
             var check = await _packageVersionCache.IsNewerVersionAvailableAsync(
                 registry, sourceAlias, pinnedPackageName, pinnedVersion, cancellationToken);
             if (generation == _upgradeCheckGeneration)
@@ -2033,6 +2069,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 IsUpgradeAvailable = false;
                 LatestAvailableVersion = null;
+
+                // A server that needs a sign-in is worth telling the user about, because the
+                // background check must not ask: the card says what to do instead
+                if (ex is PackageSourceAccessException { Kind: PackageSourceFailureKind.AuthenticationFailed } && !allowPrompt)
+                {
+                    SourceProblem = $"{ex.Message} Use the card's \"...\" menu > Refresh to sign in.";
+                }
             }
         }
         finally

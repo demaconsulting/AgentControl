@@ -54,7 +54,9 @@ elsewhere in this document. The model captures the shipped system's runtime comp
 the OTS items that ship inside the application (Avalonia, Serilog, and NuGetCaching) are modeled
 as OTS parts in `docs/sysml2/model/ots.sysml`, while the remaining OTS items in Scope above are
 build-time/pipeline tooling, documented separately (see `docs/design/ots.md`) without SysML2
-parts.
+parts. The system has eleven subsystems: `LauncherUI`, `AgentPackageManagement`,
+`PackageCredentials` (credentials for package servers), `RepoSync`, `RepoConfig`, `AgentToolLauncher`,
+`GitIntegration`, `Settings`, `Logging`, `Startup` and `Utilities`, plus the top-level `Program` unit.
 
 ![Software Structure](SoftwareStructureView.svg)
 
@@ -62,9 +64,12 @@ parts.
 
 - **src/** - source files and projects
   - **DemaConsulting.AgentControl/** - main Avalonia desktop application source
-    - **LauncherUI/** - main window, repo cards, package-selection and settings windows
+    - **LauncherUI/** - main window, repo cards, package-selection, settings, package-source editor
+      and sign-in windows
     - **AgentPackageManagement/** - package source model, source providers (zip folder, NuGet
-      folder) and registry, package discovery, and version comparison
+      folder and server) and registry, package discovery, and version comparison
+    - **PackageCredentials/** - credentials for package servers: server origin, in-memory session
+      store, per-operation credential callback and log redaction
     - **RepoSync/** - package extraction (zip or unpacked NuGet package folder) and
       release-notes viewing
     - **RepoConfig/** - per-repo pin file persistence (package, version and source alias)
@@ -76,6 +81,8 @@ parts.
     - **Utilities/** - shared utilities subsystem
   - **DemaConsulting.AgentControl.Msi/** - WiX Toolset MSI installer project
 - **test/** - test projects
+  - **DemaConsulting.AgentControl.Tests/** - unit, subsystem and headless-window tests, plus test support
+    (an in-process NuGet V3 mock feed, fake credential prompt, list logger)
   - **DemaConsulting.AgentControl.UiTests/** - FlaUI end-to-end UI test project
 
 ## Document Conventions

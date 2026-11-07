@@ -2,7 +2,7 @@
 # Software Unit Requirements for the SourceEditorViewModel Class
 #
 # SourceEditorViewModel backs the dialog that adds or edits one package source - a folder of zip
-# packages or a NuGet package folder.
+# packages, a NuGet package folder or a NuGet package server - and tests a server's connection.
 
 sections:
   - title: SourceEditorViewModel Unit Requirements
@@ -10,15 +10,17 @@ sections:
       - id: AgentControl-SourceEditorViewModel-Validation
         title: >-
           The SourceEditorViewModel class shall permit saving a source only when its alias is
-          valid and not already used, its location is a full folder path that is not a web
-          address and does not embed a credential, and - for a NuGet package folder - at least
-          one package ID is listed, shall explain the first rule each field breaks without
-          repeating a credential, and shall show no error for a field the user has not yet
-          touched.
+          valid and not already used, its location is acceptable for the kind of source - a full
+          folder path that is not a web address for a folder, an https address ending in
+          index.json (or an http address only while "Allow insecure HTTP" is ticked) for a
+          server - and does not embed a credential, and - for a NuGet source - at least one
+          package ID is listed, shall explain the first rule each field breaks without repeating
+          a credential, and shall show no error for a field the user has not yet touched.
         justification: |
           A source that the application would later refuse to use or save must not be
           acceptable in the dialog; credentials must never be stored, so they are stopped where
-          the user types them.
+          the user types them, and plain http must be a deliberate choice because the sign-in
+          would cross the network unprotected.
         tests:
           - SourceEditorViewModel_Constructor_NewSourceOfEachKind_HasMatchingTitleAndSections
           - SourceEditorViewModel_NewEmptyEditor_CannotSaveButShowsNoErrorsYet
@@ -26,15 +28,58 @@ sections:
           - SourceEditorViewModel_Location_Invalid_ReportsProblemAndBlocksSave
           - SourceEditorViewModel_NuGetSource_NoPackageIds_CannotSaveUntilOneIsAdded
           - SourceEditorViewModel_Constructor_NullAliasCheck_ThrowsArgumentNullException
+          - SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave
+          - SourceEditorViewModel_AllowInsecureHttp_Toggled_AcceptsHttpAndShowsWarning
+          - SourceEditorViewModel_PackageIds_EmptyForServer_ReportsServerSpecificMessage
+
+      - id: AgentControl-SourceEditorViewModel-ServerSource
+        title: >-
+          The SourceEditorViewModel class shall edit a NuGet package server source by asking for
+          its feed address, showing example addresses for JFrog Artifactory and Azure Artifacts,
+          offering an "Allow insecure HTTP" choice that is off by default and warns when ticked,
+          and keeping the address, the package IDs and the insecure-HTTP choice when the source
+          is saved or an existing server source is edited.
+        justification: |
+          Users reach a feed through an address whose exact form differs between products, so
+          showing it for the two common servers avoids trial and error; the insecure choice must
+          be off unless the user turns it on knowingly.
+        tests:
+          - SourceEditorViewModel_Constructor_NewServer_HasServerTitleLabelAndExamples
+          - SourceEditorViewModel_Constructor_NuGetFolder_IsNotAServerAndCannotTest
+          - SourceEditorViewModel_SaveCommand_ValidServer_SavesAddressPackageIdsAndInsecureChoice
+          - SourceEditorViewModel_EditExistingServer_StaysAServerWithItsSettings
+
+      - id: AgentControl-SourceEditorViewModel-TestConnection
+        title: >-
+          The SourceEditorViewModel class shall, for a server source with an acceptable address
+          and at least one package ID, test the connection by listing the versions of the first
+          package ID through the source's provider without saving anything, shall show progress
+          that the user can cancel, shall report the outcome in plain words - connection works
+          with the number of versions and the newest, sign-in failed, sign-in canceled, package
+          not found, timed out, server unreachable, or another failure - and shall discard a
+          result once the address or package IDs change.
+        justification: |
+          The developer needs to learn which of the address, the package ID or the sign-in is
+          wrong while the dialog is still open, in terms they can act on, without the test
+          freezing the dialog or leaving a stale "connection OK" beside an address that was
+          edited since.
+        tests:
+          - SourceEditorViewModel_CanTestConnection_NeedsValidAddressAndPackageId
+          - SourceEditorViewModel_TestConnection_ServerAnswers_ReportsVersionCountAndLatest
+          - SourceEditorViewModel_TestConnection_PackageMissing_ReportsPackageNotFound
+          - SourceEditorViewModel_TestConnection_ProviderFails_ReportsHeadlineAndMessage
+          - SourceEditorViewModel_TestConnection_OtherFailures_AreReportedInTheDialog
+          - SourceEditorViewModel_TestConnection_CancelWhileRunning_StopsWithCanceledResult
+          - SourceEditorViewModel_TestConnection_ResultDroppedWhenAddressChanges
 
       - id: AgentControl-SourceEditorViewModel-PackageIds
         title: >-
           The SourceEditorViewModel class shall let the user add and remove the package IDs a
-          NuGet package folder offers, refusing an ID that is malformed or already listed
-          (ignoring case).
+          NuGet package folder or server offers, refusing an ID that is malformed or already
+          listed (ignoring case).
         justification: |
-          A NuGet folder is not scanned for packages, so the listed IDs define what it offers;
-          malformed or duplicate entries would produce failures later.
+          A NuGet folder or server is not scanned for packages, so the listed IDs define what it
+          offers; malformed or duplicate entries would produce failures later.
         tests:
           - SourceEditorViewModel_AddPackageId_InvalidOrDuplicate_IsRefused
           - SourceEditorViewModel_RemovePackageId_RemovesSelectedId

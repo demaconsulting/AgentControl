@@ -24,7 +24,7 @@ package AgentControl {
     }
 
     part def NuGetCaching {
-        doc /* DemaConsulting.NuGet.Caching library backing the NuGet package folder source provider: lists package versions and unpacks a chosen version into a package cache. */
+        doc /* DemaConsulting.NuGet.Caching library backing the NuGet package source provider: lists package versions on a folder feed or NuGet V3 server, authenticates through a per-call credential callback, and unpacks a chosen version into a package cache. */
 
         comment designRef /* Design: docs/design/ots/nuget-caching.md */
         comment verificationRef /* Verification: docs/verification/ots/nuget-caching.md */

@@ -96,18 +96,22 @@ sections:
       - id: AgentControl-System-SelectPackage
         title: >-
           The tool shall let the user select an initial agent package, from a chosen configured
-          source, and its version for a repo that has no existing pin.
+          source, and its version for a repo that has no existing pin, asking the user to sign in
+          when the source is a server that needs credentials.
         tags: [system]
         justification: |
           A newly added repo has no prior pin to upgrade from; without an explicit
           "Select Package..." action there would be no UI path to ever acquire agent files
-          for it, contrary to the tool's Purpose.
+          for it, contrary to the tool's Purpose; a protected package server is only usable if
+          the user can sign in at the point they choose from it.
         children:
           - AgentControl-LauncherUI-SelectPackage
+          - AgentControl-LauncherUI-SignIn
           - AgentControl-AgentPackageManagement-DiscoverPackages
         tests:
           - windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders
           - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
 
       - id: AgentControl-System-Upgrade
         title: >-
@@ -170,52 +174,66 @@ sections:
       - id: AgentControl-System-MultipleSources
         title: >-
           The tool shall support several configured agent package sources at once, each
-          identified by a unique alias and being either a folder of zip packages or a NuGet
-          package folder, shall persist them in the user's settings, and shall carry forward a
-          previously configured single package-source folder as a source named Default.
+          identified by a unique alias and being either a folder of zip packages, a NuGet
+          package folder or a NuGet package server, shall persist them in the user's settings,
+          and shall carry forward a previously configured single package-source folder as a
+          source named Default.
         tags: [system]
         justification: |
           Organizations distribute agent packages in more than one place (a share of zip files,
-          a NuGet feed folder, later a server), so a developer needs more than one source
+          a NuGet feed folder, a package server), so a developer needs more than one source
           configured side by side without losing the single-folder setup they already have.
         children:
           - AgentControl-Settings-PackageSources
           - AgentControl-AgentPackageManagement-SourceDefinitions
           - AgentControl-AgentPackageManagement-ZipFolderSource
           - AgentControl-AgentPackageManagement-NuGetFolderSource
+          - AgentControl-AgentPackageManagement-NuGetServerSource
         tests:
           # End to end: the published application runs with a zip source and a NuGet folder
-          # source configured side by side, sources are added through the Settings dialogs and
-          # a package is selected from the NuGet source; the older single-folder settings file
-          # used by the other UI tests exercises the Default-source migration. The persistence
-          # round trip and migration are also verified at unit level.
+          # source configured side by side, sources are added through the Settings dialogs
+          # (including a NuGet server) and a package is selected from the NuGet sources; the
+          # older single-folder settings file used by the other UI tests exercises the
+          # Default-source migration. The persistence round trip and migration are also
+          # verified at unit level.
           - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
           - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
           - windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt
           - windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt
           - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
           - SettingsStore_SaveThenLoad_RoundTripsAllFields
           - SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource
 
       - id: AgentControl-System-NuGetSources
         title: >-
-          The tool shall obtain agent packages from a NuGet package folder source, offering the
-          configured package IDs with their available versions and applying a chosen version's
-          content to a repo exactly as it does a zip package, without reading or writing the
-          repo's NuGet configuration.
+          The tool shall obtain agent packages from a NuGet package folder or a NuGet package
+          server, offering the configured package IDs with their available versions and applying
+          a chosen version's content to a repo exactly as it does a zip package, requiring an
+          https address for a server unless the user explicitly allows plain http for that
+          source, signing in to a server that needs credentials, and neither reading nor
+          writing the repo's NuGet configuration.
         tags: [system]
         justification: |
-          Teams that already publish internal packages to a NuGet feed folder can deliver agent
-          packages the same way; AgentControl must not leave any trace of its sources in the
-          target repo, whose own NuGet configuration belongs to the repo's owners.
+          Teams that already publish internal packages to a NuGet feed folder or a package server
+          (JFrog Artifactory, Azure Artifacts) can deliver agent packages the same way;
+          AgentControl must not send a sign-in over an unprotected connection unless told to, and
+          must not leave any trace of its sources in the target repo, whose own NuGet
+          configuration belongs to the repo's owners.
         children:
           - AgentControl-AgentPackageManagement-NuGetFolderSource
+          - AgentControl-AgentPackageManagement-NuGetServerSource
+          - AgentControl-PackageCredentials-AskOncePerOperation
+          - AgentControl-LauncherUI-TestConnection
           - AgentControl-RepoSync-SyncFromFolderPackage
           - AgentControl-OTS-NuGetCaching-ListAndCache
+          - AgentControl-OTS-NuGetCaching-ServerAccess
         tests:
-          # End to end through the published application against a real NuGet folder feed, plus
-          # the unit-level evidence that the repo's NuGet configuration is never touched.
+          # End to end through the published application against a real NuGet folder feed and
+          # against an in-process NuGet server (plain HTTP, explicitly allowed), plus the
+          # unit-level evidence that the repo's NuGet configuration is never touched.
           - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
           - RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes
           - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig
 
@@ -246,39 +264,81 @@ sections:
 
       - id: AgentControl-System-Settings
         title: >-
-          The tool shall let the user configure the package sources, a git executable
-          override, the agent tool selection, and a shell/terminal preference.
+          The tool shall let the user configure the package sources - including testing a package
+          server's connection before saving it - a git executable override, the agent tool
+          selection, and a shell/terminal preference.
         tags: [system]
         justification: |
           The package source locations, git installation, preferred agentic CLI tool, and
           preferred terminal all vary by company/developer, so they must be user-editable
-          rather than hardcoded.
+          rather than hardcoded; a server source depends on an address and a sign-in that the
+          user can only get right if they can try it.
         children:
           - AgentControl-LauncherUI-Settings
           - AgentControl-LauncherUI-PackageSources
+          - AgentControl-LauncherUI-TestConnection
           - AgentControl-Settings-Persistence
         tests:
           - windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt
           - windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
 
       - id: AgentControl-System-ResponsiveOperations
         title: >-
           The tool shall remain responsive while it reads package sources or applies a
-          package, shall show that the operation is running, and shall let the user cancel it.
+          package, shall show that the operation is running, shall let the user cancel it, and
+          shall never interrupt the user with a sign-in dialog for work the user did not start.
         tags: [system]
         justification: |
           Package sources are often network shares or servers that can be slow or offline; a
-          window that freezes while waiting looks like a crash.
+          window that freezes while waiting looks like a crash, and a dialog that opens by
+          itself during background work is disruptive.
         children:
           - AgentControl-LauncherUI-ResponsiveOperations
+          - AgentControl-LauncherUI-BackgroundChecksDoNotPrompt
         tests:
           # Verified at unit level with deliberately slow and failing sources: a frozen UI
           # thread is not observable through UI automation without an artificially slow share,
           # so the end-to-end tests cover only the happy path of the same flows.
           - RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged
           - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains
           - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
+
+      - id: AgentControl-System-CredentialSafety
+        title: >-
+          The tool shall never persist a credential it is given for a package source - not in its
+          settings, a repo's pin file, its log or the target repo - shall keep a credential the
+          user types only for the current session, and shall offer a credential only to the
+          server it was typed for.
+        tags: [system, security]
+        justification: |
+          Package servers need credentials, but a credential that is written anywhere outlives
+          the session and can leak through backups, synced profiles, shared logs or a commit;
+          and a credential offered to a host other than the one it was typed for is a credential
+          given away. The tool therefore asks for a credential only when it is needed, keeps it in
+          memory, and uses it only for its own server. A server's own index can still direct the
+          NuGet client to resources on other hosts that then challenge it, so users must only add
+          servers they trust.
+        children:
+          - AgentControl-Settings-PackageSources
+          - AgentControl-AgentPackageManagement-SourceDefinitions
+          - AgentControl-PackageCredentials-SessionOnly
+          - AgentControl-PackageCredentials-ScopedToFeedOrigin
+          - AgentControl-PackageCredentials-SecretsNeverLogged
+          - AgentControl-LauncherUI-SignIn
+        tests:
+          # The end-to-end test signs in with a sentinel password and then searches every file the
+          # application wrote - the settings, the repo pin and the log folder - for it. The
+          # end-to-end test cannot show that a credential is withheld from a second server, which
+          # is verified one level down, and the sentinel search covers the log only for what the
+          # application wrote during that flow. That nothing is written into the target repo's
+          # files is shown at unit level.
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
+          - PackageCredentials_CredentialForOneFeed_IsNeverOfferedToAnotherOrigin
+          - NuGetSourceProvider_ListVersions_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin
+          - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig
 
       - id: AgentControl-System-DiagnosticLogging
         title: >-

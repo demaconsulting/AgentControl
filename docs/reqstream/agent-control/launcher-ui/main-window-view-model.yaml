@@ -143,3 +143,16 @@ sections:
           - MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins
           - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked
           - MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground
+
+      - id: AgentControl-MainWindowViewModel-ConnectionTestProvider
+        title: >-
+          The MainWindowViewModel class shall give the settings window's connection test a
+          package-source provider that signs in through the same session credentials and
+          sign-in dialog as the repo cards, so that a sign-in made during a test is remembered for
+          the session and not asked for again when a package is selected.
+        justification: |
+          A user who has typed a credential to test a server expects the application to remember
+          it for the session, and to ask exactly once, wherever the next use of the server
+          happens.
+        tests:
+          - MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials

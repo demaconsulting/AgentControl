@@ -26,6 +26,7 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - Applying settings drops cached package results only for sources that were edited or removed.
 - Constructing the view model reads no package source; upgrade availability is checked in the
   background, and an unreachable source affects only the cards pinned to it.
+- The connection-test provider shares the application's session credentials with the cards.
 
 #### Test Scenarios
 
@@ -123,3 +124,9 @@ the background. This scenario is tested by
 `MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked`, and
 `MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground`, covering
 `AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`.
+
+**MainWindowViewModel_ConnectionTestProvider_UsesTheSharedCredentialFacilities**: The view model hands out a
+real `NuGetSourceProvider` for the settings window's connection test, built with the same credential context
+(session store and prompt) as the cards, so a sign-in made during a test is remembered for the session. This
+scenario is tested by `MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials`
+(in `SettingsWindowServerSourceTests.cs`), covering `AgentControl-MainWindowViewModel-ConnectionTestProvider`.

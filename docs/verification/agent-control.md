@@ -25,6 +25,16 @@ slow and failing package sources, because a frozen UI thread is not observable t
 automation without an artificially slow share; the end-to-end tests cover the happy path of
 the same flows.
 
+`AgentControl-System-CredentialSafety` has one end-to-end scenario, `NuGetServerSourceTests.cs`, which runs
+the published application against an in-process mock NuGet V3 server (the same `MockNuGetFeed` the unit tests
+use, linked into the UI test project; plain HTTP, so the source ticks "Allow insecure HTTP", and each launch of the
+application gets a private `NUGET_HTTP_CACHE_PATH` so a reused port is never answered from an earlier run's
+cache). It drives the
+Add NuGet-Package Server dialog, the sign-in dialog and Select Package with the real NuGet client, then
+searches every file the application wrote - the settings, the repo's pin and the configuration directory's
+log and text files - for the password the test typed. That a credential is withheld from a second server is not
+observable end to end and is verified one level down.
+
 ## Test Environment
 
 End-to-end tests in `DemaConsulting.AgentControl.UiTests` run only on Windows (tagged
@@ -37,7 +47,9 @@ executables (via `--git-path`/`--agent-tool-command`, built with
 installation, a real agentic CLI tool, or a developer's actual `%APPDATA%\AgentControl\`
 folder. Unit tests that back the disclosed exceptions above run on .NET 10 on any
 supported platform with no additional environment setup
-(`AgentControl-Platform-Net10`).
+(`AgentControl-Platform-Net10`). The server-source end-to-end test also needs loopback networking: it starts
+the in-process mock feed (Kestrel, hosted by the ASP.NET Core shared framework that the test project references)
+on a fresh port.
 
 ## Acceptance Criteria
 
@@ -51,8 +63,10 @@ supported platform with no additional environment setup
 - No test depends on a real git installation, a real agentic CLI tool, or the developer's
   actual settings/log folders.
 - Several package sources can be configured and carried forward from the legacy setting, a NuGet
-  folder source supplies packages applied like zip packages, and a repo pin is only ever resolved
+  folder source supplies packages applied like zip packages, a NuGet server source can be added with a
+  typed sign-in and supplies packages the same way, and a repo pin is only ever resolved
   against the source it names.
+- No credential typed during an end-to-end run is found in any file the application wrote.
 
 ## Test Scenarios
 
@@ -99,9 +113,13 @@ Select Package menu item is clicked on an unpinned repo card, a package name/ver
 and confirmed; the repo's pin is set and its managed agent-file folders are synced to match,
 proving the initial-pin selection flow works end-to-end. A second scenario chooses the NuGet
 folder source in the dialog, selects its package and version, and confirms that the card then
-shows the package chip naming that source. These scenarios are tested by
-`windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders` and
-`windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip`, covering
+shows the package chip naming that source. A third scenario selects a package from the NuGet server source
+added in the previous test, with no second sign-in because the credential typed earlier is remembered for the
+session, and confirms the pin names the server source and the card chip shows its alias. These scenarios are
+tested by
+`windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders`,
+`windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip` and
+`windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`, covering
 `AgentControl-System-SelectPackage`.
 
 **AgentControl_Upgrade_UpgradeMenuItem_SyncsManagedFoldersAndShowsReleaseNotes**: The Upgrade
@@ -131,9 +149,14 @@ list, and a NuGet-package folder source is added through its dialog, which canno
 a package ID is listed; after saving, the settings file in the isolated configuration directory
 holds both sources. `SettingsWindowViewModel`'s `SaveCommand` is also executed with edited
 git/agent-tool overrides and shell preference, proving the edited preferences are captured and
-communicated for persistence. This scenario is tested by
+communicated for persistence. The Add NuGet-Package Server dialog is also exercised: plain `http` is refused
+until "Allow insecure HTTP" is ticked, **Test connection** against the mock server opens the sign-in dialog
+(which names the server's origin and says the credential is used for this session only), the connection test
+then reports success, and after saving the source is listed as "Not checked" and persisted with its
+insecure-HTTP choice. This scenario is tested by
 `windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt`,
-`windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt`, and
+`windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt`,
+`windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`, and
 `SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved`,
 covering `AgentControl-System-Settings`.
 
@@ -141,9 +164,11 @@ covering `AgentControl-System-Settings`.
 source reports busy, ignores a repeated request and can be cancelled without changing the pin,
 and the background upgrade refresh still checks the cards of reachable sources when another
 source is unreachable; the end-to-end selection of a package through the dialog confirms the
-happy path of the same flow. This scenario is tested by
+happy path of the same flow. A background upgrade check against a server that needs a sign-in never opens the
+sign-in dialog. This scenario is tested by
 `RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged`,
-`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked`, and
+`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked`,
+`RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains`, and
 `windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip`, covering
 `AgentControl-System-ResponsiveOperations`.
 
@@ -205,19 +230,38 @@ settings migrated to `Default`),
 `windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt`,
 `windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt`,
 `windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip`,
+`windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`,
 `SettingsStore_SaveThenLoad_RoundTripsAllFields` and
 `SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource`, covering
 `AgentControl-System-MultipleSources`.
 
-**AgentControl_NuGetSources_FolderFeed_AppliesPackageWithoutTouchingRepoNuGetConfig**: A repo is
+**AgentControl_NuGetSources_FolderFeedAndServer_AppliesPackageWithoutTouchingRepoNuGetConfig**: A repo is
 given a package chosen from a real NuGet folder feed; the managed folders, release notes, and pin
 are produced as for a zip package, and listing and acquiring packages never reads or writes a
 `nuget.config` in the repo or the current directory. The published application is run against a
-real NuGet folder feed and upgrades a pinned repo from it. This scenario is tested by
+real NuGet folder feed and upgrades a pinned repo from it, and against an in-process NuGet server, to which it
+signs in with a typed credential (plain `http` being refused until explicitly allowed for that source) and
+from which it applies a package. This scenario is tested by
 `windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly`,
+`windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`,
 `RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes`
 and `NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig`, covering
 `AgentControl-System-NuGetSources`.
+
+**AgentControl_CredentialSafety_TypedPasswordIsNeverPersistedAndIsScopedToItsServer**: In the end-to-end
+scenario described under Verification Approach, a password typed in the sign-in dialog is used for the
+connection test and again, without a second dialog, for Select Package, and is then absent from the settings
+file, the repo's pin file and every log and text file in the configuration directory; the dialog showed the
+server's origin and "Used for this session only - AgentControl does not save it." One level down, a credential
+remembered for one server is never offered to another origin and a challenge from a feed's advertised second
+host never opens the prompt, and nothing is written into the target repo's files. This scenario is tested by
+`windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`,
+`PackageCredentials_CredentialForOneFeed_IsNeverOfferedToAnotherOrigin`,
+`NuGetSourceProvider_ListVersions_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin` and
+`NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig`, covering
+`AgentControl-System-CredentialSafety`. Residual risk, stated plainly: the tests prove what AgentControl
+supplies; the NuGet client, once a server has authenticated, answers 401 challenges from other hosts that
+the server's index advertises with the same credential, which is why users must only add servers they trust.
 
 **AgentControl_SourcePinIntegrity_PinBoundToSource_NoSubstitution**: With the same package id
 offered by two sources, a pin to the second source resolves only against it and the first source

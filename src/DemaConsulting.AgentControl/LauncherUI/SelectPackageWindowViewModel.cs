@@ -135,6 +135,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         }
 
         ConfirmCommand = new RelayCommand(Confirm, () => CanConfirm);
+        RetryCommand = new RelayCommand(Retry, () => CanRetry);
     }
 
     /// <summary>
@@ -172,6 +173,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
             OnPropertyChanged(nameof(SourceErrorMessage));
             OnPropertyChanged(nameof(HasSourceError));
             OnPropertyChanged(nameof(HasNoPackages));
+            RaiseCanRetryChanged();
         }
     }
 
@@ -272,6 +274,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
             if (SetField(ref _versionsError, value))
             {
                 OnPropertyChanged(nameof(HasVersionsError));
+                RaiseCanRetryChanged();
             }
         }
     }
@@ -315,6 +318,25 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     public RelayCommand ConfirmCommand { get; }
 
     /// <summary>
+    ///     Gets a value indicating whether there is a failed read to retry: the selected source
+    ///     could not be read, or the selected package's versions could not be read.
+    /// </summary>
+    public bool CanRetry => HasSourceError || (HasVersionsError && _selectedSource is not null && _selectedPackageName is not null);
+
+    /// <summary>
+    ///     Gets the command bound to the "Retry" button shown beside an inline error: reads the
+    ///     source (or, when only the versions failed, the package's versions) again. A server
+    ///     that needs a sign-in asks again; a server that was unreachable is tried again.
+    /// </summary>
+    public RelayCommand RetryCommand { get; }
+
+    /// <summary>
+    ///     Gets the task of the most recently started retry of a source read, so a caller (a test)
+    ///     can await it; completed when none is running.
+    /// </summary>
+    internal Task PendingSourceRetry { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
     ///     Raised when the user confirms their selection, carrying the selected source alias,
     ///     package name and version, so the owning window can close itself with that result.
     /// </summary>
@@ -350,6 +372,58 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     ///     Cancels the version load still running, for when the dialog closes.
     /// </summary>
     public void CancelLoading() => _versionsCancellation.Cancel();
+
+    /// <summary>
+    ///     Reads again whatever failed for the selected source: its package list when the source
+    ///     could not be read, otherwise the versions of the selected package.
+    /// </summary>
+    private void Retry()
+    {
+        if (_selectedSource is null)
+        {
+            return;
+        }
+
+        if (_selectedSource.HasError)
+        {
+            // Read the failed source again, on its own, without touching the others
+            var source = _selectedSource;
+            source.BeginLoading();
+            PendingSourceRetry = RetrySourceAsync(source);
+            return;
+        }
+
+        if (_selectedPackageName is null)
+        {
+            return;
+        }
+
+        // Start a fresh version load exactly as a new selection would, superseding the failed one
+        _versionsCancellation.Cancel();
+        _versionsCancellation.Dispose();
+        _versionsCancellation = new CancellationTokenSource();
+        var generation = ++_versionsGeneration;
+        VersionsError = null;
+        PendingVersionsLoad = LoadVersionsAsync(_selectedSource, _selectedPackageName, generation, _versionsCancellation.Token);
+    }
+
+    /// <summary>
+    ///     Reads one source's package list again after a failure and records the outcome.
+    /// </summary>
+    /// <param name="source">The source row to reload.</param>
+    /// <returns>A task that completes when the row shows the outcome; cancellation (the dialog
+    ///     closing) is not an error.</returns>
+    private async Task RetrySourceAsync(SelectPackageSourceViewModel source)
+    {
+        try
+        {
+            await LoadSourceAsync(source, _versionsCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The dialog closed meanwhile: nothing is left to show
+        }
+    }
 
     /// <summary>
     ///     Reads one source's package list and records the outcome on its row.
@@ -436,6 +510,16 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(SourceErrorMessage));
         OnPropertyChanged(nameof(HasSourceError));
         OnPropertyChanged(nameof(HasNoPackages));
+        RaiseCanRetryChanged();
+    }
+
+    /// <summary>
+    ///     Notifies that whether there is something to retry may have changed.
+    /// </summary>
+    private void RaiseCanRetryChanged()
+    {
+        OnPropertyChanged(nameof(CanRetry));
+        RetryCommand.RaiseCanExecuteChanged();
     }
 
     /// <summary>

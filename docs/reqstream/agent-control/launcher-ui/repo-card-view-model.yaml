@@ -13,8 +13,9 @@ sections:
           The RepoCardViewModel class shall expose the repo's leaf folder name as its display
           name, and - when a pin file exists - a chip text naming the pinned package and its
           version together with a tooltip and icon that say which configured source it came
-          from and of what kind (a zip folder or a NuGet folder, or not configured), and - when
-          no package is pinned - a distinct "no agent package" state.
+          from and of what kind (a zip folder, a NuGet folder or a NuGet server, or not
+          configured), the source's alias as text beside the icon so the source is recognizable
+          at a glance, and - when no package is pinned - a distinct "no agent package" state.
         justification: |
           A developer identifies a repo card primarily by its folder name; the chip tells them
           at a glance which agent package, which version and from where, instead of an
@@ -24,6 +25,7 @@ sections:
           - RepoCardViewModel_Refresh_PinFileExists_PopulatesPinnedFields
           - RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip
           - RepoCardViewModel_PackageChip_PinnedToNuGetFolderSource_ShowsNuGetFolderIconAndKind
+          - RepoCardViewModel_PinnedToServerSource_ChipShowsAliasAndServerIcon
           - RepoCardViewModel_PackageChip_PinnedSourceNotConfigured_ShowsUnknownSource
           - RepoCardViewModel_NoPackageChip_NeverPinnedRepo_ShowsNoPackageChipOnly
           - RepoCardViewModel_Chips_MissingRepo_ShowNeitherPackageChip
@@ -340,3 +342,19 @@ sections:
           - RepoCardViewModel_ApplySelectedPackage_NewerSchemaPinFile_RaisesErrorAndChangesNothing
           - RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes
           - RepoCardViewModel_UpgradeCommand_NuGetFolderSource_UpgradesToHighestVersion
+
+      - id: AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt
+        title: >-
+          The RepoCardViewModel class shall, when it checks a server source for an upgrade in the
+          background, use only the credentials already entered during the session and never ask
+          the user to sign in, shall instead show a package source problem that says a sign-in is
+          needed and how to give it, and shall allow a check the user asks for to ask the user to
+          sign in.
+        justification: |
+          A sign-in dialog that opens by itself while the user is working elsewhere is
+          disruptive and hard to trust; the user signs in only for an action they chose, and the
+          card tells them which action does it.
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_AnonymousServer_OffersNewerVersion
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential

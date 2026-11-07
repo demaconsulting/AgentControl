@@ -3,16 +3,25 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="using:DemaConsulting.AgentControl.LauncherUI"
+        xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         mc:Ignorable="d"
         d:DesignWidth="540" d:DesignHeight="480"
         x:Class="DemaConsulting.AgentControl.LauncherUI.SourceEditorWindow"
         x:DataType="vm:SourceEditorViewModel"
         Name="SourceEditorRoot"
         Title="{Binding Title}"
-        Width="540" SizeToContent="Height"
+        Width="560" SizeToContent="Height"
         MinWidth="440"
         CanResize="False"
         WindowStartupLocation="CenterOwner">
+    <Window.Styles>
+        <Style Selector="materialIcons|MaterialIcon.testOk">
+            <Setter Property="Foreground" Value="#2EA043" />
+        </Style>
+        <Style Selector="materialIcons|MaterialIcon.testFail">
+            <Setter Property="Foreground" Value="#E5534B" />
+        </Style>
+    </Window.Styles>
     <StackPanel Margin="16" Spacing="6">
 
         <!-- Alias: the name repos use to refer to this source; fixed once the source exists -->
@@ -33,18 +42,22 @@
                     Text="{Binding AliasError}"
                     Foreground="Red" FontSize="12" TextWrapping="Wrap" />
 
-        <!-- Location: a folder path, with a native folder picker -->
-        <TextBlock Text="Folder" FontWeight="Bold" Margin="0,8,0,0" />
+        <!-- Location: a folder path with a native folder picker, or - for a server - the address of
+             the feed's V3 service index -->
+        <TextBlock Name="SourceLocationLabel"
+                    AutomationProperties.AutomationId="SourceLocationLabel"
+                    Text="{Binding LocationLabel}" FontWeight="Bold" Margin="0,8,0,0" />
         <Grid ColumnDefinitions="*,Auto">
             <TextBox Grid.Column="0"
                       Name="SourceLocationTextBox"
                       AutomationProperties.AutomationId="SourceLocationTextBox"
-                      PlaceholderText="Local, mapped-drive, or UNC folder"
-                      Text="{Binding Location}"
-                      Margin="0,0,8,0" />
+                      PlaceholderText="{Binding LocationPlaceholder}"
+                      Text="{Binding Location}" />
             <Button Grid.Column="1"
                      Name="SourceBrowseButton"
+                     Margin="8,0,0,0"
                      AutomationProperties.AutomationId="SourceBrowseButton"
+                     IsVisible="{Binding !IsServer}"
                      ToolTip.Tip="Choose the package folder with a folder picker"
                      Content="Browse..."
                      Click="BrowseButton_Click" />
@@ -53,18 +66,39 @@
                     AutomationProperties.AutomationId="SourceLocationHelpText"
                     Text="{Binding LocationHelp}"
                     FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+        <TextBlock Name="SourceLocationExamplesText"
+                    AutomationProperties.AutomationId="SourceLocationExamplesText"
+                    IsVisible="{Binding IsServer}"
+                    Text="{x:Static vm:SourceEditorViewModel.LocationExamplesText}"
+                    FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
         <TextBlock Name="SourceLocationErrorText"
                     AutomationProperties.AutomationId="SourceLocationErrorText"
                     IsVisible="{Binding LocationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                     Text="{Binding LocationError}"
                     Foreground="Red" FontSize="12" TextWrapping="Wrap" />
 
-        <!-- Package IDs: only a NuGet-package folder lists the packages it offers -->
+        <!-- Plain http: off unless the user insists, with a warning while it is on -->
+        <StackPanel IsVisible="{Binding IsServer}" Spacing="4">
+            <CheckBox Name="SourceAllowInsecureHttpCheckBox"
+                       AutomationProperties.AutomationId="SourceAllowInsecureHttpCheckBox"
+                       ToolTip.Tip="Accept a feed address that starts with http:// - a password sent to it is not encrypted"
+                       IsChecked="{Binding AllowInsecureHttp}"
+                       Content="Allow insecure HTTP (not recommended)" />
+            <TextBlock Name="SourceInsecureHttpWarningText"
+                        AutomationProperties.AutomationId="SourceInsecureHttpWarningText"
+                        IsVisible="{Binding ShowInsecureWarning}"
+                        Text="Warning: with plain http, the user name and password you type are sent unencrypted. Only use this on a network you trust."
+                        Foreground="#D29922" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Package IDs: a NuGet source lists the packages it offers -->
         <StackPanel Name="SourceEditorPackageIdsSection"
                      AutomationProperties.AutomationId="SourceEditorPackageIdsSection"
                      IsVisible="{Binding IsNuGet}" Spacing="6" Margin="0,8,0,0">
             <TextBlock Text="Package IDs" FontWeight="Bold" />
-            <TextBlock Text="The agent packages this folder offers (the NuGet package IDs), at least one."
+            <TextBlock Name="SourcePackageIdsHelpText"
+                        AutomationProperties.AutomationId="SourcePackageIdsHelpText"
+                        Text="{Binding PackageIdsHelp}"
                         FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
             <Grid ColumnDefinitions="*,Auto">
                 <TextBox Grid.Column="0"
@@ -112,6 +146,69 @@
                         IsVisible="{Binding PackageIdsError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                         Text="{Binding PackageIdsError}"
                         Foreground="Red" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Test connection (servers only): try the address before saving. Shows progress with a
+             Cancel button while it runs, then the outcome in words. -->
+        <StackPanel Name="SourceEditorTestSection"
+                     AutomationProperties.AutomationId="SourceEditorTestSection"
+                     IsVisible="{Binding IsServer}" Spacing="6" Margin="0,8,0,0">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Name="SourceTestConnectionButton"
+                         AutomationProperties.AutomationId="SourceTestConnectionButton"
+                         Command="{Binding TestConnectionCommand}"
+                         ToolTip.Tip="{Binding TestConnectionTooltip}"
+                         ToolTip.ShowOnDisabled="True">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <materialIcons:MaterialIcon Kind="LanConnect" />
+                        <TextBlock Text="Test connection" />
+                    </StackPanel>
+                </Button>
+                <Button Name="SourceTestCancelButton"
+                         AutomationProperties.AutomationId="SourceTestCancelButton"
+                         IsVisible="{Binding IsTesting}"
+                         Command="{Binding CancelTestCommand}"
+                         ToolTip.Tip="Stop the connection test (this also closes a sign-in dialog it opened)"
+                         Content="Cancel" />
+            </StackPanel>
+
+            <!-- Progress while the test runs -->
+            <StackPanel Name="SourceTestProgressPanel"
+                         AutomationProperties.AutomationId="SourceTestProgressPanel"
+                         IsVisible="{Binding IsTesting}" Spacing="4">
+                <ProgressBar IsIndeterminate="True" Height="4" />
+                <TextBlock Name="SourceTestProgressText"
+                            AutomationProperties.AutomationId="SourceTestProgressText"
+                            Text="{Binding TestProgressText}"
+                            FontSize="12" Opacity="0.75" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <!-- Outcome of the last test -->
+            <Border Name="SourceTestResultPanel"
+                     AutomationProperties.AutomationId="SourceTestResultPanel"
+                     IsVisible="{Binding HasTestResult}"
+                     BorderThickness="1" BorderBrush="Gray" CornerRadius="4" Padding="10,8">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <materialIcons:MaterialIcon Kind="CheckCircleOutline" Width="22" Height="22"
+                                                  VerticalAlignment="Top" Classes="testOk"
+                                                  IsVisible="{Binding TestSucceeded}" />
+                    <materialIcons:MaterialIcon Kind="AlertCircleOutline" Width="22" Height="22"
+                                                  VerticalAlignment="Top" Classes="testFail"
+                                                  IsVisible="{Binding TestFailed}" />
+                    <materialIcons:MaterialIcon Kind="InformationOutline" Width="22" Height="22"
+                                                  VerticalAlignment="Top"
+                                                  IsVisible="{Binding TestWasCanceled}" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Name="SourceTestResultTitleText"
+                                    AutomationProperties.AutomationId="SourceTestResultTitleText"
+                                    Text="{Binding TestResultTitle}" FontWeight="Bold" />
+                        <TextBlock Name="SourceTestResultDetailText"
+                                    AutomationProperties.AutomationId="SourceTestResultDetailText"
+                                    Text="{Binding TestResultDetail}"
+                                    FontSize="12" TextWrapping="Wrap" MaxWidth="440" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
         </StackPanel>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">

@@ -8,7 +8,7 @@ AgentControl is an Avalonia desktop application built on .NET 10. Per architectu
 Purpose, it lets a developer open a repo from a recent-repos list, have the tool ensure the
 repo's proprietary agent-configuration folders match a pinned package version, optionally
 pull the latest commits, and then launch a preferred agentic CLI tool in that repo's working
-directory. It is structured as one system containing one top-level unit (`Program`) and ten
+directory. It is structured as one system containing one top-level unit (`Program`) and eleven
 subsystems, matching architecture.md's Software Structure diagram:
 
 ```mermaid
@@ -20,6 +20,8 @@ flowchart TD
         SelectPackageWindowViewModel
         SettingsWindowViewModel
         SourceEditorViewModel
+        CredentialPromptViewModel
+    end
     subgraph AgentPackageManagement
         PackageSource
         PackageVersion
@@ -27,6 +29,12 @@ flowchart TD
         PackageSourceRegistry
         ZipFolderSourceProvider
         NuGetSourceProvider
+    end
+    subgraph PackageCredentials
+        FeedOrigin
+        SessionCredentialStore
+        PackageCredentialCallback
+        SecretRedactingLogger
     end
     subgraph RepoSync
         PackageContentExtractor
@@ -66,6 +74,12 @@ flowchart TD
     PackageSourceRegistry --> ZipFolderSourceProvider
     PackageSourceRegistry --> NuGetSourceProvider
     ZipFolderSourceProvider --> PackageSource
+    NuGetSourceProvider --> PackageCredentialCallback
+    NuGetSourceProvider --> SecretRedactingLogger
+    PackageCredentialCallback --> SessionCredentialStore
+    PackageCredentialCallback --> FeedOrigin
+    SettingsWindowViewModel --> SourceEditorViewModel
+    PackageCredentialCallback -.->|ICredentialPrompt| CredentialPromptViewModel
     PackageVersionCache --> PackageSourceRegistry
     RepoCardViewModel --> PackageContentExtractor
     PackageZipExtractor --> PackageContentExtractor
@@ -81,7 +95,9 @@ flowchart TD
 logging (`Logging`), and hands off to Avalonia's classic desktop lifetime, which loads settings
 (`Settings`) and shows `MainWindowViewModel`'s window (`LauncherUI`). From there, `LauncherUI`'s
 view-models orchestrate the remaining subsystems: `AgentPackageManagement` for discovering available
-package versions, `RepoSync` for extracting a package zip's managed folders (from a zip or an
+package versions (and, for a NuGet package server, signing in through `PackageCredentials`, which keeps
+credentials in memory only and offers them only to the server they were typed for), `RepoSync` for
+extracting a package zip's managed folders (from a zip or an
 unpacked NuGet package folder) into a repo and displaying release notes, `RepoConfig` for persisting
 each repo's pin, `GitIntegration` for status/pull/branch queries, and `AgentToolLauncher` for
 detecting a shell and launching the configured agentic CLI tool in it. `Utilities` provides shared,
@@ -114,23 +130,41 @@ companion test file).
   capable (see architecture.md's Open Concerns #2).
 
 **Package Sources**: Any number of user-configured sources, each a folder of agent package zip
-files or a NuGet package folder (a local, mapped-drive or UNC folder feed), identified by a unique
+files, a NuGet package folder (a local, mapped-drive or UNC folder feed) or a NuGet package server
+(the V3 service index of, for example, JFrog Artifactory or Azure Artifacts), identified by a unique
 alias.
 
-- *Type*: File.
+- *Type*: File (folders) or network service (servers, HTTP).
 - *Role*: Consumer (`AgentPackageManagement`/`RepoSync` read packages from them).
 - *Contract*: Zip package filenames encode a name and a `PackageVersion`-parsable version (see
   `docs/design/agent-control/agent-package-management/package-source.md`); a NuGet package carries
   its agent files under its `content` folder, and its versions are listed and unpacked by the
   NuGet caching library into a per-source cache AgentControl owns (see
   `docs/design/agent-control/agent-package-management/nuget-source-provider.md`)
-  (`AgentControl-System-MultipleSources`, `AgentControl-System-NuGetSources`). Nothing about a
+  (`AgentControl-System-MultipleSources`, `AgentControl-System-NuGetSources`). A server address must be
+  `https` and end in `index.json`; plain `http` is accepted only when the user explicitly ticks
+  "Allow insecure HTTP" for that source. A server that needs credentials is signed in to as described under
+  *Credentials* below. Nothing about a
   source is ever written to the target repo, including its NuGet configuration. No
-  authentication, checksum, or signature verification is performed for folder sources; the
-  security and integrity of a shared folder is the responsibility of whoever maintains it.
-- *Constraints*: Folder-based sources only; NuGet server sources, credentials and signature
-  enforcement are explicitly later work (a NuGet server location is rejected with a clear error).
-  AgentControl never stores a password or token.
+  checksum or signature verification is performed (signature enforcement is later work); the
+  security and integrity of a shared folder or server is the responsibility of whoever maintains it.
+- *Constraints*: AgentControl never stores a password or token. Users must only add servers they trust
+  (see *Risk Control Measures*).
+
+**Package Server Credentials**: The user name and password or token a package server asks for.
+
+- *Type*: User input through a modal sign-in dialog; HTTP authentication towards the server.
+- *Role*: Consumer (the user supplies them; `PackageCredentials` hands them to the NuGet client).
+- *Contract*: Credentials come, in order, from what NuGet itself knows (a `nuget.config` source with the
+  same address and its stored credentials, or an installed credential-provider plug-in running without
+  interaction), from what the user already typed this session, and only then from the sign-in dialog, at most
+  once per operation (`AgentControl-System-NuGetSources`, `AgentControl-System-CredentialSafety`). A
+  credential the user types is kept in memory for the session only and is offered only to the server it was
+  typed for; it is sent to a server only when that server challenges (HTTP 401), never preemptively. Work the
+  user did not start (the background upgrade check) never opens the dialog
+  (`AgentControl-System-ResponsiveOperations`).
+- *Constraints*: No credential is ever written to the settings file, a repo's pin file, a repo, or the log
+  (`AgentControl-System-CredentialSafety`).
 
 **Per-Repo Pin File**: `.agentcontrol.json` at each tracked repo's root.
 
@@ -192,9 +226,13 @@ override for hermetic testing).
   every `LauncherUI` window and control. See `docs/design/ots/avalonia.md`.
 - **Serilog** (`AgentControl-OTS-Serilog-WriteLogFile`): structured-logging library backing
   the `Logging` subsystem's rolling diagnostic log file. See `docs/design/ots/serilog.md`.
-- **NuGetCaching** (`AgentControl-OTS-NuGetCaching-ListAndCache`): the DemaConsulting.NuGet.Caching
-  library that lists the versions of, and unpacks, packages from NuGet package folder sources
-  for `NuGetSourceProvider`. See `docs/design/ots/nuget-caching.md`.
+- **NuGetCaching** (`AgentControl-OTS-NuGetCaching-ListAndCache`,
+  `AgentControl-OTS-NuGetCaching-ServerAccess`): the DemaConsulting.NuGet.Caching
+  library that lists the versions of, and unpacks, packages from NuGet package folder and server sources
+  for `NuGetSourceProvider`, and whose `NuGetCredential` type and credential callback `PackageCredentials`
+  uses. See `docs/design/ots/nuget-caching.md`. `PackageCredentials` also uses
+  `Microsoft.Extensions.Logging` (the logger abstraction the library takes), which ships with the
+  application's logging stack.
 - **FlaUI** (`AgentControl-OTS-FlaUI-DriveUiTests`): drives the published application's UI
   via Windows UI Automation for end-to-end test scenarios. See `docs/design/ots/flaui.md`.
 - **WiX Toolset** (`AgentControl-OTS-WixToolset-BuildInstaller`): packages the published
@@ -210,7 +248,20 @@ on the next sync/upgrade); this is a disclosed, accepted trade-off, not a defect
 untrusted input: pins are bound to their source alias and never resolved elsewhere
 (`AgentControl-System-SourcePinIntegrity`), NuGet content is read from a private per-source cache
 that rejects links and path traversal, and no secret is ever stored (see
-`docs/design/agent-control/agent-package-management.md` and `repo-sync.md`). The AGENTS.md
+`docs/design/agent-control/agent-package-management.md` and `repo-sync.md`). **Credentials for package
+servers** are the other accepted risk area and are controlled as follows (`AgentControl-System-CredentialSafety`):
+a credential is never persisted (not in the settings file, a pin file, the log or a repo), is kept in memory
+for the session only and cleared at exit, is asked for only through a dialog that shows which server receives
+it, is offered by AgentControl only to the origin (scheme, host and port) of the configured server - a
+redirect target or any other host is answered with no credential and never triggers a dialog - and is only
+sent to a server that challenges it (HTTP 401), never preemptively; plain `http` needs an explicit per-source
+opt-in; and the NuGet client's log output is redacted so secrets, authorization headers and addresses with
+query strings never reach the log (see `docs/design/agent-control/package-credentials.md`). **Residual risk,
+stated honestly:** the origin scoping is a guarantee about what AgentControl itself supplies. Once a server
+has authenticated, the NuGet client answers HTTP 401 challenges from *other* hosts that the server's own
+service index advertises for package resources with the same credential - observed in testing, where a
+second server named by a feed's index received an `Authorization` header. The index of a feed controls where
+its package resources are, so a user must only add servers they trust; the user guide says so. The AGENTS.md
 template-offer feature (`AgentControl-System-AgentsMdTemplate`) is gated by an explicit modal
 yes/no confirmation before any write to a repo's working directory, never overwrites a
 pre-existing `AGENTS.md`, and the decline is permanent (never reset) — mitigating the risk of
@@ -231,18 +282,25 @@ an unwanted or repeated file write.
    (`RepoPinStore.Load`), resolves the current branch and committed-agent-files badge
    (`GitClient`, `CommittedAgentFilesCache`), and checks upgrade availability
    (`PackageSourceRegistry`/`PackageVersionCache`) against the source the pin names - and only
-   that source - showing an error state when that source is not configured.
+   that source - showing an error state when that source is not configured. The background check
+   never opens the sign-in dialog: for a server that needs credentials it uses a credential already
+   typed this session or sets the card's source problem to say a sign-in is needed
+   (`AgentControl-System-ResponsiveOperations`).
 4. User actions on a card dispatch to the relevant subsystem: Pull to `GitClient.Pull`
    (gated on a clean working tree, `AgentControl-System-Pull`); Launch to
    `RepoCardViewModel`'s ensure-synced check (re-extracting via `PackageZipExtractor` only if
    a managed folder is missing) followed by `AgentToolLauncher.BuildProcessStartInfo`
    (`AgentControl-System-Launch`); Select Package to the chosen source's provider
-   (`IPackageSourceProvider.ListVersionsAsync`/`AcquireAsync`) followed by
+   (`IPackageSourceProvider.ListVersionsAsync`/`AcquireAsync`) - for a NuGet server the provider signs
+   in as needed, asking through `AvaloniaCredentialPrompt` and the `CredentialPromptViewModel` dialog
+   when the user started the action and keeping what was typed in `SessionCredentialStore` once the
+   operation succeeded - followed by
    `PackageContentExtractor.Extract` and `RepoPinStore.Save` recording the source alias
    (`AgentControl-System-SelectPackage`, `AgentControl-System-PinFile`); Upgrade to the pin's
    source's latest version followed by the same extract/pin/`ReleaseNotesViewerViewModel`
    display sequence (`AgentControl-System-Upgrade`); Settings to
-   `SettingsWindowViewModel.Save` (sources are added and edited through `SourceEditorViewModel`),
+   `SettingsWindowViewModel.Save` (sources are added and edited through `SourceEditorViewModel`, which can
+   test a server's connection before it is saved),
    applied back through `MainWindowViewModel.ApplySettings`
    (`AgentControl-System-Settings`); and, after a Select Package, Upgrade, or Launch-time
    re-extraction genuinely occurs, `RepoCardViewModel` decides whether to offer the package's
@@ -268,3 +326,6 @@ an unwanted or repeated file write.
   (`AgentControl-System-TestIsolation`).
 - Path safety: all caller-supplied path components are validated by `PathHelpers.SafePathCombine`
   before file-system use.
+- Credential safety: a credential for a package server is never persisted, is kept in memory for the
+  session, is offered only to the server's origin and never reaches the log
+  (`AgentControl-System-CredentialSafety`); users must only add servers they trust.

@@ -97,6 +97,12 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     /// </summary>
     public Task? ListVersionsGate { get; set; }
 
+    /// <summary>
+    ///     Gets or sets an exception that <see cref="ListVersionsAsync"/> throws (after the gate),
+    ///     or <see langword="null"/> to succeed.
+    /// </summary>
+    public Exception? ListVersionsException { get; set; }
+
     /// <inheritdoc />
     public Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken)
     {
@@ -111,11 +117,17 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     {
         Interlocked.Increment(ref _listVersionsCalls);
 
-        // Snapshot the gate so a later change does not affect this call
+        // Snapshot the gate so a later change does not affect this call; waiting honors
+        // cancellation, like a real source does
         var gate = ListVersionsGate;
         if (gate is not null)
         {
-            await gate;
+            await gate.WaitAsync(cancellationToken);
+        }
+
+        if (ListVersionsException is not null)
+        {
+            throw ListVersionsException;
         }
 
         return _packages

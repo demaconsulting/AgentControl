@@ -47,7 +47,7 @@ internal static class PackageSourceIcons
     {
         null => MaterialIconKind.HelpCircleOutline,
         { Type: PackageSourceType.Zip } => MaterialIconKind.FolderZip,
-        { Type: PackageSourceType.NuGet, LocationKind: PackageSourceLocationKind.Server } => MaterialIconKind.Server,
+        { Type: PackageSourceType.NuGet, LocationKind: PackageSourceLocationKind.Server } => MaterialIconKind.ServerNetwork,
         _ => MaterialIconKind.PackageVariant
     };
 

@@ -4,6 +4,7 @@ resource-path:
   - docs/design/agent-control
   - docs/design/agent-control/launcher-ui
   - docs/design/agent-control/agent-package-management
+  - docs/design/agent-control/package-credentials
   - docs/design/agent-control/repo-sync
   - docs/design/agent-control/repo-config
   - docs/design/agent-control/agent-tool-launcher
@@ -25,6 +26,7 @@ input-files:
   - docs/design/agent-control/launcher-ui/select-package-window-view-model.md
   - docs/design/agent-control/launcher-ui/settings-window-view-model.md
   - docs/design/agent-control/launcher-ui/source-editor-view-model.md
+  - docs/design/agent-control/launcher-ui/credential-prompt-view-model.md
   - docs/design/agent-control/agent-package-management.md
   - docs/design/agent-control/agent-package-management/package-source.md
   - docs/design/agent-control/agent-package-management/package-source-registry.md
@@ -32,6 +34,11 @@ input-files:
   - docs/design/agent-control/agent-package-management/nuget-source-provider.md
   - docs/design/agent-control/agent-package-management/package-version.md
   - docs/design/agent-control/agent-package-management/package-version-cache.md
+  - docs/design/agent-control/package-credentials.md
+  - docs/design/agent-control/package-credentials/feed-origin.md
+  - docs/design/agent-control/package-credentials/session-credential-store.md
+  - docs/design/agent-control/package-credentials/package-credential-callback.md
+  - docs/design/agent-control/package-credentials/secret-redacting-logger.md
   - docs/design/agent-control/repo-sync.md
   - docs/design/agent-control/repo-sync/package-content-extractor.md
   - docs/design/agent-control/repo-sync/package-zip-extractor.md

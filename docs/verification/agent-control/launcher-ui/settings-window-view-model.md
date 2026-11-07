@@ -5,7 +5,9 @@
 `SettingsWindowViewModel` is verified with unit tests defined in
 `SettingsWindowViewModelTests.cs`. No Avalonia `Window` is constructed; tests exercise the
 view-model class directly against real `AppSettings` values and an injected folder-exists check
-(so no real folders are needed and a check can be made slow or failing on purpose). The window
+(so no real folders are needed and a check can be made slow or failing on purpose). The server-source
+behavior is in `SettingsWindowServerSourceTests.cs`, which also drives the headless Settings and editor
+windows; the provider factory that the editor's connection test uses is replaced by a fake there. The window
 is exercised by the headless Avalonia tests in `DialogWindowTests.cs` and, end to end with the
 editor dialogs, by the FlaUI tests.
 
@@ -27,7 +29,9 @@ N/A - standard test environment.
 - A source location that embeds a credential is refused with a message that does not repeat it,
   and nothing is saved.
 - The source list shows each source and a folder status without blocking the caller; a folder
-  that cannot be examined shows as missing and pending checks are abandoned on dispose.
+  that cannot be examined shows as missing and pending checks are abandoned on dispose; a server source is
+  shown as "Not checked" without any check.
+- A NuGet server source can be added and edited through the server editor.
 - Add, edit and remove change the list as documented, and a removal's warning names the repos
   pinned to the source.
 - A new source's alias must differ from every configured alias, ignoring case.
@@ -68,24 +72,30 @@ no duplicate entries, and for matching the expected preset names for the OS the 
 **SettingsWindowViewModel_SourceList_ListsSourcesAndChecksFoldersWithoutBlocking**: The configured
 sources are listed in order, an empty configuration reports no sources, a slow folder check shows
 a "checking" state and then its result while the constructor returns immediately, a missing or
-failing check shows as missing, and disposing cancels pending checks. This scenario is tested by
+failing check shows as missing, disposing cancels pending checks, and a saved server source is listed as
+"Not checked" - with the server icon - without the folder check ever running for it. This scenario is tested by
 `SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder`,
 `SettingsWindowViewModel_Constructor_NoSources_ReportsHasNoSources`,
 `SettingsWindowViewModel_Constructor_FolderCheckSlow_ShowsCheckingThenResultWithoutBlocking`,
-`SettingsWindowViewModel_FolderCheck_MissingOrFailing_ShowsMissing`, and
-`SettingsWindowViewModel_Dispose_CancelsPendingFolderChecks`, covering
+`SettingsWindowViewModel_FolderCheck_MissingOrFailing_ShowsMissing`,
+`SettingsWindowViewModel_Dispose_CancelsPendingFolderChecks`, and
+`SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt`, covering
 `AgentControl-SettingsWindowViewModel-SourceList`.
 
 **SettingsWindowViewModel_AddEditRemoveSource_ChangeListAndWarnBeforeRemoval**: The add commands
-request an editor for each source kind; saving an editor adds and selects a zip or NuGet source
-(keeping the NuGet package identifiers), an edit replaces the source in place keeping its alias,
+request an editor for each source kind (including the NuGet server, whose editor is in server mode);
+saving an editor adds and selects a zip or NuGet source
+(keeping the NuGet package identifiers), an edit replaces the source in place keeping its alias, editing a
+listed server opens the server editor whose connection test goes through the supplied provider factory,
 the remove command requests a removal for the selected source, a removal's warning names the
 pinned repos before the source is removed, and the saved settings hold the resulting list in
 order. This scenario is tested by
 `SettingsWindowViewModel_AddCommands_RaiseEditorRequestedForNewSourceOfEachKind`,
 `SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource`,
 `SettingsWindowViewModel_AddNuGetFolderSource_EditorSaved_KeepsPackageIds`,
+`SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor`,
 `SettingsWindowViewModel_EditSource_EditorSaved_ReplacesSourceInPlaceKeepingAlias`,
+`SettingsWindowViewModel_EditServerSource_OpensServerEditorThatTestsThroughTheFactory`,
 `SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource`,
 `SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves`, and
 `SettingsWindowViewModel_Save_AfterAddEditRemove_WritesResultingSourcesInOrder`, covering

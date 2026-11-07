@@ -18,6 +18,7 @@ package AgentControl {
         part program : Program;
         part launcherUi : LauncherUISubsystem;
         part agentPackageManagement : AgentPackageManagementSubsystem;
+        part packageCredentials : PackageCredentialsSubsystem;
         part repoSync : RepoSyncSubsystem;
         part repoConfig : RepoConfigSubsystem;
         part agentToolLauncher : AgentToolLauncherSubsystem;

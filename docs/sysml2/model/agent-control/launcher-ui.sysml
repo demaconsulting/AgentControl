@@ -3,12 +3,13 @@ package AgentControl {
         doc
         /*
          * Presentation layer: the recent-repos main window, per-repo cards, the
-         * package-selection window, the settings window and the package-source editor
-         * window. Also spans the Avalonia .axaml Views and shared MVVM support types
-         * (RelayCommand, AsyncRelayCommand, ViewModelBase, PackageSourceIcons,
-         * PackageSourceItemViewModel, SelectPackageSourceViewModel, FavoriteIconConverter,
-         * FavoriteColorConverter), which are folded into this subsystem-level description
-         * rather than given separate unit files.
+         * package-selection window, the settings window, the package-source editor window
+         * and the sign-in dialog. Also spans the Avalonia .axaml Views (including
+         * CredentialPromptWindow) and shared MVVM support types (RelayCommand,
+         * AsyncRelayCommand, ViewModelBase, PackageSourceIcons, PackageSourceItemViewModel,
+         * SelectPackageSourceViewModel, AvaloniaCredentialPrompt, ConnectionTestResultKind,
+         * FavoriteIconConverter, FavoriteColorConverter), which are folded into this
+         * subsystem-level description rather than given separate unit files.
          */
 
         comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/LauncherUI/ */
@@ -21,6 +22,7 @@ package AgentControl {
         part selectPackageWindowViewModel : SelectPackageWindowViewModel;
         part settingsWindowViewModel : SettingsWindowViewModel;
         part sourceEditorViewModel : SourceEditorViewModel;
+        part credentialPromptViewModel : CredentialPromptViewModel;
         part avalonia : Avalonia;
     }
 }

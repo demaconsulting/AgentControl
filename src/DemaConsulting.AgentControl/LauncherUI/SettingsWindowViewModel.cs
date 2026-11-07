@@ -61,6 +61,12 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     private readonly Func<string, CancellationToken, Task<bool>> _folderExists;
 
     /// <summary>
+    ///     Creates the provider the editor's "Test connection" uses for a server source;
+    ///     <see langword="null"/> lets the editor create a plain one.
+    /// </summary>
+    private readonly Func<PackageSourceDefinition, IPackageSourceProvider>? _providerFactory;
+
+    /// <summary>
     ///     How many recent repos are pinned to each source alias (compared case-insensitively),
     ///     captured when the window opened.
     /// </summary>
@@ -116,15 +122,22 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     /// <param name="folderExists">Tells whether a folder exists, for the sources' status check;
     ///     <see langword="null"/> checks the real file system. Supplied so tests need no real
     ///     folders and the check can be made slow on purpose.</param>
+    /// <param name="providerFactory">Creates the provider the server editor's "Test connection"
+    ///     uses (so the application can give it the session credentials); <see langword="null"/>
+    ///     uses a plain one. Supplied so tests can use a fake.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="initial"/> or
     ///     <paramref name="onSave"/> is <see langword="null"/>.</exception>
     public SettingsWindowViewModel(
-        AppSettings initial, Action<AppSettings> onSave, Func<string, CancellationToken, Task<bool>>? folderExists = null)
+        AppSettings initial,
+        Action<AppSettings> onSave,
+        Func<string, CancellationToken, Task<bool>>? folderExists = null,
+        Func<PackageSourceDefinition, IPackageSourceProvider>? providerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(initial);
         ArgumentNullException.ThrowIfNull(onSave);
 
         _folderExists = folderExists ?? ((path, token) => Task.Run(() => Directory.Exists(path), token));
+        _providerFactory = providerFactory;
         _pinnedRepoCounts = initial.RecentRepos
             .Where(repo => !string.IsNullOrEmpty(repo.PinnedSource))
             .GroupBy(repo => repo.PinnedSource!, StringComparer.OrdinalIgnoreCase)
@@ -144,6 +157,7 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
         SaveCommand = new RelayCommand(Save);
         AddZipSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.Zip, null));
         AddNuGetFolderSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.NuGet, null));
+        AddNuGetServerSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.NuGet, null, server: true));
         EditSourceCommand = new RelayCommand(
             () => RequestEditor(_selectedSource!.Definition.Type, _selectedSource), () => _selectedSource is not null);
         RemoveSourceCommand = new RelayCommand(
@@ -301,6 +315,11 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand AddNuGetFolderSourceCommand { get; }
 
     /// <summary>
+    ///     Gets the command bound to the "Add NuGet-Package Server" button.
+    /// </summary>
+    public RelayCommand AddNuGetServerSourceCommand { get; }
+
+    /// <summary>
     ///     Gets the command bound to the "Edit" button; executable while a source is selected.
     /// </summary>
     public RelayCommand EditSourceCommand { get; }
@@ -336,14 +355,19 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     /// <param name="type">The kind of source to add; ignored when <paramref name="editing"/> is
     ///     supplied.</param>
     /// <param name="editing">The row to edit, or <see langword="null"/> to add a new source.</param>
+    /// <param name="server">Whether a new NuGet source is a server rather than a folder; ignored
+    ///     when <paramref name="editing"/> is supplied.</param>
     /// <returns>An editor whose save adds the new source (selecting it) or replaces the edited one
     ///     in place; its alias check covers every source in the list.</returns>
-    public SourceEditorViewModel CreateEditor(PackageSourceType type, PackageSourceItemViewModel? editing)
+    public SourceEditorViewModel CreateEditor(
+        PackageSourceType type, PackageSourceItemViewModel? editing, bool server = false)
     {
         var editor = new SourceEditorViewModel(
             type,
             editing?.Definition,
-            alias => Sources.Any(item => string.Equals(item.Alias, alias, StringComparison.OrdinalIgnoreCase)));
+            alias => Sources.Any(item => string.Equals(item.Alias, alias, StringComparison.OrdinalIgnoreCase)),
+            server,
+            _providerFactory);
         editor.Saved += (_, definition) =>
         {
             if (editing is null)
@@ -471,8 +495,9 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <param name="type">The kind of source to add.</param>
     /// <param name="editing">The row to edit, or <see langword="null"/> to add.</param>
-    private void RequestEditor(PackageSourceType type, PackageSourceItemViewModel? editing) =>
-        EditorRequested?.Invoke(this, CreateEditor(type, editing));
+    /// <param name="server">Whether a new NuGet source is a server.</param>
+    private void RequestEditor(PackageSourceType type, PackageSourceItemViewModel? editing, bool server = false) =>
+        EditorRequested?.Invoke(this, CreateEditor(type, editing, server));
 
     /// <summary>
     ///     Appends a source to the working list, selects it and starts checking its folder.

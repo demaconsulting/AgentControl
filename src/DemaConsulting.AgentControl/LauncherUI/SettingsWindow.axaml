@@ -27,8 +27,7 @@
     <StackPanel Margin="16" Spacing="12">
 
         <!-- Package sources: where agent packages come from. Each repo is pinned to one source by
-             its alias. The add buttons sit in a wrapping row so a further source type (a NuGet
-             server) can join them without redesigning the layout. -->
+             its alias. The add buttons sit in a wrapping row so the three source types fit. -->
         <TextBlock Text="Package sources" FontWeight="Bold" />
         <TextBlock Text="Agent packages are read from these sources. A repo is pinned to one source by its alias."
                     FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
@@ -38,7 +37,7 @@
                 <TextBlock Name="SourcesEmptyText"
                             AutomationProperties.AutomationId="SourcesEmptyText"
                             IsVisible="{Binding HasNoSources}"
-                            Text="No package sources yet. Add a zip-package folder or a NuGet-package folder below."
+                            Text="No package sources yet. Add a zip-package folder, a NuGet-package folder or a NuGet-package server below."
                             TextWrapping="Wrap" TextAlignment="Center"
                             Opacity="0.65" MaxWidth="360"
                             HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -47,7 +46,7 @@
                           IsVisible="{Binding !HasNoSources}"
                           ItemsSource="{Binding Sources}"
                           SelectedItem="{Binding SelectedSource, Mode=TwoWay}"
-                          MaxHeight="200">
+                          MaxHeight="260">
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="vm:PackageSourceItemViewModel">
                             <Grid ColumnDefinitions="Auto,*,Auto" Margin="2,2">
@@ -110,6 +109,16 @@
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <materialIcons:MaterialIcon Kind="PackageVariant" />
                         <TextBlock Text="Add NuGet-Package Folder" />
+                    </StackPanel>
+                </Button>
+                <Button Name="AddNuGetServerSourceButton"
+                         AutomationProperties.AutomationId="AddNuGetServerSourceButton"
+                         Command="{Binding AddNuGetServerSourceCommand}"
+                         ToolTip.Tip="Add a NuGet server (for example JFrog Artifactory or Azure Artifacts) that serves agent packages"
+                         Margin="0,0,8,4">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <materialIcons:MaterialIcon Kind="ServerNetwork" />
+                        <TextBlock Text="Add NuGet-Package Server" />
                     </StackPanel>
                 </Button>
             </WrapPanel>

@@ -301,8 +301,9 @@
                             <WrapPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
                                         Orientation="Horizontal" Margin="0,4,0,0">
 
-                                <!-- Agent package: robot icon, package name and version, and a small icon
-                                     for the kind of source it came from (zip folder, NuGet folder, ...) -->
+                                <!-- Agent package: robot icon, package name and version, then where it came
+                                     from: the source kind's icon (zip folder, NuGet folder, server) and the
+                                     source's alias as muted text, so the source is recognizable at a glance -->
                                 <Border Name="PackageChip"
                                          Classes="Chip package"
                                          IsVisible="{Binding HasPinnedPackage}"
@@ -315,7 +316,14 @@
                                         <materialIcons:MaterialIcon Name="PackageSourceIcon"
                                                                       AutomationProperties.AutomationId="PackageSourceIcon"
                                                                       Kind="{Binding PinnedSourceIcon}"
-                                                                      Opacity="0.75" />
+                                                                      Width="16" Height="16"
+                                                                      Margin="4,0,0,0"
+                                                                      Opacity="0.9" />
+                                        <TextBlock Name="PackageSourceAliasText"
+                                                    AutomationProperties.AutomationId="PackageSourceAliasText"
+                                                    Text="{Binding PinnedSourceLabel}"
+                                                    Opacity="0.7"
+                                                    MaxWidth="120" TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
                                 </Border>
 

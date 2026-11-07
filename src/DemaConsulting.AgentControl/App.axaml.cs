@@ -22,6 +22,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using DemaConsulting.AgentControl.LauncherUI;
+using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.Settings;
 using DemaConsulting.AgentControl.Startup;
 
@@ -69,7 +70,13 @@ internal sealed class App : Application
             // launcher window opens with the user's recent repos and preferences already
             // populated.
             var settings = SettingsStore.Load(Options?.ConfigDirectory);
-            var viewModel = new MainWindowViewModel(settings, Options, Options?.ConfigDirectory);
+
+            // The session credential store holds what the user types into the sign-in dialog, in
+            // memory only; it is emptied when the application exits
+            var credentialStore = new SessionCredentialStore();
+            var credentials = new PackageCredentialContext(credentialStore, new AvaloniaCredentialPrompt());
+            var viewModel = new MainWindowViewModel(settings, Options, Options?.ConfigDirectory, credentials);
+            desktop.Exit += (_, _) => credentialStore.Clear();
 
             desktop.MainWindow = new MainWindow
             {
