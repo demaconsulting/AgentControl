@@ -28,6 +28,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Logging;
+using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoSync;
 using Microsoft.Extensions.Logging;
 
@@ -218,7 +219,7 @@ internal sealed partial class MainWindow : Window
         {
             // Invalid source configuration must be reported to the user, not crash the
             // application from this fire-and-forget event handler
-            await new MessageBoxWindow($"Package sources are unavailable: {ex.Message}").ShowDialog(this);
+            await new MessageBoxWindow($"Package sources are unavailable: {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
             return;
         }
 

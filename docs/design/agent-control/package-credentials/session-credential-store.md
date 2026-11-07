@@ -28,12 +28,15 @@ different sources run concurrently.
 **TryGet(origin, out credential)**: Finds the credential remembered for exactly this origin. A different
 port, scheme or host finds nothing.
 
-**Set(origin, credential)**: Remembers a credential for an origin, replacing any earlier one.
+**Set(origin, credential)**: Remembers a credential for an origin, replacing any earlier one. The secret is
+registered with `SecretRedactor` (and the replaced secret withdrawn) under a lock so each stored secret is
+registered exactly once (`AgentControl-SessionCredentialStore-RegistersSecretsForRedaction`).
 
-**Forget(origin)**: Removes the credential of one origin (used when the server rejected it) and reports
-whether one was removed; other origins are untouched.
+**Forget(origin)**: Removes the credential of one origin (used when the server rejected it), withdraws its
+secret from `SecretRedactor`, and reports whether one was removed; other origins are untouched.
 
-**Clear()**: Removes every credential; `App` calls it when the desktop lifetime exits.
+**Clear()**: Removes every credential and withdraws their secrets; `App` calls it when the desktop lifetime
+exits.
 
 #### Error Handling
 

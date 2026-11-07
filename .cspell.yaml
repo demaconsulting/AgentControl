@@ -16,6 +16,7 @@ language: en
 words:
   - agentcontrol
   - abbrevref
+  - apikey
   - ARGLOGGER
   - arglogger
   - ARGLOGGERSTUB
@@ -27,9 +28,11 @@ words:
   - favorited
   - gitdir
   - headlessly
+  - HMAC
   - lsfiles
   - Mvvm
   - MVVM
+  - NTLM
   - Postconditions
   - Inlines
   - inlines

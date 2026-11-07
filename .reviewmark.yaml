@@ -411,7 +411,10 @@ reviews:
       - "docs/design/agent-control/package-credentials/secret-redacting-logger.md"
       - "docs/verification/agent-control/package-credentials/secret-redacting-logger.md"
       - "src/**/PackageCredentials/SecretRedactingLogger.cs"
+      - "src/**/PackageCredentials/SecretRedactor.cs"
       - "test/**/PackageCredentials/SecretRedactingLoggerTests.cs"
+      - "test/**/PackageCredentials/SecretRedactorTests.cs"
+      - "test/**/LauncherUI/PackageSourceErrorRedactionTests.cs"
       - "test/**/PackageCredentials/ListLogger.cs"
 
   # AgentControl - RepoSync

@@ -57,14 +57,19 @@ credential callback.
   so that no dialog ever appears unprompted (`AgentControl-LauncherUI-BackgroundChecksDoNotPrompt`).
 - *Constraints*: None beyond immutability.
 
-**SecretRedactingLogger**: The logger the NuGet library is given.
+**SecretRedactingLogger**: The logger the NuGet library and the repo card are given, with the redaction
+engine and the secret-free exception stand-in that go with it.
 
-- *Type*: In-process .NET `ILogger` implementation wrapping another `ILogger`.
+- *Type*: In-process .NET `ILogger` implementation wrapping another `ILogger`, plus a static redaction engine
+  (`SecretRedactor`) and `SanitizedException`.
 - *Role*: Provider.
-- *Contract*: Forwards each message to the wrapped logger with URL user information, query strings,
-  fragments and authorization header values removed
+- *Contract*: Forwards each message, structured property value, scope and exception to the wrapped logger
+  with URL user information, query strings, fragments, the complete value of every authorization header
+  (whatever the scheme) and every registered secret value removed; the engine also gives the user interface
+  `SafeMessage` text and gives `PackageSourceAccessException` a sanitized description of an inner exception
   (`AgentControl-PackageCredentials-SecretsNeverLogged`).
-- *Constraints*: Only text is forwarded; structured state and stack traces are not.
+- *Constraints*: An exception is forwarded only as a sanitized stand-in (redacted type, message chain and
+  stack trace); the original object, its inner exceptions and its data are never forwarded or kept.
 
 ### Design
 
@@ -75,7 +80,11 @@ server's `FeedOrigin`, hands its `Callback` to the NuGet library, and afterwards
 operation succeeded or `Reject` when the server refused a credential. The NuGet library may challenge
 several addresses and retry; the callback answers the first challenge once (store first, then the
 prompt) and shares that answer, including a "no", with every later challenge of the operation.
-`SecretRedactingLogger` wraps the application's logger before it is given to the NuGet library.
+`SecretRedactingLogger` wraps the application's logger before it is given to the NuGet library (and is the
+logger of the repo card), and every secret in use is registered with its `SecretRedactor`: the store
+registers a credential for as long as it stores it, and the callback registers a credential the user just
+typed until the operation ends (`Commit`, `Reject` or `Release`), so even an unforeseen path cannot put the
+password into a log line, a property, a scope or an exception message.
 
 **Silent and prompting attempts.** The callback can be created with or without a prompt. The NuGet
 library consults the callback first and only when it yields nothing falls through to its own credential

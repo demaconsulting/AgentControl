@@ -81,7 +81,7 @@ public class PackageCredentialsSubsystemTests
         // Arrange: a remembered credential that the feed will reject, and a user who types a new one
         var store = new SessionCredentialStore();
         var origin = FeedOrigin.Create(FeedIndex);
-        store.Set(origin, new NuGetCredential("svc", "stale"));
+        store.Set(origin, new NuGetCredential("svc", "pw-stale-sub"));
         var prompt = new FakeCredentialPrompt();
         prompt.EnqueueAnswer(new NuGetCredential("svc", SentinelPassword));
 
@@ -96,7 +96,7 @@ public class PackageCredentialsSubsystemTests
         asking.Commit();
 
         // Assert
-        Assert.Equal("stale", offered!.Secret);
+        Assert.Equal("pw-stale-sub", offered!.Secret);
         Assert.Equal(SentinelPassword, typed!.Secret);
         Assert.True(store.TryGet(origin, out var remembered));
         Assert.Equal(SentinelPassword, remembered!.Secret);

@@ -49,10 +49,16 @@ open.
 
 **Commit()**: Stores the credential in the session store, but only when it came from the prompt (one that
 came from the store is already there). The owner calls it after the operation succeeded, so a wrong
-credential is never kept (`AgentControl-PackageCredentialCallback-CommitOnSuccess`).
+credential is never kept (`AgentControl-PackageCredentialCallback-CommitOnSuccess`). It then calls `Release`.
 
 **Reject()**: Forgets the server's remembered credential, for when the server refused one this operation
-offered.
+offered, and calls `Release`.
+
+**Release()**: Withdraws the credential the user typed during this operation from `SecretRedactor`, where
+the callback registered it as soon as the prompt returned it; safe to call more than once. The owner calls it
+in a `finally`, so a typed secret never stays tracked after an operation that was canceled or failed for
+another reason; a credential that `Commit` stored stays registered by the store
+(`AgentControl-PackageCredentialCallback-RegistersTypedSecret`).
 
 #### Error Handling
 

@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.PackageCredentials;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
 
@@ -442,7 +443,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         {
             // An unreachable or misconfigured source is reported on its own row; it must not
             // stop the other sources from loading
-            source.SetFailed($"This source could not be read: {ex.Message}");
+            source.SetFailed($"This source could not be read: {SecretRedactor.SafeMessage(ex)}");
         }
     }
 
@@ -487,7 +488,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         {
             if (generation == _versionsGeneration)
             {
-                VersionsError = $"The versions of '{packageName}' could not be read: {ex.Message}";
+                VersionsError = $"The versions of '{packageName}' could not be read: {SecretRedactor.SafeMessage(ex)}";
             }
         }
         finally

@@ -147,7 +147,12 @@ one preemptively.
 - Messages and logs: the NuGet library receives a `SecretRedactingLogger`-wrapped logger, and every
   exception message the provider raises names the source alias and the server's origin (scheme, host,
   port) only — never a path, a query string or a credential
-  (`AgentControl-NuGetSourceProvider-SecretsNotLogged`).
+  (`AgentControl-NuGetSourceProvider-SecretsNotLogged`). The library's own exception is never kept: a
+  `PackageSourceAccessException` stores only a `SanitizedException` description of its cause (redacted type,
+  message chain and stack trace), any other exception type the library or the network stack throws during a
+  server operation is wrapped the same way as `Unreachable`, and the password being tried is registered with
+  the redaction engine while it is in use. The failure is described (and so sanitized) before the rejected
+  credential is forgotten.
 - The unpacked package is only read, never modified.
 
 #### Error Handling

@@ -32,9 +32,17 @@ namespace DemaConsulting.AgentControl.Tests.PackageCredentials;
 internal sealed class ListLogger : ILogger
 {
     /// <summary>
-    ///     Gets the formatted messages received, with each exception's text appended.
+    ///     Gets the formatted messages received, with each exception's text and the structured
+    ///     property values (<c>name=value</c> pairs) appended, exactly as a structured sink could
+    ///     record them.
     /// </summary>
     public List<string> Lines { get; } = [];
+
+    /// <summary>
+    ///     Gets the text of every scope state received by <see cref="BeginScope{TState}"/>
+    ///     (<c>name=value</c> pairs for structured state).
+    /// </summary>
+    public List<string> Scopes { get; } = [];
 
     /// <summary>
     ///     Gets or sets the lowest level that is enabled.
@@ -55,7 +63,15 @@ internal sealed class ListLogger : ILogger
 
     /// <inheritdoc />
     public IDisposable? BeginScope<TState>(TState state)
-        where TState : notnull => null;
+        where TState : notnull
+    {
+        lock (Lines)
+        {
+            Scopes.Add(Describe(state));
+        }
+
+        return null;
+    }
 
     /// <inheritdoc />
     public bool IsEnabled(LogLevel logLevel) => logLevel >= MinimumLevel;
@@ -66,7 +82,20 @@ internal sealed class ListLogger : ILogger
     {
         lock (Lines)
         {
-            Lines.Add(formatter(state, exception) + (exception is null ? string.Empty : " " + exception));
+            Lines.Add(
+                formatter(state, exception) +
+                (state is IEnumerable<KeyValuePair<string, object?>> ? " {" + Describe(state) + "}" : string.Empty) +
+                (exception is null ? string.Empty : " " + exception));
         }
     }
+
+    /// <summary>
+    ///     Renders a state object the way a structured sink would see it.
+    /// </summary>
+    /// <param name="state">The state.</param>
+    /// <returns>The <c>name=value</c> pairs of structured state, otherwise the state's text.</returns>
+    private static string Describe(object? state) =>
+        state is IEnumerable<KeyValuePair<string, object?>> pairs
+            ? string.Join(";", pairs.Select(pair => $"{pair.Key}={pair.Value}"))
+            : state?.ToString() ?? string.Empty;
 }

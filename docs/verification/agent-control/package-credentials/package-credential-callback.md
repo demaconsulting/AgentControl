@@ -55,3 +55,9 @@ constructor arguments are refused. This scenario is tested by
 `PackageCredentialCallback_Reject_SessionCredential_IsForgotten` and
 `PackageCredentialCallback_Constructor_NullArguments_Throw`, covering
 `AgentControl-PackageCredentialCallback-CommitOnSuccess`.
+
+**PackageCredentialCallback_RegistersTypedSecret**: A credential obtained from the prompt is removed from text
+by the redaction engine while the operation runs; `Release` (also when repeated) and `Reject` withdraw it;
+`Commit` leaves it registered by the store until the store forgets it. This scenario is tested by
+`PackageCredentialCallback_PromptedCredential_IsRegisteredForRedactionUntilTheOperationEnds`, covering
+`AgentControl-PackageCredentialCallback-RegistersTypedSecret`.

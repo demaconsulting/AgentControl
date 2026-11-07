@@ -21,6 +21,7 @@
 using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.PackageCredentials;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
 
@@ -591,11 +592,11 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         }
         catch (PackageSourceAccessException ex)
         {
-            SetTestResult(ConnectionTestResultKind.Failed, GetFailureTitle(ex.Kind), ex.Message);
+            SetTestResult(ConnectionTestResultKind.Failed, GetFailureTitle(ex.Kind), SecretRedactor.SafeMessage(ex));
         }
         catch (InvalidOperationException ex)
         {
-            SetTestResult(ConnectionTestResultKind.Failed, "Connection failed", ex.Message);
+            SetTestResult(ConnectionTestResultKind.Failed, "Connection failed", SecretRedactor.SafeMessage(ex));
         }
     }
 
@@ -608,7 +609,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         SetTestResult(
             ConnectionTestResultKind.Failed,
             "Connection failed",
-            $"The test could not be completed: {exception.Message}");
+            $"The test could not be completed: {SecretRedactor.SafeMessage(exception)}");
 
     /// <summary>
     ///     Chooses the headline for a failure.

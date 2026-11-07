@@ -209,6 +209,9 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
         Assert.Equal(0, store.Count);
         Assert.Contains("rejected the credentials", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(SentinelPassword, ex.ToString(), StringComparison.Ordinal);
+
+        // The library's exception object is not kept, only a secret-free description of it
+        Assert.IsType<SanitizedException>(ex.InnerException);
     }
 
     /// <summary>

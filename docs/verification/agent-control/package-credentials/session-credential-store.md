@@ -35,3 +35,9 @@ whether one was removed; `Clear` forgets every credential. This scenario is test
 `SessionCredentialStore_Forget_StoredOrigin_RemovesOnlyThatCredential` and
 `SessionCredentialStore_Clear_StoredCredentials_ForgetsAll`, covering
 `AgentControl-SessionCredentialStore-ForgetAndClear`.
+
+**SessionCredentialStore_RegistersSecretsForRedaction**: A stored secret is removed from text by the
+redaction engine; replacing the credential withdraws the old secret and registers the new one; `Forget` and
+`Clear` withdraw the secret. This scenario is tested by
+`SessionCredentialStore_SetReplaceForgetAndClear_RegistersAndWithdrawsTheSecretForRedaction`, covering
+`AgentControl-SessionCredentialStore-RegistersSecretsForRedaction`.

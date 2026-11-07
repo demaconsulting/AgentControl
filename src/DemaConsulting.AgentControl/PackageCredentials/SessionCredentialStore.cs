@@ -41,7 +41,9 @@ namespace DemaConsulting.AgentControl.PackageCredentials;
 ///     <para>
 ///     A credential is stored only after an operation that used it succeeded, and is forgotten
 ///     (<see cref="Forget"/>) as soon as a feed rejects it, so a wrong or revoked credential is
-///     never reused. Thread-safe: operations on different sources run concurrently.
+///     never reused. Every stored secret is registered with <see cref="SecretRedactor"/> for as long
+///     as it is stored, so an occurrence of it in any log text or exception message is removed.
+///     Thread-safe: operations on different sources run concurrently.
 ///     </para>
 /// </remarks>
 internal sealed class SessionCredentialStore
@@ -50,6 +52,12 @@ internal sealed class SessionCredentialStore
     ///     The remembered credentials by feed origin.
     /// </summary>
     private readonly ConcurrentDictionary<FeedOrigin, NuGetCredential> _credentials = new();
+
+    /// <summary>
+    ///     Serializes changes, so each stored credential is registered with, and withdrawn from,
+    ///     the secret redactor exactly once.
+    /// </summary>
+    private readonly object _gate = new();
 
     /// <summary>
     ///     Gets how many feeds currently have a remembered credential. Exposed for display and
@@ -83,7 +91,19 @@ internal sealed class SessionCredentialStore
     {
         ArgumentNullException.ThrowIfNull(origin);
         ArgumentNullException.ThrowIfNull(credential);
-        _credentials[origin] = credential;
+
+        // The secret is registered for redaction before it is visible to anything else, and the
+        // replaced credential (if any) is withdrawn
+        lock (_gate)
+        {
+            SecretRedactor.Register(credential);
+            if (_credentials.TryGetValue(origin, out var replaced))
+            {
+                SecretRedactor.Unregister(replaced);
+            }
+
+            _credentials[origin] = credential;
+        }
     }
 
     /// <summary>
@@ -97,11 +117,31 @@ internal sealed class SessionCredentialStore
     public bool Forget(FeedOrigin origin)
     {
         ArgumentNullException.ThrowIfNull(origin);
-        return _credentials.TryRemove(origin, out _);
+        lock (_gate)
+        {
+            if (!_credentials.TryRemove(origin, out var removed))
+            {
+                return false;
+            }
+
+            SecretRedactor.Unregister(removed);
+            return true;
+        }
     }
 
     /// <summary>
     ///     Forgets every remembered credential, for when the application exits.
     /// </summary>
-    public void Clear() => _credentials.Clear();
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            foreach (var credential in _credentials.Values)
+            {
+                SecretRedactor.Unregister(credential);
+            }
+
+            _credentials.Clear();
+        }
+    }
 }

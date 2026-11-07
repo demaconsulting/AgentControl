@@ -178,13 +178,17 @@ sections:
       - id: AgentControl-NuGetSourceProvider-SecretsNotLogged
         title: >-
           The NuGetSourceProvider class shall ensure that no password, token, authorization
-          header value or web-address query string reaches the application log during any sign-in
-          flow, whether it succeeds or fails.
+          header value or web-address query string reaches the application log, or the exception
+          it raises (including its inner exception), during any sign-in flow, whether it succeeds
+          or fails.
         justification: |
           The diagnostic log is a plain file users attach to reports; the NuGet client writes the
-          addresses it requests and the errors it meets, which can quote a secret.
+          addresses it requests and the errors it meets, which can quote a secret, and a raw
+          library exception kept as an inner exception would carry that text to wherever the
+          exception is later logged or shown.
         tests:
           - NuGetSourceProvider_SignInFlows_NeverLogTheSecret
+          - NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt
 
       - id: AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource
         title: >-

@@ -169,7 +169,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     packages, pulling the repo, and launching the agent tool - so an operator can audit
     ///     what happened (and when) from the log file, not just from transient UI status text.
     /// </summary>
-    private readonly ILogger<RepoCardViewModel> _logger = AppLogging.Factory.CreateLogger<RepoCardViewModel>();
+    private readonly ILogger _logger = new SecretRedactingLogger(AppLogging.Factory.CreateLogger<RepoCardViewModel>());
 
     /// <summary>
     ///     Initializes a new <see cref="RepoCardViewModel"/> for a single recent repo.
@@ -1284,7 +1284,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 _logger.LogError(ex, "Failed to sync agent files for repo '{RepoName}' before launch", RepoName);
             }
 
-            ErrorOccurred?.Invoke(this, $"Failed to sync agent files: {ex.Message} Launching anyway.");
+            ErrorOccurred?.Invoke(this, $"Failed to sync agent files: {SecretRedactor.SafeMessage(ex)} Launching anyway.");
             return false;
         }
         catch (DirectoryNotFoundException ex)
@@ -1295,7 +1295,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     ex, "Package source is unreachable while syncing repo '{RepoName}' before launch", RepoName);
             }
 
-            ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message} Launching anyway.");
+            ErrorOccurred?.Invoke(this, $"Package source is unreachable: {SecretRedactor.SafeMessage(ex)} Launching anyway.");
             return false;
         }
     }
@@ -1385,7 +1385,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
         catch (InvalidOperationException ex)
         {
-            ErrorOccurred?.Invoke(this, $"Upgrade failed: {ex.Message}");
+            ErrorOccurred?.Invoke(this, $"Upgrade failed: {SecretRedactor.SafeMessage(ex)}");
             return;
         }
 
@@ -1420,7 +1420,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 _logger.LogError(ex, "Package source is unreachable while upgrading repo '{RepoName}'", RepoName);
             }
 
-            ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message}");
+            ErrorOccurred?.Invoke(this, $"Package source is unreachable: {SecretRedactor.SafeMessage(ex)}");
             return;
         }
         catch (InvalidOperationException ex)
@@ -1430,7 +1430,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 _logger.LogError(ex, "Package source failed while upgrading repo '{RepoName}'", RepoName);
             }
 
-            ErrorOccurred?.Invoke(this, $"Upgrade failed: {ex.Message}");
+            ErrorOccurred?.Invoke(this, $"Upgrade failed: {SecretRedactor.SafeMessage(ex)}");
             return;
         }
 
@@ -1501,7 +1501,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
         catch (InvalidOperationException ex)
         {
-            ErrorOccurred?.Invoke(this, $"Select Package failed: {ex.Message}");
+            ErrorOccurred?.Invoke(this, $"Select Package failed: {SecretRedactor.SafeMessage(ex)}");
             return;
         }
 
@@ -1521,7 +1521,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
         catch (DirectoryNotFoundException ex)
         {
-            ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message}");
+            ErrorOccurred?.Invoke(this, $"Package source is unreachable: {SecretRedactor.SafeMessage(ex)}");
             return;
         }
         catch (InvalidOperationException ex)
@@ -1531,7 +1531,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 _logger.LogError(ex, "Package source failed while selecting a package for repo '{RepoName}'", RepoName);
             }
 
-            ErrorOccurred?.Invoke(this, $"Select Package failed: {ex.Message}");
+            ErrorOccurred?.Invoke(this, $"Select Package failed: {SecretRedactor.SafeMessage(ex)}");
             return;
         }
 
@@ -1664,7 +1664,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     failureVerb, package.PackageName, package.Version, RepoName);
             }
 
-            ErrorOccurred?.Invoke(this, $"{failureVerb} failed: {ex.Message}");
+            ErrorOccurred?.Invoke(this, $"{failureVerb} failed: {SecretRedactor.SafeMessage(ex)}");
         }
         catch (DirectoryNotFoundException ex)
         {
@@ -1674,7 +1674,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     ex, "Package source is unreachable while applying a package to repo '{RepoName}'", RepoName);
             }
 
-            ErrorOccurred?.Invoke(this, $"Package source is unreachable: {ex.Message}");
+            ErrorOccurred?.Invoke(this, $"Package source is unreachable: {SecretRedactor.SafeMessage(ex)}");
         }
     }
 
@@ -2074,7 +2074,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 // background check must not ask: the card says what to do instead
                 if (ex is PackageSourceAccessException { Kind: PackageSourceFailureKind.AuthenticationFailed } && !allowPrompt)
                 {
-                    SourceProblem = $"{ex.Message} Use the card's \"...\" menu > Refresh to sign in.";
+                    SourceProblem = $"{SecretRedactor.SafeMessage(ex)} Use the card's \"...\" menu > Refresh to sign in.";
                 }
             }
         }
@@ -2201,7 +2201,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             _logger.LogError(exception, "An operation on repo '{RepoName}' failed unexpectedly", RepoName);
         }
 
-        ErrorOccurred?.Invoke(this, $"The operation failed: {exception.Message}");
+        ErrorOccurred?.Invoke(this, $"The operation failed: {SecretRedactor.SafeMessage(exception)}");
     }
 
     /// <summary>

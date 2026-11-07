@@ -98,6 +98,12 @@ internal sealed class PackageCredentialCallback
     private Task<NuGetCredential?>? _answer;
 
     /// <summary>
+    ///     The typed credential this callback registered with <see cref="SecretRedactor"/> and has
+    ///     not yet released.
+    /// </summary>
+    private NuGetCredential? _registeredCredential;
+
+    /// <summary>
     ///     Initializes the callback for one operation against one feed.
     /// </summary>
     /// <param name="feed">The origin of the feed the operation talks to.</param>
@@ -205,6 +211,28 @@ internal sealed class PackageCredentialCallback
             _store.Set(_feed, SuppliedCredential);
             _logger?.LogInformation("A credential for {FeedOrigin} is remembered for this session.", _feed);
         }
+
+        Release();
+    }
+
+    /// <summary>
+    ///     Withdraws the credential the user typed during this operation from secret redaction, for
+    ///     when the operation is over. A credential kept by <see cref="Commit"/> stays registered by
+    ///     the store; one that was not kept stops being tracked. Safe to call more than once.
+    /// </summary>
+    public void Release()
+    {
+        NuGetCredential? credential;
+        lock (_gate)
+        {
+            credential = _registeredCredential;
+            _registeredCredential = null;
+        }
+
+        if (credential is not null)
+        {
+            SecretRedactor.Unregister(credential);
+        }
     }
 
     /// <summary>
@@ -217,6 +245,8 @@ internal sealed class PackageCredentialCallback
         {
             _logger?.LogInformation("The remembered credential for {FeedOrigin} was rejected and forgotten.", _feed);
         }
+
+        Release();
     }
 
     /// <summary>
@@ -251,6 +281,13 @@ internal sealed class PackageCredentialCallback
             UserDeclined = true;
             _logger?.LogDebug("The user declined to sign in to {FeedOrigin}.", _feed);
             return null;
+        }
+
+        // From here the typed secret is in use: register it for redaction until Release
+        lock (_gate)
+        {
+            SecretRedactor.Register(entered);
+            _registeredCredential = entered;
         }
 
         SuppliedCredential = entered;

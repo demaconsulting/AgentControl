@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.PackageCredentials;
 
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 
@@ -98,7 +99,11 @@ public class PackageSourceServerLocationTests
         // Assert
         Assert.Equal(PackageSourceFailureKind.TimedOut, exception.Kind);
         Assert.Equal("took too long", exception.Message);
-        Assert.Same(inner, exception.InnerException);
+
+        // Only a sanitized description of the cause is kept, never the original object
+        var cause = Assert.IsType<SanitizedException>(exception.InnerException);
+        Assert.NotSame(inner, cause);
+        Assert.Contains("inner detail", cause.Message, StringComparison.Ordinal);
         Assert.IsAssignableFrom<InvalidOperationException>(exception);
     }
 

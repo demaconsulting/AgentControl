@@ -18,47 +18,47 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using System.Text.RegularExpressions;
+using System.Collections;
 using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.PackageCredentials;
 
 /// <summary>
-///     A logger wrapper that removes anything that could be a secret - URL user information, query
-///     strings and fragments, and authorization header values - from every message before it
-///     reaches the application log.
+///     A logger wrapper that removes anything that could be a secret from everything that reaches
+///     the application log: the formatted message, every structured property value, scope state
+///     and the exception (which is replaced by a secret-free description).
 /// </summary>
 /// <remarks>
 ///     <para>
 ///     The NuGet library reports its network activity (which URLs it requested, why a request
-///     failed) to the logger it is given. Those messages are valuable for diagnosing an
-///     unreachable feed, but a redirect to a download service can carry a signed-URL token in a
-///     query string, and an exception message can quote one. Rather than trust every message
-///     source, all text is passed through <see cref="Redact"/>, so the rule "secrets,
-///     Authorization headers and full URLs with query strings never reach the log" holds
-///     regardless of what the library writes. Exceptions are reduced to their type and redacted
-///     message (no stack trace or inner exception is forwarded, which keeps the guarantee
-///     simple). The user name and password a person types are never given to this logger at all;
-///     this wrapper is a second line of defense for the URL-borne and header-borne secrets.
-///     Stateless apart from the wrapped logger, and thread-safe when that logger is.
+///     failed) to the logger it is given, and the application's own code logs failures whose
+///     exceptions may quote a URL, a header or a credential. Rather than trust every message
+///     source, each piece of text is passed through <see cref="SecretRedactor"/>, so the rule
+///     "secrets, Authorization headers and full URLs with query strings never reach the log" holds
+///     regardless of what the caller writes. Structure is preserved: the message template and the
+///     property names are forwarded, with each property value redacted (numbers, booleans and
+///     similar values pass through unchanged), so structured sinks keep working. Exceptions are
+///     forwarded as <see cref="SanitizedException"/> (redacted type, message chain and stack
+///     trace; the original object, its inner exceptions and its data are not forwarded).
+///     </para>
+///     <para>
+///     The user name and password a person types are never given to this logger by AgentControl;
+///     this wrapper is the safety net that makes the guarantee hold even when some other code
+///     path - or a library - puts a secret into a message. Stateless apart from the wrapped
+///     logger, and thread-safe when that logger is.
 ///     </para>
 /// </remarks>
-internal sealed partial class SecretRedactingLogger : ILogger
+internal sealed class SecretRedactingLogger : ILogger
 {
     /// <summary>
-    ///     The text that replaces a removed secret.
-    /// </summary>
-    private const string Redacted = "[redacted]";
-
-    /// <summary>
-    ///     The logger that receives the redacted messages.
+    ///     The logger that receives the redacted output.
     /// </summary>
     private readonly ILogger _inner;
 
     /// <summary>
     ///     Initializes the wrapper.
     /// </summary>
-    /// <param name="inner">The logger that receives the redacted messages.</param>
+    /// <param name="inner">The logger that receives the redacted output.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="inner"/> is
     ///     <see langword="null"/>.</exception>
     public SecretRedactingLogger(ILogger inner)
@@ -67,50 +67,19 @@ internal sealed partial class SecretRedactingLogger : ILogger
         _inner = inner;
     }
 
-    /// <summary>
-    ///     Matches an <c>http</c>/<c>https</c> URL inside free text, up to the next character
-    ///     that cannot belong to a URL.
-    /// </summary>
-    /// <returns>The compiled expression.</returns>
-    [GeneratedRegex(@"https?://[^\s'""<>)\]]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex UrlPattern();
-
-    /// <summary>
-    ///     Matches an authorization header or scheme followed by its credential
-    ///     (<c>Authorization: Basic abc</c>, <c>Bearer abc</c>).
-    /// </summary>
-    /// <returns>The compiled expression.</returns>
-    [GeneratedRegex(
-        @"(?<head>(authorization|proxy-authorization)\s*[:=]\s*)(?<scheme>(basic|bearer|negotiate)\s+)?[^\s,;]+|(?<head2>\b(basic|bearer)\s+)[A-Za-z0-9+/=._~-]{8,}",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex AuthorizationPattern();
-
-    /// <summary>
-    ///     Removes secrets from free text.
-    /// </summary>
-    /// <param name="text">The message text; <see langword="null"/> is treated as empty.</param>
-    /// <returns>The text with each URL reduced to scheme, host, port and path (user information,
-    ///     query string and fragment removed) and each authorization credential replaced by a
-    ///     placeholder.</returns>
-    public static string Redact(string? text)
-    {
-        if (string.IsNullOrEmpty(text))
-        {
-            return string.Empty;
-        }
-
-        // Header values first, then URLs, so a URL inside a header value is not half-processed
-        var withoutHeaders = AuthorizationPattern().Replace(
-            text,
-            match => match.Groups["head"].Success
-                ? $"{match.Groups["head"].Value}{match.Groups["scheme"].Value}{Redacted}"
-                : $"{match.Groups["head2"].Value}{Redacted}");
-        return UrlPattern().Replace(withoutHeaders, match => RedactUrl(match.Value));
-    }
-
     /// <inheritdoc />
     public IDisposable? BeginScope<TState>(TState state)
-        where TState : notnull => _inner.BeginScope(state);
+        where TState : notnull
+    {
+        // Scope state is forwarded like message state: structured pairs with redacted values, or
+        // redacted text for anything else
+        if (state is IEnumerable<KeyValuePair<string, object?>> pairs)
+        {
+            return _inner.BeginScope(new RedactedState(pairs, null));
+        }
+
+        return _inner.BeginScope(SecretRedactor.Redact(state.ToString()));
+    }
 
     /// <inheritdoc />
     public bool IsEnabled(LogLevel logLevel) => _inner.IsEnabled(logLevel);
@@ -128,32 +97,61 @@ internal sealed partial class SecretRedactingLogger : ILogger
             return;
         }
 
-        // Format first, redact the final text, and forward only text: structured values could
-        // carry the secrets this wrapper exists to remove
-        var message = Redact(formatter(state, null));
-        if (exception is not null)
-        {
-            message += $" ({exception.GetType().Name}: {Redact(exception.Message)})";
-        }
+        // Format first and redact the final text; redact each structured value separately so the
+        // properties a sink records are clean too
+        var message = SecretRedactor.Redact(formatter(state, null));
+        var pairs = state as IEnumerable<KeyValuePair<string, object?>> ?? [];
+        var redactedState = new RedactedState(pairs, message);
+        var sanitized = exception is null ? null : SecretRedactor.Sanitize(exception);
 
-        _inner.Log(logLevel, eventId, message, null, static (text, _) => text);
+        _inner.Log(logLevel, eventId, redactedState, sanitized, static (s, _) => s.ToString());
     }
 
     /// <summary>
-    ///     Reduces one URL to scheme, host, port and path.
+    ///     Structured log or scope state whose values have been redacted.
     /// </summary>
-    /// <param name="url">The URL text found in a message.</param>
-    /// <returns>The URL without user information, query string or fragment; when the text cannot
-    ///     be parsed, everything from the first <c>?</c>, <c>#</c> or <c>@</c> is dropped.</returns>
-    private static string RedactUrl(string url)
+    private sealed class RedactedState : IReadOnlyList<KeyValuePair<string, object?>>
     {
-        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        /// <summary>
+        ///     The pairs, redacted.
+        /// </summary>
+        private readonly List<KeyValuePair<string, object?>> _pairs;
+
+        /// <summary>
+        ///     The formatted, redacted message, or <see langword="null"/> for scope state.
+        /// </summary>
+        private readonly string? _message;
+
+        /// <summary>
+        ///     Initializes the state from the original pairs.
+        /// </summary>
+        /// <param name="source">The original pairs.</param>
+        /// <param name="message">The redacted message, or <see langword="null"/>.</param>
+        public RedactedState(IEnumerable<KeyValuePair<string, object?>> source, string? message)
         {
-            var port = uri.IsDefaultPort ? string.Empty : $":{uri.Port}";
-            return $"{uri.Scheme}://{uri.Host}{port}{uri.AbsolutePath}";
+            _message = message;
+            _pairs = [];
+            foreach (var pair in source)
+            {
+                // The original template (a pair named {OriginalFormat}) is text like any other
+                _pairs.Add(new KeyValuePair<string, object?>(pair.Key, SecretRedactor.RedactValue(pair.Value)));
+            }
         }
 
-        var cut = url.IndexOfAny(['?', '#', '@']);
-        return cut < 0 ? url : url[..cut] + Redacted;
+        /// <inheritdoc />
+        public int Count => _pairs.Count;
+
+        /// <inheritdoc />
+        public KeyValuePair<string, object?> this[int index] => _pairs[index];
+
+        /// <inheritdoc />
+        public IEnumerator<KeyValuePair<string, object?>> GetEnumerator() => _pairs.GetEnumerator();
+
+        /// <inheritdoc />
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        /// <inheritdoc />
+        public override string ToString() =>
+            _message ?? string.Join(", ", _pairs.Select(pair => $"{pair.Key}={pair.Value}"));
     }
 }

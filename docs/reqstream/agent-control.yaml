@@ -310,8 +310,9 @@ sections:
         title: >-
           The tool shall never persist a credential it is given for a package source - not in its
           settings, a repo's pin file, its log or the target repo - shall keep a credential the
-          user types only for the current session, and shall offer a credential only to the
-          server it was typed for.
+          user types only for the current session, shall never show or log one (whether it
+          appears in a message, a header, an address or an exception), and shall offer a
+          credential only to the server it was typed for.
         tags: [system, security]
         justification: |
           Package servers need credentials, but a credential that is written anywhere outlives
@@ -339,6 +340,7 @@ sections:
           - PackageCredentials_CredentialForOneFeed_IsNeverOfferedToAnotherOrigin
           - NuGetSourceProvider_ListVersions_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin
           - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig
+          - RepoCardViewModel_PackageSourceFailureWithSecrets_StatusTextAndLogsAreRedacted
 
       - id: AgentControl-System-DiagnosticLogging
         title: >-

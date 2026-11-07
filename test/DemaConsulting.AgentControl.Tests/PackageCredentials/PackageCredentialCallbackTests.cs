@@ -46,7 +46,7 @@ public sealed class PackageCredentialCallbackTests
     {
         // Arrange: a remembered credential and a prompt that would answer
         var store = new SessionCredentialStore();
-        store.Set(FeedOrigin.Create(FeedIndex), new NuGetCredential("svc", "pw"));
+        store.Set(FeedOrigin.Create(FeedIndex), new NuGetCredential("svc", "pw-foreign-test"));
         var prompt = new FakeCredentialPrompt();
         prompt.EnqueueAnswer(new NuGetCredential("typed", "typed-pw"));
         var callback = Create(store, prompt);
@@ -68,7 +68,7 @@ public sealed class PackageCredentialCallbackTests
     {
         // Arrange
         var store = new SessionCredentialStore();
-        var remembered = new NuGetCredential("svc", "pw");
+        var remembered = new NuGetCredential("svc", "pw-session-test");
         store.Set(FeedOrigin.Create(FeedIndex), remembered);
         var prompt = new FakeCredentialPrompt();
         var callback = Create(store, prompt);
@@ -228,7 +228,7 @@ public sealed class PackageCredentialCallbackTests
     {
         // Arrange
         var store = new SessionCredentialStore();
-        store.Set(FeedOrigin.Create(FeedIndex), new NuGetCredential("svc", "stale"));
+        store.Set(FeedOrigin.Create(FeedIndex), new NuGetCredential("svc", "pw-stale-test"));
         var callback = Create(store, prompt: null);
         await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
 
@@ -269,7 +269,7 @@ public sealed class PackageCredentialCallbackTests
     {
         // Arrange
         var store = new SessionCredentialStore();
-        var remembered = new NuGetCredential("svc", "pw");
+        var remembered = new NuGetCredential("svc", "pw-delegate-test");
         store.Set(FeedOrigin.Create(FeedIndex), remembered);
         Func<Uri, CancellationToken, Task<NuGetCredential?>> callback = Create(store, prompt: null).Callback;
 
@@ -294,6 +294,59 @@ public sealed class PackageCredentialCallbackTests
         Assert.Throws<ArgumentNullException>(() => new PackageCredentialCallback(null!, "Feed", store));
         Assert.Throws<ArgumentNullException>(() => new PackageCredentialCallback(origin, null!, store));
         Assert.Throws<ArgumentNullException>(() => new PackageCredentialCallback(origin, "Feed", null!));
+    }
+
+    /// <summary>
+    ///     Test that a credential the user typed is registered for redaction as soon as it is
+    ///     entered and stays registered only as long as it is used: it is withdrawn by Release or
+    ///     Reject, and by Commit once the store - which then holds and tracks it - forgets it.
+    /// </summary>
+    [Fact]
+    public async Task PackageCredentialCallback_PromptedCredential_IsRegisteredForRedactionUntilTheOperationEnds()
+    {
+        // Arrange: three operations, each with its own typed secret
+        var released = "sec-" + Guid.NewGuid().ToString("N");
+        var rejected = "sec-" + Guid.NewGuid().ToString("N");
+        var committed = "sec-" + Guid.NewGuid().ToString("N");
+        var store = new SessionCredentialStore();
+
+        // Act / Assert: released
+        var releaseCallback = await PromptAsync(store, released);
+        Assert.DoesNotContain(released, SecretRedactor.Redact(released), StringComparison.Ordinal);
+        releaseCallback.Release();
+        releaseCallback.Release();
+        Assert.Equal(released, SecretRedactor.Redact(released));
+
+        // Act / Assert: rejected
+        var rejectCallback = await PromptAsync(store, rejected);
+        Assert.DoesNotContain(rejected, SecretRedactor.Redact(rejected), StringComparison.Ordinal);
+        rejectCallback.Reject();
+        Assert.Equal(rejected, SecretRedactor.Redact(rejected));
+        Assert.Equal(0, store.Count);
+
+        // Act / Assert: committed - the store keeps tracking it until it is forgotten
+        var commitCallback = await PromptAsync(store, committed);
+        commitCallback.Commit();
+        Assert.DoesNotContain(committed, SecretRedactor.Redact(committed), StringComparison.Ordinal);
+        Assert.Equal(1, store.Count);
+        Assert.True(store.Forget(FeedOrigin.Create(FeedIndex)));
+        Assert.Equal(committed, SecretRedactor.Redact(committed));
+    }
+
+    /// <summary>
+    ///     Makes a callback ask the scripted prompt, which answers with a credential carrying the
+    ///     given secret.
+    /// </summary>
+    /// <param name="store">The session store.</param>
+    /// <param name="secret">The secret the user "types".</param>
+    /// <returns>The callback after it has been challenged.</returns>
+    private static async Task<PackageCredentialCallback> PromptAsync(SessionCredentialStore store, string secret)
+    {
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential("typed", secret));
+        var callback = Create(store, prompt);
+        await callback.GetCredentialAsync(FeedIndex, CancellationToken.None);
+        return callback;
     }
 
     /// <summary>

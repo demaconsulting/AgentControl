@@ -191,5 +191,8 @@ why the user interface shows progress and offers cancel.
 
 **NuGetSourceProvider_SecretsNotLogged_SignInFlowsNeverLogTheSecret**: A successful sign-in and a failed one
 with a wrong password are run with a recording logger; no recorded line contains the password or its Base64
-form. This scenario is tested by `NuGetSourceProvider_SignInFlows_NeverLogTheSecret`, covering
+form, the exception raised for the wrong password does not contain it either, and its inner exception is a
+sanitized description rather than the library's own exception. This scenario is tested by
+`NuGetSourceProvider_SignInFlows_NeverLogTheSecret` and
+`NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt`, covering
 `AgentControl-NuGetSourceProvider-SecretsNotLogged`.

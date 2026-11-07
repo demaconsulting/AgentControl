@@ -297,7 +297,8 @@ in its own folder under your user profile.
 | The user name and password or token you type in the sign-in dialog | **Never** - kept in memory for the session |
 | Secrets in the log, the settings, a pin file or the repo | **Never** - the log redacts them |
 
-The log removes passwords, authorization headers and the query strings of addresses.
+The log removes passwords, authorization headers (whatever their scheme) and the query strings and user
+information of addresses, and the same clean-up is applied to the error messages AgentControl shows.
 
 A source location that contains a user name, password, query string or fragment is refused, so a
 secret cannot end up in `settings.json` by being pasted into an address.

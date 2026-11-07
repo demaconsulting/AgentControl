@@ -58,7 +58,7 @@ public sealed class SessionCredentialStoreTests
     {
         // Arrange
         var store = new SessionCredentialStore();
-        store.Set(Origin("https://feeds.example.com/v3/index.json"), new NuGetCredential("svc", "pw"));
+        store.Set(Origin("https://feeds.example.com/v3/index.json"), new NuGetCredential("svc", "pw-collection-test"));
 
         // Act
         var found = store.TryGet(Origin("https://other.example.com/v3/index.json"), out var result);
@@ -120,14 +120,14 @@ public sealed class SessionCredentialStoreTests
         // Arrange
         var store = new SessionCredentialStore();
         var origin = Origin("https://a.example.com/index.json");
-        store.Set(origin, new NuGetCredential("a", "old"));
+        store.Set(origin, new NuGetCredential("a", "pw-old-test"));
 
         // Act
-        store.Set(origin, new NuGetCredential("a", "new"));
+        store.Set(origin, new NuGetCredential("a", "pw-new-test"));
 
         // Assert
         Assert.True(store.TryGet(origin, out var result));
-        Assert.Equal("new", result!.Secret);
+        Assert.Equal("pw-new-test", result!.Secret);
         Assert.Equal(1, store.Count);
     }
 
@@ -167,6 +167,41 @@ public sealed class SessionCredentialStoreTests
         // Assert
         Assert.DoesNotContain(sentinel, json, StringComparison.Ordinal);
         Assert.DoesNotContain(sentinel, text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that every secret the store holds is registered for redaction while stored and
+    ///     withdrawn when it is replaced, forgotten or cleared, so a stale secret is not tracked.
+    /// </summary>
+    [Fact]
+    public void SessionCredentialStore_SetReplaceForgetAndClear_RegistersAndWithdrawsTheSecretForRedaction()
+    {
+        // Arrange
+        var store = new SessionCredentialStore();
+        var origin = Origin("https://a.example.com/index.json");
+        var first = "sec-" + Guid.NewGuid().ToString("N");
+        var second = "sec-" + Guid.NewGuid().ToString("N");
+        var third = "sec-" + Guid.NewGuid().ToString("N");
+        var text = $"{first} {second} {third}";
+
+        // Act / Assert: stored -> redacted
+        store.Set(origin, new NuGetCredential("a", first));
+        Assert.Equal($"[redacted] {second} {third}", SecretRedactor.Redact(text));
+
+        // Replaced -> the old secret is withdrawn, the new one registered
+        store.Set(origin, new NuGetCredential("a", second));
+        Assert.Equal($"{first} [redacted] {third}", SecretRedactor.Redact(text));
+
+        // Forgotten -> withdrawn
+        Assert.True(store.Forget(origin));
+        Assert.Equal(text, SecretRedactor.Redact(text));
+
+        // Cleared -> withdrawn
+        store.Set(origin, new NuGetCredential("a", third));
+        Assert.Equal($"{first} {second} [redacted]", SecretRedactor.Redact(text));
+        store.Clear();
+        Assert.Equal(text, SecretRedactor.Redact(text));
+        Assert.False(store.Forget(origin));
     }
 
     /// <summary>

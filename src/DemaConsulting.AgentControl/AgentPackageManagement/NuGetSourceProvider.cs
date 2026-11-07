@@ -409,14 +409,22 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         {
             // A remembered credential that the server refused must never be reused
             var rejected = silent.SuppliedCredential is not null;
+            if (prompt is null || cancellationToken.IsCancellationRequested)
+            {
+                // Describe the failure (sanitizing the library's exception) before the credential
+                // stops being registered for redaction
+                var failure = CreateAuthenticationFailure(rejected, userDeclined: false, ex);
+                if (rejected)
+                {
+                    silent.Reject();
+                }
+
+                throw failure;
+            }
+
             if (rejected)
             {
                 silent.Reject();
-            }
-
-            if (prompt is null || cancellationToken.IsCancellationRequested)
-            {
-                throw CreateAuthenticationFailure(rejected, userDeclined: false, ex);
             }
 
             // Attempt 2 - the server needs something the user has to supply: ask, once
@@ -456,9 +464,18 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         }
         catch (NuGetAuthenticationException ex)
         {
-            prompting.Reject();
-            throw CreateAuthenticationFailure(
+            // Describe the failure (which sanitizes the library's exception) while the secret is
+            // still registered, then forget the credential
+            var failure = CreateAuthenticationFailure(
                 previousCredentialRejected || prompting.SuppliedCredential is not null, prompting.UserDeclined, ex);
+            prompting.Reject();
+            throw failure;
+        }
+        finally
+        {
+            // However the attempt ended, the typed secret stops being tracked (a kept one is
+            // tracked by the store)
+            prompting.Release();
         }
     }
 
@@ -501,6 +518,14 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         }
         catch (InvalidOperationException ex)
         {
+            _nugetLogger.LogWarning(ex, "Source {FeedOrigin} could not be used.", _feed);
+            throw new PackageSourceAccessException(PackageSourceFailureKind.Unreachable, failureMessage, ex);
+        }
+        catch (Exception ex) when (ex is not (OperationCanceledException or PackageSourceAccessException))
+        {
+            // Anything else the library or the network stack throws (a failed connection, a
+            // malformed response) is reported the same way; the exception itself never leaves
+            // this method, only a secret-free description of it does
             _nugetLogger.LogWarning(ex, "Source {FeedOrigin} could not be used.", _feed);
             throw new PackageSourceAccessException(PackageSourceFailureKind.Unreachable, failureMessage, ex);
         }

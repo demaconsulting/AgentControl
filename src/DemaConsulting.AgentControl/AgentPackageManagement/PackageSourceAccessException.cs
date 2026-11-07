@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using DemaConsulting.AgentControl.PackageCredentials;
+
 namespace DemaConsulting.AgentControl.AgentPackageManagement;
 
 /// <summary>
@@ -70,10 +72,12 @@ internal sealed class PackageSourceAccessException : InvalidOperationException
     /// </summary>
     /// <param name="kind">The cause.</param>
     /// <param name="message">A user-readable, secret-free message.</param>
-    /// <param name="innerException">The underlying failure, or <see langword="null"/>. It is kept
-    ///     for diagnosis but its text is never part of <paramref name="message"/>.</param>
+    /// <param name="innerException">The underlying failure, or <see langword="null"/>. Only a
+    ///     secret-free description of it (its redacted type name, message chain and stack trace, as
+    ///     a <see cref="SanitizedException"/>) is kept: the original object could carry headers,
+    ///     URLs or credentials. Its text is never part of <paramref name="message"/>.</param>
     public PackageSourceAccessException(PackageSourceFailureKind kind, string message, Exception? innerException = null)
-        : base(message, innerException)
+        : base(SecretRedactor.Redact(message), innerException is null ? null : SecretRedactor.Sanitize(innerException))
     {
         Kind = kind;
     }
