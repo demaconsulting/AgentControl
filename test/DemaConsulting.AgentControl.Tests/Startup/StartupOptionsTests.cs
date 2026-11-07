@@ -48,11 +48,33 @@ public class StartupOptionsTests
     [Fact]
     public void StartupOptions_Parse_ConfigDirArgument_CapturesValue()
     {
+        // Arrange: an absolute config directory valid on every platform
+        var configDir = Path.Combine(Path.GetTempPath(), "isolated", "config");
+
         // Act: parse a config-dir override
-        var options = StartupOptions.Parse(["--config-dir", @"C:\isolated\config"]);
+        var options = StartupOptions.Parse(["--config-dir", configDir]);
 
         // Assert: the config directory is captured
-        Assert.Equal(@"C:\isolated\config", options.ConfigDirectory);
+        Assert.Equal(configDir, options.ConfigDirectory);
+    }
+
+    /// <summary>
+    ///     Test that a relative --config-dir is resolved to a full path at parse time, so nothing
+    ///     downstream can interpret it against a different current directory.
+    /// </summary>
+    [Fact]
+    public void StartupOptions_Parse_RelativeConfigDirArgument_IsResolvedToFullPath()
+    {
+        // Arrange: a relative config directory
+        var relative = Path.Combine("relative", "config");
+
+        // Act: parse the override
+        var options = StartupOptions.Parse(["--config-dir", relative]);
+
+        // Assert: the captured value is absolute and equals the launch-time resolution
+        Assert.NotNull(options.ConfigDirectory);
+        Assert.True(Path.IsPathFullyQualified(options.ConfigDirectory));
+        Assert.Equal(Path.GetFullPath(relative), options.ConfigDirectory);
     }
 
     /// <summary>
@@ -88,9 +110,10 @@ public class StartupOptionsTests
     public void StartupOptions_Parse_AllArguments_CapturesAllValues()
     {
         // Arrange: all three supported overrides
+        var configDir = Path.Combine(Path.GetTempPath(), "isolated", "config");
         var args = new[]
         {
-            "--config-dir", @"C:\isolated\config",
+            "--config-dir", configDir,
             "--git-path", @"C:\stubs\git.bat",
             "--agent-tool-command", @"C:\stubs\arg-logger.exe"
         };
@@ -99,7 +122,7 @@ public class StartupOptionsTests
         var options = StartupOptions.Parse(args);
 
         // Assert: all values are captured independently
-        Assert.Equal(@"C:\isolated\config", options.ConfigDirectory);
+        Assert.Equal(configDir, options.ConfigDirectory);
         Assert.Equal(@"C:\stubs\git.bat", options.GitExecutableOverride);
         Assert.Equal(@"C:\stubs\arg-logger.exe", options.AgentToolCommandOverride);
     }

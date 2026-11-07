@@ -104,3 +104,10 @@ cache would fail to read it and report no upgrade), while a changed source is ob
 scenario is tested by `MainWindowViewModel_ApplySettings_OnlyEditedSourceIsInvalidated` and
 `MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache`, covering
 `AgentControl-MainWindowViewModel-InvalidateChangedSources`.
+
+**MainWindowViewModel_ApplySettings_CredentialBearingSource_IsRefused**: `ApplySettings` with a
+package source location that embeds a sentinel password throws `InvalidOperationException` whose
+message does not contain it, the live settings instance is unchanged, and no settings file is
+written. This scenario is tested by
+`MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings`,
+covering `AgentControl-MainWindowViewModel-ApplySettings`.

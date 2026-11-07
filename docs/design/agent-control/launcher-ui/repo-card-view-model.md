@@ -33,7 +33,8 @@ reads as `Default`).
 **SourceProblem** / **HasSourceProblem**: `string?`/`bool` — the card's error state for a pin whose
 source cannot be used, chiefly an alias that is not among the configured sources. When set, no
 upgrade is offered and no other source is ever consulted
-(`AgentControl-RepoCardViewModel-SourceAwareness`). Set by `RefreshUpgradeStatus`; cleared when
+(`AgentControl-RepoCardViewModel-SourceAwareness`); the main window shows it as a warning badge
+on the card, with the reason as its tooltip. Set by `RefreshUpgradeStatus`; cleared when
 the pin or settings no longer have the problem.
 
 **CurrentBranch**, **HasCommittedAgentFiles**: `string?`/`bool` — Resolved via `GitClient`,

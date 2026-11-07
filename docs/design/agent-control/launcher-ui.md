@@ -43,7 +43,7 @@ shown in the main window.
   version exists at the source (`AgentControl-LauncherUI-Upgrade`) — and raises a view-model
   event (`LaunchRecorded`, `SelectPackageRequested`, `ReleaseNotesReady`,
   `AgentsMdTemplateOfferRequested`, `ErrorOccurred`, `RemoveRequested`) reporting the outcome.
-  Status badges (upgrade-available, missing-repo, committed-agent-files) are refreshed
+  Status badges (upgrade-available, missing-repo, package-source-problem, committed-agent-files) are refreshed
   alongside these actions (`AgentControl-LauncherUI-StatusBadges`).
 - *Constraints*: Never mutates state before a required confirmation (see `RemoveRequest`
   below); never launches without a successful ensure-synced check.

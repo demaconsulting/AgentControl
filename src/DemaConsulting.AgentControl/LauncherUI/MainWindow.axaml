@@ -170,6 +170,13 @@
                                             ToolTip.Tip="This repo's folder could not be found on disk."
                                             Text="❌"
                                             FontSize="14" />
+                                <TextBlock Name="SourceProblemBadge"
+                                            AutomationProperties.AutomationId="SourceProblemBadge"
+                                            IsVisible="{Binding HasSourceProblem}"
+                                            ToolTip.Tip="{Binding SourceProblem}"
+                                            Text="⚠ Package source problem"
+                                            FontSize="12"
+                                            Foreground="DarkOrange" />
                             </StackPanel>
 
                             <TextBlock Grid.Row="1" Grid.Column="0"

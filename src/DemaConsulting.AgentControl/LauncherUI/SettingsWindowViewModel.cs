@@ -61,6 +61,11 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
     private string? _shellPreference;
 
     /// <summary>
+    ///     Backing field for <see cref="ErrorMessage"/>.
+    /// </summary>
+    private string? _errorMessage;
+
+    /// <summary>
     ///     Initializes a new <see cref="SettingsWindowViewModel"/>, seeding its editable
     ///     properties from <paramref name="initial"/>.
     /// </summary>
@@ -129,6 +134,27 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
         get => _packageSourcePath;
         set => SetField(ref _packageSourcePath, value);
     }
+
+    /// <summary>
+    ///     Gets the reason the last save attempt was refused, or <see langword="null"/> when there
+    ///     is none. Shown in the window so the user can correct the problem.
+    /// </summary>
+    public string? ErrorMessage
+    {
+        get => _errorMessage;
+        private set
+        {
+            if (SetField(ref _errorMessage, value))
+            {
+                OnPropertyChanged(nameof(HasError));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether <see cref="ErrorMessage"/> has text to show.
+    /// </summary>
+    public bool HasError => !string.IsNullOrEmpty(_errorMessage);
 
     /// <summary>
     ///     Gets or sets the git executable path override; blank/<see langword="null"/> means
@@ -220,6 +246,16 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
             ShellPreference = ShellPreference
         };
 
+        // A credential embedded in a location is refused here, keeping the window open with the
+        // reason shown, rather than being allowed to reach the settings file
+        var problem = sources.Select(source => source.GetCredentialProblem()).FirstOrDefault(p => p is not null);
+        if (problem is not null)
+        {
+            ErrorMessage = problem;
+            return;
+        }
+
+        ErrorMessage = null;
         _onSave(updated);
         Saved?.Invoke(this, EventArgs.Empty);
     }

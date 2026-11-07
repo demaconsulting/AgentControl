@@ -381,6 +381,28 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that ApplySettings refuses a source location embedding a credential: it throws
+    ///     without leaking the secret, keeps the current settings, and writes nothing.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        var settings = new AppSettings { PackageSourcePath = CreateTempDirectory() };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: configDir);
+        var updated = new AppSettings { PackageSourcePath = "https://user:SentinelSecretValue@feeds.example.com/nuget" };
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => viewModel.ApplySettings(updated));
+
+        // Assert: refused, the live settings are unchanged, and nothing was written
+        Assert.DoesNotContain("SentinelSecretValue", ex.Message, StringComparison.Ordinal);
+        Assert.Same(settings, viewModel.Settings);
+        Assert.False(File.Exists(Path.Combine(configDir, "settings.json")));
+    }
+
+    /// <summary>
     ///     Test that ApplySettings invalidates the shared PackageVersionCache, so a changed
     ///     package-source path is reflected immediately rather than served from a stale cache.
     /// </summary>

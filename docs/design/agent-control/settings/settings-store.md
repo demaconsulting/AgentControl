@@ -49,7 +49,11 @@ path.
   named temporary file in the same directory and moved over the settings file, so a failure
   never leaves a truncated or partial file, and a leftover temporary file is removed
   (`AgentControl-SettingsStore-AtomicSave`). Because the model has no secret-bearing member,
-  nothing secret is written (`AgentControl-SettingsStore-NoSecretsPersisted`).
+  nothing secret is written, and before anything is written every effective source is checked with
+  `PackageSourceDefinition.GetCredentialProblem`: a location with URL user information (or a
+  server URL with a query string or fragment) makes `Save` throw `InvalidOperationException`
+  without creating or changing any file and without repeating the location in the message
+  (`AgentControl-SettingsStore-NoSecretsPersisted`).
 
 #### Error Handling
 

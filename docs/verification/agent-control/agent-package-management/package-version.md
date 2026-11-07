@@ -41,12 +41,15 @@ with a negative major version throws `ArgumentOutOfRangeException`. This scenari
 **PackageVersion_Compare_NumericOrderingReleasePrecedenceEqualityAndRoundTrip**: A version with
 higher numeric components compares greater; a release version compares greater than a
 prerelease with the same numeric components; two versions built from the same version string
-are equal; and a parsed version round-trips through its string representation back through
+are equal; prerelease labels that differ only by letter case are equal with the same hash code and
+agree with NuGet; and a parsed version round-trips through its string representation back through
 `TryParse`. This scenario is tested by
 `PackageVersion_CompareTo_HigherNumericVersion_ComparesGreater`,
 `PackageVersion_CompareTo_ReleaseVsPrereleaseSameNumeric_ReleaseIsGreater`,
 `PackageVersion_CompareTo_PrereleaseIdentifiers_FollowSemverPrecedence`,
 `PackageVersion_CompareTo_HugeNumericIdentifiers_ComparesNumerically`,
+`PackageVersion_CompareTo_PrereleaseLabelsDifferingOnlyByCase_AreEqualWithSameHashCode`,
+`PackageVersion_CompareTo_VersionsAgreeWithNuGetVersionOrdering`,
 `PackageVersion_Equals_SameVersionString_ReturnsTrue`, and
 `PackageVersion_ToString_ParsedVersion_RoundTripsThroughParse`, covering
 `AgentControl-PackageVersion-Compare`.

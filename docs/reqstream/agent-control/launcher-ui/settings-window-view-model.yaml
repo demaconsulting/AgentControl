@@ -35,13 +35,16 @@ sections:
       - id: AgentControl-SettingsWindowViewModel-Save
         title: >-
           The SettingsWindowViewModel class shall, on save, pass its current property values
-          to its owner and signal that settings were saved.
+          to its owner and signal that settings were saved, except that it shall refuse to
+          save, showing an explanation, a package source location that embeds a credential.
         justification: |
           Persisting settings and notifying the caller must happen together so the main window
           can immediately apply the new configuration (e.g. invalidate cached package
-          versions) after a save.
+          versions) after a save; a credential typed into a location must be stopped where the
+          user can correct it, because AgentControl never stores secrets.
         tests:
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
+          - SettingsWindowViewModel_Save_PackageSourcePathWithEmbeddedCredential_IsRefusedWithErrorMessage
 
       - id: AgentControl-SettingsWindowViewModel-ShellPreferencePresets
         title: >-

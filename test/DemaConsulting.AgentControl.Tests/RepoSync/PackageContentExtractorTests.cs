@@ -328,6 +328,134 @@ public sealed class PackageContentExtractorTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that an unpacked package folder that is itself a symbolic link is rejected when
+    ///     opened.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_Open_PackageFolderIsSymlink_ThrowsInvalidOperationException()
+    {
+        // Arrange: a real package elsewhere, and a link to it standing in for the package folder
+        var realPackage = CreatePackageFolder((".github/agents/real.md", "real"));
+        var link = Path.Combine(CreateTempDirectory(), "linked-package");
+        TryCreateDirectorySymlinkOrSkip(link, realPackage);
+
+        // Act / Assert
+        var ex = Assert.Throws<InvalidOperationException>(() => DirectoryPackageContentReader.Open(link));
+        Assert.Contains("link", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that a file reached through a symbolic-link parent directory is refused even though
+    ///     the file itself is an ordinary file.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenRead_LinkedParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException()
+    {
+        // Arrange: content/.github/agents is a link to an outside folder holding an ordinary file
+        var package = CreatePackageFolder((".github/skills/s.md", "skill"));
+        var outsideDir = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(outsideDir, "payload.md"), "payload");
+        TryCreateDirectorySymlinkOrSkip(Path.Combine(package, "content", ".github", "agents"), outsideDir);
+        using var reader = DirectoryPackageContentReader.Open(package);
+
+        // Act / Assert: reading through the linked parent is refused
+        var ex = Assert.Throws<InvalidOperationException>(() => reader.OpenRead(".github/agents/payload.md"));
+        Assert.Contains("link", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that an unpacked package folder that is a directory junction is rejected when
+    ///     opened. Junctions need no privilege on Windows, so this test runs there.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_Open_PackageFolderIsJunction_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var realPackage = CreatePackageFolder((".github/agents/real.md", "real"));
+        var link = Path.Combine(CreateTempDirectory(), "junction-package");
+        CreateJunctionOrSkip(link, realPackage);
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(() => DirectoryPackageContentReader.Open(link));
+    }
+
+    /// <summary>
+    ///     Test that a content folder that is a directory junction is rejected when opened.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_Open_ContentFolderIsJunction_ThrowsInvalidOperationException()
+    {
+        // Arrange: the content folder is a junction to a real content folder elsewhere
+        var realContent = CreateTempDirectory();
+        Directory.CreateDirectory(Path.Combine(realContent, ".github", "agents"));
+        var package = CreateTempDirectory();
+        CreateJunctionOrSkip(Path.Combine(package, "content"), realContent);
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(() => DirectoryPackageContentReader.Open(package));
+    }
+
+    /// <summary>
+    ///     Test that a file reached through a directory-junction parent is refused even though the
+    ///     file itself is an ordinary file.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenRead_JunctionParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException()
+    {
+        // Arrange: content/.github/agents is a junction to an outside folder holding an ordinary file
+        var package = CreatePackageFolder((".github/skills/s.md", "skill"));
+        var outsideDir = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(outsideDir, "payload.md"), "payload");
+        CreateJunctionOrSkip(Path.Combine(package, "content", ".github", "agents"), outsideDir);
+        using var reader = DirectoryPackageContentReader.Open(package);
+
+        // Act / Assert
+        var ex = Assert.Throws<InvalidOperationException>(() => reader.OpenRead(".github/agents/payload.md"));
+        Assert.Contains("link", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that listing a package that contains a directory junction is refused rather than
+    ///     following the junction.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_ListFiles_JunctionInPackage_ThrowsInvalidOperationException()
+    {
+        // Arrange: content/.github/skills is a junction to an outside folder
+        var package = CreatePackageFolder((".github/agents/real.md", "real"));
+        var outsideDir = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(outsideDir, "payload.md"), "payload");
+        CreateJunctionOrSkip(Path.Combine(package, "content", ".github", "skills"), outsideDir);
+        using var reader = DirectoryPackageContentReader.Open(package);
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(() => reader.ListFiles());
+    }
+
+    /// <summary>
+    ///     Test that extracting a package that contains a directory junction is refused before any
+    ///     managed folder in the repo is deleted.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_JunctionInPackage_ThrowsBeforeDeletingManagedFolders()
+    {
+        // Arrange: a package whose skills folder is a junction, and a repo with existing content
+        var package = CreatePackageFolder((".github/agents/real.md", "real"));
+        var outsideDir = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(outsideDir, "payload.md"), "payload");
+        CreateJunctionOrSkip(Path.Combine(package, "content", ".github", "skills"), outsideDir);
+        var repo = CreateTempDirectory();
+        var agents = Path.Combine(repo, ".github", "agents");
+        Directory.CreateDirectory(agents);
+        File.WriteAllText(Path.Combine(agents, "keep.md"), "keep me");
+        using var reader = DirectoryPackageContentReader.Open(package);
+
+        // Act / Assert: rejected, and the repo's existing managed content survives
+        Assert.Throws<InvalidOperationException>(() => PackageContentExtractor.Extract(reader, repo));
+        Assert.Equal("keep me", File.ReadAllText(Path.Combine(agents, "keep.md")));
+    }
+
+    /// <summary>
     ///     Test that a null reader or repo root is rejected.
     /// </summary>
     [Fact]
@@ -403,6 +531,45 @@ public sealed class PackageContentExtractorTests : IDisposable
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
         {
             Assert.Skip($"Cannot create symbolic links in this environment: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    ///     Creates a directory junction (needs no privilege on Windows), or skips the test on
+    ///     platforms that do not have junctions.
+    /// </summary>
+    /// <param name="linkPath">The junction to create.</param>
+    /// <param name="target">The existing directory it points at.</param>
+    /// <exception cref="InvalidOperationException">Thrown on Windows when the junction cannot be
+    ///     created, which would indicate a broken test environment rather than a skip.</exception>
+    private static void CreateJunctionOrSkip(string linkPath, string target)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Directory junctions exist only on Windows.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
+        var startInfo = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add("/c");
+        // cspell:disable-next-line
+        startInfo.ArgumentList.Add("mklink");
+        startInfo.ArgumentList.Add("/J");
+        startInfo.ArgumentList.Add(linkPath);
+        startInfo.ArgumentList.Add(target);
+        using var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start cmd.exe to create a junction.");
+        var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Creating the junction failed ({process.ExitCode}): {output}");
         }
     }
 

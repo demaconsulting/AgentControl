@@ -34,8 +34,9 @@ sections:
           precedence: numerically by major, minor, and patch; a release greater than a
           prerelease with the same numeric components; and prerelease identifiers compared
           left to right, with numeric identifiers compared numerically (so beta.2 precedes
-          beta.10), numeric identifiers ranking below alphanumeric ones, and a longer
-          identifier list ranking above its shorter prefix. It shall also consider two
+          beta.10), numeric identifiers ranking below alphanumeric ones, prerelease labels
+          compared without regard to letter case (as NuGet does), and a longer identifier
+          list ranking above its shorter prefix. It shall also consider two
           versions with the same version string equal, and round-trip through its string
           representation.
         justification: |
@@ -47,6 +48,8 @@ sections:
           - PackageVersion_CompareTo_ReleaseVsPrereleaseSameNumeric_ReleaseIsGreater
           - PackageVersion_CompareTo_PrereleaseIdentifiers_FollowSemverPrecedence
           - PackageVersion_CompareTo_HugeNumericIdentifiers_ComparesNumerically
+          - PackageVersion_CompareTo_PrereleaseLabelsDifferingOnlyByCase_AreEqualWithSameHashCode
+          - PackageVersion_CompareTo_VersionsAgreeWithNuGetVersionOrdering
           - PackageVersion_Equals_SameVersionString_ReturnsTrue
           - PackageVersion_ToString_ParsedVersion_RoundTripsThroughParse
 

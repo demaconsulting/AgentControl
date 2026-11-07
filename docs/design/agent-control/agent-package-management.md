@@ -103,7 +103,10 @@ source offers, and the trust options `AllowInsecureHttp`, `RequireSignedPackages
 (an absolute `http`/`https` URI is a server; anything else is a folder) rather than persisted, so
 the two can never disagree. The definition deliberately has no password, token or other secret
 member, and a test guards that property; sources that later need credentials obtain them when
-needed and never persist them (`AgentControl-AgentPackageManagement-SourceDefinitions`). A
+needed and never persist them. `GetCredentialProblem` flags a location that embeds a credential
+(URL user information, or a server URL with a query string or fragment) so the settings save
+paths can refuse it without repeating it in any message
+(`AgentControl-AgentPackageManagement-SourceDefinitions`). A
 `PackageReference` is the identity a repo pin records: source alias, package ID and the exact
 version text — a package ID is never unique across sources, so a package is only ever identified
 together with its source. `DiscoveredPackage` is a package version found at a source, carrying

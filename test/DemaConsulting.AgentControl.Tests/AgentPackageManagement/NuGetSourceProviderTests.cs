@@ -259,6 +259,29 @@ public sealed class NuGetSourceProviderTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that listing and supplying packages leaves NuGet's process-wide credential
+    ///     service exactly as it was, so other NuGet operations in the process authenticate as
+    ///     before.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_ListAndAcquire_LeavesProcessWideCredentialServiceUnchanged()
+    {
+        // Arrange
+        var feed = CreateTempDirectory();
+        var id = UniqueId();
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0");
+        var provider = CreateProvider("Feed", feed);
+        var before = global::NuGet.Protocol.HttpHandlerResourceV3.CredentialService;
+
+        // Act
+        var package = Assert.Single(await provider.ListVersionsAsync(id, CancellationToken.None));
+        using var reader = await provider.AcquireAsync(package, CancellationToken.None);
+
+        // Assert: the same (possibly absent) service instance is still registered
+        Assert.Same(before, global::NuGet.Protocol.HttpHandlerResourceV3.CredentialService);
+    }
+
+    /// <summary>
     ///     Test that two NuGet sources offering the same package ID and version with different
     ///     content each yield their own content: a package unpacked for one source is never served
     ///     for the other (each source has a private package cache).
@@ -338,6 +361,48 @@ public sealed class NuGetSourceProviderTests : IDisposable
 
         // Act / Assert
         Assert.Throws<InvalidOperationException>(() => new NuGetSourceProvider(definition, CreateTempDirectory()));
+    }
+
+    /// <summary>
+    ///     Test that a relative (or drive-relative) cache root base is rejected, so the NuGet root
+    ///     can never be resolved against the current directory or a target repository.
+    /// </summary>
+    /// <param name="rootBase">The invalid root base.</param>
+    [Theory]
+    [InlineData("nuget-cache")]
+    [InlineData("..")]
+    [InlineData(".")]
+    public void NuGetSourceProvider_Constructor_RelativeRootBase_ThrowsArgumentException(string rootBase)
+    {
+        // Arrange
+        var definition = CreateDefinition("Feed", CreateTempDirectory());
+
+        // Act
+        var ex = Assert.Throws<ArgumentException>(() => new NuGetSourceProvider(definition, rootBase));
+
+        // Assert
+        Assert.Equal("rootBase", ex.ParamName);
+    }
+
+    /// <summary>
+    ///     Test that the default cache root (no base supplied) is an absolute path under the
+    ///     per-user local application data folder, never relative to the current directory.
+    /// </summary>
+    [Fact]
+    public void NuGetSourceProvider_Constructor_NoRootBase_RootIsAbsoluteUnderLocalApplicationData()
+    {
+        // Arrange
+        var definition = CreateDefinition("Feed", CreateTempDirectory());
+
+        // Act
+        var provider = new NuGetSourceProvider(definition);
+
+        // Assert
+        Assert.True(Path.IsPathFullyQualified(provider.RootFolder));
+        Assert.StartsWith(
+            Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)),
+            provider.RootFolder,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

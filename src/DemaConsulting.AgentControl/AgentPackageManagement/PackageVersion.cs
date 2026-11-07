@@ -42,8 +42,8 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     Zip package file names carry only the strict three-part form, so
 ///     <see cref="TryParseStrict"/> keeps that narrower grammar for file-name splitting while
 ///     <see cref="TryParse"/> accepts the extended NuGet-compatible grammar. Prerelease labels
-///     compare case-sensitively (semver), whereas NuGet compares them case-insensitively; the
-///     difference only matters for labels that differ solely by case.
+///     compare without regard to letter case, as NuGet does (so <c>1.0.0-beta</c> equals
+///     <c>1.0.0-BETA</c>), and equality and hashing agree with that comparison.
 ///     Immutable and thread-safe once constructed.
 ///     </para>
 /// </remarks>
@@ -361,7 +361,8 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
     /// <summary>
     ///     Compares two prerelease strings using semver precedence: identifiers are compared left
     ///     to right; numeric identifiers compare numerically and rank below alphanumeric ones;
-    ///     alphanumeric identifiers compare in ASCII order; and when all shared identifiers are
+    ///     alphanumeric identifiers compare in ASCII order ignoring letter case (as NuGet does,
+    ///     so <c>1.0.0-beta</c> equals <c>1.0.0-BETA</c>); and when all shared identifiers are
     ///     equal, the longer list ranks higher.
     /// </summary>
     /// <param name="left">The left prerelease string (dot-separated identifiers).</param>
@@ -415,7 +416,9 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
             return 1;
         }
 
-        return string.CompareOrdinal(left, right);
+        // Prerelease labels compare without regard to letter case, as NuGet does, so the
+        // "latest" chosen here for a NuGet source is the one NuGet itself would choose
+        return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -446,11 +449,13 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
     public override bool Equals(object? obj) => Equals(obj as PackageVersion);
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(Major, Minor, Patch, Revision, CanonicalPrerelease(Prerelease));
+    public override int GetHashCode() => HashCode.Combine(
+        Major, Minor, Patch, Revision, StringComparer.OrdinalIgnoreCase.GetHashCode(CanonicalPrerelease(Prerelease) ?? string.Empty));
 
     /// <summary>
     ///     Produces the representation equality is based on: numeric identifiers with leading
-    ///     zeros removed, so versions that compare equal always hash equally.
+    ///     zeros removed (the hash is then taken ignoring letter case), so versions that compare
+    ///     equal always hash equally.
     /// </summary>
     /// <param name="prerelease">The prerelease string, or <see langword="null"/>.</param>
     /// <returns>The canonical prerelease string, or <see langword="null"/>.</returns>

@@ -340,6 +340,66 @@ public class SettingsStoreTests
     }
 
     /// <summary>
+    ///     Test that settings holding a source location with an embedded credential are refused:
+    ///     nothing is written, so the sentinel password can never appear in the settings file.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Save_SourceLocationWithEmbeddedCredential_ThrowsAndWritesNothing()
+    {
+        // Arrange: a NuGet server source whose location embeds a sentinel password
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var settings = new AppSettings
+            {
+                Sources =
+                [
+                    new PackageSourceDefinition
+                    {
+                        Alias = "Server",
+                        Type = PackageSourceType.NuGet,
+                        Location = "https://user:SentinelSecretValue@feeds.example.com/v3/index.json"
+                    }
+                ]
+            };
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() => SettingsStore.Save(settings, configDir));
+
+            // Assert: refused without leaking the secret, and no settings file (or temp file) exists
+            Assert.DoesNotContain("SentinelSecretValue", ex.Message, StringComparison.Ordinal);
+            Assert.Empty(Directory.GetFiles(configDir));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a legacy single package path embedding a credential is refused on save too,
+    ///     so the migration path cannot write a secret either.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Save_LegacyPackageSourcePathWithEmbeddedCredential_ThrowsAndWritesNothing()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var settings = new AppSettings { PackageSourcePath = "https://user:SentinelSecretValue@host/feed" };
+
+            // Act / Assert
+            Assert.Throws<InvalidOperationException>(() => SettingsStore.Save(settings, configDir));
+            Assert.Empty(Directory.GetFiles(configDir));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that a save replaces the settings file atomically: afterwards only the settings
     ///     file exists (no temporary file is left behind) and it holds the latest content.
     /// </summary>

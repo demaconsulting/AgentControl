@@ -116,13 +116,14 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     /// <param name="definition">The source definition; its
     ///     <see cref="PackageSourceDefinition.Type"/> must be <see cref="PackageSourceType.NuGet"/>
     ///     and its location a rooted folder or UNC path.</param>
-    /// <param name="rootBase">The folder under which per-source roots are created, or
+    /// <param name="rootBase">The absolute folder under which per-source roots are created, or
     ///     <see langword="null"/> for <c>{LocalApplicationData}/AgentControl/nuget</c>. Never the
-    ///     target repository.</param>
+    ///     target repository, and never relative to the current directory.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="definition"/> is
     ///     <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when the definition is not a NuGet source or has
-    ///     a blank alias or location.</exception>
+    /// <exception cref="ArgumentException">Thrown when the definition is not a NuGet source, has
+    ///     a blank alias or location, or <paramref name="rootBase"/> is not an absolute
+    ///     path.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the location is a server URL
     ///     (not yet supported) or is not an absolute folder path.</exception>
     public NuGetSourceProvider(PackageSourceDefinition definition, string? rootBase = null)
@@ -144,7 +145,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
                 $"NuGet server sources are not supported yet; source '{definition.Alias}' must use a folder or network share.");
         }
 
-        if (!Path.IsPathRooted(definition.Location))
+        if (!Path.IsPathFullyQualified(definition.Location))
         {
             throw new InvalidOperationException(
                 $"The location of NuGet source '{definition.Alias}' must be an absolute folder path.");
@@ -157,7 +158,17 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
             .Select(id => id.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        _root = Path.Combine(rootBase ?? GetDefaultRootBase(), BuildSourceKey(definition.Alias, definition.Location));
+        // The cache root must never depend on the process current directory (which could be a
+        // target repo, whose NuGet configuration is not ours to read), so a relative or
+        // drive-relative base is refused rather than resolved
+        var baseFolder = rootBase ?? GetDefaultRootBase();
+        if (!Path.IsPathFullyQualified(baseFolder))
+        {
+            throw new ArgumentException(
+                $"The NuGet cache root base '{baseFolder}' must be an absolute path.", nameof(rootBase));
+        }
+
+        _root = Path.Combine(baseFolder, BuildSourceKey(definition.Alias, definition.Location));
     }
 
     /// <inheritdoc />

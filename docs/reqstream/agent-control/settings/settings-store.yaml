@@ -69,13 +69,17 @@ sections:
       - id: AgentControl-SettingsStore-NoSecretsPersisted
         title: >-
           The SettingsStore class shall write no password, token or other secret to the
-          settings file, whatever the configured sources contain.
+          settings file, whatever the configured sources contain, and shall refuse - writing
+          nothing - to save a source whose location embeds a credential such as URL user
+          information.
         justification: |
           The settings file is plain text under the user's profile; AgentControl must not store
           secrets there, so no credential can leak through a backup, a synced profile or a
           support attachment.
         tests:
           - SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties
+          - SettingsStore_Save_SourceLocationWithEmbeddedCredential_ThrowsAndWritesNothing
+          - SettingsStore_Save_LegacyPackageSourcePathWithEmbeddedCredential_ThrowsAndWritesNothing
 
       - id: AgentControl-SettingsStore-AtomicSave
         title: >-

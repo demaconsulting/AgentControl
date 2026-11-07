@@ -91,7 +91,9 @@ sections:
           reappeared (was missing, now present) since it was last checked or whose
           GitExecutablePath setting changed, so it is not left showing a stale, indefinitely
           "not yet checked", or wrong-executable Pull-disabled state, without re-checking the
-          Git status of every other already-present, unchanged-executable repo.
+          Git status of every other already-present, unchanged-executable repo. It shall
+          refuse, leaving the current settings unchanged, updated settings whose package source
+          location embeds a credential.
         justification: |
           A settings change (e.g. a new package source path) must take effect immediately for
           subsequent upgrade checks, without discarding the developer's tracked repos. Because
@@ -112,6 +114,7 @@ sections:
           - MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately
           - MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus
           - MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus
+          - MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings
 
       - id: AgentControl-MainWindowViewModel-InvalidateChangedSources
         title: >-

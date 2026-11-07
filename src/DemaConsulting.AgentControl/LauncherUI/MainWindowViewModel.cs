@@ -266,6 +266,8 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     <see cref="SettingsWindowViewModel.Save"/>.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="updated"/> is
     ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when a source location embeds a
+    ///     credential; the current settings are left unchanged.</exception>
     public void ApplySettings(AppSettings updated)
     {
         ArgumentNullException.ThrowIfNull(updated);
@@ -276,6 +278,17 @@ internal sealed class MainWindowViewModel : ViewModelBase
         // Note which sources were configured before the swap so cached results for any that were
         // edited or removed can be dropped afterwards
         var previousSources = _settings.GetEffectiveSources().ToList();
+
+        // Refuse a credential-bearing source before adopting the settings, so the rejected values
+        // never become the live in-memory settings either
+        foreach (var source in updated.GetEffectiveSources())
+        {
+            var problem = source.GetCredentialProblem();
+            if (problem is not null)
+            {
+                throw new InvalidOperationException($"Settings were not applied. {problem}");
+            }
+        }
 
         updated.RecentRepos = _settings.RecentRepos;
         _settings = updated;

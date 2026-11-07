@@ -168,6 +168,33 @@ public class SettingsWindowViewModelTests
     }
 
     /// <summary>
+    ///     Test that a package source path embedding a credential is refused: the callback is not
+    ///     invoked, the window does not report saved, and the reason is shown without the secret.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_Save_PackageSourcePathWithEmbeddedCredential_IsRefusedWithErrorMessage()
+    {
+        // Arrange
+        var saveCalled = false;
+        var savedRaised = false;
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => saveCalled = true)
+        {
+            PackageSourcePath = "https://user:SentinelSecretValue@feeds.example.com/nuget"
+        };
+        viewModel.Saved += (_, _) => savedRaised = true;
+
+        // Act
+        viewModel.SaveCommand.Execute(null);
+
+        // Assert
+        Assert.False(saveCalled);
+        Assert.False(savedRaised);
+        Assert.True(viewModel.HasError);
+        Assert.NotNull(viewModel.ErrorMessage);
+        Assert.DoesNotContain("SentinelSecretValue", viewModel.ErrorMessage, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that clearing the package source field removes the Default source on save but
     ///     keeps other sources.
     /// </summary>

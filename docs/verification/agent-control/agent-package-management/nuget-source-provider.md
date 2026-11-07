@@ -28,8 +28,10 @@ used by these tests.
 - Acquisition yields a reader over the package's `content` folder (managed files, release notes,
   AGENTS.md template), a wrong-layout package is rejected, and the content can be applied to a repo
   through the shared extractor.
-- The root folder passed to the library is AgentControl-owned and distinct per source; two
-  sources with the same package ID and version each yield their own content.
+- The root folder passed to the library is AgentControl-owned, absolute and distinct per source (a
+  relative cache base is refused); two sources with the same package ID and version each yield
+  their own content.
+- Listing and acquiring leave the process-wide NuGet credential service unchanged.
 - Nothing is read from or written to a repo, including a repo `nuget.config`.
 - Server and relative locations and non-NuGet definitions are rejected; a package from another
   source is refused.
@@ -64,9 +66,13 @@ covering `AgentControl-NuGetSourceProvider-AcquireToPrivateCache`.
 directly under the supplied base, its generated `nuget.config` contains a global-packages-folder
 setting and no sources or credentials, and the unpacked package is inside it; the per-source key is
 stable for the same alias and location (alias case and trailing separators ignored), differs when
-the location or alias differs, and is safe as a folder name. This scenario is tested by
-`NuGetSourceProvider_Acquire_UsesExplicitAgentControlOwnedRootWithGeneratedConfig` and
-`NuGetSourceProvider_BuildSourceKey_AliasAndLocation_StableDistinctAndFolderSafe`, covering
+the location or alias differs, and is safe as a folder name; a relative or drive-relative cache base
+is refused with `ArgumentException`, and the default base is an absolute path under the per-user
+local application-data folder. This scenario is tested by
+`NuGetSourceProvider_Acquire_UsesExplicitAgentControlOwnedRootWithGeneratedConfig`,
+`NuGetSourceProvider_BuildSourceKey_AliasAndLocation_StableDistinctAndFolderSafe`,
+`NuGetSourceProvider_Constructor_RelativeRootBase_ThrowsArgumentException`, and
+`NuGetSourceProvider_Constructor_NoRootBase_RootIsAbsoluteUnderLocalApplicationData`, covering
 `AgentControl-NuGetSourceProvider-ExplicitCacheRoot`.
 
 **NuGetSourceProvider_NoRepoNuGetConfig_RepoIsNeverReadOrWritten**: With a repo folder holding a
@@ -75,10 +81,12 @@ holding only that original file, unchanged, create no cache there, and use a roo
 This scenario is tested by `NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig`,
 covering `AgentControl-NuGetSourceProvider-NoRepoNuGetConfig`.
 
-**NuGetSourceProvider_NoCredentialService_ProductAssemblyDoesNotReferenceIt**: The product
-assembly's type references contain no credential-service or HTTP-handler-resource type. This
-scenario is tested by `NuGetSourceProvider_ProductAssembly_DoesNotReferenceNuGetCredentialService`,
-covering `AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration`.
+**NuGetSourceProvider_NoCredentialService_ProcessWideServiceUnchanged**: After listing and
+acquiring, the process-wide NuGet credential service is the same instance as before, and the
+product assembly's type references contain no credential-service or HTTP-handler-resource type.
+This scenario is tested by
+`NuGetSourceProvider_ListAndAcquire_LeavesProcessWideCredentialServiceUnchanged` and
+`NuGetSourceProvider_ProductAssembly_DoesNotReferenceNuGetCredentialService`, covering `AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration`.
 
 **NuGetSourceProvider_RejectServerAndInvalidLocations_WithClearErrors**: An `http` or `https`
 server location is rejected with a message naming the source and saying servers are not supported;

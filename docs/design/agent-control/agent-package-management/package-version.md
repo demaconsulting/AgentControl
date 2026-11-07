@@ -69,14 +69,14 @@ exactly three numeric segments, an optional prerelease, and no metadata.
   components, a release (`Prerelease is null`) outranks any prerelease of the same numeric
   version; two prereleases compare identifier by identifier (split on `.`): numeric identifiers
   compare numerically (as arbitrary-length digit strings, so there is no overflow) and rank
-  below alphanumeric identifiers, alphanumeric identifiers compare in ASCII order, and when all
+  below alphanumeric identifiers, alphanumeric identifiers compare in ASCII order ignoring letter case, and when all
   shared identifiers are equal the longer list ranks higher. Metadata is never consulted
   (`AgentControl-PackageVersion-Compare`, `AgentControl-PackageVersion-MetadataIgnoredInComparison`).
-  Prerelease labels compare case-sensitively as semver specifies, whereas NuGet compares them
-  case-insensitively; the difference only matters for labels that differ solely by letter case.
+  Prerelease labels compare without regard to letter case, as NuGet does, so `1.0.0-beta` and
+  `1.0.0-BETA` are equal and the "latest" chosen for a NuGet source matches NuGet's own choice.
 
 **Equals / GetHashCode / ToString**: `Equals` delegates to `CompareTo(other) == 0`;
-`GetHashCode` combines the numeric components and the canonical prerelease so versions that
+`GetHashCode` combines the numeric components and the case-insensitive canonical prerelease so versions that
 compare equal hash equally; `ToString` returns the original text, which round-trips through
 `TryParse` (`AgentControl-PackageVersion-Compare`).
 
@@ -94,7 +94,7 @@ unlike `Equals`, which treats two nulls as equal).
 
 #### Dependencies
 
-- **.NET BCL** — `int.TryParse` (invariant culture, `NumberStyles.None`), `string.CompareOrdinal`.
+- **.NET BCL** — `int.TryParse` (invariant culture, `NumberStyles.None`), `string.Compare` (ordinal, ignoring case).
 
 The unit tests additionally compare its ordering with `NuGet.Versioning` (a transitive
 dependency of the NuGet caching OTS item) to prove both agree on which version is newest.

@@ -113,7 +113,9 @@ by `LastLaunchedUtc` descending with nulls last, stable otherwise
 #### Error Handling
 
 `AddRepo` throws `ArgumentException` for a null, empty, or whitespace `repoPath`.
-`RemoveRepo`/`ApplySettings` throw `ArgumentNullException` for a null argument. `SaveSettings`
+`RemoveRepo`/`ApplySettings` throw `ArgumentNullException` for a null argument, and `ApplySettings`
+throws `InvalidOperationException` before adopting anything when a source location embeds a
+credential, leaving the current settings in place. `SaveSettings`
 propagates `InvalidOperationException` from `SettingsStore.Save` if the settings file cannot
 be written. `TryLoadPin` (private) catches `InvalidOperationException` from `RepoPinStore.Load`
 and returns `null`, so a corrupt or unreadable pin file never prevents `AddRepo` from

@@ -66,10 +66,18 @@ internal sealed class AgentControlTestContext : IDisposable
     ///     pin file when <paramref name="pinnedPackageName"/> is supplied, since
     ///     <c>RepoCardViewModel.Refresh()</c> always re-reads the pin from disk), or
     ///     <see langword="null"/>.</param>
+    /// <param name="nuGetFeedPath">A NuGet package folder to configure as the additional
+    ///     <c>Feed</c> source, or <see langword="null"/> for none.</param>
+    /// <param name="nuGetPackageIds">The package IDs offered by the <c>Feed</c> source.</param>
+    /// <param name="pinnedSource">The source alias to record in the repo's pin file, or
+    ///     <see langword="null"/> to write a pin that names no source.</param>
     public AgentControlTestContext(
         string? packageSourcePath = null,
         string? pinnedPackageName = null,
-        string? pinnedPackageVersion = null)
+        string? pinnedPackageVersion = null,
+        string? nuGetFeedPath = null,
+        IReadOnlyList<string>? nuGetPackageIds = null,
+        string? pinnedSource = null)
     {
         var root = Directory.CreateTempSubdirectory("AgentControlUiTests-");
         RootDirectory = root.FullName;
@@ -87,11 +95,13 @@ internal sealed class AgentControlTestContext : IDisposable
             packageSourcePath,
             RepoPath,
             pinnedPackageName,
-            pinnedPackageVersion);
+            pinnedPackageVersion,
+            nuGetFeedPath,
+            nuGetPackageIds);
 
         if (pinnedPackageName is not null && pinnedPackageVersion is not null)
         {
-            TestRepoPinWriter.Write(RepoPath, pinnedPackageName, pinnedPackageVersion);
+            TestRepoPinWriter.Write(RepoPath, pinnedPackageName, pinnedPackageVersion, pinnedSource);
         }
 
         _preExistingShellProcessIds = SnapshotShellProcessIds();

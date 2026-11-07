@@ -37,9 +37,10 @@ namespace DemaConsulting.AgentControl.RepoSync;
 ///     </para>
 ///     <para>
 ///     The package folder is typically a shared cache, so this reader is strictly read-only. It
-///     also rejects any symbolic link, junction or other reparse point inside the content tree
-///     (which could redirect a read to an arbitrary file) rather than following it, and every file
-///     path it opens is validated with <see cref="PathHelpers.SafePathCombine"/> to stay inside the
+///     also rejects any symbolic link, junction or other reparse point at the package folder
+///     itself, at the content root, and at every directory or file along each path it reads
+///     (any of which could redirect a read to an arbitrary file) rather than following it, and
+///     every file path it opens is validated with <see cref="PathHelpers.SafePathCombine"/> to stay inside the
 ///     content root. Not thread-safe; holds no file handles between calls.
 ///     </para>
 /// </remarks>
@@ -83,10 +84,18 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="packageFolder"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the folder has no <c>content</c>
-    ///     sub-folder, or the content root is itself a link.</exception>
+    ///     sub-folder, or the package folder or the content root is itself a link.</exception>
     public static DirectoryPackageContentReader Open(string packageFolder)
     {
         ArgumentNullException.ThrowIfNull(packageFolder);
+
+        // A linked package folder could redirect every read to an arbitrary location, so the
+        // folder itself is checked before anything under it is trusted
+        if (Directory.Exists(packageFolder) && IsLink(new DirectoryInfo(packageFolder)))
+        {
+            throw new InvalidOperationException(
+                $"Package folder '{packageFolder}' is a link, which is not allowed.");
+        }
 
         // The content folder is mandatory: without it there is nothing to sync, and proceeding
         // would let the extractor delete the repo's managed folders for no replacement.
@@ -176,12 +185,12 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
 
     /// <summary>
     ///     Resolves a relative path to an absolute file path inside the content root, rejecting
-    ///     traversal and links.
+    ///     traversal and links anywhere along the path.
     /// </summary>
     /// <param name="relativePath">The relative path using <c>/</c> separators.</param>
     /// <returns>The absolute path (which may not exist).</returns>
     /// <exception cref="InvalidOperationException">Thrown when the path escapes the content root
-    ///     or the file is a link.</exception>
+    ///     or the file or any directory leading to it is a link.</exception>
     private string ResolveFile(string relativePath)
     {
         string path;
@@ -195,13 +204,41 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
                 $"Package file '{relativePath}' has an invalid path: {ex.Message}", ex);
         }
 
-        if (File.Exists(path) && IsLink(new FileInfo(path)))
-        {
-            throw new InvalidOperationException(
-                $"Package file '{relativePath}' in '{Description}' is a link, which is not allowed.");
-        }
-
+        RejectLinksAlongPath(relativePath);
         return path;
+    }
+
+    /// <summary>
+    ///     Rejects a requested path when any directory component between the content root and the
+    ///     file, or the file itself, is a link of any kind.
+    /// </summary>
+    /// <param name="relativePath">The relative path using <c>/</c> separators; already validated
+    ///     to stay inside the content root.</param>
+    /// <exception cref="InvalidOperationException">Thrown when a component that exists is a
+    ///     link.</exception>
+    /// <remarks>
+    ///     Checking only the last component would let a linked parent directory containing an
+    ///     ordinary file redirect the read outside the package, so every component is examined,
+    ///     stopping at the first one that does not exist.
+    /// </remarks>
+    private void RejectLinksAlongPath(string relativePath)
+    {
+        var current = _contentRoot;
+        foreach (var component in relativePath.Split(PackagePathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, component);
+            FileSystemInfo entry = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+            if (!entry.Exists)
+            {
+                return;
+            }
+
+            if (IsLink(entry))
+            {
+                throw new InvalidOperationException(
+                    $"Package file '{relativePath}' in '{Description}' passes through a link, which is not allowed.");
+            }
+        }
     }
 
     /// <summary>

@@ -113,11 +113,23 @@ internal static class SettingsStore
     /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the configuration directory
-    ///     cannot be created or the settings file cannot be written.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when a source location embeds a
+    ///     credential (nothing is written), the configuration directory cannot be created, or the
+    ///     settings file cannot be written.</exception>
     public static void Save(AppSettings settings, string? configDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
+
+        // Refuse before anything is written: a source location that embeds a credential must
+        // never reach the settings file
+        foreach (var source in settings.GetEffectiveSources())
+        {
+            var problem = source.GetCredentialProblem();
+            if (problem is not null)
+            {
+                throw new InvalidOperationException($"Settings were not saved. {problem}");
+            }
+        }
 
         var directory = configDirectory ?? GetDefaultConfigDirectory();
         string? temporaryPath = null;

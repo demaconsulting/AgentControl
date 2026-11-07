@@ -211,8 +211,7 @@ public class PackageVersionTests
     ///     here picks the same "latest" NuGet would.
     /// </summary>
     /// <remarks>
-    ///     Prerelease labels differing only by letter case are deliberately excluded: this type
-    ///     follows semver (case-sensitive) while NuGet compares labels case-insensitively.
+    ///     Includes prerelease labels that differ only by letter case, which NuGet treats as equal.
     /// </remarks>
     [Fact]
     public void PackageVersion_CompareTo_VersionsAgreeWithNuGetVersionOrdering()
@@ -222,7 +221,7 @@ public class PackageVersionTests
         [
             "0.0.1", "0.1.0", "1.0.0", "1.0.0.0", "1.0.0.1", "1.0.1", "1.0.0-alpha", "1.0.0-alpha.1",
             "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0+build1",
-            "1.0.0+build2", "1.0.0-beta+meta", "1.2.3", "1.2.3.4", "2.0.0", "10.0.0", "2.0.0-rc.1", "1.10.0",
+            "1.0.0+build2", "1.0.0-beta+meta", "1.0.0-BETA", "1.0.0-Beta.2", "1.0.0-ALPHA.beta", "1.0.0-Rc.1", "1.2.3", "1.2.3.4", "2.0.0", "10.0.0", "2.0.0-rc.1", "1.10.0",
             "1.9.0"
         ];
 
@@ -440,6 +439,27 @@ public class PackageVersionTests
         // Assert
         Assert.True(canonical.Equals(padded));
         Assert.Equal(canonical.GetHashCode(), padded.GetHashCode());
+    }
+
+    /// <summary>
+    ///     Test that prerelease labels differing only by letter case compare equal, order equally
+    ///     and share a hash code, matching NuGet.
+    /// </summary>
+    [Fact]
+    public void PackageVersion_CompareTo_PrereleaseLabelsDifferingOnlyByCase_AreEqualWithSameHashCode()
+    {
+        // Arrange
+        Assert.True(PackageVersion.TryParse("1.0.0-beta.Rc", out var lower));
+        Assert.True(PackageVersion.TryParse("1.0.0-BETA.rc", out var upper));
+        Assert.NotNull(lower);
+        Assert.NotNull(upper);
+
+        // Assert: equal, no ordering difference, same hash, and NuGet agrees
+        Assert.Equal(0, lower.CompareTo(upper));
+        Assert.True(lower.Equals(upper));
+        Assert.Equal(lower.GetHashCode(), upper.GetHashCode());
+        Assert.True(global::NuGet.Versioning.NuGetVersion.Parse("1.0.0-beta.Rc")
+            .Equals(global::NuGet.Versioning.NuGetVersion.Parse("1.0.0-BETA.rc")));
     }
 
     /// <summary>

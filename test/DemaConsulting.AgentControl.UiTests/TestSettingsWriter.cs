@@ -60,13 +60,20 @@ internal static class TestSettingsWriter
     /// <param name="pinnedPackageVersion">The pinned package version for
     ///     <paramref name="repoPath"/>, or <see langword="null"/> if the repo has never been
     ///     synced.</param>
+    /// <param name="nuGetFeedPath">A NuGet package folder to configure as an additional source
+    ///     with alias <c>Feed</c> (switching the file to the multi-source format, in which
+    ///     <paramref name="packageSourcePath"/> becomes the <c>Default</c> zip source), or
+    ///     <see langword="null"/> for the older single-folder format.</param>
+    /// <param name="nuGetPackageIds">The package IDs offered by the <c>Feed</c> source.</param>
     public static void Write(
         string configDirectory,
         string argLoggerStubExePath,
         string? packageSourcePath,
         string repoPath,
         string? pinnedPackageName = null,
-        string? pinnedPackageVersion = null)
+        string? pinnedPackageVersion = null,
+        string? nuGetFeedPath = null,
+        IReadOnlyList<string>? nuGetPackageIds = null)
     {
         Directory.CreateDirectory(configDirectory);
 
@@ -74,14 +81,13 @@ internal static class TestSettingsWriter
         // the anonymous type property below a type without an unnecessary upcast.
         string? shellPreference = null;
 
-        var settings = new
+        var settings = new Dictionary<string, object?>
         {
-            PackageSourcePath = packageSourcePath,
-            GitExecutablePath = argLoggerStubExePath,
-            AgentTool = 3, // AgentToolKind.Custom
-            CustomAgentCommand = $"\"{argLoggerStubExePath}\"",
-            ShellPreference = shellPreference,
-            RecentRepos = new[]
+            ["GitExecutablePath"] = argLoggerStubExePath,
+            ["AgentTool"] = 3, // AgentToolKind.Custom
+            ["CustomAgentCommand"] = $"\"{argLoggerStubExePath}\"",
+            ["ShellPreference"] = shellPreference,
+            ["RecentRepos"] = new[]
             {
                 new
                 {
@@ -91,6 +97,29 @@ internal static class TestSettingsWriter
                 }
             }
         };
+
+        if (nuGetFeedPath is null)
+        {
+            // Older single-folder format, which the application migrates to a "Default" source
+            settings["PackageSourcePath"] = packageSourcePath;
+        }
+        else
+        {
+            var sources = new List<object>();
+            if (packageSourcePath is not null)
+            {
+                sources.Add(new { Alias = "Default", Type = "Zip", Location = packageSourcePath });
+            }
+
+            sources.Add(new
+            {
+                Alias = "Feed",
+                Type = "NuGet",
+                Location = nuGetFeedPath,
+                PackageIds = nuGetPackageIds ?? []
+            });
+            settings["Sources"] = sources;
+        }
 
         var json = JsonSerializer.Serialize(settings, SerializerOptions);
         File.WriteAllText(Path.Combine(configDirectory, "settings.json"), json);

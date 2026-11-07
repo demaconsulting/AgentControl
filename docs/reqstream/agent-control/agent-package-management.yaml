@@ -63,7 +63,9 @@ sections:
           The AgentPackageManagement subsystem shall describe a configured package source by a
           unique alias, a type (zip package folder or NuGet package folder or server), a
           location, and - for NuGet sources - the package IDs it offers, together with trust
-          options, and shall never hold a password, token or other secret in that description.
+          options, shall never hold a password, token or other secret in that description, and
+          shall identify a location that embeds a credential (such as URL user information) so
+          it is never persisted.
         justification: |
           The source description is persisted in the user's settings file, so it must carry
           everything needed to reach a source and nothing that would turn the settings file
@@ -73,6 +75,8 @@ sections:
           - PackageSourceDefinition_Members_HaveNoSecretLikeProperty
           - PackageSourceDefinition_LocationKind_DerivedFromLocation
           - PackageSourceDefinition_Serialize_TypeAsNameAndNoDerivedLocationKind
+          - PackageSourceDefinition_GetCredentialProblem_CredentialBearingLocation_ReturnsMessageWithoutSecret
+          - PackageSourceDefinition_GetCredentialProblem_OrdinaryLocation_ReturnsNull
 
       - id: AgentControl-AgentPackageManagement-SourceResolution
         title: >-

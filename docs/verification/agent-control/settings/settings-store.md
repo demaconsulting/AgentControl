@@ -16,7 +16,8 @@ N/A - standard test environment.
 - All unit tests pass with zero failures.
 - Package sources (with all fields) round-trip; a legacy single package-folder path migrates to a
   Default zip source, loses to a configured source list, and is never written back.
-- The persisted JSON contains no property named like a secret.
+- The persisted JSON contains no property named like a secret, and a source location that embeds a
+  credential is refused with nothing written.
 - A save leaves only the settings file, holding the latest content.
 - Settings saved and then loaded again return every field unchanged.
 - Loading with no settings file present returns default settings rather than throwing.
@@ -62,8 +63,12 @@ caller's instance unchanged. This scenario is tested by
 
 **SettingsStore_NoSecretsPersisted_JsonHasNoSecretLikeProperties**: The persisted JSON of settings
 holding a fully populated NuGet server source has no property named like a password, token,
-secret, credential or key. This scenario is tested by
-`SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties`, covering
+secret, credential or key, and settings whose source location embeds a sentinel password (as URL
+user information, for a source or for the legacy single path) are refused without writing any file
+and without the password appearing in the error. This scenario is tested by
+`SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties`,
+`SettingsStore_Save_SourceLocationWithEmbeddedCredential_ThrowsAndWritesNothing`, and
+`SettingsStore_Save_LegacyPackageSourcePathWithEmbeddedCredential_ThrowsAndWritesNothing`, covering
 `AgentControl-SettingsStore-NoSecretsPersisted`.
 
 **SettingsStore_AtomicSave_LeavesOnlySettingsFileWithLatestContent**: After two saves the

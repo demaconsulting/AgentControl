@@ -51,11 +51,15 @@ subsystem level, covering `AgentControl-AgentPackageManagement-UpgradeDetection`
 **AgentPackageManagement_SourceDefinitions_HoldNoSecretsAndDeriveLocationKind**: The source
 description carries alias, type, location, package IDs and trust options with safe defaults,
 derives folder-versus-server from the location, serializes its type by name without the derived
-kind, validates aliases, and has no property named like a password, token, key, credential or
-secret. This scenario is tested by the source model tests, with
+kind, validates aliases, has no property named like a password, token, key, credential or
+secret, and flags a location that embeds a credential (URL user information, or a server URL
+with a query string or fragment) without repeating it in the message. This scenario is tested by
+the source model tests, with
 `PackageSourceDefinition_Members_HaveNoSecretLikeProperty`,
-`PackageSourceDefinition_LocationKind_DerivedFromLocation`, and
-`PackageSourceDefinition_Serialize_TypeAsNameAndNoDerivedLocationKind` cited directly at the
+`PackageSourceDefinition_LocationKind_DerivedFromLocation`,
+`PackageSourceDefinition_Serialize_TypeAsNameAndNoDerivedLocationKind`,
+`PackageSourceDefinition_GetCredentialProblem_CredentialBearingLocation_ReturnsMessageWithoutSecret`,
+and `PackageSourceDefinition_GetCredentialProblem_OrdinaryLocation_ReturnsNull` cited directly at the
 subsystem level, covering `AgentControl-AgentPackageManagement-SourceDefinitions`.
 
 **AgentPackageManagement_SourceResolution_ResolvesOnlyTheNamedSourceWithNoFallback**: Resolving a

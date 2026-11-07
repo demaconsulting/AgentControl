@@ -76,8 +76,11 @@ recent-repos list, since this view model never owns or edits it.
 
 #### Error Handling
 
-The constructor throws `ArgumentNullException` for a null `initial` or `onSave`. `Save`
-itself performs no validation and cannot fail; any failure persisting the resulting
+The constructor throws `ArgumentNullException` for a null `initial` or `onSave`. `Save` checks
+every source location with `PackageSourceDefinition.GetCredentialProblem`: a location embedding a
+credential (for example a URL with user information typed into the package source field) is not
+saved - `onSave` is not invoked, `Saved` is not raised, and `ErrorMessage` (shown in red in the
+window, and never containing the location) explains why. Any failure persisting the resulting
 `AppSettings` (e.g. `InvalidOperationException` from `SettingsStore.Save`) originates from the
 `onSave` callback, not from this view model.
 

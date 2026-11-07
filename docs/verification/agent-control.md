@@ -173,16 +173,22 @@ covering `AgentControl-Platform-Net10`.
 **AgentControl_MultipleSources_SettingsRoundTripAndLegacyMigration**: Settings holding several
 sources are saved and loaded back with every field intact, and a legacy settings file that holds
 only the single package-source folder is loaded as one zip source named `Default`, proving the tool
-supports several configured sources and carries the earlier setup forward. This is verified at unit
-level because no end-to-end test configures several sources yet (the limitation is disclosed in the
-requirement). This scenario is tested by `SettingsStore_SaveThenLoad_RoundTripsAllFields` and
+supports several configured sources and carries the earlier setup forward. The published
+application is also run with a zip source and a NuGet folder source configured side by side (the
+settings file is seeded directly because the Settings window still edits only the `Default`
+source). This scenario is tested by
+`windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly`,
+`windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes` (older single-folder
+settings migrated to `Default`), `SettingsStore_SaveThenLoad_RoundTripsAllFields` and
 `SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource`, covering
 `AgentControl-System-MultipleSources`.
 
 **AgentControl_NuGetSources_FolderFeed_AppliesPackageWithoutTouchingRepoNuGetConfig**: A repo is
 given a package chosen from a real NuGet folder feed; the managed folders, release notes, and pin
 are produced as for a zip package, and listing and acquiring packages never reads or writes a
-`nuget.config` in the repo or the current directory. This scenario is tested by
+`nuget.config` in the repo or the current directory. The published application is run against a
+real NuGet folder feed and upgrades a pinned repo from it. This scenario is tested by
+`windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly`,
 `RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes`
 and `NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig`, covering
 `AgentControl-System-NuGetSources`.
@@ -190,7 +196,12 @@ and `NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig`, covering
 **AgentControl_SourcePinIntegrity_PinBoundToSource_NoSubstitution**: With the same package id
 offered by two sources, a pin to the second source resolves only against it and the first source
 is never contacted; a pin naming a source that is not configured gives an error state for the repo
-and offers no upgrade from any other source. This scenario is tested by
+and offers no upgrade from any other source. The published application shows both behaviors: a repo
+pinned to the NuGet source is upgraded from it although the zip source offers a higher version of
+the same package name, and a repo pinned to an unconfigured source shows a package source problem
+badge, offers no upgrade, and keeps its pin file unchanged. This scenario is tested by
+`windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly`,
+`windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
 `PackageSourceRegistry_PinToSourceB_SamePackageIdAtBothSources_OnlyBIsContacted` and
 `RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
 covering `AgentControl-System-SourcePinIntegrity`.

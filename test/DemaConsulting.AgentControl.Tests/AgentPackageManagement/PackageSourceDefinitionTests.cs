@@ -55,6 +55,52 @@ public class PackageSourceDefinitionTests
     }
 
     /// <summary>
+    ///     Test that a location embedding user information, or a server URL carrying a query
+    ///     string or fragment, is rejected, and that the message never repeats the secret.
+    /// </summary>
+    /// <param name="location">A credential-bearing location.</param>
+    [Theory]
+    [InlineData("https://user:SentinelSecretValue@feeds.example.com/v3/index.json")]
+    [InlineData("https://SentinelSecretValue@feeds.example.com/v3/index.json")]
+    [InlineData("http://user:SentinelSecretValue@feeds.example.com/nuget")]
+    [InlineData("https://feeds.example.com/v3/index.json?token=SentinelSecretValue")]
+    [InlineData("https://feeds.example.com/v3/index.json#SentinelSecretValue")]
+    [InlineData("ftp://user:SentinelSecretValue@host/feed")]
+    public void PackageSourceDefinition_GetCredentialProblem_CredentialBearingLocation_ReturnsMessageWithoutSecret(
+        string location)
+    {
+        // Arrange
+        var definition = new PackageSourceDefinition { Alias = "Feed", Type = PackageSourceType.NuGet, Location = location };
+
+        // Act
+        var problem = definition.GetCredentialProblem();
+
+        // Assert
+        Assert.NotNull(problem);
+        Assert.Contains("Feed", problem, StringComparison.Ordinal);
+        Assert.DoesNotContain("SentinelSecretValue", problem, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that ordinary locations - folders, UNC shares and plain server URLs - are accepted.
+    /// </summary>
+    /// <param name="location">An acceptable location.</param>
+    [Theory]
+    [InlineData(@"C:\feeds\agents")]
+    [InlineData(@"\\server\share\feed")]
+    [InlineData("/var/feeds/agents")]
+    [InlineData("https://feeds.example.com/v3/index.json")]
+    [InlineData("")]
+    public void PackageSourceDefinition_GetCredentialProblem_OrdinaryLocation_ReturnsNull(string location)
+    {
+        // Arrange
+        var definition = new PackageSourceDefinition { Alias = "Feed", Type = PackageSourceType.NuGet, Location = location };
+
+        // Act / Assert
+        Assert.Null(definition.GetCredentialProblem());
+    }
+
+    /// <summary>
     ///     Test that new definitions default to the safe values: no insecure http, no signature
     ///     requirement, no signer pin, no package IDs.
     /// </summary>

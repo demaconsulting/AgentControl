@@ -178,12 +178,15 @@ sections:
           - AgentControl-Settings-PackageSources
           - AgentControl-AgentPackageManagement-SourceDefinitions
           - AgentControl-AgentPackageManagement-ZipFolderSource
+          - AgentControl-AgentPackageManagement-NuGetFolderSource
         tests:
-          # No FlaUI end-to-end test configures several sources yet (the Settings window still
-          # edits only the Default source; UiTests seed settings through TestSettingsWriter's
-          # legacy single path, which exercises the Default-source migration). This system
-          # requirement is therefore verified via the underlying unit tests - a disclosed
-          # granularity limitation, not a fabricated end-to-end claim.
+          # End to end: the published application runs with a zip source and a NuGet folder
+          # source configured side by side (the Settings window still edits only the Default
+          # source, so the multi-source settings file is seeded directly), and the older
+          # single-folder settings file used by the other UI tests exercises the Default-source
+          # migration. The persistence round trip and migration are also verified at unit level.
+          - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
+          - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
           - SettingsStore_SaveThenLoad_RoundTripsAllFields
           - SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource
 
@@ -203,9 +206,9 @@ sections:
           - AgentControl-RepoSync-SyncFromFolderPackage
           - AgentControl-OTS-NuGetCaching-ListAndCache
         tests:
-          # Verified at unit level through the real NuGet folder-feed provider and the card
-          # view model driving it; no FlaUI test drives a NuGet source yet (see
-          # AgentControl-System-MultipleSources for the same disclosed limitation).
+          # End to end through the published application against a real NuGet folder feed, plus
+          # the unit-level evidence that the repo's NuGet configuration is never touched.
+          - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
           - RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes
           - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig
 
@@ -226,8 +229,11 @@ sections:
           - AgentControl-AgentPackageManagement-SourceResolution
           - AgentControl-LauncherUI-SourceAwareActions
         tests:
-          # Verified at unit level (see AgentControl-System-MultipleSources for the disclosed
-          # limitation that no FlaUI test configures several sources yet).
+          # End to end: a pin to the NuGet source is upgraded from that source although the zip
+          # source offers a higher version of the same package name, and a pin to an
+          # unconfigured source shows an error and offers no upgrade from another source.
+          - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
+          - windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
           - PackageSourceRegistry_PinToSourceB_SamePackageIdAtBothSources_OnlyBIsContacted
           - RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
 

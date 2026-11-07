@@ -31,8 +31,9 @@ sections:
         title: >-
           The PackageContentExtractor class shall reject, before deleting anything from the
           repo, any package file whose destination would fall outside the repo and any
-          symbolic link, junction or other link inside a folder package, and shall refuse to
-          read package files outside the package's content folder.
+          symbolic link, junction or other link in a folder package - at the package folder,
+          at its content folder, at any directory leading to a file, or at the file itself -
+          and shall refuse to read package files outside the package's content folder.
         justification: |
           A package is untrusted input: a crafted path could write outside the repo, and a link
           inside an unpacked package could redirect a read to an arbitrary file, so both must
@@ -45,6 +46,15 @@ sections:
           - ubuntu@DirectoryPackageContentReader_ListFiles_SymlinkedDirectoryInPackage_ThrowsInvalidOperationException
           - ubuntu@DirectoryPackageContentReader_Open_ContentFolderIsSymlink_ThrowsInvalidOperationException
           - ubuntu@DirectoryPackageContentReader_ReadText_SymlinkedReleaseNotes_ThrowsInvalidOperationException
+          - ubuntu@DirectoryPackageContentReader_Open_PackageFolderIsSymlink_ThrowsInvalidOperationException
+          - ubuntu@DirectoryPackageContentReader_OpenRead_LinkedParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException
+          # Directory junctions need no privilege on Windows, so the directory-level rejection
+          # has passing evidence there too.
+          - windows@PackageContentExtractor_Extract_JunctionInPackage_ThrowsBeforeDeletingManagedFolders
+          - windows@DirectoryPackageContentReader_ListFiles_JunctionInPackage_ThrowsInvalidOperationException
+          - windows@DirectoryPackageContentReader_Open_PackageFolderIsJunction_ThrowsInvalidOperationException
+          - windows@DirectoryPackageContentReader_Open_ContentFolderIsJunction_ThrowsInvalidOperationException
+          - windows@DirectoryPackageContentReader_OpenRead_JunctionParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException
 
       - id: AgentControl-PackageContentExtractor-ReadRootFiles
         title: >-

@@ -11,13 +11,15 @@ lists caller-supplied paths so hostile paths (traversal out of the repo) that a 
 never produce can be presented to the extractor. Link rejection is verified with real symbolic
 links where the operating system and its privileges allow creating one; where they do not, those
 tests skip themselves with the reason, and the requirement cites them with an `ubuntu@` source
-filter so its evidence comes from the Linux leg of the build matrix.
+filter so its evidence comes from the Linux leg of the build matrix. Directory junctions need no
+privilege on Windows, so equivalent tests create junctions with the Windows command shell and the requirement
+cites them with a `windows@` filter, giving the directory-level rejection passing evidence there.
 
 #### Test Environment
 
 Symbolic-link tests need an environment that permits creating symbolic links (always true on Linux
 and macOS; on Windows only with the symbolic-link privilege or developer mode, otherwise they are
-skipped).
+skipped). Junction tests run on Windows only (they skip elsewhere) and need no privilege.
 
 #### Acceptance Criteria
 
@@ -28,8 +30,9 @@ skipped).
 - The package folder is byte-for-byte unchanged by extraction and reads.
 - The same content as a zip and as a folder produces an identical repo tree.
 - A package folder without a content folder is rejected when opened.
-- A path that escapes the repo, a path outside the content folder, and a symbolic link in the
-  package are refused, with the repo's managed folders untouched.
+- A path that escapes the repo, a path outside the content folder, and a symbolic link or junction
+  at the package folder, the content folder, any directory leading to a file, or the file itself
+  are refused, with the repo's managed folders untouched.
 - Release notes and the AGENTS.md template are read from a folder package, or reported absent.
 
 #### Test Scenarios
@@ -51,14 +54,25 @@ naming it. This scenario is tested by
 escapes the repo (two spellings) makes extraction fail while a pre-existing managed file survives;
 asking the folder reader for a path that leaves the content folder, or for a missing file, fails (or
 returns none for reading text); a symbolic link to a file in a managed folder, a symbolic link to a
-directory, a symbolic content folder, and a symbolic release-notes file are each refused, the first
-with the repo's existing managed content surviving. This scenario is tested by
+directory, a symbolic content folder, a symbolic package folder, a symbolic parent directory holding an
+ordinary file, and a symbolic release-notes file are each refused, the first with the repo's
+existing managed content surviving; the same refusals are shown on Windows with directory junctions
+as the package folder, the content folder, a parent directory of an ordinary file, and a directory
+inside the package (the last also leaving the repo's existing managed content intact). This
+scenario is tested by
 `PackageContentExtractor_Extract_TraversalPathFromReader_ThrowsBeforeDeletingManagedFolders`,
 `DirectoryPackageContentReader_OpenReadAndReadText_TraversalOrMissingPath_Rejected`,
 `PackageContentExtractor_Extract_SymlinkedFileInPackage_ThrowsBeforeDeletingManagedFolders`,
 `DirectoryPackageContentReader_ListFiles_SymlinkedDirectoryInPackage_ThrowsInvalidOperationException`,
-`DirectoryPackageContentReader_Open_ContentFolderIsSymlink_ThrowsInvalidOperationException`, and
+`DirectoryPackageContentReader_Open_ContentFolderIsSymlink_ThrowsInvalidOperationException`,
 `DirectoryPackageContentReader_ReadText_SymlinkedReleaseNotes_ThrowsInvalidOperationException`,
+`DirectoryPackageContentReader_Open_PackageFolderIsSymlink_ThrowsInvalidOperationException`,
+`DirectoryPackageContentReader_OpenRead_LinkedParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException`,
+`PackageContentExtractor_Extract_JunctionInPackage_ThrowsBeforeDeletingManagedFolders`,
+`DirectoryPackageContentReader_ListFiles_JunctionInPackage_ThrowsInvalidOperationException`,
+`DirectoryPackageContentReader_Open_PackageFolderIsJunction_ThrowsInvalidOperationException`,
+`DirectoryPackageContentReader_Open_ContentFolderIsJunction_ThrowsInvalidOperationException`, and
+`DirectoryPackageContentReader_OpenRead_JunctionParentDirectoryWithOrdinaryFile_ThrowsInvalidOperationException`,
 covering `AgentControl-PackageContentExtractor-RejectLinksAndTraversal`.
 
 **PackageContentExtractor_ReadRootFiles_ReturnsTextOrNull**: Release notes and the AGENTS.md

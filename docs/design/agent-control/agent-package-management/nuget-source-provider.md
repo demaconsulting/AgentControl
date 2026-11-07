@@ -36,7 +36,9 @@ The provider is otherwise stateless and thread-safe.
 
 **Constructor**: Validates the definition (a NuGet source with a non-blank alias and an absolute
 folder location), and derives the root. A server location or a relative path throws
-`InvalidOperationException`; a non-NuGet definition throws `ArgumentException`.
+`InvalidOperationException`; a non-NuGet definition throws `ArgumentException`, as does a supplied
+base folder that is not a fully qualified absolute path, so the root can never be resolved against
+the current directory or a target repo (`AgentControl-NuGetSourceProvider-ExplicitCacheRoot`).
 
 **ListPackageIdsAsync**: Returns the configured package IDs, sorted
 (`AgentControl-NuGetSourceProvider-ListVersions`).
@@ -73,8 +75,9 @@ location, non-interactive, no credential callback, with the application logger.
 - The private `packages` folder means a package unpacked for one source (or present in the
   developer's own NuGet cache) can never be served as another source's package.
 - The provider never registers a NuGet credential service (the service is process-wide) and
-  carries no credentials; a test inspects the product assembly's type references to guard this
-  (`AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration`). `RequireSignedPackages`,
+  carries no credentials; one test observes that the process-wide service is unchanged after
+  listing and acquiring, and another inspects the product assembly's type references to guard
+  the design constraint (`AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration`). `RequireSignedPackages`,
   `SignerFingerprint` and `AllowInsecureHttp` on the definition are persisted but not yet
   enforced; they belong to server and signing support.
 - The unpacked package is only read, never modified.

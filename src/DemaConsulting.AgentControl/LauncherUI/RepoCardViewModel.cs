@@ -420,7 +420,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private string? GetNuGetRootBase() =>
         string.IsNullOrWhiteSpace(_startupOptions?.ConfigDirectory)
             ? null
-            : Path.Combine(_startupOptions.ConfigDirectory, "nuget");
+            : Path.Combine(Path.GetFullPath(_startupOptions.ConfigDirectory), "nuget");
 
     /// <summary>
     ///     Runs an asynchronous source operation to completion on a worker thread and returns its

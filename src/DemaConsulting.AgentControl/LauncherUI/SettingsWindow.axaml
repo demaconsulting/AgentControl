@@ -58,6 +58,13 @@
                    Text="{Binding ShellPreference}"
                    HorizontalAlignment="Stretch" />
 
+        <TextBlock Name="SettingsErrorTextBlock"
+                    AutomationProperties.AutomationId="SettingsErrorTextBlock"
+                    Text="{Binding ErrorMessage}"
+                    IsVisible="{Binding HasError}"
+                    Foreground="Red"
+                    TextWrapping="Wrap" />
+
         <Button Name="SaveSettingsButton"
                  AutomationProperties.AutomationId="SaveSettingsButton"
                  Content="Save"

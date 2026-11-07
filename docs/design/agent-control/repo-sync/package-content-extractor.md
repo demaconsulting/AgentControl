@@ -31,11 +31,12 @@ failures in `InvalidOperationException` naming the zip.
 
 **DirectoryPackageContentReader**: holds only paths. `Open` requires a `content` sub-folder
 (otherwise `InvalidOperationException` — a wrong-layout package must never make the extractor
-delete a repo's managed folders for nothing) and rejects a `content` folder that is itself a
-link. `ListFiles` walks the content tree and rejects any file or directory that is a symbolic link,
+delete a repo's managed folders for nothing) and rejects a package folder or a `content` folder
+that is itself a link. `ListFiles` walks the content tree and rejects any file or directory that is a symbolic link,
 junction or other reparse point (`FileAttributes.ReparsePoint` or a link target). `OpenRead` and
 `ReadText` resolve each path with `PathHelpers.SafePathCombine` against the content root and
-refuse a link file.
+refuse a path when the file, or any directory between the content root and the file, is a link, so
+a linked parent directory holding an ordinary file cannot redirect a read.
 
 #### Key Methods
 

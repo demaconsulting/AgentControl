@@ -20,6 +20,8 @@ N/A - standard test environment.
 - Saving invokes the owner's callback with the current values and raises `Saved`.
 - `AvailableShellPreferences` is non-empty, has no duplicate entries, starts with a blank
   auto-detect entry, and contains the expected OS-appropriate preset names.
+- A package source field that embeds a credential is refused with a message that does not repeat
+  it, and nothing is saved.
 - Saving writes the package source field as the Default source (never the legacy path), keeps all
   other configured sources unchanged, and removes the Default source when the field is blank.
 
@@ -65,3 +67,10 @@ field. This scenario is tested by
 `SettingsWindowViewModel_Save_BlankPackageSourcePath_RemovesDefaultSourceOnly`, and
 `SettingsWindowViewModel_Constructor_LegacyPackageSourcePath_SeedsPackageSourcePathField`,
 covering `AgentControl-SettingsWindowViewModel-DefaultSource`.
+
+**SettingsWindowViewModel_Save_CredentialBearingPath_IsRefused**: Saving with a package source
+field holding a URL with user information and a sentinel password does not invoke the save
+callback or raise `Saved`, sets `HasError`, and the message does not contain the password. This
+scenario is tested by
+`SettingsWindowViewModel_Save_PackageSourcePathWithEmbeddedCredential_IsRefusedWithErrorMessage`,
+covering `AgentControl-SettingsWindowViewModel-Save`.

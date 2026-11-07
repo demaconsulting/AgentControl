@@ -119,6 +119,33 @@ internal sealed partial class PackageSourceDefinition
             : PackageSourceLocationKind.Folder;
 
     /// <summary>
+    ///     Checks that <see cref="Location"/> carries no credential, because a location is
+    ///     persisted in the settings file and AgentControl never stores secrets.
+    /// </summary>
+    /// <returns><see langword="null"/> when the location is acceptable; otherwise a message
+    ///     (which never repeats the location itself, so the secret cannot leak into an error
+    ///     display or log) saying that the location embeds a credential. An absolute URI with
+    ///     user information (<c>https://user:password@host/...</c>, <c>https://token@host/...</c>)
+    ///     is rejected, as is a server URL carrying a query string or fragment, which is where
+    ///     access tokens and signed-URL secrets travel.</returns>
+    public string? GetCredentialProblem()
+    {
+        if (string.IsNullOrWhiteSpace(Location) ||
+            !Uri.TryCreate(Location.Trim(), UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        var embedsCredential = !string.IsNullOrEmpty(uri.UserInfo) ||
+                               (LocationKind == PackageSourceLocationKind.Server &&
+                                (!string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment)));
+        return embedsCredential
+            ? $"The location of source '{Alias}' must not contain a user name, password, token or query string; " +
+              "AgentControl never stores credentials."
+            : null;
+    }
+
+    /// <summary>
     ///     Gets the pattern of characters an alias may contain: a letter or digit followed by any
     ///     number of letters, digits, spaces, dots, underscores or hyphens (length and trailing
     ///     characters are checked separately by <see cref="IsValidAlias"/>).
