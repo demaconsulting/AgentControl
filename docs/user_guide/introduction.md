@@ -264,7 +264,9 @@ Open Settings from the gear icon on the toolbar to configure:
 - **Agent tool selection** — which agentic CLI tool Launch starts: GitHub Copilot CLI,
   Cursor, Claude Code, or a custom command line that you supply yourself. In a custom command
   line, quote the executable path if it contains spaces, for example
-  `"C:\Program Files\My Tool\tool.exe" --flag`; single quotes work too. When the launch shell
+  `"C:\Program Files\My Tool\tool.exe" --flag`. Double quotes work in every shell; single quotes
+  (`'C:\Program Files\My Tool\tool.exe' --flag`) work in PowerShell and POSIX shells but not in
+  `cmd`, which only understands double quotes. When the launch shell
   is PowerShell, AgentControl automatically adds the PowerShell call operator (`&`) in front of
   a command that starts with a quote, so you do not need to type it yourself (a command you
   already start with `&` is left alone). Commands launched through `cmd` or a POSIX shell are
