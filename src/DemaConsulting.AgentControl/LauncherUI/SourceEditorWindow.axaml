@@ -1,0 +1,124 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:DemaConsulting.AgentControl.LauncherUI"
+        mc:Ignorable="d"
+        d:DesignWidth="540" d:DesignHeight="480"
+        x:Class="DemaConsulting.AgentControl.LauncherUI.SourceEditorWindow"
+        x:DataType="vm:SourceEditorViewModel"
+        Name="SourceEditorRoot"
+        Title="{Binding Title}"
+        Width="540" SizeToContent="Height"
+        MinWidth="440"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+    <StackPanel Margin="16" Spacing="6">
+
+        <!-- Alias: the name repos use to refer to this source; fixed once the source exists -->
+        <TextBlock Text="Alias" FontWeight="Bold" />
+        <TextBox Name="SourceAliasTextBox"
+                  AutomationProperties.AutomationId="SourceAliasTextBox"
+                  PlaceholderText="For example: Contoso"
+                  IsEnabled="{Binding IsAliasEditable}"
+                  Text="{Binding Alias}" />
+        <TextBlock Name="SourceAliasHelpText"
+                    AutomationProperties.AutomationId="SourceAliasHelpText"
+                    IsVisible="{Binding IsNew}"
+                    Text="Repos pin their agent package to a source by this name, so it cannot be changed after the source is saved."
+                    FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+        <TextBlock Name="SourceAliasErrorText"
+                    AutomationProperties.AutomationId="SourceAliasErrorText"
+                    IsVisible="{Binding AliasError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                    Text="{Binding AliasError}"
+                    Foreground="Red" FontSize="12" TextWrapping="Wrap" />
+
+        <!-- Location: a folder path, with a native folder picker -->
+        <TextBlock Text="Folder" FontWeight="Bold" Margin="0,8,0,0" />
+        <Grid ColumnDefinitions="*,Auto">
+            <TextBox Grid.Column="0"
+                      Name="SourceLocationTextBox"
+                      AutomationProperties.AutomationId="SourceLocationTextBox"
+                      PlaceholderText="Local, mapped-drive, or UNC folder"
+                      Text="{Binding Location}"
+                      Margin="0,0,8,0" />
+            <Button Grid.Column="1"
+                     Name="SourceBrowseButton"
+                     AutomationProperties.AutomationId="SourceBrowseButton"
+                     Content="Browse..."
+                     Click="BrowseButton_Click" />
+        </Grid>
+        <TextBlock Name="SourceLocationHelpText"
+                    AutomationProperties.AutomationId="SourceLocationHelpText"
+                    Text="{Binding LocationHelp}"
+                    FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+        <TextBlock Name="SourceLocationErrorText"
+                    AutomationProperties.AutomationId="SourceLocationErrorText"
+                    IsVisible="{Binding LocationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                    Text="{Binding LocationError}"
+                    Foreground="Red" FontSize="12" TextWrapping="Wrap" />
+
+        <!-- Package IDs: only a NuGet-package folder lists the packages it offers -->
+        <StackPanel Name="SourceEditorPackageIdsSection"
+                     AutomationProperties.AutomationId="SourceEditorPackageIdsSection"
+                     IsVisible="{Binding IsNuGet}" Spacing="6" Margin="0,8,0,0">
+            <TextBlock Text="Package IDs" FontWeight="Bold" />
+            <TextBlock Text="The agent packages this folder offers (the NuGet package IDs), at least one."
+                        FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBox Grid.Column="0"
+                          Name="SourcePackageIdTextBox"
+                          AutomationProperties.AutomationId="SourcePackageIdTextBox"
+                          PlaceholderText="For example: contoso-agents"
+                          Text="{Binding NewPackageId}"
+                          Margin="0,0,8,0">
+                    <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding AddPackageIdCommand}" />
+                    </TextBox.KeyBindings>
+                </TextBox>
+                <Button Grid.Column="1"
+                         Name="SourceAddPackageIdButton"
+                         AutomationProperties.AutomationId="SourceAddPackageIdButton"
+                         Content="Add"
+                         Command="{Binding AddPackageIdCommand}" />
+            </Grid>
+            <TextBlock Name="SourceNewPackageIdErrorText"
+                        AutomationProperties.AutomationId="SourceNewPackageIdErrorText"
+                        IsVisible="{Binding NewPackageIdError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Text="{Binding NewPackageIdError}"
+                        Foreground="Red" FontSize="12" TextWrapping="Wrap" />
+            <Grid ColumnDefinitions="*,Auto">
+                <ListBox Grid.Column="0"
+                          Name="SourcePackageIdList"
+                          AutomationProperties.AutomationId="SourcePackageIdList"
+                          ItemsSource="{Binding PackageIds}"
+                          SelectedItem="{Binding SelectedPackageId, Mode=TwoWay}"
+                          MinHeight="60" MaxHeight="120"
+                          Margin="0,0,8,0" />
+                <Button Grid.Column="1"
+                         Name="SourceRemovePackageIdButton"
+                         AutomationProperties.AutomationId="SourceRemovePackageIdButton"
+                         Content="Remove"
+                         VerticalAlignment="Top"
+                         Command="{Binding RemovePackageIdCommand}" />
+            </Grid>
+            <TextBlock Name="SourcePackageIdsErrorText"
+                        AutomationProperties.AutomationId="SourcePackageIdsErrorText"
+                        IsVisible="{Binding PackageIdsError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Text="{Binding PackageIdsError}"
+                        Foreground="Red" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">
+            <Button Name="SourceEditorCancelButton"
+                     AutomationProperties.AutomationId="SourceEditorCancelButton"
+                     Content="Cancel"
+                     Click="CancelButton_Click" />
+            <Button Name="SourceEditorSaveButton"
+                     AutomationProperties.AutomationId="SourceEditorSaveButton"
+                     Classes="accent"
+                     Content="Save"
+                     Command="{Binding SaveCommand}" />
+        </StackPanel>
+    </StackPanel>
+</Window>

@@ -3,31 +3,138 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="using:DemaConsulting.AgentControl.LauncherUI"
+        xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         mc:Ignorable="d"
-        d:DesignWidth="480" d:DesignHeight="420"
+        d:DesignWidth="600" d:DesignHeight="640"
         x:Class="DemaConsulting.AgentControl.LauncherUI.SettingsWindow"
         x:DataType="vm:SettingsWindowViewModel"
         Name="SettingsWindowRoot"
         Title="AgentControl Settings"
-        Width="480" SizeToContent="Height"
-        MinWidth="380"
+        Width="600" SizeToContent="Height"
+        MinWidth="500"
         CanResize="False"
         WindowStartupLocation="CenterOwner">
+    <Window.Styles>
+        <!-- Status colors for the sources list: found = green, not found = red. Mid-tone values
+             stay readable on both the light and the dark theme. -->
+        <Style Selector="materialIcons|MaterialIcon.sourceAvailable">
+            <Setter Property="Foreground" Value="#2EA043" />
+        </Style>
+        <Style Selector="materialIcons|MaterialIcon.sourceMissing">
+            <Setter Property="Foreground" Value="#E5534B" />
+        </Style>
+    </Window.Styles>
     <StackPanel Margin="16" Spacing="12">
 
-        <TextBlock Text="Package source path" FontWeight="Bold" />
+        <!-- Package sources: where agent packages come from. Each repo is pinned to one source by
+             its alias. The add buttons sit in a wrapping row so a further source type (a NuGet
+             server) can join them without redesigning the layout. -->
+        <TextBlock Text="Package sources" FontWeight="Bold" />
+        <TextBlock Text="Agent packages are read from these sources. A repo is pinned to one source by its alias."
+                    FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+
+        <Border BorderThickness="1" BorderBrush="Gray" CornerRadius="4" MinHeight="120">
+            <Grid>
+                <TextBlock Name="SourcesEmptyText"
+                            AutomationProperties.AutomationId="SourcesEmptyText"
+                            IsVisible="{Binding HasNoSources}"
+                            Text="No package sources yet. Add a zip-package folder or a NuGet-package folder below."
+                            TextWrapping="Wrap" TextAlignment="Center"
+                            Opacity="0.65" MaxWidth="360"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <ListBox Name="SourcesList"
+                          AutomationProperties.AutomationId="SourcesList"
+                          IsVisible="{Binding !HasNoSources}"
+                          ItemsSource="{Binding Sources}"
+                          SelectedItem="{Binding SelectedSource, Mode=TwoWay}"
+                          MaxHeight="200">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PackageSourceItemViewModel">
+                            <Grid ColumnDefinitions="Auto,*,Auto" Margin="2,2">
+                                <materialIcons:MaterialIcon Grid.Column="0"
+                                                              Kind="{Binding TypeIcon}"
+                                                              Width="26" Height="26"
+                                                              Margin="0,0,10,0"
+                                                              VerticalAlignment="Center"
+                                                              ToolTip.Tip="{Binding TypeName}" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Name="SourceAliasText"
+                                                    AutomationProperties.AutomationId="SourceAliasText"
+                                                    Text="{Binding Alias}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding TypeName}" FontSize="11" Opacity="0.6"
+                                                    VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <TextBlock Name="SourceLocationText"
+                                                AutomationProperties.AutomationId="SourceLocationText"
+                                                Text="{Binding Location}"
+                                                ToolTip.Tip="{Binding Location}"
+                                                TextTrimming="CharacterEllipsis"
+                                                FontSize="12" Opacity="0.7" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4"
+                                             Margin="10,0,0,0" VerticalAlignment="Center"
+                                             ToolTip.Tip="{Binding StatusTooltip}">
+                                    <materialIcons:MaterialIcon Kind="{Binding StatusIcon}"
+                                                                  Width="16" Height="16"
+                                                                  Classes.sourceAvailable="{Binding IsAvailable}"
+                                                                  Classes.sourceMissing="{Binding IsMissing}" />
+                                    <TextBlock Name="SourceStatusText"
+                                                AutomationProperties.AutomationId="SourceStatusText"
+                                                Text="{Binding StatusText}" FontSize="12" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </Border>
+
         <Grid ColumnDefinitions="*,Auto">
-            <TextBox Grid.Column="0"
-                      Name="PackageSourcePathTextBox"
-                      AutomationProperties.AutomationId="PackageSourcePathTextBox"
-                      PlaceholderText="Local, mapped-drive, or UNC path"
-                      Text="{Binding PackageSourcePath}"
-                      Margin="0,0,8,0" />
-            <Button Grid.Column="1"
-                     Name="BrowsePackageSourceButton"
-                     AutomationProperties.AutomationId="BrowsePackageSourceButton"
-                     Content="Browse..."
-                     Click="BrowsePackageSourceButton_Click" />
+            <WrapPanel Grid.Column="0" Orientation="Horizontal">
+                <Button Name="AddZipSourceButton"
+                         AutomationProperties.AutomationId="AddZipSourceButton"
+                         Command="{Binding AddZipSourceCommand}"
+                         ToolTip.Tip="Add a folder that contains agent package zip files"
+                         Margin="0,0,8,4">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <materialIcons:MaterialIcon Kind="FolderZip" />
+                        <TextBlock Text="Add Zip-Package Folder" />
+                    </StackPanel>
+                </Button>
+                <Button Name="AddNuGetFolderSourceButton"
+                         AutomationProperties.AutomationId="AddNuGetFolderSourceButton"
+                         Command="{Binding AddNuGetFolderSourceCommand}"
+                         ToolTip.Tip="Add a folder that contains NuGet packages (.nupkg files)"
+                         Margin="0,0,8,4">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <materialIcons:MaterialIcon Kind="PackageVariant" />
+                        <TextBlock Text="Add NuGet-Package Folder" />
+                    </StackPanel>
+                </Button>
+            </WrapPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+                <Button Name="EditSourceButton"
+                         AutomationProperties.AutomationId="EditSourceButton"
+                         Command="{Binding EditSourceCommand}"
+                         ToolTip.Tip="Edit the selected source"
+                         ToolTip.ShowOnDisabled="True">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <materialIcons:MaterialIcon Kind="PencilOutline" />
+                        <TextBlock Text="Edit" />
+                    </StackPanel>
+                </Button>
+                <Button Name="RemoveSourceButton"
+                         AutomationProperties.AutomationId="RemoveSourceButton"
+                         Command="{Binding RemoveSourceCommand}"
+                         ToolTip.Tip="Remove the selected source"
+                         ToolTip.ShowOnDisabled="True">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <materialIcons:MaterialIcon Kind="TrashCanOutline" />
+                        <TextBlock Text="Remove" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </Grid>
 
         <TextBlock Text="Git executable path override (blank = use PATH)" FontWeight="Bold" />
@@ -68,6 +175,7 @@
         <Button Name="SaveSettingsButton"
                  AutomationProperties.AutomationId="SaveSettingsButton"
                  Content="Save"
+                 Classes="accent"
                  Command="{Binding SaveCommand}"
                  HorizontalAlignment="Right" />
     </StackPanel>

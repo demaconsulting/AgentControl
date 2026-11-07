@@ -25,25 +25,34 @@ using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
 using DemaConsulting.AgentControl.Utilities;
+using Material.Icons;
 using Microsoft.Extensions.Logging;
 using AgentLauncher = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     View model for a single card in the main window's recent-repos list: displays the repo's
-///     pinned package version and upgrade-availability badge, and exposes Launch/Pull/Upgrade
-///     actions.
+///     View model for a single card in the main window's recent-repos list: describes the repo
+///     with a row of chips (agent package and its source, available upgrade, branch, status
+///     warnings) and exposes the Launch/Git Pull/Upgrade/Select Package actions.
 /// </summary>
 /// <remarks>
+///     <para>
 ///     All business logic (upgrade detection, launch orchestration, pull-eligibility checks) is
 ///     implemented here or delegated to the Phase 1 subsystems (<see cref="GitClient"/>,
 ///     <see cref="PackageSourceRegistry"/>, <see cref="PackageContentExtractor"/>,
 ///     <see cref="GitIgnoreEnsurer"/>, <see cref="RepoPinStore"/>, <see cref="AgentLauncher"/>)
 ///     rather than in any view
-///     code-behind, so this class is fully unit-testable without an Avalonia window. Not
-///     thread-safe; every member is expected to be called from the UI thread, consistent with
-///     <see cref="ViewModelBase"/>.
+///     code-behind, so this class is fully unit-testable without an Avalonia window.
+///     </para>
+///     <para>
+///     Everything that reads a package source or copies package content is asynchronous: the
+///     commands are <see cref="AsyncRelayCommand"/>s, so the window stays responsive while a
+///     source is slow or unreachable, only one package operation per card runs at a time
+///     (<see cref="IsBusy"/>), and the user can cancel a running operation
+///     (<see cref="CancelOperationCommand"/>). Not thread-safe; every member is expected to be
+///     called from the UI thread, consistent with <see cref="ViewModelBase"/>.
+///     </para>
 /// </remarks>
 internal sealed class RepoCardViewModel : ViewModelBase
 {
@@ -100,6 +109,32 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     private readonly Startup.StartupOptions? _startupOptions;
 
+    /// <summary>
+    ///     Builds the registry of configured sources from the current settings; replaced in tests
+    ///     by one that supplies in-memory sources.
+    /// </summary>
+    private readonly Func<AppSettings, PackageSourceRegistry>? _registryFactory;
+
+    /// <summary>
+    ///     The longest agent tool name (in characters) that is spelled out in the Launch button
+    ///     label; a longer name would make the button too wide, so the label falls back to a plain
+    ///     "Launch".
+    /// </summary>
+    private const int MaxLaunchToolNameLength = 10;
+
+    /// <summary>
+    ///     Cancels the package operation currently running for this card (the one that holds
+    ///     <see cref="IsBusy"/>), or <see langword="null"/> when none is running.
+    /// </summary>
+    private CancellationTokenSource? _operationCancellation;
+
+    /// <summary>
+    ///     Identifies the most recently started upgrade-availability check, so a slower, older
+    ///     check (for example one begun before the user edited the sources) cannot overwrite the
+    ///     result of a newer one.
+    /// </summary>
+    private int _upgradeCheckGeneration;
+
     private bool _isMissing;
     private bool _isUpgradeAvailable;
     private string? _latestAvailableVersion;
@@ -110,6 +145,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private bool _gitStatusUnavailable;
     private bool _gitStatusChecked;
     private string? _statusMessage;
+    private bool _isBusy;
+    private bool _canCancelOperation;
+    private string? _busyMessage;
+    private bool _isCheckingUpgrade;
 
     /// <summary>
     ///     Logs the actual work this card performs on behalf of the user - fetching/applying
@@ -125,6 +164,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="getSettings">Supplies the current <see cref="AppSettings"/> on demand.</param>
     /// <param name="packageVersionCache">The shared, session-scoped package-version cache.</param>
     /// <param name="startupOptions">Test-only startup overrides, or <see langword="null"/>.</param>
+    /// <param name="registryFactory">Builds the registry of configured sources from the settings;
+    ///     <see langword="null"/> uses the real providers. Supplied so tests can substitute
+    ///     in-memory sources whose timing they control.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="recentRepo"/>,
     ///     <paramref name="getSettings"/>, or <paramref name="packageVersionCache"/> is
     ///     <see langword="null"/>.</exception>
@@ -132,7 +174,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RecentRepo recentRepo,
         Func<AppSettings> getSettings,
         PackageVersionCache packageVersionCache,
-        Startup.StartupOptions? startupOptions = null)
+        Startup.StartupOptions? startupOptions = null,
+        Func<AppSettings, PackageSourceRegistry>? registryFactory = null)
     {
         ArgumentNullException.ThrowIfNull(recentRepo);
         ArgumentNullException.ThrowIfNull(getSettings);
@@ -142,18 +185,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
         _getSettings = getSettings;
         _packageVersionCache = packageVersionCache;
         _startupOptions = startupOptions;
+        _registryFactory = registryFactory;
 
-        LaunchCommand = new RelayCommand(Launch, () => !IsMissing);
-        PullCommand = new RelayCommand(Pull, () => CanPull && !IsMissing);
-        UpgradeCommand = new RelayCommand(Upgrade, () => IsUpgradeAvailable && !IsMissing);
-        SelectPackageCommand = new RelayCommand(SelectPackage, () => IsPackageSelectionNeeded && !IsMissing);
-        RefreshCommand = new RelayCommand(() =>
-        {
-            RefreshCheap();
-            RefreshDirtyStatus();
-        }, () => !IsMissing);
+        LaunchCommand = new AsyncRelayCommand(LaunchAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
+        PullCommand = new AsyncRelayCommand(PullAsync, ReportUnexpectedFailure, () => CanPull && !IsMissing && !IsBusy);
+        UpgradeCommand = new AsyncRelayCommand(
+            UpgradeAsync, ReportUnexpectedFailure, () => IsUpgradeAvailable && !IsMissing && !IsBusy);
+        SelectPackageCommand = new RelayCommand(
+            SelectPackage, () => IsPackageSelectionNeeded && !IsMissing && !IsBusy);
+        RefreshCommand = new AsyncRelayCommand(RefreshAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
         FavoriteToggleCommand = new RelayCommand(() => IsFavorite = !IsFavorite);
         RemoveCommand = new RelayCommand(() => RemoveRequested?.Invoke(this, EventArgs.Empty));
+        CancelOperationCommand = new RelayCommand(CancelOperation, () => CanCancelOperation);
     }
 
     /// <summary>
@@ -195,6 +238,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 RefreshCommand.RaiseCanExecuteChanged();
                 OnPropertyChanged(nameof(IsWorkingTreeDirty));
                 OnPropertyChanged(nameof(PullTooltip));
+                OnPropertyChanged(nameof(HasPinnedPackage));
+                OnPropertyChanged(nameof(ShowNoPackageChip));
             }
         }
     }
@@ -246,6 +291,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             _recentRepo.PinnedPackageName = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsPackageSelectionNeeded));
+            RaisePackageChipChanged();
             SelectPackageCommand.RaiseCanExecuteChanged();
         }
     }
@@ -266,6 +312,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             _recentRepo.PinnedPackageVersion = value;
             OnPropertyChanged();
+            RaisePackageChipChanged();
         }
     }
 
@@ -286,6 +333,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             _recentRepo.PinnedSource = value;
             OnPropertyChanged();
+            RaisePackageChipChanged();
         }
     }
 
@@ -324,8 +372,26 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public string? CurrentBranch
     {
         get => _currentBranch;
-        private set => SetField(ref _currentBranch, value);
+        private set
+        {
+            if (SetField(ref _currentBranch, value))
+            {
+                OnPropertyChanged(nameof(HasBranch));
+                OnPropertyChanged(nameof(BranchTooltip));
+            }
+        }
     }
+
+    /// <summary>
+    ///     Gets a value indicating whether the current branch is known, i.e. whether the branch
+    ///     chip is shown.
+    /// </summary>
+    public bool HasBranch => !string.IsNullOrEmpty(_currentBranch);
+
+    /// <summary>
+    ///     Gets the tooltip of the branch chip, which says what the chip shows.
+    /// </summary>
+    public string BranchTooltip => $"Current git branch: {CurrentBranch}";
 
     /// <summary>
     ///     Gets a value indicating whether one or more of the four known agent folders are
@@ -346,15 +412,22 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public string? LatestAvailableVersion
     {
         get => _latestAvailableVersion;
-        private set => SetField(ref _latestAvailableVersion, value);
+        private set
+        {
+            if (SetField(ref _latestAvailableVersion, value))
+            {
+                OnPropertyChanged(nameof(UpgradeTooltip));
+                OnPropertyChanged(nameof(UpgradeChipText));
+            }
+        }
     }
 
     /// <summary>
     ///     Gets a value indicating whether a newer package version than
-    ///     <see cref="PinnedPackageVersion"/> was discovered at the configured package source.
+    ///     <see cref="PinnedPackageVersion"/> was discovered at the pinned package's source.
     /// </summary>
     /// <remarks>
-    ///     Drives both the upgrade badge's visibility in <c>MainWindow.axaml</c> and the
+    ///     Drives both the upgrade chip's visibility in <c>MainWindow.axaml</c> and the
     ///     "Upgrade" menu item's visibility/enablement.
     /// </remarks>
     public bool IsUpgradeAvailable
@@ -364,16 +437,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             if (SetField(ref _isUpgradeAvailable, value))
             {
+                OnPropertyChanged(nameof(UpgradeTooltip));
                 UpgradeCommand.RaiseCanExecuteChanged();
             }
         }
     }
 
     /// <summary>
-    ///     Gets the tooltip text shown on the upgrade-available badge.
+    ///     Gets the tooltip text shown on the upgrade chip, naming both versions and how to
+    ///     upgrade, or <see langword="null"/> when no upgrade is available.
     /// </summary>
     public string? UpgradeTooltip => IsUpgradeAvailable
-        ? $"Version {LatestAvailableVersion} is available (currently pinned to {PinnedPackageVersion})."
+        ? $"Agent package update available: {PinnedPackageVersion} -> {LatestAvailableVersion} " +
+          "(click this chip, or use the \"...\" menu > Upgrade)."
         : null;
 
     /// <summary>
@@ -383,12 +459,149 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     ///     Mutually exclusive with <see cref="IsUpgradeAvailable"/> being ever <see langword="true"/>
-    ///     - <see cref="RefreshUpgradeStatus"/> already short-circuits to <see langword="false"/>
+    ///     - <see cref="RefreshUpgradeStatusAsync"/> already short-circuits to <see langword="false"/>
     ///     whenever <see cref="PinnedPackageName"/> is <see langword="null"/>, so a repo is either
     ///     never-pinned (this is <see langword="true"/>) or already-pinned (this is
     ///     <see langword="false"/>), never both.
     /// </remarks>
     public bool IsPackageSelectionNeeded => PinnedPackageName is null;
+
+    /// <summary>
+    ///     Gets a value indicating whether the agent package chip is shown: the repo has a pinned
+    ///     package and its folder exists.
+    /// </summary>
+    public bool HasPinnedPackage => !IsPackageSelectionNeeded && !IsMissing;
+
+    /// <summary>
+    ///     Gets a value indicating whether the grey "No agent package" chip is shown: the repo
+    ///     exists but has never had an agent package pinned.
+    /// </summary>
+    public bool ShowNoPackageChip => IsPackageSelectionNeeded && !IsMissing;
+
+    /// <summary>
+    ///     Gets the text of the agent package chip: the pinned package's name and version.
+    /// </summary>
+    public string PackageChipText => $"{PinnedPackageName} {PinnedPackageVersion}".TrimEnd();
+
+    /// <summary>
+    ///     Gets the text of the upgrade chip: the version an upgrade would move the repo to.
+    /// </summary>
+    public string UpgradeChipText => LatestAvailableVersion ?? string.Empty;
+
+    /// <summary>
+    ///     Gets the definition of the source the pinned package comes from, or
+    ///     <see langword="null"/> when the repo is not pinned or the source is not configured
+    ///     (the card never substitutes another source).
+    /// </summary>
+    private PackageSourceDefinition? PinnedSourceDefinition
+    {
+        get
+        {
+            var alias = PinnedSource;
+            return alias is null
+                ? null
+                : _getSettings().GetEffectiveSources().FirstOrDefault(
+                    source => string.Equals(source.Alias, alias, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    /// <summary>
+    ///     Gets the icon of the pinned package's source type, shown inside the agent package chip.
+    /// </summary>
+    public MaterialIconKind PinnedSourceIcon => PackageSourceIcons.GetIcon(PinnedSourceDefinition);
+
+    /// <summary>
+    ///     Gets the tooltip of the agent package chip: which package and version the agent files
+    ///     came from and from which source (by alias and kind).
+    /// </summary>
+    public string PackageChipTooltip =>
+        $"Agent files: {PackageChipText} from source '{PinnedSource ?? RepoPin.LegacySourceAlias}' " +
+        $"({PackageSourceIcons.GetShortName(PinnedSourceDefinition)}).";
+
+    /// <summary>
+    ///     Gets the label of the Launch button: <c>Launch</c> followed by the configured agent
+    ///     tool's short name (for example <c>Launch Copilot</c>), or just <c>Launch</c> when the
+    ///     tool's name is unknown or would make the button too wide.
+    /// </summary>
+    public string LaunchButtonText
+    {
+        get
+        {
+            var toolName = GetAgentToolDisplayName(_getSettings());
+            return toolName is null ? "Launch" : $"Launch {toolName}";
+        }
+    }
+
+    /// <summary>
+    ///     Gets the tooltip of the Launch button.
+    /// </summary>
+    public string LaunchTooltip
+    {
+        get
+        {
+            var toolName = GetAgentToolDisplayName(_getSettings());
+            return toolName is null
+                ? "Launch the configured agent tool in this repo"
+                : $"Launch {toolName} in this repo";
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether a package operation (launch preparation, upgrade,
+    ///     package selection, refresh or pull) is running for this card, during which every other
+    ///     action on the card is disabled.
+    /// </summary>
+    public bool IsBusy
+    {
+        get => _isBusy;
+        private set
+        {
+            if (SetField(ref _isBusy, value))
+            {
+                LaunchCommand.RaiseCanExecuteChanged();
+                PullCommand.RaiseCanExecuteChanged();
+                UpgradeCommand.RaiseCanExecuteChanged();
+                SelectPackageCommand.RaiseCanExecuteChanged();
+                RefreshCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a short description of the running operation (for example "Upgrading agent
+    ///     package..."), or <see langword="null"/> when none is running.
+    /// </summary>
+    public string? BusyMessage
+    {
+        get => _busyMessage;
+        private set => SetField(ref _busyMessage, value);
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether the running operation can be cancelled by the user;
+    ///     false for an operation (such as a git pull) that cannot be interrupted once started.
+    /// </summary>
+    public bool CanCancelOperation
+    {
+        get => _canCancelOperation;
+        private set
+        {
+            if (SetField(ref _canCancelOperation, value))
+            {
+                CancelOperationCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether the background check for a newer package version is
+    ///     running, shown as a small progress indicator beside the package chip.
+    /// </summary>
+    public bool IsCheckingUpgrade
+    {
+        get => _isCheckingUpgrade;
+        private set => SetField(ref _isCheckingUpgrade, value);
+    }
 
     /// <summary>
     ///     Gets the shared, session-scoped package-version cache passed to this card at
@@ -406,8 +619,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     one after settings change).</returns>
     /// <exception cref="InvalidOperationException">Thrown when the configured sources are invalid
     ///     (for example a duplicated alias).</exception>
-    internal PackageSourceRegistry CreateSourceRegistry() =>
-        PackageSourceRegistry.Create(_getSettings().GetEffectiveSources(), GetNuGetRootBase());
+    internal PackageSourceRegistry CreateSourceRegistry()
+    {
+        var settings = _getSettings();
+        return _registryFactory is not null
+            ? _registryFactory(settings)
+            : PackageSourceRegistry.Create(settings.GetEffectiveSources(), GetNuGetRootBase());
+    }
 
     /// <summary>
     ///     Gets the folder under which NuGet sources keep their private package caches: a
@@ -423,21 +641,64 @@ internal sealed class RepoCardViewModel : ViewModelBase
             : Path.Combine(Path.GetFullPath(_startupOptions.ConfigDirectory), "nuget");
 
     /// <summary>
-    ///     Runs an asynchronous source operation to completion on a worker thread and returns its
-    ///     result, so this view model's existing synchronous commands can use the asynchronous
-    ///     source providers without risking a deadlock on the UI thread's synchronization context.
+    ///     Determines the short name of the configured agent tool for the Launch button label.
     /// </summary>
-    /// <typeparam name="T">The operation's result type.</typeparam>
-    /// <param name="operation">Starts the asynchronous operation.</param>
-    /// <returns>The operation's result; an exception thrown by the operation is rethrown with its
-    ///     original type (not wrapped in an <see cref="AggregateException"/>).</returns>
-    /// <remarks>
-    ///     This blocks the calling (UI) thread for the duration of the operation, exactly as the
-    ///     previous direct filesystem scans did; moving these commands to true asynchronous
-    ///     execution with progress and cancellation is part of the source-aware UI work.
-    /// </remarks>
-    private static T RunBlocking<T>(Func<Task<T>> operation) =>
-        Task.Run(operation).GetAwaiter().GetResult();
+    /// <param name="settings">The current application settings.</param>
+    /// <returns>The tool's short name (for example <c>Copilot</c>), or <see langword="null"/> when
+    ///     the tool has no usable short name: a custom command whose program name cannot be
+    ///     determined or is longer than <see cref="MaxLaunchToolNameLength"/> characters.</returns>
+    private static string? GetAgentToolDisplayName(AppSettings settings)
+    {
+        switch (settings.AgentTool)
+        {
+            case AgentToolKind.CopilotCli:
+                return "Copilot";
+            case AgentToolKind.Cursor:
+                return "Cursor";
+            case AgentToolKind.ClaudeCode:
+                return "Claude";
+        }
+
+        // A custom command is described by the program it runs: its first token, without any
+        // quotes, folder or extension
+        var command = settings.CustomAgentCommand?.Trim();
+        if (string.IsNullOrEmpty(command))
+        {
+            return null;
+        }
+
+        string firstToken;
+        if (command[0] == '"')
+        {
+            var closingQuote = command.IndexOf('"', 1);
+            firstToken = closingQuote > 1 ? command[1..closingQuote] : command[1..];
+        }
+        else
+        {
+            var space = command.IndexOf(' ', StringComparison.Ordinal);
+            firstToken = space > 0 ? command[..space] : command;
+        }
+
+        var name = Path.GetFileNameWithoutExtension(firstToken.Trim());
+        return string.IsNullOrWhiteSpace(name) || name.Length > MaxLaunchToolNameLength ? null : name;
+    }
+
+    /// <summary>
+    ///     Raises change notifications for every property that depends on the pinned package, its
+    ///     source or the configured sources/agent tool, so the chips and the Launch label follow
+    ///     whenever any of them change.
+    /// </summary>
+    private void RaisePackageChipChanged()
+    {
+        OnPropertyChanged(nameof(HasPinnedPackage));
+        OnPropertyChanged(nameof(ShowNoPackageChip));
+        OnPropertyChanged(nameof(PackageChipText));
+        OnPropertyChanged(nameof(PackageChipTooltip));
+        OnPropertyChanged(nameof(PinnedSourceIcon));
+        OnPropertyChanged(nameof(UpgradeTooltip));
+        OnPropertyChanged(nameof(LaunchButtonText));
+        OnPropertyChanged(nameof(LaunchTooltip));
+    }
 
     /// <summary>
     ///     Determines whether a discovered package is the version recorded in a pin: equal text, or
@@ -450,23 +711,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private static bool IsVersion(DiscoveredPackage package, string? versionText) =>
         string.Equals(package.Version.ToString(), versionText, StringComparison.Ordinal) ||
         (PackageVersion.TryParse(versionText, out var parsed) && parsed is not null && package.Version.Equals(parsed));
-
-    /// <summary>
-    ///     Chooses the source a new package selection is made from when the caller does not name
-    ///     one: the source with the legacy <c>Default</c> alias if configured, otherwise the first
-    ///     configured source.
-    /// </summary>
-    /// <param name="registry">The configured sources; must not be empty.</param>
-    /// <returns>The chosen source alias.</returns>
-    /// <remarks>
-    ///     Interim behavior for the single-source Settings window: until the user can choose among
-    ///     several sources, the source the Settings window edits (<c>Default</c>) is the one
-    ///     packages are selected from.
-    /// </remarks>
-    private static string ChooseSelectionSourceAlias(PackageSourceRegistry registry) =>
-        registry.Contains(PackageSourceDefinition.DefaultAlias)
-            ? PackageSourceDefinition.DefaultAlias
-            : registry.Definitions[0].Alias;
 
     /// <summary>
     ///     Gets a value indicating whether the "Pull" action is currently offered, per
@@ -584,35 +828,36 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <summary>
     ///     Gets the command bound to the card's "Launch" button.
     /// </summary>
-    public RelayCommand LaunchCommand { get; }
+    public AsyncRelayCommand LaunchCommand { get; }
 
     /// <summary>
-    ///     Gets the command bound to the card's "Pull" button.
+    ///     Gets the command bound to the card's "Git Pull" button.
     /// </summary>
-    public RelayCommand PullCommand { get; }
+    public AsyncRelayCommand PullCommand { get; }
 
     /// <summary>
-    ///     Gets the command bound to the card's "Upgrade" menu item.
+    ///     Gets the command bound to the card's upgrade chip and "Upgrade" menu item.
     /// </summary>
-    public RelayCommand UpgradeCommand { get; }
+    public AsyncRelayCommand UpgradeCommand { get; }
 
     /// <summary>
-    ///     Gets the command bound to the card's "Select Package..." menu item, offered instead of
-    ///     <see cref="UpgradeCommand"/> whenever <see cref="IsPackageSelectionNeeded"/> is
-    ///     <see langword="true"/>.
+    ///     Gets the command bound to the card's "No agent package" chip and "Select Package..."
+    ///     menu item, offered instead of <see cref="UpgradeCommand"/> whenever
+    ///     <see cref="IsPackageSelectionNeeded"/> is <see langword="true"/>.
     /// </summary>
     public RelayCommand SelectPackageCommand { get; }
 
     /// <summary>
     ///     Gets the command bound to the card's manual "Refresh" action, re-running the cheap
-    ///     checks plus the (otherwise lazy) working-tree dirty check for just this card.
+    ///     checks, the upgrade check and the (otherwise lazy) working-tree dirty check for just
+    ///     this card.
     /// </summary>
     /// <remarks>
     ///     Does not bypass the shared <see cref="PackageVersionCache"/> - per architecture.md's
     ///     caching-strategy decision, the package-version scan is refreshed on app start or via
-    ///     the Settings window (whenever the package-source path changes), not per-repo-card.
+    ///     the Settings window (whenever a package source changes), not per-repo-card.
     /// </remarks>
-    public RelayCommand RefreshCommand { get; }
+    public AsyncRelayCommand RefreshCommand { get; }
 
     /// <summary>
     ///     Gets the command bound to the card's favorite/pin toggle button.
@@ -631,7 +876,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public RelayCommand RemoveCommand { get; }
 
     /// <summary>
-    ///     Raised after a successful <see cref="Upgrade"/> with the new package's release notes
+    ///     Gets the command bound to the card's "Cancel" button, which asks the running package
+    ///     operation to stop; only executable while <see cref="CanCancelOperation"/> is
+    ///     <see langword="true"/>.
+    /// </summary>
+    public RelayCommand CancelOperationCommand { get; }
+
+    /// <summary>
+    ///     Raised after a successful <see cref="UpgradeAsync"/>, or package selection, with the
+    ///     new package's release notes
     ///     text (or an empty string if the package had none), so the owning window can show a
     ///     <c>ReleaseNotesViewer</c>.
     /// </summary>
@@ -666,14 +919,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Raised by <see cref="SelectPackageCommand"/> to request the "Select Package..." dialog
-    ///     be shown, carrying the alias of the package source to select from (see
-    ///     <see cref="CreateSourceRegistry"/> for the sources). Only raised once at least one
-    ///     package source is configured - otherwise <see cref="ErrorOccurred"/> is raised instead.
-    ///     Does not itself show any dialog - that is a view-layer concern handled by
-    ///     <c>MainWindow</c>'s code-behind, exactly like
+    ///     be shown. Only raised once at least one package source is configured - otherwise
+    ///     <see cref="ErrorOccurred"/> is raised instead. The dialog lists every configured source
+    ///     and lets the user choose among them. Does not itself show any dialog - that is a
+    ///     view-layer concern handled by <c>MainWindow</c>'s code-behind, exactly like
     ///     <see cref="RemoveRequested"/>/<see cref="ConfirmationWindow"/>.
     /// </summary>
-    public event EventHandler<string>? SelectPackageRequested;
+    public event EventHandler? SelectPackageRequested;
 
     /// <summary>
     ///     Raised after a successful extraction when the repo has no root-level <c>AGENTS.md</c>
@@ -692,27 +944,35 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     the filesystem/git/package source, updating every bindable property.
     /// </summary>
     /// <remarks>
-    ///     Equivalent to calling <see cref="RefreshCheap"/> followed by
-    ///     <see cref="RefreshDirtyStatus"/> - kept as a single convenience entry point for
-    ///     callers (e.g. adding a brand-new repo) that want an immediate full refresh rather than
+    ///     Equivalent to calling <see cref="RefreshCheap"/>, awaiting
+    ///     <see cref="RefreshUpgradeStatusAsync"/> and calling <see cref="RefreshDirtyStatus"/> -
+    ///     the single full-refresh entry point behind <see cref="RefreshCommand"/>, rather than
     ///     the split eager/lazy sequencing <see cref="MainWindowViewModel"/> uses at app launch.
+    ///     It holds <see cref="IsBusy"/> while it runs so no other card action starts meanwhile.
     /// </remarks>
-    public void Refresh()
-    {
-        RefreshCheap();
-        RefreshDirtyStatus();
-    }
+    /// <param name="cancellationToken">Cancels the package-source part of the refresh.</param>
+    /// <returns>A task that completes when every property is current; a failing source is
+    ///     reported through the card's state, not thrown.</returns>
+    public Task RefreshAsync(CancellationToken cancellationToken = default) =>
+        RunOperationAsync("Refreshing...", cancellable: true, async token =>
+        {
+            RefreshCheap();
+            await RefreshUpgradeStatusAsync(token);
+            RefreshDirtyStatus();
+        }, cancellationToken);
 
     /// <summary>
-    ///     Runs every cheap per-repo check: the missing-repo check, the pin file read, the
-    ///     current branch name, the committed-agent-files badge (via the <c>HEAD</c>-hash cache),
-    ///     and upgrade availability (via the shared <see cref="PackageVersionCache"/>).
+    ///     Runs every cheap per-repo check that does not need a package source: the missing-repo
+    ///     check, the pin file read, whether the pin's source is configured, the current branch
+    ///     name and the committed-agent-files badge (via the <c>HEAD</c>-hash cache).
     /// </summary>
     /// <remarks>
     ///     Deliberately excludes the working-tree dirty/clean check
     ///     (<see cref="RefreshDirtyStatus"/>), which is not cacheable and is instead deferred/lazy
-    ///     per architecture.md's repo-fact caching strategy, so this method is safe to call
-    ///     eagerly for every recent repo at app launch without slowing down startup. When
+    ///     per architecture.md's repo-fact caching strategy, and the upgrade-availability check
+    ///     (<see cref="RefreshUpgradeStatusAsync"/>), which reads a package source and is
+    ///     therefore asynchronous, so this method is safe to call eagerly for every recent repo
+    ///     at app launch without slowing down startup. When
     ///     <see cref="IsMissing"/> is <see langword="true"/>, every other check short-circuits to
     ///     its "unavailable" default rather than attempting a git/filesystem operation against a
     ///     path that does not exist.
@@ -737,12 +997,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // see MainWindowViewModel.ApplySettings.
             GitStatusChecked = false;
             GitStatusUnavailable = false;
+            RaisePackageChipChanged();
             return;
         }
 
         RefreshPin();
         RefreshBranchAndCommittedFiles();
-        RefreshUpgradeStatus();
+        EvaluatePinnedSource();
+        RaisePackageChipChanged();
     }
 
     /// <summary>
@@ -788,18 +1050,41 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     Per architecture.md's "Initial package selection and ensure-synced-before-launch"
     ///     decision (as amended - launch must never be blocked by agent-package sync state),
-    ///     this first calls <see cref="EnsureAgentFilesSyncedBeforeLaunch"/> purely for its
+    ///     this first awaits <see cref="EnsureAgentFilesSyncedBeforeLaunchAsync"/> purely for its
     ///     best-effort sync side effect (it may extract missing managed folders, or surface an
     ///     informational status message/warning), then always proceeds to resolve the shell/agent
-    ///     command and spawn the process regardless of that call's outcome. A user may want to
+    ///     command and spawn the process regardless of that call's outcome - including when the
+    ///     user cancels the wait for the sync. A user may want to
     ///     launch their agentic CLI tool to help with agent-package migration, or simply because
     ///     an agentic tool is useful even with zero agent files present - either way, sync state
     ///     must never stand in the way of launching.
     /// </remarks>
-    private void Launch()
-    {
-        EnsureAgentFilesSyncedBeforeLaunch();
+    /// <param name="cancellationToken">Signalled when the command itself is cancelled.</param>
+    /// <returns>A task that completes once the agent tool has been started or the failure has
+    ///     been reported.</returns>
+    private Task LaunchAsync(CancellationToken cancellationToken) =>
+        RunOperationAsync("Preparing agent files...", cancellable: true, async token =>
+        {
+            // The pre-launch sync is best effort: whether it succeeds, fails or is cancelled by
+            // the user, the agent tool is still started below
+            try
+            {
+                await EnsureAgentFilesSyncedBeforeLaunchAsync(token);
+            }
+            catch (OperationCanceledException)
+            {
+                StatusMessage = "Agent file sync was canceled; launching anyway.";
+            }
 
+            LaunchAgentTool();
+        }, cancellationToken);
+
+    /// <summary>
+    ///     Resolves the configured agent tool and shell and starts the tool in this repo's
+    ///     working directory, recording the launch on success and reporting any failure.
+    /// </summary>
+    private void LaunchAgentTool()
+    {
         try
         {
             var settings = _getSettings();
@@ -837,20 +1122,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <summary>
     ///     Best-effort attempt to sync this repo's four managed agent folders with the currently
     ///     pinned package version, as an informational side action that runs before
-    ///     <see cref="Launch"/> spawns the agent tool. Per architecture.md's
+    ///     <see cref="LaunchAsync"/> spawns the agent tool. Per architecture.md's
     ///     "ensure-synced-before-launch" decision (as amended), this <b>never</b> blocks the
     ///     launch - it only ever attempts to help keep the managed folders in sync, surfacing a
     ///     non-blocking status message or warning when it cannot.
     /// </summary>
+    /// <param name="cancellationToken">Cancels reading the source; once the copy into the repo
+    ///     has started it is not interrupted, so a repo is never left half extracted.</param>
     /// <returns>
     ///     <see langword="true"/> if no sync action was needed or attempted (the repo has
     ///     committed agent files, has no pin, or the managed folders were already present), or a
     ///     missing set was silently re-extracted successfully; <see langword="false"/> if a sync
     ///     attempt was made and failed for an ordinary reason (source unreachable, pinned version
     ///     missing, an I/O failure), in which case <see cref="ErrorOccurred"/> has already been
-    ///     raised as a non-blocking warning explaining why and <see cref="Launch"/> proceeds to
+    ///     raised as a non-blocking warning explaining why and <see cref="LaunchAsync"/> proceeds to
     ///     spawn the agent tool regardless of this return value.
     /// </returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is cancelled while the source is being read; the launch still proceeds.</exception>
     /// <remarks>
     ///     <para>
     ///     If this repo has committed agent files (<see cref="HasCommittedAgentFiles"/> is
@@ -876,10 +1165,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <para>
     ///     If a pin exists but one or more managed folders are missing (e.g. a freshly cloned
     ///     repo whose <c>.gitignore</c>'d agent folders were never unpacked on this machine), this
-    ///     resolves the <em>currently pinned</em> package at the configured source (never the
+    ///     resolves the <em>currently pinned</em> package at the source the pin names (never the
     ///     latest - upgrading remains a deliberate, separate user action) and re-extracts it
     ///     directly via <see cref="PackageContentExtractor.Extract"/>, deliberately without going
-    ///     through <see cref="ApplyPackageAndShowReleaseNotes"/> - architecture.md's
+    ///     through <see cref="ApplyPackageAndShowReleaseNotesAsync"/> - architecture.md's
     ///     ensure-synced-before-launch bullet never mentions showing release notes, unlike its
     ///     Select-Package bullet, so a silent background repair must not pop a release-notes
     ///     window on every launch. If this re-extraction attempt fails, <see cref="ErrorOccurred"/>
@@ -888,12 +1177,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     </para>
     ///     <para>
     ///     Marked <see langword="internal"/> (not <see langword="private"/>) rather than tested
-    ///     only through <see cref="Launch"/> itself, mirroring <c>AgentToolLauncher.BuildProcessStartInfo</c>'s
+    ///     only through <see cref="LaunchAsync"/> itself, mirroring <c>AgentToolLauncher.BuildProcessStartInfo</c>'s
     ///     own precedent for keeping process-spawning code separated from its unit-testable
     ///     decision logic.
     /// </para>
     /// </remarks>
-    internal bool EnsureAgentFilesSyncedBeforeLaunch()
+    internal async Task<bool> EnsureAgentFilesSyncedBeforeLaunchAsync(CancellationToken cancellationToken = default)
     {
         if (HasCommittedAgentFiles)
         {
@@ -901,7 +1190,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return true;
         }
 
-        if (PinnedPackageName is null)
+        var pinnedPackageName = PinnedPackageName;
+        if (pinnedPackageName is null)
         {
             StatusMessage = "No agent package is pinned for this repo; launching without managed agent files.";
             return true;
@@ -925,13 +1215,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // pin whose source is not configured fails here (UnknownSourceException) rather than
             // being served by any other source.
             var provider = registry.Resolve(PinnedSource ?? RepoPin.LegacySourceAlias);
-            var pinnedPackage = RunBlocking(() => provider.ListVersionsAsync(PinnedPackageName, CancellationToken.None))
-                .FirstOrDefault(p => IsVersion(p, PinnedPackageVersion));
+            var pinnedVersion = PinnedPackageVersion;
+            var pinnedPackage = (await provider.ListVersionsAsync(pinnedPackageName, cancellationToken))
+                .FirstOrDefault(p => IsVersion(p, pinnedVersion));
             if (pinnedPackage is null)
             {
                 ErrorOccurred?.Invoke(
                     this,
-                    $"Pinned package '{PinnedPackageName} {PinnedPackageVersion}' was not found at the configured source. Launching without syncing agent files.");
+                    $"Pinned package '{pinnedPackageName} {pinnedVersion}' was not found at the configured source. Launching without syncing agent files.");
                 return false;
             }
 
@@ -942,8 +1233,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     RepoName, pinnedPackage.PackageName, pinnedPackage.Version, pinnedPackage.SourceAlias);
             }
 
-            using var reader = RunBlocking(() => provider.AcquireAsync(pinnedPackage, CancellationToken.None));
-            PackageContentExtractor.Extract(reader, RepoPath);
+            using var reader = await provider.AcquireAsync(pinnedPackage, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
             MaybeOfferAgentsMdTemplate(reader);
             return true;
         }
@@ -971,9 +1263,20 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Runs <c>git pull</c> in this repo, then refreshes the working-tree status.
+    ///     Runs <c>git pull</c> in this repo on a worker thread, then refreshes the working-tree
+    ///     status.
     /// </summary>
-    private void Pull()
+    /// <param name="cancellationToken">Signalled when the command itself is cancelled; a pull that
+    ///     has already started is not interrupted.</param>
+    /// <returns>A task that completes when the pull and the status refresh have finished.</returns>
+    private Task PullAsync(CancellationToken cancellationToken) =>
+        RunOperationAsync("Pulling...", cancellable: false, async _ => await PullCoreAsync(), cancellationToken);
+
+    /// <summary>
+    ///     Performs the pull for <see cref="PullAsync"/>.
+    /// </summary>
+    /// <returns>A task that completes when the pull and the status refresh have finished.</returns>
+    private async Task PullCoreAsync()
     {
         if (_logger.IsEnabled(LogLevel.Information))
         {
@@ -984,7 +1287,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             var settings = _getSettings();
             var git = new GitClient(ResolveGitExecutablePath(settings));
-            var result = git.Pull(RepoPath);
+            var result = await Task.Run(() => git.Pull(RepoPath), CancellationToken.None);
             StatusMessage = result.Succeeded
                 ? "Pull succeeded."
                 : $"Pull failed: {result.StandardError.Trim()}";
@@ -1017,14 +1320,25 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Runs the full upgrade sequence for this repo: finds the latest package at the source the
-    ///     pin names, then applies it via <see cref="ApplyPackageAndShowReleaseNotes"/>.
+    ///     pin names, then applies it via <see cref="ApplyPackageAndShowReleaseNotesAsync"/>.
     /// </summary>
     /// <remarks>
     ///     The upgrade is resolved only at the pin's own source; if that source is not configured
     ///     the upgrade is refused with an explanatory message rather than offered from another
     ///     source.
     /// </remarks>
-    private void Upgrade()
+    /// <param name="cancellationToken">Signalled when the command itself is cancelled.</param>
+    /// <returns>A task that completes when the upgrade has finished or failed.</returns>
+    private Task UpgradeAsync(CancellationToken cancellationToken) =>
+        RunOperationAsync("Upgrading agent package...", cancellable: true, UpgradeCoreAsync, cancellationToken);
+
+    /// <summary>
+    ///     Performs the upgrade for <see cref="UpgradeAsync"/>.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels reading the source; a copy into the repo that has
+    ///     started is not interrupted.</param>
+    /// <returns>A task that completes when the upgrade has finished or failed.</returns>
+    private async Task UpgradeCoreAsync(CancellationToken cancellationToken)
     {
         PackageSourceRegistry registry;
         try
@@ -1037,7 +1351,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return;
         }
 
-        if (registry.Definitions.Count == 0 || string.IsNullOrWhiteSpace(PinnedPackageName))
+        var packageName = PinnedPackageName;
+        if (registry.Definitions.Count == 0 || string.IsNullOrWhiteSpace(packageName))
         {
             ErrorOccurred?.Invoke(this, "No package source or pinned package name is configured for this repo.");
             return;
@@ -1048,7 +1363,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             _logger.LogInformation(
                 "Checking for an upgrade to package '{PackageName}' for repo '{RepoName}' at source '{SourceAlias}'",
-                PinnedPackageName, RepoName, sourceAlias);
+                packageName, RepoName, sourceAlias);
         }
 
         IPackageSourceProvider provider;
@@ -1056,7 +1371,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         try
         {
             provider = registry.Resolve(sourceAlias);
-            latest = RunBlocking(() => provider.ListVersionsAsync(PinnedPackageName, CancellationToken.None))
+            latest = (await provider.ListVersionsAsync(packageName, cancellationToken))
                 .OrderByDescending(p => p.Version)
                 .FirstOrDefault();
         }
@@ -1087,10 +1402,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 _logger.LogWarning(
                     "No package named '{PackageName}' was found at the configured source for repo '{RepoName}'",
-                    PinnedPackageName, RepoName);
+                    packageName, RepoName);
             }
 
-            ErrorOccurred?.Invoke(this, $"No package named '{PinnedPackageName}' was found at the configured source.");
+            ErrorOccurred?.Invoke(this, $"No package named '{packageName}' was found at the configured source.");
             return;
         }
 
@@ -1101,27 +1416,46 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 RepoName, latest.PackageName, latest.Version);
         }
 
-        ApplyPackageAndShowReleaseNotes(provider, latest, $"Upgraded to {latest.Version}.", "Upgrade");
+        await ApplyPackageAndShowReleaseNotesAsync(
+            provider, latest, $"Upgraded to {latest.Version}.", "Upgrade", cancellationToken);
     }
 
     /// <summary>
-    ///     Applies a user-selected package name/version to this repo: resolves the exact
+    ///     Applies a user-selected package to this repo: resolves the exact
     ///     <see cref="DiscoveredPackage"/> at the chosen source, then applies it via
-    ///     <see cref="ApplyPackageAndShowReleaseNotes"/>.
+    ///     <see cref="ApplyPackageAndShowReleaseNotesAsync"/>.
     /// </summary>
-    /// <param name="packageName">The package name or ID the user selected.</param>
-    /// <param name="version">The exact version string the user selected (matched against the
-    ///     source's discovered versions).</param>
-    /// <param name="sourceAlias">The alias of the source the selection was made from, or
-    ///     <see langword="null"/> to use the interim default (the <c>Default</c> source, else the
-    ///     first configured source). The alias is recorded in the repo's pin.</param>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="packageName"/> or
-    ///     <paramref name="version"/> is <see langword="null"/>.</exception>
-    public void ApplySelectedPackage(string packageName, string version, string? sourceAlias = null)
+    /// <param name="selection">The package the user selected, naming the source it was selected
+    ///     from; the source alias is recorded in the repo's pin. The version is matched against
+    ///     the source's discovered versions.</param>
+    /// <param name="cancellationToken">Cancels reading the source; a copy into the repo that has
+    ///     started is not interrupted.</param>
+    /// <returns>A task that completes when the package has been applied or the failure has been
+    ///     reported.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="selection"/> is
+    ///     <see langword="null"/>.</exception>
+    public Task ApplySelectedPackageAsync(PackageReference selection, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(packageName);
-        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(selection);
 
+        return RunOperationAsync(
+            "Applying agent package...",
+            cancellable: true,
+            token => ApplySelectedPackageCoreAsync(selection, token),
+            cancellationToken);
+    }
+
+    /// <summary>
+    ///     Performs the package application for <see cref="ApplySelectedPackageAsync"/>.
+    /// </summary>
+    /// <param name="selection">The package the user selected.</param>
+    /// <param name="cancellationToken">Cancels reading the source.</param>
+    /// <returns>A task that completes when the package has been applied or the failure has been
+    ///     reported.</returns>
+    private async Task ApplySelectedPackageCoreAsync(PackageReference selection, CancellationToken cancellationToken)
+    {
+        var packageName = selection.PackageId;
+        var version = selection.Version;
         PackageSourceRegistry registry;
         try
         {
@@ -1135,7 +1469,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         if (registry.Definitions.Count == 0)
         {
-            ErrorOccurred?.Invoke(this, "No package source is configured. Set one in Settings.");
+            ErrorOccurred?.Invoke(this, "No package source is configured. Add one in Settings.");
             return;
         }
 
@@ -1143,8 +1477,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         DiscoveredPackage? selected;
         try
         {
-            provider = registry.Resolve(sourceAlias ?? ChooseSelectionSourceAlias(registry));
-            selected = RunBlocking(() => provider.ListVersionsAsync(packageName, CancellationToken.None))
+            provider = registry.Resolve(selection.SourceAlias);
+            selected = (await provider.ListVersionsAsync(packageName, cancellationToken))
                 .FirstOrDefault(p => IsVersion(p, version));
         }
         catch (DirectoryNotFoundException ex)
@@ -1184,12 +1518,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 packageName, version, selected.SourceAlias, RepoName);
         }
 
-        ApplyPackageAndShowReleaseNotes(provider, selected, $"Package selected: {packageName} {version}.", "Select Package");
+        await ApplyPackageAndShowReleaseNotesAsync(
+            provider, selected, $"Package selected: {packageName} {version}.", "Select Package", cancellationToken);
     }
 
     /// <summary>
-    ///     Shared extract-and-pin sequence reused by both <see cref="Upgrade"/> (after resolving
-    ///     the latest version) and <see cref="ApplySelectedPackage"/> (after resolving the exact
+    ///     Shared extract-and-pin sequence reused by both <see cref="UpgradeAsync"/> (after resolving
+    ///     the latest version) and <see cref="ApplySelectedPackageAsync"/> (after resolving the exact
     ///     user-selected version): acquires the package from its source, extracts it
     ///     (blind-delete-and-replace), proactively ensures the repo's <c>.gitignore</c> covers the
     ///     managed agent folders, rewrites the pin file (recording the package's source alias and
@@ -1207,14 +1542,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     whose own failure handling is unchanged - a genuine write failure there is still
     ///     reported via the outer <see cref="ErrorOccurred"/> handler. Reusing the loaded pin keeps
     ///     <see cref="RepoPin.AgentsMdTemplateDeclined"/> and any unknown fields intact.
+    ///     Cancellation is honored only while the package is being acquired; the copy into the
+    ///     repo runs on a worker thread and, once started, is never interrupted, so a repo is
+    ///     never left half extracted.
     /// </remarks>
     /// <param name="provider">The provider of the source the package was discovered at.</param>
     /// <param name="package">The resolved package to apply.</param>
     /// <param name="successMessage">The <see cref="StatusMessage"/> text to set on success.</param>
     /// <param name="failureVerb">A short verb phrase (e.g. <c>"Upgrade"</c>, <c>"Select Package"</c>)
     ///     used to prefix any <see cref="ErrorOccurred"/> message raised on failure.</param>
-    private void ApplyPackageAndShowReleaseNotes(
-        IPackageSourceProvider provider, DiscoveredPackage package, string successMessage, string failureVerb)
+    /// <param name="cancellationToken">Cancels acquiring the package.</param>
+    /// <returns>A task that completes when the package has been applied or the failure has been
+    ///     reported.</returns>
+    private async Task ApplyPackageAndShowReleaseNotesAsync(
+        IPackageSourceProvider provider,
+        DiscoveredPackage package,
+        string successMessage,
+        string failureVerb,
+        CancellationToken cancellationToken)
     {
         if (_logger.IsEnabled(LogLevel.Information))
         {
@@ -1237,8 +1582,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 existingPin = null;
             }
 
-            using var reader = RunBlocking(() => provider.AcquireAsync(package, CancellationToken.None));
-            PackageContentExtractor.Extract(reader, RepoPath);
+            using var reader = await provider.AcquireAsync(package, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
             EnsureGitIgnoreCoversManagedFolders();
 
             // Preserve a prior AGENTS.md template decline (and any unknown fields) across
@@ -1252,8 +1598,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             var releaseNotes = PackageContentExtractor.ReadReleaseNotes(reader) ?? string.Empty;
 
+            // The package is applied; the follow-up status refresh is no longer cancellable so
+            // the card never shows the old pin's upgrade state next to the new pin
             RefreshPin();
-            RefreshUpgradeStatus();
+            EvaluatePinnedSource();
+            await RefreshUpgradeStatusAsync(CancellationToken.None);
+            RaisePackageChipChanged();
             StatusMessage = successMessage;
 
             if (_logger.IsEnabled(LogLevel.Information))
@@ -1303,8 +1653,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     Called only from call sites that already have a <paramref name="reader"/> in hand
     ///     immediately after a successful <see cref="PackageContentExtractor.Extract"/> call
-    ///     (<see cref="ApplyPackageAndShowReleaseNotes"/> and the re-extraction branch of
-    ///     <see cref="EnsureAgentFilesSyncedBeforeLaunch"/>) - never as an independent, standing
+    ///     (<see cref="ApplyPackageAndShowReleaseNotesAsync"/> and the re-extraction branch of
+    ///     <see cref="EnsureAgentFilesSyncedBeforeLaunchAsync"/>) - never as an independent, standing
     ///     per-launch check, so the offer only ever fires when a sync genuinely just happened.
     ///     Wrapped in its own non-blocking try/catch, mirroring
     ///     <see cref="EnsureGitIgnoreCoversManagedFolders"/>'s precedent, so a pin-read or
@@ -1361,7 +1711,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <c>AGENTS.md</c> while the dialog is open, this never silently overwrites it. That
     ///     outcome is treated as a distinct, non-destructive result - reported via
     ///     <see cref="StatusMessage"/>, not <see cref="ErrorOccurred"/> - rather than a generic
-    ///     failure, mirroring how <see cref="EnsureAgentFilesSyncedBeforeLaunch"/> distinguishes
+    ///     failure, mirroring how <see cref="EnsureAgentFilesSyncedBeforeLaunchAsync"/> distinguishes
     ///     informational outcomes from genuine errors.
     ///     </para>
     /// </remarks>
@@ -1481,7 +1831,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Proactively ensures this repo's root <c>.gitignore</c> covers the four managed agent
     ///     folders immediately after a successful extraction, so they are far less likely to be
     ///     accidentally committed. Purely a non-blocking, best-effort side effect: deliberately
-    ///     wrapped in its own try/catch, separate from <see cref="ApplyPackageAndShowReleaseNotes"/>'s
+    ///     wrapped in its own try/catch, separate from <see cref="ApplyPackageAndShowReleaseNotesAsync"/>'s
     ///     outer catch, so a <c>.gitignore</c> I/O failure can never abort the pin write or
     ///     release-notes display that follow it.
     /// </summary>
@@ -1505,15 +1855,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Chooses the source to select a package from, then raises
-    ///     <see cref="SelectPackageRequested"/> so the view layer can show the "Select Package..."
-    ///     dialog.
+    ///     Raises <see cref="SelectPackageRequested"/> so the view layer can show the "Select
+    ///     Package..." dialog.
     /// </summary>
     /// <remarks>
     ///     Reports an error instead when no package source is configured (or the configured
-    ///     sources are invalid). Until the dialog offers a choice of source, the <c>Default</c>
-    ///     source (else the first configured one) is used - see
-    ///     <see cref="ChooseSelectionSourceAlias"/>.
+    ///     sources are invalid). The dialog lists every configured source and lets the user
+    ///     choose, so the card passes nothing along.
     /// </remarks>
     private void SelectPackage()
     {
@@ -1530,11 +1878,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         if (registry.Definitions.Count == 0)
         {
-            ErrorOccurred?.Invoke(this, "No package source is configured. Set one in Settings.");
+            ErrorOccurred?.Invoke(this, "No package source is configured. Add one in Settings.");
             return;
         }
 
-        SelectPackageRequested?.Invoke(this, ChooseSelectionSourceAlias(registry));
+        SelectPackageRequested?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -1635,46 +1983,175 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     A pin naming a source that is not configured is an error state, not a reason to look
     ///     elsewhere: <see cref="SourceProblem"/> explains it and no upgrade is offered. Only the
-    ///     pin's own source is ever consulted.
+    ///     pin's own source is ever consulted. The source is read asynchronously, so a slow or
+    ///     unreachable source never freezes the window; <see cref="IsCheckingUpgrade"/> is set
+    ///     meanwhile. When several checks overlap (for example after the sources were edited
+    ///     while an earlier check was still waiting) only the most recently started one updates
+    ///     the card.
     /// </remarks>
-    private void RefreshUpgradeStatus()
+    /// <param name="cancellationToken">Cancels reading the source.</param>
+    /// <returns>A task that completes when the card's upgrade state is current.</returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is cancelled; the card keeps its previous upgrade state.</exception>
+    public async Task RefreshUpgradeStatusAsync(CancellationToken cancellationToken = default)
+    {
+        var generation = ++_upgradeCheckGeneration;
+        if (!EvaluatePinnedSource())
+        {
+            IsCheckingUpgrade = false;
+            return;
+        }
+
+        var pinnedPackageName = PinnedPackageName!;
+        var pinnedVersion = PinnedPackageVersion ?? string.Empty;
+        var sourceAlias = PinnedSource ?? RepoPin.LegacySourceAlias;
+        IsCheckingUpgrade = true;
+        try
+        {
+            var registry = CreateSourceRegistry();
+            var check = await _packageVersionCache.IsNewerVersionAvailableAsync(
+                registry, sourceAlias, pinnedPackageName, pinnedVersion, cancellationToken);
+            if (generation == _upgradeCheckGeneration)
+            {
+                LatestAvailableVersion = check.Latest?.Version.ToString();
+                IsUpgradeAvailable = check.IsNewerAvailable;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // An unreachable or failing source (or invalid source configuration) means "no
+            // upgrade can be offered", not a crash; the specific failure is surfaced by the
+            // actions that need the source
+            if (generation == _upgradeCheckGeneration)
+            {
+                IsUpgradeAvailable = false;
+                LatestAvailableVersion = null;
+            }
+        }
+        finally
+        {
+            if (generation == _upgradeCheckGeneration)
+            {
+                IsCheckingUpgrade = false;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Applies the parts of the upgrade check that need no package source: a repo with no pin
+    ///     has no upgrade, and a pin naming a source that is not configured is an error state.
+    /// </summary>
+    /// <returns><see langword="true"/> when the pin's source is configured and must be consulted
+    ///     to learn whether a newer version exists; <see langword="false"/> when the state was
+    ///     fully decided here (no pin, unconfigured source, or invalid source configuration).</returns>
+    private bool EvaluatePinnedSource()
     {
         SourceProblem = null;
         if (string.IsNullOrWhiteSpace(PinnedPackageName))
         {
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
-            return;
+            return false;
         }
 
+        var sourceAlias = PinnedSource ?? RepoPin.LegacySourceAlias;
         try
         {
-            var registry = CreateSourceRegistry();
-            var sourceAlias = PinnedSource ?? RepoPin.LegacySourceAlias;
-            if (!registry.Contains(sourceAlias))
+            if (!CreateSourceRegistry().Contains(sourceAlias))
             {
                 // No fallback: the pin's source is simply not available, and the card says so
                 SourceProblem = new UnknownSourceException(sourceAlias).Message;
                 IsUpgradeAvailable = false;
                 LatestAvailableVersion = null;
-                return;
+                return false;
             }
-
-            var pinnedPackageName = PinnedPackageName;
-            var pinnedVersion = PinnedPackageVersion ?? string.Empty;
-            var check = RunBlocking(() => _packageVersionCache.IsNewerVersionAvailableAsync(
-                registry, sourceAlias, pinnedPackageName, pinnedVersion, CancellationToken.None));
-            LatestAvailableVersion = check.Latest?.Version.ToString();
-            IsUpgradeAvailable = check.IsNewerAvailable;
         }
-        catch (Exception ex) when (ex is DirectoryNotFoundException or InvalidOperationException)
+        catch (InvalidOperationException)
         {
-            // An unreachable or failing source (or invalid source configuration) means "no
-            // upgrade can be offered", not a crash; the specific failure is surfaced by the
-            // actions that need the source
+            // Invalid source configuration (for example a duplicated alias): nothing can be
+            // offered; the actions that need the source report the specific reason
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
+            return false;
         }
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Runs a package operation for this card while holding <see cref="IsBusy"/>, so a second
+    ///     operation cannot start until it finishes, and makes it cancellable through
+    ///     <see cref="CancelOperationCommand"/> when <paramref name="cancellable"/> is set.
+    /// </summary>
+    /// <param name="busyMessage">The text shown while the operation runs.</param>
+    /// <param name="cancellable">Whether the user may cancel the operation.</param>
+    /// <param name="operation">The work to run; receives a token cancelled by either
+    ///     <paramref name="cancellationToken"/> or the card's cancel command.</param>
+    /// <param name="cancellationToken">The caller's cancellation token.</param>
+    /// <returns>A task that completes when the operation has finished; returns immediately
+    ///     without running <paramref name="operation"/> when another operation is already
+    ///     running. A cancelled operation sets a status message instead of failing.</returns>
+    private async Task RunOperationAsync(
+        string busyMessage,
+        bool cancellable,
+        Func<CancellationToken, Task> operation,
+        CancellationToken cancellationToken)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _operationCancellation = cancellation;
+        BusyMessage = busyMessage;
+        CanCancelOperation = cancellable;
+        IsBusy = true;
+        try
+        {
+            await operation(cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "The operation was canceled.";
+        }
+        finally
+        {
+            _operationCancellation = null;
+            IsBusy = false;
+            CanCancelOperation = false;
+            BusyMessage = null;
+        }
+    }
+
+    /// <summary>
+    ///     Asks the running package operation to stop; does nothing when none is running.
+    /// </summary>
+    private void CancelOperation()
+    {
+        try
+        {
+            _operationCancellation?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The operation finished between the click and the cancel; nothing is left to stop
+        }
+    }
+
+    /// <summary>
+    ///     Tells the user about an exception that no operation handled itself, so a failure never
+    ///     disappears silently or tears down the application.
+    /// </summary>
+    /// <param name="exception">The unexpected exception thrown by a command's operation.</param>
+    private void ReportUnexpectedFailure(Exception exception)
+    {
+        if (_logger.IsEnabled(LogLevel.Error))
+        {
+            _logger.LogError(exception, "An operation on repo '{RepoName}' failed unexpectedly", RepoName);
+        }
+
+        ErrorOccurred?.Invoke(this, $"The operation failed: {exception.Message}");
     }
 
     /// <summary>

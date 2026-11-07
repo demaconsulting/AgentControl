@@ -42,6 +42,17 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 internal sealed class MainWindowViewModel : ViewModelBase
 {
     /// <summary>
+    ///     The most upgrade checks that read package sources at the same time.
+    /// </summary>
+    private const int MaxConcurrentUpgradeChecks = 4;
+
+    /// <summary>
+    ///     Cancels the background upgrade check started by the most recent
+    ///     <see cref="BeginUpgradeRefresh()"/>, or <see langword="null"/> before the first one.
+    /// </summary>
+    private CancellationTokenSource? _refreshCancellation;
+
+    /// <summary>
     ///     The configuration directory settings are persisted to/from, or <see langword="null"/>
     ///     to use <see cref="SettingsStore.GetDefaultConfigDirectory"/>.
     /// </summary>
@@ -204,11 +215,16 @@ internal sealed class MainWindowViewModel : ViewModelBase
         _settings.RecentRepos.Insert(0, recentRepo);
         var card = CreateCard(recentRepo);
         AttachCardEvents(card);
-        card.Refresh();
+        card.RefreshCheap();
+        card.RefreshDirtyStatus();
         RepoCards.Insert(0, card);
 
         SaveSettings();
         UpdateDisplayedRepoCards();
+
+        // The new card's upgrade check reads its package source, so it runs in the background
+        // rather than delaying the card's appearance
+        BeginSingleCardUpgradeRefresh(card);
         return true;
     }
 
@@ -243,13 +259,14 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     <see cref="PackageVersionCache"/> for each package source that was changed or removed
     ///     (cached results for an edited source would otherwise be silently reused; sources that
     ///     did not change keep theirs), and
-    ///     re-runs each card's cheap refresh (pin file, branch, committed-files badge, upgrade
-    ///     availability) so those properties reflect any changed package-source/git-path
-    ///     settings immediately.
+    ///     re-runs each card's cheap refresh (pin file, branch, committed-files badge, whether the
+    ///     pin's source is configured) so those properties reflect any changed package-source/git-path
+    ///     settings immediately, then starts the background upgrade-availability check
+    ///     (<see cref="BeginUpgradeRefresh()"/>) against the new sources.
     /// </summary>
     /// <remarks>
     ///     Deliberately uses <see cref="RepoCardViewModel.RefreshCheap"/> rather than a full
-    ///     <see cref="RepoCardViewModel.Refresh"/> for every card: <c>GitClient</c>'s
+    ///     <see cref="RepoCardViewModel.RefreshAsync"/> for every card: <c>GitClient</c>'s
     ///     synchronous, un-timed <c>git status</c> call means refreshing every tracked repo's
     ///     dirty status on the UI thread could freeze the window for a large or slow/networked
     ///     repo list. A fresh Git status check is instead requested only for the cards that
@@ -308,6 +325,98 @@ internal sealed class MainWindowViewModel : ViewModelBase
         }
 
         UpdateDisplayedRepoCards();
+
+        // Re-check upgrades against the new sources in the background; any check still running
+        // for the previous settings is cancelled
+        BeginUpgradeRefresh();
+    }
+
+    /// <summary>
+    ///     Gets the task of the most recently started background upgrade check, so a caller (a
+    ///     test, or code that must wait for the cards to settle) can await it; completed when no
+    ///     check has been started.
+    /// </summary>
+    internal Task PendingRefresh { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    ///     Starts checking, in the background and without blocking the UI thread, whether a newer
+    ///     package version is available for every repo card, cancelling any such check still
+    ///     running.
+    /// </summary>
+    /// <remarks>
+    ///     Called by the main window once it is shown, and after settings change. Each card reads
+    ///     only the source its pin names; at most a few cards read sources at the same time so a
+    ///     long recent-repos list cannot flood a slow source. A failing source only affects the
+    ///     cards pinned to it.
+    /// </remarks>
+    /// <returns>A task that completes when every card's check has finished (also available as
+    ///     <see cref="PendingRefresh"/>).</returns>
+    public Task BeginUpgradeRefresh() => StartUpgradeRefresh([.. RepoCards]);
+
+    /// <summary>
+    ///     Starts the background upgrade check for a single card (a repo that was just added),
+    ///     without cancelling the check of the other cards.
+    /// </summary>
+    /// <param name="card">The card to check.</param>
+    private void BeginSingleCardUpgradeRefresh(RepoCardViewModel card)
+    {
+        var token = _refreshCancellation?.Token ?? CancellationToken.None;
+        var previous = PendingRefresh;
+        PendingRefresh = Task.WhenAll(previous, CheckUpgradesAsync([card], token));
+    }
+
+    /// <summary>
+    ///     Replaces the running background upgrade check with a new one for the given cards.
+    /// </summary>
+    /// <param name="cards">The cards to check.</param>
+    /// <returns>A task that completes when the new check has finished.</returns>
+    private Task StartUpgradeRefresh(IReadOnlyList<RepoCardViewModel> cards)
+    {
+        var previous = _refreshCancellation;
+        var cancellation = new CancellationTokenSource();
+        _refreshCancellation = cancellation;
+        if (previous is not null)
+        {
+            previous.Cancel();
+            previous.Dispose();
+        }
+
+        PendingRefresh = CheckUpgradesAsync(cards, cancellation.Token);
+        return PendingRefresh;
+    }
+
+    /// <summary>
+    ///     Checks each card's upgrade availability, a few at a time.
+    /// </summary>
+    /// <param name="cards">The cards to check.</param>
+    /// <param name="cancellationToken">Cancels the checks that have not completed.</param>
+    /// <returns>A task that completes when every check has finished or been cancelled; a
+    ///     cancelled check is not an error.</returns>
+    private static async Task CheckUpgradesAsync(
+        IReadOnlyList<RepoCardViewModel> cards, CancellationToken cancellationToken)
+    {
+        using var throttle = new SemaphoreSlim(MaxConcurrentUpgradeChecks);
+        var checks = cards.Select(async card =>
+        {
+            await throttle.WaitAsync(cancellationToken);
+            try
+            {
+                await card.RefreshUpgradeStatusAsync(cancellationToken);
+            }
+            finally
+            {
+                throttle.Release();
+            }
+        });
+
+        try
+        {
+            await Task.WhenAll(checks);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer check (or the window closing): the cards keep their state
+        }
     }
 
     /// <summary>

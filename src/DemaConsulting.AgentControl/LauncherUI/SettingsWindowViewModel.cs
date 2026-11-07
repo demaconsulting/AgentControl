@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Collections.ObjectModel;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Settings;
 
@@ -25,21 +26,28 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
 ///     View model for the settings window: edits a working copy of <see cref="AppSettings"/>'s
-///     user-configurable fields and persists them on <see cref="Save"/>.
+///     user-configurable fields, including the list of package sources, and persists them on
+///     <see cref="Save"/>.
 /// </summary>
 /// <remarks>
+///     <para>
 ///     Edits a copy rather than the live <see cref="AppSettings"/> instance so that closing the
-///     window without saving (not currently exposed in the UI, but a natural future "Cancel"
-///     button) never partially mutates the caller's settings. The recent-repos list is
-///     intentionally not exposed here - it is owned exclusively by
+///     window without saving never partially mutates the caller's settings. The recent-repos list
+///     is intentionally not exposed here - it is owned exclusively by
 ///     <see cref="MainWindowViewModel"/> and is preserved by <see cref="MainWindowViewModel.ApplySettings"/>
-///     when the built <see cref="AppSettings"/> from <see cref="Save"/> is applied. The package
-///     source field edits the location of the source named <c>Default</c> (the source a
-///     single-folder configuration migrates to) while every other configured source is carried
-///     through unchanged; a full multi-source editor is a separate piece of UI work. Not
+///     when the built <see cref="AppSettings"/> from <see cref="Save"/> is applied; it is only
+///     read, to tell the user how many repos are pinned to a source they are about to remove.
+///     </para>
+///     <para>
+///     The package sources are shown as a list with add, edit and remove actions. The dialogs
+///     that add or edit a source are view-layer concerns: this class raises
+///     <see cref="EditorRequested"/> and <see cref="RemoveRequested"/> and applies the outcome,
+///     so the logic stays testable without a window. Whether each source's folder can be found
+///     is checked on worker threads so a slow network share never blocks the window. Not
 ///     thread-safe; every member is expected to be called from the UI thread.
+///     </para>
 /// </remarks>
-internal sealed class SettingsWindowViewModel : ViewModelBase
+internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
 {
     /// <summary>
     ///     Invoked by <see cref="Save"/> with the newly-built <see cref="AppSettings"/> to
@@ -48,13 +56,27 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
     private readonly Action<AppSettings> _onSave;
 
     /// <summary>
-    ///     Working copies of the sources configured when the window opened, saved back (with the
-    ///     <c>Default</c> source's location replaced by <see cref="PackageSourcePath"/>) by
-    ///     <see cref="Save"/>.
+    ///     Tells whether a folder exists; run on a worker thread for each source's status check.
     /// </summary>
-    private readonly List<PackageSourceDefinition> _sources;
+    private readonly Func<string, CancellationToken, Task<bool>> _folderExists;
 
-    private string? _packageSourcePath;
+    /// <summary>
+    ///     How many recent repos are pinned to each source alias (compared case-insensitively),
+    ///     captured when the window opened.
+    /// </summary>
+    private readonly Dictionary<string, int> _pinnedRepoCounts;
+
+    /// <summary>
+    ///     Cancels the folder checks still running when the window closes.
+    /// </summary>
+    private readonly CancellationTokenSource _statusCancellation = new();
+
+    /// <summary>
+    ///     The folder checks started so far, so a caller can wait for them to settle.
+    /// </summary>
+    private readonly List<Task> _statusChecks = [];
+
+    private PackageSourceItemViewModel? _selectedSource;
     private string? _gitExecutablePath;
     private AgentToolKind _agentTool;
     private string? _customAgentCommand;
@@ -67,26 +89,46 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
 
     /// <summary>
     ///     Initializes a new <see cref="SettingsWindowViewModel"/>, seeding its editable
-    ///     properties from <paramref name="initial"/>.
+    ///     properties from <paramref name="initial"/> and starting the status check of every
+    ///     configured source.
     /// </summary>
     /// <param name="initial">The current application settings to edit a copy of.</param>
     /// <param name="onSave">Callback invoked by <see cref="Save"/> with the updated settings.</param>
+    /// <param name="folderExists">Tells whether a folder exists, for the sources' status check;
+    ///     <see langword="null"/> checks the real file system. Supplied so tests need no real
+    ///     folders and the check can be made slow on purpose.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="initial"/> or
     ///     <paramref name="onSave"/> is <see langword="null"/>.</exception>
-    public SettingsWindowViewModel(AppSettings initial, Action<AppSettings> onSave)
+    public SettingsWindowViewModel(
+        AppSettings initial, Action<AppSettings> onSave, Func<string, CancellationToken, Task<bool>>? folderExists = null)
     {
         ArgumentNullException.ThrowIfNull(initial);
         ArgumentNullException.ThrowIfNull(onSave);
 
-        _sources = initial.GetEffectiveSources().Select(source => source.Clone()).ToList();
-        _packageSourcePath = FindDefaultSource(_sources)?.Location;
+        _folderExists = folderExists ?? ((path, token) => Task.Run(() => Directory.Exists(path), token));
+        _pinnedRepoCounts = initial.RecentRepos
+            .Where(repo => !string.IsNullOrEmpty(repo.PinnedSource))
+            .GroupBy(repo => repo.PinnedSource!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
         _gitExecutablePath = initial.GitExecutablePath;
         _agentTool = initial.AgentTool;
         _customAgentCommand = initial.CustomAgentCommand;
         _shellPreference = initial.ShellPreference;
         _onSave = onSave;
 
+        Sources = [];
+        foreach (var source in initial.GetEffectiveSources())
+        {
+            AddItem(source.Clone());
+        }
+
         SaveCommand = new RelayCommand(Save);
+        AddZipSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.Zip, null));
+        AddNuGetFolderSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.NuGet, null));
+        EditSourceCommand = new RelayCommand(
+            () => RequestEditor(_selectedSource!.Definition.Type, _selectedSource), () => _selectedSource is not null);
+        RemoveSourceCommand = new RelayCommand(
+            () => RemoveRequested?.Invoke(this, _selectedSource!), () => _selectedSource is not null);
     }
 
     /// <summary>
@@ -125,14 +167,31 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
             ];
 
     /// <summary>
-    ///     Gets or sets the location of the <c>Default</c> package source (the filesystem path
-    ///     agent package zips are enumerated from); blank/<see langword="null"/> removes the
-    ///     <c>Default</c> source when saved.
+    ///     Gets the configured package sources, in the order they are saved and listed.
     /// </summary>
-    public string? PackageSourcePath
+    public ObservableCollection<PackageSourceItemViewModel> Sources { get; }
+
+    /// <summary>
+    ///     Gets a value indicating whether no package source is configured, which the window
+    ///     answers with an explanation instead of an empty list.
+    /// </summary>
+    public bool HasNoSources => Sources.Count == 0;
+
+    /// <summary>
+    ///     Gets or sets the source selected in the list, the one the Edit and Remove buttons act
+    ///     on.
+    /// </summary>
+    public PackageSourceItemViewModel? SelectedSource
     {
-        get => _packageSourcePath;
-        set => SetField(ref _packageSourcePath, value);
+        get => _selectedSource;
+        set
+        {
+            if (SetField(ref _selectedSource, value))
+            {
+                EditSourceCommand.RaiseCanExecuteChanged();
+                RemoveSourceCommand.RaiseCanExecuteChanged();
+            }
+        }
     }
 
     /// <summary>
@@ -213,10 +272,143 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
     public RelayCommand SaveCommand { get; }
 
     /// <summary>
+    ///     Gets the command bound to the "Add Zip-Package Folder" button.
+    /// </summary>
+    public RelayCommand AddZipSourceCommand { get; }
+
+    /// <summary>
+    ///     Gets the command bound to the "Add NuGet-Package Folder" button.
+    /// </summary>
+    public RelayCommand AddNuGetFolderSourceCommand { get; }
+
+    /// <summary>
+    ///     Gets the command bound to the "Edit" button; executable while a source is selected.
+    /// </summary>
+    public RelayCommand EditSourceCommand { get; }
+
+    /// <summary>
+    ///     Gets the command bound to the "Remove" button; executable while a source is selected.
+    /// </summary>
+    public RelayCommand RemoveSourceCommand { get; }
+
+    /// <summary>
     ///     Raised after <see cref="Save"/> has invoked the <c>onSave</c> callback, so
     ///     <see cref="SettingsWindow"/>'s code-behind can close the window.
     /// </summary>
     public event EventHandler? Saved;
+
+    /// <summary>
+    ///     Raised when the user asks to add or edit a source, carrying the editor view model the
+    ///     view should show in a dialog. The outcome is applied by this view model when the
+    ///     editor reports a save; the view only shows the dialog.
+    /// </summary>
+    public event EventHandler<SourceEditorViewModel>? EditorRequested;
+
+    /// <summary>
+    ///     Raised when the user asks to remove a source, carrying the row. The view confirms with
+    ///     the user (see <see cref="GetRemovalWarning"/>) and calls <see cref="RemoveSource"/>
+    ///     only if they agree.
+    /// </summary>
+    public event EventHandler<PackageSourceItemViewModel>? RemoveRequested;
+
+    /// <summary>
+    ///     Creates the editor for adding a new source of a kind, or for editing an existing one.
+    /// </summary>
+    /// <param name="type">The kind of source to add; ignored when <paramref name="editing"/> is
+    ///     supplied.</param>
+    /// <param name="editing">The row to edit, or <see langword="null"/> to add a new source.</param>
+    /// <returns>An editor whose save adds the new source (selecting it) or replaces the edited one
+    ///     in place; its alias check covers every source in the list.</returns>
+    public SourceEditorViewModel CreateEditor(PackageSourceType type, PackageSourceItemViewModel? editing)
+    {
+        var editor = new SourceEditorViewModel(
+            type,
+            editing?.Definition,
+            alias => Sources.Any(item => string.Equals(item.Alias, alias, StringComparison.OrdinalIgnoreCase)));
+        editor.Saved += (_, definition) =>
+        {
+            if (editing is null)
+            {
+                AddSource(definition);
+            }
+            else
+            {
+                ReplaceSource(editing, definition);
+            }
+        };
+        return editor;
+    }
+
+    /// <summary>
+    ///     Describes what removing a source will cause, for the confirmation the user sees before
+    ///     it is removed.
+    /// </summary>
+    /// <param name="source">The row about to be removed.</param>
+    /// <returns>A question naming the source, with a warning when repos are pinned to it: they
+    ///     will show a package source problem until a source with that alias is configured
+    ///     again.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="source"/> is
+    ///     <see langword="null"/>.</exception>
+    public static string GetRemovalWarning(PackageSourceItemViewModel source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        var message = $"Remove the package source '{source.Alias}'?\n\n" +
+                      "Nothing is deleted from the folder itself; AgentControl only forgets the source.";
+        if (source.PinnedRepoCount > 0)
+        {
+            var repos = source.PinnedRepoCount == 1 ? "1 repo is" : $"{source.PinnedRepoCount} repos are";
+            message += $"\n\nWarning: {repos} pinned to '{source.Alias}'. Until a source with that " +
+                       "alias is configured again, those repos will show a \"Package source problem\" " +
+                       "and cannot be upgraded.";
+        }
+        else
+        {
+            message += "\n\nRepos pinned to this alias will show a \"Package source problem\" until a " +
+                       "source with that alias is configured again.";
+        }
+
+        return message;
+    }
+
+    /// <summary>
+    ///     Removes a source from the working list; nothing is persisted until <see cref="Save"/>.
+    /// </summary>
+    /// <param name="source">The row to remove.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="source"/> is
+    ///     <see langword="null"/>.</exception>
+    public void RemoveSource(PackageSourceItemViewModel source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (!Sources.Remove(source))
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_selectedSource, source))
+        {
+            SelectedSource = null;
+        }
+
+        OnPropertyChanged(nameof(HasNoSources));
+    }
+
+    /// <summary>
+    ///     Cancels the folder checks that are still running and releases the resources they use,
+    ///     for when the window closes.
+    /// </summary>
+    public void Dispose()
+    {
+        _statusCancellation.Cancel();
+        _statusCancellation.Dispose();
+    }
+
+    /// <summary>
+    ///     Waits for every folder check started so far to finish.
+    /// </summary>
+    /// <returns>A task that completes when the checks have finished or were cancelled.</returns>
+    internal Task WaitForStatusChecksAsync() => Task.WhenAll(_statusChecks.ToArray());
 
     /// <summary>
     ///     Builds an <see cref="AppSettings"/> from the current editable properties and invokes
@@ -227,16 +419,13 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
     ///     list; callers (specifically <see cref="MainWindowViewModel.ApplySettings"/>) are
     ///     responsible for preserving the authoritative recent-repos list, since this view model
     ///     never owns or edits it. The configured sources are written to
-    ///     <see cref="AppSettings.Sources"/> (never the legacy single path): the <c>Default</c>
-    ///     source takes <see cref="PackageSourcePath"/> as its location - created as a zip source
-    ///     if it did not exist, removed if the path is blank - and all other sources are kept as
-    ///     they were.
+    ///     <see cref="AppSettings.Sources"/> (never the legacy single path) in the order listed.
+    ///     A source whose location embeds a credential is refused here, keeping the window open
+    ///     with the reason shown, rather than being allowed to reach the settings file.
     /// </remarks>
     private void Save()
     {
-        var sources = _sources.Select(source => source.Clone()).ToList();
-        ApplyDefaultSourceLocation(sources, PackageSourcePath);
-
+        var sources = Sources.Select(item => item.Definition.Clone()).ToList();
         var updated = new AppSettings
         {
             Sources = sources,
@@ -246,8 +435,6 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
             ShellPreference = ShellPreference
         };
 
-        // A credential embedded in a location is refused here, keeping the window open with the
-        // reason shown, rather than being allowed to reach the settings file
         var problem = sources.Select(source => source.GetCredentialProblem()).FirstOrDefault(p => p is not null);
         if (problem is not null)
         {
@@ -261,41 +448,74 @@ internal sealed class SettingsWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Finds the source named <c>Default</c>, if any.
+    ///     Raises <see cref="EditorRequested"/> with an editor for a new or an existing source.
     /// </summary>
-    /// <param name="sources">The sources to search.</param>
-    /// <returns>The <c>Default</c> source (alias compared case-insensitively), or
-    ///     <see langword="null"/>.</returns>
-    private static PackageSourceDefinition? FindDefaultSource(IEnumerable<PackageSourceDefinition> sources) =>
-        sources.FirstOrDefault(source =>
-            string.Equals(source.Alias, PackageSourceDefinition.DefaultAlias, StringComparison.OrdinalIgnoreCase));
+    /// <param name="type">The kind of source to add.</param>
+    /// <param name="editing">The row to edit, or <see langword="null"/> to add.</param>
+    private void RequestEditor(PackageSourceType type, PackageSourceItemViewModel? editing) =>
+        EditorRequested?.Invoke(this, CreateEditor(type, editing));
 
     /// <summary>
-    ///     Applies the single-field package source location to a source list: updates, adds or
-    ///     removes the <c>Default</c> source.
+    ///     Appends a source to the working list, selects it and starts checking its folder.
     /// </summary>
-    /// <param name="sources">The working list to modify.</param>
-    /// <param name="location">The new <c>Default</c> location; blank removes the source.</param>
-    private static void ApplyDefaultSourceLocation(List<PackageSourceDefinition> sources, string? location)
+    /// <param name="definition">The new source.</param>
+    private void AddSource(PackageSourceDefinition definition)
     {
-        var existing = FindDefaultSource(sources);
-        if (string.IsNullOrWhiteSpace(location))
-        {
-            if (existing is not null)
-            {
-                sources.Remove(existing);
-            }
+        var item = AddItem(definition);
+        SelectedSource = item;
+    }
 
+    /// <summary>
+    ///     Replaces an edited source in place (keeping its position and selection) and restarts
+    ///     the check of its folder.
+    /// </summary>
+    /// <param name="editing">The row being replaced.</param>
+    /// <param name="definition">The edited source.</param>
+    private void ReplaceSource(PackageSourceItemViewModel editing, PackageSourceDefinition definition)
+    {
+        var index = Sources.IndexOf(editing);
+        if (index < 0)
+        {
             return;
         }
 
-        if (existing is not null)
+        var wasSelected = ReferenceEquals(_selectedSource, editing);
+        var replacement = CreateItem(definition);
+        Sources[index] = replacement;
+        if (wasSelected)
         {
-            existing.Location = location;
+            SelectedSource = replacement;
         }
-        else
-        {
-            sources.Insert(0, PackageSourceDefinition.CreateDefaultZip(location));
-        }
+
+        StartStatusCheck(replacement);
     }
+
+    /// <summary>
+    ///     Adds a source row at the end of the list and starts its folder check.
+    /// </summary>
+    /// <param name="definition">The source.</param>
+    /// <returns>The new row.</returns>
+    private PackageSourceItemViewModel AddItem(PackageSourceDefinition definition)
+    {
+        var item = CreateItem(definition);
+        Sources.Add(item);
+        OnPropertyChanged(nameof(HasNoSources));
+        StartStatusCheck(item);
+        return item;
+    }
+
+    /// <summary>
+    ///     Creates a row for a source, including how many repos are pinned to it.
+    /// </summary>
+    /// <param name="definition">The source.</param>
+    /// <returns>The row, in its "checking" state.</returns>
+    private PackageSourceItemViewModel CreateItem(PackageSourceDefinition definition) =>
+        new(definition, _pinnedRepoCounts.GetValueOrDefault(definition.Alias));
+
+    /// <summary>
+    ///     Starts a row's folder check on a worker thread.
+    /// </summary>
+    /// <param name="item">The row to check.</param>
+    private void StartStatusCheck(PackageSourceItemViewModel item) =>
+        _statusChecks.Add(item.CheckStatusAsync(_folderExists, _statusCancellation.Token));
 }

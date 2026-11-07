@@ -19,20 +19,21 @@
 // SOFTWARE.
 
 using Avalonia.Controls;
-using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
-using Avalonia.Platform.Storage;
+using DemaConsulting.AgentControl.AgentPackageManagement;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     Modal settings window: edits the package-source path, git executable override, agent-tool
+///     Modal settings window: edits the package sources, git executable override, agent-tool
 ///     selection, and shell preference via a <see cref="SettingsWindowViewModel"/>.
 /// </summary>
 /// <remarks>
 ///     All editable state and the save/round-trip logic live in
-///     <see cref="SettingsWindowViewModel"/>; this code-behind only wires the folder-browse
-///     dialog (which requires a live <see cref="IStorageProvider"/>) and closes the window once
+///     <see cref="SettingsWindowViewModel"/>; this code-behind only shows the dialogs the view
+///     model asks for - the <see cref="SourceEditorWindow"/> that adds or edits a source and the
+///     <see cref="ConfirmationWindow"/> that confirms a removal - cancels the view model's
+///     folder checks when the window closes, and closes the window once
 ///     <see cref="SettingsWindowViewModel.Saved"/> fires.
 /// </remarks>
 internal sealed partial class SettingsWindow : Window
@@ -51,7 +52,7 @@ internal sealed partial class SettingsWindow : Window
     ///     Initializes a new <see cref="SettingsWindow"/> bound to the given view model, closing
     ///     itself once the view model reports a successful save.
     /// </summary>
-    /// <param name="viewModel">The view model to bind and observe for the "Saved" event.</param>
+    /// <param name="viewModel">The view model to bind and observe.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="viewModel"/> is
     ///     <see langword="null"/>.</exception>
     public SettingsWindow(SettingsWindowViewModel viewModel) : this()
@@ -59,32 +60,35 @@ internal sealed partial class SettingsWindow : Window
         ArgumentNullException.ThrowIfNull(viewModel);
         DataContext = viewModel;
         viewModel.Saved += (_, _) => Close();
+        viewModel.EditorRequested += async (_, editor) => await ShowEditorAsync(editor);
+        viewModel.RemoveRequested += async (_, source) => await ConfirmAndRemoveAsync(viewModel, source);
+        Closed += (_, _) => viewModel.Dispose();
     }
 
     /// <summary>
-    ///     Opens a native folder-browse dialog and applies the chosen folder to
-    ///     <see cref="SettingsWindowViewModel.PackageSourcePath"/>.
+    ///     Shows the modal dialog that adds or edits a source. The editor view model applies the
+    ///     outcome itself when the user saves, so nothing is done with the dialog's result here.
     /// </summary>
-    /// <param name="sender">The clicked "Browse..." button.</param>
-    /// <param name="e">Routed event arguments (unused).</param>
-    private async void BrowsePackageSourceButton_Click(object? sender, RoutedEventArgs e)
+    /// <param name="editor">The editor view model to show.</param>
+    /// <returns>A task that completes when the dialog closes.</returns>
+    private async Task ShowEditorAsync(SourceEditorViewModel editor)
     {
-        if (DataContext is not SettingsWindowViewModel viewModel)
-        {
-            return;
-        }
+        await new SourceEditorWindow(editor).ShowDialog<PackageSourceDefinition?>(this);
+    }
 
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+    /// <summary>
+    ///     Asks the user to confirm removing a source (warning when repos are pinned to it) and
+    ///     removes it only if they agree.
+    /// </summary>
+    /// <param name="viewModel">The settings view model that owns the source list.</param>
+    /// <param name="source">The row the user asked to remove.</param>
+    /// <returns>A task that completes when the user has answered and any removal is done.</returns>
+    private async Task ConfirmAndRemoveAsync(SettingsWindowViewModel viewModel, PackageSourceItemViewModel source)
+    {
+        var confirmed = await new ConfirmationWindow(SettingsWindowViewModel.GetRemovalWarning(source)).ShowDialog<bool>(this);
+        if (confirmed)
         {
-            Title = "Select the agent package source folder",
-            AllowMultiple = false
-        });
-
-        var folder = folders.Count > 0 ? folders[0] : null;
-        var localPath = folder?.TryGetLocalPath();
-        if (!string.IsNullOrEmpty(localPath))
-        {
-            viewModel.PackageSourcePath = localPath;
+            viewModel.RemoveSource(source);
         }
     }
 }

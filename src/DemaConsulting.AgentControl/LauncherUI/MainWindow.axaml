@@ -123,15 +123,78 @@
                     <Setter Property="Background" Value="#1AFFFFFF" />
                     <Setter Property="BoxShadow" Value="0 4 12 0 #40000000" />
                 </Style>
+
+                <!-- Chips: small rounded labels (icon plus short text) that each state one fact about
+                     the repo. Neutral (default) chips state facts; amber chips ask for attention;
+                     red chips report a problem. Mid-tone colors stay readable on the light and the
+                     dark theme. A clickable chip is a flat button that wraps a chip. -->
+                <Style Selector="Border.Chip">
+                    <Setter Property="CornerRadius" Value="10" />
+                    <Setter Property="BorderThickness" Value="1" />
+                    <Setter Property="Padding" Value="7,1" />
+                    <Setter Property="Margin" Value="0,0,6,4" />
+                    <Setter Property="Background" Value="#14808080" />
+                    <Setter Property="BorderBrush" Value="#55808080" />
+                </Style>
+                <Style Selector="Border.Chip.amber">
+                    <Setter Property="Background" Value="#26D29922" />
+                    <Setter Property="BorderBrush" Value="#99D29922" />
+                    <Setter Property="TextElement.Foreground" Value="#BF8700" />
+                </Style>
+                <Style Selector="Border.Chip.red">
+                    <Setter Property="Background" Value="#26E5534B" />
+                    <Setter Property="BorderBrush" Value="#99E5534B" />
+                    <Setter Property="TextElement.Foreground" Value="#E5534B" />
+                </Style>
+                <Style Selector="Border.Chip.grey">
+                    <Setter Property="Background" Value="#0F808080" />
+                    <Setter Property="BorderBrush" Value="#40808080" />
+                    <Setter Property="Opacity" Value="0.85" />
+                </Style>
+                <Style Selector="Border.Chip.package">
+                    <Setter Property="Background" Value="#1F3FA9F5" />
+                    <Setter Property="BorderBrush" Value="#803FA9F5" />
+                </Style>
+                <Style Selector="Border.Chip TextBlock">
+                    <Setter Property="FontSize" Value="11" />
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                </Style>
+                <Style Selector="Border.Chip materialIcons|MaterialIcon">
+                    <Setter Property="Width" Value="13" />
+                    <Setter Property="Height" Value="13" />
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                </Style>
+                <Style Selector="Button.chipButton">
+                    <Setter Property="Background" Value="Transparent" />
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="MinHeight" Value="0" />
+                    <Setter Property="Cursor" Value="Hand" />
+                </Style>
+                <Style Selector="Button.chipButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                    <Setter Property="Background" Value="Transparent" />
+                </Style>
+                <Style Selector="Button.chipButton:pressed /template/ ContentPresenter#PART_ContentPresenter">
+                    <Setter Property="Background" Value="Transparent" />
+                </Style>
+                <Style Selector="Button.chipButton:pointerover Border.Chip">
+                    <Setter Property="BorderThickness" Value="2" />
+                    <Setter Property="Padding" Value="6,0" />
+                </Style>
+                <Style Selector="Button.chipButton:disabled">
+                    <Setter Property="Opacity" Value="0.5" />
+                </Style>
             </ListBox.Styles>
             <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:RepoCardViewModel">
                     <Border Classes="RepoCard"
                              BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,8"
                              AttachedToVisualTree="RepoCard_AttachedToVisualTree">
-                        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
 
-                            <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                            <!-- Title row: the repo's name on the left, its actions on the right -->
+                            <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6"
+                                         VerticalAlignment="Center">
                                 <materialIcons:MaterialIcon Kind="Folder"
                                                               Width="16" Height="16"
                                                               Opacity="0.6"
@@ -140,155 +203,259 @@
                                             AutomationProperties.AutomationId="RepoNameText"
                                             Text="{Binding RepoName}"
                                             ToolTip.Tip="{Binding RepoName}"
-                                            FontWeight="Bold" />
-                                <Border Name="UpgradeAvailableBadge"
-                                         AutomationProperties.AutomationId="UpgradeAvailableBadge"
-                                         IsVisible="{Binding IsUpgradeAvailable}"
-                                         ToolTip.Tip="{Binding UpgradeTooltip}"
-                                         Background="Orange"
-                                         BorderBrush="{DynamicResource SystemAccentColor}"
-                                         BorderThickness="1"
-                                         CornerRadius="8"
-                                         Padding="6,1">
-                                    <TextBlock Text="Update available" FontSize="10" />
-                                </Border>
-                                <TextBlock Name="CommittedAgentFilesBadge"
-                                            AutomationProperties.AutomationId="CommittedAgentFilesBadge"
-                                            IsVisible="{Binding HasCommittedAgentFiles}"
-                                            ToolTip.Tip="This repo has committed agent files (.github/agents, .github/standards, .github/templates, or .github/skills) tracked at HEAD."
-                                            Text="⚠️"
-                                            FontSize="14" />
-                                <TextBlock Name="DirtyWorkingTreeBadge"
-                                            AutomationProperties.AutomationId="DirtyWorkingTreeBadge"
-                                            IsVisible="{Binding IsWorkingTreeDirty}"
-                                            ToolTip.Tip="{Binding PullTooltip}"
-                                            Text="📝"
-                                            FontSize="14" />
-                                <TextBlock Name="MissingRepoBadge"
-                                            AutomationProperties.AutomationId="MissingRepoBadge"
-                                            IsVisible="{Binding IsMissing}"
-                                            ToolTip.Tip="This repo's folder could not be found on disk."
-                                            Text="❌"
-                                            FontSize="14" />
-                                <TextBlock Name="SourceProblemBadge"
-                                            AutomationProperties.AutomationId="SourceProblemBadge"
-                                            IsVisible="{Binding HasSourceProblem}"
-                                            ToolTip.Tip="{Binding SourceProblem}"
-                                            Text="⚠ Package source problem"
-                                            FontSize="12"
-                                            Foreground="DarkOrange" />
+                                            FontWeight="Bold"
+                                            TextTrimming="CharacterEllipsis"
+                                            VerticalAlignment="Center" />
                             </StackPanel>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0"
+                            <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                <ToggleButton Name="FavoriteToggleButton"
+                                         AutomationProperties.AutomationId="FavoriteToggleButton"
+                                         ToolTip.Tip="Favorite/pin this repo to the top of the list"
+                                         IsChecked="{Binding IsFavorite, Mode=TwoWay}"
+                                         Command="{Binding FavoriteToggleCommand}"
+                                         VerticalAlignment="Center">
+                                    <materialIcons:MaterialIcon Kind="{Binding IsFavorite, Converter={StaticResource FavoriteIconConverter}}"
+                                                                  Foreground="{Binding IsFavorite, Converter={StaticResource FavoriteColorConverter}}" />
+                                </ToggleButton>
+
+                                <Button Name="LaunchButton"
+                                         AutomationProperties.AutomationId="LaunchButton"
+                                         Classes="accent"
+                                         Command="{Binding LaunchCommand}"
+                                         ToolTip.Tip="{Binding LaunchTooltip}"
+                                         VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <materialIcons:MaterialIcon Kind="Rocket" />
+                                        <TextBlock Name="LaunchButtonText"
+                                                    AutomationProperties.AutomationId="LaunchButtonText"
+                                                    Text="{Binding LaunchButtonText}" />
+                                    </StackPanel>
+                                </Button>
+
+                                <Button Name="PullButton"
+                                         AutomationProperties.AutomationId="PullButton"
+                                         Command="{Binding PullCommand}"
+                                         ToolTip.Tip="{Binding PullTooltip}"
+                                         ToolTip.ShowOnDisabled="True"
+                                         VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <materialIcons:MaterialIcon Kind="SourcePull" />
+                                        <TextBlock Text="Git Pull" />
+                                    </StackPanel>
+                                </Button>
+
+                                <Button Name="MoreActionsButton"
+                                         AutomationProperties.AutomationId="MoreActionsButton"
+                                         ToolTip.Tip="More actions"
+                                         VerticalAlignment="Center">
+                                    <materialIcons:MaterialIcon Kind="DotsHorizontal" />
+                                    <Button.Flyout>
+                                        <MenuFlyout>
+                                            <MenuItem Name="RefreshMenuItem"
+                                                       AutomationProperties.AutomationId="RefreshMenuItem"
+                                                       Header="Refresh"
+                                                       ToolTip.Tip="Re-check this repo's branch, chips, and upgrade status"
+                                                       Command="{Binding RefreshCommand}">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="Refresh" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <MenuItem Name="SelectPackageMenuItem"
+                                                       AutomationProperties.AutomationId="SelectPackageMenuItem"
+                                                       Header="Select Package..."
+                                                       ToolTip.Tip="Choose an initial agent package to pin to this repo"
+                                                       IsVisible="{Binding IsPackageSelectionNeeded}"
+                                                       Click="SelectPackageMenuItem_Click">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="PackageVariant" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <MenuItem Name="UpgradeMenuItem"
+                                                       AutomationProperties.AutomationId="UpgradeMenuItem"
+                                                       Header="Upgrade"
+                                                       ToolTip.Tip="{Binding UpgradeTooltip}"
+                                                       IsVisible="{Binding IsUpgradeAvailable}"
+                                                       Command="{Binding UpgradeCommand}">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="ArrowUpBold" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <MenuItem Name="RemoveMenuItem"
+                                                       AutomationProperties.AutomationId="RemoveMenuItem"
+                                                       Header="Remove from list"
+                                                       ToolTip.Tip="Remove this repo from AgentControl's recent-repos list (does not delete it from disk)"
+                                                       Click="RemoveMenuItem_Click">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="TrashCan" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                        </MenuFlyout>
+                                    </Button.Flyout>
+                                </Button>
+                            </StackPanel>
+
+                            <!-- Chip row: what the repo has (agent package and where it came from, an
+                                 available upgrade, the branch) and what needs attention (status
+                                 chips). Every chip has a tooltip that explains it in full. -->
+                            <WrapPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                        Orientation="Horizontal" Margin="0,4,0,0">
+
+                                <!-- Agent package: robot icon, package name and version, and a small icon
+                                     for the kind of source it came from (zip folder, NuGet folder, ...) -->
+                                <Border Name="PackageChip"
+                                         Classes="Chip package"
+                                         IsVisible="{Binding HasPinnedPackage}"
+                                         ToolTip.Tip="{Binding PackageChipTooltip}">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <materialIcons:MaterialIcon Kind="Robot" />
+                                        <TextBlock Name="RepoPinnedVersionText"
+                                                    AutomationProperties.AutomationId="RepoPinnedVersionText"
+                                                    Text="{Binding PackageChipText}" />
+                                        <materialIcons:MaterialIcon Name="PackageSourceIcon"
+                                                                      AutomationProperties.AutomationId="PackageSourceIcon"
+                                                                      Kind="{Binding PinnedSourceIcon}"
+                                                                      Opacity="0.75" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Upgrade: the version an upgrade would move the agent package to;
+                                     clicking it starts the upgrade -->
+                                <Button Name="UpgradeAvailableBadge"
+                                         AutomationProperties.AutomationId="UpgradeAvailableBadge"
+                                         AutomationProperties.Name="Agent package upgrade available"
+                                         Classes="chipButton"
+                                         IsVisible="{Binding IsUpgradeAvailable}"
+                                         Command="{Binding UpgradeCommand}"
+                                         ToolTip.Tip="{Binding UpgradeTooltip}">
+                                    <Border Classes="Chip amber">
+                                        <StackPanel Orientation="Horizontal" Spacing="3">
+                                            <materialIcons:MaterialIcon Kind="ArrowUpBold" />
+                                            <TextBlock Name="UpgradeChipText"
+                                                        AutomationProperties.AutomationId="UpgradeChipText"
+                                                        Text="{Binding UpgradeChipText}" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+
+                                <TextBlock Name="UpgradeCheckingText"
+                                            AutomationProperties.AutomationId="UpgradeCheckingText"
+                                            IsVisible="{Binding IsCheckingUpgrade}"
+                                            Text="checking for updates..."
+                                            FontSize="11" FontStyle="Italic" Opacity="0.6"
+                                            VerticalAlignment="Center" Margin="0,0,6,4" />
+
+                                <!-- No agent package pinned: clicking selects one -->
+                                <Button Name="NoPackageChip"
+                                         AutomationProperties.AutomationId="NoPackageChip"
+                                         Classes="chipButton"
+                                         IsVisible="{Binding ShowNoPackageChip}"
+                                         Command="{Binding SelectPackageCommand}"
+                                         ToolTip.Tip="No agent package is pinned for this repo, so no agent files are managed here. Click to select a package.">
+                                    <Border Classes="Chip grey">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <materialIcons:MaterialIcon Kind="RobotOutline" />
+                                            <TextBlock Text="No agent package" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+
+                                <!-- Branch -->
+                                <Border Name="BranchChip"
+                                         Classes="Chip"
+                                         IsVisible="{Binding HasBranch}"
+                                         ToolTip.Tip="{Binding BranchTooltip}">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <materialIcons:MaterialIcon Kind="SourceBranch" />
+                                        <TextBlock Name="CurrentBranchText"
+                                                    AutomationProperties.AutomationId="CurrentBranchText"
+                                                    Text="{Binding CurrentBranch}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Status chips: amber asks for attention, red reports a problem -->
+                                <Border Name="DirtyWorkingTreeChip"
+                                         Classes="Chip amber"
+                                         IsVisible="{Binding IsWorkingTreeDirty}"
+                                         ToolTip.Tip="{Binding PullTooltip}">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <materialIcons:MaterialIcon Kind="PencilCircleOutline" />
+                                        <TextBlock Name="DirtyWorkingTreeBadge"
+                                                    AutomationProperties.AutomationId="DirtyWorkingTreeBadge"
+                                                    Text="Uncommitted changes" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Name="CommittedAgentFilesChip"
+                                         Classes="Chip amber"
+                                         IsVisible="{Binding HasCommittedAgentFiles}"
+                                         ToolTip.Tip="This repo has committed agent files (.github/agents, .github/standards, .github/templates, or .github/skills) tracked at HEAD, so AgentControl does not manage them.">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <materialIcons:MaterialIcon Kind="AlertOutline" />
+                                        <TextBlock Name="CommittedAgentFilesBadge"
+                                                    AutomationProperties.AutomationId="CommittedAgentFilesBadge"
+                                                    Text="Committed agent files" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Name="MissingRepoChip"
+                                         Classes="Chip red"
+                                         IsVisible="{Binding IsMissing}"
+                                         ToolTip.Tip="This repo's folder could not be found on disk.">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <materialIcons:MaterialIcon Kind="FolderAlertOutline" />
+                                        <TextBlock Name="MissingRepoBadge"
+                                                    AutomationProperties.AutomationId="MissingRepoBadge"
+                                                    Text="Folder missing" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Name="SourceProblemChip"
+                                         Classes="Chip red"
+                                         IsVisible="{Binding HasSourceProblem}"
+                                         ToolTip.Tip="{Binding SourceProblem}">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <materialIcons:MaterialIcon Kind="AlertCircleOutline" />
+                                        <TextBlock Name="SourceProblemBadge"
+                                                    AutomationProperties.AutomationId="SourceProblemBadge"
+                                                    Text="Package source problem" />
+                                    </StackPanel>
+                                </Border>
+                            </WrapPanel>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
                                         Name="RepoPathText"
                                         AutomationProperties.AutomationId="RepoPathText"
                                         Text="{Binding RepoPath}"
                                         ToolTip.Tip="{Binding RepoPath}"
-                                        Opacity="0.7" />
+                                        TextTrimming="CharacterEllipsis"
+                                        FontSize="11" Opacity="0.55" />
 
-                            <TextBlock Grid.Row="2" Grid.Column="0"
-                                        Name="RepoPinnedVersionText"
-                                        AutomationProperties.AutomationId="RepoPinnedVersionText"
-                                        Text="{Binding PinnedPackageVersion, StringFormat='Pinned version: {0}'}"
-                                        ToolTip.Tip="The agent package version currently extracted into this repo"
-                                        Opacity="0.7" />
-
-                            <TextBlock Grid.Row="3" Grid.Column="0"
-                                        Name="CurrentBranchText"
-                                        AutomationProperties.AutomationId="CurrentBranchText"
-                                        Text="{Binding CurrentBranch, StringFormat='Branch: {0}'}"
-                                        ToolTip.Tip="The current checked-out git branch for this repo"
-                                        Opacity="0.7" />
-
-                            <ToggleButton Grid.Row="0" Grid.RowSpan="4" Grid.Column="1"
-                                     Name="FavoriteToggleButton"
-                                     AutomationProperties.AutomationId="FavoriteToggleButton"
-                                     ToolTip.Tip="Favorite/pin this repo to the top of the list"
-                                     IsChecked="{Binding IsFavorite, Mode=TwoWay}"
-                                     Command="{Binding FavoriteToggleCommand}"
-                                     VerticalAlignment="Center"
-                                     Margin="0,0,8,0">
-                                <materialIcons:MaterialIcon Kind="{Binding IsFavorite, Converter={StaticResource FavoriteIconConverter}}"
-                                                              Foreground="{Binding IsFavorite, Converter={StaticResource FavoriteColorConverter}}" />
-                            </ToggleButton>
-
-                            <Button Grid.Row="0" Grid.RowSpan="4" Grid.Column="2"
-                                     Name="LaunchButton"
-                                     AutomationProperties.AutomationId="LaunchButton"
-                                     Classes="accent"
-                                     Command="{Binding LaunchCommand}"
-                                     ToolTip.Tip="Launch the configured agent tool in this repo"
-                                     VerticalAlignment="Center"
-                                     Margin="0,0,8,0">
-                                <StackPanel Orientation="Horizontal" Spacing="4">
-                                    <materialIcons:MaterialIcon Kind="Rocket" />
-                                    <TextBlock Text="Launch" />
-                                </StackPanel>
-                            </Button>
-
-                            <Button Grid.Row="0" Grid.RowSpan="4" Grid.Column="3"
-                                     Name="PullButton"
-                                     AutomationProperties.AutomationId="PullButton"
-                                     Command="{Binding PullCommand}"
-                                     ToolTip.Tip="{Binding PullTooltip}"
-                                     ToolTip.ShowOnDisabled="True"
-                                     VerticalAlignment="Center"
-                                     Margin="0,0,8,0">
-                                <StackPanel Orientation="Horizontal" Spacing="4">
-                                    <materialIcons:MaterialIcon Kind="CloudDownload" />
-                                    <TextBlock Text="Pull" />
-                                </StackPanel>
-                            </Button>
-
-                            <Button Grid.Row="0" Grid.RowSpan="4" Grid.Column="4"
-                                     Name="MoreActionsButton"
-                                     AutomationProperties.AutomationId="MoreActionsButton"
-                                     ToolTip.Tip="More actions"
-                                     VerticalAlignment="Center">
-                                <materialIcons:MaterialIcon Kind="DotsHorizontal" />
-                                <Button.Flyout>
-                                    <MenuFlyout>
-                                        <MenuItem Name="RefreshMenuItem"
-                                                   AutomationProperties.AutomationId="RefreshMenuItem"
-                                                   Header="Refresh"
-                                                   ToolTip.Tip="Re-check this repo's branch, badges, and upgrade status"
-                                                   Command="{Binding RefreshCommand}">
-                                            <MenuItem.Icon>
-                                                <materialIcons:MaterialIcon Kind="Refresh" />
-                                            </MenuItem.Icon>
-                                        </MenuItem>
-                                        <MenuItem Name="SelectPackageMenuItem"
-                                                   AutomationProperties.AutomationId="SelectPackageMenuItem"
-                                                   Header="Select Package..."
-                                                   ToolTip.Tip="Choose an initial agent package to pin to this repo"
-                                                   IsVisible="{Binding IsPackageSelectionNeeded}"
-                                                   Click="SelectPackageMenuItem_Click">
-                                            <MenuItem.Icon>
-                                                <materialIcons:MaterialIcon Kind="PackageVariant" />
-                                            </MenuItem.Icon>
-                                        </MenuItem>
-                                        <MenuItem Name="UpgradeMenuItem"
-                                                   AutomationProperties.AutomationId="UpgradeMenuItem"
-                                                   Header="Upgrade"
-                                                   ToolTip.Tip="{Binding UpgradeTooltip}"
-                                                   IsVisible="{Binding IsUpgradeAvailable}"
-                                                   Command="{Binding UpgradeCommand}">
-                                            <MenuItem.Icon>
-                                                <materialIcons:MaterialIcon Kind="ArrowUpBold" />
-                                            </MenuItem.Icon>
-                                        </MenuItem>
-                                        <MenuItem Name="RemoveMenuItem"
-                                                   AutomationProperties.AutomationId="RemoveMenuItem"
-                                                   Header="Remove from list"
-                                                   ToolTip.Tip="Remove this repo from AgentControl's recent-repos list (does not delete it from disk)"
-                                                   Click="RemoveMenuItem_Click">
-                                            <MenuItem.Icon>
-                                                <materialIcons:MaterialIcon Kind="TrashCan" />
-                                            </MenuItem.Icon>
-                                        </MenuItem>
-                                    </MenuFlyout>
-                                </Button.Flyout>
-                            </Button>
+                            <!-- Progress of a running package operation, with a cancel button when the
+                                 operation can be stopped -->
+                            <Grid Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
+                                   ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8"
+                                   IsVisible="{Binding IsBusy}" Margin="0,4,0,0">
+                                <TextBlock Name="BusyMessageText"
+                                            AutomationProperties.AutomationId="BusyMessageText"
+                                            Grid.Column="0"
+                                            Text="{Binding BusyMessage}"
+                                            FontSize="11" VerticalAlignment="Center" />
+                                <ProgressBar Grid.Column="1"
+                                              Name="BusyProgress"
+                                              AutomationProperties.AutomationId="BusyProgress"
+                                              IsIndeterminate="True" Height="4"
+                                              VerticalAlignment="Center" />
+                                <Button Grid.Column="2"
+                                         Name="CancelOperationButton"
+                                         AutomationProperties.AutomationId="CancelOperationButton"
+                                         Command="{Binding CancelOperationCommand}"
+                                         IsVisible="{Binding CanCancelOperation}"
+                                         ToolTip.Tip="Cancel the running operation"
+                                         Padding="8,1" FontSize="11">
+                                    <StackPanel Orientation="Horizontal" Spacing="3">
+                                        <materialIcons:MaterialIcon Kind="Cancel" Width="12" Height="12" />
+                                        <TextBlock Text="Cancel" FontSize="11" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
                         </Grid>
                     </Border>
                 </DataTemplate>

@@ -26,6 +26,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.RepoSync;
 using Microsoft.Extensions.Logging;
@@ -150,6 +151,10 @@ internal sealed partial class MainWindow : Window
         }
 
         viewModel.RepoCards.CollectionChanged += OnRepoCardsChanged;
+
+        // The upgrade check reads package sources, which may be slow or unreachable, so it starts
+        // in the background now that the window has its data rather than delaying the window
+        _ = viewModel.BeginUpgradeRefresh();
     }
 
     /// <summary>
@@ -192,36 +197,35 @@ internal sealed partial class MainWindow : Window
         card.ReleaseNotesReady += (_, releaseNotes) =>
             ShowTrackedChildWindow(new ReleaseNotesViewer(new ReleaseNotesViewerViewModel(card.RepoName, releaseNotes)));
         card.RemoveRequested += async (_, _) => await ConfirmAndRemoveCard(card);
-        card.SelectPackageRequested += async (_, sourceAlias) => await ShowSelectPackageDialog(card, sourceAlias);
+        card.SelectPackageRequested += async (_, _) => await ShowSelectPackageDialog(card);
         card.AgentsMdTemplateOfferRequested += async (_, templateContent) => await ShowAgentsMdTemplateOfferDialog(card, templateContent);
     }
 
     /// <summary>
     ///     Shows the modal <see cref="SelectPackageWindow"/> for <paramref name="card"/>, and, if
-    ///     the user confirmed a package name/version, applies it via
-    ///     <see cref="RepoCardViewModel.ApplySelectedPackage"/>.
+    ///     the user confirmed a package, applies it via
+    ///     <see cref="RepoCardViewModel.ApplySelectedPackageAsync"/>.
     /// </summary>
     /// <param name="card">The card that requested package selection.</param>
-    /// <param name="sourceAlias">The alias of the configured package source to enumerate.</param>
-    private async Task ShowSelectPackageDialog(RepoCardViewModel card, string sourceAlias)
+    private async Task ShowSelectPackageDialog(RepoCardViewModel card)
     {
         SelectPackageWindowViewModel viewModel;
         try
         {
-            viewModel = new SelectPackageWindowViewModel(card.CreateSourceRegistry(), sourceAlias, card.PackageVersionCache);
+            viewModel = new SelectPackageWindowViewModel(card.CreateSourceRegistry(), card.PackageVersionCache);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException)
+        catch (InvalidOperationException ex)
         {
-            // An unreachable or misconfigured source must be reported to the user, not crash the
+            // Invalid source configuration must be reported to the user, not crash the
             // application from this fire-and-forget event handler
-            await new MessageBoxWindow($"Package source is unavailable: {ex.Message}").ShowDialog(this);
+            await new MessageBoxWindow($"Package sources are unavailable: {ex.Message}").ShowDialog(this);
             return;
         }
 
-        var result = await new SelectPackageWindow(viewModel).ShowDialog<(string Name, string Version)?>(this);
+        var result = await new SelectPackageWindow(viewModel).ShowDialog<PackageReference?>(this);
         if (result is not null)
         {
-            card.ApplySelectedPackage(result.Value.Name, result.Value.Version, viewModel.SourceAlias);
+            await card.ApplySelectedPackageAsync(result);
         }
     }
 

@@ -70,7 +70,7 @@ public sealed class MultipleSourcesTests
 
             // The badge appears once the NuGet source has been listed and 2.0.0 found newer
             var badgeText = Retry.WhileNull(
-                () => mainWindow.FindFirstDescendant(cf => cf.ByName("Update available")),
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeAvailableBadge")),
                 timeout: TimeSpan.FromSeconds(30),
                 interval: TimeSpan.FromMilliseconds(200)).Result;
             Assert.NotNull(badgeText);
@@ -143,11 +143,11 @@ public sealed class MultipleSourcesTests
                 timeout: TimeSpan.FromSeconds(10),
                 interval: TimeSpan.FromMilliseconds(200)).Result);
             var problemBadge = Retry.WhileNull(
-                () => mainWindow.FindFirstDescendant(cf => cf.ByName("⚠ Package source problem")),
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("SourceProblemBadge")),
                 timeout: TimeSpan.FromSeconds(10),
                 interval: TimeSpan.FromMilliseconds(200)).Result;
             Assert.NotNull(problemBadge);
-            Assert.Null(mainWindow.FindFirstDescendant(cf => cf.ByName("Update available")));
+            Assert.Null(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeAvailableBadge")));
             Assert.Equal(pinBefore, File.ReadAllText(pinPath));
             Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));
         }

@@ -201,10 +201,9 @@ public sealed class MainWindowTests : IDisposable
         {
             var registry = PackageSourceRegistry.Create(
                 [PackageSourceDefinition.CreateDefaultZip(CreateTempDirectory())]);
-            var viewModel = new SelectPackageWindowViewModel(
-                registry, PackageSourceDefinition.DefaultAlias, new PackageVersionCache());
+            var viewModel = new SelectPackageWindowViewModel(registry, new PackageVersionCache());
             var dialog = new SelectPackageWindow(viewModel);
-            var result = dialog.ShowDialog<(string Name, string Version)?>(owner);
+            var result = dialog.ShowDialog<PackageReference?>(owner);
 
             // Act
             DialogWindowTests.Click(dialog, "SelectPackageCancelButton");

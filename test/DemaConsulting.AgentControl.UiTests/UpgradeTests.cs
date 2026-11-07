@@ -67,14 +67,11 @@ public sealed class UpgradeTests
                 pinnedPackageVersion: "1.0.0");
             var mainWindow = context.Launch();
 
-            // The upgrade-available badge itself is an Avalonia Border, which (per this
-            // environment's own verification) does not surface as a distinct UI Automation
-            // element even with AutomationProperties.AutomationId set - only its child TextBlock
-            // does. Wait for that child text to appear as the signal that
-            // RefreshUpgradeStatus() has compared the pinned "1.0.0" against the "1.1.0" fixture
-            // package at the configured source and found it newer.
+            // The upgrade chip is a button whose AutomationId is UpgradeAvailableBadge; it appears
+            // once the background check has compared the pinned "1.0.0" against the "1.1.0"
+            // fixture package at the configured source and found it newer.
             var badgeText = Retry.WhileNull(
-                () => mainWindow.FindFirstDescendant(cf => cf.ByName("Update available")),
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeAvailableBadge")),
                 timeout: TimeSpan.FromSeconds(10),
                 interval: TimeSpan.FromMilliseconds(200)).Result;
             Assert.NotNull(badgeText);

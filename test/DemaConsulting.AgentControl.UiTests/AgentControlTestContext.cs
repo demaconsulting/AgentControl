@@ -202,6 +202,29 @@ internal sealed class AgentControlTestContext : IDisposable
     }
 
     /// <summary>
+    ///     Finds a currently-open top-level window that contains an element with the given
+    ///     AutomationId, polling until found or the timeout elapses. Searching by a descendant
+    ///     rather than by title is reliable for modal dialogs, whose title is not always a
+    ///     dependable match target through UI Automation.
+    /// </summary>
+    /// <param name="automationId">The AutomationId of an element the wanted window contains.</param>
+    /// <param name="timeout">Maximum time to wait.</param>
+    /// <returns>The matching window, or <see langword="null"/> if none appeared in time.</returns>
+    public Window? WaitForWindowWithDescendant(string automationId, TimeSpan timeout)
+    {
+        if (App is null || Automation is null)
+        {
+            return null;
+        }
+
+        return Retry.WhileNull(
+            () => App.GetAllTopLevelWindows(Automation)
+                .FirstOrDefault(window => window.FindFirstDescendant(cf => cf.ByAutomationId(automationId)) is not null),
+            timeout: timeout,
+            interval: TimeSpan.FromMilliseconds(200)).Result;
+    }
+
+    /// <summary>
     ///     Closes/kills the launched AgentControl process, disposes the automation instance,
     ///     kills any new shell process spawned by the agent-tool launch, and best-effort deletes
     ///     this context's temp directory tree.
