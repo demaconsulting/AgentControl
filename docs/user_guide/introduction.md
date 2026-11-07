@@ -262,7 +262,13 @@ Open Settings from the gear icon on the toolbar to configure:
 - **Git executable path override** — a specific `git` executable to use instead of resolving
   `git` from the process `PATH`.
 - **Agent tool selection** — which agentic CLI tool Launch starts: GitHub Copilot CLI,
-  Cursor, Claude Code, or a custom command line that you supply yourself.
+  Cursor, Claude Code, or a custom command line that you supply yourself. In a custom command
+  line, quote the executable path if it contains spaces, for example
+  `"C:\Program Files\My Tool\tool.exe" --flag`; single quotes work too. When the launch shell
+  is PowerShell, AgentControl automatically adds the PowerShell call operator (`&`) in front of
+  a command that starts with a quote, so you do not need to type it yourself (a command you
+  already start with `&` is left alone). Commands launched through `cmd` or a POSIX shell are
+  used exactly as typed.
 - **Shell/terminal preference** — the shell AgentControl launches the agent tool in, chosen
   from an editable dropdown of OS-appropriate presets (`pwsh`/`powershell`/`cmd` on Windows,
   `bash`/`zsh`/`sh` on macOS/Linux) or a custom path you type in. Leave this unset (the blank

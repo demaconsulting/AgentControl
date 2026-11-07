@@ -62,7 +62,8 @@ internal static class AgentToolLauncher
     ///     A <see cref="ProcessStartInfo"/> ready to pass to <see cref="Launch"/>. The shell is
     ///     started with <c>-NoExit</c> (PowerShell) or <c>/K</c> (cmd) so the window remains open
     ///     for the user to interact with the launched tool; POSIX shells run the command via
-    ///     <c>-c</c>.
+    ///     <c>-c</c>. For PowerShell, a command beginning with a quoted executable path is prefixed
+    ///     with the call operator (<c>&amp;</c>) so that it is executed rather than echoed.
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="shell"/> is
     ///     <see langword="null"/>.</exception>
@@ -92,7 +93,7 @@ internal static class AgentToolLauncher
                 startInfo.ArgumentList.Add("-NoLogo");
                 startInfo.ArgumentList.Add("-NoExit");
                 startInfo.ArgumentList.Add("-Command");
-                startInfo.ArgumentList.Add(command);
+                startInfo.ArgumentList.Add(ApplyPowerShellCallOperator(command));
                 break;
 
             case ShellKind.Cmd:
@@ -111,6 +112,30 @@ internal static class AgentToolLauncher
         }
 
         return startInfo;
+    }
+
+    /// <summary>
+    ///     Prefixes the PowerShell call operator (<c>&amp;</c>) to a command that begins with a
+    ///     quoted executable path, so PowerShell invokes it instead of merely printing it.
+    /// </summary>
+    /// <param name="command">The command line to run inside PowerShell.</param>
+    /// <returns>
+    ///     <c>&amp; </c> followed by the command (with leading whitespace removed) when the
+    ///     command starts with a <c>"</c> or <c>'</c> character; otherwise
+    ///     <paramref name="command"/> unchanged. A command already starting with <c>&amp;</c>
+    ///     (call operator) or <c>.</c> (dot-source operator) is also returned unchanged so it is
+    ///     never double-prefixed.
+    /// </returns>
+    /// <remarks>
+    ///     In PowerShell a leading quoted string is an expression whose value is echoed, not a
+    ///     command, so <c>"C:\Program Files\Tool\tool.exe" --flag</c> would only be printed (and
+    ///     the trailing arguments would be a parse error). cmd (<c>/K</c>) and POSIX shells
+    ///     (<c>-c</c>) execute such a command directly and therefore never go through this method.
+    /// </remarks>
+    private static string ApplyPowerShellCallOperator(string command)
+    {
+        var trimmed = command.TrimStart();
+        return trimmed[0] is '"' or '\'' ? "& " + trimmed : command;
     }
 
     /// <summary>

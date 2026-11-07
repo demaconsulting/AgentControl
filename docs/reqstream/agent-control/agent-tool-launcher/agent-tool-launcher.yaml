@@ -24,6 +24,29 @@ sections:
           - AgentToolLauncher_BuildProcessStartInfo_Cmd_ProducesKeepOpenArguments
           - AgentToolLauncher_BuildProcessStartInfo_Posix_ProducesDashCArgument
 
+      - id: AgentControl-AgentToolLauncher-QuotedPathInvocation
+        title: >-
+          The AgentToolLauncher class shall execute, rather than echo, a custom agent tool
+          command that begins with a quoted executable path when the shell is PowerShell Core
+          or Windows PowerShell, and shall leave the command unchanged for the Command shell,
+          POSIX shells, and PowerShell commands that do not begin with a quote or that already
+          begin with an invocation operator.
+        justification: |
+          PowerShell treats a leading quoted string as an expression and merely prints it, so
+          a custom command such as a quoted path containing spaces would never start the tool
+          unless it is invoked with the PowerShell call operator. The command must be adapted
+          only where PowerShell needs it, so commands that already work are not altered.
+        tests:
+          - AgentToolLauncher_BuildProcessStartInfo_PowerShellCoreQuotedPathWithArguments_PrefixesCallOperator
+          - AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShellQuotedPathWithArguments_PrefixesCallOperator
+          - AgentToolLauncher_BuildProcessStartInfo_PowerShellQuotedPathOnly_PrefixesCallOperator
+          - AgentToolLauncher_BuildProcessStartInfo_PowerShellSingleQuotedPath_PrefixesCallOperator
+          - AgentToolLauncher_BuildProcessStartInfo_PowerShellLeadingWhitespaceBeforeQuote_PrefixesCallOperator
+          - AgentToolLauncher_BuildProcessStartInfo_PowerShellCommandAlreadyHasOperator_IsNotDoublePrefixed
+          - AgentToolLauncher_BuildProcessStartInfo_PowerShellUnquotedCommand_IsUnchanged
+          - AgentToolLauncher_BuildProcessStartInfo_CmdQuotedPath_IsUnchanged
+          - AgentToolLauncher_BuildProcessStartInfo_PosixQuotedPath_IsUnchanged
+
       - id: AgentControl-AgentToolLauncher-Validation
         title: >-
           The AgentToolLauncher class shall reject a null shell, an empty command, an empty

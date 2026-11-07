@@ -33,6 +33,17 @@ detected shell.
 - *Postconditions*: The shell is started with `-NoExit`/`-NoLogo` (PowerShell), `/K` (cmd), or
   `-c` (POSIX) so the window stays open for the user to interact with the launched tool
   (`AgentControl-AgentToolLauncher-BuildCommand`).
+- *Command adaptation (PowerShell only)*: when the shell kind is `PowerShellCore` or
+  `WindowsPowerShell` and the command, after trimming leading whitespace, begins with a `"` or
+  `'` character, the value passed to `-Command` is `&` followed by the trimmed command. This
+  is required because PowerShell treats a leading quoted string as an expression and only
+  prints it; the call operator makes it invoke the quoted executable path (for example
+  `& "C:\Program Files\Tool\tool.exe" --flag`). A command already beginning with `&` (call
+  operator) or `.` (dot-source operator), or beginning with anything other than a quote, is
+  passed through verbatim, so it is never double-prefixed. cmd (`/K`) and POSIX (`-c`) commands
+  are never modified because those shells execute a quoted path directly
+  (`AgentControl-AgentToolLauncher-QuotedPathInvocation`). The adaptation is implemented by
+  the private helper `ApplyPowerShellCallOperator`.
 
 **Launch**: Starts a process from a previously built `ProcessStartInfo`.
 

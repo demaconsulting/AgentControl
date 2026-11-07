@@ -105,6 +105,187 @@ public class AgentToolLauncherTests
     }
 
     /// <summary>
+    ///     Test that a PowerShell Core command beginning with a double-quoted executable path and
+    ///     arguments gets the call operator, so the tool is executed rather than echoed.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_PowerShellCoreQuotedPathWithArguments_PrefixesCallOperator()
+    {
+        // Arrange: a detected PowerShell Core shell and a quoted path (with spaces) plus a flag
+        var shell = new DetectedShell(ShellKind.PowerShellCore, @"C:\Program Files\PowerShell\7\pwsh.exe");
+
+        // Act: build the start info
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "\"C:\\Program Files\\Tool\\tool.exe\" --flag", @"C:\repos\example");
+
+        // Assert: the command is invoked with the call operator
+        Assert.Equal(
+            ["-NoLogo", "-NoExit", "-Command", "& \"C:\\Program Files\\Tool\\tool.exe\" --flag"],
+            startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that a Windows PowerShell command beginning with a double-quoted executable path
+    ///     and arguments gets the call operator.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShellQuotedPathWithArguments_PrefixesCallOperator()
+    {
+        // Arrange: a detected Windows PowerShell 5.x shell
+        var shell = new DetectedShell(ShellKind.WindowsPowerShell, @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+
+        // Act: build the start info
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "\"C:\\Program Files\\Tool\\tool.exe\" --flag", @"C:\repos\example");
+
+        // Assert: the command is invoked with the call operator
+        Assert.Equal(
+            ["-NoLogo", "-NoExit", "-Command", "& \"C:\\Program Files\\Tool\\tool.exe\" --flag"],
+            startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that a PowerShell command that is just a quoted executable path (no arguments)
+    ///     gets the call operator.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_PowerShellQuotedPathOnly_PrefixesCallOperator()
+    {
+        // Arrange: a detected PowerShell Core shell and a command that is only a quoted path
+        var shell = new DetectedShell(ShellKind.PowerShellCore, @"C:\Program Files\PowerShell\7\pwsh.exe");
+
+        // Act: build the start info
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "\"C:\\Program Files\\Tool\\tool.exe\"", @"C:\repos\example");
+
+        // Assert: the lone quoted path is invoked with the call operator
+        Assert.Equal(
+            ["-NoLogo", "-NoExit", "-Command", "& \"C:\\Program Files\\Tool\\tool.exe\""],
+            startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that a PowerShell command beginning with a single-quoted executable path gets the
+    ///     call operator.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_PowerShellSingleQuotedPath_PrefixesCallOperator()
+    {
+        // Arrange: a detected PowerShell Core shell and a single-quoted path plus a flag
+        var shell = new DetectedShell(ShellKind.PowerShellCore, @"C:\Program Files\PowerShell\7\pwsh.exe");
+
+        // Act: build the start info
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "'C:\\Program Files\\Tool\\tool.exe' --flag", @"C:\repos\example");
+
+        // Assert: the command is invoked with the call operator
+        Assert.Equal(
+            ["-NoLogo", "-NoExit", "-Command", "& 'C:\\Program Files\\Tool\\tool.exe' --flag"],
+            startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that leading whitespace before a quoted path is ignored when deciding to add the
+    ///     call operator, and that the operator is still added.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_PowerShellLeadingWhitespaceBeforeQuote_PrefixesCallOperator()
+    {
+        // Arrange: a detected PowerShell Core shell and a quoted path preceded by whitespace
+        var shell = new DetectedShell(ShellKind.PowerShellCore, @"C:\Program Files\PowerShell\7\pwsh.exe");
+
+        // Act: build the start info
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "  \t\"C:\\Program Files\\Tool\\tool.exe\" --flag", @"C:\repos\example");
+
+        // Assert: the call operator replaces the leading whitespace
+        Assert.Equal(
+            ["-NoLogo", "-NoExit", "-Command", "& \"C:\\Program Files\\Tool\\tool.exe\" --flag"],
+            startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that a PowerShell command that already starts with the call operator or the
+    ///     dot-source operator is passed through verbatim (never double-prefixed).
+    /// </summary>
+    /// <param name="command">The command that already carries an invocation operator.</param>
+    [Theory]
+    [InlineData("& \"C:\\Program Files\\Tool\\tool.exe\" --flag")]
+    [InlineData("&\"C:\\Program Files\\Tool\\tool.exe\" --flag")]
+    [InlineData("  & 'C:\\Program Files\\Tool\\tool.exe' --flag")]
+    [InlineData(". \"C:\\Program Files\\Tool\\tool.ps1\"")]
+    public void AgentToolLauncher_BuildProcessStartInfo_PowerShellCommandAlreadyHasOperator_IsNotDoublePrefixed(
+        string command)
+    {
+        // Arrange: a detected PowerShell Core shell
+        var shell = new DetectedShell(ShellKind.PowerShellCore, @"C:\Program Files\PowerShell\7\pwsh.exe");
+
+        // Act: build the start info
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, command, @"C:\repos\example");
+
+        // Assert: the command is passed to PowerShell exactly as supplied
+        Assert.Equal(["-NoLogo", "-NoExit", "-Command", command], startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that an unquoted PowerShell command, including one whose quote is not the first
+    ///     character, is passed through unchanged.
+    /// </summary>
+    /// <param name="command">The unquoted-start command.</param>
+    [Theory]
+    [InlineData("copilot")]
+    [InlineData("copilot --model \"gpt 5\"")]
+    [InlineData(@"C:\Tools\tool.exe --flag")]
+    public void AgentToolLauncher_BuildProcessStartInfo_PowerShellUnquotedCommand_IsUnchanged(string command)
+    {
+        // Arrange: a detected PowerShell Core shell
+        var shell = new DetectedShell(ShellKind.PowerShellCore, @"C:\Program Files\PowerShell\7\pwsh.exe");
+
+        // Act: build the start info
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, command, @"C:\repos\example");
+
+        // Assert: no call operator is added
+        Assert.Equal(["-NoLogo", "-NoExit", "-Command", command], startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that a quoted-path command for cmd.exe is passed through without a call operator.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_CmdQuotedPath_IsUnchanged()
+    {
+        // Arrange: a detected cmd.exe shell
+        var shell = new DetectedShell(ShellKind.Cmd, @"C:\Windows\System32\cmd.exe");
+
+        // Act: build the start info
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "\"C:\\Program Files\\Tool\\tool.exe\" --flag", @"C:\repos\example");
+
+        // Assert: cmd executes a quoted path directly, so the command is untouched
+        Assert.Equal(["/K", "\"C:\\Program Files\\Tool\\tool.exe\" --flag"], startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that a quoted-path command for a POSIX shell is passed through without a call
+    ///     operator.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_PosixQuotedPath_IsUnchanged()
+    {
+        // Arrange: a detected POSIX shell
+        var shell = new DetectedShell(ShellKind.Posix, "/bin/bash");
+
+        // Act: build the start info
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "\"/opt/my tool/tool\" --flag", "/home/user/repos/example");
+
+        // Assert: POSIX shells execute a quoted path directly, so the command is untouched
+        Assert.Equal(["-c", "\"/opt/my tool/tool\" --flag"], startInfo.ArgumentList);
+    }
+
+    /// <summary>
     ///     Test that a null shell throws an ArgumentNullException.
     /// </summary>
     [Fact]

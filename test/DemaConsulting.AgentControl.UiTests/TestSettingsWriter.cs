@@ -44,6 +44,15 @@ internal static class TestSettingsWriter
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
 
     /// <summary>
+    ///     The single argument appended to the quoted arg-logger stub path in the custom
+    ///     agent-tool command. Git invocations of the stub never carry it, so a recorded
+    ///     invocation whose arguments are exactly this value can only have come from the
+    ///     agent-tool launch (the quoted path therefore also had to be executed by the shell,
+    ///     not merely echoed).
+    /// </summary>
+    public const string AgentToolMarkerArgument = "--agent-tool-launch";
+
+    /// <summary>
     ///     Writes a <c>settings.json</c> file under <paramref name="configDirectory"/> pointing
     ///     the git executable and the (custom) agent-tool command at the arg-logger stub, and
     ///     pre-populating the recent-repos list with a single repo.
@@ -85,7 +94,7 @@ internal static class TestSettingsWriter
         {
             ["GitExecutablePath"] = argLoggerStubExePath,
             ["AgentTool"] = 3, // AgentToolKind.Custom
-            ["CustomAgentCommand"] = $"\"{argLoggerStubExePath}\"",
+            ["CustomAgentCommand"] = $"\"{argLoggerStubExePath}\" {AgentToolMarkerArgument}",
             ["ShellPreference"] = shellPreference,
             ["RecentRepos"] = new[]
             {
