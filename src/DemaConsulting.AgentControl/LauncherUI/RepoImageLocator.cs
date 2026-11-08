@@ -310,14 +310,21 @@ internal static partial class RepoImageLocator
         }
 
         using var stream = OpenVerified(root.FullName, file.Path);
-        if (stream is null || stream.Length is 0 or > MaxFileBytes)
+        if (stream is null)
         {
             return null;
         }
 
-        // The length was checked against the cap just above (so it fits an int), so this never reads
-        // more than the cap; a file that shrank meanwhile fails the length comparison below
-        var buffer = new byte[checked((int)stream.Length)];
+        // The length is read once, checked against the cap, and that same value sizes the buffer, so
+        // a file that grows between the check and the allocation cannot enlarge the allocation; a
+        // a file that shrank meanwhile fails the length comparison below
+        var length = stream.Length;
+        if (length is 0 or > MaxFileBytes)
+        {
+            return null;
+        }
+
+        var buffer = new byte[checked((int)length)];
         var read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
         return read == buffer.Length && read >= HeaderLength && HasPngHeader(buffer.AsSpan(0, HeaderLength))
             ? buffer

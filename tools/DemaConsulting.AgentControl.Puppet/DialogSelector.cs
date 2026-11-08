@@ -29,12 +29,16 @@ namespace DemaConsulting.AgentControl.Puppet;
 ///     such as a tooltip.</param>
 /// <param name="Handle">The native window handle, or zero when the root has none (it keeps the order given).</param>
 /// <param name="Owner">The handle of the window that owns it (the window a dialog was opened from), or zero.</param>
+/// <param name="NonModal">Whether the window is a non-modal window (its owner, if any, still accepts input, as the
+///     main window does while the release-notes window is open), which does not take the keyboard from the window
+///     behind it.</param>
 internal readonly record struct DialogCandidate(
     string? Name,
     bool IsOffscreen,
     bool IsWindow,
     IntPtr Handle = default,
-    IntPtr Owner = default);
+    IntPtr Owner = default,
+    bool NonModal = false);
 
 /// <summary>
 ///     Chooses which root of an instance is the innermost open dialog (no window is touched).
@@ -42,7 +46,7 @@ internal readonly record struct DialogCandidate(
 internal static class DialogSelector
 {
     /// <summary>
-    ///     Finds the innermost visible, titled dialog among the roots that follow the main window.
+    ///     Finds the innermost visible, titled, modal dialog among the roots that follow the main window.
     /// </summary>
     /// <remarks>
     ///     The roots are stacked as <see cref="WindowStacking"/> stacks a shot: by the process's z-order, with an owner
@@ -50,7 +54,8 @@ internal static class DialogSelector
     ///     Automation happens to enumerate the roots. A root without a handle keeps the order given and counts as on
     ///     top; that order lists the main window first, then its dialogs and then any open pop-ups (a tooltip still
     ///     showing is among them). Only real windows qualify: focusing or raising a tooltip would send the keyboard to
-    ///     the wrong window while a modal dialog is open.
+    ///     the wrong window while a modal dialog is open. A non-modal window (the release-notes or About window) does not
+    ///     qualify either: it leaves the main window usable, so the main window stays the target of keyboard input.
     /// </remarks>
     /// <param name="roots">The roots in the order the instance lists them (the main window first).</param>
     /// <param name="topDownZOrder">The z-order of the process's top-level windows, topmost first; empty when unknown.
@@ -68,7 +73,7 @@ internal static class DialogSelector
         {
             var index = bottomUp[position];
             var root = roots[index];
-            if (index >= 1 && root.IsWindow && !root.IsOffscreen && !string.IsNullOrWhiteSpace(root.Name))
+            if (index >= 1 && root.IsWindow && !root.NonModal && !root.IsOffscreen && !string.IsNullOrWhiteSpace(root.Name))
             {
                 return index;
             }

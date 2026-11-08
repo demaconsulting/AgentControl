@@ -166,4 +166,25 @@ public class DialogSelectorTests
         // Assert
         Assert.Equal(1, index);
     }
+
+    /// <summary>
+    ///     Validates that a non-modal window (the release-notes window, which leaves the main window usable) is never
+    ///     the target, whether it is the only window open or the topmost one over a modal dialog.
+    /// </summary>
+    [Fact]
+    public void DialogSelector_InnermostDialog_NonModalWindow_IsSkipped()
+    {
+        // Arrange
+        var main = new DialogCandidate("AgentControl", false, true, 1);
+        var notes = new DialogCandidate("Release notes", false, true, 2, 1, NonModal: true);
+        var settings = new DialogCandidate("Settings", false, true, 3, 1);
+
+        // Act
+        var onlyNotes = DialogSelector.InnermostDialog([main, notes], [2, 1]);
+        var notesOverModal = DialogSelector.InnermostDialog([main, settings, notes], [2, 3, 1]);
+
+        // Assert: the main window stays the target; the modal dialog wins over a non-modal window above it
+        Assert.Equal(-1, onlyNotes);
+        Assert.Equal(1, notesOverModal);
+    }
 }

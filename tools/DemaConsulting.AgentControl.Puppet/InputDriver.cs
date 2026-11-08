@@ -65,8 +65,8 @@ internal static partial class InputDriver
 
     /// <summary>
     ///     Restores and raises the window that should receive the input as far as Windows allows a background process to:
-    ///     the innermost open dialog when there is one (a modal dialog keeps the keyboard, so the Puppet must not push the
-    ///     disabled main window in front of it), else the main window.
+    ///     the innermost open modal dialog when there is one (a modal dialog keeps the keyboard, so the Puppet must not push
+    ///     the disabled main window in front of it), else the main window (a non-modal window leaves it usable).
     /// </summary>
     /// <param name="context">The attached instance.</param>
     internal static void BringToFront(AttachContext context)
@@ -83,7 +83,8 @@ internal static partial class InputDriver
                 UiActions.Safe(() => root.Properties.IsOffscreen.ValueOrDefault, false),
                 UiActions.Safe(() => root.Patterns.Window.IsSupported, false),
                 handles[i],
-                handles[i] == IntPtr.Zero ? IntPtr.Zero : WindowCapture.OwnerOf(handles[i])))],
+                handles[i] == IntPtr.Zero ? IntPtr.Zero : WindowCapture.OwnerOf(handles[i]),
+                IsNonModal(handles[i])))],
             WindowCapture.ZOrderOf(context.ProcessId));
         var front = dialogIndex >= 0 ? roots[dialogIndex] : context.MainWindow;
         var handle = front.Properties.NativeWindowHandle.ValueOrDefault;
@@ -104,6 +105,23 @@ internal static partial class InputDriver
             Thread.Sleep(150);
         }
     }
+    /// <summary>
+    ///     Tests whether a window is non-modal: it has no owner, or its owner still accepts input. A modal dialog's owner is
+    ///     disabled by the operating system while the dialog is open.
+    /// </summary>
+    /// <param name="handle">The window (zero when it has none).</param>
+    /// <returns><see langword="true"/> when the window does not keep the keyboard from the window behind it.</returns>
+    private static bool IsNonModal(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var owner = WindowCapture.OwnerOf(handle);
+        return owner == IntPtr.Zero || IsWindowEnabled(owner);
+    }
+
     /// <summary>
     ///     Tests whether a window (or a window it owns) is the foreground window.
     /// </summary>
@@ -399,6 +417,15 @@ internal static partial class InputDriver
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool IsIconic(IntPtr hwnd);
+
+    /// <summary>
+    ///     Native <c>IsWindowEnabled</c>.
+    /// </summary>
+    /// <param name="hwnd">The window.</param>
+    /// <returns><see langword="true"/> when the window accepts input (no modal dialog is open over it).</returns>
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindowEnabled(IntPtr hwnd);
 
     /// <summary>
     ///     Native <c>ShowWindow</c>.
