@@ -57,12 +57,27 @@ internal static class DpiAwareness
     ///     Makes the process per-monitor DPI aware as soon as the test assembly loads; an awareness the
     ///     host already chose is left as it is.
     /// </summary>
+    /// <remarks>
+    ///     <c>SetProcessDpiAwarenessContext</c> exists only on Windows 10 version 1703 (build 15063) and
+    ///     later. On older Windows the call is skipped (and a missing entry point is tolerated), because
+    ///     an exception thrown from a module initializer would abort the whole test host; the tests then
+    ///     run DPI-unaware, which only matters on displays scaled above 100%.
+    /// </remarks>
     [ModuleInitializer]
     internal static void Initialize()
     {
-        if (System.OperatingSystem.IsWindows())
+        if (!System.OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063))
+        {
+            return;
+        }
+
+        try
         {
             _ = SetProcessDpiAwarenessContext(PerMonitorAwareV2);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Older user32.dll without the API: keep the default awareness rather than abort the host
         }
     }
 }
