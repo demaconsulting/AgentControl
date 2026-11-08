@@ -187,12 +187,20 @@ public sealed class PackageSourcesTests
                 TimeSpan.FromSeconds(10),
                 TimeSpan.FromMilliseconds(200)).Result);
 
-            // Act: open the Select Package window from the card's menu
-            Find(mainWindow, "MoreActionsButton").AsButton().Invoke();
-            var selectPackageMenuItem = Retry.WhileNull(
-                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("SelectPackageMenuItem")),
-                TimeSpan.FromSeconds(10),
-                TimeSpan.FromMilliseconds(200)).Result?.AsMenuItem();
+            // Act: open the Select Package window from the card's menu. Under full-suite load the
+            // first Invoke can land before the card's flyout is ready (the card is still running
+            // its background source checks), so re-open the menu a few times before giving up.
+            AutomationElement? selectPackageElement = null;
+            for (var attempt = 0; attempt < 3 && selectPackageElement is null; attempt++)
+            {
+                Find(mainWindow, "MoreActionsButton").AsButton().Invoke();
+                selectPackageElement = Retry.WhileNull(
+                    () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("SelectPackageMenuItem")),
+                    TimeSpan.FromSeconds(5),
+                    TimeSpan.FromMilliseconds(200)).Result;
+            }
+
+            var selectPackageMenuItem = selectPackageElement?.AsMenuItem();
             Assert.NotNull(selectPackageMenuItem);
             selectPackageMenuItem.Click();
             var dialog = context.WaitForWindowWithDescendant("SelectPackageSourceList", TimeSpan.FromSeconds(15));
