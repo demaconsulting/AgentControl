@@ -55,9 +55,12 @@ settings value with `ArgumentNullException`. This scenario is tested by
 **SettingsWindowViewModel_Save_InvokesCallbackAndRaisesSaved**: `SaveCommand` invokes the
 `onSave` callback with the current property values and raises `Saved`; a location holding a URL
 with user information and a sentinel password does not invoke the callback or raise `Saved`,
-sets `HasError`, and the message does not contain the password. This scenario is tested by
-`SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved` and
-`SettingsWindowViewModel_Save_SourceLocationWithEmbeddedCredential_IsRefusedWithErrorMessage`,
+sets `HasError`, and the message does not contain the password; when the callback throws
+`InvalidOperationException` the window stays open with `HasError` set and `Saved` is not raised. This scenario is
+tested by
+`SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved`,
+`SettingsWindowViewModel_Save_SourceLocationWithEmbeddedCredential_IsRefusedWithErrorMessage` and
+`SettingsWindowViewModel_SaveCommand_OnSaveThrowsInvalidOperation_ShowsErrorAndDoesNotRaiseSaved`,
 covering `AgentControl-SettingsWindowViewModel-Save`.
 
 **SettingsWindowViewModel_ShellPreferencePresets_NonEmptyBlankFirstNoDuplicatesAndOsAppropriate**:

@@ -378,6 +378,11 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
 
         await PrepareAsync(cancellationToken);
 
+        // Before the library is called (it would unpack into whatever cache location applies):
+        // the private cache must be the one the generated configuration names and must not be
+        // reached through a link, so nothing is ever read from or written to a location outside it
+        RejectUnsafeCacheLocation();
+
         // The library unpacks the package into the global packages folder configured in the
         // generated per-source nuget.config and returns that package's folder
         var packageFolder = await RunAsync(
@@ -405,9 +410,35 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         // The check above is only lexical: a link that replaced the cache folder, or a package-ID
         // or version folder on the way down, would still look like it is inside the cache while
         // redirecting every read to wherever it points
-        RejectLinkedCacheFolders(packagesFolder, Path.GetFullPath(packageFolder), package);
+        RejectLinkedCacheFolders(packagesFolder, Path.GetFullPath(packageFolder), Alias);
 
         return DirectoryPackageContentReader.Open(packageFolder);
+    }
+
+    /// <summary>
+    ///     Refuses to call the NuGet library when it would not use this source's private package cache:
+    ///     the <c>NUGET_PACKAGES</c> environment variable names another folder (it overrides the
+    ///     generated configuration), or the cache folder itself is a symbolic link or junction.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when the cache location is not the
+    ///     private one or is a link.</exception>
+    private void RejectUnsafeCacheLocation()
+    {
+        var packagesFolder = Path.GetFullPath(Path.Combine(_root, PackagesFolderName));
+        var redirected = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+        if (!string.IsNullOrWhiteSpace(redirected) &&
+            !string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(redirected)),
+                Path.TrimEndingDirectorySeparator(packagesFolder),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Source '{Alias}' cannot use AgentControl's private package cache because the NUGET_PACKAGES " +
+                "environment variable redirects NuGet's package cache elsewhere, where a same-ID, same-version " +
+                "package from a different source could be served. Remove the NUGET_PACKAGES environment variable and try again.");
+        }
+
+        RejectLinkedCacheFolders(packagesFolder, packagesFolder, Alias);
     }
 
     /// <summary>
@@ -415,23 +446,24 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     ///     and it, is a symbolic link, junction or other reparse point.
     /// </summary>
     /// <param name="packagesFolder">The private package cache folder.</param>
-    /// <param name="packageFolder">The unpacked package folder, inside <paramref name="packagesFolder"/>.</param>
-    /// <param name="package">The package, for the message.</param>
+    /// <param name="packageFolder">The unpacked package folder, inside <paramref name="packagesFolder"/>
+    ///     (or the cache folder itself, to check only that).</param>
+    /// <param name="alias">The source alias, for the message.</param>
     /// <exception cref="InvalidOperationException">Thrown when a component is a link.</exception>
-    private void RejectLinkedCacheFolders(string packagesFolder, string packageFolder, DiscoveredPackage package)
+    private static void RejectLinkedCacheFolders(string packagesFolder, string packageFolder, string alias)
     {
         var current = packagesFolder;
         var parts = Path.GetRelativePath(packagesFolder, packageFolder)
             .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
-        foreach (var part in parts.Prepend(string.Empty))
+        foreach (var part in parts.Where(part => part != ".").Prepend(string.Empty))
         {
             current = part.Length == 0 ? current : Path.Combine(current, part);
             var info = new DirectoryInfo(current);
             if (info.LinkTarget is not null || (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint)))
             {
                 throw new InvalidOperationException(
-                    $"Package '{package.PackageName}' from source '{Alias}' was unpacked through a link in " +
-                    "AgentControl's private package cache, so it cannot be trusted to come from this source. " +
+                    $"Source '{alias}' cannot use AgentControl's private package cache because a folder in it " +
+                    "is a link, so a package could come from a location the source does not control. " +
                     "Remove the link and try again.");
             }
         }
@@ -485,11 +517,31 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         // Keep the alias recognizable in the folder name but make it filesystem-safe
         var safeAlias = new string(alias.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '_').ToArray());
 
-        // The hash covers the case-folded alias and a normalized location; case-folding matches
-        // the case-insensitive alias uniqueness rule
-        var normalizedLocation = location.Trim().TrimEnd('\\', '/').ToUpperInvariant();
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(alias.ToUpperInvariant() + "\n" + normalizedLocation));
+        // The hash covers the case-folded alias (alias uniqueness is case-insensitive) and a
+        // normalized location. Case is folded only where the comparison really is case-insensitive:
+        // a server's scheme and host, and a Windows folder path. A URL path, and a folder path on
+        // a case-sensitive file system, keep their case, so two locations differing only by case
+        // never share (and never serve each other's) cached packages
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(alias.ToUpperInvariant() + "\n" + NormalizeLocation(location)));
         return $"{safeAlias}-{Convert.ToHexString(hash)[..KeyHashLength].ToLowerInvariant()}";
+    }
+
+    /// <summary>
+    ///     Normalizes a source location for the root key.
+    /// </summary>
+    /// <param name="location">The location: a folder path or a feed URL.</param>
+    /// <returns>The location without surrounding space or trailing separators, with the case folded
+    ///     only for the parts that compare case-insensitively.</returns>
+    private static string NormalizeLocation(string location)
+    {
+        var trimmed = location.Trim();
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+        {
+            return uri.GetLeftPart(UriPartial.Authority).ToUpperInvariant() + uri.AbsolutePath.TrimEnd('/') + uri.Query;
+        }
+
+        var folder = trimmed.TrimEnd('\\', '/');
+        return OperatingSystem.IsWindows() ? folder.ToUpperInvariant() : folder;
     }
 
     /// <summary>

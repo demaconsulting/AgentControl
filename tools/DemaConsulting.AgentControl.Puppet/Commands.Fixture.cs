@@ -41,11 +41,6 @@ internal static partial class Commands
             Console.WriteLine($"  package \"{package}\"");
         }
 
-        if (options.Formats is PackageFormats.Nupkg or PackageFormats.Both)
-        {
-            Console.WriteLine($"NOTE {FixtureBuilder.NupkgNote}");
-        }
-
         if (result.RepoDirectory is { } repo)
         {
             Console.WriteLine($"REPO path=\"{repo}\"");

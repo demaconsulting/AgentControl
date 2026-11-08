@@ -448,10 +448,11 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
             var names = await _cache.GetPackageIdsAsync(_registry, source.Alias, cancellationToken);
             source.SetLoaded(names);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
-            // An unreachable or misconfigured source is reported on its own row; it must not
-            // stop the other sources from loading
+            // An unreachable or misconfigured source (including a hand-edited entry whose location
+            // is blank, which its provider refuses with an ArgumentException) is reported on its
+            // own row; it must not stop the other sources from loading
             source.SetFailed(
                 ex is DirectoryNotFoundException
                     ? $"This source's folder was not found: {source.Location}. Check that the folder exists and that its drive or share is connected."

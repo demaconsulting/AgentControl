@@ -137,6 +137,31 @@ public sealed class SelectPackageWindowViewModelTests
     }
 
     /// <summary>
+    ///     Test that a source with a blank location (a hand-edited settings file) is reported on its
+    ///     own row, without stopping the other sources or escaping as an exception.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_SourceWithBlankLocation_FailsOnlyThatRow()
+    {
+        // Arrange: "Bad" has a blank location, which its provider refuses to be built with
+        var up = new FakePackageSourceProvider("Up", ("contoso-agents", "1.0.0"));
+        var registry = new PackageSourceRegistry(
+            [
+                new PackageSourceDefinition { Alias = "Bad", Type = PackageSourceType.Zip, Location = "  " },
+                new PackageSourceDefinition { Alias = "Up", Type = PackageSourceType.Zip, Location = "unused" }
+            ],
+            definition => definition.Alias == "Up" ? up : new ZipFolderSourceProvider(definition));
+        var viewModel = new SelectPackageWindowViewModel(registry, new PackageVersionCache());
+
+        // Act
+        await viewModel.LoadAsync(CancellationToken.None);
+
+        // Assert: only the bad row failed
+        Assert.Equal("Unavailable", viewModel.Sources[0].StatusText);
+        Assert.Equal(["contoso-agents"], viewModel.Sources[1].PackageNames);
+    }
+
+    /// <summary>
     ///     Test that a source that loads but offers no packages is reported as empty rather than
     ///     as a failure.
     /// </summary>

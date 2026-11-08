@@ -450,6 +450,30 @@ public class SettingsWindowViewModelTests
     }
 
     /// <summary>
+    ///     Test that a settings callback that rejects the save keeps the window open with the
+    ///     reason shown, and does not report the settings as saved.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_SaveCommand_OnSaveThrowsInvalidOperation_ShowsErrorAndDoesNotRaiseSaved()
+    {
+        // Arrange
+        var viewModel = new SettingsWindowViewModel(
+            new AppSettings { Sources = [ZipSource("Zips", @"D:\packages")] },
+            _ => throw new InvalidOperationException("Settings were not applied. The settings file cannot be written."),
+            (_, _) => Task.FromResult(true));
+        var savedRaised = false;
+        viewModel.Saved += (_, _) => savedRaised = true;
+
+        // Act
+        viewModel.SaveCommand.Execute(null);
+
+        // Assert
+        Assert.False(savedRaised);
+        Assert.True(viewModel.HasError);
+        Assert.Contains("cannot be written", viewModel.ErrorMessage, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that the saved source list reflects added, edited and removed sources in order,
     ///     carrying the signature settings of a source whose folder was edited.
     /// </summary>

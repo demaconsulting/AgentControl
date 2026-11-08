@@ -291,6 +291,45 @@ public sealed class NuGetSourceProviderTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a private cache folder that is itself a link is refused before the NuGet
+    ///     library is called, so nothing is written through the link.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_Acquire_PackagesFolderIsLink_RefusedBeforeAnythingIsWritten()
+    {
+        // Arrange: the source's packages folder is a link to a folder outside the private root
+        var feed = CreateTempDirectory();
+        var rootBase = CreateTempDirectory();
+        var id = UniqueId();
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "agents v1");
+        var provider = new NuGetSourceProvider(CreateDefinition("Feed", feed), rootBase);
+        var package = Assert.Single(await provider.ListVersionsAsync(id, CancellationToken.None));
+        var outside = CreateTempDirectory();
+        var packagesLink = Path.Combine(provider.RootFolder, "packages");
+        if (Directory.Exists(packagesLink))
+        {
+            Directory.Delete(packagesLink, recursive: true);
+        }
+
+        try
+        {
+            Directory.CreateSymbolicLink(packagesLink, outside);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            Assert.Skip($"Cannot create symbolic links in this environment: {ex.Message}");
+        }
+
+        // Act
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, CancellationToken.None));
+
+        // Assert: refused, and the link's target was left empty
+        Assert.Contains("link", thrown.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.GetFileSystemEntries(outside));
+    }
+
+    /// <summary>
     ///     Test that a package without the mandatory content folder is rejected on acquisition,
     ///     so it can never cause a repo's managed folders to be deleted and replaced with nothing.
     /// </summary>
@@ -589,6 +628,27 @@ public sealed class NuGetSourceProviderTests : IDisposable
         Assert.NotEqual(key, otherLocation);
         Assert.NotEqual(key, otherAlias);
         Assert.DoesNotContain(key, c => Path.GetInvalidFileNameChars().Contains(c));
+    }
+
+    /// <summary>
+    ///     Test that the per-source root key keeps the case of a server URL's path (a different
+    ///     path is a different feed) while ignoring the case of its host, and keeps the case of a
+    ///     folder path where the file system is case-sensitive.
+    /// </summary>
+    [Fact]
+    public void NuGetSourceProvider_BuildSourceKey_CaseOfLocation_FoldedOnlyWhereComparisonIsCaseInsensitive()
+    {
+        // Act
+        var url = NuGetSourceProvider.BuildSourceKey("Feed", "https://feeds.example.com/V3/index.json");
+        var urlHostCase = NuGetSourceProvider.BuildSourceKey("Feed", "https://Feeds.Example.COM/V3/index.json/");
+        var urlPathCase = NuGetSourceProvider.BuildSourceKey("Feed", "https://feeds.example.com/v3/index.json");
+        var folder = NuGetSourceProvider.BuildSourceKey("Feed", @"/feeds/Agents");
+        var folderCase = NuGetSourceProvider.BuildSourceKey("Feed", @"/feeds/agents");
+
+        // Assert
+        Assert.Equal(url, urlHostCase);
+        Assert.NotEqual(url, urlPathCase);
+        Assert.Equal(OperatingSystem.IsWindows(), folder == folderCase);
     }
 
     /// <summary>

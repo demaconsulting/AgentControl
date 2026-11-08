@@ -157,11 +157,16 @@ without it.
   `FavoriteToggleButton`, `LaunchButton`, `PullButton`, `MoreActionsButton`.
 - **Card menu** (pop-up of `MoreActionsButton`): `RefreshMenuItem`, `SelectPackageMenuItem` (only for a repo that has
   no package yet), `UpgradeMenuItem`, `RemoveMenuItem`.
-- **Settings** (`AgentControl Settings`): `PackageSourcePathTextBox`, `BrowsePackageSourceButton`,
+- **Settings** (`AgentControl Settings`): the package sources `SourcesList` (rows with `SourceAliasText`,
+  `SourceLocationText`, `SourceStatusText`), `AddZipSourceButton`, `AddNuGetFolderSourceButton`,
+  `AddNuGetServerSourceButton`, `EditSourceButton`, `RemoveSourceButton`, `SourcesEmptyText`; and
   `GitExecutablePathTextBox`, `AgentToolComboBox`, `CustomAgentCommandTextBox`, `ShellPreferenceComboBox`,
-  `SaveSettingsButton`.
-- **Select Package** (`Select Package`): `SelectPackageNameList`, `SelectPackageVersionList`,
-  `SelectPackageCancelButton`, `SelectPackageConfirmButton`.
+  `SettingsErrorTextBlock`, `SaveSettingsButton`. The **source editor** has `SourceAliasTextBox`,
+  `SourceLocationTextBox`, `SourceBrowseButton`, `SourceEditorSaveButton`, `SourceEditorCancelButton` (and, for NuGet
+  sources, the package ID, sign-in, signature and test-connection controls).
+- **Select Package** (`Select Package`): `SelectPackageSourceList`, `SelectPackageNameList`,
+  `SelectPackageVersionList`, `SelectPackageCancelButton`, `SelectPackageConfirmButton` (and the inline error and retry
+  controls).
 - **About** (`About AgentControl`): `AboutTaglineText`, `AboutVersionText`, `AboutCopyrightText`, `AboutLicenseText`,
   `AboutDependenciesList`, `AboutCloseButton`.
 - **Confirmation** (`AgentControl`): `ConfirmationMessageText`, `ConfirmationNoButton`, `ConfirmationYesButton`.
@@ -242,13 +247,14 @@ Creates a ready-to-use sandbox in a new (or empty) folder for manual exploration
   2.0.0. `--packages zip` (the default) writes `{name}-{version}.zip` with `.github\agents`, `.github\standards`,
   `.github\templates`, `.github\skills\...`, `release-notes.md` and `AGENTS.md`; `nupkg` writes
   `{name}.{version}.nupkg` with the same files under `content\` and a minimal `{name}.nuspec`; `both` writes both.
-  **The current AgentControl (main) cannot consume `.nupkg` packages yet**: NuGet package sources arrive with the
-  multi-source packages feature, so with the current application use `zip`. The option and the output note
-  (`NOTE .nupkg packages ...`) exist so fixtures for that feature can already be prepared.
+  Zip packages are offered by a `Default` zip source and `.nupkg` packages by a NuGet folder source named `NuGet`
+  (both pointing at this folder).
 - `<dir>\repo\` (with `--repo`, implied by `--pin`) - a git repository (`git` from the PATH: `git init -b main` and one
-  commit). `--pin contoso-agents@1.0.0` also commits an `.agentcontrol.json` pin, so the card shows a pinned version and
+  commit). `--pin contoso-agents@1.0.0` also commits an `.agentcontrol.json` pin (current schema, naming the `Default`
+  source, or `NuGet` with `--packages nupkg`), so the card shows a pinned version and
   an upgrade badge; without a pin the repo is "never synced" and its card offers `SelectPackageMenuItem`.
-- `<dir>\config\settings.json` - the application's settings: `PackageSourcePath` and, with a repo, `RecentRepos` with the
+- `<dir>\config\settings.json` - the application's settings: `Sources` (the zip and/or NuGet source above, the NuGet
+  one naming the sample package IDs it offers) and, with a repo, `RecentRepos` with the
   repo (and its pin). Nothing else is written, so every other setting keeps its default and the file loads in any
   version of the application. Start the application on it with `launch --config-dir <dir>\config`.
 
@@ -286,7 +292,7 @@ $box = "$env:TEMP\acp-demo"
 # Look at the settings window
 & $puppet click OpenSettingsButton
 & $puppet dialogs                                       # exit 10: the dialog and its controls are listed
-& $puppet read PackageSourcePathTextBox --raw
+& $puppet read SourceLocationText --raw
 & $puppet shot "$box\settings.png"                      # the picture shows the Settings window over the main window
 & $puppet click Close --window "AgentControl Settings"
 

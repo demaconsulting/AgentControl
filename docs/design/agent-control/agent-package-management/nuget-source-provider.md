@@ -97,7 +97,9 @@ offered.
 **\_root**: `string` — the AgentControl-owned folder passed to the NuGet library as its starting
 folder: `{base}/{key}`, where `{base}` is the supplied base folder or, by default, `nuget` under
 AgentControl's per-user local application-data folder, and `{key}` is the sanitized alias plus a
-hash of the case-folded alias and normalized location (`BuildSourceKey`). Editing a source's
+hash of the case-folded alias and normalized location (`BuildSourceKey`; the location's case is folded only
+where the comparison is case-insensitive - a URL's scheme and host, a Windows folder path - so locations that
+differ only by case in a URL path or on a case-sensitive file system get separate caches). Editing a source's
 location therefore starts a fresh cache and two sources never share one
 (`AgentControl-NuGetSourceProvider-ExplicitCacheRoot`).
 
@@ -155,7 +157,9 @@ unpacked package did not land
 inside this source's own `packages` folder — which happens only when the `NUGET_PACKAGES`
 environment variable overrides the generated configuration and so could serve a same-ID,
 same-version package from another source (`AgentControl-NuGetSourceProvider-PrivateCachePerSource`,
-`AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource`). It also refuses (`InvalidOperationException`) a
+`AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource`). Before calling the library it refuses
+(`InvalidOperationException`) when `NUGET_PACKAGES` redirects the package cache or the private `packages` folder
+is a link, so nothing is written outside the private root. It also refuses (`InvalidOperationException`) a
 package whose folder, or any folder between the private cache and it, is a symbolic link or junction, because
 a link there still lies lexically inside the cache while redirecting every read
 (`AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder`). A package with no `content` folder

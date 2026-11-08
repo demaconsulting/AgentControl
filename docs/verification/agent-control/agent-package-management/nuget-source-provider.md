@@ -156,14 +156,17 @@ package without a `content` folder is rejected. This scenario is tested by
 `NuGetSourceProvider_Acquire_ThenExtract_WritesManagedFoldersToRepoOnly`
 (`AgentControl-NuGetSourceProvider-AcquireToPrivateCache`),
 `NuGetSourceProvider_Acquire_SamePackageInTwoSources_EachSourceGetsItsOwnContent` and
-`NuGetSourceProvider_BuildSourceKey_AliasAndLocation_StableDistinctAndFolderSafe`
+`NuGetSourceProvider_BuildSourceKey_AliasAndLocation_StableDistinctAndFolderSafe` and
+`NuGetSourceProvider_BuildSourceKey_CaseOfLocation_FoldedOnlyWhereComparisonIsCaseInsensitive`
 (`AgentControl-NuGetSourceProvider-PrivateCachePerSource`), and
 `NuGetSourceProvider_Acquire_PackageWithoutContentFolder_ThrowsInvalidOperationException`
 (`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`). When a package-ID folder inside the private cache
 has been replaced by a symbolic link to a copy outside it, acquiring the package is refused with
 `InvalidOperationException` naming a link, tested by
 `NuGetSourceProvider_Acquire_CacheFolderReplacedByLink_ThrowsInvalidOperationException`
-(`AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder`; skipped where symbolic links cannot be created).
+(`AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder`; skipped where symbolic links cannot be created). A
+private cache folder that is itself a link is refused before the library is called, leaving the link's target
+empty (`NuGetSourceProvider_Acquire_PackagesFolderIsLink_RefusedBeforeAnythingIsWritten`, same requirement).
 
 **NuGetSourceProvider_ExplicitRoot_AgentControlOwnedAndGeneratedConfigOnly**: The root folder is
 directly under the supplied base, its generated `nuget.config` contains a global-packages-folder

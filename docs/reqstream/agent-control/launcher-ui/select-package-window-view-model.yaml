@@ -48,6 +48,7 @@ sections:
           stop the developer from selecting a package from a source that works.
         tests:
           - SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline
+          - SelectPackageWindowViewModel_LoadAsync_SourceWithBlankLocation_FailsOnlyThatRow
           - SelectPackageWindowViewModel_SelectPackageName_VersionReadFails_ShowsInlineError
 
       - id: AgentControl-SelectPackageWindowViewModel-VersionSelection

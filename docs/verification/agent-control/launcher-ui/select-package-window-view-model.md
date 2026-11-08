@@ -49,10 +49,12 @@ scenario is tested by
 `AgentControl-SelectPackageWindowViewModel-AsyncLoading`.
 
 **SelectPackageWindowViewModel_SourceFailureIsolation_OneBrokenSourceDoesNotBlockOthers**: With
-one source that throws, the other sources still load and the failed source carries an inline
+one source that throws, or one whose hand-edited location is blank (its provider refuses to be built),
+the other sources still load and the failed source carries an inline
 message; a failing version read shows an inline error on the version list. This scenario is
 tested by
-`SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline` and
+`SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline`,
+`SelectPackageWindowViewModel_LoadAsync_SourceWithBlankLocation_FailsOnlyThatRow` and
 `SelectPackageWindowViewModel_SelectPackageName_VersionReadFails_ShowsInlineError`, covering
 `AgentControl-SelectPackageWindowViewModel-SourceFailureIsolation`.
 

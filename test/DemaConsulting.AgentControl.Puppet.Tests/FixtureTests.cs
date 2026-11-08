@@ -178,7 +178,8 @@ public sealed class FixtureTests : IDisposable
     }
 
     /// <summary>
-    ///     Validates that the settings file has the shape the application reads: the package source and the recent repos.
+    ///     Validates that the settings file has the shape the application reads: the package sources and the recent repos,
+    ///     and that the pin names the source (current schema).
     /// </summary>
     [Fact]
     public void FixtureBuilder_Build_WithRepoAndPin_WritesSettingsShapeOfTheApplication()
@@ -192,17 +193,62 @@ public sealed class FixtureTests : IDisposable
         // Assert
         using var settings = JsonDocument.Parse(File.ReadAllText(result.SettingsFile));
         var root = settings.RootElement;
+        var source = Assert.Single(root.GetProperty("Sources").EnumerateArray());
         var repo = root.GetProperty("RecentRepos")[0];
         var pin = JsonDocument.Parse(File.ReadAllText(Path.Combine(result.RepoDirectory!, ".agentcontrol.json"))).RootElement;
         Assert.Multiple(
             () => Assert.Equal(Path.Combine(result.Root, "config", "settings.json"), result.SettingsFile),
-            () => Assert.Equal(result.PackagesDirectory, root.GetProperty("PackageSourcePath").GetString()),
+            () => Assert.Equal("Default", source.GetProperty("Alias").GetString()),
+            () => Assert.Equal("Zip", source.GetProperty("Type").GetString()),
+            () => Assert.Equal(result.PackagesDirectory, source.GetProperty("Location").GetString()),
             () => Assert.Equal(result.RepoDirectory, repo.GetProperty("Path").GetString()),
             () => Assert.Equal("contoso-agents", repo.GetProperty("PinnedPackageName").GetString()),
             () => Assert.Equal("1.0.0", repo.GetProperty("PinnedPackageVersion").GetString()),
+            () => Assert.Equal("Default", repo.GetProperty("PinnedSource").GetString()),
+            () => Assert.Equal(2, pin.GetProperty("SchemaVersion").GetInt32()),
+            () => Assert.Equal("Default", pin.GetProperty("Source").GetString()),
             () => Assert.Equal("contoso-agents", pin.GetProperty("PackageName").GetString()),
             () => Assert.Equal("1.0.0", pin.GetProperty("Version").GetString()),
-            () => Assert.Equal(["PackageSourcePath", "RecentRepos"], root.EnumerateObject().Select(p => p.Name)));
+            () => Assert.Equal(["Sources", "RecentRepos"], root.EnumerateObject().Select(p => p.Name)));
+    }
+
+    /// <summary>
+    ///     Validates that <c>nupkg</c> packages are offered by a NuGet folder source naming the sample package IDs, and that
+    ///     a pin then names that source.
+    /// </summary>
+    [Fact]
+    public void FixtureBuilder_Build_NupkgWithPin_ConfiguresNuGetSourceAndNamesItInThePin()
+    {
+        // Arrange / Act
+        var result = FixtureBuilder.Build(Options("nupkg", repo: true, pin: new PackagePin("contoso-agents", "1.0.0")), new RecordingGit());
+
+        // Assert
+        using var settings = JsonDocument.Parse(File.ReadAllText(result.SettingsFile));
+        var source = Assert.Single(settings.RootElement.GetProperty("Sources").EnumerateArray());
+        var pin = JsonDocument.Parse(File.ReadAllText(Path.Combine(result.RepoDirectory!, ".agentcontrol.json"))).RootElement;
+        Assert.Multiple(
+            () => Assert.Equal("NuGet", source.GetProperty("Alias").GetString()),
+            () => Assert.Equal("NuGet", source.GetProperty("Type").GetString()),
+            () => Assert.Equal(result.PackagesDirectory, source.GetProperty("Location").GetString()),
+            () => Assert.Equal(["contoso-agents", "fabrikam-agents"], source.GetProperty("PackageIds").EnumerateArray().Select(e => e.GetString())),
+            () => Assert.Equal("NuGet", pin.GetProperty("Source").GetString()),
+            () => Assert.Equal("NuGet", settings.RootElement.GetProperty("RecentRepos")[0].GetProperty("PinnedSource").GetString()));
+    }
+
+    /// <summary>
+    ///     Validates that both formats configure both sources, in this order.
+    /// </summary>
+    [Fact]
+    public void FixtureBuilder_Build_Both_ConfiguresZipAndNuGetSources()
+    {
+        // Arrange / Act
+        var result = FixtureBuilder.Build(Options("both"), new RecordingGit());
+
+        // Assert
+        using var settings = JsonDocument.Parse(File.ReadAllText(result.SettingsFile));
+        Assert.Equal(
+            ["Default", "NuGet"],
+            settings.RootElement.GetProperty("Sources").EnumerateArray().Select(e => e.GetProperty("Alias").GetString()));
     }
 
     /// <summary>

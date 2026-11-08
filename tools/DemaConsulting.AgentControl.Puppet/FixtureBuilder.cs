@@ -121,7 +121,7 @@ internal sealed record FixtureOptions(string Directory, PackageFormats Formats, 
 ///     What <c>fixture</c> created.
 /// </summary>
 /// <param name="Root">The fixture folder.</param>
-/// <param name="PackagesDirectory">The package source folder (the <c>PackageSourcePath</c> of the settings).</param>
+/// <param name="PackagesDirectory">The package source folder (the location of the configured package sources).</param>
 /// <param name="Packages">The package files written.</param>
 /// <param name="RepoDirectory">The git repository, or <see langword="null"/> when none was asked for.</param>
 /// <param name="ConfigDirectory">The folder to pass to <c>launch --config-dir</c>.</param>
@@ -209,11 +209,14 @@ internal sealed class ProcessGitRunner : IGitRunner
 internal static partial class FixtureBuilder
 {
     /// <summary>
-    ///     The note printed when the fixture contains <c>.nupkg</c> packages.
+    ///     The alias of the zip package source the fixture configures (the same alias a legacy single folder migrates to).
     /// </summary>
-    internal const string NupkgNote =
-        ".nupkg packages are prepared for NuGet package sources, which the current AgentControl (main) cannot consume yet; " +
-        "they arrive with the multi-source packages feature. Use zip packages with the current application.";
+    internal const string ZipSourceAlias = "Default";
+
+    /// <summary>
+    ///     The alias of the NuGet package source the fixture configures.
+    /// </summary>
+    internal const string NuGetSourceAlias = "NuGet";
 
     /// <summary>
     ///     The sample packages written to the package source: name and version.
@@ -284,31 +287,77 @@ internal static partial class FixtureBuilder
         if (options.CreateRepo)
         {
             repoDirectory = Path.Combine(options.Directory, "repo");
-            CreateRepository(repoDirectory, options.Pin, git);
+            CreateRepository(repoDirectory, options.Pin, PinSourceAlias(options.Formats), git);
         }
 
         var settingsFile = Path.Combine(configDirectory, "settings.json");
-        File.WriteAllText(settingsFile, SettingsJson(packagesDirectory, repoDirectory, options.Pin));
+        File.WriteAllText(settingsFile, SettingsJson(packagesDirectory, repoDirectory, options.Pin, options.Formats));
         return new FixtureResult(options.Directory, packagesDirectory, packages, repoDirectory, configDirectory, settingsFile);
     }
 
     /// <summary>
-    ///     Builds the content of <c>settings.json</c>: the package source and the recent-repos list.
+    ///     Gets the alias of the package source a pin of the fixture names: the zip source when zip packages exist,
+    ///     otherwise the NuGet source.
+    /// </summary>
+    /// <param name="formats">The package formats of the fixture.</param>
+    /// <returns>The alias.</returns>
+    internal static string PinSourceAlias(PackageFormats formats) =>
+        formats == PackageFormats.Nupkg ? NuGetSourceAlias : ZipSourceAlias;
+
+    /// <summary>
+    ///     Builds the content of <c>settings.json</c>: the package sources and the recent-repos list.
     /// </summary>
     /// <remarks>
-    ///     Only <c>PackageSourcePath</c> and <c>RecentRepos</c> are written: every other setting keeps its default, and
+    ///     Only <c>Sources</c> and <c>RecentRepos</c> are written: every other setting keeps its default, and
     ///     unknown settings of a newer version are never emitted, so the file loads in any version of the application.
+    ///     Zip packages are offered by a <c>Zip</c> source and <c>.nupkg</c> packages by a <c>NuGet</c> folder source
+    ///     (which, as NuGet cannot list a folder cheaply, names the sample package IDs it offers).
     /// </remarks>
     /// <param name="packagesDirectory">The package source folder.</param>
     /// <param name="repoDirectory">The repository folder, or <see langword="null"/>.</param>
     /// <param name="pin">The pin, or <see langword="null"/>.</param>
+    /// <param name="formats">The package formats of the fixture.</param>
     /// <returns>The JSON text.</returns>
-    internal static string SettingsJson(string packagesDirectory, string? repoDirectory, PackagePin? pin)
+    internal static string SettingsJson(string packagesDirectory, string? repoDirectory, PackagePin? pin, PackageFormats formats)
     {
-        var repos = repoDirectory is null
-            ? []
-            : new[] { new { Path = repoDirectory, PinnedPackageName = pin?.Name, PinnedPackageVersion = pin?.Version } };
-        return JsonSerializer.Serialize(new { PackageSourcePath = packagesDirectory, RecentRepos = repos }, JsonOptions);
+        var sources = new List<object>();
+        if (formats is PackageFormats.Zip or PackageFormats.Both)
+        {
+            sources.Add(new { Alias = ZipSourceAlias, Type = "Zip", Location = packagesDirectory });
+        }
+
+        if (formats is PackageFormats.Nupkg or PackageFormats.Both)
+        {
+            sources.Add(new
+            {
+                Alias = NuGetSourceAlias,
+                Type = "NuGet",
+                Location = packagesDirectory,
+                PackageIds = SamplePackages.Select(package => package.Name).Distinct().ToArray(),
+            });
+        }
+
+        object[] repos = [];
+        if (repoDirectory is not null)
+        {
+            string? pinSource = null;
+            if (pin is not null)
+            {
+                pinSource = PinSourceAlias(formats);
+            }
+
+            repos =
+            [
+                new
+                {
+                    Path = repoDirectory,
+                    PinnedPackageName = pin?.Name,
+                    PinnedPackageVersion = pin?.Version,
+                    PinnedSource = pinSource,
+                },
+            ];
+        }
+        return JsonSerializer.Serialize(new { Sources = sources, RecentRepos = repos }, JsonOptions);
     }
 
     /// <summary>
@@ -408,8 +457,9 @@ internal static partial class FixtureBuilder
     /// </summary>
     /// <param name="directory">The repository folder.</param>
     /// <param name="pin">The pin, or <see langword="null"/>.</param>
+    /// <param name="sourceAlias">The alias of the package source the pin names.</param>
     /// <param name="git">Runs git.</param>
-    private static void CreateRepository(string directory, PackagePin? pin, IGitRunner git)
+    private static void CreateRepository(string directory, PackagePin? pin, string sourceAlias, IGitRunner git)
     {
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "README.md"), "# Sample repository\n\nCreated by agentcontrol-puppet fixture.\n");
@@ -417,7 +467,7 @@ internal static partial class FixtureBuilder
         {
             File.WriteAllText(
                 Path.Combine(directory, ".agentcontrol.json"),
-                JsonSerializer.Serialize(new { PackageName = pin.Name, pin.Version }, JsonOptions));
+                JsonSerializer.Serialize(new { SchemaVersion = 2, Source = sourceAlias, PackageName = pin.Name, pin.Version }, JsonOptions));
         }
 
         git.Run(directory, ["init", "-b", "main"]);

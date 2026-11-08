@@ -476,7 +476,10 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     ///     never owns or edits it. The configured sources are written to
     ///     <see cref="AppSettings.Sources"/> (never the legacy single path) in the order listed.
     ///     A source whose location embeds a credential is refused here, keeping the window open
-    ///     with the reason shown, rather than being allowed to reach the settings file.
+    ///     with the reason shown, rather than being allowed to reach the settings file. When the
+    ///     callback rejects the settings (<see cref="InvalidOperationException"/>, for example a
+    ///     settings file that cannot be written) the window stays open with the redacted reason and
+    ///     <see cref="Saved"/> is not raised.
     /// </remarks>
     private void Save()
     {
@@ -498,7 +501,18 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
         }
 
         ErrorMessage = null;
-        _onSave(updated);
+        try
+        {
+            _onSave(updated);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A rejected source or a settings file that cannot be written keeps the window open
+            // with the reason shown, and nothing is reported as saved
+            ErrorMessage = SecretRedactor.SafeMessage(ex);
+            return;
+        }
+
         Saved?.Invoke(this, EventArgs.Empty);
     }
 
