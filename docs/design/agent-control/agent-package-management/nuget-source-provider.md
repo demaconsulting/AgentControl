@@ -49,7 +49,7 @@ signatures cannot be verified (`AgentControl-NuGetSourceProvider-RequireSigned`,
 `AgentControl-NuGetSourceProvider-ListPackageIds`,
 `AgentControl-NuGetSourceProvider-CancellationHonoredBeforeSideEffects`,
 `AgentControl-NuGetSourceProvider-AcquireToPrivateCache`, `AgentControl-NuGetSourceProvider-PrivateCachePerSource`,
-`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`,
+`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`, `AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder`,
 `AgentControl-NuGetSourceProvider-ServerUnknownPackageIsEmpty`, `AgentControl-NuGetSourceProvider-ServerAcquire` and
 `AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource`; location and cache-root rules satisfy
 `AgentControl-NuGetSourceProvider-ValidateLocation`, `AgentControl-NuGetSourceProvider-RejectNonNuGetDefinition`,
@@ -155,7 +155,10 @@ unpacked package did not land
 inside this source's own `packages` folder — which happens only when the `NUGET_PACKAGES`
 environment variable overrides the generated configuration and so could serve a same-ID,
 same-version package from another source (`AgentControl-NuGetSourceProvider-PrivateCachePerSource`,
-`AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource`). A package with no `content` folder
+`AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource`). It also refuses (`InvalidOperationException`) a
+package whose folder, or any folder between the private cache and it, is a symbolic link or junction, because
+a link there still lies lexically inside the cache while redirecting every read
+(`AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder`). A package with no `content` folder
 is rejected by the reader (`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`). A signature failure is
 reported as `SignatureRejected` and nothing is returned for the
 package (`AgentControl-NuGetSourceProvider-RequireSigned`,

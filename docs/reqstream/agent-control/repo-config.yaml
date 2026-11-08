@@ -46,7 +46,8 @@ sections:
         title: >-
           The RepoConfig subsystem shall record the alias of the package source in a repo's
           pin, shall read a pin written before sources existed as a pin to the source named
-          Default, shall preserve pin-file properties it does not understand when rewriting,
+          Default, shall reject a pin of the current schema version that names no source,
+          shall preserve pin-file properties it does not understand when rewriting,
           and shall neither interpret nor overwrite a pin file written by a newer version of
           the tool.
         justification: |
@@ -57,10 +58,12 @@ sections:
         children:
           - AgentControl-RepoPinStore-SourceAlias
           - AgentControl-RepoPinStore-LegacyV1
+          - AgentControl-RepoPinStore-RejectUnnamedSource
           - AgentControl-RepoPinStore-PreserveUnknownFields
           - AgentControl-RepoPinStore-RejectNewerSchema
         tests:
           - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion2AndRoundTripsSource
           - RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource
+          - RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault
           - RepoPinStore_Save_UnknownProperties_ArePreserved
           - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage

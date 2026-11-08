@@ -163,6 +163,29 @@ sections:
           - ubuntu@PackageContentExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched
           - ubuntu@PackageContentExtractor_Extract_DestinationSubfolderIsSymlink_RefusesAndLeavesTargetUntouched
 
+      - id: AgentControl-PackageContentExtractor-RefuseNonFolderRepoComponent
+        title: >-
+          The PackageContentExtractor class shall refuse to extract into a repo - deleting and
+          writing nothing - when a component of a managed agent folder's path or of a
+          destination path exists but is a file rather than a folder.
+        justification: |
+          A file where a managed folder belongs makes the later copy fail after the other
+          managed folders were already deleted, leaving the repo partially erased; refusing up
+          front keeps a failed sync from destroying content.
+        tests:
+          - PackageContentExtractor_Extract_ManagedFolderIsAFile_RefusesBeforeDeletingAnything
+
+      - id: AgentControl-PackageContentExtractor-RefuseLinkedDestinationFile
+        title: >-
+          The PackageContentExtractor class shall refuse to write a package file through a
+          symbolic link or other reparse point found at the file's destination immediately
+          before it is written.
+        justification: |
+          Creating a file follows a link at its destination, so a link planted there after the
+          folder checks would let a package overwrite a file outside the repository.
+        tests:
+          - ubuntu@PackageContentExtractor_Extract_DestinationFileBecomesSymlink_RefusesAndLeavesTargetUntouched
+
       - id: AgentControl-PackageContentExtractor-ManagedFoldersExist
         title: >-
           The PackageContentExtractor class shall report that a repo's managed agent folders

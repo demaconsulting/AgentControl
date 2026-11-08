@@ -97,6 +97,18 @@ sections:
           - NuGetSourceProvider_Acquire_SamePackageInTwoSources_EachSourceGetsItsOwnContent
           - NuGetSourceProvider_BuildSourceKey_AliasAndLocation_StableDistinctAndFolderSafe
 
+      - id: AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder
+        title: >-
+          The NuGetSourceProvider class shall refuse to supply a package whose unpacked folder, or
+          any folder between the source's private package cache and it, is a symbolic link or
+          junction.
+        justification: |
+          A link that replaced a cache folder still lies lexically inside the cache while
+          redirecting every read elsewhere, so the package's content could come from a location
+          the source does not control.
+        tests:
+          - NuGetSourceProvider_Acquire_CacheFolderReplacedByLink_ThrowsInvalidOperationException
+
       - id: AgentControl-NuGetSourceProvider-RejectPackageWithoutContent
         title: >-
           The NuGetSourceProvider class shall reject a package that has no content folder.

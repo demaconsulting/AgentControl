@@ -165,6 +165,7 @@ level, covering `AgentControl-AgentPackageManagement-NuGetFolderSource` (childre
 `AgentControl-NuGetSourceProvider-CancellationHonoredBeforeSideEffects`,
 `AgentControl-NuGetSourceProvider-AcquireToPrivateCache`,
 `AgentControl-NuGetSourceProvider-PrivateCachePerSource`,
+`AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder`,
 `AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`,
 `AgentControl-NuGetSourceProvider-ExplicitCacheRoot`,
 `AgentControl-NuGetSourceProvider-CacheRootMustBeAbsolute`,

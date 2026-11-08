@@ -21,8 +21,8 @@ contains one unit: `RepoPinStore`.
 - *Contract*: Returns a `RepoPin` when `.agentcontrol.json` exists at the repo root, `null`
   when it does not (`AgentControl-RepoPinStore-Load`). A pin written before pins named a source
   is returned as a pin to the source named `Default`
-  (`AgentControl-RepoPinStore-LegacyV1`).
-- *Constraints*: Rejects a null repo root path with `ArgumentNullException`, and a pin file
+  (`AgentControl-RepoPinStore-LegacyV1`); a current-schema pin that names no source is rejected
+  with `InvalidOperationException` (`AgentControl-RepoPinStore-RejectUnnamedSource`).: Rejects a null repo root path with `ArgumentNullException`, and a pin file
   from a newer schema with `UnsupportedPinSchemaException`
   (`AgentControl-RepoPinStore-RejectNewerSchema`).
 

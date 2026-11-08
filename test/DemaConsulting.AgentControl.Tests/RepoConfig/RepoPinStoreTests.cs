@@ -37,7 +37,7 @@ public class RepoPinStoreTests
         var repoRoot = CreateTempDirectory();
         try
         {
-            var pin = new RepoPin { PackageName = "contoso-agents", Version = "2.1.0" };
+            var pin = new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "2.1.0" };
 
             // Act: save then reload from the same repo root
             RepoPinStore.Save(repoRoot, pin);
@@ -86,10 +86,10 @@ public class RepoPinStoreTests
         var repoRoot = CreateTempDirectory();
         try
         {
-            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
 
             // Act: overwrite with a newer version
-            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "2.0.0" });
+            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "2.0.0" });
             var loaded = RepoPinStore.Load(repoRoot);
 
             // Assert: the loaded pin reflects the overwrite, not the original value
@@ -141,7 +141,7 @@ public class RepoPinStoreTests
         var repoRoot = CreateTempDirectory();
         try
         {
-            var pin = new RepoPin { PackageName = "contoso-agents", Version = "1.0.0", AgentsMdTemplateDeclined = true };
+            var pin = new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0", AgentsMdTemplateDeclined = true };
 
             // Act: save then reload from the same repo root
             RepoPinStore.Save(repoRoot, pin);
@@ -311,6 +311,35 @@ public class RepoPinStoreTests
             Assert.Contains("\"FutureField\"", afterFreshSave, StringComparison.Ordinal);
             Assert.Contains("\"a\": [", afterFreshSave.Replace("\r\n", "\n").Replace("\n", string.Empty), StringComparison.Ordinal);
             Assert.Contains("\"3.0.0\"", afterFreshSave, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a pin file of the current schema that names no source is rejected instead of
+    ///     being read as a pin to the legacy Default source.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "SchemaVersion": 2, "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
+    [InlineData("""{ "SchemaVersion": 2, "Source": "  ", "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
+    public void RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault(string json)
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(repoRoot, ".agentcontrol.json"), json);
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() => RepoPinStore.Load(repoRoot));
+
+            // Assert
+            Assert.IsNotType<UnsupportedPinSchemaException>(ex);
+            Assert.Contains(".agentcontrol.json", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("source", ex.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

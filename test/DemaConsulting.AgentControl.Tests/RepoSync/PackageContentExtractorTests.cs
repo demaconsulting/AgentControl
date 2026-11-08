@@ -566,6 +566,58 @@ public sealed class PackageContentExtractorTests : IDisposable
         AssertRepoRootUnderLinkSucceeds(TryCreateDirectorySymlinkOrSkip);
 
     /// <summary>
+    ///     Test that a file where a managed folder belongs is refused before any other managed
+    ///     folder is deleted, so the repo is never left partially erased.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_ManagedFolderIsAFile_RefusesBeforeDeletingAnything()
+    {
+        // Arrange: .github/agents is a regular file; .github/standards is an ordinary folder
+        var repo = CreateTempDirectory();
+        var github = Path.Combine(repo, ".github");
+        Directory.CreateDirectory(Path.Combine(github, "standards"));
+        File.WriteAllText(Path.Combine(github, "standards", "keep.md"), "keep me");
+        File.WriteAllText(Path.Combine(github, "agents"), "not a folder");
+        var package = CreatePackageFolder((".github/agents/new.md", "new"), (".github/standards/new.md", "new"));
+        using var reader = DirectoryPackageContentReader.Open(package);
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => PackageContentExtractor.Extract(reader, repo));
+
+        // Assert: refused naming the offending component, nothing deleted or written
+        Assert.Contains(Path.Combine(".github", "agents"), ex.Message, StringComparison.Ordinal);
+        Assert.Equal("keep me", File.ReadAllText(Path.Combine(github, "standards", "keep.md")));
+        Assert.False(File.Exists(Path.Combine(github, "standards", "new.md")));
+        Assert.Equal("not a folder", File.ReadAllText(Path.Combine(github, "agents")));
+    }
+
+    /// <summary>
+    ///     Test that a symbolic link that appears at a file's destination after the folders were
+    ///     checked is never written through.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_DestinationFileBecomesSymlink_RefusesAndLeavesTargetUntouched()
+    {
+        // Arrange: a file outside the repo, and a reader that - while the first file is copied -
+        // plants a symbolic link at the destination of the second one
+        var outside = CreateTempDirectory();
+        var outsideFile = Path.Combine(outside, "precious.txt");
+        File.WriteAllText(outsideFile, "precious");
+        var repo = CreateTempDirectory();
+        var secondDestination = Path.Combine(repo, ".github", "agents", "b.md");
+        using var reader = new LinkPlantingPackageContentReader(
+            [".github/agents/a.md", ".github/agents/b.md"],
+            () => TryCreateFileSymlinkOrSkip(secondDestination, outsideFile));
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => PackageContentExtractor.Extract(reader, repo));
+
+        // Assert: refused naming the link, and the link's target was not written
+        Assert.Contains("link", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("precious", File.ReadAllText(outsideFile));
+    }
+
+    /// <summary>
     ///     Test that a managed folder that is a directory junction does not count as an existing
     ///     managed folder, so callers do not treat the repo as already synced.
     /// </summary>
@@ -866,6 +918,66 @@ public sealed class PackageContentExtractorTests : IDisposable
             {
                 // Best-effort cleanup; leftover temp directories do not fail the test.
             }
+        }
+    }
+
+    /// <summary>
+    ///     A reader that lists caller-supplied paths with fixed content and runs an action the first
+    ///     time a file is opened, so a test can change the repo while an extraction is running.
+    /// </summary>
+    private sealed class LinkPlantingPackageContentReader : IPackageContentReader
+    {
+        /// <summary>
+        ///     The paths this reader lists.
+        /// </summary>
+        private readonly IReadOnlyList<string> _paths;
+
+        /// <summary>
+        ///     The action run once, the first time a file is opened.
+        /// </summary>
+        private readonly Action _onFirstOpen;
+
+        /// <summary>
+        ///     Whether <see cref="_onFirstOpen"/> has run.
+        /// </summary>
+        private bool _opened;
+
+        /// <summary>
+        ///     Initializes the reader.
+        /// </summary>
+        /// <param name="paths">The paths to list.</param>
+        /// <param name="onFirstOpen">The action to run when the first file is opened.</param>
+        public LinkPlantingPackageContentReader(IReadOnlyList<string> paths, Action onFirstOpen)
+        {
+            _paths = paths;
+            _onFirstOpen = onFirstOpen;
+        }
+
+        /// <inheritdoc />
+        public string Description => "link planting package";
+
+        /// <inheritdoc />
+        public IReadOnlyList<string> ListFiles() => _paths;
+
+        /// <inheritdoc />
+        public Stream OpenRead(string relativePath)
+        {
+            if (!_opened)
+            {
+                _opened = true;
+                _onFirstOpen();
+            }
+
+            return new MemoryStream("package content"u8.ToArray());
+        }
+
+        /// <inheritdoc />
+        public string? ReadText(string relativePath) => null;
+
+        /// <inheritdoc />
+        public void Dispose()
+        {
+            // Nothing to release.
         }
     }
 

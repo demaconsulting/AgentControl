@@ -55,6 +55,17 @@ sections:
           - RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource
           - RepoPinStore_Load_LegacyPinFileMissingAgentsMdTemplateDeclinedField_DefaultsToFalse
 
+      - id: AgentControl-RepoPinStore-RejectUnnamedSource
+        title: >-
+          The RepoPinStore class shall reject a pin file of the current schema version that
+          names no source, instead of reading it as a pin to the source named Default.
+        justification: |
+          Only a pin written before sources existed may fall back to the Default source; a
+          current-schema pin that names none is malformed, and resolving it against a source the
+          pin never named could supply a same-named package from a different source.
+        tests:
+          - RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault
+
       - id: AgentControl-RepoPinStore-PreserveUnknownFields
         title: >-
           The RepoPinStore class shall keep, when it rewrites a pin file, any properties of the

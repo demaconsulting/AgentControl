@@ -440,7 +440,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     {
         // Arrange: a repo pinned to 1.0.0, and an initial (empty) package source directory
         var repoPath = CreateTempDirectory();
-        RepoPinStore.Save(repoPath, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
         var initialSourceDir = CreateTempDirectory();
         var settings = new AppSettings
         {

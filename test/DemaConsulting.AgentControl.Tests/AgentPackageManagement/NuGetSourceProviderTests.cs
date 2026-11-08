@@ -254,6 +254,43 @@ public sealed class NuGetSourceProviderTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a package folder reached through a symbolic link inside the private cache is
+    ///     refused, even though its path still lies lexically under the cache.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_Acquire_CacheFolderReplacedByLink_ThrowsInvalidOperationException()
+    {
+        // Arrange: a package already unpacked into the private cache, whose package-ID folder is
+        // then swapped for a link to a copy outside the cache
+        var feed = CreateTempDirectory();
+        var rootBase = CreateTempDirectory();
+        var id = UniqueId();
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "agents v1");
+        var provider = new NuGetSourceProvider(CreateDefinition("Feed", feed), rootBase);
+        var package = Assert.Single(await provider.ListVersionsAsync(id, CancellationToken.None));
+        (await provider.AcquireAsync(package, CancellationToken.None)).Dispose();
+
+        var idFolder = Directory.GetDirectories(Path.Combine(provider.RootFolder, "packages")).Single();
+        var outside = Path.Combine(CreateTempDirectory(), "moved");
+        Directory.Move(idFolder, outside);
+        try
+        {
+            Directory.CreateSymbolicLink(idFolder, outside);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            Assert.Skip($"Cannot create symbolic links in this environment: {ex.Message}");
+        }
+
+        // Act
+        var ex2 = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, CancellationToken.None));
+
+        // Assert
+        Assert.Contains("link", ex2.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     ///     Test that a package without the mandatory content folder is rejected on acquisition,
     ///     so it can never cause a repo's managed folders to be deleted and replaced with nothing.
     /// </summary>

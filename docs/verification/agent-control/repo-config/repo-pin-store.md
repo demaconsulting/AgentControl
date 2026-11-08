@@ -64,6 +64,11 @@ scenario is tested by `RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource` an
 `RepoPinStore_Load_LegacyPinFileMissingAgentsMdTemplateDeclinedField_DefaultsToFalse`, covering
 `AgentControl-RepoPinStore-LegacyV1`.
 
+**RepoPinStore_CurrentSchemaWithoutSource_IsRejected**: A hand-written pin file of the current
+schema version that names no source (or only whitespace) is not read as a pin to `Default`;
+loading it throws `InvalidOperationException` naming the file. This scenario is tested by
+`RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault`, covering
+`AgentControl-RepoPinStore-RejectUnnamedSource`.
 **RepoPinStore_PreserveUnknownFields_SurviveRewrite**: Properties of the existing file that the
 tool does not model (including a nested value) are present after a load-modify-save and after a
 save of a freshly built pin over the existing file. This scenario is tested by

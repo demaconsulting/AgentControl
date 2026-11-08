@@ -65,8 +65,8 @@ widening a pin nor narrowing an unpinned source (the tests fail without the `<cl
 #### Test Environment
 
 Requires the `NUGET_PACKAGES` environment variable to be unset (acquisition deliberately fails
-closed when it redirects the package cache outside the per-source folder); symbolic links are not
-used by these tests. The server tests need loopback networking and the ASP.NET Core shared framework that the
+closed when it redirects the package cache outside the per-source folder); symbolic links are used only
+by the cache-link test, which skips where they cannot be created. The server tests need loopback networking and the ASP.NET Core shared framework that the
 test project references. The real-signed-package tests need access to nuget.org on first use and an operating
 system whose trust store holds the roots the package's certificates chain to; they are skipped - and only then -
 when nuget.org cannot be reached or those roots are missing (a Linux distribution that dropped the legacy roots, for
@@ -158,7 +158,11 @@ package without a `content` folder is rejected. This scenario is tested by
 `NuGetSourceProvider_BuildSourceKey_AliasAndLocation_StableDistinctAndFolderSafe`
 (`AgentControl-NuGetSourceProvider-PrivateCachePerSource`), and
 `NuGetSourceProvider_Acquire_PackageWithoutContentFolder_ThrowsInvalidOperationException`
-(`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`).
+(`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`). When a package-ID folder inside the private cache
+has been replaced by a symbolic link to a copy outside it, acquiring the package is refused with
+`InvalidOperationException` naming a link, tested by
+`NuGetSourceProvider_Acquire_CacheFolderReplacedByLink_ThrowsInvalidOperationException`
+(`AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder`; skipped where symbolic links cannot be created).
 
 **NuGetSourceProvider_ExplicitRoot_AgentControlOwnedAndGeneratedConfigOnly**: The root folder is
 directly under the supplied base, its generated `nuget.config` contains a global-packages-folder

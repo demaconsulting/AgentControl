@@ -54,7 +54,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     {
         // Arrange: a repo with a pin file already written
         var repoRoot = CreateTempDirectory();
-        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
         var card = CreateCard(repoRoot, null, null, new AppSettings());
 
         // Act: refresh
@@ -1009,7 +1009,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Arrange: a never-pinned repo with no AGENTS.md but a pre-existing pin file recording a
         // prior decline, and a package with an AGENTS.md template
         var repoRoot = CreateTempDirectory();
-        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = string.Empty, Version = string.Empty, AgentsMdTemplateDeclined = true });
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Default", PackageName = string.Empty, Version = string.Empty, AgentsMdTemplateDeclined = true });
         var sourceDir = CreateTempDirectory();
         CreatePackageZip(sourceDir, "contoso-agents", "1.0.0", agentsMdTemplate: "# AGENTS\n\nCustomize me.");
         var settings = new AppSettings { PackageSourcePath = sourceDir };
@@ -2398,7 +2398,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     {
         if (pinnedPackageName is not null)
         {
-            RepoPinStore.Save(repoPath, new RepoPin { PackageName = pinnedPackageName, Version = pinnedPackageVersion ?? "0.0.0" });
+            RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = pinnedPackageName, Version = pinnedPackageVersion ?? "0.0.0" });
         }
 
         var recentRepo = new RecentRepo

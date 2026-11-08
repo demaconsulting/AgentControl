@@ -68,10 +68,11 @@ repo if present, and copies the same four folders from the package into the repo
   anything is deleted, so a path that escapes the repo (or a link inside a folder package, which
   `ListFiles` rejects) fails the whole call with the repo untouched
   (`AgentControl-PackageContentExtractor-RejectLinksAndTraversal`). Containment is also checked
-  against the repo's real layout, still before anything is deleted: `FindLinkedComponent` walks
+  against the repo's real layout, still before anything is deleted:   `FindUnsafeComponent` walks
   every existing folder from just below the repo root down to each managed folder and to each
   file's destination folder, and a symbolic link, junction or other reparse point
-  (`FileAttributes.ReparsePoint` or a link target) — or a component whose type cannot be
+  (`FileAttributes.ReparsePoint` or a link target), a component that exists but is not a folder
+  (`AgentControl-PackageContentExtractor-RefuseNonFolderRepoComponent`) — or a component whose type cannot be
   determined — refuses the whole extraction with a clear error, so a link can never redirect the
   delete or copy outside the repo and a refused extraction changes nothing
   (`AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`; the requirement covers a link in the
@@ -81,7 +82,8 @@ repo if present, and copies the same four folders from the package into the repo
   link such as a redirected user profile; only components at or below the root must be link-free
   (`AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink`).
   `CopyFile` repeats the check on its destination chain just before creating directories, as
-  defense in depth. A delete or copy I/O failure can
+  defense in depth, and checks the destination file itself for a link or reparse point
+  immediately before opening it (`AgentControl-PackageContentExtractor-RefuseLinkedDestinationFile`). A delete or copy I/O failure can
   still leave the repo partially upgraded — there is intentionally no rollback, per
   architecture.md's "Upgrade sequence and failure handling" decision. Nothing is ever written to
   the package.

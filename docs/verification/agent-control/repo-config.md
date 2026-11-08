@@ -40,12 +40,15 @@ defaulted to `false` rather than throwing, covering
 
 **RepoConfig_SourcePin_RecordsAliasMapsLegacyPreservesFieldsAndRejectsNewerSchema**: The pin's
 source alias survives a save-then-load round trip; a pin written before sources existed loads as
-a pin to `Default`; unknown properties survive a rewrite; and a pin from a newer schema is
+a pin to `Default` (a current-schema pin that names no source is rejected rather than mapped);
+unknown properties survive a rewrite; and a pin from a newer schema is
 rejected without being interpreted or overwritten. These are verified by the `RepoPinStore` unit
 tests, with `RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion2AndRoundTripsSource`,
 `RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource`,
+`RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault`,
 `RepoPinStore_Save_UnknownProperties_ArePreserved`, and
 `RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage`
 cited directly at the subsystem level, covering `AgentControl-RepoConfig-SourcePin` (children:
 `AgentControl-RepoPinStore-SourceAlias`, `AgentControl-RepoPinStore-LegacyV1`,
+`AgentControl-RepoPinStore-RejectUnnamedSource`,
 `AgentControl-RepoPinStore-PreserveUnknownFields`, `AgentControl-RepoPinStore-RejectNewerSchema`).

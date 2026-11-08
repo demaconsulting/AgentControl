@@ -39,14 +39,17 @@ sections:
       - id: AgentControl-RepoSync-RefuseLinkedRepoFolders
         title: >-
           The RepoSync subsystem shall refuse to replace a repo's managed agent-file folders when
-          the repo's .github folder or a managed folder is a symbolic link or junction, changing
-          nothing inside or outside the repo.
+          the repo's .github folder or a managed folder is a symbolic link or junction (or is a
+          file), or a package file's destination is a link, changing nothing inside or outside
+          the repo.
         justification: |
           A repo can contain links the developer did not intend a sync to follow; replacing
           managed folders through one would delete or overwrite files outside the repository.
         children:
           - AgentControl-PackageZipExtractor-RefuseLinkedRepoFolders
           - AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders
+          - AgentControl-PackageContentExtractor-RefuseNonFolderRepoComponent
+          - AgentControl-PackageContentExtractor-RefuseLinkedDestinationFile
           - AgentControl-PackageContentExtractor-ManagedFoldersExist
           - AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink
         tests:

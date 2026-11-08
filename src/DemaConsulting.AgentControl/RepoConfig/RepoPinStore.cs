@@ -99,7 +99,8 @@ internal static class RepoPinStore
     /// <exception cref="UnsupportedPinSchemaException">Thrown when the pin file declares a schema
     ///     version newer than <see cref="RepoPin.CurrentSchemaVersion"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the pin file exists but cannot be
-    ///     read or contains invalid JSON.</exception>
+    ///     read, contains invalid JSON, or is a current-schema pin that names no source (only a
+    ///     version 1 pin is mapped to <see cref="RepoPin.LegacySourceAlias"/>).</exception>
     public static RepoPin? Load(string repoRoot)
     {
         ArgumentNullException.ThrowIfNull(repoRoot);
@@ -137,6 +138,16 @@ internal static class RepoPinStore
         if (pin.SchemaVersion < RepoPin.CurrentSchemaVersion && string.IsNullOrWhiteSpace(pin.Source))
         {
             pin.Source = RepoPin.LegacySourceAlias;
+        }
+
+        // A current-schema pin must name its source: falling back to the legacy alias here would
+        // resolve the pinned package from a source the pin never named
+        if (string.IsNullOrWhiteSpace(pin.Source))
+        {
+            throw new InvalidOperationException(
+                $"Pin file '{filePath}' uses schema version {pin.SchemaVersion} but does not name the package " +
+                "source it was pinned from, so it is not trusted to resolve against any source. " +
+                "Select the package again to repair it.");
         }
 
         return pin;

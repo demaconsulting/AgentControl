@@ -114,6 +114,17 @@ and symbolic links on Linux (`ubuntu@`). This scenario is tested by
 `-ManagedFoldersExist` (the `AllManagedFoldersExist` tests) and `-AcceptRepoRootThroughLink` (the repo-root tests;
 each prefixed `AgentControl-PackageContentExtractor`).
 
+**PackageContentExtractor_RefuseUnsafeDestinations_BeforeAnyChange**: With `.github/agents` present as
+a regular file (and another managed folder holding a file), extraction fails naming that component and the
+other folder's file survives, with nothing written. With a reader that plants a symbolic link at the
+destination of a later file while an earlier one is being copied, extraction fails naming a link and the
+link's target outside the repo is unchanged (the planting reader reproduces, deterministically, the gap
+between the folder checks and the write; the test skips where links cannot be created). This scenario is
+tested by `PackageContentExtractor_Extract_ManagedFolderIsAFile_RefusesBeforeDeletingAnything` and
+`PackageContentExtractor_Extract_DestinationFileBecomesSymlink_RefusesAndLeavesTargetUntouched`, covering
+`AgentControl-PackageContentExtractor-RefuseNonFolderRepoComponent` and `-RefuseLinkedDestinationFile` (each
+prefixed `AgentControl-PackageContentExtractor`).
+
 **PackageContentExtractor_ReadRootFiles_ReturnsTextOrNull**: Release notes and the AGENTS.md
 template are returned from a folder package's content root, and `null` when absent. This scenario
 is tested by

@@ -37,7 +37,10 @@ tells the user to update AgentControl.
   never-synced repo is an expected, ordinary state (`AgentControl-RepoPinStore-Load`). A file
   with a schema version older than the current one (including one with no schema version at all)
   and no source is returned with `Source` set to the legacy alias `Default`
-  (`AgentControl-RepoPinStore-LegacyV1`). A file declaring a schema version newer than
+  (`AgentControl-RepoPinStore-LegacyV1`). A current-schema file that names no source is not
+  mapped to anything: `InvalidOperationException` is thrown, so a malformed pin is never
+  resolved against a source it did not name (`AgentControl-RepoPinStore-RejectUnnamedSource`).
+  A file declaring a schema version newer than
   `RepoPin.CurrentSchemaVersion` is not interpreted: `UnsupportedPinSchemaException` is thrown
   (`AgentControl-RepoPinStore-RejectNewerSchema`).
 

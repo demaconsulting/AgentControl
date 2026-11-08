@@ -118,5 +118,7 @@ reported by `AllManagedFoldersExist` as existing. This scenario is tested by
 skip where links cannot be created), covering `AgentControl-RepoSync-RefuseLinkedRepoFolders`
 (children: `AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders`,
 `AgentControl-PackageContentExtractor-ManagedFoldersExist` and
-`AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink`, whose unit tests are
+`AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink`, plus
+`AgentControl-PackageContentExtractor-RefuseNonFolderRepoComponent` and
+`AgentControl-PackageContentExtractor-RefuseLinkedDestinationFile`, whose unit tests are
 described in the `PackageContentExtractor` unit verification design).

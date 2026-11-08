@@ -402,7 +402,39 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
                 "Remove the NUGET_PACKAGES environment variable and try again.");
         }
 
+        // The check above is only lexical: a link that replaced the cache folder, or a package-ID
+        // or version folder on the way down, would still look like it is inside the cache while
+        // redirecting every read to wherever it points
+        RejectLinkedCacheFolders(packagesFolder, Path.GetFullPath(packageFolder), package);
+
         return DirectoryPackageContentReader.Open(packageFolder);
+    }
+
+    /// <summary>
+    ///     Refuses an unpacked package whose folder, or any folder between the private package cache
+    ///     and it, is a symbolic link, junction or other reparse point.
+    /// </summary>
+    /// <param name="packagesFolder">The private package cache folder.</param>
+    /// <param name="packageFolder">The unpacked package folder, inside <paramref name="packagesFolder"/>.</param>
+    /// <param name="package">The package, for the message.</param>
+    /// <exception cref="InvalidOperationException">Thrown when a component is a link.</exception>
+    private void RejectLinkedCacheFolders(string packagesFolder, string packageFolder, DiscoveredPackage package)
+    {
+        var current = packagesFolder;
+        var parts = Path.GetRelativePath(packagesFolder, packageFolder)
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in parts.Prepend(string.Empty))
+        {
+            current = part.Length == 0 ? current : Path.Combine(current, part);
+            var info = new DirectoryInfo(current);
+            if (info.LinkTarget is not null || (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint)))
+            {
+                throw new InvalidOperationException(
+                    $"Package '{package.PackageName}' from source '{Alias}' was unpacked through a link in " +
+                    "AgentControl's private package cache, so it cannot be trusted to come from this source. " +
+                    "Remove the link and try again.");
+            }
+        }
     }
 
     /// <summary>

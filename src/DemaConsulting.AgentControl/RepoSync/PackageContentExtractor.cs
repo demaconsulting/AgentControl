@@ -49,7 +49,10 @@ namespace DemaConsulting.AgentControl.RepoSync;
 ///     against the repo's actual layout: before anything is deleted or written, every existing
 ///     folder at or below the repo root on the way to each managed folder and destination is
 ///     checked, and the extraction is refused if any is a symbolic link or junction (which
-///     would redirect the delete and copy outside the repository). The repo root itself and
+///     would redirect the delete and copy outside the repository) or is not a folder at all (a
+///     file where a managed folder belongs would fail the copy after the other managed folders
+///     were already deleted). The destination file of each copy is checked again just before it
+///     is written, so a link planted there is never written through. The repo root itself and
 ///     the components above it may be links and are not inspected. The package itself is only
 ///     ever read: nothing is written to a zip or to a NuGet package cache. Stateless and
 ///     thread-safe: every member is a pure function of its parameters plus the filesystem.
@@ -166,12 +169,12 @@ internal static class PackageContentExtractor
             .Distinct(StringComparer.OrdinalIgnoreCase);
         foreach (var directory in directoriesToCheck)
         {
-            var linked = FindLinkedComponent(repoRoot, directory);
+            var linked = FindUnsafeComponent(repoRoot, directory);
             if (linked is not null)
             {
                 throw new InvalidOperationException(
                     $"Refusing to extract package '{reader.Description}' into '{repoRoot}': '{linked}' is a " +
-                    "symbolic link or junction (or its type could not be determined), so deleting or " +
+                    "symbolic link or junction, or is not a folder (or its type could not be determined), so deleting or " +
                     "writing through it could affect files outside the repository. Nothing was changed.");
             }
         }
@@ -234,7 +237,7 @@ internal static class PackageContentExtractor
         return ManagedFolders.All(folder =>
         {
             var folderPath = PathHelpers.SafePathCombine(repoRoot, folder);
-            return Directory.Exists(folderPath) && FindLinkedComponent(repoRoot, folderPath) is null;
+            return Directory.Exists(folderPath) && FindUnsafeComponent(repoRoot, folderPath) is null;
         });
     }
 
@@ -276,18 +279,20 @@ internal static class PackageContentExtractor
 
     /// <summary>
     ///     Walks every existing folder from just below the repo root down to a target folder and
-    ///     returns the first one that is a symbolic link, junction or other reparse point.
+    ///     returns the first one that is a symbolic link, junction or other reparse point, or that
+    ///     is not a folder.
     /// </summary>
     /// <param name="repoRoot">Absolute path to the repository root; it and everything above it
     ///     are deliberately not inspected, because the root may legitimately live under a linked
     ///     path (such as a redirected user profile).</param>
     /// <param name="directoryPath">The absolute folder path, inside <paramref name="repoRoot"/>,
     ///     to walk down to.</param>
-    /// <returns>The path of the first linked component, or <see langword="null"/> when every
+    /// <returns>The path of the first unsafe component (linked or not a folder), or
+    ///     <see langword="null"/> when every
     ///     existing component is an ordinary folder (or does not exist yet). A component whose
     ///     type cannot be determined (an I/O or permission failure) is reported as linked, so an
     ///     unverifiable chain is refused rather than trusted.</returns>
-    private static string? FindLinkedComponent(string repoRoot, string directoryPath)
+    private static string? FindUnsafeComponent(string repoRoot, string directoryPath)
     {
         var fullRoot = Path.GetFullPath(repoRoot);
         var relative = Path.GetRelativePath(fullRoot, Path.GetFullPath(directoryPath));
@@ -304,6 +309,14 @@ internal static class PackageContentExtractor
                 // a missing component means nothing deeper exists to be redirected either
                 var attributes = File.GetAttributes(current);
                 if (attributes.HasFlag(FileAttributes.ReparsePoint) || new DirectoryInfo(current).LinkTarget is not null)
+                {
+                    return current;
+                }
+
+                // An existing component that is not a folder (a file where a managed folder
+                // belongs) can never be deleted or created through, so it is refused up front
+                // rather than after other managed folders have been deleted
+                if (!attributes.HasFlag(FileAttributes.Directory))
                 {
                     return current;
                 }
@@ -428,18 +441,31 @@ internal static class PackageContentExtractor
         {
             // Defense in depth: re-verify the chain just before creating directories and writing,
             // in case a link appeared after the up-front check in Extract
-            var linked = FindLinkedComponent(fullRoot, destinationDirectory);
+            var linked = FindUnsafeComponent(fullRoot, destinationDirectory);
             if (linked is not null)
             {
                 throw new InvalidOperationException(
                     $"Package entry '{relativePath}' would be written through '{linked}', which is a " +
-                    "symbolic link or junction (or its type could not be determined).");
+                    "symbolic link or junction, or is not a folder (or its type could not be determined).");
             }
 
             Directory.CreateDirectory(destinationDirectory);
         }
 
         using var source = reader.OpenRead(relativePath);
+
+        // FileMode.Create follows a link at the destination, so a link there (planted after the
+        // folders were checked) would redirect the write outside the repository; checked
+        // immediately before the file is opened to keep the window as small as it can be
+        var destinationInfo = new FileInfo(fullDestination);
+        if (destinationInfo.LinkTarget is not null ||
+            (destinationInfo.Exists && destinationInfo.Attributes.HasFlag(FileAttributes.ReparsePoint)))
+        {
+            throw new InvalidOperationException(
+                $"Package entry '{relativePath}' would be written through '{fullDestination}', which is a " +
+                "symbolic link or other reparse point.");
+        }
+
         using var target = new FileStream(fullDestination, FileMode.Create, FileAccess.Write);
         source.CopyTo(target);
     }
