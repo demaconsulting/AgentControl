@@ -17,8 +17,20 @@ makes sure the repo's `.github/agents`, `.github/standards`, `.github/templates`
 then launches the developer's preferred agentic CLI tool (for example, GitHub Copilot CLI)
 in that repo's working directory.
 
+## Screenshots
+
+![AgentControl main window, dark theme: app bar, then repo cards in sections with status bars][shot-main-dark]
+
+![AgentControl main window, light theme: the same repo cards][shot-main-light]
+
+The cards, the card menu, Settings and the package-source editor are shown in the
+[User Guide][link-guide].
+
 ## Features
 
+- **Compact app bar and themes**: one slim bar at the top of the main window holds the logo, a filter box and the
+  **Add repository**, **Settings** and **About** buttons; the whole application follows the **System default**,
+  **Light** or **Dark** theme, with legible text in both
 - **Recent-repos list**: add repos via a folder-browse button; each repo is shown as a card
   with a colored **status bar** (green up to date, amber upgrade available, red a problem, grey no
   agent package - always backed by words and tooltips), a favorite star, its display name, a tile with its
@@ -26,7 +38,8 @@ in that repo's working directory.
   package (name, version and source, with a small check mark when it is the newest), an available upgrade, and
   the current git branch; **Launch** sits on the card and everything else (Git Pull, Refresh - **Check again**
   for a repo whose folder is missing - Select Package/Upgrade, Move to group, Card color, Remove) in its grouped
-  "..." menu; a long path is shortened in the middle so the repo's folder name stays visible
+  "..." menu; a long path is shortened to fit - the folder part first, then the middle of a very long folder
+  name - so the start and the end of the repo's folder name stay visible
 - **Repo groups and card colors (just for you)**: put repos into groups of your own (**Move to group** in a
   card's "..." menu, then an existing group or **New group...**) and the list becomes collapsible sections -
   **Favorites** first, your groups alphabetically, **Ungrouped** last - with the number of repos in each; the
@@ -115,6 +128,9 @@ in that repo's working directory.
   server's own address, but cannot stop the NuGet client from doing that.
 - A repo's pin names its source by alias, and a package is only ever taken from that source; a
   missing source is an error, never a fallback to another source with a package of the same name.
+- A version number is only a label: depending on the source, a published version can be overwritten with different
+  content (a shared folder by anyone who can write to it, some servers when redeploy is allowed). See the User
+  Guide's section "Version Immutability and Trust" for how to guard against it.
 - AgentControl never reads or writes the target repo's `nuget.config`, and keeps its NuGet
   caches in its own folder under the user profile.
 
@@ -137,7 +153,8 @@ the .NET 10 runtime, so the target machine needs no pre-installed runtime.
 
 ### Adding a repo
 
-Click the folder-plus icon button on the toolbar and browse to a repository's root folder.
+Click the folder-plus icon button in the app bar at the top of the main window and browse to a repository's root
+folder.
 The repo is added to the recent-repos list as a card showing its display name, path, and chips
 for the pinned package (name, version and source), an available upgrade, and the current git
 branch.
@@ -240,7 +257,7 @@ The Settings window lets you configure:
 
 ### About
 
-The About dialog (reachable from the main window) shows the application logo, a short mission
+The About dialog (the info button in the main window's app bar) shows the application logo, a short mission
 tagline, and the running build's version, copyright, and license, so it can be identified
 without inspecting file properties, along with a scrollable list of this application's direct
 third-party dependencies and their licenses.
@@ -273,6 +290,10 @@ By contributing to this project, you agree that your contributions will be licen
 [badge-build]: https://img.shields.io/github/actions/workflow/status/demaconsulting/AgentControl/build_on_push.yaml?style=plastic
 [badge-quality]: https://sonarcloud.io/api/project_badges/measure?project=demaconsulting_AgentControl&metric=alert_status
 [badge-security]: https://sonarcloud.io/api/project_badges/measure?project=demaconsulting_AgentControl&metric=security_rating
+
+<!-- Screenshot References -->
+[shot-main-dark]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/user_guide/images/main-window-dark.png
+[shot-main-light]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/user_guide/images/main-window-light.png
 
 <!-- Link References -->
 [link-forks]: https://github.com/demaconsulting/AgentControl/network/members

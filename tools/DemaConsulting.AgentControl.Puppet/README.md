@@ -150,7 +150,8 @@ without it.
 
 ### AutomationIds
 
-- **Main** (`AgentControl`): `FilterTextBox`, `AddRepoButton`, `OpenSettingsButton`, `OpenAboutButton`,
+- **Main** (`AgentControl`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`, `AddRepoButton`,
+  `OpenSettingsButton`, `OpenAboutButton`,
   `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`.
 - **Group header** (repeated, one per section, in `RepoListBox`; only present once a repo is in a group):
   `GroupHeaderToggleButton` (collapses or expands; its name says the section, count and state, for example
@@ -160,8 +161,8 @@ without it.
   to start with a particular group collapsed, list it in `CollapsedGroups` in the settings file before `launch`.
 - **Repo card** (repeated, one per list item): `RepoNameText`, `RepoStatusAccent` (the status bar; its name is the
   status in words), `RepoAvatarText`, `RepoAvatarImage`, `UpgradeAvailableBadge` (a button: click it to upgrade),
-  CommittedAgentFilesBadge, DirtyWorkingTreeBadge, MissingRepoBadge, RepoPathText (a panel whose name is the full
-  path), RepoPinnedVersionText,
+  CommittedAgentFilesBadge, DirtyWorkingTreeBadge, MissingRepoBadge, RepoPathText (a text control whose name is the
+  full path; the path is shortened to fit, a long folder name in the middle), RepoPinnedVersionText,
   `CurrentBranchText`, `GroupChipText` (a favorite's group), `FavoriteToggleButton` (accessible name `Favorite`; a
   toggle: `read` shows `toggle=On|Off`), `UpToDateCue` (the check mark in the package chip of an up-to-date card),
   `LaunchButton`,

@@ -496,6 +496,14 @@ shell settings, is tested by `SettingsWindow_Layout_AppearanceIsItsOwnSectionBef
 `windows@SettingsWindow_AppearanceIsItsOwnSectionAboveTools` (the real application), also covering
 `AgentControl-LauncherUI-Appearance`.
 
+**LauncherUI_AppBar_LogoFilterAndButtonsInOrderAndNothingClipsAtMinimumWidth**: In the headless main window at its
+narrowest width the app bar holds the logo (accessible name and tooltip "AgentControl", no text or tagline in
+the bar), the filter box and the Add, Settings and About buttons from left to right; the first four keyboard stops
+are the filter box and then those three buttons; the About button ends inside the window, no button is narrower
+than it needs, and the filter box has shrunk but is still wide enough to use. This scenario is tested by
+`MainWindow_AppBar_LogoFilterAndButtonsInOrderAndNothingClipsAtMinimumWidth`, covering
+`AgentControl-LauncherUI-AppBar`.
+
 **LauncherUI_FavoriteStar_RealClickAndKeyToggleOncePerPressBothWays**: In the headless main window a
 real mouse click (a button press and release at the star's center) on an unfavorited repo's star favorites it
 
@@ -521,11 +529,16 @@ creating the missing folder and choosing the item clears the "Folder missing" ba
 newest version, pinned to an older version, no package) exactly one "Agent files are up to date" check mark is
 visible, inside the package chip of the up-to-date card, with that text as its tooltip and accessible name. In a
 window at the narrowest width, a long repo name ends in an ellipsis with the whole name as its tooltip and never
-reaches the Launch button, and the path is shown as a folder part that gives way and a folder name that is never
-trimmed, with the whole path as the tooltip and accessible name. In the real application the check mark is found
-(with its name) on a card whose pinned package is the only version, and not on one with an upgrade badge. This
+reaches the Launch button, and the path is shortened with the folder part giving way first and a very long folder
+name keeping its start and its end around a middle ellipsis, with the whole path as the tooltip and accessible
+name. `PathEllipsisText` itself is checked without a window: its middle and end ellipses keep the right
+characters and never split a surrogate pair, a path that fits is drawn whole (also when the width grows back), the
+folder part gives way before a folder name that fits, a folder name that does not fit keeps both ends and the
+result fits the width, and a missing path draws nothing. In the real application the check mark is found (with
+its name) on a card whose pinned package is the only version, and not on one with an upgrade badge. This
 scenario is tested by `MainWindow_UpToDateCue_ShownOnlyForPinnedAndUpToDateCard`,
-`MainWindow_NarrowWidth_NameEllipsisPathKeepsFolderNameAndNothingCollides` and
+`MainWindow_NarrowWidth_NameEllipsisPathKeepsFolderNameAndNothingCollides`, the `PathEllipsisText_*` tests of
+`PathEllipsisTextTests.cs` and
 `windows@UpToDateCue_ShownOnlyForPinnedPackageThatIsUpToDate`, covering `AgentControl-LauncherUI-UpToDateCue`.
 
 **LauncherUI_DialogKeyboard_FocusStartsInsideTabCyclesAndEscapeCancels**: Settings shown as a modal dialog over a window

@@ -9,7 +9,7 @@
 #   SettingsWindowViewModel, SourceEditorViewModel, CredentialPromptViewModel), plus their
 #   Avalonia .axaml Views (including CredentialPromptWindow and the AvaloniaCredentialPrompt
 #   that shows it) and shared MVVM support types (RelayCommand, ViewModelBase,
-#   FavoriteIconConverter, ThemePreferenceDisplayNameConverter, AppStyles.axaml,
+#   FavoriteIconConverter, ThemePreferenceDisplayNameConverter, PathEllipsisText, AppStyles.axaml,
 #   ThirdPartyDependencies), which are folded
 #   into this subsystem-level description rather than given separate unit files
 #   (ThirdPartyDependencies is the one exception with a dedicated test file,
@@ -104,6 +104,20 @@ sections:
           - AppStyles_TextAndGraphicColors_MeetContrastInBothThemes
           - AppStyles_TileLetters_AreTheBetterOfLightAndDarkTextOnEveryPaletteColor
 
+      - id: AgentControl-LauncherUI-AppBar
+        title: >-
+          The LauncherUI subsystem shall show the main window's controls in one compact app bar,
+          below the window's normal title bar, holding the application logo (with an accessible
+          name and a tooltip), the filter box, then the Add repository, Settings and About
+          buttons, in that keyboard focus order, with the filter box shrinking first at narrow
+          widths so that no button is clipped.
+        justification: |
+          A branded header plus a separate toolbar used two bands of vertical space before the
+          first repo; one bar keeps the name in the title bar and the About box, gives the repo
+          list the room, and keeps the filter, the control used most, first for the keyboard.
+        tests:
+          - MainWindow_AppBar_LogoFilterAndButtonsInOrderAndNothingClipsAtMinimumWidth
+
       - id: AgentControl-LauncherUI-RepoGroups
         title: >-
           The LauncherUI subsystem shall list the repos in collapsible sections once at least one
@@ -194,10 +208,11 @@ sections:
         title: >-
           The LauncherUI subsystem shall show a small check mark, with the tooltip and accessible
           name "Agent files are up to date", inside the agent package chip of a repo whose pinned
-          package is the newest one, and nowhere else, and shall shorten a long repo path in the
-          middle (keeping the repo's folder name whole) and a long repo name at its end, each with
-          the full value as its tooltip and the path also as its accessible name, without the name
-          reaching the Launch button.
+          package is the newest one, and nowhere else, and shall shorten a long repo path (the
+          folder part first, then the middle of a very long folder name so that its start and its
+          end stay visible) and a long repo name at its end, each with the full value as its
+          tooltip and the path also as its accessible name, without the name reaching the Launch
+          button.
         justification: |
           A healthy card showed only a green bar, which says nothing in words to a mouse user; the
           cue adds the words inside an existing chip without adding clutter. At a narrow width the
@@ -207,6 +222,13 @@ sections:
         tests:
           - MainWindow_UpToDateCue_ShownOnlyForPinnedAndUpToDateCard
           - MainWindow_NarrowWidth_NameEllipsisPathKeepsFolderNameAndNothingCollides
+          - PathEllipsisText_MiddleEllipsis_KeepsStartAndEnd
+          - PathEllipsisText_EndEllipsis_KeepsStart
+          - PathEllipsisText_Ellipsis_NeverSplitsASurrogatePair
+          - PathEllipsisText_WideEnough_DrawsTheWholePath
+          - PathEllipsisText_SlightlyTooNarrow_ShortensTheFolderPartAndKeepsTheFolderName
+          - PathEllipsisText_VeryLongFolderName_KeepsItsStartAndItsEnd
+          - PathEllipsisText_NoFolderPartOrNoPath_StillFitsOrDrawsNothing
           - windows@UpToDateCue_ShownOnlyForPinnedPackageThatIsUpToDate
 
       - id: AgentControl-LauncherUI-DialogKeyboard

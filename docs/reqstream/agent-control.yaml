@@ -29,6 +29,7 @@ sections:
           - AgentControl-LauncherUI-RepoCardChips
           - AgentControl-LauncherUI-CardIdentityAndStatus
           - AgentControl-LauncherUI-UpToDateCue
+          - AgentControl-LauncherUI-AppBar
           - AgentControl-GitIntegration-DetectCommittedFiles
           - AgentControl-GitIntegration-CurrentBranch
         tests:

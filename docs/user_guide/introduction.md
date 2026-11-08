@@ -17,10 +17,12 @@ directory.
 This user guide covers:
 
 - Installing AgentControl
+- The main window: the app bar, the repo cards, and the light and dark themes
 - Adding a repository to the recent-repos list
 - Reading a repo card's chips: pinned package, upgrade, branch, and status warnings
 - Configuring package sources (zip-package folders, NuGet-package folders and NuGet-package
   servers), including testing a server's connection and signing in to it
+- Why a published package version should never be reused, and how to guard against it
 - Selecting an initial agent package for a never-pinned repo, and upgrading an
   already-pinned repo
 - Launch behavior, including ensure-synced-before-launch semantics
@@ -44,10 +46,33 @@ the .NET 10 runtime (matching the app's `net10.0` target framework and the Avalo
 framework's Windows desktop requirements), so the target machine needs no pre-installed
 runtime.
 
+# The Main Window
+
+![The AgentControl main window in the dark theme: the app bar, then repo cards in the Favorites and Client Work
+sections](images/main-window-dark.png)
+
+The top of the main window is one compact **app bar** below the window's normal title bar. From left to right it
+holds:
+
+- the AgentControl **logo** (hover for its name; the name and a short description are in the **About** dialog),
+- the **filter box**, which stretches across the bar and narrows first when the window is made narrower (it is
+  also the first stop when you press **Tab**), and
+- three icon buttons: **Add repository** (a folder with a plus), **Settings** (a gear) and **About** (an
+  information mark), each with a tooltip.
+
+Below the app bar is the list of **repo cards**, described in the next section, newest-launched first within each
+section (see *Organizing Repos with Groups*). With no repos, or when the filter matches none, a short message
+says so instead.
+
+AgentControl follows your operating system's light or dark setting by default, and every window works in both
+themes; to always use one of them, choose a **Theme** in Settings (see *Settings*).
+
+![The same main window in the light theme](images/main-window-light.png)
+
 # Adding a Repository
 
-Click the folder-plus icon button on the main window's toolbar. A folder-browse dialog opens;
-select the root folder of the git repository you want to manage. The repo is added to the
+Click the **Add repository** button (the folder-plus icon) in the main window's app bar. A folder-browse dialog
+opens; select the root folder of the git repository you want to manage. The repo is added to the
 recent-repos list as a card.
 
 Each repo card shows:
@@ -74,6 +99,12 @@ Each repo card shows:
   available again). **Agent files**: **Select Package...** or **Upgrade to x.y.z** (mutually exclusive — see below;
   the group is hidden when neither applies). **Organize**: **Move to group** and **Card color...** (see
   *Organizing Repos with Groups* and *Choosing a Card Color*). Then **Remove from list**.
+
+![A card with the repo's own picture and an up-to-date package, a section header, and a card with an upgrade chip
+and an uncommitted-changes warning](images/repo-card-anatomy.png)
+
+![The open "..." menu of a card: Git Pull and Refresh under Repository, Move to group and Card color under
+Organize, and Remove from list](images/card-menu.png)
 
 Removing a repo from the list prompts for confirmation first, since it is a destructive
 action against AgentControl's own recent-repos state (it does not touch the repository
@@ -131,6 +162,9 @@ read on that color (at least 4.5:1 contrast in both themes). A repo that shows i
 Card Icon*) keeps the picture's light backing so the picture stays legible, and the color appears as a ring around
 it. The **status bar** on the card's left edge never changes with the color: green, amber, red and grey keep their
 meaning.
+
+![The card color palette: ten colors with a check mark on the chosen one (Teal) and an Automatic
+button](images/card-color-palette.png)
 
 ## Reading the Chips
 
@@ -209,6 +243,9 @@ Each source has an **alias**, the short name shown in the app and recorded in a 
 5. Messages under each field say what is wrong, and **Save** stays disabled until everything is
    valid. Then save the source, and save the Settings window to keep the change.
 
+![The Settings window with the Add menu open: Zip-package folder, NuGet-package folder and NuGet-package
+server](images/settings-add-menu.png)
+
 Each row of the list shows the alias, an icon for the kind of source, the location (hover for
 the full text) and a status. For a folder the status is whether the folder can currently be
 found, checked in the background so an offline network share never freezes Settings. A server
@@ -243,6 +280,9 @@ Click **Add** and choose **NuGet-package server**. The dialog is a stack of titl
   *Remembering a Sign-In*).
 - **Package signatures** — see *Requiring Signed Packages*.
 - **Connection test** — see *Testing the Connection*.
+
+![The Add NuGet-Package Server dialog filled in with an alias, a feed address and one package
+ID](images/source-editor-nuget-server.png)
 
 ## Testing the Connection
 
@@ -529,6 +569,30 @@ same name, the one in the pin wins even if the other has a higher version; if th
 is missing, you see an error rather than a quiet substitution. This stops a package of the same
 name in another place from being installed under your repo's pin.
 
+## Version Immutability and Trust
+
+A pin names a package, a version and a source, but a version number is only a label: whether the content behind
+`contoso-agents 1.1.0` can change later depends on the source, and AgentControl does not compare a package with the
+one you installed earlier.
+
+- **Zip-package folders and NuGet-package folders** - anyone with write access to the folder can overwrite
+  `contoso-agents-1.1.0.zip` or `contoso-agents.1.1.0.nupkg` in place. For a NuGet folder this can also make
+  machines differ: AgentControl keeps a private package cache for each source and uses the copy it unpacked first,
+  so a machine that already has 1.1.0 keeps the old content while one that did not gets the new content.
+- **NuGet-package servers** - nuget.org, JFrog Artifactory and Azure Artifacts normally refuse to overwrite a
+  version that is already published, but some servers can be configured to allow a redeploy, or a delete followed
+  by a push of the same version.
+- **Git repositories** (a planned kind of source) - a tag can be moved to a different commit by force.
+
+To keep a version trustworthy:
+
+- Restrict write access to shared package folders to the people who publish.
+- Turn on "no overwrite" (immutable versions) wherever the server offers it.
+- Never reuse a version number: publish a new version instead, even for a small fix.
+- For NuGet sources, use **Require signed packages** with a pinned publisher fingerprint (see *Requiring Signed
+  Packages*), so a package that was not signed by your publisher is refused. A signature does not stop the
+  publisher itself from signing different content under the same version, so the rules above still apply.
+
 # Selecting and Upgrading Agent Packages
 
 A repo's card shows exactly one of **Select Package...** or **Upgrade** in its "..." menu,
@@ -552,6 +616,9 @@ shows **Select Package...**. Choosing it opens a dialog with three columns:
    selection to the latest. If the versions cannot be read, the error is shown with **Retry**
    beside it. Reading a server can take several seconds, and a cancelled or failed sign-in can be
    retried from here without closing the dialog.
+
+![The Select Package dialog with the source Contoso, the package contoso-agents and the version 1.1.0
+selected](images/select-package.png)
 
 On confirm, AgentControl runs the same extract-and-pin sequence as an upgrade: validate the
 package, delete the four managed folders if present, extract the new files, ensure your
@@ -632,7 +699,10 @@ check that simply hasn't run yet.
 
 # Settings
 
-Open Settings from the gear icon on the toolbar to configure:
+Open Settings from the **Settings** button (the gear icon) in the main window's app bar to configure:
+
+![The Settings window in the dark theme: the package sources, the Appearance section and the
+Tools section](images/settings-dark.png)
 
 - **Package sources** — the list of configured package sources, with one **Add** button (a menu of
   **Zip-package folder**, **NuGet-package folder** and **NuGet-package server**), **Edit** and **Remove** (see
@@ -669,7 +739,7 @@ Open Settings from the gear icon on the toolbar to configure:
 
 # About
 
-The About dialog, reachable from an info icon on the main window's toolbar, is a simple
+The About dialog, reachable from the **About** (information) button in the main window's app bar, is a simple
 dialog (the main window waits until you close it) showing the running build's application version
 (a labeled **Version** row; hover over it for the full build version, including the build identifier after
 a `+`), copyright, and license text, so you can identify the running build without inspecting file

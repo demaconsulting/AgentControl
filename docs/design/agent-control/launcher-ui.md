@@ -15,7 +15,8 @@ window, the settings window, the package-source editor window and the sign-in di
 `SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`,
 `FavoriteIconConverter`, `AgentToolKindDisplayNameConverter`, `ThemePreferenceDisplayNameConverter`,
 `RepoCardStatus`, `RepoImageLocator`, `RepoGroupHeaderViewModel`, `RepoGroupKind`, `GroupNameViewModel`,
-`GroupNameWindow`, `CardColorPalette`, `DialogBehavior`, `ThirdPartyDependencies`), the shared theme resources and styles
+`GroupNameWindow`, `CardColorPalette`, `PathEllipsisText`, `DialogBehavior`, `ThirdPartyDependencies`), the shared
+theme resources and styles
 (`AppStyles.axaml`, included by `App.axaml`), which are folded
 into this subsystem-level description rather than given separate unit files; `ThirdPartyDependencies`
 and `AsyncRelayCommand` are the exceptions with dedicated test files
@@ -398,12 +399,27 @@ kept in memory until Save and would be dropped silently. Focus returns to the co
 window when the dialog closes, because that window's focus is not changed while it is disabled. The release-notes
 window is the only non-modal window left.
 
+**Main window app bar.** The top of the main window is one compact bar (`AppBar`, inside the normal OS title bar -
+the window does not extend into it): the application logo (`AppLogo`, reused `Assets/AppIcon.ico` on the same white
+backing as in the About window, with the accessible name and tooltip "AgentControl" - the name and tagline are in
+the window title and the About window, not repeated here), the filter box (`FilterTextBox`, the star-width column,
+so it is what shrinks at narrow widths) and the `AddRepoButton`, `OpenSettingsButton` and `OpenAboutButton` icon
+buttons, which are auto-width and never clip. It is drawn on the `AppBarBackground` theme brush (a little off the
+page color in the dark theme, white in the light one) with a one-pixel `SurfaceDivider` line below it, instead of
+a branded header and a blue rule above a separate toolbar. The keyboard focus order is the visual order (the logo is
+not a stop): filter, Add, Settings, About (`AgentControl-LauncherUI-AppBar`).
+
 **Card presentation at narrow widths.** The repo name is one `TextBlock` with an end ellipsis and the whole name
 as its tooltip, in a star-width column beside the auto-width Launch and "..." buttons, so it never runs under
-them. The path is a small grid of two `TextBlock`s - the parent with an end ellipsis and the leaf (the folder
-name with its separator) untrimmed, from `RepoPathParent`/`RepoPathLeaf` - so a narrow card reads
-`C:\work\cl...\repo`, with the whole path as the grid's tooltip and accessible name (the two texts are
-hidden from automation so the path is not read twice). The package chip's up-to-date check mark
+them. The path is a `PathEllipsisText`, a small `Decorator` that draws one `TextBlock` from
+`RepoPathParent` and `RepoPathLeaf` (the folder name with its separator). It measures the real text, so the result
+follows the font and the width the layout gives it: a path that fits is drawn whole; otherwise the folder part
+gives way first (an end ellipsis, down to 35 % of the width) and the folder name is shown whole while it fits. A
+folder name that is still too long gets a *middle* ellipsis that keeps its start and its end (binary search over
+the number of kept characters, never splitting a surrogate pair), so a narrow card reads
+`C:\work\cl...\05-very-long-na...-alpha` and similar repos stay apart. The control carries the whole path as its
+tooltip and accessible name, and the text it draws is hidden from automation so the path is not read twice. The
+package chip's up-to-date check mark
 (`UpToDateCue`) and its tooltip live inside the existing chip (`AgentControl-LauncherUI-UpToDateCue`).
 The card color palette's heading names the chosen color (`Card color: Teal`), in addition to each swatch's
 tooltip, accessible name and check mark. The icon-only toolbar buttons and the card's "..." button have

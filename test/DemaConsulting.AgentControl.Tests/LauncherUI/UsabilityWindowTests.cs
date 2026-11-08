@@ -231,9 +231,9 @@ public sealed class UsabilityWindowTests : IDisposable
 
     /// <summary>
     ///     Test that a card's name ends in an ellipsis with a full-name tooltip, that its path keeps the
-    ///     folder name (the tail) whole and gives way in the folder part, with the full path as its tooltip
-    ///     and accessible name, and that at the narrowest width the name never runs under the Launch
-    ///     button.
+    ///     folder name readable (whole, or with a middle ellipsis that keeps its start and its end) and
+    ///     gives way in the folder part first, with the full path as its tooltip and accessible name, and
+    ///     that at the narrowest width the name never runs under the Launch button.
     /// </summary>
     [Fact]
     public void MainWindow_NarrowWidth_NameEllipsisPathKeepsFolderNameAndNothingCollides() => HeadlessTestApp.Run(() =>
@@ -247,33 +247,83 @@ public sealed class UsabilityWindowTests : IDisposable
         try
         {
             var nameText = window.GetVisualDescendantsOf<TextBlock>("RepoNameText").Single();
-            var pathPanel = window.GetVisualDescendantsOf<Grid>("RepoPathText").Single();
-            var parentText = window.GetVisualDescendantsOf<TextBlock>("RepoPathParentText").Single();
-            var leafText = window.GetVisualDescendantsOf<TextBlock>("RepoPathLeafText").Single();
+            var pathText = window.GetVisualDescendantsOf<PathEllipsisText>("RepoPathText").Single();
             var launch = window.GetVisualDescendantsOf<Button>("LaunchButton").Single();
 
             // Assert: the name trims at its end and its tooltip has all of it
             Assert.Equal(TextTrimming.CharacterEllipsis, nameText.TextTrimming);
             Assert.Equal(name, ToolTip.GetTip(nameText));
 
-            // Assert: the folder part trims, the folder name does not, and the whole path is the name/tooltip
-            Assert.Equal(TextTrimming.CharacterEllipsis, parentText.TextTrimming);
-            Assert.Equal(Path.DirectorySeparatorChar + name, leafText.Text);
-            Assert.Equal(folder, ToolTip.GetTip(pathPanel));
-            Assert.Equal(folder, AutomationProperties.GetName(pathPanel));
-            Assert.Equal(AccessibilityView.Raw, AutomationProperties.GetAccessibilityView(parentText));
-            leafText.Measure(Size.Infinity);
-            Assert.True(
-                leafText.Bounds.Width >= leafText.DesiredSize.Width - 1,
-                $"the folder name was trimmed: {leafText.Bounds.Width} < {leafText.DesiredSize.Width}");
-            parentText.Measure(Size.Infinity);
-            Assert.True(parentText.Bounds.Width < parentText.DesiredSize.Width, "the folder part should have given way");
+            // Assert: the whole path is the tooltip and the accessible name; what is drawn is shortened
+            // (the folder part first, then the folder name in the middle) and is hidden from automation
+            Assert.Equal(folder, ToolTip.GetTip(pathText));
+            Assert.Equal(folder, AutomationProperties.GetName(pathText));
+            Assert.Equal(viewModel.RepoCards[0].RepoPathParent, pathText.ParentText);
+            Assert.Equal(viewModel.RepoCards[0].RepoPathLeaf, pathText.LeafText);
+            Assert.Contains(PathEllipsisText.Ellipsis, pathText.DisplayText);
+            Assert.EndsWith("checks-alpha", pathText.DisplayText);
+            Assert.True(pathText.DisplayText.Length < folder.Length, "the path should have been shortened");
+            Assert.All(
+                pathText.GetVisualDescendants().OfType<TextBlock>(),
+                text => Assert.Equal(AccessibilityView.Raw, AutomationProperties.GetAccessibilityView(text)));
+            Assert.True(pathText.Bounds.Width > 0);
 
             // Assert: the name ends before the Launch button starts
             var nameRight = nameText.TranslatePoint(new Point(nameText.Bounds.Width, 0), window)!.Value.X;
             var launchLeft = launch.TranslatePoint(new Point(0, 0), window)!.Value.X;
             Assert.True(nameRight <= launchLeft, $"the name ends at {nameRight}, the Launch button starts at {launchLeft}");
             Assert.Equal(name, viewModel.RepoCards[0].RepoName);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the main window has one compact app bar (the logo with an accessible name and a tooltip
+    ///     but no name text or tagline, the filter box, then the Add, Settings and About buttons), that the
+    ///     filter is the first stop of the keyboard focus order, followed by the three buttons in order, and
+    ///     that at the narrowest width the filter has shrunk while the buttons stay inside the window.
+    /// </summary>
+    [Fact]
+    public void MainWindow_AppBar_LogoFilterAndButtonsInOrderAndNothingClipsAtMinimumWidth() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: the narrowest window
+        var (window, _) = CreateWindow([new RecentRepo()], width: 560);
+
+        try
+        {
+            var appBar = window.GetVisualDescendantsOf<Border>("AppBar").Single();
+            var logo = window.GetVisualDescendantsOf<Border>("AppLogo").Single();
+            var filter = window.GetVisualDescendantsOf<TextBox>("FilterTextBox").Single();
+            var buttons = new[] { "AddRepoButton", "OpenSettingsButton", "OpenAboutButton" }
+                .Select(id => window.GetVisualDescendantsOf<Button>(id).Single())
+                .ToList();
+
+            // Assert: the logo is named and has a tooltip, and the bar carries no name text or tagline
+            Assert.Equal("AgentControl", AutomationProperties.GetName(logo));
+            Assert.Equal("AgentControl", ToolTip.GetTip(logo));
+            Assert.DoesNotContain(appBar.GetVisualDescendants().OfType<TextBlock>(), text => !string.IsNullOrEmpty(text.Text));
+
+            // Assert: the keyboard stops (no tab index is set, so the visual order is the focus order) start with
+            // the filter, then Add, Settings and About
+            var stops = window.GetVisualDescendants()
+                .OfType<InputElement>()
+                .Where(element => element.Focusable && element.IsTabStop && element.IsEffectivelyVisible)
+                .Take(4)
+                .ToList();
+            Assert.Equal<InputElement>([filter, buttons[0], buttons[1], buttons[2]], stops);
+
+            // Assert: left to right, logo, filter, buttons; all inside the window, the filter taking what is left
+            var lefts = new Control[] { logo, filter, buttons[0], buttons[1], buttons[2] }
+                .Select(element => element.TranslatePoint(new Point(0, 0), window)!.Value.X)
+                .ToList();
+            Assert.Equal(lefts.Order(), lefts);
+            var aboutRight = lefts[4] + buttons[2].Bounds.Width;
+            Assert.True(aboutRight <= window.Bounds.Width, $"About ends at {aboutRight} in a {window.Bounds.Width} wide window");
+            Assert.All(buttons, button => Assert.True(button.Bounds.Width >= button.DesiredSize.Width - 1, "a button was clipped"));
+            Assert.True(filter.Bounds.Width > 100, $"the filter is {filter.Bounds.Width} wide");
         }
         finally
         {

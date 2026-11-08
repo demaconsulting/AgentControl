@@ -16,44 +16,49 @@
     <Window.Resources>
         <vm:FavoriteIconConverter x:Key="FavoriteIconConverter" />
     </Window.Resources>
-    <DockPanel Margin="12">
+    <DockPanel>
 
-        <!-- Branding header: reuses the About window's logo treatment (white backing panel so
-             the icon's black "D" stays visible against the dark theme) to give the window body
-             its own identity beyond the native title bar. -->
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-            <Border Background="{DynamicResource LogoBackingBackground}" CornerRadius="6" Padding="3" Width="32" Height="32">
-                <Image Source="avares://DemaConsulting.AgentControl/Assets/AppIcon.ico"
-                        Width="26" Height="26" />
-            </Border>
-            <StackPanel VerticalAlignment="Center" Spacing="0">
-                <TextBlock Text="AgentControl" FontWeight="Bold" FontSize="16" />
-                <TextBlock Text="Distribute proprietary AI-agent configuration alongside public repositories"
-                            FontSize="11" Opacity="0.65" />
-            </StackPanel>
-        </StackPanel>
-
-        <!-- A thin accent-colored divider ties the header's brand identity to the accented
-             Launch button and badges below, instead of the header floating disconnected from
-             the rest of the UI. -->
+        <!-- One compact app bar instead of a branded header plus a separate toolbar: the logo
+             (the window title and the About box carry the name), the filter box stretching in
+             the middle and the add-repo/settings/about icon buttons on the right. It sits on
+             its own theme-aware surface with a thin separator below, inside the normal OS frame.
+             The filter box is the first focus stop; it is the part that shrinks at narrow widths,
+             so the buttons never clip. -->
         <Border DockPanel.Dock="Top"
-                 Height="2"
-                 Background="{DynamicResource SystemAccentColor}"
-                 Margin="0,0,0,12" />
-
-        <!-- Combined toolbar: filter box on the left, add-repo/settings/about icons on the right -->
-        <Grid DockPanel.Dock="Top"
-              ColumnDefinitions="*,Auto,Auto,Auto"
-              Margin="0,0,0,12">
+                Name="AppBar"
+                Background="{DynamicResource AppBarBackground}"
+                BorderBrush="{DynamicResource SurfaceDivider}"
+                BorderThickness="0,0,0,1"
+                Padding="12,8">
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+            <!-- The logo reuses the About window's treatment (white backing panel so the icon's
+                 black "D" stays visible against the dark theme); it is not a control, only a
+                 named picture with a tooltip. -->
+            <Border Grid.Column="0"
+                    Name="AppLogo"
+                    AutomationProperties.AutomationId="AppLogo"
+                    AutomationProperties.AccessibilityView="Content"
+                    AutomationProperties.Name="AgentControl"
+                    ToolTip.Tip="AgentControl"
+                    Focusable="False"
+                    Background="{DynamicResource LogoBackingBackground}"
+                    CornerRadius="5" Padding="2" Width="28" Height="28"
+                    VerticalAlignment="Center"
+                    Margin="0,0,12,0">
+                <Image Source="avares://DemaConsulting.AgentControl/Assets/AppIcon.ico"
+                       AutomationProperties.AccessibilityView="Raw"
+                       Width="24" Height="24" />
+            </Border>
             <!-- Filter box: substring-filters the recent-repos list by display name/path -->
-            <TextBox Grid.Column="0"
+            <TextBox Grid.Column="1"
                       Name="FilterTextBox"
                       AutomationProperties.AutomationId="FilterTextBox"
                       PlaceholderText="Filter repos..."
                       ToolTip.Tip="Filter the repo list below by name or path"
                       Text="{Binding FilterText, Mode=TwoWay}"
+                      VerticalAlignment="Center"
                       Margin="0,0,8,0" />
-            <Button Grid.Column="1"
+            <Button Grid.Column="2"
                      Name="AddRepoButton"
                      AutomationProperties.AutomationId="AddRepoButton"
                      AutomationProperties.Name="Add a repository"
@@ -62,7 +67,7 @@
                      Margin="0,0,8,0">
                 <materialIcons:MaterialIcon Kind="FolderPlus" />
             </Button>
-            <Button Grid.Column="2"
+            <Button Grid.Column="3"
                      Name="OpenSettingsButton"
                      AutomationProperties.AutomationId="OpenSettingsButton"
                      AutomationProperties.Name="Settings"
@@ -71,7 +76,7 @@
                      Margin="0,0,8,0">
                 <materialIcons:MaterialIcon Kind="Cog" />
             </Button>
-            <Button Grid.Column="3"
+            <Button Grid.Column="4"
                      Name="OpenAboutButton"
                      AutomationProperties.AutomationId="OpenAboutButton"
                      AutomationProperties.Name="About AgentControl"
@@ -80,10 +85,11 @@
                 <materialIcons:MaterialIcon Kind="Information" />
             </Button>
         </Grid>
+        </Border>
 
         <!-- Recent-repos list, with an empty-state placeholder shown instead when there is
              nothing to display (no repos added yet, or the filter matches none). -->
-        <Grid>
+        <Grid Margin="12,8,12,12">
             <!-- Empty state: an intentional, card-like placeholder (icon tile, then the message)
                  instead of loose text floating on the page -->
             <Border Name="EmptyStatePanel"
@@ -694,34 +700,23 @@
                                 </Border>
                             </WrapPanel>
 
-                            <!-- The repo's path with a middle ellipsis: the folder part gives way first (end
-                                 ellipsis) while the last segment - the repo's folder name, which tells
-                                 similar repos apart - is never trimmed. The grid carries the full path as
-                                 its accessible name and tooltip; the two texts are hidden from automation
-                                 so the path is not read twice, in pieces. -->
-                            <Grid Grid.Row="1" Grid.Column="1"
+                            <!-- The repo's path, shortened to fit: the folder part gives way first (end
+                                 ellipsis), the last segment - the repo's folder name, which tells similar
+                                 repos apart - is shown whole while it fits and otherwise gets a middle
+                                 ellipsis that keeps its start and its end. The control carries the full path
+                                 as its accessible name and tooltip; the text it draws is hidden from
+                                 automation so the path is not read twice. -->
+                            <vm:PathEllipsisText Grid.Row="1" Grid.Column="1"
                                    Name="RepoPathText"
                                    AutomationProperties.AutomationId="RepoPathText"
                                    AutomationProperties.AccessibilityView="Content"
                                    AutomationProperties.Name="{Binding RepoPath}"
                                    ToolTip.Tip="{Binding RepoPath}"
-                                   ColumnDefinitions="*,Auto"
+                                   ParentText="{Binding RepoPathParent}"
+                                   LeafText="{Binding RepoPathLeaf}"
                                    HorizontalAlignment="Left"
-                                   Opacity="0.65" Margin="0,6,0,0">
-                                <TextBlock Grid.Column="0"
-                                            Name="RepoPathParentText"
-                                            AutomationProperties.AccessibilityView="Raw"
-                                            Text="{Binding RepoPathParent}"
-                                            TextTrimming="CharacterEllipsis"
-                                            FontSize="12" />
-                                <TextBlock Grid.Column="1"
-                                            Name="RepoPathLeafText"
-                                            AutomationProperties.AccessibilityView="Raw"
-                                            Text="{Binding RepoPathLeaf}"
-                                            TextTrimming="CharacterEllipsis"
-                                            MaxWidth="360"
-                                            FontSize="12" />
-                            </Grid>
+                                   TextElement.FontSize="12"
+                                   Opacity="0.65" Margin="0,6,0,0" />
 
                             <!-- The outcome of the last action (for example a failed Git Pull and
                                  git's reason), so a button that was clicked always shows what happened -->

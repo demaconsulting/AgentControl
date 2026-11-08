@@ -102,8 +102,9 @@ otherwise `UpToDate`. **ShowUpToDateCue** (`HasPinnedPackage && Status == UpToDa
 accessible name "Agent files are up to date" - inside its package chip, so a healthy card says so in words
 without an extra chip or row; it is hidden for every other status so it never contradicts the rest of the card.
 **RepoPathParent** and **RepoPathLeaf** split `RepoPath` at its last separator (the leaf keeps its separator, a
-trailing separator is ignored, and a path without a separator is all leaf): the card shows the parent with an end
-ellipsis and the leaf untrimmed, which reads as a middle ellipsis that keeps the folder name visible.
+trailing separator is ignored, and a path without a separator is all leaf): the card's `PathEllipsisText` shortens the
+parent with an end ellipsis first and the leaf with a middle ellipsis only when it still does not fit, which keeps
+the start and the end of the folder name visible.
 Green, amber, red and grey are only the view's rendering of that value: `StatusText` says
 it in words ("Up to date", "Upgrade available", "Needs attention", "No agent package", "Checking for updates")
 and is the bar's accessible name, and `StatusTooltip` adds the reason (for a problem, the missing folder, the

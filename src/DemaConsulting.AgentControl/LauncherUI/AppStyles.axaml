@@ -33,6 +33,7 @@
                     <SolidColorBrush x:Key="MenuGroupHeaderForeground" Color="#A8A8B4" />
                     <SolidColorBrush x:Key="GroupHeaderForeground" Color="#E6E6EA" />
                     <SolidColorBrush x:Key="SurfaceDivider" Color="#3A3A42" />
+                    <SolidColorBrush x:Key="AppBarBackground" Color="#1B1B1F" />
                     <SolidColorBrush x:Key="ErrorForeground" Color="#FF8A80" />
                     <SolidColorBrush x:Key="WarningForeground" Color="#F2C14E" />
                     <SolidColorBrush x:Key="SuccessForeground" Color="#56D364" />
@@ -134,6 +135,7 @@
                     <SolidColorBrush x:Key="MenuGroupHeaderForeground" Color="#5C5C66" />
                     <SolidColorBrush x:Key="GroupHeaderForeground" Color="#2B2B30" />
                     <SolidColorBrush x:Key="SurfaceDivider" Color="#D0D0D8" />
+                    <SolidColorBrush x:Key="AppBarBackground" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ErrorForeground" Color="#B42318" />
                     <SolidColorBrush x:Key="WarningForeground" Color="#7A4A00" />
                     <SolidColorBrush x:Key="SuccessForeground" Color="#17692D" />
