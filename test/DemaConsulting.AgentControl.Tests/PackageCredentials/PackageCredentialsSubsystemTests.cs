@@ -682,12 +682,14 @@ public class PackageCredentialsSubsystemTests
         var callback = new PackageCredentialCallback(FeedOrigin.Create(FeedIndex), "Feed", store, prompt, logger: logger);
 
         // Act: sign in, commit, and let the library-style messages through the redacting logger
+        // while the credential is in use (it is registered for redaction only until it is
+        // forgotten, so the feed's rejection comes last, as it does after an operation's requests)
         await callback.Callback(FeedIndex, CancellationToken.None);
         await callback.CommitAsync(CancellationToken.None);
-        await callback.RejectAsync(CancellationToken.None);
         var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("svc:" + SentinelPassword));
         logger.LogInformation("GET https://feeds.example.com/v3/index.json?sig={Token}", SentinelPassword);
         logger.LogWarning("Authorization: Basic {Encoded}", encoded);
+        await callback.RejectAsync(CancellationToken.None);
 
         // Assert
         var lines = inner.Snapshot();

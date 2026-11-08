@@ -161,8 +161,8 @@ public class GitCredentialClientTests
             Assert.Contains("GIT_ASKPASS=[]", invocation.Environment, StringComparison.Ordinal);
             Assert.Contains("SSH_ASKPASS=[]", invocation.Environment, StringComparison.Ordinal);
             Assert.Equal(
-                Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar),
-                Path.GetFullPath(invocation.WorkingDirectory).TrimEnd(Path.DirectorySeparatorChar),
+                ResolvePhysicalPath(folder),
+                ResolvePhysicalPath(invocation.WorkingDirectory),
                 ignoreCase: OperatingSystem.IsWindows());
         }
         finally
@@ -675,5 +675,29 @@ public class GitCredentialClientTests
         var path = Path.Combine(Path.GetTempPath(), $"agentcontrol_git_credential_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    /// <summary>
+    ///     Resolves every symbolic link along a directory path, giving the physical path a child
+    ///     process reports as its working directory (on macOS the temp directory <c>/var/...</c> is
+    ///     reached through the <c>/var</c> link to <c>/private/var</c>).
+    /// </summary>
+    /// <param name="directory">The existing directory.</param>
+    /// <returns>The physical path, without a trailing separator.</returns>
+    private static string ResolvePhysicalPath(string directory)
+    {
+        var full = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar);
+        var resolved = Path.GetPathRoot(full) ?? string.Empty;
+        foreach (var part in full[resolved.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            resolved = Path.Combine(resolved, part);
+            var target = new DirectoryInfo(resolved).ResolveLinkTarget(returnFinalTarget: true);
+            if (target is not null)
+            {
+                resolved = target.FullName.TrimEnd(Path.DirectorySeparatorChar);
+            }
+        }
+
+        return resolved;
     }
 }
