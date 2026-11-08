@@ -21,19 +21,25 @@ words:
   - ARGLOGGER
   - arglogger
   - ARGLOGGERSTUB
+  - Argb
   - Avalonia
   - axaml
   - Blockquotes
   - contoso
+  - dwmapi
   - esac
+  - fabrikam
   - favorited
   - findstr
+  - flyouts
   - gitdir
+  - gpgsign
   - headlessly
   - HMAC
   - libsecret
   - lsfiles
   - metacharacters
+  - LTRB
   - Mvvm
   - MVVM
   - Newtonsoft
@@ -47,6 +53,7 @@ words:
   - Inlines
   - inlines
   - renderable
+  - ROOTOWNER
   - buildmark
   - buildtransitive
   - cascadia

@@ -18,6 +18,8 @@ needs-review:
   - "!**/bin/**"                  # Exclude build output
   - "!node_modules/**"            # Exclude npm dependencies
   - "!**/.venv/**"                # Exclude Python virtual environment
+  - "!tools/**"                   # Exclude agent tooling (not shipped, not software items)
+  - "!test/DemaConsulting.AgentControl.Puppet.Tests/**"  # Exclude tooling test project (not shipped)
 
 # Evidence source: review data and index.json are located in the 'reviews' branch
 # of this repository, accessed through the GitHub public HTTPS raw content access.

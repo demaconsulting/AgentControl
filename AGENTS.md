@@ -32,8 +32,11 @@
 │   └── verification/
 ├── src/
 │   └── {project}/
-└── test/
-    └── {test-project}/
+├── test/
+│   ├── {test-project}/
+│   └── DemaConsulting.AgentControl.Puppet.Tests/  # Not shipped: tests of the agent tooling
+└── tools/                                         # Not shipped: agent tooling
+    └── DemaConsulting.AgentControl.Puppet/
 ```
 
 # Language and Spelling (ALL Agents)
@@ -57,6 +60,15 @@ understand software structure, purpose, and relationships. Fall back to
 `docs/design/introduction.md` for the human-facing narrative, folder layout, and
 companion artifact locations, and use it as the primary map when the model doesn't
 yet cover something.
+
+# Driving the AgentControl App (Agent Tooling)
+
+To see or exercise the real AgentControl GUI (UI Automation actions, screenshots of what is drawn), use the
+**AgentControl Puppet**, a stateless CLI (`agentcontrol-puppet`, one action per process). It is agent tooling only: not
+shipped, not a software item (no requirements, design or verification documents, excluded from ReviewMark). Read
+`tools/DemaConsulting.AgentControl.Puppet/README.md` for the commands, the AutomationIds, the isolation (`launch` uses a
+fresh `--config-dir`; `fixture` builds a sandbox with sample packages and a git repo) and the safety rules for the
+commands that send real mouse or keyboard input.
 
 # Key Configuration Files
 

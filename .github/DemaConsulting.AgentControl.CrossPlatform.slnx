@@ -1,10 +1,13 @@
 <!--
   Cross-platform-safe subset of the root DemaConsulting.AgentControl.slnx solution.
 
-  Lists only the four projects that are safe to restore/build/test on every CI OS
+  Lists only the projects that are safe to restore/build/test on every CI OS
   (ubuntu-latest, macos-latest, windows-latest): the main app, the unit test project, the
   FlaUI-based UiTests project (restorable everywhere via EnableWindowsTargeting, though its
-  Windows-only tests self-skip off-Windows), and the ArgLoggerStub helper. It deliberately
+  Windows-only tests self-skip off-Windows), the ArgLoggerStub helper, and the agent-tooling
+  Puppet (agentcontrol-puppet) with its unit tests (both Windows-targeted like UiTests, so
+  restorable and buildable everywhere; their test host only runs on windows-latest, which tests
+  the whole solution - the non-Windows legs test only DemaConsulting.AgentControl.Tests). It deliberately
   excludes DemaConsulting.AgentControl.Msi.wixproj, which needs Windows-only MSI tooling and
   would fail restore/build on non-Windows runners.
 
@@ -38,7 +41,11 @@
   <Folder Name="/test/">
     <Project Path="../test/DemaConsulting.AgentControl.Tests/DemaConsulting.AgentControl.Tests.csproj" />
     <Project Path="../test/DemaConsulting.AgentControl.UiTests/DemaConsulting.AgentControl.UiTests.csproj" />
+    <Project Path="../test/DemaConsulting.AgentControl.Puppet.Tests/DemaConsulting.AgentControl.Puppet.Tests.csproj" />
     <Project Path="../test/DemaConsulting.AgentControl.ArgLoggerStub/DemaConsulting.AgentControl.ArgLoggerStub.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="../tools/DemaConsulting.AgentControl.Puppet/DemaConsulting.AgentControl.Puppet.csproj" />
   </Folder>
 </Solution>
 
