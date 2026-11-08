@@ -14,7 +14,8 @@ window, the settings window, the package-source editor window and the sign-in di
 `AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
 `SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`,
 `FavoriteIconConverter`, `AgentToolKindDisplayNameConverter`, `ThemePreferenceDisplayNameConverter`,
-`RepoCardStatus`, `RepoImageLocator`, `ThirdPartyDependencies`), the shared theme resources and styles
+`RepoCardStatus`, `RepoImageLocator`, `RepoGroupHeaderViewModel`, `RepoGroupKind`, `GroupNameViewModel`,
+`GroupNameWindow`, `CardColorPalette`, `ThirdPartyDependencies`), the shared theme resources and styles
 (`AppStyles.axaml`, included by `App.axaml`), which are folded
 into this subsystem-level description rather than given separate unit files; `ThirdPartyDependencies`
 and `AsyncRelayCommand` are the exceptions with dedicated test files
@@ -31,19 +32,26 @@ requires signed packages, with an automation identifier `PackageSignatureIcon`
 
 ### Interfaces
 
-**MainWindowViewModel.DisplayedRepoCards**: The filtered, sorted collection of repo cards
-shown in the main window.
+**MainWindowViewModel.DisplayedItems**: The filtered, sectioned collection of rows shown in the main
+window: the repo cards interleaved with the `RepoGroupHeaderViewModel` that starts each section.
+(`MainWindowViewModel.DisplayedRepoCards` is the same cards without the headers and without the cards of
+collapsed sections.)
 
-- *Type*: In-process .NET observable collection (data-bound to `MainWindow`'s `ItemsControl`).
+- *Type*: In-process .NET observable collection (data-bound to `MainWindow`'s `ListBox`, which picks the
+  header or the card template by row type).
 - *Role*: Provider.
-- *Contract*: Reflects `AddRepo`/`RemoveRepo` mutations, `FilterText` changes, and sort order
-  (favorites first, then most-recently-launched descending with never-launched last)
-  (`AgentControl-LauncherUI-RecentReposDisplay`, `AgentControl-LauncherUI-SearchFilter`,
-  `AgentControl-LauncherUI-SortOrder`).
-- *Constraints*: Recomputed synchronously on the UI thread whenever a dependency changes.
+- *Contract*: Reflects `AddRepo`/`RemoveRepo` mutations, `FilterText` changes, grouping changes and sort
+  order. With no repo in a group it is flat: favorites first, then most-recently-launched descending
+  with never-launched last. Once a repo is in a group it is sectioned - Favorites (a favorite only
+  there), the user's groups alphabetically, Ungrouped - with collapsible sections that a filter shows in
+  full (`AgentControl-LauncherUI-RecentReposDisplay`, `AgentControl-LauncherUI-SearchFilter`,
+  `AgentControl-LauncherUI-SortOrder`, `AgentControl-LauncherUI-RepoGroups`).
+- *Constraints*: Recomputed synchronously on the UI thread whenever a dependency changes, updating the
+  collection in place so unchanged rows keep their controls.
 
 **RepoCardViewModel's action commands**: `LaunchCommand`, `PullCommand`,
-`SelectPackageCommand`, `UpgradeCommand`, `FavoriteToggleCommand`, `RemoveCommand`.
+`SelectPackageCommand`, `UpgradeCommand`, `FavoriteToggleCommand`, `RemoveCommand`,
+`NewGroupCommand`, `RemoveFromGroupCommand`.
 
 - *Type*: In-process .NET `ICommand` (`AsyncRelayCommand` for the operations that read a
   package source or the file system - Launch, Pull, Upgrade, Refresh - and `RelayCommand` for the
@@ -300,9 +308,43 @@ path. The tile shows the repo's own `icon.png`/`logo.png` when it has one (see `
 the repo name's initials on a color chosen by a deterministic hash of the repo path, otherwise a folder glyph.
 The **...** menu is grouped: *Repository* (**Git Pull**, with its enablement rules and its explanatory tooltip
 shown even while it is disabled, and **Refresh**), *Agent files* (**Select Package...** or **Upgrade to
-x.y.z**, whichever applies; the group is hidden when neither does) and **Remove from list**. The upgrade
+x.y.z**, whichever applies; the group is hidden when neither does), *Organize* (**Move to group** and
+**Card color...**) and **Remove from list**. The upgrade
 chip is a button that runs the same `UpgradeCommand` as the menu's Upgrade item
 (`AgentControl-RepoCardViewModel-UpgradeFromChip`).
+
+**Repo groups and card colors (user-specific).** Both are personal organizing choices stored only in the user's
+own settings file (on the repo's `RecentRepo`, and the collapsed section names in `AppSettings`), never in the
+repository or its `.agentcontrol.json` (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`).
+*Sections.* The list is a single `ListBox` over `MainWindowViewModel.DisplayedItems` with two row templates: a
+repo card, and a section header - one flat button (chevron, icon, name, count chip) that collapses or expands the
+section, plus, for the user's own groups, a "..." menu with **Rename group...** and **Remove group**. The header
+button's accessible name says the section, its count and its state (`Work, 2 repos, collapsed`). A decision
+made here: a favorite repo is listed **only** under *Favorites* (not a second time under its group), so every
+repo appears once and the counts add up; its card shows its group as a chip so the user can still see where it
+belongs, and it returns to its group when it stops being a favorite. When no repo is in a group the list has no
+headers at all and looks as it did before groups existed. While the filter box has text every section is shown
+expanded and sections without a match disappear, so a match can never be hidden by a collapsed group; the
+headers' toggles are disabled then, with a tooltip that says why.
+*Move to group.* The submenu depends on the groups that exist when the menu opens, which a XAML template cannot
+express as one list mixing groups and commands, so `MainWindow`'s code-behind fills it in the flyout's `Opening`
+event (a check mark on the repo's own group, a separator, **New group...**, and **Remove from group** for a
+grouped repo); the choices run `RepoCardViewModel.MoveToGroup` and its commands. Group names are shown in
+text blocks, so an underscore is not taken as an access key. **New group...** and **Rename group...** show the
+small `GroupNameWindow`, whose `GroupNameViewModel` validates while the user types (blank, longer than 40
+characters, and the built-in names *Favorites* and *Ungrouped* are refused; a duplicate is refused when renaming and
+joins the existing group, with a note, when creating); **Remove group** asks for a confirmation that says
+nothing on disk or in any repository changes.
+*Card color.* **Card color...** opens a small palette pop-up (an attached `Flyout` on the "..." button) with one
+round swatch per `CardColorPalette` entry - the same ten theme-aware avatar colors the automatic color is drawn
+from - plus **Automatic**. Each swatch has an AutomationId (`CardColorSwatch_<Name>`), its name as tooltip and
+accessible name,
+and the chosen one shows a check mark and a ring, so the choice is not carried by color alone. The color goes only to
+the avatar tile (palette style classes `avatar0` ... `avatar9`, driven by bindings on the card's `AvatarStyleClass`);
+the status accent bar and chips are unaffected. A repo that shows its own picture keeps the tile's light backing
+so a logo drawn for a white page stays legible, and the chosen color is drawn as a ring around the picture. The
+letters on every palette color use whichever of white and near-black reads better on that fill in each theme,
+at least 4.5:1 (`ThemeResourceTests` checks every entry in both themes).
 
 **Settings window package-source actions.** One **Add** button opens a menu with the source types that can be
 added (zip-package folder, NuGet-package folder, NuGet-package server), each with its type's icon (the one

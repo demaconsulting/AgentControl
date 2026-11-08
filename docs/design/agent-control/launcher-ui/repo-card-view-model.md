@@ -101,10 +101,34 @@ nothing to offer.
 of the first two words of `RepoName` (words are runs of letters and digits, so `alpha-service` gives `AS`), or
 one letter for a one-word name, and **HasAvatarInitials** is `false` when the name has none (the view then shows
 a folder glyph). **AvatarColorIndex** (and **AvatarStyleClass**, `avatar0` ... `avatar9`) picks one of
-`AvatarPaletteSize` palette entries with a 32-bit FNV-1a hash of the repo path compared without regard to case or
+`AvatarPaletteSize` palette entries: the color the user chose (**CardColorName**) when there is one, otherwise a
+32-bit FNV-1a hash of the repo path compared without regard to case or
 a trailing separator; `string.GetHashCode` is deliberately not used because it is randomized per process, which
 would change a repo's color on every launch. The view model carries no color: the style class selects theme-aware
 `AvatarBackgroundN`/`AvatarForegroundN` resources (letter color chosen for contrast) from `AppStyles.axaml`.
+
+**Group and card color** (user-specific; stored only on the repo's `RecentRepo` in the per-user settings, never in
+the repository or its pin file). **GroupName** reads the stored name through `RepoGroupName.Sanitize` (a blank,
+overlong or reserved stored value yields a valid name or none), **HasGroup** is `GroupName is not null`, and
+**ShowGroupChip** (`IsFavorite && HasGroup`) tells the card to show its group as a chip - needed only for a favorite,
+because a favorite is listed under Favorites instead of under its group. **MoveToGroup(name)** moves the repo into a
+group or, with `null`/blank, out of every group: the name is cleaned up, refused (returns `false`, nothing changes)
+when `RepoGroupName.Validate` fails (too long, or *Favorites*/*Ungrouped*), and given the spelling of an existing
+group that matches ignoring letter case (`GetExistingGroupNames()`, from the groups of all repos in the live
+settings); a real change raises `GroupChanged` for `MainWindowViewModel` to persist and re-section
+(`AgentControl-RepoCardViewModel-MoveToGroup`). **NewGroupCommand** raises `NewGroupRequested` (the view shows the
+name prompt and calls `MoveToGroup`); **RemoveFromGroupCommand** (available while `HasGroup`) calls
+`MoveToGroup(null)`. **CardColorName** is the palette color's name read through `CardColorPalette.Find` - a missing,
+blank or unknown stored name gives `null`, the automatic color (**HasCustomCardColor**, **IsCardColorAutomatic**) -
+and **SetCardColor(name)** stores a palette name (letter case ignored; refused with `false` when not in the palette)
+or `null` for Automatic, raises `CardColorChanged`, and changes `AvatarColorIndex`/`AvatarStyleClass`. Only the tile
+changes: **Status**, the accent bar and every chip are independent of the color
+(`AgentControl-RepoCardViewModel-CardColor`). `CardColorPalette` is a small static helper of this unit: ten named
+entries (Blue, Violet, Magenta, Green, Amber, Teal, Orange, Indigo, Red, Lime) whose position is the index of the
+theme-aware `AvatarBackgroundN`/`AvatarForegroundN` resources, so a chosen color is the same palette the automatic
+colors come from. Where the repo shows its own picture the tile keeps its light backing (so a logo drawn for a
+white page stays legible) and a chosen color is drawn as a 3 px ring around the picture (the `customColor`
+class); with no picture the color fills the tile and the letters use the entry's foreground resource.
 
 **Repo picture** (`AgentControl-RepoCardViewModel-RepoPicture`): **RepoImage** (`Bitmap?`), **HasRepoImage**,
 **ShowAvatarInitials** and **ShowAvatarFolderGlyph** tell the tile what to show. `RefreshCheap` starts
@@ -182,7 +206,8 @@ AGENTS.md accept/decline), mirroring the logging convention already established 
 and `AgentToolLauncher`. Every call site is guarded by `_logger.IsEnabled(...)`.
 
 **LaunchCommand, PullCommand, UpgradeCommand, RefreshCommand**: `AsyncRelayCommand`;
-**SelectPackageCommand, FavoriteToggleCommand, RemoveCommand, CancelOperationCommand**:
+**SelectPackageCommand, FavoriteToggleCommand, RemoveCommand, CancelOperationCommand, NewGroupCommand,
+RemoveFromGroupCommand**:
 `RelayCommand` — see Interfaces in `docs/design/agent-control/launcher-ui.md`.
 
 #### Key Methods
@@ -392,10 +417,14 @@ throwing (it never calls `RepoPinStore`, so `InvalidOperationException` cannot o
 from `RepoPinStore.Load`/`Save` and likewise raises `ErrorOccurred` rather than throwing. The
 constructor throws `ArgumentNullException` for a null `recentRepo`, `getSettings`, or
 `packageVersionCache`. `ApplySelectedPackageAsync` throws `ArgumentNullException` for a null
-`selection`.
+`selection`. `MoveToGroup` and `SetCardColor` never throw: a name that is not valid, or not a palette color, is
+refused by returning `false` and changing nothing, and stored values that are missing, blank or unknown read as
+"no group" and the automatic color (`GroupName` is sanitized on every read).
 
 #### Dependencies
 
+- **RepoGroupName** (`Settings` subsystem) — cleans up, validates and repairs group names, and unifies the
+  spelling of groups that differ only in letter case.
 - **RepoPinStore** (`RepoConfig` subsystem) — reads/writes the repo's pin.
 - **PackageSourceRegistry**, **IPackageSourceProvider**, **PackageVersionCache**,
   **DiscoveredPackage**, **PackageSourceAccessException** (`AgentPackageManagement` subsystem) — source
@@ -429,9 +458,11 @@ constructor throws `ArgumentNullException` for a null `recentRepo`, `getSettings
 #### Callers
 
 - **MainWindowViewModel** — constructs one `RepoCardViewModel` per `RecentRepo` and subscribes
-  to `FavoriteChanged`/`LaunchRecorded` to persist settings and re-sort the displayed list.
+  to `FavoriteChanged`/`GroupChanged`/`CardColorChanged`/`LaunchRecorded` to persist settings and
+  re-sort/re-section the displayed list.
 - **MainWindow** (code-behind) — subscribes to `RemoveRequested`
-  (`AgentControl-RepoCardViewModel-RemoveRequest`), `SelectPackageRequested`,
+  (`AgentControl-RepoCardViewModel-RemoveRequest`), `SelectPackageRequested`, `NewGroupRequested`,
   `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, and `ErrorOccurred` to drive
   dialogs/windows, calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the
-  `ConfirmationWindow` shown for the AGENTS.md template offer.
+  `ConfirmationWindow` shown for the AGENTS.md template offer, `MoveToGroup` from the card menu's
+  "Move to group" entries and the name prompt, and `SetCardColor` from the color palette pop-up.

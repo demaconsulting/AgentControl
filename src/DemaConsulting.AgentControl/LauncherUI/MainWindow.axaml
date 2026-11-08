@@ -114,9 +114,85 @@
                       Classes="repoList"
                       Margin="-8,0,-8,0"
                       IsVisible="{Binding !HasNoDisplayedRepos}"
-                      ItemsSource="{Binding DisplayedRepoCards}">
-            <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="vm:RepoCardViewModel">
+                      ItemsSource="{Binding DisplayedItems}">
+            <!-- The list holds two kinds of rows: a section header (when repos are grouped) and a
+                 repo card. Each has its own template, chosen by the row's type. -->
+            <ListBox.DataTemplates>
+                <DataTemplate DataType="vm:RepoGroupHeaderViewModel" x:DataType="vm:RepoGroupHeaderViewModel">
+                    <!-- Section header: one flat button (chevron, icon, name, count) collapses or
+                         expands the section; a user's own group also has a "..." menu to rename
+                         or remove it. The accessible name says the section, its count and its state. -->
+                    <Grid Name="GroupHeader" ColumnDefinitions="*,Auto" Margin="0,8,0,0">
+                        <Button Grid.Column="0"
+                                 Name="GroupHeaderToggleButton"
+                                 AutomationProperties.AutomationId="GroupHeaderToggleButton"
+                                 AutomationProperties.Name="{Binding AccessibleName}"
+                                 Classes="groupToggle"
+                                 HorizontalAlignment="Left"
+                                 Command="{Binding ToggleCommand}"
+                                 ToolTip.Tip="{Binding ToggleTooltip}"
+                                 ToolTip.ShowOnDisabled="True">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <materialIcons:MaterialIcon Classes="chevron" Kind="ChevronDown" Width="18" Height="18"
+                                                              IsVisible="{Binding IsExpanded}" />
+                                <materialIcons:MaterialIcon Classes="chevron" Kind="ChevronRight" Width="18" Height="18"
+                                                              IsVisible="{Binding IsCollapsed}" />
+                                <materialIcons:MaterialIcon Kind="Star" Width="16" Height="16"
+                                                              Foreground="{DynamicResource FavoriteStarForeground}"
+                                                              IsVisible="{Binding IsFavoritesSection}" />
+                                <materialIcons:MaterialIcon Kind="Folder" Width="16" Height="16"
+                                                              IsVisible="{Binding IsUserGroup}" />
+                                <materialIcons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
+                                                              IsVisible="{Binding IsUngroupedSection}" />
+                                <TextBlock Name="GroupHeaderNameText"
+                                            AutomationProperties.AutomationId="GroupHeaderNameText"
+                                            Text="{Binding Name}"
+                                            FontWeight="SemiBold" FontSize="14"
+                                            MaxWidth="360" TextTrimming="CharacterEllipsis"
+                                            VerticalAlignment="Center" />
+                                <Border Classes="Chip grey" ToolTip.Tip="{Binding CountTooltip}">
+                                    <TextBlock Name="GroupHeaderCountText"
+                                                AutomationProperties.AutomationId="GroupHeaderCountText"
+                                                Text="{Binding Count}" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Grid.Column="1"
+                                 Name="GroupHeaderMenuButton"
+                                 AutomationProperties.AutomationId="GroupHeaderMenuButton"
+                                 AutomationProperties.Name="{Binding Name, StringFormat='Actions for group {0}'}"
+                                 Classes="iconGhost"
+                                 Margin="0,0,15,0"
+                                 IsVisible="{Binding IsUserGroup}"
+                                 ToolTip.Tip="Rename or remove this group">
+                            <materialIcons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
+                            <Button.Flyout>
+                                <MenuFlyout>
+                                    <MenuItem Name="RenameGroupMenuItem"
+                                               AutomationProperties.AutomationId="RenameGroupMenuItem"
+                                               Header="Rename group..."
+                                               ToolTip.Tip="Give this group a different name"
+                                               Command="{Binding RenameCommand}">
+                                        <MenuItem.Icon>
+                                            <materialIcons:MaterialIcon Kind="Pencil" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Name="RemoveGroupMenuItem"
+                                               AutomationProperties.AutomationId="RemoveGroupMenuItem"
+                                               Header="Remove group"
+                                               ToolTip.Tip="Remove this group; its repos stay in the list, ungrouped"
+                                               Command="{Binding RemoveGroupCommand}">
+                                        <MenuItem.Icon>
+                                            <materialIcons:MaterialIcon Kind="FolderRemove" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+                    </Grid>
+                </DataTemplate>
+                <DataTemplate DataType="vm:RepoCardViewModel" x:DataType="vm:RepoCardViewModel">
                     <Border Classes="RepoCard"
                              AttachedToVisualTree="RepoCard_AttachedToVisualTree">
                         <!-- Accent bar (overall status) | card body -->
@@ -203,10 +279,11 @@
                                     <materialIcons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
                                     <Button.Flyout>
                                         <!-- Grouped menu: Repository (Git Pull, Refresh), Agent files (Select
-                                             Package or Upgrade, whichever applies), then Remove. The group
+                                             Package or Upgrade, whichever applies), Organize (Move to group,
+                                             Card color), then Remove. The group
                                              headers are disabled items (not interactive, skipped by the
                                              keyboard) styled as small captions. -->
-                                        <MenuFlyout>
+                                        <MenuFlyout Opening="CardMenu_Opening">
                                             <MenuItem Classes="groupHeader" IsEnabled="False" Focusable="False"
                                                        Header="Repository" />
                                             <MenuItem Name="PullButton"
@@ -253,6 +330,28 @@
                                                 </MenuItem.Icon>
                                             </MenuItem>
                                             <Separator />
+                                            <MenuItem Classes="groupHeader" IsEnabled="False" Focusable="False"
+                                                       Header="Organize" />
+                                            <!-- The submenu's entries (the groups, New group, Remove from group)
+                                                 are filled in when the menu opens: see CardMenu_Opening -->
+                                            <MenuItem Name="MoveToGroupMenuItem"
+                                                       AutomationProperties.AutomationId="MoveToGroupMenuItem"
+                                                       Header="Move to group"
+                                                       ToolTip.Tip="Put this repo in one of your groups, or start a new group (stored only in your AgentControl settings, never in the repository)">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="FolderMultipleOutline" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <MenuItem Name="CardColorMenuItem"
+                                                       AutomationProperties.AutomationId="CardColorMenuItem"
+                                                       Header="Card color..."
+                                                       ToolTip.Tip="Choose the color of this repo's tile (stored only in your AgentControl settings; the status bar keeps its colors)"
+                                                       Click="CardColorMenuItem_Click">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="Palette" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <Separator />
                                             <MenuItem Name="RemoveMenuItem"
                                                        AutomationProperties.AutomationId="RemoveMenuItem"
                                                        Header="Remove from list"
@@ -264,6 +363,108 @@
                                             </MenuItem>
                                         </MenuFlyout>
                                     </Button.Flyout>
+
+                                    <!-- Card color palette: a small pop-up under the "..." button, opened by
+                                         the menu's "Card color..." item (see CardColorMenuItem_Click). The
+                                         swatches are the avatar palette in the current theme, "Automatic"
+                                         goes back to the color derived from the repo path. -->
+                                    <FlyoutBase.AttachedFlyout>
+                                        <Flyout Placement="BottomEdgeAlignedRight">
+                                            <StackPanel Name="CardColorPalette"
+                                                         AutomationProperties.AutomationId="CardColorPalette"
+                                                         AutomationProperties.AccessibilityView="Content"
+                                                         AutomationProperties.Name="Card color palette"
+                                                         Spacing="10">
+                                                <TextBlock Text="Card color" FontWeight="SemiBold" />
+                                                <UniformGrid Columns="5">
+                                                    <Button Classes="swatch avatar0" Margin="3" Tag="Blue"
+                                                             Classes.selected="{Binding CardColorName, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=Blue}"
+                                                             AutomationProperties.AutomationId="CardColorSwatch_Blue"
+                                                             AutomationProperties.Name="Blue"
+                                                             ToolTip.Tip="Blue" Click="CardColorSwatch_Click">
+                                                        <materialIcons:MaterialIcon Kind="Check" />
+                                                    </Button>
+                                                    <Button Classes="swatch avatar1" Margin="3" Tag="Violet"
+                                                             Classes.selected="{Binding CardColorName, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=Violet}"
+                                                             AutomationProperties.AutomationId="CardColorSwatch_Violet"
+                                                             AutomationProperties.Name="Violet"
+                                                             ToolTip.Tip="Violet" Click="CardColorSwatch_Click">
+                                                        <materialIcons:MaterialIcon Kind="Check" />
+                                                    </Button>
+                                                    <Button Classes="swatch avatar2" Margin="3" Tag="Magenta"
+                                                             Classes.selected="{Binding CardColorName, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=Magenta}"
+                                                             AutomationProperties.AutomationId="CardColorSwatch_Magenta"
+                                                             AutomationProperties.Name="Magenta"
+                                                             ToolTip.Tip="Magenta" Click="CardColorSwatch_Click">
+                                                        <materialIcons:MaterialIcon Kind="Check" />
+                                                    </Button>
+                                                    <Button Classes="swatch avatar3" Margin="3" Tag="Green"
+                                                             Classes.selected="{Binding CardColorName, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=Green}"
+                                                             AutomationProperties.AutomationId="CardColorSwatch_Green"
+                                                             AutomationProperties.Name="Green"
+                                                             ToolTip.Tip="Green" Click="CardColorSwatch_Click">
+                                                        <materialIcons:MaterialIcon Kind="Check" />
+                                                    </Button>
+                                                    <Button Classes="swatch avatar4" Margin="3" Tag="Amber"
+                                                             Classes.selected="{Binding CardColorName, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=Amber}"
+                                                             AutomationProperties.AutomationId="CardColorSwatch_Amber"
+                                                             AutomationProperties.Name="Amber"
+                                                             ToolTip.Tip="Amber" Click="CardColorSwatch_Click">
+                                                        <materialIcons:MaterialIcon Kind="Check" />
+                                                    </Button>
+                                                    <Button Classes="swatch avatar5" Margin="3" Tag="Teal"
+                                                             Classes.selected="{Binding CardColorName, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=Teal}"
+                                                             AutomationProperties.AutomationId="CardColorSwatch_Teal"
+                                                             AutomationProperties.Name="Teal"
+                                                             ToolTip.Tip="Teal" Click="CardColorSwatch_Click">
+                                                        <materialIcons:MaterialIcon Kind="Check" />
+                                                    </Button>
+                                                    <Button Classes="swatch avatar6" Margin="3" Tag="Orange"
+                                                             Classes.selected="{Binding CardColorName, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=Orange}"
+                                                             AutomationProperties.AutomationId="CardColorSwatch_Orange"
+                                                             AutomationProperties.Name="Orange"
+                                                             ToolTip.Tip="Orange" Click="CardColorSwatch_Click">
+                                                        <materialIcons:MaterialIcon Kind="Check" />
+                                                    </Button>
+                                                    <Button Classes="swatch avatar7" Margin="3" Tag="Indigo"
+                                                             Classes.selected="{Binding CardColorName, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=Indigo}"
+                                                             AutomationProperties.AutomationId="CardColorSwatch_Indigo"
+                                                             AutomationProperties.Name="Indigo"
+                                                             ToolTip.Tip="Indigo" Click="CardColorSwatch_Click">
+                                                        <materialIcons:MaterialIcon Kind="Check" />
+                                                    </Button>
+                                                    <Button Classes="swatch avatar8" Margin="3" Tag="Red"
+                                                             Classes.selected="{Binding CardColorName, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=Red}"
+                                                             AutomationProperties.AutomationId="CardColorSwatch_Red"
+                                                             AutomationProperties.Name="Red"
+                                                             ToolTip.Tip="Red" Click="CardColorSwatch_Click">
+                                                        <materialIcons:MaterialIcon Kind="Check" />
+                                                    </Button>
+                                                    <Button Classes="swatch avatar9" Margin="3" Tag="Lime"
+                                                             Classes.selected="{Binding CardColorName, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=Lime}"
+                                                             AutomationProperties.AutomationId="CardColorSwatch_Lime"
+                                                             AutomationProperties.Name="Lime"
+                                                             ToolTip.Tip="Lime" Click="CardColorSwatch_Click">
+                                                        <materialIcons:MaterialIcon Kind="Check" />
+                                                    </Button>
+                                                </UniformGrid>
+                                                <Button Name="CardColorAutomaticButton"
+                                                         AutomationProperties.AutomationId="CardColorAutomaticButton"
+                                                         Classes="actionButton secondary"
+                                                         Tag=""
+                                                         HorizontalAlignment="Stretch"
+                                                         ToolTip.Tip="Use the color AgentControl derives from this repo's path"
+                                                         Click="CardColorSwatch_Click">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <materialIcons:MaterialIcon Kind="AutoFix" Width="16" Height="16" />
+                                                        <TextBlock Text="Automatic" VerticalAlignment="Center" />
+                                                        <materialIcons:MaterialIcon Kind="Check" Width="16" Height="16"
+                                                                                      IsVisible="{Binding IsCardColorAutomatic}" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </StackPanel>
+                                        </Flyout>
+                                    </FlyoutBase.AttachedFlyout>
                                 </Button>
                             </StackPanel>
 
@@ -275,17 +476,28 @@
                                    RowDefinitions="Auto,Auto,Auto,Auto">
 
                             <!-- Avatar: the repo's own picture (root icon.png or logo.png) letterboxed on
-                                 the tile, else its initials on a stable per-repo color (the color class
-                                 is applied by RepoAvatar_DataContextChanged), else a folder glyph when
-                                 the name has no letters or digits -->
+                                 the tile, else its initials on the tile color (the color the user chose,
+                                 else a stable per-repo color), else a folder glyph when the name has no
+                                 letters or digits. The palette class (avatar0..avatar9) selects the
+                                 theme-aware fill and letter colors; exactly one is on at a time. A chosen
+                                 color shows as a ring around a picture (customColor). -->
                             <Border Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
                                      Name="RepoAvatar"
                                      Classes="Avatar"
                                      Classes.hasImage="{Binding HasRepoImage}"
+                                     Classes.customColor="{Binding HasCustomCardColor}"
+                                     Classes.avatar0="{Binding AvatarStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=avatar0}"
+                                     Classes.avatar1="{Binding AvatarStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=avatar1}"
+                                     Classes.avatar2="{Binding AvatarStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=avatar2}"
+                                     Classes.avatar3="{Binding AvatarStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=avatar3}"
+                                     Classes.avatar4="{Binding AvatarStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=avatar4}"
+                                     Classes.avatar5="{Binding AvatarStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=avatar5}"
+                                     Classes.avatar6="{Binding AvatarStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=avatar6}"
+                                     Classes.avatar7="{Binding AvatarStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=avatar7}"
+                                     Classes.avatar8="{Binding AvatarStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=avatar8}"
+                                     Classes.avatar9="{Binding AvatarStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=avatar9}"
                                      VerticalAlignment="Top" HorizontalAlignment="Left"
-                                     ClipToBounds="True"
-                                     DataContextChanged="RepoAvatar_DataContextChanged"
-                                     AttachedToVisualTree="RepoAvatar_AttachedToVisualTree">
+                                     ClipToBounds="True">
                                 <Panel>
                                     <Image Name="RepoAvatarImage"
                                             AutomationProperties.AutomationId="RepoAvatarImage"
@@ -403,6 +615,21 @@
                                     </StackPanel>
                                 </Border>
 
+                                <!-- The user's group: shown on favorites only, because a favorite is listed
+                                     under Favorites instead of under its group -->
+                                <Border Name="GroupChip"
+                                         Classes="Chip"
+                                         IsVisible="{Binding ShowGroupChip}"
+                                         ToolTip.Tip="{Binding GroupName, StringFormat='In the group {0}. Favorites are listed under Favorites; unfavorite this repo to list it under its group.'}">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <materialIcons:MaterialIcon Kind="FolderOutline" />
+                                        <TextBlock Name="GroupChipText"
+                                                    AutomationProperties.AutomationId="GroupChipText"
+                                                    Text="{Binding GroupName}"
+                                                    MaxWidth="140" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </Border>
+
                                 <!-- Status chips: amber asks for attention, red reports a problem -->
                                 <Border Name="DirtyWorkingTreeChip"
                                          Classes="Chip amber"
@@ -502,7 +729,7 @@
                         </Grid>
                     </Border>
                 </DataTemplate>
-            </ListBox.ItemTemplate>
+            </ListBox.DataTemplates>
             </ListBox>
         </Grid>
     </DockPanel>

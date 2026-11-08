@@ -68,7 +68,8 @@ Each repo card shows:
 - The "..." menu is grouped. **Repository**: **Git Pull** (see *Pulling Changes*) and **Refresh** (re-checks
   the repo's git state, upgrade status and committed-agent-files chip without waiting for the next app
   launch). **Agent files**: **Select Package...** or **Upgrade to x.y.z** (mutually exclusive — see below;
-  the group is hidden when neither applies). Then **Remove from list**.
+  the group is hidden when neither applies). **Organize**: **Move to group** and **Card color...** (see
+  *Organizing Repos with Groups* and *Choosing a Card Color*). Then **Remove from list**.
 
 Removing a repo from the list prompts for confirmation first, since it is a destructive
 action against AgentControl's own recent-repos state (it does not touch the repository
@@ -83,6 +84,49 @@ choose **Refresh** in the card's "..." menu, and shows it, scaled down, inside t
 transparent logo is centered on a light background so it stays tidy). A repository can be untrusted, so the
 picture is only used when it is a plain file (not a link) of at most 1 MB that really is a PNG image of a
 reasonable size; anything else is ignored and the colored tile stays. Pictures in folders below the root are never used.
+
+## Organizing Repos with Groups
+
+When you track many repos, put related ones into **groups** of your own. Groups (and the card colors below) are
+personal: they are stored only in your own AgentControl settings file and are never written to a repository or to its
+`.agentcontrol.json`, so they are not shared with anyone through git, and a repo is in at most one group.
+
+1. Open the repo card's "..." menu and choose **Organize > Move to group**.
+2. Pick one of your existing groups (the repo's current group has a check mark), or choose **New group...**. The
+   small prompt checks the name as you type: it must not be blank, may have up to 40 characters, and may not be
+   **Favorites** or **Ungrouped** (those are the built-in sections). Typing the name of an existing group in
+   another letter case simply adds the repo to that group. **Create** stays disabled until the name is usable.
+3. To take a repo out of its group, choose **Remove from group** in the same submenu.
+
+As soon as one repo is in a group the list is shown in **sections**, each with a header that shows the section's
+name and how many repos it holds:
+
+- **Favorites** comes first and holds your starred repos. A favorite is listed **only** here, not again under its
+  group, so every repo appears once; its card shows its group as a small chip, and it returns to its group when you
+  remove the star.
+- Then come **your groups**, alphabetically (letter case ignored), and finally **Ungrouped**, the repos in no group.
+  A section with no repo has no header. Within a section the most recently launched repo comes first.
+
+Click a header (its chevron, name or count) to **collapse** or **expand** the section; AgentControl remembers which
+sections you collapsed. A group's header also has a "..." menu: **Rename group...** (the same prompt; another
+group's name is refused) and **Remove group**, which asks for confirmation and leaves the group's repos in the
+list, ungrouped. Nothing on disk changes.
+
+The **filter box** always searches all repos: while it has text, every section is shown expanded and a section
+without a match disappears, so a repo is never hidden inside a collapsed group; clear the filter and your collapsed
+sections are back as you left them (the headers' toggles are disabled while filtering). While no repo is in a group
+there are no headers at all, and favorites simply come first.
+
+## Choosing a Card Color
+
+Choose **Organize > Card color...** in a card's "..." menu to color that repo's tile. A small palette opens under
+the "..." button with ten colors (blue, violet, magenta, green, amber, teal, orange, indigo, red and lime) that look
+right in both the light and the dark theme; the chosen one shows a check mark. **Automatic** goes back to the color
+AgentControl derives from the repo's path. The letters on the tile are white or near-black, whichever is easier to
+read on that color (at least 4.5:1 contrast in both themes). A repo that shows its own picture (see *Giving a Repo a
+Card Icon*) keeps the picture's light backing so the picture stays legible, and the color appears as a ring around
+it. The **status bar** on the card's left edge never changes with the color: green, amber, red and grey keep their
+meaning.
 
 ## Reading the Chips
 

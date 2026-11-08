@@ -39,6 +39,8 @@ invocations are not parallelized with other tests using real process launches).
   user starts may ask once, and the credential is then remembered for the session.
 - The signature shield and its tooltip appear only for a pinned NuGet source that requires signed packages and follow
   a change of that requirement.
+- A repo moves into, between and out of groups under the group-name rules, an unknown stored color reads as
+  the automatic color, and a chosen color never changes the card's status.
 
 #### Test Scenarios
 
@@ -364,3 +366,29 @@ hidden, light backing) for the repo that has one and the initials for the one th
 tested by the `RepoImageLocator_Find_*` and `RepoImageLocator_Decode_*` tests of `RepoImageLocatorTests.cs` and the
 `RepoCardViewModel_RepoImage_*` and `MainWindow_RepoCard_AvatarShowsRepoPictureWhenPresent` tests of
 `RepoCardImageTests.cs`, covering `AgentControl-RepoCardViewModel-RepoPicture`.
+
+**RepoCardViewModel_MoveToGroup_RulesEventsAndGroupChip**: Tested by `RepoCardColorTests.cs` and
+`RepoGroupingTests.cs` (cards are built over a settings entry, without a refresh, so no git is started for
+`RepoCardColorTests`). A blank stored group reads as no group and the existing groups of the settings are
+listed; moving into a group whose name matches an existing one in another letter case adopts the existing
+spelling and raises the change event once; the remove command is available only while the repo is in a group
+and takes it out; names that are too long or are *Favorites* or *Ungrouped* are refused without any change; a
+valid name is cleaned up and persisted to the settings only; the new-group command only raises its request; and
+the group chip shows only for a favorite that has a group. This scenario is tested by
+`RepoCardViewModel_MoveToGroup_UpdatesGroupAndRaisesChange`,
+`RepoCardViewModel_NewGroupCommand_RaisesRequest_AndChipShowsForGroupedFavorites` and
+`RepoCardViewModel_MoveToGroup_NewExistingInvalidAndRemove`, covering
+`AgentControl-RepoCardViewModel-MoveToGroup`.
+
+**RepoCardViewModel_CardColor_ChooseResetRefuseAndFallBack**: The palette has one entry per avatar palette
+index with distinct names, and finds a stored name ignoring case and white space (a blank, null or unknown name
+means the automatic color); a card with no choice uses the path-hash color; choosing "tEaL" stores `Teal`, moves
+the palette index and style class, raises the change event once (choosing the same color again raises nothing)
+and choosing Automatic returns to the hash color and clears the value; an unknown name is refused and changes
+nothing; an unknown stored name reads as Automatic; and the card's status, status text and status tooltip are
+the same before and after a color is chosen. This scenario is tested by
+`CardColorPalette_All_MatchesTheAvatarPalette`, `CardColorPalette_Find_ToleratesAnyStoredValue`,
+`RepoCardViewModel_CardColor_Default_IsAutomatic`, `RepoCardViewModel_SetCardColor_ChoosesAndClearsColor`,
+`RepoCardViewModel_SetCardColor_UnknownName_IsRefused`,
+`RepoCardViewModel_CardColor_UnknownStoredValue_FallsBackToAutomatic` and
+`RepoCardViewModel_SetCardColor_DoesNotChangeStatus`, covering `AgentControl-RepoCardViewModel-CardColor`.

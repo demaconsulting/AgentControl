@@ -12,7 +12,9 @@ The `LauncherUI` subsystem is verified by the combined unit tests of its six uni
 command, which together
 exercise the full recent-repos/card/select-package/settings/sign-in interaction surface without ever
 constructing an Avalonia `Window`. The windows themselves are exercised by headless Avalonia tests
-(`DialogWindowTests.cs`, `MainWindowTests.cs`, `SettingsWindowServerSourceTests.cs` for the Settings
+(`DialogWindowTests.cs`, `MainWindowTests.cs`, `RepoGroupWindowTests.cs` for the group headers, the card menu's
+"Move to group" submenu, the group-name prompt and the card color palette pop-up,
+`SettingsWindowServerSourceTests.cs` for the Settings
 window, the source editor window and its connection test, `SourceEditorSignatureWindowTests.cs` for the signature
 section and "Forget saved sign-in" of the source editor, `RepoCardSignatureTests.cs` for the signature shield in the
 main window's package chip, and `CredentialPromptWindowTests.cs` for the sign-in
@@ -63,6 +65,9 @@ executable.
 - Every documented UI action (add/remove repo, search/sort, launch, pull, select package,
   upgrade, settings, about) produces its documented observable outcome.
 - Removal requires explicit confirmation; no test path removes a card without it.
+- Repos are listed in collapsible sections once any repo is in a group (a flat list otherwise), the card menu and
+  the group header offer moving, renaming and removing groups, a chosen card color is shown on the tile only, and
+  the letters on every palette color have at least 4.5:1 contrast in both themes.
 - Status badges (upgrade-available, missing-repo, committed-files) reflect the correct
   underlying state for both normal and boundary conditions.
 - The AGENTS.md template offer fires at most once per repo, never overwrites an existing
@@ -466,9 +471,40 @@ matching Avalonia variant (system default to `ThemeVariant.Default`, which follo
 applying a choice changes the running application's requested and actual theme; the light and the dark
 dictionary of `AppStyles.axaml` define exactly the same keys; and in both themes every text color of the shared
 styles (the five chip palettes in every state, the secondary button in every state, the disabled primary button,
-the ghost icon buttons, validation, caution and success text on the page and on a card, the empty-state tile and
+the ghost icon buttons, validation, caution and success text on the page and on a card, the group header text and
+chevron on the page, the empty-state tile and
 all ten avatar letter colors) has at least 4.5:1 contrast against the fill and surface it is drawn on, and the
 status accents and the favorite star at least 3:1. This scenario is tested by
 `App_ToThemeVariant_MapsEachPreferenceToItsVariant`, `App_ApplyTheme_SwitchesRunningApplicationTheme`,
 `AppStyles_LightAndDarkDictionaries_DefineTheSameKeys` and
 `AppStyles_TextAndGraphicColors_MeetContrastInBothThemes`, covering `AgentControl-LauncherUI-Appearance`.
+
+**LauncherUI_RepoGroups_HeadersCollapseMenuAndPromptWorkInTheWindow**: Headless main-window tests
+(`RepoGroupWindowTests.cs`, `RealProcess` collection) show that grouped repos are listed under headers
+(Favorites, the group, Ungrouped) whose accessible names state the section, its count and whether it is
+expanded, with a tooltip each and a "..." menu on the user's own group only; that a list without groups has
+no header; that invoking a header collapses and expands its section (the cards disappear and return, the
+accessible name changes and the state is remembered); that the card menu's "Move to group" submenu lists the
+groups (the repo's own marked), "New group..." and, for a grouped repo only, "Remove from group", each with an
+AutomationId and a tooltip, and that choosing a group moves the repo; that "New group..." opens the name
+prompt, which refuses an unusable name and creates the group with a usable one (the header appears) or changes
+nothing when canceled; that the header's menu renames a group through the prompt and removes it after a
+confirmation (declining keeps it) leaving its repos listed without headers; that a favorite in a group shows
+the group chip and another repo does not; and that the prompt window validates while typing and reports the
+name. This scenario is tested by `MainWindow_GroupedRepos_ShowHeadersWithNameCountAndState`,
+`MainWindow_NoGroups_ShowsNoHeader`, `MainWindow_HeaderToggle_CollapsesAndExpandsSection`,
+`MainWindow_CardMenu_MoveToGroupSubmenu_ListsChoicesAndMovesRepo`,
+`MainWindow_NewGroupMenuItem_PromptsForNameAndCreatesGroup`, `MainWindow_NewGroupPrompt_Canceled_ChangesNothing`,
+`MainWindow_HeaderMenu_RenameAndRemoveGroup`, `MainWindow_FavoriteInGroup_ShowsGroupChip` and
+`GroupNameWindow_ValidatesWhileTyping_AndAccepts`, covering `AgentControl-LauncherUI-RepoGroups`.
+
+**LauncherUI_CardColor_PalettePopupColorsTheTileAndKeepsLettersReadable**: A headless main window opens the
+palette pop-up from the card menu's "Card color..." item and finds a swatch for every palette color (each with
+an AutomationId, and its name as accessible name and tooltip) and the Automatic button; choosing Teal gives the
+card that color, puts the matching palette class and the custom-color class on the tile and closes the pop-up;
+reopening it marks Teal (and not Blue) as chosen; choosing Automatic returns the tile to its path-derived
+palette class. For every palette color and in both themes the letters on the fill are the better of white and
+near-black and have at least 4.5:1 contrast. This scenario is tested by
+`MainWindow_CardColorPalette_ChoosingSwatchColorsTileAndAutomaticClears` and
+`AppStyles_TileLetters_AreTheBetterOfLightAndDarkTextOnEveryPaletteColor`, covering
+`AgentControl-LauncherUI-CardColor`.

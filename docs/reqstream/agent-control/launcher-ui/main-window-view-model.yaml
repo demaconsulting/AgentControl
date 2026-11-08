@@ -169,3 +169,92 @@ sections:
         tests:
           - MainWindowViewModel_ApplySettings_ThemeChanged_PersistsAndAppliesTheme
           - MainWindowViewModel_ApplySettings_SaveFails_DoesNotApplyTheme
+
+      - id: AgentControl-MainWindowViewModel-GroupSections
+        title: >-
+          The MainWindowViewModel class shall, while at least one repo is in a group, order the
+          displayed items as sections - a Favorites section of the favorite repos (a favorite
+          only there), then one section per group alphabetically ignoring letter case, then an
+          Ungrouped section last - each introduced by a header with the section's name and its
+          number of matching repos, repos within a section by most recent launch, and no header
+          for a section without a repo; while no repo is in a group it shall show the flat list
+          without any header, favorites first.
+        justification: |
+          Sections let a long list be read by topic; listing a favorite once keeps every repo
+          in exactly one place, and a user who has no groups must see the list exactly as before.
+        tests:
+          - MainWindowViewModel_DisplayedItems_NoGroups_FlatListWithoutHeaders
+          - MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered
+          - MainWindowViewModel_Favorite_IsListedOnlyUnderFavoritesAndKeepsItsGroup
+          - MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader
+          - MainWindowViewModel_ToggleGroupCollapsed_KeepsHeaderAndUnchangedCardsInPlace
+          - MainWindowViewModel_Constructor_NullAndInvalidOrganizingSettings_FallBack
+          - MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection
+          - RepoGroupHeaderViewModel_Kind_SelectsSectionFlags
+          - RepoGroupHeaderViewModel_Update_DescribesCountAndState
+          - RepoGroupHeaderViewModel_ToString_IsTheAccessibleName
+          - RepoGroupHeaderViewModel_Constructor_BlankName_Throws
+
+      - id: AgentControl-MainWindowViewModel-GroupCollapse
+        title: >-
+          The MainWindowViewModel class shall collapse and expand any section (a group, Favorites
+          or Ungrouped) on request, hiding the cards of a collapsed section but keeping its header
+          with its count, shall remember the collapsed sections in the settings file, and shall
+          keep them when other settings are applied.
+        justification: |
+          A user collapses what they are not working on and expects it to stay that way the next
+          time the application starts.
+        tests:
+          - MainWindowViewModel_ToggleGroupCollapsed_HidesCardsAndPersists
+          - MainWindowViewModel_ToggleGroupCollapsed_BuiltInSections_CollapseAndPersist
+          - MainWindowViewModel_AllGroupsCollapsed_HeadersRemainAndListIsNotEmpty
+          - MainWindowViewModel_ApplySettings_KeepsCollapsedGroups
+          - RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled
+
+      - id: AgentControl-MainWindowViewModel-GroupFilter
+        title: >-
+          The MainWindowViewModel class shall, while a filter is active, show every repo that
+          matches it - including those in a collapsed section - under headers that count only the
+          matches, omit sections without a match, disable the headers' collapse toggles and leave
+          the remembered collapsed state unchanged, so that clearing the filter restores it.
+        justification: |
+          A repo the user searches for must never be hidden by the way the list is organized.
+        tests:
+          - MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes
+          - MainWindowViewModel_FilterText_NoMatch_ShowsNothing
+
+      - id: AgentControl-MainWindowViewModel-GroupManagement
+        title: >-
+          The MainWindowViewModel class shall rename a group (moving all its repos and its
+          collapsed state, accepting a change of letter case only, and refusing an unknown group,
+          an invalid name and another group's name) and shall remove a group (its repos become
+          ungrouped and its collapsed state is forgotten), persisting the result to the settings
+          file only, and shall forward a header's rename and remove requests to the window.
+        justification: |
+          Groups must be maintainable without editing a file; the user's own repositories must
+          not be touched by it.
+        tests:
+          - MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames
+          - MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped
+          - MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName
+          - RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests
+          - RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository
+
+      - id: AgentControl-MainWindowViewModel-GroupNamePrompt
+        title: >-
+          The group-name prompt shall validate the typed name as the user types - refusing a blank
+          name, a name longer than 40 characters and the built-in names Favorites and Ungrouped,
+          and, when renaming, another group's name - shall let a new group join an existing group
+          of the same name ignoring letter case (with a note), shall only accept a usable name, and
+          shall complete exactly once, with the name or with none when canceled.
+        justification: |
+          A name can only be used if it is valid; telling the user why as they type is quicker than
+          refusing afterwards, and a group must not exist twice under different letter case.
+        tests:
+          - GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName
+          - GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept
+          - GroupNameViewModel_TooLongName_ShowsLengthMessage
+          - GroupNameViewModel_NewGroup_ExistingName_HintsAndAdoptsSpelling
+          - GroupNameViewModel_Rename_RefusesOtherGroupsAcceptsCaseChange
+          - GroupNameViewModel_Cancel_CompletesOnceWithNull
+          - GroupNameViewModel_Constructor_NullArguments_Throw

@@ -152,12 +152,27 @@ without it.
 
 - **Main** (`AgentControl`): `FilterTextBox`, `AddRepoButton`, `OpenSettingsButton`, `OpenAboutButton`,
   `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`.
+- **Group header** (repeated, one per section, in `RepoListBox`; only present once a repo is in a group):
+  `GroupHeaderToggleButton` (collapses or expands; its name says the section, count and state, for example
+  `Work, 2 repos, collapsed`, and so does its list item), `GroupHeaderNameText`, `GroupHeaderCountText`, and, for
+  the user's own groups, `GroupHeaderMenuButton` with the menu items `RenameGroupMenuItem` and `RemoveGroupMenuItem`.
+  `--item` matches repo cards only, so a header command acts on the first header (the one at the top of the list);
+  to start with a particular group collapsed, list it in `CollapsedGroups` in the settings file before `launch`.
 - **Repo card** (repeated, one per list item): `RepoNameText`, `RepoStatusAccent` (the status bar; its name is the
   status in words), `RepoAvatarText`, `RepoAvatarImage`, `UpgradeAvailableBadge` (a button: click it to upgrade),
   `CommittedAgentFilesBadge`, `DirtyWorkingTreeBadge`, `MissingRepoBadge`, `RepoPathText`, `RepoPinnedVersionText`,
-  `CurrentBranchText`, `FavoriteToggleButton`, `LaunchButton`, `MoreActionsButton`.
+  `CurrentBranchText`, `GroupChipText` (a favorite's group), `FavoriteToggleButton`, `LaunchButton`,
+  `MoreActionsButton`.
 - **Card menu** (pop-up of `MoreActionsButton`): `PullButton` (Git Pull), `RefreshMenuItem`, `SelectPackageMenuItem`
-  (only for a repo that has no package yet), `UpgradeMenuItem` (only while an upgrade is available), `RemoveMenuItem`.
+  (only for a repo that has no package yet), `UpgradeMenuItem` (only while an upgrade is available),
+  `MoveToGroupMenuItem` (its submenu, built when the menu opens: one `MoveToGroupItem` per group - find it by
+  name, for example `menu MoveToGroupMenuItem/Work` - then `NewGroupMenuItem`, and `RemoveFromGroupMenuItem` for a
+  grouped repo), `CardColorMenuItem`, `RemoveMenuItem`.
+- **Card color palette** (pop-up under `MoreActionsButton`, opened by `CardColorMenuItem`): `CardColorPalette`,
+  one `CardColorSwatch_<Name>` per color (`CardColorSwatch_Teal`, ...; the name is also the accessible name) and
+  `CardColorAutomaticButton`.
+- **New group / Rename group** (`New group`, `Rename group`): `GroupNamePromptText`, `GroupNameTextBox`,
+  `GroupNameErrorText`, `GroupNameHintText`, `GroupNameCancelButton`, `GroupNameAcceptButton`.
 - **Settings** (`AgentControl Settings`): the package sources `SourcesList` (rows with `SourceAliasText`,
   `SourceLocationText`, `SourceStatusText`), `AddSourceButton` (opens the Add menu), its items
   `AddZipSourceButton`, `AddNuGetFolderSourceButton`, `AddNuGetServerSourceButton`, `EditSourceButton`,

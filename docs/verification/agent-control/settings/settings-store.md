@@ -18,6 +18,8 @@ N/A - standard test environment.
   Default zip source, loses to a configured source list, and is never written back.
 - The persisted JSON contains no property named like a secret, and a source location that embeds a
   credential is refused with nothing written.
+- A repo's group, card color and the collapsed sections round-trip, damaged or wrongly typed values read as
+  "none" without failing the load, and stored group names are repaired.
 - A save leaves only the settings file, holding the latest content.
 - Settings saved and then loaded again return every field unchanged.
 - Loading with no settings file present returns default settings rather than throwing.
@@ -89,3 +91,24 @@ the value still read, proving the reader stays positioned - while a name in anot
 number are accepted. This scenario is tested by `SettingsStore_Load_NoThemeValue_DefaultsToSystem`,
 `SettingsStore_SaveThenLoad_Theme_RoundTripsByName` and
 `SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem`, covering `AgentControl-SettingsStore-Theme`.
+
+**SettingsStore_RepoOrganization_RoundTripsAndToleratesDamagedValues**: Tested by `SettingsStoreOrganizingTests.cs`
+and `RepoGroupNameTests.cs` (temporary configuration directories, no UI). A repo's group, a repo's card color
+and the collapsed section names survive a save and a load, and a repo without a group or color writes
+nothing for them; a settings file from before these values existed loads with no group, the automatic color
+and nothing collapsed; a group or color that is null, a number, a boolean, an object or an array reads as none
+and the value after it is still read; a collapsed list that is null, a number, a string, an object or empty reads as
+empty, and a list with mixed entries keeps only its clean, distinct string entries; and stored group names are
+repaired on load - white space cleaned, *Favorites* and *Ungrouped* read as no group, an overlong name cut to 40
+characters and look-alike names given the first one's spelling. The name rules themselves are checked directly:
+normalizing (trim, fold white space and control characters, null for nothing), validating (blank, too long,
+reserved), sanitizing a stored name, listing the distinct names sorted with the first spelling, and adopting an
+existing group's spelling. This scenario is tested by
+`SettingsStore_SaveThenLoad_GroupColorAndCollapsedGroups_RoundTrip`,
+`SettingsStore_Load_FileWithoutOrganizingValues_UsesDefaults`,
+`SettingsStore_Load_InvalidGroupOrColorType_ReadsAsNone`,
+`SettingsStore_Load_InvalidCollapsedGroups_KeepsOnlyCleanStrings`,
+`SettingsStore_Load_GroupNames_AreRepairedAndUnified`,
+`RepoGroupName_Normalize_CleansWhiteSpaceAndControlCharacters`, `RepoGroupName_Validate_ReportsEachProblem`,
+`RepoGroupName_Sanitize_RepairsStoredNames`, `RepoGroupName_DistinctNames_UnifiesCaseAndSorts` and
+`RepoGroupName_Canonicalize_AdoptsExistingSpelling`, covering `AgentControl-SettingsStore-RepoOrganization`.

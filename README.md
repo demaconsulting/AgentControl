@@ -24,7 +24,15 @@ in that repo's working directory.
   agent package - always backed by words and tooltips), a favorite star, its display name, a tile with its
   initials (or the repo's own root `icon.png`/`logo.png`), its path, and labeled chips for the pinned agent
   package (name, version and source), an available upgrade, and the current git branch; **Launch** sits on
-  the card and everything else (Git Pull, Refresh, Select Package/Upgrade, Remove) in its grouped "..." menu
+  the card and everything else (Git Pull, Refresh, Select Package/Upgrade, Move to group, Card color, Remove) in
+  its grouped "..." menu
+- **Repo groups and card colors (just for you)**: put repos into groups of your own (**Move to group** in a
+  card's "..." menu, then an existing group or **New group...**) and the list becomes collapsible sections -
+  **Favorites** first, your groups alphabetically, **Ungrouped** last - with the number of repos in each; the
+  collapsed state is remembered, rename or remove a group from its header's "..." menu, and the filter box still
+  finds a repo inside a collapsed group. **Card color...** gives a repo's tile a color of your choice from a
+  palette (or **Automatic**); the status bar keeps its fixed colors. Both are stored only in your own AgentControl
+  settings - never in the repository or its `.agentcontrol.json` - so they are never shared through git
 - **Version-pinned agent packages**: every repo names an exact agent package name and
   semantic version, and the source it came from, in its `.agentcontrol.json` pin file — there
   is no floating "latest" mode, so upgrades are always a deliberate, visible action
@@ -188,6 +196,23 @@ folder** has an `icon.png` (or else a `logo.png`; the name's case does not matte
 at most 1 MB is used - never a link, and never a file in a subfolder - and anything else is ignored, so a
 repository you do not trust cannot make AgentControl read other files or load huge images. Choose **Refresh** in
 the card's "..." menu after adding or changing the file.
+
+### Groups and card colors
+
+Both are personal ways to organize the list and are stored **only in your own AgentControl settings file**
+(`%APPDATA%\AgentControl\settings.json`); nothing is written to a repository or its `.agentcontrol.json`.
+
+- **Groups.** In a card's "..." menu choose **Organize > Move to group**, then one of your groups, **New group...**
+  (a small prompt: up to 40 characters; *Favorites* and *Ungrouped* are built-in names; letter case does not make a
+  new group) or **Remove from group**. As soon as one repo is in a group the list shows sections with a header
+  each - **Favorites** (a favorite is listed only there, and its card shows its group as a chip), then your groups
+  alphabetically, then **Ungrouped** - with the number of repos; click a header to collapse or expand it (the choice
+  is remembered). A group's header has a "..." menu with **Rename group...** and **Remove group** (its repos stay
+  in the list, ungrouped). With no groups at all there are no headers and the list looks as it always did.
+  Typing in the filter box shows every match, expanding collapsed groups while you filter.
+- **Card color.** **Organize > Card color...** opens a palette of ten colors that work in the light and dark
+  themes, plus **Automatic** (the color AgentControl derives from the repo's path). The color goes on the card's
+  tile (as a ring around a repo's own picture); the status bar on the card's left edge keeps its meaning.
 
 ### Settings
 

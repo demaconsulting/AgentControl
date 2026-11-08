@@ -145,6 +145,8 @@ reviews:
       - "src/**/LauncherUI/AgentToolKindDisplayNameConverter.cs"
       - "src/**/LauncherUI/ThemePreferenceDisplayNameConverter.cs"
       - "src/**/LauncherUI/AppStyles.axaml"
+      - "src/**/LauncherUI/GroupNameWindow.axaml"
+      - "src/**/LauncherUI/GroupNameWindow.axaml.cs"
       - "src/**/LauncherUI/ThirdPartyDependencies.cs"
       - "test/**/LauncherUI/AsyncRelayCommandTests.cs"
       - "test/**/LauncherUI/AgentToolKindDisplayNameConverterTests.cs"
@@ -155,6 +157,7 @@ reviews:
       - "test/**/LauncherUI/DialogWindowTests.cs"
       - "test/**/LauncherUI/HeadlessTestApp.cs"
       - "test/**/LauncherUI/MainWindowTests.cs"
+      - "test/**/LauncherUI/RepoGroupWindowTests.cs"
       - "test/**/LauncherUI/ThirdPartyDependenciesTests.cs"
 
   - id: AgentControl-LauncherUI-MainWindowViewModel
@@ -169,7 +172,12 @@ reviews:
       - "docs/design/agent-control/launcher-ui/main-window-view-model.md"
       - "docs/verification/agent-control/launcher-ui/main-window-view-model.md"
       - "src/**/LauncherUI/MainWindowViewModel.cs"
+      - "src/**/LauncherUI/RepoGroupHeaderViewModel.cs"
+      - "src/**/LauncherUI/GroupNameViewModel.cs"
       - "test/**/LauncherUI/MainWindowViewModelTests.cs"
+      - "test/**/LauncherUI/RepoGroupingTests.cs"
+      - "test/**/LauncherUI/RepoGroupHeaderViewModelTests.cs"
+      - "test/**/LauncherUI/GroupNameViewModelTests.cs"
 
   - id: AgentControl-LauncherUI-RepoCardViewModel
     title: Review of Agent Control RepoCardViewModel unit implementation
@@ -185,7 +193,9 @@ reviews:
       - "src/**/LauncherUI/RepoCardViewModel.cs"
       - "src/**/LauncherUI/RepoCardStatus.cs"
       - "src/**/LauncherUI/RepoImageLocator.cs"
+      - "src/**/LauncherUI/CardColorPalette.cs"
       - "test/**/LauncherUI/RepoCardViewModelTests.cs"
+      - "test/**/LauncherUI/RepoCardColorTests.cs"
       - "test/**/LauncherUI/RepoImageLocatorTests.cs"
       - "test/**/LauncherUI/RepoCardImageTests.cs"
       - "test/**/LauncherUI/TestPng.cs"
@@ -677,7 +687,10 @@ reviews:
       - "docs/design/agent-control/settings/settings-store.md"
       - "docs/verification/agent-control/settings/settings-store.md"
       - "src/**/Settings/SettingsStore.cs"
+      - "src/**/Settings/RepoGroupName.cs"
       - "test/**/Settings/SettingsStoreTests.cs"
+      - "test/**/Settings/SettingsStoreOrganizingTests.cs"
+      - "test/**/Settings/RepoGroupNameTests.cs"
 
   # AgentControl - Logging (documented at subsystem level only; LoggingSetupTests covers the setup unit)
   - id: AgentControl-Logging

@@ -95,6 +95,9 @@ on a fresh port.
 - No credential typed during an end-to-end run is found in any file the application wrote; a sign-in the user chose
   to remember is found only in the user's own (emulated) credential helper, is used again without a dialog and is
   removed by "Forget saved sign-in".
+- A repo can be moved into a new group through the real UI, the group shows as a header and is stored only in the
+  user's settings (the repository stays untouched), the filter finds a repo inside a collapsed group, and a
+  chosen card color is stored the same way.
 - A source that requires signed packages is refused an unsigned package end to end and the repo is left unchanged;
   a valid signature, the publisher pin and the platform fail-closed behavior are proven at the subsystem and unit
   levels.
@@ -379,3 +382,21 @@ chosen and saved and the page turns dark. The test never changes the operating-s
 explicit themes, not the system default). This scenario is tested by
 `windows@SettingsWindow_ChooseLightThenDark_ReThemesMainWindowWithoutRestart`, covering
 `AgentControl-System-Appearance`.
+
+**AgentControl_RepoGroups_MoveToNewGroupShowsHeaderAndFilterFindsRepoInCollapsedGroup**: In the real
+application a repo is moved to a new group through the card's "..." menu (Move to group, then New group...), a
+name is typed into the prompt and confirmed, and a header named after the group, counting one repo and expanded,
+appears with the repo under it; the group is found in the settings file, and the repository folder stays empty
+(nothing is written to the repository). In a second run settings put the seeded repo in a group that is
+remembered as collapsed: its header is shown collapsed and only the other repo is listed; typing the seeded
+repo's path in the filter box lists that repo (the filter expands the group) and nothing else, and clearing the
+filter collapses the group again. This scenario is tested by
+`windows@CardMenu_MoveToNewGroup_ShowsGroupHeaderAndStoresInSettingsOnly` and
+`windows@FilterTextBox_RepoInCollapsedGroup_IsFoundByFilterAndHiddenAgainAfterwards`, covering
+`AgentControl-System-RepoGroups`.
+
+**AgentControl_CardColor_ChooseSwatchStoresColorInSettingsOnly**: In the real application the card's "..."
+menu item "Card color..." opens the palette pop-up, which offers a swatch for every palette color and Automatic;
+invoking the Teal swatch stores `"CardColor": "Teal"` in the settings file, the repository folder stays
+empty, and the card's status accent bar keeps its accessible status text. This scenario is tested by
+`windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly`, covering `AgentControl-System-CardColor`.

@@ -1,9 +1,9 @@
 package AgentControl {
     part def SettingsStore {
-        doc /* Loads/saves application-wide settings; resolves the default configuration directory. */
+        doc /* Loads/saves application-wide settings, including the user's own repo groups, card colors and collapsed sections; resolves the default configuration directory. */
 
-        comment sourceRef /* Source: src/DemaConsulting.AgentControl/Settings/SettingsStore.cs */
-        comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/Settings/SettingsStoreTests.cs */
+        comment sourceRef /* Source: src/DemaConsulting.AgentControl/Settings/SettingsStore.cs; src/DemaConsulting.AgentControl/Settings/RepoGroupName.cs */
+        comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/Settings/SettingsStoreTests.cs; test/DemaConsulting.AgentControl.Tests/Settings/SettingsStoreOrganizingTests.cs; test/DemaConsulting.AgentControl.Tests/Settings/RepoGroupNameTests.cs */
         comment designRef /* Design: docs/design/agent-control/settings/settings-store.md */
         comment verificationRef /* Verification: docs/verification/agent-control/settings/settings-store.md */
         comment reqRef /* Requirements: docs/reqstream/agent-control/settings/settings-store.yaml */

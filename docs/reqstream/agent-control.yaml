@@ -90,6 +90,44 @@ sections:
         tests:
           - windows@SettingsWindow_ChooseLightThenDark_ReThemesMainWindowWithoutRestart
 
+      - id: AgentControl-System-RepoGroups
+        title: >-
+          The tool shall let the user organize the recent-repos list into groups of their own:
+          move a repo into a new or an existing group or out of its group, show the groups as
+          collapsible sections (favorites first, then the groups alphabetically, then the repos
+          in no group; no sections at all while no repo is in a group), remember which sections
+          are collapsed, and let the filter find a repo even in a collapsed group. Groups shall
+          be stored only in the user's own AgentControl settings and never in a repository.
+        tags: [system]
+        justification: |
+          Developers who work across many repos (several clients, or work and personal) need
+          to keep related repos together and collapse the rest out of the way. Groups are a
+          personal way of organizing the list, so they must not be written into a repository
+          where they would be committed and shared with other people, and a filter that could
+          not find a repo because its group is collapsed would make the grouping a trap.
+        children:
+          - AgentControl-LauncherUI-RepoGroups
+        tests:
+          - windows@CardMenu_MoveToNewGroup_ShowsGroupHeaderAndStoresInSettingsOnly
+          - windows@FilterTextBox_RepoInCollapsedGroup_IsFoundByFilterAndHiddenAgainAfterwards
+
+      - id: AgentControl-System-CardColor
+        title: >-
+          The tool shall let the user choose the color of a repo card's tile from a palette, or
+          return to the automatic color, without changing the status colors of the card, and
+          shall store the choice only in the user's own AgentControl settings, never in a
+          repository.
+        tags: [system]
+        justification: |
+          A color of their own lets a developer recognize a repo at a glance among many. The
+          status colors carry a fixed meaning (up to date, upgrade available, problem) and must
+          never be confused with a personal choice, and the choice is personal, so it must not
+          be written into a repository.
+        children:
+          - AgentControl-LauncherUI-CardColor
+        tests:
+          - windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly
+
       - id: AgentControl-System-Launch
         title: >-
           The tool shall ensure a repo's agent files are synced before launching the

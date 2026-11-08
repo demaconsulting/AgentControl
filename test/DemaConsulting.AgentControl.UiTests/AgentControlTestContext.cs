@@ -72,6 +72,9 @@ internal sealed class AgentControlTestContext : IDisposable
     ///     packages.</param>
     /// <param name="nuGetServerIndexUrl">The service-index address of a NuGet package server to
     ///     configure as the additional <c>Server</c> source, or <see langword="null"/> for none.</param>
+    /// <param name="customizeSettings">Edits the settings dictionary just before it is written, with
+    ///     this context (whose <see cref="RootDirectory"/> and <see cref="RepoPath"/> are set), or
+    ///     <see langword="null"/> for none; used to seed groups, collapsed groups and more repos.</param>
     public AgentControlTestContext(
         string? packageSourcePath = null,
         string? pinnedPackageName = null,
@@ -80,7 +83,8 @@ internal sealed class AgentControlTestContext : IDisposable
         IReadOnlyList<string>? nuGetPackageIds = null,
         string? pinnedSource = null,
         bool nuGetRequireSigned = false,
-        string? nuGetServerIndexUrl = null)
+        string? nuGetServerIndexUrl = null,
+        Action<Dictionary<string, object?>, AgentControlTestContext>? customizeSettings = null)
     {
         var root = Directory.CreateTempSubdirectory("AgentControlUiTests-");
         RootDirectory = root.FullName;
@@ -102,7 +106,8 @@ internal sealed class AgentControlTestContext : IDisposable
             nuGetFeedPath,
             nuGetPackageIds,
             nuGetRequireSigned,
-            nuGetServerIndexUrl);
+            nuGetServerIndexUrl,
+            customizeSettings is null ? null : settings => customizeSettings(settings, this));
 
         if (pinnedPackageName is not null && pinnedPackageVersion is not null)
         {

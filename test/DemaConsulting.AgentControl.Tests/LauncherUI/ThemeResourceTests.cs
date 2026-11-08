@@ -182,6 +182,10 @@ public class ThemeResourceTests
             CheckText($"{semantic} on card", Opaque(palette, semantic), card);
         }
 
+        // The text of a group header and its chevron, drawn straight on the page
+        CheckText("GroupHeaderForeground on page", Opaque(palette, "GroupHeaderForeground"), page);
+        CheckText("Group chevron on page", Opaque(palette, "MenuGroupHeaderForeground"), page);
+
         // The empty-state icon tile
         CheckText(
             "EmptyStateTile", Opaque(palette, "EmptyStateTileForeground"),
@@ -206,6 +210,41 @@ public class ThemeResourceTests
 
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
     });
+
+    /// <summary>
+    ///     Test that the letters (and the check mark of a chosen swatch) on every tile color are the
+    ///     better of white and near-black for that fill in each theme, and meet AA contrast: so
+    ///     whichever palette color the user chooses, the initials stay readable in both themes.
+    /// </summary>
+    /// <param name="variantName">The theme variant to check.</param>
+    [Theory]
+    [InlineData("Light")]
+    [InlineData("Dark")]
+    public void AppStyles_TileLetters_AreTheBetterOfLightAndDarkTextOnEveryPaletteColor(string variantName) =>
+        HeadlessTestApp.Run(() =>
+        {
+            // Arrange
+            var palette = LoadPalette(variantName == "Light" ? ThemeVariant.Light : ThemeVariant.Dark);
+            var white = Colors.White;
+            var nearBlack = Color.Parse("#111114");
+            var problems = new List<string>();
+
+            // Act: every color a user can choose, by its palette index
+            foreach (var color in CardColorPalette.All)
+            {
+                var fill = Opaque(palette, $"AvatarBackground{color.Index}");
+                var letters = Opaque(palette, $"AvatarForeground{color.Index}");
+                var chosen = Contrast(letters, fill);
+                var best = Math.Max(Contrast(white, fill), Contrast(nearBlack, fill));
+                if (chosen < TextContrast || chosen + 0.001 < best)
+                {
+                    problems.Add($"{color.Name}: {chosen:F2} (best available {best:F2})");
+                }
+            }
+
+            // Assert
+            Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
+        });
 
     /// <summary>
     ///     Loads the theme dictionary of one variant from the shared styles file.

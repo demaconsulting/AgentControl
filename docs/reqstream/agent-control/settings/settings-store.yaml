@@ -111,3 +111,28 @@ sections:
           - SettingsStore_Load_NoThemeValue_DefaultsToSystem
           - SettingsStore_SaveThenLoad_Theme_RoundTripsByName
           - SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem
+
+      - id: AgentControl-SettingsStore-RepoOrganization
+        title: >-
+          The SettingsStore class shall write a repo's group, a repo's chosen card color and the
+          collapsed section names to the settings file only (omitting a group or color the repo
+          does not have), shall read them back, shall read a missing, null or wrongly typed value
+          as no group, the automatic color or an empty list - keeping the string entries of a
+          damaged list - and shall repair stored group names: trimmed and cleaned, cut to 40
+          characters, the built-in section names Favorites and Ungrouped read as no group, and
+          names that differ only in letter case given one spelling.
+        justification: |
+          These values are personal and must not reach a repository; a hand-edited or damaged
+          file must degrade to the plain list instead of keeping the application from starting,
+          and a group needs exactly one name however its repos were recorded.
+        tests:
+          - SettingsStore_SaveThenLoad_GroupColorAndCollapsedGroups_RoundTrip
+          - SettingsStore_Load_FileWithoutOrganizingValues_UsesDefaults
+          - SettingsStore_Load_InvalidGroupOrColorType_ReadsAsNone
+          - SettingsStore_Load_InvalidCollapsedGroups_KeepsOnlyCleanStrings
+          - SettingsStore_Load_GroupNames_AreRepairedAndUnified
+          - RepoGroupName_Normalize_CleansWhiteSpaceAndControlCharacters
+          - RepoGroupName_Validate_ReportsEachProblem
+          - RepoGroupName_Sanitize_RepairsStoredNames
+          - RepoGroupName_DistinctNames_UnifiesCaseAndSorts
+          - RepoGroupName_Canonicalize_AdoptsExistingSpelling

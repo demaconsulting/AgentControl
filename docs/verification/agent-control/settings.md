@@ -3,7 +3,8 @@
 ### Verification Approach
 
 The `Settings` subsystem is verified indirectly through its `SettingsStore` unit's test suite
-(`SettingsStoreTests.cs`), documented in the `SettingsStore` unit-level verification design.
+(`SettingsStoreTests.cs` and `SettingsStoreOrganizingTests.cs`, with `RepoGroupNameTests.cs` for the group-name
+rules), documented in the `SettingsStore` unit-level verification design.
 The `AppSettings`, `RecentRepo`, and `AgentToolKind` data types have no dedicated test file
 and are exercised only as values round-tripped through `SettingsStore`'s save/load tests. All
 tests use a real temporary configuration directory on disk.
@@ -41,3 +42,14 @@ with `SettingsStore_SaveThenLoad_RoundTripsAllFields`,
 the subsystem level, covering `AgentControl-Settings-PackageSources` (children:
 `AgentControl-SettingsStore-SourcesRoundTrip`, `AgentControl-SettingsStore-LegacySourceMigration`,
 `AgentControl-SettingsStore-NoSecretsPersisted`, `AgentControl-SettingsStore-AtomicSave`).
+
+**Settings_RepoOrganization_GroupsColorsAndCollapsedSectionsArePersonalAndTolerant**: A repo's group, a repo's
+card color and the collapsed section names survive a save and a load; a file without them, or with them
+missing, null or wrongly typed, loads with no group, the automatic color and nothing collapsed; and stored
+group names are repaired. These are verified by the `SettingsStore` unit tests, with
+`SettingsStore_SaveThenLoad_GroupColorAndCollapsedGroups_RoundTrip`,
+`SettingsStore_Load_FileWithoutOrganizingValues_UsesDefaults`,
+`SettingsStore_Load_InvalidGroupOrColorType_ReadsAsNone`,
+`SettingsStore_Load_InvalidCollapsedGroups_KeepsOnlyCleanStrings` and
+`SettingsStore_Load_GroupNames_AreRepairedAndUnified` cited directly at the subsystem level, covering
+`AgentControl-Settings-RepoOrganization` (child: `AgentControl-SettingsStore-RepoOrganization`).

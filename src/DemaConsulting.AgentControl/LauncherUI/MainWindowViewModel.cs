@@ -88,6 +88,12 @@ internal sealed class MainWindowViewModel : ViewModelBase
     private string? _filterText;
 
     /// <summary>
+    ///     The section headers in use, one instance per section (keyed by kind and name) so a header
+    ///     is updated in place rather than replaced and keeps keyboard focus.
+    /// </summary>
+    private readonly Dictionary<string, RepoGroupHeaderViewModel> _headers = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     ///     Initializes a new <see cref="MainWindowViewModel"/>, populating
     ///     <see cref="RepoCards"/> from <paramref name="settings"/>'s recent-repos list.
     /// </summary>
@@ -121,6 +127,7 @@ internal sealed class MainWindowViewModel : ViewModelBase
 
         RepoCards = [];
         DisplayedRepoCards = [];
+        DisplayedItems = [];
         foreach (var card in settings.RecentRepos.Select(CreateCard))
         {
             AttachCardEvents(card);
@@ -144,26 +151,61 @@ internal sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<RepoCardViewModel> RepoCards { get; }
 
     /// <summary>
-    ///     Gets the filtered/sorted view of <see cref="RepoCards"/> that the main window's list
-    ///     actually binds to: a case-insensitive substring match against
-    ///     <see cref="RepoCardViewModel.RepoName"/>/<see cref="RepoCardViewModel.RepoPath"/>
-    ///     against <see cref="FilterText"/>, sorted by favorite status (descending) then by
-    ///     <see cref="RepoCardViewModel.LastLaunchedUtc"/> (descending, nulls last), stable
-    ///     otherwise.
+    ///     Gets the filtered/sorted cards that are currently shown: those of
+    ///     <see cref="RepoCards"/> that match <see cref="FilterText"/> (a case-insensitive substring
+    ///     match against <see cref="RepoCardViewModel.RepoName"/>/<see cref="RepoCardViewModel.RepoPath"/>),
+    ///     in the order <see cref="DisplayedItems"/> shows them, without the cards hidden inside
+    ///     collapsed sections.
     /// </summary>
+    /// <remarks>
+    ///     See <see cref="DisplayedItems"/> for the order. When no repo is in a group the list is
+    ///     flat: favorites first, then the most recently launched, stable otherwise.
+    /// </remarks>
     public ObservableCollection<RepoCardViewModel> DisplayedRepoCards { get; }
 
     /// <summary>
-    ///     Gets a value indicating whether <see cref="DisplayedRepoCards"/> is currently empty,
-    ///     so the view can swap the repo-card list for an explanatory empty-state placeholder
-    ///     instead of just rendering nothing.
+    ///     Gets what the main window's list binds to: the cards of <see cref="DisplayedRepoCards"/>
+    ///     interleaved with the <see cref="RepoGroupHeaderViewModel"/> that starts each section.
+    /// </summary>
+    /// <remarks>
+    ///     <b>Sections.</b> When at least one repo is in a group (<see cref="HasGroups"/>) the list is
+    ///     sectioned: <c>Favorites</c> first (the favorite repos - a favorite is listed only there,
+    ///     not again under its group, and its card shows a group chip), then the user's groups
+    ///     alphabetically, then <c>Ungrouped</c> last; sections with no matching repo have no header.
+    ///     When no repo is in a group there are no headers at all and the list looks as it always
+    ///     did, favorites first. Within a section repos are ordered by most recent launch (nulls
+    ///     last), stable otherwise. <b>Collapsing.</b> The cards of a collapsed section are left out
+    ///     (its header stays, with the count of its matches); the state is remembered per user in
+    ///     <see cref="AppSettings.CollapsedGroups"/>. <b>Filtering.</b> While a filter is active
+    ///     every section is shown expanded and sections without a match disappear, so a match is
+    ///     never hidden; the remembered collapsed state is not changed by filtering.
+    /// </remarks>
+    public ObservableCollection<object> DisplayedItems { get; }
+
+    /// <summary>
+    ///     Gets a value indicating whether at least one repo is in a group of the user's own, which
+    ///     is what switches the list from flat to sectioned (with headers).
+    /// </summary>
+    public bool HasGroups => RepoCards.Any(card => card.HasGroup);
+
+    /// <summary>
+    ///     Gets the names of the groups that exist now, alphabetically.
+    /// </summary>
+    public IReadOnlyList<string> GroupNames =>
+        RepoGroupName.DistinctNames(_settings.RecentRepos.Select(repo => repo.GroupName));
+
+    /// <summary>
+    ///     Gets a value indicating whether <see cref="DisplayedItems"/> is currently empty (no repo
+    ///     matches, or there is none), so the view can swap the repo list for an explanatory
+    ///     empty-state placeholder instead of just rendering nothing.
     /// </summary>
     /// <remarks>
     ///     Recomputed (and its change notified) every time <see cref="UpdateDisplayedRepoCards"/>
     ///     runs, which covers every path that can change the displayed set: adding/removing a
-    ///     repo, filtering, and favorite-toggling.
+    ///     repo, filtering, favorite-toggling and grouping. A list whose sections are all collapsed
+    ///     is not empty: the headers are still shown.
     /// </remarks>
-    public bool HasNoDisplayedRepos => DisplayedRepoCards.Count == 0;
+    public bool HasNoDisplayedRepos => DisplayedItems.Count == 0;
 
     /// <summary>
     ///     Gets the message shown by the empty-state placeholder when
@@ -339,6 +381,7 @@ internal sealed class MainWindowViewModel : ViewModelBase
         // the exception propagates to the caller (which shows it) while the live settings stay as
         // they were, so a later save (favorite, launch, ...) can never write the rejected values
         updated.RecentRepos = _settings.RecentRepos;
+        updated.CollapsedGroups = _settings.CollapsedGroups;
         SettingsStore.Save(updated, _configDirectory);
         _settings = updated;
         OnPropertyChanged(nameof(Settings));
@@ -482,41 +525,302 @@ internal sealed class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Recomputes <see cref="DisplayedRepoCards"/> from <see cref="RepoCards"/>: a
-    ///     case-insensitive substring match against <see cref="FilterText"/>, sorted by favorite
-    ///     status (descending) then by <see cref="RepoCardViewModel.LastLaunchedUtc"/>
-    ///     (descending, nulls last), stable otherwise (<see cref="Enumerable.OrderBy{TSource,TKey}(IEnumerable{TSource},Func{TSource,TKey})"/>
-    ///     and <see cref="Enumerable.ThenBy{TSource,TKey}(IOrderedEnumerable{TSource},Func{TSource,TKey})"/>
-    ///     are documented as stable sorts).
+    ///     Recomputes <see cref="DisplayedItems"/> and <see cref="DisplayedRepoCards"/> from
+    ///     <see cref="RepoCards"/>: filters by <see cref="FilterText"/>, orders by section, then by
+    ///     most recent launch (see <see cref="DisplayedItems"/> for the section rules), and brings
+    ///     both collections to that state with the fewest changes.
     /// </summary>
+    /// <remarks>
+    ///     The collections are updated in place (removing, moving and inserting only what differs)
+    ///     rather than cleared and refilled, so the rows that stay keep their controls - and so the
+    ///     keyboard focus - when, for example, a group is collapsed. The ordering uses
+    ///     <see cref="Enumerable.OrderByDescending{TSource,TKey}(IEnumerable{TSource},Func{TSource,TKey})"/>,
+    ///     which is documented as a stable sort.
+    /// </remarks>
     private void UpdateDisplayedRepoCards()
     {
         var filter = _filterText;
+        var isFiltering = !string.IsNullOrWhiteSpace(filter);
         IEnumerable<RepoCardViewModel> filtered = RepoCards;
-        if (!string.IsNullOrWhiteSpace(filter))
+        if (isFiltering)
         {
             filtered = filtered.Where(card =>
-                card.RepoName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                card.RepoPath.Contains(filter, StringComparison.OrdinalIgnoreCase));
+                card.RepoName.Contains(filter!, StringComparison.OrdinalIgnoreCase) ||
+                card.RepoPath.Contains(filter!, StringComparison.OrdinalIgnoreCase));
         }
 
-        var sorted = filtered
-            .OrderByDescending(card => card.IsFavorite)
-            .ThenByDescending(card => card.LastLaunchedUtc ?? DateTimeOffset.MinValue)
-            .ToList();
+        var items = new List<object>();
+        var cards = new List<RepoCardViewModel>();
+        var usedHeaders = new HashSet<RepoGroupHeaderViewModel>();
 
-        DisplayedRepoCards.Clear();
-        foreach (var card in sorted)
+        if (!HasGroups)
         {
-            DisplayedRepoCards.Add(card);
+            // No group anywhere: a flat list, favorites first, exactly as before groups existed
+            foreach (var card in filtered
+                         .OrderByDescending(card => card.IsFavorite)
+                         .ThenByDescending(card => card.LastLaunchedUtc ?? DateTimeOffset.MinValue))
+            {
+                items.Add(card);
+                cards.Add(card);
+            }
+        }
+        else
+        {
+            var matches = filtered
+                .OrderByDescending(card => card.LastLaunchedUtc ?? DateTimeOffset.MinValue)
+                .ToList();
+
+            // A favorite is listed only under Favorites; every other repo under its group or, with
+            // none, under Ungrouped
+            AddSection(RepoGroupKind.Favorites, RepoGroupName.FavoritesName, matches.Where(card => card.IsFavorite));
+            var groupNames = matches
+                .Where(card => !card.IsFavorite && card.HasGroup)
+                .Select(card => card.GroupName!)
+                .Distinct(RepoGroupName.Comparer)
+                .Order(RepoGroupName.Comparer);
+            foreach (var groupName in groupNames)
+            {
+                AddSection(
+                    RepoGroupKind.Group,
+                    groupName,
+                    matches.Where(card =>
+                        !card.IsFavorite && card.HasGroup && RepoGroupName.Comparer.Equals(card.GroupName!, groupName)));
+            }
+
+            AddSection(
+                RepoGroupKind.Ungrouped, RepoGroupName.UngroupedName, matches.Where(card => !card.IsFavorite && !card.HasGroup));
         }
 
+        // Forget the headers of sections that no longer have a match
+        foreach (var stale in _headers.Where(pair => !usedHeaders.Contains(pair.Value)).Select(pair => pair.Key).ToList())
+        {
+            _headers.Remove(stale);
+        }
+
+        SyncCollection(DisplayedItems, items);
+        SyncCollection(DisplayedRepoCards, cards);
+
+        OnPropertyChanged(nameof(HasGroups));
+        OnPropertyChanged(nameof(GroupNames));
         OnPropertyChanged(nameof(HasNoDisplayedRepos));
         OnPropertyChanged(nameof(EmptyStateMessage));
+
+        // Adds one section: its header (when it has any match) and, unless collapsed, its cards. A
+        // filter shows everything, whatever the remembered collapsed state.
+        void AddSection(RepoGroupKind kind, string name, IEnumerable<RepoCardViewModel> sectionCards)
+        {
+            var members = sectionCards.ToList();
+            if (members.Count == 0)
+            {
+                return;
+            }
+
+            var collapsed = !isFiltering && IsGroupCollapsed(name);
+            var header = GetHeader(kind, name);
+            header.Update(members.Count, collapsed, isToggleEnabled: !isFiltering);
+            usedHeaders.Add(header);
+            items.Add(header);
+            if (!collapsed)
+            {
+                items.AddRange(members);
+                cards.AddRange(members);
+            }
+        }
     }
 
     /// <summary>
-    ///     Subscribes to a card's <see cref="RepoCardViewModel.FavoriteChanged"/> and
+    ///     Makes <paramref name="target"/> contain exactly <paramref name="desired"/>, in order, by
+    ///     removing, moving and inserting only what differs.
+    /// </summary>
+    /// <typeparam name="T">The element type; compared by reference.</typeparam>
+    /// <param name="target">The collection the view is bound to.</param>
+    /// <param name="desired">The wanted contents, without duplicates.</param>
+    private static void SyncCollection<T>(ObservableCollection<T> target, IReadOnlyList<T> desired)
+        where T : class
+    {
+        // First drop what is no longer wanted, so the passes below only move or add
+        var wanted = new HashSet<T>(desired, ReferenceEqualityComparer.Instance);
+        for (var i = target.Count - 1; i >= 0; i--)
+        {
+            if (!wanted.Contains(target[i]))
+            {
+                target.RemoveAt(i);
+            }
+        }
+
+        // Then walk the wanted order: everything before position i already matches
+        for (var i = 0; i < desired.Count; i++)
+        {
+            if (i < target.Count && ReferenceEquals(target[i], desired[i]))
+            {
+                continue;
+            }
+
+            var existing = target.IndexOf(desired[i]);
+            if (existing > i)
+            {
+                target.Move(existing, i);
+            }
+            else
+            {
+                target.Insert(i, desired[i]);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets the header for a section, creating it (and wiring its requests) the first time it is
+    ///     needed so the same instance is reused while the section exists.
+    /// </summary>
+    /// <param name="kind">The kind of section.</param>
+    /// <param name="name">The section's display name.</param>
+    /// <returns>The section's header.</returns>
+    private RepoGroupHeaderViewModel GetHeader(RepoGroupKind kind, string name)
+    {
+        var key = $"{kind}:{name}";
+        if (_headers.TryGetValue(key, out var existing) && string.Equals(existing.Name, name, StringComparison.Ordinal))
+        {
+            return existing;
+        }
+
+        var header = new RepoGroupHeaderViewModel(kind, name);
+        header.ToggleRequested += (_, _) => ToggleGroupCollapsed(header.Name);
+        header.RenameRequested += (_, _) => GroupRenameRequested?.Invoke(this, header.Name);
+        header.RemoveGroupRequested += (_, _) => GroupRemoveRequested?.Invoke(this, header.Name);
+        _headers[key] = header;
+        return header;
+    }
+
+    /// <summary>
+    ///     Gets whether a section (a group, or the built-in Favorites or Ungrouped section) is
+    ///     remembered as collapsed.
+    /// </summary>
+    /// <param name="name">The section's name; letter case is ignored.</param>
+    /// <returns><see langword="true"/> when the user collapsed the section.</returns>
+    public bool IsGroupCollapsed(string name) =>
+        (_settings.CollapsedGroups ?? []).Contains(name, RepoGroupName.Comparer);
+
+    /// <summary>
+    ///     Collapses an expanded section, or expands a collapsed one, remembers that in the settings
+    ///     and refreshes the list.
+    /// </summary>
+    /// <remarks>
+    ///     Allowed while a filter is active (the remembered state changes, the filtered list keeps
+    ///     showing every match), though the header's toggle is disabled then.
+    /// </remarks>
+    /// <param name="name">The section's name (a group name, or <c>Favorites</c> or
+    ///     <c>Ungrouped</c>); letter case is ignored.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written.</exception>
+    public void ToggleGroupCollapsed(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        _settings.CollapsedGroups ??= [];
+        if (_settings.CollapsedGroups.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, name)) == 0)
+        {
+            _settings.CollapsedGroups.Add(name);
+        }
+
+        SaveSettings();
+        UpdateDisplayedRepoCards();
+    }
+
+    /// <summary>
+    ///     Renames a group: every repo in it moves to the new name, and its collapsed state moves
+    ///     with it.
+    /// </summary>
+    /// <param name="oldName">The group's current name; letter case is ignored.</param>
+    /// <param name="newName">The new name. It must be valid (see <see cref="RepoGroupName.Validate"/>)
+    ///     and must not be another existing group's name; changing only the letter case of the
+    ///     group's own name is allowed.</param>
+    /// <returns><see langword="true"/> when the group was renamed (or the name was already so);
+    ///     <see langword="false"/> when the group does not exist or the new name cannot be used, in
+    ///     which case nothing changed.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written.</exception>
+    public bool RenameGroup(string oldName, string newName)
+    {
+        var target = RepoGroupName.Normalize(newName);
+        if (target is null ||
+            RepoGroupName.Validate(target) != RepoGroupNameProblem.None ||
+            !GroupNames.Contains(oldName, RepoGroupName.Comparer) ||
+            GroupNames.Any(other =>
+                RepoGroupName.Comparer.Equals(other, target) && !RepoGroupName.Comparer.Equals(other, oldName)))
+        {
+            return false;
+        }
+
+        // Every member takes the new spelling; the collapsed state follows the name
+        foreach (var repo in _settings.RecentRepos.Where(
+                     repo => RepoGroupName.Comparer.Equals(RepoGroupName.Sanitize(repo.GroupName) ?? string.Empty, oldName)))
+        {
+            repo.GroupName = target;
+        }
+
+        var wasCollapsed = IsGroupCollapsed(oldName);
+        _settings.CollapsedGroups?.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, oldName));
+        if (wasCollapsed)
+        {
+            (_settings.CollapsedGroups ??= []).Add(target);
+        }
+
+        FinishGroupEdit();
+        return true;
+    }
+
+    /// <summary>
+    ///     Removes a group: its repos become ungrouped (nothing on disk or in any repository changes)
+    ///     and its remembered collapsed state is forgotten.
+    /// </summary>
+    /// <param name="name">The group's name; letter case is ignored.</param>
+    /// <returns><see langword="true"/> when the group existed and was removed.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written.</exception>
+    public bool RemoveGroup(string name)
+    {
+        if (!GroupNames.Contains(name, RepoGroupName.Comparer))
+        {
+            return false;
+        }
+
+        foreach (var repo in _settings.RecentRepos.Where(
+                     repo => RepoGroupName.Comparer.Equals(RepoGroupName.Sanitize(repo.GroupName) ?? string.Empty, name)))
+        {
+            repo.GroupName = null;
+        }
+
+        _settings.CollapsedGroups?.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, name));
+        FinishGroupEdit();
+        return true;
+    }
+
+    /// <summary>
+    ///     Persists a group rename or removal and brings the cards and the list up to date.
+    /// </summary>
+    private void FinishGroupEdit()
+    {
+        SaveSettings();
+        foreach (var card in RepoCards)
+        {
+            card.RaiseGroupPropertiesChanged();
+        }
+
+        UpdateDisplayedRepoCards();
+    }
+
+    /// <summary>
+    ///     Raised when the user asks to rename a group (its name is the argument); the window shows
+    ///     the name prompt and calls <see cref="RenameGroup"/>.
+    /// </summary>
+    public event EventHandler<string>? GroupRenameRequested;
+
+    /// <summary>
+    ///     Raised when the user asks to remove a group (its name is the argument); the window
+    ///     confirms and calls <see cref="RemoveGroup"/>.
+    /// </summary>
+    public event EventHandler<string>? GroupRemoveRequested;
+
+    /// <summary>
+    ///     Subscribes to a card's <see cref="RepoCardViewModel.FavoriteChanged"/>,
+    ///     <see cref="RepoCardViewModel.GroupChanged"/>, <see cref="RepoCardViewModel.CardColorChanged"/> and
     ///     <c>LaunchRecorded</c> events so settings are persisted and
     ///     <see cref="DisplayedRepoCards"/> is kept current. Deliberately does <em>not</em>
     ///     subscribe to <see cref="RepoCardViewModel.RemoveRequested"/> here - that event is a
@@ -532,6 +836,12 @@ internal sealed class MainWindowViewModel : ViewModelBase
             SaveSettings();
             UpdateDisplayedRepoCards();
         };
+        card.GroupChanged += (_, _) =>
+        {
+            SaveSettings();
+            UpdateDisplayedRepoCards();
+        };
+        card.CardColorChanged += (_, _) => SaveSettings();
         card.LaunchRecorded += (_, _) =>
         {
             SaveSettings();

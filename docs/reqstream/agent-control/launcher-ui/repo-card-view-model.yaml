@@ -482,3 +482,39 @@ sections:
           - RepoCardViewModel_RepoImage_FileRemoved_FallsBackToInitials
           - RepoCardViewModel_RepoImage_MissingFolder_NeverLooksForAnImage
           - RepoCardViewModel_RepoImage_DecodeFailsOrThrows_KeepsTileAndDoesNotRetry
+
+      - id: AgentControl-RepoCardViewModel-MoveToGroup
+        title: >-
+          The RepoCardViewModel class shall move its repo into a valid group (adopting the
+          spelling of an existing group whose name matches ignoring letter case, and refusing a
+          name that is too long or one of the built-in section names) or out of its group, record
+          the choice on the repo's settings entry only, raise a change notification, list the
+          existing groups, request the new-group prompt, and show its group as a chip only while
+          the repo is a favorite.
+        justification: |
+          The card is where the user decides which group a repo belongs to; the rules must be the
+          same wherever the move comes from, and a favorite - listed under Favorites - still has to
+          show which group it belongs to.
+        tests:
+          - RepoCardViewModel_MoveToGroup_UpdatesGroupAndRaisesChange
+          - RepoCardViewModel_NewGroupCommand_RaisesRequest_AndChipShowsForGroupedFavorites
+          - RepoCardViewModel_MoveToGroup_NewExistingInvalidAndRemove
+
+      - id: AgentControl-RepoCardViewModel-CardColor
+        title: >-
+          The RepoCardViewModel class shall let the tile's color be chosen from the palette by name
+          (ignoring letter case) or reset to the automatic color derived from the repo path, record
+          the choice on the repo's settings entry only, raise a change notification, refuse a name
+          that is not in the palette, read a stored name that is not in the palette as the
+          automatic color, and leave the card's status unchanged.
+        justification: |
+          The choice must be reversible and safe against a stale or damaged stored value, and the
+          card's status colors must keep their meaning whatever color the user picks.
+        tests:
+          - CardColorPalette_All_MatchesTheAvatarPalette
+          - CardColorPalette_Find_ToleratesAnyStoredValue
+          - RepoCardViewModel_CardColor_Default_IsAutomatic
+          - RepoCardViewModel_SetCardColor_ChoosesAndClearsColor
+          - RepoCardViewModel_SetCardColor_UnknownName_IsRefused
+          - RepoCardViewModel_CardColor_UnknownStoredValue_FallsBackToAutomatic
+          - RepoCardViewModel_SetCardColor_DoesNotChangeStatus

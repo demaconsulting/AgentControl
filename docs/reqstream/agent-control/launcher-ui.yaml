@@ -100,6 +100,59 @@ sections:
           - App_ApplyTheme_SwitchesRunningApplicationTheme
           - AppStyles_LightAndDarkDictionaries_DefineTheSameKeys
           - AppStyles_TextAndGraphicColors_MeetContrastInBothThemes
+          - AppStyles_TileLetters_AreTheBetterOfLightAndDarkTextOnEveryPaletteColor
+
+      - id: AgentControl-LauncherUI-RepoGroups
+        title: >-
+          The LauncherUI subsystem shall list the repos in collapsible sections once at least one
+          repo is in a group of the user's own - the favorites first (a favorite is listed only
+          there, with its group shown on its card), then the groups alphabetically, then the
+          repos in no group, each header showing the section's name and its number of repos - and
+          shall offer, in each card's menu, moving the repo into an existing group, into a new
+          group named in a small prompt that validates the name, or out of its group, and, in a
+          group's header, renaming and removing the group; collapsing a section shall hide its
+          cards while the filter keeps showing every match; with no repo in a group the list shall
+          have no headers.
+        justification: |
+          The grouping must be discoverable where the user already acts (the card menu and the
+          header), must never hide a repo the user is looking for, and must leave the list exactly
+          as it was for a user who does not use groups.
+        children:
+          - AgentControl-MainWindowViewModel-GroupSections
+          - AgentControl-MainWindowViewModel-GroupCollapse
+          - AgentControl-MainWindowViewModel-GroupFilter
+          - AgentControl-MainWindowViewModel-GroupManagement
+          - AgentControl-MainWindowViewModel-GroupNamePrompt
+          - AgentControl-RepoCardViewModel-MoveToGroup
+          - AgentControl-Settings-RepoOrganization
+        tests:
+          - MainWindow_GroupedRepos_ShowHeadersWithNameCountAndState
+          - MainWindow_NoGroups_ShowsNoHeader
+          - MainWindow_HeaderToggle_CollapsesAndExpandsSection
+          - MainWindow_CardMenu_MoveToGroupSubmenu_ListsChoicesAndMovesRepo
+          - MainWindow_NewGroupMenuItem_PromptsForNameAndCreatesGroup
+          - MainWindow_NewGroupPrompt_Canceled_ChangesNothing
+          - MainWindow_HeaderMenu_RenameAndRemoveGroup
+          - MainWindow_FavoriteInGroup_ShowsGroupChip
+          - GroupNameWindow_ValidatesWhileTyping_AndAccepts
+
+      - id: AgentControl-LauncherUI-CardColor
+        title: >-
+          The LauncherUI subsystem shall offer, in each card's menu, a palette pop-up of colors
+          for the card's tile and an Automatic choice, shall mark the chosen color, shall show the
+          chosen color on the tile (as a ring around a repo's own picture) without changing the
+          status accent bar, and shall draw the letters on every palette color in whichever of white
+          and near-black reads better, with at least AA (4.5:1) contrast in both themes.
+        justification: |
+          The color is a personal aid to recognition; it must be easy to choose and to undo, must
+          not be mistaken for a status, and must keep the repo's initials readable whatever color
+          is chosen and in either theme.
+        children:
+          - AgentControl-RepoCardViewModel-CardColor
+          - AgentControl-Settings-RepoOrganization
+        tests:
+          - MainWindow_CardColorPalette_ChoosingSwatchColorsTileAndAutomaticClears
+          - AppStyles_TileLetters_AreTheBetterOfLightAndDarkTextOnEveryPaletteColor
 
       - id: AgentControl-LauncherUI-AddRepo
         title: The LauncherUI subsystem shall let the user add an existing folder as a tracked repo.

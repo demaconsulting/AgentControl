@@ -245,6 +245,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
             SelectPackage, () => IsPackageSelectionNeeded && !IsMissing && !IsBusy);
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
         FavoriteToggleCommand = new RelayCommand(() => IsFavorite = !IsFavorite);
+        NewGroupCommand = new RelayCommand(() => NewGroupRequested?.Invoke(this, EventArgs.Empty));
+        RemoveFromGroupCommand = new RelayCommand(() => MoveToGroup(null), () => HasGroup);
         RemoveCommand = new RelayCommand(() => RemoveRequested?.Invoke(this, EventArgs.Empty));
         CancelOperationCommand = new RelayCommand(CancelOperation, () => CanCancelOperation);
 
@@ -319,8 +321,153 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             _recentRepo.IsFavorite = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(ShowGroupChip));
             FavoriteChanged?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    /// <summary>
+    ///     Gets the name of the user's own group this repo is listed under, or
+    ///     <see langword="null"/> when it is in no group.
+    /// </summary>
+    /// <remarks>
+    ///     Read through <see cref="RepoGroupName.Sanitize"/>, so whatever the settings hold (even
+    ///     text that was not repaired at load, as in a test that builds settings directly) yields a
+    ///     valid name or no group, never a failure. Change it with <see cref="MoveToGroup"/>.
+    /// </remarks>
+    public string? GroupName => RepoGroupName.Sanitize(_recentRepo.GroupName);
+
+    /// <summary>
+    ///     Gets a value indicating whether this repo is in one of the user's own groups.
+    /// </summary>
+    public bool HasGroup => GroupName is not null;
+
+    /// <summary>
+    ///     Gets a value indicating whether the card shows its group's name as a chip. A favorite repo
+    ///     is listed under Favorites rather than under its group, so the chip is what tells the user
+    ///     which group it belongs to; for any other repo the section header already says so.
+    /// </summary>
+    public bool ShowGroupChip => IsFavorite && HasGroup;
+
+    /// <summary>
+    ///     Gets the names of the groups that exist now (the groups of all repos in the settings),
+    ///     sorted, for the "Move to group" submenu.
+    /// </summary>
+    /// <returns>The distinct group names, alphabetically.</returns>
+    public IReadOnlyList<string> GetExistingGroupNames() =>
+        RepoGroupName.DistinctNames(_getSettings().RecentRepos.Select(repo => repo.GroupName));
+
+    /// <summary>
+    ///     Moves this repo into a group, or out of every group.
+    /// </summary>
+    /// <remarks>
+    ///     A name that matches an existing group ignoring letter case joins that group under its own
+    ///     spelling, so look-alike groups cannot arise. The choice is stored only in the per-user
+    ///     settings (on the shared <see cref="RecentRepo"/>), never in the repository. Raises
+    ///     <see cref="GroupChanged"/> when the group actually changed, so the owning
+    ///     <see cref="MainWindowViewModel"/> persists the settings and rebuilds the list.
+    /// </remarks>
+    /// <param name="groupName">The group's name, or <see langword="null"/> (or blank) to take the
+    ///     repo out of its group.</param>
+    /// <returns><see langword="true"/> when the repo is now in the requested place (including when
+    ///     it already was); <see langword="false"/> when <paramref name="groupName"/> is not a valid
+    ///     group name (too long, or a built-in section's name) and nothing changed.</returns>
+    public bool MoveToGroup(string? groupName)
+    {
+        // Blank means "no group"; anything else must be a name the rules accept
+        var requested = RepoGroupName.Normalize(groupName);
+        if (requested is not null && RepoGroupName.Validate(requested) != RepoGroupNameProblem.None)
+        {
+            return false;
+        }
+
+        var target = requested is null ? null : RepoGroupName.Canonicalize(requested, GetExistingGroupNames());
+        if (string.Equals(_recentRepo.GroupName, target, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        _recentRepo.GroupName = target;
+        RaiseGroupPropertiesChanged();
+        GroupChanged?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
+    /// <summary>
+    ///     Tells the view that this card's group properties may have changed because the group was
+    ///     renamed or removed from outside the card (by the owning view model).
+    /// </summary>
+    internal void RaiseGroupPropertiesChanged()
+    {
+        OnPropertyChanged(nameof(GroupName));
+        OnPropertyChanged(nameof(HasGroup));
+        OnPropertyChanged(nameof(ShowGroupChip));
+        RemoveFromGroupCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>
+    ///     Gets the command that asks for a new group to move this repo into; it raises
+    ///     <see cref="NewGroupRequested"/> (the window shows the name prompt).
+    /// </summary>
+    public RelayCommand NewGroupCommand { get; }
+
+    /// <summary>
+    ///     Gets the command that takes this repo out of its group; available while the repo is in one.
+    /// </summary>
+    public RelayCommand RemoveFromGroupCommand { get; }
+
+    /// <summary>
+    ///     Gets the name of the palette color the user chose for this repo's tile, or
+    ///     <see langword="null"/> for the automatic color (including when the stored name is not a
+    ///     color this version knows).
+    /// </summary>
+    public string? CardColorName => CardColorPalette.Find(_recentRepo.CardColor)?.Name;
+
+    /// <summary>
+    ///     Gets a value indicating whether the user chose a color for this repo's tile.
+    /// </summary>
+    public bool HasCustomCardColor => CardColorName is not null;
+
+    /// <summary>
+    ///     Gets a value indicating whether the tile uses the automatic color (the opposite of
+    ///     <see cref="HasCustomCardColor"/>), for the palette popup's "Automatic" entry.
+    /// </summary>
+    public bool IsCardColorAutomatic => !HasCustomCardColor;
+
+    /// <summary>
+    ///     Chooses the color of this repo's tile.
+    /// </summary>
+    /// <remarks>
+    ///     Only the tile changes: the status accent bar keeps its fixed, meaningful colors. The choice
+    ///     is stored by name in the per-user settings only, and raises <see cref="CardColorChanged"/>
+    ///     so the owning <see cref="MainWindowViewModel"/> persists it.
+    /// </remarks>
+    /// <param name="colorName">A palette color's name (letter case ignored), or
+    ///     <see langword="null"/> (or blank) for the automatic color.</param>
+    /// <returns><see langword="true"/> when the card now has the requested color (including when it
+    ///     already had); <see langword="false"/> when <paramref name="colorName"/> names no palette
+    ///     color and nothing changed.</returns>
+    public bool SetCardColor(string? colorName)
+    {
+        var requested = string.IsNullOrWhiteSpace(colorName) ? null : CardColorPalette.Find(colorName);
+        if (requested is null && !string.IsNullOrWhiteSpace(colorName))
+        {
+            return false;
+        }
+
+        if (string.Equals(_recentRepo.CardColor, requested?.Name, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        _recentRepo.CardColor = requested?.Name;
+        OnPropertyChanged(nameof(CardColorName));
+        OnPropertyChanged(nameof(HasCustomCardColor));
+        OnPropertyChanged(nameof(IsCardColorAutomatic));
+        OnPropertyChanged(nameof(AvatarColorIndex));
+        OnPropertyChanged(nameof(AvatarStyleClass));
+        CardColorChanged?.Invoke(this, EventArgs.Empty);
+        return true;
     }
 
     /// <summary>
@@ -737,11 +884,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Gets the index (0 up to <see cref="AvatarPaletteSize"/> - 1) of this repo's avatar color,
-    ///     derived from a stable hash of the repo path so the same repo always has the same color
-    ///     in every session and on every machine.
+    ///     Gets the index (0 up to <see cref="AvatarPaletteSize"/> - 1) of the palette color of this
+    ///     repo's tile: the color the user chose (<see cref="CardColorName"/>), otherwise the
+    ///     automatic color, derived from a stable hash of the repo path so the same repo always has
+    ///     the same color in every session and on every machine.
     /// </summary>
-    public int AvatarColorIndex => GetAvatarColorIndex(RepoPath);
+    public int AvatarColorIndex => CardColorPalette.Find(_recentRepo.CardColor)?.Index ?? GetAvatarColorIndex(RepoPath);
 
     /// <summary>
     ///     Gets the style class (<c>avatar0</c>, <c>avatar1</c>, ...) that selects this repo's avatar
@@ -1341,6 +1489,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
     /// </summary>
     public event EventHandler? FavoriteChanged;
+
+    /// <summary>
+    ///     Raised when <see cref="MoveToGroup"/> changes the repo's group, so the owning
+    ///     <see cref="MainWindowViewModel"/> can persist settings and rebuild the sectioned list.
+    /// </summary>
+    public event EventHandler? GroupChanged;
+
+    /// <summary>
+    ///     Raised by <see cref="NewGroupCommand"/> to request the "New group" name prompt; the view
+    ///     shows it and, if a name is chosen, calls <see cref="MoveToGroup"/>.
+    /// </summary>
+    public event EventHandler? NewGroupRequested;
+
+    /// <summary>
+    ///     Raised when <see cref="SetCardColor"/> changes the tile color, so the owning
+    ///     <see cref="MainWindowViewModel"/> can persist settings.
+    /// </summary>
+    public event EventHandler? CardColorChanged;
 
     /// <summary>
     ///     Raised when a launch is recorded, so the owning <see cref="MainWindowViewModel"/> can

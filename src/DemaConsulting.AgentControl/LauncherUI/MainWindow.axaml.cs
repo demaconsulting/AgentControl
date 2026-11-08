@@ -22,14 +22,21 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoSync;
+using DemaConsulting.AgentControl.Settings;
+using Material.Icons;
+using Material.Icons.Avalonia;
 using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
@@ -152,6 +159,8 @@ internal sealed partial class MainWindow : Window
         }
 
         viewModel.RepoCards.CollectionChanged += OnRepoCardsChanged;
+        viewModel.GroupRenameRequested += async (_, name) => await ShowRenameGroupPrompt(viewModel, name);
+        viewModel.GroupRemoveRequested += async (_, name) => await ConfirmAndRemoveGroup(viewModel, name);
 
         // The upgrade check reads package sources, which may be slow or unreachable, so it starts
         // in the background now that the window has its data rather than delaying the window
@@ -199,6 +208,7 @@ internal sealed partial class MainWindow : Window
             ShowTrackedChildWindow(new ReleaseNotesViewer(new ReleaseNotesViewerViewModel(card.RepoName, releaseNotes)));
         card.RemoveRequested += async (_, _) => await ConfirmAndRemoveCard(card);
         card.SelectPackageRequested += async (_, _) => await ShowSelectPackageDialog(card);
+        card.NewGroupRequested += async (_, _) => await ShowNewGroupPrompt(card);
         card.AgentsMdTemplateOfferRequested += async (_, templateContent) => await ShowAgentsMdTemplateOfferDialog(card, templateContent);
     }
 
@@ -350,45 +360,224 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Gives a card's avatar tile the style class of its repo's palette color when the tile
-    ///     first attaches to the visual tree.
+    ///     Fills the "Move to group" submenu of a card's "..." menu just before the menu opens: one
+    ///     entry per existing group (the repo's own group is marked), then "New group..." and, when
+    ///     the repo is in a group, "Remove from group".
     /// </summary>
-    /// <param name="sender">The avatar <see cref="Border"/>.</param>
+    /// <remarks>
+    ///     The entries depend on the groups that exist at that moment, which a XAML template cannot
+    ///     express as one mixed list of items and commands, so the code-behind builds them from the
+    ///     card's own data and commands; the choices themselves are carried out by
+    ///     <see cref="RepoCardViewModel"/>. The card is found through the flyout's placement
+    ///     target, whose data context is the card.
+    /// </remarks>
+    /// <param name="sender">The card's <see cref="MenuFlyout"/>.</param>
     /// <param name="e">Event arguments (unused).</param>
-    private static void RepoAvatar_AttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e) =>
-        ApplyAvatarColorClass(sender as Border);
-
-    /// <summary>
-    ///     Re-applies the avatar color class when a recycled list container is given another repo's
-    ///     card, so a virtualized row never keeps the previous repo's color.
-    /// </summary>
-    /// <param name="sender">The avatar <see cref="Border"/>.</param>
-    /// <param name="e">Event arguments (unused).</param>
-    private static void RepoAvatar_DataContextChanged(object? sender, EventArgs e) =>
-        ApplyAvatarColorClass(sender as Border);
-
-    /// <summary>
-    ///     Replaces the avatar's palette style class (<c>avatar0</c>, <c>avatar1</c>, ...) with the
-    ///     one its repo maps to. The class selects theme-aware background and foreground
-    ///     resources (see <c>RepoCardStyles.axaml</c>), so this code carries no color values.
-    /// </summary>
-    /// <param name="avatar">The avatar tile, or <see langword="null"/> (nothing to do).</param>
-    private static void ApplyAvatarColorClass(Border? avatar)
+    private static void CardMenu_Opening(object? sender, EventArgs e)
     {
-        if (avatar is null)
+        if (sender is not MenuFlyout { Target.DataContext: RepoCardViewModel card } flyout)
         {
             return;
         }
 
-        // Drop any earlier palette class first: a recycled container keeps its Classes
-        foreach (var existing in avatar.Classes.Where(c => c.StartsWith("avatar", StringComparison.Ordinal)).ToList())
+        var submenu = flyout.Items.OfType<MenuItem>().FirstOrDefault(item => item.Name == "MoveToGroupMenuItem");
+        if (submenu is null)
         {
-            avatar.Classes.Remove(existing);
+            return;
         }
 
-        if (avatar.DataContext is RepoCardViewModel card)
+        var entries = new List<object>();
+        var groups = card.GetExistingGroupNames();
+        foreach (var group in groups)
         {
-            avatar.Classes.Add(card.AvatarStyleClass);
+            // The header is a TextBlock so an underscore in a group name is not taken as an access key
+            var isCurrent = RepoGroupName.Comparer.Equals(group, card.GroupName ?? string.Empty);
+            var entry = new MenuItem
+            {
+                Header = new TextBlock { Text = group },
+                Icon = isCurrent ? new MaterialIcon { Kind = MaterialIconKind.Check } : null
+            };
+            AutomationProperties.SetAutomationId(entry, "MoveToGroupItem");
+            AutomationProperties.SetName(entry, group);
+            ToolTip.SetTip(
+                entry,
+                isCurrent ? $"{card.RepoName} is in the group {group}." : $"Move {card.RepoName} to the group {group}.");
+            entry.Click += (_, _) => card.MoveToGroup(group);
+            entries.Add(entry);
+        }
+
+        if (groups.Count > 0)
+        {
+            entries.Add(new Separator());
+        }
+
+        var newGroup = new MenuItem
+        {
+            Header = "New group...",
+            Icon = new MaterialIcon { Kind = MaterialIconKind.FolderPlus },
+            Command = card.NewGroupCommand
+        };
+        AutomationProperties.SetAutomationId(newGroup, "NewGroupMenuItem");
+        ToolTip.SetTip(newGroup, $"Create a group and move {card.RepoName} into it");
+        entries.Add(newGroup);
+
+        if (card.HasGroup)
+        {
+            var remove = new MenuItem
+            {
+                Header = "Remove from group",
+                Icon = new MaterialIcon { Kind = MaterialIconKind.FolderRemove },
+                Command = card.RemoveFromGroupCommand
+            };
+            AutomationProperties.SetAutomationId(remove, "RemoveFromGroupMenuItem");
+            ToolTip.SetTip(remove, $"Take {card.RepoName} out of the group {card.GroupName}");
+            entries.Add(remove);
+        }
+
+        submenu.Items.Clear();
+        foreach (var entry in entries)
+        {
+            submenu.Items.Add(entry);
+        }
+    }
+
+    /// <summary>
+    ///     The card whose color palette is open, so a swatch click knows which card to color; set
+    ///     while the pop-up is shown.
+    /// </summary>
+    private RepoCardViewModel? _paletteCard;
+
+    /// <summary>
+    ///     The open color palette pop-up, so a swatch click can close it; <see langword="null"/>
+    ///     when none is open.
+    /// </summary>
+    private FlyoutBase? _paletteFlyout;
+
+    /// <summary>
+    ///     Opens the color palette pop-up of the card whose "Card color..." menu item was clicked,
+    ///     anchored to that card's "..." button.
+    /// </summary>
+    /// <remarks>
+    ///     The pop-up is shown after the menu has finished closing (posted to the UI thread), because
+    ///     showing it while the menu's own light-dismiss is still pending would close it at once.
+    /// </remarks>
+    /// <param name="sender">The clicked "Card color..." <see cref="MenuItem"/>.</param>
+    /// <param name="e">Routed event arguments (unused).</param>
+    private void CardColorMenuItem_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: RepoCardViewModel card })
+        {
+            return;
+        }
+
+        var button = FindControlOfCard<Button>(card, "MoreActionsButton");
+        if (button is null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            _paletteCard = card;
+            _paletteFlyout = FlyoutBase.GetAttachedFlyout(button);
+            FlyoutBase.ShowAttachedFlyout(button);
+        });
+    }
+
+    /// <summary>
+    ///     Applies the color of the clicked swatch (or "Automatic") to the card whose palette is open,
+    ///     then closes the palette.
+    /// </summary>
+    /// <param name="sender">The clicked swatch or "Automatic" <see cref="Button"/>; its tag is the
+    ///     palette color's name, or empty for Automatic.</param>
+    /// <param name="e">Routed event arguments (unused).</param>
+    private void CardColorSwatch_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string name } && _paletteCard is { } card)
+        {
+            card.SetCardColor(name.Length == 0 ? null : name);
+        }
+
+        _paletteFlyout?.Hide();
+        _paletteFlyout = null;
+        _paletteCard = null;
+    }
+
+    /// <summary>
+    ///     Finds a named control inside a card's list row.
+    /// </summary>
+    /// <typeparam name="T">The control type.</typeparam>
+    /// <param name="card">The card whose row to search.</param>
+    /// <param name="name">The control's <see cref="StyledElement.Name"/>.</param>
+    /// <returns>The control, or <see langword="null"/> when the card is not shown (for example it
+    ///     is in a collapsed group or filtered out).</returns>
+    private T? FindControlOfCard<T>(RepoCardViewModel card, string name)
+        where T : Control
+    {
+        var list = this.FindControl<ListBox>("RepoListBox");
+        return list?.ContainerFromItem(card)?
+            .GetVisualDescendants()
+            .OfType<T>()
+            .FirstOrDefault(control => control.Name == name);
+    }
+
+    /// <summary>
+    ///     Shows the name prompt for a new group and, when a name is chosen, moves
+    ///     <paramref name="card"/>'s repo into that group.
+    /// </summary>
+    /// <param name="card">The card that asked for a new group.</param>
+    private async Task ShowNewGroupPrompt(RepoCardViewModel card)
+    {
+        var prompt = new GroupNameViewModel(
+            "New group",
+            $"Name of the new group for \"{card.RepoName}\":",
+            "Create",
+            card.GetExistingGroupNames());
+        var name = await new GroupNameWindow(prompt).ShowDialog<string?>(this);
+        if (name is not null)
+        {
+            card.MoveToGroup(name);
+        }
+    }
+
+    /// <summary>
+    ///     Shows the name prompt for renaming a group and, when a new name is chosen, renames it.
+    /// </summary>
+    /// <param name="viewModel">The main view model that owns the groups.</param>
+    /// <param name="groupName">The group to rename.</param>
+    private async Task ShowRenameGroupPrompt(MainWindowViewModel viewModel, string groupName)
+    {
+        var prompt = new GroupNameViewModel(
+            "Rename group",
+            $"New name for the group \"{groupName}\":",
+            "Rename",
+            viewModel.GroupNames,
+            renaming: groupName);
+        var name = await new GroupNameWindow(prompt).ShowDialog<string?>(this);
+        if (name is not null)
+        {
+            viewModel.RenameGroup(groupName, name);
+        }
+    }
+
+    /// <summary>
+    ///     Asks the user to confirm removing a group and, if confirmed, removes it (its repos become
+    ///     ungrouped). Nothing on disk or in any repository changes, which the message says.
+    /// </summary>
+    /// <param name="viewModel">The main view model that owns the groups.</param>
+    /// <param name="groupName">The group to remove.</param>
+    private async Task ConfirmAndRemoveGroup(MainWindowViewModel viewModel, string groupName)
+    {
+        var members = viewModel.RepoCards.Count(card => RepoGroupName.Comparer.Equals(card.GroupName ?? string.Empty, groupName));
+        var confirmed = await new ConfirmationWindow(
+                $"Remove the group \"{groupName}\"?\n\n" +
+                $"Its {members} repo(s) stay in AgentControl's list, ungrouped. This only changes how AgentControl " +
+                "lists them - nothing on disk or in any repository is changed.")
+            .ShowDialog<bool>(this);
+
+        if (confirmed)
+        {
+            viewModel.RemoveGroup(groupName);
         }
     }
 

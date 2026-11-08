@@ -31,6 +31,7 @@
                     <SolidColorBrush x:Key="SurfaceBorder" Color="#4A4A52" />
                     <SolidColorBrush x:Key="PageBackground" Color="#141416" />
                     <SolidColorBrush x:Key="MenuGroupHeaderForeground" Color="#A8A8B4" />
+                    <SolidColorBrush x:Key="GroupHeaderForeground" Color="#E6E6EA" />
                     <SolidColorBrush x:Key="SurfaceDivider" Color="#3A3A42" />
                     <SolidColorBrush x:Key="ErrorForeground" Color="#FF8A80" />
                     <SolidColorBrush x:Key="WarningForeground" Color="#F2C14E" />
@@ -131,6 +132,7 @@
                     <SolidColorBrush x:Key="SurfaceBorder" Color="#A0A0AC" />
                     <SolidColorBrush x:Key="PageBackground" Color="#F3F3F6" />
                     <SolidColorBrush x:Key="MenuGroupHeaderForeground" Color="#5C5C66" />
+                    <SolidColorBrush x:Key="GroupHeaderForeground" Color="#2B2B30" />
                     <SolidColorBrush x:Key="SurfaceDivider" Color="#D0D0D8" />
                     <SolidColorBrush x:Key="ErrorForeground" Color="#B42318" />
                     <SolidColorBrush x:Key="WarningForeground" Color="#7A4A00" />
@@ -316,42 +318,52 @@
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AvatarForeground0}" />
     </Style>
     <Style Selector="Border.Avatar.avatar0">
+        <Setter Property="BorderBrush" Value="{DynamicResource AvatarBackground0}" />
         <Setter Property="Background" Value="{DynamicResource AvatarBackground0}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AvatarForeground0}" />
     </Style>
     <Style Selector="Border.Avatar.avatar1">
+        <Setter Property="BorderBrush" Value="{DynamicResource AvatarBackground1}" />
         <Setter Property="Background" Value="{DynamicResource AvatarBackground1}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AvatarForeground1}" />
     </Style>
     <Style Selector="Border.Avatar.avatar2">
+        <Setter Property="BorderBrush" Value="{DynamicResource AvatarBackground2}" />
         <Setter Property="Background" Value="{DynamicResource AvatarBackground2}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AvatarForeground2}" />
     </Style>
     <Style Selector="Border.Avatar.avatar3">
+        <Setter Property="BorderBrush" Value="{DynamicResource AvatarBackground3}" />
         <Setter Property="Background" Value="{DynamicResource AvatarBackground3}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AvatarForeground3}" />
     </Style>
     <Style Selector="Border.Avatar.avatar4">
+        <Setter Property="BorderBrush" Value="{DynamicResource AvatarBackground4}" />
         <Setter Property="Background" Value="{DynamicResource AvatarBackground4}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AvatarForeground4}" />
     </Style>
     <Style Selector="Border.Avatar.avatar5">
+        <Setter Property="BorderBrush" Value="{DynamicResource AvatarBackground5}" />
         <Setter Property="Background" Value="{DynamicResource AvatarBackground5}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AvatarForeground5}" />
     </Style>
     <Style Selector="Border.Avatar.avatar6">
+        <Setter Property="BorderBrush" Value="{DynamicResource AvatarBackground6}" />
         <Setter Property="Background" Value="{DynamicResource AvatarBackground6}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AvatarForeground6}" />
     </Style>
     <Style Selector="Border.Avatar.avatar7">
+        <Setter Property="BorderBrush" Value="{DynamicResource AvatarBackground7}" />
         <Setter Property="Background" Value="{DynamicResource AvatarBackground7}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AvatarForeground7}" />
     </Style>
     <Style Selector="Border.Avatar.avatar8">
+        <Setter Property="BorderBrush" Value="{DynamicResource AvatarBackground8}" />
         <Setter Property="Background" Value="{DynamicResource AvatarBackground8}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AvatarForeground8}" />
     </Style>
     <Style Selector="Border.Avatar.avatar9">
+        <Setter Property="BorderBrush" Value="{DynamicResource AvatarBackground9}" />
         <Setter Property="Background" Value="{DynamicResource AvatarBackground9}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource AvatarForeground9}" />
     </Style>
@@ -361,8 +373,16 @@
          apart from the card. Defined after the palette classes so it wins over them. -->
     <Style Selector="Border.Avatar.hasImage">
         <Setter Property="Background" Value="{DynamicResource LogoBackingBackground}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource RepoCardBorderHover}" />
         <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.Avatar.hasImage:not(.customColor)">
+        <Setter Property="BorderBrush" Value="{DynamicResource RepoCardBorderHover}" />
+    </Style>
+    <!-- A color the user chose for a repo that has a picture shows as a ring around the picture's
+         tile (the ring takes its color from the palette class), so the picture keeps its light
+         backing and stays legible while the card still carries the chosen color -->
+    <Style Selector="Border.Avatar.hasImage.customColor">
+        <Setter Property="BorderThickness" Value="3" />
     </Style>
 
     <!-- ===== Empty state ===== -->
@@ -590,5 +610,121 @@
     <!-- A favorited repo's star is filled gold; unfavorited it is an outline in the ghost color -->
     <Style Selector="ToggleButton.iconGhost:checked materialIcons|MaterialIcon">
         <Setter Property="Foreground" Value="{DynamicResource FavoriteStarForeground}" />
+    </Style>
+
+    <!-- ===== Group headers: a section's name and count among the cards. The whole title is one
+         flat button (chevron, icon, name, count) that collapses or expands the section. ===== -->
+    <Style Selector="Button.groupToggle">
+        <Setter Property="Height" Value="30" />
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="Padding" Value="6,0,10,0" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource GroupHeaderForeground}" />
+    </Style>
+    <Style Selector="Button.groupToggle /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.13" />
+            </Transitions>
+        </Setter>
+    </Style>
+    <Style Selector="Button.groupToggle:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource IconGhostBackgroundHover}" />
+        <Setter Property="Foreground" Value="{DynamicResource GroupHeaderForeground}" />
+    </Style>
+    <Style Selector="Button.groupToggle:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource IconGhostBackgroundPressed}" />
+        <Setter Property="Foreground" Value="{DynamicResource GroupHeaderForeground}" />
+    </Style>
+    <Style Selector="Button.groupToggle:disabled /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource GroupHeaderForeground}" />
+    </Style>
+    <Style Selector="Button.groupToggle:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="BoxShadow" Value="{DynamicResource FocusRingShadow}" />
+    </Style>
+    <Style Selector="Button.groupToggle materialIcons|MaterialIcon.chevron">
+        <Setter Property="Foreground" Value="{DynamicResource MenuGroupHeaderForeground}" />
+    </Style>
+
+    <!-- ===== Card color palette: round swatches filled with the avatar palette's colors. A
+         swatch keeps its fill on hover and press (only its ring changes), and the chosen one shows
+         a check mark in the letter color of its fill, so the choice is not carried by color alone. ===== -->
+    <Style Selector="Button.swatch">
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="MinWidth" Value="30" />
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="CornerRadius" Value="15" />
+        <Setter Property="BorderThickness" Value="2" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Background" Value="{DynamicResource AvatarBackground0}" />
+        <Setter Property="Foreground" Value="{DynamicResource AvatarForeground0}" />
+    </Style>
+    <Style Selector="Button.swatch.avatar0">
+        <Setter Property="Background" Value="{DynamicResource AvatarBackground0}" />
+        <Setter Property="Foreground" Value="{DynamicResource AvatarForeground0}" />
+    </Style>
+    <Style Selector="Button.swatch.avatar1">
+        <Setter Property="Background" Value="{DynamicResource AvatarBackground1}" />
+        <Setter Property="Foreground" Value="{DynamicResource AvatarForeground1}" />
+    </Style>
+    <Style Selector="Button.swatch.avatar2">
+        <Setter Property="Background" Value="{DynamicResource AvatarBackground2}" />
+        <Setter Property="Foreground" Value="{DynamicResource AvatarForeground2}" />
+    </Style>
+    <Style Selector="Button.swatch.avatar3">
+        <Setter Property="Background" Value="{DynamicResource AvatarBackground3}" />
+        <Setter Property="Foreground" Value="{DynamicResource AvatarForeground3}" />
+    </Style>
+    <Style Selector="Button.swatch.avatar4">
+        <Setter Property="Background" Value="{DynamicResource AvatarBackground4}" />
+        <Setter Property="Foreground" Value="{DynamicResource AvatarForeground4}" />
+    </Style>
+    <Style Selector="Button.swatch.avatar5">
+        <Setter Property="Background" Value="{DynamicResource AvatarBackground5}" />
+        <Setter Property="Foreground" Value="{DynamicResource AvatarForeground5}" />
+    </Style>
+    <Style Selector="Button.swatch.avatar6">
+        <Setter Property="Background" Value="{DynamicResource AvatarBackground6}" />
+        <Setter Property="Foreground" Value="{DynamicResource AvatarForeground6}" />
+    </Style>
+    <Style Selector="Button.swatch.avatar7">
+        <Setter Property="Background" Value="{DynamicResource AvatarBackground7}" />
+        <Setter Property="Foreground" Value="{DynamicResource AvatarForeground7}" />
+    </Style>
+    <Style Selector="Button.swatch.avatar8">
+        <Setter Property="Background" Value="{DynamicResource AvatarBackground8}" />
+        <Setter Property="Foreground" Value="{DynamicResource AvatarForeground8}" />
+    </Style>
+    <Style Selector="Button.swatch.avatar9">
+        <Setter Property="Background" Value="{DynamicResource AvatarBackground9}" />
+        <Setter Property="Foreground" Value="{DynamicResource AvatarForeground9}" />
+    </Style>
+    <Style Selector="Button.swatch:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.swatch:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{Binding $parent[Button].Background}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource IconGhostForeground}" />
+    </Style>
+    <Style Selector="Button.swatch.selected /template/ ContentPresenter#PART_ContentPresenter, Button.swatch.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="BorderBrush" Value="{DynamicResource IconGhostForegroundHover}" />
+    </Style>
+    <Style Selector="Button.swatch:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="BoxShadow" Value="{DynamicResource FocusRingShadow}" />
+    </Style>
+    <Style Selector="Button.swatch materialIcons|MaterialIcon">
+        <Setter Property="Width" Value="16" />
+        <Setter Property="Height" Value="16" />
+        <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="Button.swatch.selected materialIcons|MaterialIcon">
+        <Setter Property="IsVisible" Value="True" />
     </Style>
 </Styles>

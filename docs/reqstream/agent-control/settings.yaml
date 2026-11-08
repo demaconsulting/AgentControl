@@ -61,3 +61,22 @@ sections:
         tests:
           - SettingsStore_SaveThenLoad_Theme_RoundTripsByName
           - SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem
+
+      - id: AgentControl-Settings-RepoOrganization
+        title: >-
+          The Settings subsystem shall persist, per repo and only in the user's own settings file,
+          the user's group for the repo and the user's chosen card color, and, per user, which
+          list sections are collapsed, and shall read missing, null or invalid values of these as
+          "no group", the automatic color and "nothing collapsed" instead of failing the load.
+        justification: |
+          Groups, colors and collapsed sections are personal choices that must survive restarts
+          but must not be shared through a repository; a settings file that is damaged, edited by
+          hand or written by another version must never keep the application from starting.
+        children:
+          - AgentControl-SettingsStore-RepoOrganization
+        tests:
+          - SettingsStore_SaveThenLoad_GroupColorAndCollapsedGroups_RoundTrip
+          - SettingsStore_Load_FileWithoutOrganizingValues_UsesDefaults
+          - SettingsStore_Load_InvalidGroupOrColorType_ReadsAsNone
+          - SettingsStore_Load_InvalidCollapsedGroups_KeepsOnlyCleanStrings
+          - SettingsStore_Load_GroupNames_AreRepairedAndUnified

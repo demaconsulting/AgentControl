@@ -3,7 +3,8 @@ package AgentControl {
         doc
         /*
          * Loads/saves application-wide settings (package source path, git/agent-tool
-         * overrides, recent repos, shell preference). AppSettings, RecentRepo, and
+         * overrides, recent repos, shell preference, and the user's own repo groups, card
+         * colors and collapsed sections). AppSettings, RecentRepo, RepoGroupName and
          * AgentToolKind have no dedicated test file and are folded into this subsystem-level
          * description.
          */

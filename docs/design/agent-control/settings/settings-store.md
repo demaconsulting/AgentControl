@@ -41,7 +41,13 @@ path.
   property initializers) is normalized to an empty collection by `AppSettings.NormalizeNulls`
   before migration runs, so it can never crash migration, startup or a source provider. A missing
   `Theme` value loads as `ThemePreference.System`, and an unknown or invalid one does too instead of failing
-  the load (`AgentControl-SettingsStore-Theme`); `Save` writes the theme by name.
+  the load (`AgentControl-SettingsStore-Theme`); `Save` writes the theme by name. A repo's `GroupName` and
+  `CardColor` and the `CollapsedGroups` list are read tolerantly (a missing, null or wrongly typed value is no
+  group, the automatic color and an empty list; the string entries of a damaged list are kept) and then repaired by
+  `AppSettings.NormalizeNulls` using `RepoGroupName` (names cleaned, cut to 40 characters, *Favorites* and
+  *Ungrouped* read as no group, look-alike names given one spelling, the collapsed list made distinct); `Save` omits
+  a group or color that is `null`. They are written to the settings file only
+  (`AgentControl-SettingsStore-RepoOrganization`).
 
 **Save**: Saves `AppSettings` to a configuration directory, creating the directory if needed.
 
@@ -71,6 +77,8 @@ when the configuration directory cannot be created or the file cannot be written
 
 - **AppSettings** (data type, same subsystem) — the data type read/written, including its
   legacy-migration and persisted-copy members.
+- **RecentRepo**, **RepoGroupName** (same subsystem) — the per-repo group and card-color values, and the rules
+  that repair stored group names.
 - **PackageSourceDefinition** (`AgentPackageManagement` subsystem) — the source data type held in
   `AppSettings.Sources`.
 - **.NET BCL** — `System.Text.Json`, `Environment.GetFolderPath`.

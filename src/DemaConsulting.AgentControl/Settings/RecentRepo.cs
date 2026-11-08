@@ -18,6 +18,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace DemaConsulting.AgentControl.Settings;
 
 /// <summary>
@@ -90,4 +93,92 @@ internal sealed class RecentRepo
     ///     than a separate cache file.
     /// </remarks>
     public DateTimeOffset? LastLaunchedUtc { get; set; }
+
+    /// <summary>
+    ///     Gets or sets the name of the user's own group this repo is listed under in the main
+    ///     window, or <see langword="null"/> for no group.
+    /// </summary>
+    /// <remarks>
+    ///     A user-specific organizing choice: it lives only in the per-user settings file, never in
+    ///     the repository or its <c>.agentcontrol.json</c>, so it is never shared through git. A
+    ///     group has no entry of its own - it exists while at least one repo names it. Persisted
+    ///     only when set; a stored value that is not a string reads as no group, and
+    ///     <see cref="AppSettings.NormalizeNulls"/> repairs the text (see <see cref="RepoGroupName"/>),
+    ///     so the value can never keep the application from starting.
+    /// </remarks>
+    [JsonConverter(typeof(OptionalStringJsonConverter))]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? GroupName { get; set; }
+
+    /// <summary>
+    ///     Gets or sets the name of the palette color the user chose for this repo's card tile, or
+    ///     <see langword="null"/> for the automatic color (the one derived from the repo path).
+    /// </summary>
+    /// <remarks>
+    ///     A user-specific appearance choice stored only in the per-user settings file, never in
+    ///     the repository. Kept as the palette entry's name (for example <c>Teal</c>) rather than an
+    ///     index so reordering the palette cannot change anyone's choice; a name the palette does
+    ///     not know (a typo, or a color from a newer version) simply reads as the automatic color.
+    ///     Persisted only when set.
+    /// </remarks>
+    [JsonConverter(typeof(OptionalStringJsonConverter))]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CardColor { get; set; }
+
+    /// <summary>
+    ///     Reads an optional string and treats a JSON value of any other kind as
+    ///     <see langword="null"/> instead of failing.
+    /// </summary>
+    /// <remarks>
+    ///     The built-in string handling throws on a number, boolean, object or array, which
+    ///     <see cref="SettingsStore.Load"/> would report as a corrupt settings file; the organizing
+    ///     choices on a repo must never be able to do that. Stateless and thread-safe.
+    /// </remarks>
+    private sealed class OptionalStringJsonConverter : JsonConverter<string?>
+    {
+        /// <inheritdoc />
+        public override bool HandleNull => true;
+
+        /// <summary>
+        ///     Reads a string, or <see langword="null"/> for anything that is not one.
+        /// </summary>
+        /// <param name="reader">The reader positioned on the value.</param>
+        /// <param name="typeToConvert">The target type (unused).</param>
+        /// <param name="options">The serializer options (unused).</param>
+        /// <returns>The string, or <see langword="null"/> for a null or non-string value.</returns>
+        public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.String:
+                    return reader.GetString();
+
+                case JsonTokenType.StartObject or JsonTokenType.StartArray:
+                    // Consume the whole nested value so the reader stays positioned correctly
+                    reader.Skip();
+                    return null;
+
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>
+        ///     Writes the string, or JSON null.
+        /// </summary>
+        /// <param name="writer">The writer.</param>
+        /// <param name="value">The value to write.</param>
+        /// <param name="options">The serializer options (unused).</param>
+        public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options)
+        {
+            if (value is null)
+            {
+                writer.WriteNullValue();
+            }
+            else
+            {
+                writer.WriteStringValue(value);
+            }
+        }
+    }
 }

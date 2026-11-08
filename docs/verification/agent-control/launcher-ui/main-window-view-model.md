@@ -27,6 +27,11 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - Constructing the view model reads no package source; upgrade availability is checked in the
   background, and an unreachable source affects only the cards pinned to it.
 - The connection-test provider shares the application's session credentials with the cards.
+- With no repo in a group the list is flat and has no header; with groups it is sectioned
+  (Favorites, groups alphabetically, Ungrouped), a favorite is listed once, collapsed sections hide their
+  cards but keep their headers, a filter shows every match (even in a collapsed group) and leaves the
+  remembered state alone, and group changes are stored in the settings file only.
+- The group-name prompt validates as the user types and completes exactly once.
 
 #### Test Scenarios
 
@@ -144,3 +149,71 @@ the live settings keep the system default. This scenario is tested by
 `MainWindowViewModel_ApplySettings_ThemeChanged_PersistsAndAppliesTheme` and
 `MainWindowViewModel_ApplySettings_SaveFails_DoesNotApplyTheme`, covering
 `AgentControl-MainWindowViewModel-ApplyTheme`.
+
+**MainWindowViewModel_GroupSections_FlatListWithoutGroupsSectionedListWithThem**: Tested by
+`RepoGroupingTests.cs` (same `RealProcess` collection and temporary-directory approach, with repos
+created under a unique parent so the card name is the folder name). Settings with no group give a flat
+list without any header, favorites first. Settings with groups give Favorites first, the groups
+alphabetically ignoring letter case, then Ungrouped, each header with its count, repos by most recent
+launch, no header for an empty section, and a favorite listed only under Favorites (and back in its group
+when it is no longer a favorite). Toggling a section keeps the header and the unchanged cards as the same
+objects with only the hidden cards removed, and settings built in memory with a null collapsed list,
+blank, reserved, overlong or look-alike group names load without failing. This scenario is tested by
+`MainWindowViewModel_DisplayedItems_NoGroups_FlatListWithoutHeaders`,
+`MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered`,
+`MainWindowViewModel_Favorite_IsListedOnlyUnderFavoritesAndKeepsItsGroup`,
+`MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader`,
+`MainWindowViewModel_ToggleGroupCollapsed_KeepsHeaderAndUnchangedCardsInPlace`,
+`MainWindowViewModel_Constructor_NullAndInvalidOrganizingSettings_FallBack`,
+`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection` and the
+`RepoGroupHeaderViewModelTests.cs` tests `RepoGroupHeaderViewModel_Kind_SelectsSectionFlags`,
+`RepoGroupHeaderViewModel_Update_DescribesCountAndState`, `RepoGroupHeaderViewModel_ToString_IsTheAccessibleName`
+and `RepoGroupHeaderViewModel_Constructor_BlankName_Throws`, covering
+`AgentControl-MainWindowViewModel-GroupSections`.
+
+**MainWindowViewModel_GroupCollapse_HidesCardsAndIsRemembered**: Collapsing a group leaves its header (with
+its count) and no cards, writes the name to the settings file, and a view model built from those settings
+shows it collapsed; expanding forgets it (letter case ignored); Favorites and Ungrouped collapse the same
+way; a list of only collapsed sections still shows its headers; applying other settings keeps the collapsed
+names; and a header's toggle command is unavailable while toggling is disabled. This scenario is tested by
+`MainWindowViewModel_ToggleGroupCollapsed_HidesCardsAndPersists`,
+`MainWindowViewModel_ToggleGroupCollapsed_BuiltInSections_CollapseAndPersist`,
+`MainWindowViewModel_AllGroupsCollapsed_HeadersRemainAndListIsNotEmpty`,
+`MainWindowViewModel_ApplySettings_KeepsCollapsedGroups` and
+`RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled`, covering
+`AgentControl-MainWindowViewModel-GroupCollapse`.
+
+**MainWindowViewModel_GroupFilter_ShowsEveryMatchEvenInCollapsedGroups**: With a group collapsed, a filter
+shows its matching repos expanded, counts only the matches, omits the sections without one, disables the
+toggles and leaves the file's collapsed names unchanged; clearing the filter brings the collapsed state back;
+a filter that matches nothing shows no header at all. This scenario is tested by
+`MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes` and
+`MainWindowViewModel_FilterText_NoMatch_ShowsNothing`, covering `AgentControl-MainWindowViewModel-GroupFilter`.
+
+**MainWindowViewModel_GroupManagement_RenameRemoveAndNothingWrittenToRepos**: Renaming moves every member
+and the collapsed entry and is persisted, accepts a change of letter case only, and is refused for an
+unknown group, a blank, reserved or overlong name and another group's name; removing a group leaves its
+repos ungrouped and forgets its collapsed entry; a header's rename and remove commands raise the view model's requests
+with the group's name and change nothing by themselves; and after moving, coloring, collapsing and renaming
+the repository folder is still empty while the settings file holds the choices. This scenario is tested by
+`MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames`,
+`MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped`,
+`MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName`,
+`RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests` and
+`RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository`, covering
+`AgentControl-MainWindowViewModel-GroupManagement`.
+
+**GroupNameViewModel_Prompt_ValidatesWhileTypingAndCompletesOnce**: Tested by `GroupNameViewModelTests.cs`
+(no window, no temporary files). An empty prompt is neutral; a valid name is cleaned up and accepted; a blank
+name, a name over 40 characters and the built-in names show their message and cannot be accepted; creating a
+group with an existing group's name (other letter case) gives a note and adopts that spelling; renaming
+refuses another group's name but accepts a change of letter case, keeping what was typed; canceling
+completes once with no name, whatever happens afterwards; and null arguments throw. This scenario is tested by
+`GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName`,
+`GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept`,
+`GroupNameViewModel_TooLongName_ShowsLengthMessage`,
+`GroupNameViewModel_NewGroup_ExistingName_HintsAndAdoptsSpelling`,
+`GroupNameViewModel_Rename_RefusesOtherGroupsAcceptsCaseChange`,
+`GroupNameViewModel_Cancel_CompletesOnceWithNull` and
+`GroupNameViewModel_Constructor_NullArguments_Throw`, covering
+`AgentControl-MainWindowViewModel-GroupNamePrompt`.

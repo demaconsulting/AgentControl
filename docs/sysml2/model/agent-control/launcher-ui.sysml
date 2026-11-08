@@ -10,7 +10,8 @@ package AgentControl {
          * CredentialPromptWindow) and shared MVVM support types (RelayCommand,
          * AsyncRelayCommand, ViewModelBase, PackageSourceIcons, PackageSourceItemViewModel,
          * SelectPackageSourceViewModel, AvaloniaCredentialPrompt, ConnectionTestResultKind,
-         * FavoriteIconConverter, ThemePreferenceDisplayNameConverter, RepoCardStatus, RepoImageLocator and the shared AppStyles.axaml theme resources), which are folded into this
+         * FavoriteIconConverter, ThemePreferenceDisplayNameConverter, RepoCardStatus, RepoImageLocator,
+         * RepoGroupHeaderViewModel, RepoGroupKind, GroupNameViewModel, GroupNameWindow, CardColorPalette and the shared AppStyles.axaml theme resources), which are folded into this
          * subsystem-level description rather than given separate unit files.
          */
 
