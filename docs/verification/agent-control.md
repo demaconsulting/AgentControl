@@ -95,6 +95,9 @@ on a fresh port.
 - No credential typed during an end-to-end run is found in any file the application wrote; a sign-in the user chose
   to remember is found only in the user's own (emulated) credential helper, is used again without a dialog and is
   removed by "Forget saved sign-in".
+- A repo can be favorited and unfavorited through the real UI (moving between sections), a missing repo can be
+  re-checked from its menu, an opened Settings dialog disables the main window behind it, and a pinned
+  package that is up to date shows its check mark.
 - A repo can be moved into a new group through the real UI, the group shows as a header and is stored only in the
   user's settings (the repository stays untouched), the filter finds a repo inside a collapsed group, and a
   chosen card color is stored the same way.
@@ -175,6 +178,9 @@ dedicated FlaUI end-to-end scenario drives the AGENTS.md template offer's modal
 decline neither writes the file nor re-prompts on a later sync, even after a fresh app
 session), exercising the real `MainWindow` event subscription/dialog-routing wiring in
 addition to the `RepoCardViewModel` unit tests that verify the same behavior in isolation.
+After an upgrade that offers the template, only the question is open: the release-notes window of the
+same upgrade opens after the question is answered (the accept scenario checks that no release-notes window
+exists while the question is open, and that one appears after Yes).
 These scenarios are tested by `windows@AgentsMdTemplateOffer_Accept_WritesTemplateToRepoRoot`
 and `windows@AgentsMdTemplateOffer_Decline_DoesNotWriteFileAndDoesNotReprompt`, plus
 `RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent`,
@@ -221,8 +227,8 @@ by `GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue` (one such passing test),
 `AgentControl-System-DiagnosticLogging`.
 
 **AgentControl_About_AboutButton_OpensAboutWindowShowingVersionAndCopyright**: The About
-button is clicked; the About window opens showing the application version and copyright
-notice. This scenario is tested by
+button is clicked; the About window (a modal dialog) opens showing the application version, as a
+labeled row without build metadata, and the copyright notice. This scenario is tested by
 `windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright`, covering
 `AgentControl-System-About` and `AgentControl-Program-Version`.
 
@@ -381,7 +387,9 @@ a screenshot of the window) turns light without a restart and the file holds `"T
 chosen and saved and the page turns dark. The test never changes the operating-system theme (it chooses
 explicit themes, not the system default). This scenario is tested by
 `windows@SettingsWindow_ChooseLightThenDark_ReThemesMainWindowWithoutRestart`, covering
-`AgentControl-System-Appearance`.
+`AgentControl-System-Appearance`. A second scenario shows that Settings has an Appearance heading with the Theme
+picker under it, above the Tools heading and the git setting, tested by
+`windows@SettingsWindow_AppearanceIsItsOwnSectionAboveTools`, also covering `AgentControl-System-Appearance`.
 
 **AgentControl_RepoGroups_MoveToNewGroupShowsHeaderAndFilterFindsRepoInCollapsedGroup**: In the real
 application a repo is moved to a new group through the card's "..." menu (Move to group, then New group...), a
@@ -394,6 +402,33 @@ filter collapses the group again. This scenario is tested by
 `windows@CardMenu_MoveToNewGroup_ShowsGroupHeaderAndStoresInSettingsOnly` and
 `windows@FilterTextBox_RepoInCollapsedGroup_IsFoundByFilterAndHiddenAgainAfterwards`, covering
 `AgentControl-System-RepoGroups`.
+
+**AgentControl_Favorites_ToggleStarMovesRepoBetweenSections**: In the real application, with one repo in a
+group and one in none, the first card's star (accessible name "Favorite") is toggled on: a Favorites section
+holding one repo appears, the star reports "on" and the settings file holds `"IsFavorite": true`; toggling it off
+removes the Favorites section, the star reports "off" and the file no longer has the favorite. This scenario is
+tested by `windows@FavoriteToggleButton_ToggledOnThenOff_MovesRepoBetweenSectionsAndStoresChoice`, covering
+`AgentControl-System-Favorites`. (Real pointer and key input on the star are tested in the headless window, see the
+LauncherUI verification.)
+
+**AgentControl_MissingRepoRecheck_CheckAgainFindsTheFolder**: In the real application a repo whose folder does not
+exist shows the "Folder missing" badge, its card menu offers "Check again" enabled, and after the folder is
+created, choosing it clears the badge. This scenario is tested by
+`windows@RefreshMenuItem_MissingFolder_IsEnabledAsCheckAgain_AndFindsFolderOnceBack`, covering
+`AgentControl-System-MissingRepoRecheck`.
+
+**AgentControl_DialogKeyboard_SettingsIsModalOverTheMainWindow**: In the real application, while the Settings
+window is open the operating system has disabled the main window behind it (read from the main window's own
+window handle), so neither clicks nor Tab can reach it, and saving enables it again. This scenario is tested by
+`windows@SettingsWindow_Opened_MainWindowBehindItIsDisabledUntilItCloses`, covering
+`AgentControl-System-DialogKeyboard`. The initial focus, the Tab cycle, Escape and the other dialogs are verified
+in the headless windows (see the LauncherUI verification), because the keyboard focus of the real application
+depends on which window the desktop session has active.
+
+**AgentControl_UpToDateCue_CheckMarkOnlyWhenPinnedPackageIsNewest**: In the real application a repo pinned to the
+only version of a package shows the "Agent files are up to date" check mark in its package chip; with a newer version
+at the source the upgrade badge appears and the check mark does not. This scenario is tested by
+`windows@UpToDateCue_ShownOnlyForPinnedPackageThatIsUpToDate`, covering `AgentControl-System-RecentRepos`.
 
 **AgentControl_CardColor_ChooseSwatchStoresColorInSettingsOnly**: In the real application the card's "..."
 menu item "Card color..." opens the palette pop-up, which offers a swatch for every palette color and Automatic;

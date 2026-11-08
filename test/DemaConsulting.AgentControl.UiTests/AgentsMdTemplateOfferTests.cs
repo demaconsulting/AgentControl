@@ -68,15 +68,22 @@ public sealed class AgentsMdTemplateOfferTests
 
             InvokeUpgradeMenuItem(mainWindow);
 
-            // The non-modal release-notes window and the modal AGENTS.md offer are both raised
-            // from the same ApplyPackageAndShowReleaseNotes call; only the latter blocks further
-            // interaction, so wait for the offer's ConfirmationWindow specifically.
+            // The AGENTS.md offer (modal) comes first: the release notes of the same upgrade are held
+            // back until it is answered, so the question never covers them
             var confirmationWindow = WaitForAgentsMdOfferWindow(context);
             Assert.NotNull(confirmationWindow);
+            Assert.Null(context.WaitForWindow(
+                title => title.StartsWith("Release Notes", StringComparison.Ordinal),
+                TimeSpan.FromSeconds(2)));
 
             var yesButton = confirmationWindow.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationYesButton"))?.AsButton();
             Assert.NotNull(yesButton);
             yesButton.Invoke();
+
+            // Answering the question brings up the release notes
+            Assert.NotNull(context.WaitForWindow(
+                title => title.StartsWith("Release Notes", StringComparison.Ordinal),
+                TimeSpan.FromSeconds(15)));
 
             // The template must be written verbatim to the repo root, not into any managed folder.
             var agentsMdPath = Path.Combine(context.RepoPath, "AGENTS.md");
@@ -214,7 +221,7 @@ public sealed class AgentsMdTemplateOfferTests
             timeout: TimeSpan.FromSeconds(10),
             interval: TimeSpan.FromMilliseconds(200)).Result?.AsMenuItem();
         Assert.NotNull(upgradeMenuItem);
-        upgradeMenuItem.Click();
+        upgradeMenuItem.Invoke();
     }
 
     /// <summary>

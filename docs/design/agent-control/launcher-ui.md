@@ -15,7 +15,7 @@ window, the settings window, the package-source editor window and the sign-in di
 `SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`,
 `FavoriteIconConverter`, `AgentToolKindDisplayNameConverter`, `ThemePreferenceDisplayNameConverter`,
 `RepoCardStatus`, `RepoImageLocator`, `RepoGroupHeaderViewModel`, `RepoGroupKind`, `GroupNameViewModel`,
-`GroupNameWindow`, `CardColorPalette`, `ThirdPartyDependencies`), the shared theme resources and styles
+`GroupNameWindow`, `CardColorPalette`, `DialogBehavior`, `ThirdPartyDependencies`), the shared theme resources and styles
 (`AppStyles.axaml`, included by `App.axaml`), which are folded
 into this subsystem-level description rather than given separate unit files; `ThirdPartyDependencies`
 and `AsyncRelayCommand` are the exceptions with dedicated test files
@@ -50,8 +50,9 @@ collapsed sections.)
   collection in place so unchanged rows keep their controls.
 
 **RepoCardViewModel's action commands**: `LaunchCommand`, `PullCommand`,
-`SelectPackageCommand`, `UpgradeCommand`, `FavoriteToggleCommand`, `RemoveCommand`,
-`NewGroupCommand`, `RemoveFromGroupCommand`.
+`SelectPackageCommand`, `UpgradeCommand`, `RemoveCommand`,
+`NewGroupCommand`, `RemoveFromGroupCommand`. (The favorite star has no command: its checked state is bound
+two-way to `RepoCardViewModel.IsFavorite`, the only owner of that state, `AgentControl-LauncherUI-FavoriteStar`.)
 
 - *Type*: In-process .NET `ICommand` (`AsyncRelayCommand` for the operations that read a
   package source or the file system - Launch, Pull, Upgrade, Refresh - and `RelayCommand` for the
@@ -262,7 +263,11 @@ back into `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` depending on the us
 (`AgentControl-LauncherUI-AgentsMdTemplateOffer`). This mirrors the non-modal
 `ReleaseNotesViewer` pattern's event-raise/subscribe structure but intentionally uses a
 *modal* dialog instead, since this prompt requires an explicit yes/no decision before
-proceeding, unlike release notes which are purely informational.
+proceeding, unlike release notes which are purely informational. The two are sequenced: the view
+model raises the offer before `ReleaseNotesReady`, `MainWindow` remembers the open question per card and
+`ShowReleaseNotesAsync` waits for it to be answered before opening the release-notes window and activating
+it, so the question never covers the notes and the notes window - which has no owner - is not lost behind the
+modal question; the notes are not opened at all when the main window has closed meanwhile.
 
 `ViewModelBase` supplies a minimal hand-rolled `INotifyPropertyChanged` implementation (not a
 source-generator package, to keep the dependency surface minimal) used by every view model in
@@ -363,10 +368,12 @@ to each `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`,
 dialog/window to show and how to route the user's response back into the view model (e.g.
 calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the `ConfirmationWindow` shown
 for the AGENTS.md template offer). `AboutWindow` (opened via a
-toolbar command with no dedicated view model) shows the application logo (reused from
+toolbar command with no dedicated view model, as a modal dialog over the main window) shows the application
+logo (reused from
 `Assets/AppIcon.ico`, the same icon already used for the main window/taskbar - no new binary
-image asset was added), a short mission tagline, the running version and copyright read
-from `Program.Version`, and a scrollable list of this application's direct runtime third-party
+image asset was added), a short mission tagline, a labeled "Version" row with the running version
+(`Program.Version` without its `+` build metadata, via `AboutWindow.DisplayVersion`; the full build version is
+the row's tooltip) and the copyright, and a scrollable list of this application's direct runtime third-party
 dependencies and their SPDX license identifiers (package versions are intentionally omitted so
 dependency updates do not require edits here), sourced from a static
 `ThirdPartyDependencies` list rather than parsed at runtime from the project file
@@ -375,8 +382,41 @@ dependency updates do not require edits here), sourced from a static
 rather than a dedicated unit, since its logic (path-existence and duplicate-path validation)
 is simple enough not to warrant a separate class.
 
-`MainWindow` explicitly tracks every non-modal child window it opens (`ReleaseNotesViewer`,
-`AboutWindow`) in an `_openChildWindows` list via a `ShowTrackedChildWindow(Window)` helper,
+**Dialog keyboard behavior.** Every dialog (Settings, the source editors, the sign-in prompt, the package
+picker, the confirmations, the message boxes, the group-name prompt and About) is shown with
+`ShowDialog(owner)`, so the window behind is disabled by the operating system, and applies the shared
+`DialogBehavior.Apply` from its code-behind (`AgentControl-LauncherUI-DialogKeyboard`): Tab navigation on the
+window is `Cycle`, so Tab from the last control wraps to the first and Shift+Tab back, never leaving the
+dialog; the first sensible control takes the focus when the dialog opens (Settings: Add; the confirmation: the
+safe answer No; the message box and About: their button; the editors and prompts: their first field), taken
+with the Tab navigation method so the keyboard focus ring shows while the keyboard is in use (the ring is the
+`:focus-visible` style of each control; with the mouse in use Avalonia shows none, as in every Windows
+application); and Escape - handled on the way back up from the focused control, so an open drop-down keeps its
+own Escape - cancels any dialog that has a way to cancel (the confirmation answers No, the message box, About
+and the package picker close, the prompts and the source editor cancel). Settings has no Escape: its edits are
+kept in memory until Save and would be dropped silently. Focus returns to the control that had it in the main
+window when the dialog closes, because that window's focus is not changed while it is disabled. The release-notes
+window is the only non-modal window left.
+
+**Card presentation at narrow widths.** The repo name is one `TextBlock` with an end ellipsis and the whole name
+as its tooltip, in a star-width column beside the auto-width Launch and "..." buttons, so it never runs under
+them. The path is a small grid of two `TextBlock`s - the parent with an end ellipsis and the leaf (the folder
+name with its separator) untrimmed, from `RepoPathParent`/`RepoPathLeaf` - so a narrow card reads
+`C:\work\cl...\repo`, with the whole path as the grid's tooltip and accessible name (the two texts are
+hidden from automation so the path is not read twice). The package chip's up-to-date check mark
+(`UpToDateCue`) and its tooltip live inside the existing chip (`AgentControl-LauncherUI-UpToDateCue`).
+The card color palette's heading names the chosen color (`Card color: Teal`), in addition to each swatch's
+tooltip, accessible name and check mark. The icon-only toolbar buttons and the card's "..." button have
+accessible names matching their tooltips.
+
+**Settings sections and the source editor.** Settings lists Package sources, then an Appearance section (the
+Theme picker, a labeled row) and a Tools section (git executable, agent tool, shell)
+(`AgentControl-LauncherUI-Appearance`). The source editor's location box wraps a long folder or feed address
+over several lines (up to a maximum height, then it scrolls), has a tooltip with the whole value
+(`SourceEditorViewModel.LocationTooltip`, absent while the box is empty), and the editor is 640 px wide.
+
+`MainWindow` explicitly tracks every non-modal child window it opens (the `ReleaseNotesViewer`)
+in an `_openChildWindows` list via a `ShowTrackedChildWindow(Window)` helper,
 which also subscribes to each window's `Closed` event to remove it from the list, and force-
 closes any still-open entries from a `MainWindow_Closing` handler before the main window
 itself finishes closing. This deliberately does *not* use Avalonia/Win32 window ownership

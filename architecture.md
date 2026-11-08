@@ -332,7 +332,7 @@ to this document's own Purpose statement. The following closes that gap:
   unpacked on this machine. If no pin exists at all when Launch is clicked,
   the launch proceeds anyway with an informational status message, rather
   than silently launching the agent tool with no agent files present.
-- **About dialog:** a simple, non-modal "About AgentControl" window
+- **About dialog:** a simple, modal "About AgentControl" window
   (app version via the existing `Program.Version`, copyright, license text)
   reachable via a new toolbar/menu entry next to Settings.
 

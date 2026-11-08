@@ -191,7 +191,7 @@ public class DialogWindowTests
         window.Show();
 
         // Assert: static text and dependency list are populated
-        Assert.Contains("AgentControl", window.FindControl<TextBlock>("AboutVersionText")!.Text);
+        Assert.Equal(AboutWindow.DisplayVersion(Program.Version), window.FindControl<TextBlock>("AboutVersionText")!.Text);
         Assert.Equal("Copyright (c) DEMA Consulting", window.FindControl<TextBlock>("AboutCopyrightText")!.Text);
         Assert.Contains("MIT", window.FindControl<TextBlock>("AboutLicenseText")!.Text);
         Assert.NotEmpty(window.FindControl<TextBlock>("AboutTaglineText")!.Text!);

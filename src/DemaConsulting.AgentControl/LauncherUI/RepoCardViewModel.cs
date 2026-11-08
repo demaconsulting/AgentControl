@@ -243,8 +243,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
             UpgradeAsync, ReportUnexpectedFailure, () => IsUpgradeAvailable && !IsMissing && !IsBusy);
         SelectPackageCommand = new RelayCommand(
             SelectPackage, () => IsPackageSelectionNeeded && !IsMissing && !IsBusy);
-        RefreshCommand = new AsyncRelayCommand(RefreshAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
-        FavoriteToggleCommand = new RelayCommand(() => IsFavorite = !IsFavorite);
+        // Refresh stays available for a repo whose folder is missing: it is the only in-app way to
+        // re-check once the folder (a remounted drive, a restored clone) is back
+        RefreshCommand = new AsyncRelayCommand(RefreshAsync, ReportUnexpectedFailure, () => !IsBusy);
         NewGroupCommand = new RelayCommand(() => NewGroupRequested?.Invoke(this, EventArgs.Empty));
         RemoveFromGroupCommand = new RelayCommand(() => MoveToGroup(null), () => HasGroup);
         RemoveCommand = new RelayCommand(() => RemoveRequested?.Invoke(this, EventArgs.Empty));
@@ -291,7 +292,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 PullCommand.RaiseCanExecuteChanged();
                 UpgradeCommand.RaiseCanExecuteChanged();
                 SelectPackageCommand.RaiseCanExecuteChanged();
-                RefreshCommand.RaiseCanExecuteChanged();
+                OnPropertyChanged(nameof(RefreshMenuText));
+                OnPropertyChanged(nameof(RefreshTooltip));
                 OnPropertyChanged(nameof(IsWorkingTreeDirty));
                 OnPropertyChanged(nameof(PullTooltip));
                 OnPropertyChanged(nameof(HasPinnedPackage));
@@ -308,6 +310,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Mutates the shared <see cref="RecentRepo"/> in place and raises
     ///     <see cref="FavoriteChanged"/> so the owning <see cref="MainWindowViewModel"/> can
     ///     persist settings and re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     This property is the <b>only</b> owner of the toggle state: the card's star is a
+    ///     <c>ToggleButton</c> whose <c>IsChecked</c> binds here two-way, and it has no command.
+    ///     An earlier design also bound a toggling command, so one click flipped the state twice
+    ///     (the toggle itself, then the command) and a repo could not be favorited or unfavorited.
     /// </remarks>
     public bool IsFavorite
     {
@@ -435,6 +441,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public bool IsCardColorAutomatic => !HasCustomCardColor;
 
     /// <summary>
+    ///     Gets the palette heading's text: <c>Card color: Teal</c>, or <c>Card color: Automatic</c>,
+    ///     so the chosen color is named in words in the palette itself and not only by a swatch's
+    ///     tooltip, accessible name and check mark.
+    /// </summary>
+    public string CardColorHeading => $"Card color: {CardColorName ?? "Automatic"}";
+
+    /// <summary>
     ///     Chooses the color of this repo's tile.
     /// </summary>
     /// <remarks>
@@ -464,6 +477,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(CardColorName));
         OnPropertyChanged(nameof(HasCustomCardColor));
         OnPropertyChanged(nameof(IsCardColorAutomatic));
+        OnPropertyChanged(nameof(CardColorHeading));
         OnPropertyChanged(nameof(AvatarColorIndex));
         OnPropertyChanged(nameof(AvatarStyleClass));
         CardColorChanged?.Invoke(this, EventArgs.Empty);
@@ -742,7 +756,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RepoCardStatus.UpgradeAvailable => $"Upgrade available: {PinnedPackageVersion} -> {LatestAvailableVersion}.",
         RepoCardStatus.NoPackage => "No agent package is pinned for this repo.",
         RepoCardStatus.Checking => "Checking whether a newer agent package version is available...",
-        _ when IsMissing => "Needs attention: this repo's folder could not be found on disk.",
+        _ when IsMissing => "Needs attention: this repo's folder could not be found on disk. Use Check again in the card menu once it is back.",
         _ when HasSourceProblem => $"Needs attention: {SourceProblem}",
         _ => "Needs attention: the last action failed."
     };
@@ -983,6 +997,47 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     public bool HasPinnedPackage => !IsPackageSelectionNeeded && !IsMissing;
 
+    /// <summary>
+    ///     Gets a value indicating whether the agent package chip shows its small "Agent files are up
+    ///     to date" check mark: the package is pinned and the card's overall status is
+    ///     <see cref="RepoCardStatus.UpToDate"/>.
+    /// </summary>
+    /// <remarks>
+    ///     A healthy card would otherwise be told apart only by the green accent bar and the
+    ///     absence of an upgrade chip. The cue sits inside the existing chip (no extra chip or
+    ///     row, so no new clutter) and is hidden for every other status - an available upgrade, a
+    ///     problem, a running check or no package - so it never contradicts the rest of the card.
+    /// </remarks>
+    public bool ShowUpToDateCue => HasPinnedPackage && Status == RepoCardStatus.UpToDate;
+
+    /// <summary>
+    ///     Gets the part of <see cref="RepoPath"/> before its last directory separator (for example
+    ///     <c>C:\work\clients</c>), or an empty string when the path has no separator. The card
+    ///     shows it with an end ellipsis next to <see cref="RepoPathLeaf"/>, which is never
+    ///     trimmed, so a narrow card reads <c>C:\work\cl…\repo</c>: a middle ellipsis that keeps the
+    ///     folder name - the part that tells similar repos apart - visible.
+    /// </summary>
+    public string RepoPathParent => SplitRepoPath().Parent;
+
+    /// <summary>
+    ///     Gets the last segment of <see cref="RepoPath"/> (the repo's folder name) with the
+    ///     separator before it (for example <c>\repo</c>): the part of the path the card never trims.
+    ///     The whole path when it has no separator to split at.
+    /// </summary>
+    public string RepoPathLeaf => SplitRepoPath().Leaf;
+
+    /// <summary>
+    ///     Splits <see cref="RepoPath"/> at its last directory separator, ignoring a trailing one.
+    /// </summary>
+    /// <returns>The parent (without the separator, possibly empty) and the leaf (with it).</returns>
+    private (string Parent, string Leaf) SplitRepoPath()
+    {
+        // A trailing separator belongs to the last segment's folder, not to a further empty segment
+        var path = RepoPath;
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var split = trimmed.LastIndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
+        return split < 0 ? (string.Empty, path) : (trimmed[..split], trimmed[split..]);
+    }
     /// <summary>
     ///     Gets a value indicating whether the grey "No agent package" chip is shown: the repo
     ///     exists but has never had an agent package pinned.
@@ -1274,6 +1329,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(StatusTooltip));
         OnPropertyChanged(nameof(HasAgentFileActions));
+        OnPropertyChanged(nameof(ShowUpToDateCue));
     }
 
     /// <summary>
@@ -1447,9 +1503,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public AsyncRelayCommand RefreshCommand { get; }
 
     /// <summary>
-    ///     Gets the command bound to the card's favorite/pin toggle button.
+    ///     Gets the label of the card menu's refresh item: <c>Refresh</c> normally, <c>Check again</c>
+    ///     while the repo's folder is missing, because then there is nothing to refresh - the user is
+    ///     waiting for the folder (a remounted drive, a restored clone) to come back and wants to
+    ///     re-check.
     /// </summary>
-    public RelayCommand FavoriteToggleCommand { get; }
+    public string RefreshMenuText => IsMissing ? "Check again" : "Refresh";
+
+    /// <summary>
+    ///     Gets the tooltip of the card menu's refresh item, saying what it does in the current state.
+    /// </summary>
+    public string RefreshTooltip => IsMissing
+        ? "Check whether the folder is available again"
+        : "Re-check this repo's branch, chips, and upgrade status";
 
     /// <summary>
     ///     Gets the command bound to the card's "Remove from list" menu item.
@@ -2146,8 +2212,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     (blind-delete-and-replace), proactively ensures the repo's <c>.gitignore</c> covers the
     ///     managed agent folders, rewrites the pin file (recording the package's source alias and
     ///     keeping any existing pin's other fields), refreshes this card's pin/upgrade-status
-    ///     properties, and raises <see cref="ReleaseNotesReady"/> with the new package's release
-    ///     notes.
+    ///     properties, offers the package's AGENTS.md template when it applies (see
+    ///     <see cref="AgentsMdTemplateOfferRequested"/>) and then raises <see cref="ReleaseNotesReady"/>
+    ///     with the new package's release notes.
     /// </summary>
     /// <remarks>
     ///     The existing pin file is read <em>before</em> anything is changed so a pin written by a
@@ -2230,8 +2297,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     package.PackageName, package.Version, RepoName);
             }
 
-            ReleaseNotesReady?.Invoke(this, releaseNotes);
+            // The AGENTS.md offer comes first, then the release notes: the view shows the offer (a
+            // modal question) at once and holds the release notes back until it is answered, so the
+            // question never covers the notes (and the notes window, being non-modal, is not lost
+            // behind it); the notes then appear in front as the completion of the upgrade.
             MaybeOfferAgentsMdTemplate(reader);
+            ReleaseNotesReady?.Invoke(this, releaseNotes);
         }
         catch (InvalidOperationException ex)
         {

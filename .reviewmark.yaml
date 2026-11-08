@@ -147,6 +147,7 @@ reviews:
       - "src/**/LauncherUI/AppStyles.axaml"
       - "src/**/LauncherUI/GroupNameWindow.axaml"
       - "src/**/LauncherUI/GroupNameWindow.axaml.cs"
+      - "src/**/LauncherUI/DialogBehavior.cs"
       - "src/**/LauncherUI/ThirdPartyDependencies.cs"
       - "test/**/LauncherUI/AsyncRelayCommandTests.cs"
       - "test/**/LauncherUI/AgentToolKindDisplayNameConverterTests.cs"
@@ -158,6 +159,7 @@ reviews:
       - "test/**/LauncherUI/HeadlessTestApp.cs"
       - "test/**/LauncherUI/MainWindowTests.cs"
       - "test/**/LauncherUI/RepoGroupWindowTests.cs"
+      - "test/**/LauncherUI/UsabilityWindowTests.cs"
       - "test/**/LauncherUI/ThirdPartyDependenciesTests.cs"
 
   - id: AgentControl-LauncherUI-MainWindowViewModel

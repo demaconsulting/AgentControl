@@ -19,7 +19,6 @@
 // SOFTWARE.
 
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
@@ -62,18 +61,10 @@ internal sealed partial class GroupNameWindow : Window
 
         // However the window closes, an unanswered prompt counts as "cancelled"
         Closed += (_, _) => viewModel.Cancel();
-        KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Escape)
-            {
-                viewModel.Cancel();
-            }
-        };
-        Opened += (_, _) =>
-        {
-            var box = this.FindControl<TextBox>("GroupNameTextBox");
-            box?.Focus();
-            box?.SelectAll();
-        };
+
+        // Tab stays in the prompt, the name box has the (visible) focus with its text selected, and
+        // Escape cancels
+        DialogBehavior.Apply(this, "GroupNameTextBox", viewModel.Cancel);
+        Opened += (_, _) => this.FindControl<TextBox>("GroupNameTextBox")?.SelectAll();
     }
 }

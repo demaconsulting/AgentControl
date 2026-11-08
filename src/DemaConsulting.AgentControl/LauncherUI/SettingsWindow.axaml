@@ -178,23 +178,36 @@
 
         <Border Height="1" Background="{DynamicResource SurfaceDivider}" Margin="0,4,0,0" />
 
-        <TextBlock Text="Tools" FontWeight="Bold" FontSize="15" />
+        <!-- Appearance: how AgentControl looks, apart from the tools it runs below -->
+        <TextBlock Name="AppearanceHeadingText"
+                    AutomationProperties.AutomationId="AppearanceHeadingText"
+                    Text="Appearance" FontWeight="Bold" FontSize="15" />
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+            <TextBlock Grid.Column="0" Text="Theme" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1"
+                       Name="ThemeComboBox"
+                       AutomationProperties.AutomationId="ThemeComboBox"
+                       AutomationProperties.Name="Theme"
+                       ToolTip.Tip="Choose the color theme: follow the system setting, or always use the light or the dark theme. Applies when you save."
+                       ItemsSource="{x:Static vm:SettingsWindowViewModel.AvailableThemes}"
+                       SelectedItem="{Binding Theme}"
+                       HorizontalAlignment="Stretch">
+                <!-- The picker shows friendly names; the selected value (and the saved setting) is the
+                     ThemePreference itself -->
+                <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="settings:ThemePreference">
+                        <TextBlock Text="{Binding Converter={x:Static vm:ThemePreferenceDisplayNameConverter.Instance}}" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+        </Grid>
 
-        <TextBlock Text="Appearance (color theme)" FontWeight="SemiBold" />
-        <ComboBox Name="ThemeComboBox"
-                   AutomationProperties.AutomationId="ThemeComboBox"
-                   ToolTip.Tip="Choose the color theme: follow the system setting, or always use the light or the dark theme. Applies when you save."
-                   ItemsSource="{x:Static vm:SettingsWindowViewModel.AvailableThemes}"
-                   SelectedItem="{Binding Theme}"
-                   HorizontalAlignment="Stretch">
-            <!-- The picker shows friendly names; the selected value (and the saved setting) is the
-                 ThemePreference itself -->
-            <ComboBox.ItemTemplate>
-                <DataTemplate x:DataType="settings:ThemePreference">
-                    <TextBlock Text="{Binding Converter={x:Static vm:ThemePreferenceDisplayNameConverter.Instance}}" />
-                </DataTemplate>
-            </ComboBox.ItemTemplate>
-        </ComboBox>
+        <Border Height="1" Background="{DynamicResource SurfaceDivider}" Margin="0,4,0,0" />
+
+        <!-- Tools: the programs AgentControl runs -->
+        <TextBlock Name="ToolsHeadingText"
+                    AutomationProperties.AutomationId="ToolsHeadingText"
+                    Text="Tools" FontWeight="Bold" FontSize="15" />
 
         <TextBlock Text="Git executable path override (blank = use PATH)" FontWeight="SemiBold" />
         <TextBox Name="GitExecutablePathTextBox"

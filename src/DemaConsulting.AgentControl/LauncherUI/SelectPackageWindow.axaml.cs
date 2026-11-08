@@ -53,6 +53,7 @@ internal sealed partial class SelectPackageWindow : Window
     public SelectPackageWindow()
     {
         AvaloniaXamlLoader.Load(this);
+        DialogBehavior.Apply(this, "SelectPackageSourceList", () => Close(null));
     }
 
     /// <summary>

@@ -56,6 +56,7 @@
             <Button Grid.Column="1"
                      Name="AddRepoButton"
                      AutomationProperties.AutomationId="AddRepoButton"
+                     AutomationProperties.Name="Add a repository"
                      Click="AddRepoButton_Click"
                      ToolTip.Tip="Add a repository"
                      Margin="0,0,8,0">
@@ -64,6 +65,7 @@
             <Button Grid.Column="2"
                      Name="OpenSettingsButton"
                      AutomationProperties.AutomationId="OpenSettingsButton"
+                     AutomationProperties.Name="Settings"
                      Click="OpenSettingsButton_Click"
                      ToolTip.Tip="Settings"
                      Margin="0,0,8,0">
@@ -72,6 +74,7 @@
             <Button Grid.Column="3"
                      Name="OpenAboutButton"
                      AutomationProperties.AutomationId="OpenAboutButton"
+                     AutomationProperties.Name="About AgentControl"
                      Click="OpenAboutButton_Click"
                      ToolTip.Tip="About AgentControl">
                 <materialIcons:MaterialIcon Kind="Information" />
@@ -223,7 +226,9 @@
                                    ColumnDefinitions="Auto,*" ColumnSpacing="1"
                                    VerticalAlignment="Center">
                                 <!-- Favorite star: a borderless ghost toggle, gold and filled when
-                                     favorited, an outline otherwise. It is 28px (the glyph is 18px),
+                                     favorited, an outline otherwise. Its IsChecked binding is the only
+                                     owner of the state (no Command: a command that also toggled would
+                                     flip it a second time on every click). It is 28px (the glyph is 18px),
                                      and the negative left margin puts the glyph itself - not the
                                      button's invisible edge - on the card's content edge, in line
                                      with the avatar tile below. -->
@@ -233,9 +238,9 @@
                                          Classes="iconGhost"
                                          Width="28" Height="28" MinWidth="28" MinHeight="28"
                                          Margin="-7,0,0,0"
+                                         AutomationProperties.Name="Favorite"
                                          ToolTip.Tip="Favorite/pin this repo to the top of the list"
-                                         IsChecked="{Binding IsFavorite, Mode=TwoWay}"
-                                         Command="{Binding FavoriteToggleCommand}">
+                                         IsChecked="{Binding IsFavorite, Mode=TwoWay}">
                                     <materialIcons:MaterialIcon Width="18" Height="18"
                                                                   Kind="{Binding IsFavorite, Converter={StaticResource FavoriteIconConverter}}" />
                                 </ToggleButton>
@@ -274,6 +279,7 @@
 
                                 <Button Name="MoreActionsButton"
                                          AutomationProperties.AutomationId="MoreActionsButton"
+                                         AutomationProperties.Name="More actions"
                                          Classes="iconGhost"
                                          ToolTip.Tip="More actions">
                                     <materialIcons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
@@ -298,8 +304,8 @@
                                             </MenuItem>
                                             <MenuItem Name="RefreshMenuItem"
                                                        AutomationProperties.AutomationId="RefreshMenuItem"
-                                                       Header="Refresh"
-                                                       ToolTip.Tip="Re-check this repo's branch, chips, and upgrade status"
+                                                       Header="{Binding RefreshMenuText}"
+                                                       ToolTip.Tip="{Binding RefreshTooltip}"
                                                        Command="{Binding RefreshCommand}">
                                                 <MenuItem.Icon>
                                                     <materialIcons:MaterialIcon Kind="Refresh" />
@@ -375,7 +381,7 @@
                                                          AutomationProperties.AccessibilityView="Content"
                                                          AutomationProperties.Name="Card color palette"
                                                          Spacing="10">
-                                                <TextBlock Text="Card color" FontWeight="SemiBold" />
+                                                <TextBlock Name="CardColorHeadingText" Text="{Binding CardColorHeading}" FontWeight="SemiBold" />
                                                 <UniformGrid Columns="5">
                                                     <Button Classes="swatch avatar0" Margin="3" Tag="Blue"
                                                              Classes.selected="{Binding CardColorName, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=Blue}"
@@ -537,6 +543,17 @@
                                         <TextBlock Name="RepoPinnedVersionText"
                                                     AutomationProperties.AutomationId="RepoPinnedVersionText"
                                                     Text="{Binding PackageChipText}" />
+                                        <!-- Healthy-card cue: a small check mark inside the chip (no extra
+                                             chip or row) while the pinned package is the newest one. Its own
+                                             tooltip and accessible name say it in words. -->
+                                        <materialIcons:MaterialIcon Name="UpToDateCue"
+                                                                      AutomationProperties.AutomationId="UpToDateCue"
+                                                                      AutomationProperties.AccessibilityView="Content"
+                                                                      AutomationProperties.Name="Agent files are up to date"
+                                                                      Kind="CheckCircle"
+                                                                      Foreground="{DynamicResource SuccessForeground}"
+                                                                      IsVisible="{Binding ShowUpToDateCue}"
+                                                                      ToolTip.Tip="Agent files are up to date" />
                                         <materialIcons:MaterialIcon Name="PackageSourceIcon"
                                                                       AutomationProperties.AutomationId="PackageSourceIcon"
                                                                       Kind="{Binding PinnedSourceIcon}"
@@ -656,7 +673,7 @@
                                 <Border Name="MissingRepoChip"
                                          Classes="Chip red"
                                          IsVisible="{Binding IsMissing}"
-                                         ToolTip.Tip="This repo's folder could not be found on disk.">
+                                         ToolTip.Tip="This repo's folder could not be found on disk. Choose Check again in the card menu once it is back.">
                                     <StackPanel Orientation="Horizontal" Spacing="4">
                                         <materialIcons:MaterialIcon Kind="FolderAlertOutline" />
                                         <TextBlock Name="MissingRepoBadge"
@@ -677,13 +694,34 @@
                                 </Border>
                             </WrapPanel>
 
-                            <TextBlock Grid.Row="1" Grid.Column="1"
-                                        Name="RepoPathText"
-                                        AutomationProperties.AutomationId="RepoPathText"
-                                        Text="{Binding RepoPath}"
-                                        ToolTip.Tip="{Binding RepoPath}"
-                                        TextTrimming="CharacterEllipsis"
-                                        FontSize="12" Opacity="0.65" Margin="0,6,0,0" />
+                            <!-- The repo's path with a middle ellipsis: the folder part gives way first (end
+                                 ellipsis) while the last segment - the repo's folder name, which tells
+                                 similar repos apart - is never trimmed. The grid carries the full path as
+                                 its accessible name and tooltip; the two texts are hidden from automation
+                                 so the path is not read twice, in pieces. -->
+                            <Grid Grid.Row="1" Grid.Column="1"
+                                   Name="RepoPathText"
+                                   AutomationProperties.AutomationId="RepoPathText"
+                                   AutomationProperties.AccessibilityView="Content"
+                                   AutomationProperties.Name="{Binding RepoPath}"
+                                   ToolTip.Tip="{Binding RepoPath}"
+                                   ColumnDefinitions="*,Auto"
+                                   HorizontalAlignment="Left"
+                                   Opacity="0.65" Margin="0,6,0,0">
+                                <TextBlock Grid.Column="0"
+                                            Name="RepoPathParentText"
+                                            AutomationProperties.AccessibilityView="Raw"
+                                            Text="{Binding RepoPathParent}"
+                                            TextTrimming="CharacterEllipsis"
+                                            FontSize="12" />
+                                <TextBlock Grid.Column="1"
+                                            Name="RepoPathLeafText"
+                                            AutomationProperties.AccessibilityView="Raw"
+                                            Text="{Binding RepoPathLeaf}"
+                                            TextTrimming="CharacterEllipsis"
+                                            MaxWidth="360"
+                                            FontSize="12" />
+                            </Grid>
 
                             <!-- The outcome of the last action (for example a failed Git Pull and
                                  git's reason), so a button that was clicked always shows what happened -->

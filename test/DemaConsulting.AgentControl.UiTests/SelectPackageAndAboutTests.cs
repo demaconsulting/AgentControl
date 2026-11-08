@@ -130,9 +130,9 @@ public sealed class SelectPackageAndAboutTests
     }
 
     /// <summary>
-    ///     Clicking "About" must open a non-modal window showing the app name, its tagline, its
-    ///     <c>Program.Version</c>, a copyright/license summary, and a non-empty third-party
-    ///     dependency list.
+    ///     Clicking "About" must open a modal window showing the app name, its tagline, a labeled
+    ///     version (the <c>Program.Version</c> without its build metadata, the full text in the tooltip),
+    ///     a copyright/license summary, and a non-empty third-party dependency list.
     /// </summary>
     [Fact]
     public void AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright()
@@ -150,9 +150,8 @@ public sealed class SelectPackageAndAboutTests
         Assert.NotNull(aboutButton);
         aboutButton.Invoke();
 
-        var aboutWindow = context.WaitForWindow(
-            title => title.StartsWith("About", StringComparison.Ordinal),
-            TimeSpan.FromSeconds(15));
+        // A modal dialog is found by something it contains: its title is not a dependable match target
+        var aboutWindow = context.WaitForWindowWithDescendant("AboutCloseButton", TimeSpan.FromSeconds(15));
         Assert.NotNull(aboutWindow);
 
         var taglineText = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutTaglineText"))?.AsLabel();
@@ -162,6 +161,11 @@ public sealed class SelectPackageAndAboutTests
         var versionText = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutVersionText"))?.AsLabel();
         Assert.NotNull(versionText);
         Assert.False(string.IsNullOrWhiteSpace(versionText.Text));
+
+        // The version is one short, labeled value: no build metadata, and no repeat of the product name
+        Assert.DoesNotContain("+", versionText.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("AgentControl", versionText.Text, StringComparison.Ordinal);
+        Assert.NotNull(aboutWindow.FindFirstDescendant(cf => cf.ByName("Version")));
 
         var copyrightText = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutCopyrightText"))?.AsLabel();
         Assert.NotNull(copyrightText);
@@ -178,9 +182,8 @@ public sealed class SelectPackageAndAboutTests
         Assert.NotNull(dependenciesList);
         Assert.NotEmpty(dependenciesList.FindAllChildren());
 
-        // The window must not be modal: the main window should remain usable while the About
-        // window is open (verified by locating the main window's own toolbar button still
-        // present in the automation tree without first closing the About window).
+        // The window is a modal dialog over the main window (which stays in the automation tree,
+        // behind it, until About is closed)
         Assert.NotNull(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("OpenAboutButton")));
 
         var closeButton = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutCloseButton"))?.AsButton();

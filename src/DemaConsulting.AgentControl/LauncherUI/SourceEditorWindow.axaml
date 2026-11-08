@@ -10,8 +10,8 @@
         x:DataType="vm:SourceEditorViewModel"
         Name="SourceEditorRoot"
         Title="{Binding Title}"
-        Width="560" SizeToContent="Height"
-        MinWidth="440"
+        Width="640" SizeToContent="Height"
+        MinWidth="500"
         CanResize="False"
         WindowStartupLocation="CenterOwner">
     <Window.Styles>
@@ -74,14 +74,20 @@
                     AutomationProperties.AutomationId="SourceLocationLabel"
                     Text="{Binding LocationLabel}" Classes="fieldLabel" Margin="0,8,0,0" />
         <Grid ColumnDefinitions="*,Auto">
+            <!-- A long UNC path or feed address wraps onto further lines (up to a few, then it
+                 scrolls) instead of being cut off at the box's edge, and its tooltip shows all of it -->
             <TextBox Grid.Column="0"
                       Name="SourceLocationTextBox"
                       AutomationProperties.AutomationId="SourceLocationTextBox"
                       PlaceholderText="{Binding LocationPlaceholder}"
+                      TextWrapping="Wrap"
+                      MaxHeight="120"
+                      ToolTip.Tip="{Binding LocationTooltip}"
                       Text="{Binding Location}" />
             <Button Grid.Column="1"
                      Name="SourceBrowseButton"
                      Margin="8,0,0,0"
+                     VerticalAlignment="Top"
                      AutomationProperties.AutomationId="SourceBrowseButton"
                      IsVisible="{Binding !IsServer}"
                      ToolTip.Tip="Choose the package folder with a folder picker"

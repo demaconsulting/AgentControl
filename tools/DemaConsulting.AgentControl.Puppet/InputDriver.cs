@@ -20,6 +20,7 @@
 
 using System.Runtime.InteropServices;
 using DemaConsulting.AgentControl.Puppet.Automation;
+using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Input;
 using FlaUI.Core.WindowsAPI;
 using FlaUiMouse = FlaUI.Core.Input.Mouse;
@@ -63,19 +64,26 @@ internal static partial class InputDriver
     private static readonly TimeSpan DoubleClickGap = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
-    ///     Restores and raises the main window as far as Windows allows a background process to.
+    ///     Restores and raises the window that should receive the input as far as Windows allows a background process to:
+    ///     the innermost open dialog when there is one (a modal dialog keeps the keyboard, so the Puppet must not push the
+    ///     disabled main window in front of it), else the main window.
     /// </summary>
     /// <param name="context">The attached instance.</param>
     internal static void BringToFront(AttachContext context)
     {
-        var handle = context.MainWindow.Properties.NativeWindowHandle.ValueOrDefault;
+        // The innermost visible titled dialog (the last root) owns the keyboard while it is open
+        var dialog = context.Roots().Skip(1).LastOrDefault(root =>
+            !string.IsNullOrWhiteSpace(UiActions.Safe(() => root.Properties.Name.ValueOrDefault, string.Empty))
+            && !UiActions.Safe(() => root.Properties.IsOffscreen.ValueOrDefault, false));
+        var front = dialog ?? context.MainWindow;
+        var handle = front.Properties.NativeWindowHandle.ValueOrDefault;
         if (handle != IntPtr.Zero && IsIconic(handle))
         {
             ShowWindow(handle, ShowRestore);
         }
 
-        _ = UiActions.Safe(() => { context.MainWindow.Focus(); return true; }, false);
-        _ = UiActions.Safe(() => { context.MainWindow.SetForeground(); return true; }, false);
+        _ = UiActions.Safe(() => { front.Focus(); return true; }, false);
+        _ = UiActions.Safe(() => { front.AsWindow().SetForeground(); return true; }, false);
         Thread.Sleep(150);
 
         // Windows refuses a background process the foreground now and then: borrow the foreground thread's input
@@ -86,7 +94,6 @@ internal static partial class InputDriver
             Thread.Sleep(150);
         }
     }
-
     /// <summary>
     ///     Tests whether a window (or a window it owns) is the foreground window.
     /// </summary>

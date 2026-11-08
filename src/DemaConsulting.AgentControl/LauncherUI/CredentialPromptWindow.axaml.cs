@@ -19,7 +19,6 @@
 // SOFTWARE.
 
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
@@ -62,13 +61,8 @@ internal sealed partial class CredentialPromptWindow : Window
 
         // However the window closes, an unanswered question counts as "cancelled"
         Closed += (_, _) => viewModel.Cancel();
-        KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Escape)
-            {
-                viewModel.Cancel();
-            }
-        };
-        Opened += (_, _) => this.FindControl<TextBox>("CredentialPromptUserNameTextBox")?.Focus();
+
+        // Tab stays in the prompt, the user-name box has the (visible) focus, and Escape cancels
+        DialogBehavior.Apply(this, "CredentialPromptUserNameTextBox", viewModel.Cancel);
     }
 }

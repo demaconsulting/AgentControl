@@ -25,9 +25,13 @@
                     AutomationProperties.AutomationId="AboutTaglineText"
                     FontStyle="Italic"
                     TextWrapping="Wrap" />
-        <TextBlock Name="AboutVersionText"
-                    AutomationProperties.AutomationId="AboutVersionText"
-                    TextWrapping="Wrap" />
+        <!-- A labeled row: the semantic version, with the full build identifier (including the build
+             metadata) in the tooltip -->
+        <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="Version" FontWeight="SemiBold" />
+            <TextBlock Name="AboutVersionText"
+                        AutomationProperties.AutomationId="AboutVersionText" />
+        </StackPanel>
         <TextBlock Name="AboutCopyrightText"
                     AutomationProperties.AutomationId="AboutCopyrightText" />
         <TextBlock Name="AboutLicenseText"

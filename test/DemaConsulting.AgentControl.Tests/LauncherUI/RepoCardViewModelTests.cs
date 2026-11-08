@@ -483,12 +483,133 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.False(card.LaunchCommand.CanExecute(null));
         Assert.False(card.PullCommand.CanExecute(null));
         Assert.False(card.UpgradeCommand.CanExecute(null));
-        Assert.False(card.RefreshCommand.CanExecute(null));
+
+        // Refresh stays available (as "Check again"): it is the way to re-check once the folder is back
+        Assert.True(card.RefreshCommand.CanExecute(null));
+        Assert.Equal("Check again", card.RefreshMenuText);
+        Assert.Equal("Check whether the folder is available again", card.RefreshTooltip);
 
         // A missing repo gets its own dedicated badge/tooltip - the "dirty working tree" badge
         // must not also fire for it (its working tree can't meaningfully be "clean" or "dirty").
         Assert.False(card.IsWorkingTreeDirty);
         Assert.Equal("This repo's folder could not be found on disk.", card.PullTooltip);
+    }
+
+    /// <summary>
+    ///     Test that Refresh, offered as "Check again" while the folder is missing, finds the folder once it
+    ///     is back: the card stops being missing, the command is a plain "Refresh" again and the tile's
+    ///     other actions come back.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshCommand_MissingFolderReturns_ClearsMissingAndRestoresActions()
+    {
+        // Arrange: a repo whose folder does not exist yet
+        var path = Path.Combine(CreateTempDirectory(), "returning-repo");
+        var card = new RepoCardViewModel(new RecentRepo { Path = path }, () => new AppSettings(), new PackageVersionCache());
+        card.RefreshCheap();
+        Assert.True(card.IsMissing);
+        Assert.True(card.RefreshCommand.CanExecute(null));
+        Assert.False(card.LaunchCommand.CanExecute(null));
+
+        // Act: the folder comes back (a remounted drive), then the user chooses "Check again"
+        Directory.CreateDirectory(path);
+        await card.RefreshCommand.ExecuteAsync();
+
+        // Assert
+        Assert.False(card.IsMissing);
+        Assert.Equal("Refresh", card.RefreshMenuText);
+        Assert.Equal("Re-check this repo's branch, chips, and upgrade status", card.RefreshTooltip);
+        Assert.True(card.LaunchCommand.CanExecute(null));
+    }
+
+    /// <summary>
+    ///     Test that the card shows the "up to date" cue only for a pinned package that is the newest one:
+    ///     not while the check runs, for an available upgrade, with no package or for a missing folder.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ShowUpToDateCue_OnlyForPinnedAndUpToDate()
+    {
+        // Arrange: a source with 1.0.0 and 2.0.0
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+
+        // Act / Assert: pinned to the newest version
+        var upToDate = CreateCard(CreateTempDirectory(), "contoso-agents", "2.0.0", settings);
+        upToDate.Refresh();
+        Assert.True(upToDate.ShowUpToDateCue);
+        Assert.Equal(RepoCardStatus.UpToDate, upToDate.Status);
+
+        // an older pinned version has an upgrade available
+        var older = CreateCard(CreateTempDirectory(), "contoso-agents", "1.0.0", settings);
+        older.Refresh();
+        Assert.True(older.IsUpgradeAvailable);
+        Assert.False(older.ShowUpToDateCue);
+
+        // no package pinned
+        var noPackage = CreateCard(CreateTempDirectory(), null, null, settings);
+        noPackage.Refresh();
+        Assert.False(noPackage.ShowUpToDateCue);
+
+        // folder missing
+        var missing = new RepoCardViewModel(
+            new RecentRepo { Path = Path.Combine(CreateTempDirectory(), "gone"), PinnedPackageName = "contoso-agents", PinnedPackageVersion = "2.0.0" },
+            () => settings,
+            new PackageVersionCache());
+        missing.RefreshCheap();
+        Assert.False(missing.ShowUpToDateCue);
+
+        // a source problem (the pin's source is not configured) is not "up to date"
+        var noSource = CreateCard(CreateTempDirectory(), "contoso-agents", "2.0.0", new AppSettings());
+        noSource.Refresh();
+        Assert.False(noSource.ShowUpToDateCue);
+    }
+
+    /// <summary>
+    ///     Test that the path is split into a folder part that can give way and a leaf that keeps the repo's folder
+    ///     name (with its separator), so a narrow card can show a middle ellipsis; a trailing separator is
+    ///     ignored and a path without a separator is all leaf.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_RepoPathParts_SplitAtLastSeparator()
+    {
+        // Arrange
+        var separator = Path.DirectorySeparatorChar;
+        var parent = Path.Combine(Path.GetTempPath().TrimEnd(separator), "clients");
+        var path = Path.Combine(parent, "repo");
+
+        // Act
+        var plain = new RepoCardViewModel(new RecentRepo { Path = path }, () => new AppSettings(), new PackageVersionCache());
+        var trailing = new RepoCardViewModel(new RecentRepo { Path = path + separator }, () => new AppSettings(), new PackageVersionCache());
+        var bare = new RepoCardViewModel(new RecentRepo { Path = "repo" }, () => new AppSettings(), new PackageVersionCache());
+
+        // Assert
+        Assert.Equal(parent, plain.RepoPathParent);
+        Assert.Equal(separator + "repo", plain.RepoPathLeaf);
+        Assert.Equal(parent, trailing.RepoPathParent);
+        Assert.Equal(separator + "repo", trailing.RepoPathLeaf);
+        Assert.Equal(string.Empty, bare.RepoPathParent);
+        Assert.Equal("repo", bare.RepoPathLeaf);
+    }
+    /// <summary>
+    ///     Test that the palette heading names the chosen color, or Automatic, in words.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_CardColorHeading_NamesTheChosenColor()
+    {
+        // Arrange
+        var card = new RepoCardViewModel(new RecentRepo { Path = CreateTempDirectory() }, () => new AppSettings(), new PackageVersionCache());
+        var changed = new List<string?>();
+        card.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        Assert.Equal("Card color: Automatic", card.CardColorHeading);
+
+        // Act
+        card.SetCardColor("teal");
+
+        // Assert
+        Assert.Equal("Card color: Teal", card.CardColorHeading);
+        Assert.Contains(nameof(RepoCardViewModel.CardColorHeading), changed);
     }
 
     /// <summary>
@@ -579,10 +700,11 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that toggling IsFavorite mutates the shared RecentRepo and raises FavoriteChanged.
+    ///     Test that setting IsFavorite on then off mutates the shared RecentRepo and raises FavoriteChanged once per change
+    ///     (and not for a set to the value it already has), which is how the card's two-way bound star drives it.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_FavoriteToggleCommand_TogglesIsFavoriteAndRaisesFavoriteChanged()
+    public void RepoCardViewModel_IsFavorite_Set_UpdatesRecentRepoAndRaisesFavoriteChangedOncePerChange()
     {
         // Arrange
         var repoRoot = CreateTempDirectory();
@@ -592,15 +714,16 @@ public sealed class RepoCardViewModelTests : IDisposable
         card.FavoriteChanged += (_, _) => raisedCount++;
 
         // Act
-        card.FavoriteToggleCommand.Execute(null);
+        card.IsFavorite = true;
+        card.IsFavorite = true;
 
         // Assert
         Assert.True(card.IsFavorite);
         Assert.True(recentRepo.IsFavorite);
         Assert.Equal(1, raisedCount);
 
-        // Act again: toggle back off
-        card.FavoriteToggleCommand.Execute(null);
+        // Act again: set back off
+        card.IsFavorite = false;
 
         // Assert
         Assert.False(card.IsFavorite);
@@ -974,6 +1097,30 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Assert: no offer, and the existing file is untouched
         Assert.False(offerRaised);
         Assert.Equal("my own content", File.ReadAllText(Path.Combine(repoRoot, "AGENTS.md")));
+    }
+
+    /// <summary>
+    ///     Test that ApplySelectedPackage raises the AGENTS.md template offer before the release notes, so
+    ///     the view can show the offer first and the release notes after it is answered.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_TemplateOfferAndReleaseNotes_RaisesOfferBeforeReleaseNotes()
+    {
+        // Arrange: a never-pinned repo with no AGENTS.md, and a package with release notes and a template
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0", agentsMdTemplate: "# AGENTS", releaseNotes: "notes");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var card = CreateCard(repoRoot, null, null, settings);
+        List<string> raised = [];
+        card.AgentsMdTemplateOfferRequested += (_, _) => raised.Add("offer");
+        card.ReleaseNotesReady += (_, _) => raised.Add("notes");
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert: the offer is raised first, then the release notes
+        Assert.Equal(["offer", "notes"], raised);
     }
 
     /// <summary>

@@ -212,8 +212,10 @@ the repo has no `AGENTS.md` and the package has a template; it does not fire whe
 already has an `AGENTS.md` (which is left untouched), when the package has no template, when
 a prior decline is on record for the repo, or when the ensure-synced-before-launch check found
 all four managed folders already present (so no re-extraction, and no zip read, occurred at
-all). This scenario is tested by
+all). When both the offer and the release notes apply, the offer is raised first, then the release
+notes. This scenario is tested by
 `RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent`,
+`RepoCardViewModel_ApplySelectedPackage_TemplateOfferAndReleaseNotes_RaisesOfferBeforeReleaseNotes`,
 `RepoCardViewModel_ApplySelectedPackage_AgentsMdAlreadyExists_DoesNotRaiseAgentsMdTemplateOfferRequested`,
 `RepoCardViewModel_ApplySelectedPackage_PackageHasNoAgentsMdTemplate_DoesNotRaiseAgentsMdTemplateOfferRequested`,
 `RepoCardViewModel_ApplySelectedPackage_PreviouslyDeclined_DoesNotRaiseAgentsMdTemplateOfferRequestedAgain`,
@@ -245,9 +247,12 @@ pin-write failure raises `ErrorOccurred` rather than throwing. This scenario is 
 
 **RepoCardViewModel_MissingRepo_SuppressesOtherStatusWhenFolderAbsent**: A lightweight refresh
 against a repo path that no longer exists sets `IsMissing` and suppresses other status
-computation. This scenario is tested by
-`RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState`,
-covering `AgentControl-RepoCardViewModel-MissingRepo`.
+computation, while `RefreshCommand` stays executable and is offered as "Check again" (tooltip
+"Check whether the folder is available again"). Creating the folder and executing the command
+clears `IsMissing`, restores the label "Refresh" and re-enables Launch. This scenario is tested by
+`RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState` and
+`RepoCardViewModel_RefreshCommand_MissingFolderReturns_ClearsMissingAndRestoresActions`, covering
+`AgentControl-RepoCardViewModel-MissingRepo`.
 
 **RepoCardViewModel_CommittedFilesBadge_CachedByHeadHashAndResolvesBranchCheaply**: A
 lightweight refresh reuses the cached committed-files badge when the HEAD hash is unchanged,
@@ -258,10 +263,21 @@ scenario is tested by
 `RepoCardViewModel_RefreshCheap_DoesNotRunWorkingTreeDirtyCheck`, covering
 `AgentControl-RepoCardViewModel-CommittedFilesBadge`.
 
-**RepoCardViewModel_Favorite_ToggleCommandFlipsStateAndRaisesEvent**: `FavoriteToggleCommand`
-toggles `IsFavorite` and raises `FavoriteChanged`. This scenario is tested by
-`RepoCardViewModel_FavoriteToggleCommand_TogglesIsFavoriteAndRaisesFavoriteChanged`, covering
+**RepoCardViewModel_Favorite_SettingTheStateRaisesTheEventOncePerChange**: `IsFavorite` is the only
+owner of the favorite state (the card has no favorite command): setting it on, repeating that, and
+setting it off updates the shared repo record each time it changes and raises `FavoriteChanged`
+exactly once per change. This scenario is tested by
+`RepoCardViewModel_IsFavorite_Set_UpdatesRecentRepoAndRaisesFavoriteChangedOncePerChange`, covering
 `AgentControl-RepoCardViewModel-Favorite`.
+
+**RepoCardViewModel_UpToDateCue_OnlyForPinnedAndUpToDate**: `ShowUpToDateCue` is true for a pinned
+package that is the newest one, and false for an older pin with an upgrade available, a repo with no
+package, a missing folder, and a pin whose source is not configured; `RepoPathParent` and
+`RepoPathLeaf` split the path at its last separator (a trailing separator ignored; a path with no
+separator is all leaf) so the card can shorten the path in the middle. This scenario is tested by
+`RepoCardViewModel_ShowUpToDateCue_OnlyForPinnedAndUpToDate` and
+`RepoCardViewModel_RepoPathParts_SplitAtLastSeparator`, covering
+`AgentControl-RepoCardViewModel-UpToDateCue`.
 
 **RepoCardViewModel_RemoveRequest_RaisesEventWithoutMutatingState**: `RemoveCommand` raises
 `RemoveRequested` without changing any of the card's own state, deferring the removal decision

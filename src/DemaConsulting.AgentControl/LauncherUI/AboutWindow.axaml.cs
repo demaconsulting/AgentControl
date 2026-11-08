@@ -25,15 +25,18 @@ using Avalonia.Markup.Xaml;
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     Non-modal "About AgentControl" window showing the app name, logo, a short mission
-///     tagline, <see cref="Program.Version"/>, copyright, a short license summary, and a
+///     Modal "About AgentControl" window showing the app name, logo, a short mission
+///     tagline, a labeled "Version" row (<see cref="Program.Version"/> without its build metadata,
+///     which is the row's tooltip), copyright, a short license summary, and a
 ///     scrollable list of this application's direct third-party runtime dependencies with their
 ///     SPDX license identifiers.
 /// </summary>
 /// <remarks>
-///     Callers MUST use <see cref="Window.Show()"/>, never <c>ShowDialog</c>, mirroring
-///     <c>ReleaseNotesViewer</c>'s non-modal convention - the main window remains fully usable
-///     while this informational window is open. This window remains code-behind only (no view
+///     Callers show it with <c>ShowDialog</c> and the main window as owner, like every other
+///     dialog, so keyboard focus and Tab stay inside it (see <see cref="DialogBehavior"/>); the Close
+///     button has the focus and Escape closes it. (It was once non-modal, but a window that stays
+///     open beside the main window let Tab and clicks wander between the two.) This window
+///     remains code-behind only (no view
 ///     model is needed); this code-behind sets the tagline/version/copyright/license text once at
 ///     construction, and populates the dependency list's <c>ItemsSource</c> from the static
 ///     <see cref="ThirdPartyDependencies"/> list rather than from a view model or by parsing the
@@ -77,10 +80,37 @@ internal sealed partial class AboutWindow : Window
                                     "AboutDependenciesList control not found in AboutWindow.axaml.");
 
         taglineText.Text = Tagline;
-        versionText.Text = $"AgentControl {Program.Version}";
+        versionText.Text = DisplayVersion(Program.Version);
+        if (!string.Equals(versionText.Text, Program.Version, StringComparison.Ordinal))
+        {
+            ToolTip.SetTip(versionText, $"Full build version: {Program.Version}");
+        }
+
         copyrightText.Text = "Copyright (c) DEMA Consulting";
         licenseText.Text = "Licensed under the MIT License. See LICENSE for details.";
         dependenciesList.ItemsSource = ThirdPartyDependencies.All;
+
+        // Escape and the Close button both close it; the Close button has the focus
+        DialogBehavior.Apply(this, "AboutCloseButton", () => Close());
+    }
+
+    /// <summary>
+    ///     Shortens a full informational version to the one the About window shows: the part before
+    ///     the build metadata (the text after the first <c>+</c>, typically a commit hash), so the
+    ///     version reads <c>1.2.3</c> instead of <c>1.2.3+0123456789abcdef</c> and fits on one line.
+    ///     The full text stays available as the version's tooltip.
+    /// </summary>
+    /// <param name="fullVersion">The full informational version, as <see cref="Program.Version"/>
+    ///     reports it. Must not be <see langword="null"/>.</param>
+    /// <returns>The version without build metadata; <paramref name="fullVersion"/> itself when it has
+    ///     none, or when removing the metadata would leave nothing.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="fullVersion"/> is
+    ///     <see langword="null"/>.</exception>
+    internal static string DisplayVersion(string fullVersion)
+    {
+        ArgumentNullException.ThrowIfNull(fullVersion);
+        var plus = fullVersion.IndexOf('+', StringComparison.Ordinal);
+        return plus > 0 ? fullVersion[..plus] : fullVersion;
     }
 
     /// <summary>

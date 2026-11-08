@@ -53,6 +53,9 @@ internal sealed partial class MessageBoxWindow : Window
         AvaloniaXamlLoader.Load(this);
         _messageText = this.FindControl<TextBlock>("MessageText")
                        ?? throw new InvalidOperationException("MessageText control not found in MessageBoxWindow.axaml.");
+
+        // OK has the focus, and Escape closes the message like OK does
+        DialogBehavior.Apply(this, "MessageBoxOkButton", () => Close());
     }
 
     /// <summary>

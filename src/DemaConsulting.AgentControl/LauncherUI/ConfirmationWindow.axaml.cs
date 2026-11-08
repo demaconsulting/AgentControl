@@ -57,6 +57,9 @@ internal sealed partial class ConfirmationWindow : Window
         _messageText = this.FindControl<TextBlock>("ConfirmationMessageText")
                         ?? throw new InvalidOperationException(
                             "ConfirmationMessageText control not found in ConfirmationWindow.axaml.");
+
+        // The safe answer (No) has the focus, and Escape means No
+        DialogBehavior.Apply(this, "ConfirmationNoButton", () => Close(false));
     }
 
     /// <summary>

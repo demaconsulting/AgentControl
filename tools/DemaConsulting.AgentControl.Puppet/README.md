@@ -160,8 +160,11 @@ without it.
   to start with a particular group collapsed, list it in `CollapsedGroups` in the settings file before `launch`.
 - **Repo card** (repeated, one per list item): `RepoNameText`, `RepoStatusAccent` (the status bar; its name is the
   status in words), `RepoAvatarText`, `RepoAvatarImage`, `UpgradeAvailableBadge` (a button: click it to upgrade),
-  `CommittedAgentFilesBadge`, `DirtyWorkingTreeBadge`, `MissingRepoBadge`, `RepoPathText`, `RepoPinnedVersionText`,
-  `CurrentBranchText`, `GroupChipText` (a favorite's group), `FavoriteToggleButton`, `LaunchButton`,
+  CommittedAgentFilesBadge, DirtyWorkingTreeBadge, MissingRepoBadge, RepoPathText (a panel whose name is the full
+  path), RepoPinnedVersionText,
+  `CurrentBranchText`, `GroupChipText` (a favorite's group), `FavoriteToggleButton` (accessible name `Favorite`; a
+  toggle: `read` shows `toggle=On|Off`), `UpToDateCue` (the check mark in the package chip of an up-to-date card),
+  `LaunchButton`,
   `MoreActionsButton`.
 - **Card menu** (pop-up of `MoreActionsButton`): `PullButton` (Git Pull), `RefreshMenuItem`, `SelectPackageMenuItem`
   (only for a repo that has no package yet), `UpgradeMenuItem` (only while an upgrade is available),
@@ -176,7 +179,8 @@ without it.
 - **Settings** (`AgentControl Settings`): the package sources `SourcesList` (rows with `SourceAliasText`,
   `SourceLocationText`, `SourceStatusText`), `AddSourceButton` (opens the Add menu), its items
   `AddZipSourceButton`, `AddNuGetFolderSourceButton`, `AddNuGetServerSourceButton`, `EditSourceButton`,
-  `RemoveSourceButton`, `SourcesEmptyText`; and `ThemeComboBox` (Appearance),
+  `RemoveSourceButton`, `SourcesEmptyText`; the Appearance section (`AppearanceHeadingText`, `ThemeComboBox`, named
+  `Theme`) and the Tools section (`ToolsHeadingText`),
   `GitExecutablePathTextBox`, `AgentToolComboBox`, `CustomAgentCommandTextBox`, `ShellPreferenceComboBox`,
   `SettingsErrorTextBlock`, `SaveSettingsButton`. The **source editor** has `SourceAliasTextBox`,
   `SourceLocationTextBox`, `SourceBrowseButton`, `SourceEditorSaveButton`, `SourceEditorCancelButton` (and, for NuGet
@@ -205,7 +209,9 @@ agentcontrol-puppet drag-element <automationId> <dx> <dy>
 agentcontrol-puppet wheel <notches> [--ctrl] [--on <automationId> | --at <x>,<y>]
 ```
 
-- `key` sends **real** key presses to the focused element of the instance (or to `--to <id>` after focusing it). A
+- `key` sends **real** key presses to the focused element of the instance (or to `--to <id>` after focusing it); the
+  window that is raised for it is the innermost open dialog when there is one (a modal dialog keeps the keyboard, and
+  the disabled main window behind it must not be pushed in front of it), else the main window. A
   chord is modifiers joined with `+`: `Ctrl+C`, `Ctrl+Shift+Z`, `Delete`, `F2`, `Escape`, `Enter`, `Ctrl+Enter`,
   letters, digits, `F1`-`F12`, `Tab`, `Space`, `Backspace`, arrows, `Home`/`End`/`PageUp`/`PageDown`, `Plus`, `Minus`.
 - `hover <id>` rests the real cursor on the centre of the element so its tooltip opens. It only reads the element's

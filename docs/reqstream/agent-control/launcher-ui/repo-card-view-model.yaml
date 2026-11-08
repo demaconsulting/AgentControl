@@ -253,8 +253,10 @@ sections:
           package's optional root-level AGENTS.md template to the user only when the repo has
           no AGENTS.md file of its own, the package has a template to offer, and the user has
           not previously declined the offer for this repo; shall write the accepted template
-          verbatim to the repo root without extracting it into any managed folder; and shall
-          persist a decline so the user is never re-prompted for that repo again.
+          verbatim to the repo root without extracting it into any managed folder; shall
+          persist a decline so the user is never re-prompted for that repo again; and shall
+          raise the offer before the release notes of the same upgrade, so the view can ask
+          first and show the notes after the answer.
         justification: |
           A package may ship a starting AGENTS.md template for a repo that lacks one, but
           AgentControl must never overwrite a developer's own AGENTS.md, must never nag a user
@@ -266,6 +268,7 @@ sections:
           - AgentControl-RepoCardViewModel-DeclineAgentsMdTemplate
         tests:
           - RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent
+          - RepoCardViewModel_ApplySelectedPackage_TemplateOfferAndReleaseNotes_RaisesOfferBeforeReleaseNotes
           - RepoCardViewModel_ApplySelectedPackage_AgentsMdAlreadyExists_DoesNotRaiseAgentsMdTemplateOfferRequested
           - RepoCardViewModel_ApplySelectedPackage_PackageHasNoAgentsMdTemplate_DoesNotRaiseAgentsMdTemplateOfferRequested
           - RepoCardViewModel_ApplySelectedPackage_PreviouslyDeclined_DoesNotRaiseAgentsMdTemplateOfferRequestedAgain
@@ -308,12 +311,18 @@ sections:
       - id: AgentControl-RepoCardViewModel-MissingRepo
         title: >-
           The RepoCardViewModel class shall mark the repo as missing, and suppress other
-          status computation, when the repo's folder no longer exists on disk.
+          status computation, when the repo's folder no longer exists on disk, shall keep
+          its refresh command available then (labeled "Check again", with a tooltip that
+          says it checks whether the folder is available again), and shall stop reporting
+          the repo as missing once a refresh finds the folder.
         justification: |
           A repo folder can be deleted or moved outside AgentControl's knowledge; the card
-          must reflect that rather than show stale or misleading status information.
+          must reflect that rather than show stale or misleading status information. A folder
+          on a drive or share that is not mounted comes back by itself, and re-checking is the
+          only way to tell AgentControl, so the refresh must stay available for a missing repo.
         tests:
           - RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState
+          - RepoCardViewModel_RefreshCommand_MissingFolderReturns_ClearsMissingAndRestoresActions
 
       - id: AgentControl-RepoCardViewModel-CommittedFilesBadge
         title: >-
@@ -330,12 +339,17 @@ sections:
           - RepoCardViewModel_RefreshCheap_DoesNotRunWorkingTreeDirtyCheck
 
       - id: AgentControl-RepoCardViewModel-Favorite
-        title: The RepoCardViewModel class shall let the user toggle the repo's favorite status.
+        title: >-
+          The RepoCardViewModel class shall let the user set the repo's favorite status through
+          one property that is the only owner of that state, changing the shared repo record and
+          raising its change notification once per change.
         justification: |
           Marking a repo as a favorite is how a developer promotes it to the top of the
-          sorted recent-repos list.
+          sorted recent-repos list. The card's star binds to this one property (it has no command
+          of its own), because a second owner of the state - a command that also toggled - flipped
+          it twice per click, so a repo could neither be favorited nor unfavorited.
         tests:
-          - RepoCardViewModel_FavoriteToggleCommand_TogglesIsFavoriteAndRaisesFavoriteChanged
+          - RepoCardViewModel_IsFavorite_Set_UpdatesRecentRepoAndRaisesFavoriteChangedOncePerChange
 
       - id: AgentControl-RepoCardViewModel-RemoveRequest
         title: >-
@@ -424,6 +438,22 @@ sections:
           - RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason
           - RepoCardViewModel_Status_FailedPull_IsProblemUntilNextOperation
           - RepoCardViewModel_Status_ErrorReported_IsProblem
+
+      - id: AgentControl-RepoCardViewModel-UpToDateCue
+        title: >-
+          The RepoCardViewModel class shall tell the card to show its "up to date" cue only while
+          an agent package is pinned and the card's overall status is up to date, and shall expose
+          the repo's path as a folder part and a last segment (the repo's folder name, with its
+          separator) so the card can shorten the path in the middle.
+        justification: |
+          A healthy card would otherwise be recognized only by a green bar and the absence of an
+          upgrade chip, so it shows a small check mark in its package chip; the cue must never
+          contradict the status (an upgrade, a problem, a check still running, no package). A
+          narrow card must still show the folder name that tells similar repos apart, which needs
+          the path in two parts.
+        tests:
+          - RepoCardViewModel_ShowUpToDateCue_OnlyForPinnedAndUpToDate
+          - RepoCardViewModel_RepoPathParts_SplitAtLastSeparator
 
       - id: AgentControl-RepoCardViewModel-UpgradeFromChip
         title: >-

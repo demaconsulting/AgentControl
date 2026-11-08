@@ -11,7 +11,7 @@ package AgentControl {
          * AsyncRelayCommand, ViewModelBase, PackageSourceIcons, PackageSourceItemViewModel,
          * SelectPackageSourceViewModel, AvaloniaCredentialPrompt, ConnectionTestResultKind,
          * FavoriteIconConverter, ThemePreferenceDisplayNameConverter, RepoCardStatus, RepoImageLocator,
-         * RepoGroupHeaderViewModel, RepoGroupKind, GroupNameViewModel, GroupNameWindow, CardColorPalette and the shared AppStyles.axaml theme resources), which are folded into this
+         * RepoGroupHeaderViewModel, RepoGroupKind, GroupNameViewModel, GroupNameWindow, CardColorPalette, DialogBehavior and the shared AppStyles.axaml theme resources), which are folded into this
          * subsystem-level description rather than given separate unit files.
          */
 

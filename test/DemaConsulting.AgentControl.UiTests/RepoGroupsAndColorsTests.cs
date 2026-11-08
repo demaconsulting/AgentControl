@@ -176,6 +176,68 @@ public sealed class RepoGroupsAndColorsTests
     }
 
     /// <summary>
+    ///     Favoriting an unfavorited repo (the star turns on, the repo is listed under a new Favorites
+    ///     section and the choice is stored) and unfavoriting it again (back under its group) both work:
+    ///     one toggle changes the state once, and the repo moves between the sections.
+    /// </summary>
+    [Fact]
+    public void FavoriteToggleButton_ToggledOnThenOff_MovesRepoBetweenSectionsAndStoresChoice()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: the seeded repo is in the group "Work"; another repo is ungrouped
+        using var context = new AgentControlTestContext(customizeSettings: (settings, self) =>
+        {
+            var other = Path.Combine(self.RootDirectory, "elsewhere");
+            Directory.CreateDirectory(other);
+            settings["RecentRepos"] = new object[]
+            {
+                new { Path = self.RepoPath, GroupName = "Work" },
+                new { Path = other }
+            };
+        });
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        Assert.Equal(["repo", "elsewhere"], RepoNames(mainWindow));
+        Assert.Equal("Favorite", Find(mainWindow, "FavoriteToggleButton").Name);
+
+        // Act: favorite the repo in the group (the first card in the list)
+        Find(mainWindow, "FavoriteToggleButton").Patterns.Toggle.Pattern.Toggle();
+
+        // Assert: a Favorites section now holds it, its star is on, and the choice is stored
+        var favorites = Find(mainWindow, "GroupHeaderToggleButton", header => header.Name.StartsWith("Favorites", StringComparison.Ordinal));
+        Assert.Equal("Favorites, 1 repo, expanded", favorites.Name);
+        Assert.Equal(
+            FlaUI.Core.Definitions.ToggleState.On,
+            Find(mainWindow, "FavoriteToggleButton").Patterns.Toggle.Pattern.ToggleState.Value);
+        Assert.True(Retry.WhileFalse(
+            () => ReadSettings(context).Contains("\"IsFavorite\": true", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+
+        // Act: unfavorite it again
+        Find(mainWindow, "FavoriteToggleButton").Patterns.Toggle.Pattern.Toggle();
+
+        // Assert: the Favorites section is gone, the star is off, the choice is stored
+        Assert.True(Retry.WhileFalse(
+            () => mainWindow.FindAllDescendants(cf => cf.ByAutomationId("GroupHeaderToggleButton"))
+                .All(header => !header.Name.StartsWith("Favorites", StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Equal(
+            FlaUI.Core.Definitions.ToggleState.Off,
+            Find(mainWindow, "FavoriteToggleButton").Patterns.Toggle.Pattern.ToggleState.Value);
+        Assert.True(Retry.WhileFalse(
+            () => !ReadSettings(context).Contains("\"IsFavorite\": true", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+    }
+
+    /// <summary>
     ///     Expands a menu item that has a submenu, through its UI Automation expand pattern when it
     ///     has one, else by invoking it.
     /// </summary>

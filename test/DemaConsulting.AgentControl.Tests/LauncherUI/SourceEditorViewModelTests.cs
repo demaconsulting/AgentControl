@@ -66,6 +66,34 @@ public class SourceEditorViewModelTests
     }
 
     /// <summary>
+    ///     Test that the location box's tooltip carries the whole entered value (so a long path or feed
+    ///     address can be verified) and is absent while the box is empty.
+    /// </summary>
+    [Fact]
+    public void SourceEditorViewModel_Location_TooltipShowsWholeValueAndIsNullWhenEmpty()
+    {
+        // Arrange
+        var editor = CreateEditor(PackageSourceType.Zip);
+        var changed = new List<string?>();
+        editor.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        Assert.Null(editor.LocationTooltip);
+
+        // Act
+        var longPath = @"\\fileserver\share\departments\engineering\agent-packages\released\contoso\2026";
+        editor.Location = longPath;
+
+        // Assert
+        Assert.Equal(longPath, editor.LocationTooltip);
+        Assert.Contains(nameof(SourceEditorViewModel.LocationTooltip), changed);
+
+        // Act
+        editor.Location = "   ";
+
+        // Assert
+        Assert.Null(editor.LocationTooltip);
+    }
+
+    /// <summary>
     ///     Test that a valid zip source can be saved and the saved definition carries the trimmed
     ///     alias-independent values and no package IDs.
     /// </summary>

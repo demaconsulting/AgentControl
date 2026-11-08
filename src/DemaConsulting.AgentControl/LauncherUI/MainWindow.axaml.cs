@@ -64,7 +64,7 @@ internal sealed partial class MainWindow : Window
     private readonly HashSet<RepoCardViewModel> _dirtyStatusRefreshedCards = [];
 
     /// <summary>
-    ///     Tracks every non-modal <see cref="ReleaseNotesViewer"/>/<see cref="AboutWindow"/>
+    ///     Tracks every non-modal <see cref="ReleaseNotesViewer"/>
     ///     opened from this window, so they can be explicitly closed when this window closes
     ///     (see <see cref="MainWindow_Closing"/>). These are deliberately opened without an
     ///     Avalonia owner: owned non-modal windows have been observed to block this window's own
@@ -72,6 +72,12 @@ internal sealed partial class MainWindow : Window
     ///     so this window instead takes responsibility for closing them itself.
     /// </summary>
     private readonly List<Window> _openChildWindows = [];
+
+    /// <summary>
+    ///     Gets the non-modal child windows (the release-notes windows) that are open now, so tests can
+    ///     tell whether, and when, an upgrade's release notes were shown.
+    /// </summary>
+    internal IReadOnlyList<Window> OpenChildWindows => _openChildWindows;
 
     /// <summary>
     ///     Logs window lifecycle events (child windows opened/closed, this window closing) so an
@@ -118,7 +124,7 @@ internal sealed partial class MainWindow : Window
 
     /// <summary>
     ///     Closes every still-open tracked child window (see <see cref="_openChildWindows"/>)
-    ///     when this window closes, so a <see cref="ReleaseNotesViewer"/>/<see cref="AboutWindow"/>
+    ///     when this window closes, so a <see cref="ReleaseNotesViewer"/>
     ///     never outlives the main window.
     /// </summary>
     /// <param name="sender">This window.</param>
@@ -204,12 +210,62 @@ internal sealed partial class MainWindow : Window
     private void AttachCardHandlers(RepoCardViewModel card)
     {
         card.ErrorOccurred += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
-        card.ReleaseNotesReady += (_, releaseNotes) =>
-            ShowTrackedChildWindow(new ReleaseNotesViewer(new ReleaseNotesViewerViewModel(card.RepoName, releaseNotes)));
+        card.ReleaseNotesReady += async (_, releaseNotes) => await ShowReleaseNotesAsync(card, releaseNotes);
         card.RemoveRequested += async (_, _) => await ConfirmAndRemoveCard(card);
         card.SelectPackageRequested += async (_, _) => await ShowSelectPackageDialog(card);
         card.NewGroupRequested += async (_, _) => await ShowNewGroupPrompt(card);
-        card.AgentsMdTemplateOfferRequested += async (_, templateContent) => await ShowAgentsMdTemplateOfferDialog(card, templateContent);
+        card.AgentsMdTemplateOfferRequested += async (_, templateContent) =>
+        {
+            // Remember the question until it is answered, so the release notes that follow it can wait
+            // (the handler runs up to its first await before returning, so this is in place in time)
+            var answered = new TaskCompletionSource();
+            _agentsMdPrompts[card] = answered.Task;
+            try
+            {
+                await ShowAgentsMdTemplateOfferDialog(card, templateContent);
+            }
+            finally
+            {
+                answered.SetResult();
+            }
+        };
+    }
+
+    /// <summary>
+    ///     The AGENTS.md template questions that are open (a card has one at most), so the release notes
+    ///     of the same upgrade are shown only after the question is answered.
+    /// </summary>
+    private readonly Dictionary<RepoCardViewModel, Task> _agentsMdPrompts = [];
+
+    /// <summary>
+    ///     Shows an upgrade's release notes in a non-modal <see cref="ReleaseNotesViewer"/>, after the
+    ///     AGENTS.md template question of the same upgrade (when there is one) has been answered.
+    /// </summary>
+    /// <remarks>
+    ///     Upgrading may end with both the question (modal, over this window) and the release notes (a
+    ///     window of their own). Shown together, the question covered the notes, or the notes window
+    ///     was left behind the question. So the question comes first and the notes follow it, opening
+    ///     in front as the completion of the upgrade. Nothing is shown when this window has closed in
+    ///     the meantime, so the notes never outlive it.
+    /// </remarks>
+    /// <param name="card">The card that was upgraded.</param>
+    /// <param name="releaseNotes">The new package's release notes.</param>
+    /// <returns>A task that completes when the notes window has been opened (or skipped).</returns>
+    private async Task ShowReleaseNotesAsync(RepoCardViewModel card, string releaseNotes)
+    {
+        if (_agentsMdPrompts.Remove(card, out var question))
+        {
+            await question;
+        }
+
+        if (!IsVisible)
+        {
+            return;
+        }
+
+        var viewer = new ReleaseNotesViewer(new ReleaseNotesViewerViewModel(card.RepoName, releaseNotes));
+        ShowTrackedChildWindow(viewer);
+        viewer.Activate();
     }
 
     /// <summary>
@@ -649,14 +705,13 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Opens the non-modal <see cref="AboutWindow"/>, tracked by this window (see
-    ///     <see cref="ShowTrackedChildWindow"/>) so it closes when this window does, rather than
-    ///     outliving it.
+    ///     Opens the modal <see cref="AboutWindow"/> over this window, like every other dialog: this
+    ///     window cannot be used (or closed) until About is closed, and keyboard focus stays in it.
     /// </summary>
     /// <param name="sender">The clicked "About" button.</param>
     /// <param name="e">Routed event arguments (unused).</param>
-    private void OpenAboutButton_Click(object? sender, RoutedEventArgs e)
+    private async void OpenAboutButton_Click(object? sender, RoutedEventArgs e)
     {
-        ShowTrackedChildWindow(new AboutWindow());
+        await new AboutWindow().ShowDialog(this);
     }
 }

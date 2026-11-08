@@ -57,17 +57,21 @@ Each repo card shows:
   missing, the package source has a problem or needs a sign-in, or the last action you started on the card
   failed); **grey** — no agent package is pinned (or the upgrade check is still running). Color is never the
   only signal: hover the bar for the status and its reason, and the chips below say the same in words.
-- On the first line, the **favorite star** (click it to pin the repo above the default
-  most-recently-launched sort order; it is a gold filled star when favorited and an outline otherwise) and
+- On the first line, the **favorite star** (click it, or press Space on it, to pin the repo above the default
+  most-recently-launched sort order, and click it again to unpin it; it is a gold filled star when favorited and an
+  outline otherwise) and
   the repo's name (its folder name) right beside it
 - On the same line at the right, the **Launch** button, labelled with your agent tool (see *Launching*), and a
   "..." menu
 - Below the first line, the repo's **picture tile** (see *Giving a Repo a Card Icon*) beside a row of **chips** —
   small rounded labels, each with a hover tooltip that explains it in full (see *Reading the Chips* below) —
-  and, in smaller muted text below them, the repo's full path (hover for the full text if it is shortened)
+  and, in smaller muted text below them, the repo's full path. When the window is narrow a long name is
+  shortened at its end and a long path in the middle, so the repo's own folder name at the end of the path stays
+  visible (hover over either for the full text)
 - The "..." menu is grouped. **Repository**: **Git Pull** (see *Pulling Changes*) and **Refresh** (re-checks
   the repo's git state, upgrade status and committed-agent-files chip without waiting for the next app
-  launch). **Agent files**: **Select Package...** or **Upgrade to x.y.z** (mutually exclusive — see below;
+  launch; for a repo whose folder is missing it reads **Check again** and checks whether the folder is
+  available again). **Agent files**: **Select Package...** or **Upgrade to x.y.z** (mutually exclusive — see below;
   the group is hidden when neither applies). **Organize**: **Move to group** and **Card color...** (see
   *Organizing Repos with Groups* and *Choosing a Card Color*). Then **Remove from list**.
 
@@ -135,7 +139,10 @@ meaning.
   source the package came from (a folder of zips, a folder of NuGet packages, or a NuGet server) and
   the source's **alias** is shown as muted text next to it, so you can see where the package came
   from without hovering. The tooltip names the source in full: "Agent files: contoso-agents 1.0.0
-  from source 'Default' (zip folder)". If the source is not configured, the tooltip says so.
+  from source 'Default' (zip folder)". If the source is not configured, the tooltip says so. When the pinned
+  package is the newest one available, a small green **check mark** inside the chip (tooltip "Agent files are
+  up to date") says so, in addition to the green bar on the card's left edge; it is not shown while an upgrade is
+  available, while AgentControl is still checking, or when there is a problem.
 - **Upgrade chip** (amber, up arrow) — **Upgrade to** and the version an upgrade would move to, for example
   `Upgrade to 1.1.0`. It appears only when the source the repo is pinned to has a newer version. **Click
   the chip** (its tooltip says "Upgrade the agent files to 1.1.0"), or use the card's "..." menu >
@@ -158,7 +165,8 @@ meaning.
 - **Folder missing** (red) — the repo path no longer exists on disk (for example, a deleted
   folder or an unmounted network/removable drive). This suppresses the card's other chips and
   actions, and offers a "Remove from list" action instead (the card is never auto-removed, since
-  the path may reappear, such as a drive being remounted).
+  the path may reappear, such as a drive being remounted). When the folder is back, choose the card's "..." menu >
+  **Check again**; the badge goes away and the card's actions return, without restarting AgentControl.
 - **Package source problem** (red) — the source the repo is pinned to is not configured (for
   example it was removed or renamed in Settings). The tooltip states the problem. No upgrade is
   offered and no other source is ever used instead; restore the source with the same alias in
@@ -548,8 +556,8 @@ shows **Select Package...**. Choosing it opens a dialog with three columns:
 On confirm, AgentControl runs the same extract-and-pin sequence as an upgrade: validate the
 package, delete the four managed folders if present, extract the new files, ensure your
 `.gitignore` covers the four managed folders, write the `.agentcontrol.json` pin (naming the
-source), show the release notes, then offer the `AGENTS.md` template if applicable (see
-*AGENTS.md Template Offer* below). While this runs the card shows
+source), offer the `AGENTS.md` template if applicable (see *AGENTS.md Template Offer* below), then show the
+release notes. While this runs the card shows
 that it is busy and offers **Cancel**.
 
 ## Upgrading an Already-Pinned Repo
@@ -567,10 +575,10 @@ upgrade chip, which you can also click to start the upgrade). Upgrading:
 4. Ensures your `.gitignore` covers the four managed folders (adding them if not already
    covered), so they are far less likely to be committed by accident.
 5. Rewrites the `.agentcontrol.json` pin to the new package name and version.
-6. Shows the new package's `release-notes.md` (when the package includes one) in a
-   non-modal, resizable window.
-7. Offers the package's `AGENTS.md` template if applicable (see
-   [AGENTS.md Template Offer](#agentsmd-template-offer) below).
+6. Offers the package's `AGENTS.md` template if applicable (see
+   [AGENTS.md Template Offer](#agentsmd-template-offer) below). This question comes first.
+7. Shows the new package's `release-notes.md` (when the package includes one) in a
+   non-modal, resizable window, in front, once the question (if there was one) has been answered.
 
 There is no rollback if a step fails partway through — a message box reports the error, and
 you are expected to resolve it manually. Any local customizations you may have added inside
@@ -633,11 +641,13 @@ Open Settings from the gear icon on the toolbar to configure:
   a source that does not require them is not checked - no checksum or signature
   verification is performed on its packages by AgentControl, so the security and integrity of such a
   shared folder or server is the responsibility of whoever maintains it.
-- **Appearance (color theme)** — **System default** (the default; AgentControl follows your operating
-  system's light or dark setting, and follows it live if you change it while AgentControl is running),
+- **Appearance** (its own section, above **Tools**) — the **Theme**: **System default** (the default; AgentControl
+  follows your operating system's light or dark setting, and follows it live if you change it while AgentControl is
+  running),
   **Light** or **Dark**. The choice applies as soon as you save Settings - no restart - to every window. A
   settings file from an older version, or with a value AgentControl does not recognize, simply means System
   default.
+- **Tools** — the next three settings:
 - **Git executable path override** — a specific `git` executable to use instead of resolving
   `git` from the process `PATH`.
 - **Agent tool selection** — which agentic CLI tool Launch starts: **GitHub Copilot CLI**,
@@ -659,10 +669,23 @@ Open Settings from the gear icon on the toolbar to configure:
 
 # About
 
-The About dialog, reachable from an info icon on the main window's toolbar, is a simple,
-non-modal window showing the running build's application version, copyright, and license
-text, so you can identify the running build without inspecting file properties, along with a
-scrollable list of this application's direct third-party dependencies and their licenses.
+The About dialog, reachable from an info icon on the main window's toolbar, is a simple
+dialog (the main window waits until you close it) showing the running build's application version
+(a labeled **Version** row; hover over it for the full build version, including the build identifier after
+a `+`), copyright, and license text, so you can identify the running build without inspecting file
+properties, along with a scrollable list of this application's direct third-party dependencies and their licenses.
+
+# Using the Keyboard in Dialogs
+
+Every dialog (Settings, the package source editors, the sign-in dialog, Select Package, confirmations, message
+boxes, the group name prompt and About) is modal: the window behind it cannot be used until you close it. When a
+dialog opens, the keyboard focus is already in it - on its first field or button (a confirmation starts on the safe
+answer, **No**) - and, when you use the keyboard, it is drawn with a focus ring. **Tab** and **Shift+Tab** move between
+the dialog's controls and wrap around inside the dialog; they never reach the window behind it. **Escape** cancels a
+dialog that can be cancelled (a confirmation answers No; a message box, About, Select Package, the group name prompt,
+the source editors and the sign-in dialog close without applying anything). Settings has no Escape, so a stray key press
+cannot throw away your changes; use **Save**, or the window's close button to leave without saving. When a dialog closes,
+the focus is back where it was in the main window.
 
 # Authoring Agent Packages
 

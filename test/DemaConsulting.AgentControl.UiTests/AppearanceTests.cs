@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using System.Drawing;
+using System.Runtime.InteropServices;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Capturing;
 using FlaUI.Core.Tools;
@@ -77,6 +78,92 @@ public sealed class AppearanceTests
         Assert.Contains("\"Theme\": \"Dark\"", ReadSettings(context), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    ///     Settings shows Appearance as its own section: a heading, with the Theme picker under it, above
+    ///     the Tools heading (and not under Tools with the git and agent tool settings).
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_AppearanceIsItsOwnSectionAboveTools()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        using var context = new AgentControlTestContext();
+        var mainWindow = context.Launch();
+
+        // Act
+        Find(mainWindow, "OpenSettingsButton").AsButton().Invoke();
+        var settingsWindow = context.WaitForWindowWithDescendant("ThemeComboBox", TimeSpan.FromSeconds(15));
+        Assert.NotNull(settingsWindow);
+
+        // Assert: Appearance heading, then the Theme picker, then the Tools heading, then a tool setting
+        var appearance = Find(settingsWindow, "AppearanceHeadingText");
+        var theme = Find(settingsWindow, "ThemeComboBox");
+        var tools = Find(settingsWindow, "ToolsHeadingText");
+        var git = Find(settingsWindow, "GitExecutablePathTextBox");
+        Assert.Equal("Appearance", appearance.Name);
+        Assert.Equal("Tools", tools.Name);
+        Assert.Equal("Theme", theme.Name);
+        Assert.True(appearance.BoundingRectangle.Top < theme.BoundingRectangle.Top);
+        Assert.True(theme.BoundingRectangle.Top < tools.BoundingRectangle.Top);
+        Assert.True(tools.BoundingRectangle.Top < git.BoundingRectangle.Top);
+        Find(settingsWindow, "SaveSettingsButton").AsButton().Invoke();
+    }
+
+    /// <summary>
+    ///     Settings is a modal dialog: while it is open the operating system has disabled the main window behind
+    ///     it (so neither clicks nor Tab can reach it), and saving enables the main window again. The state of
+    ///     the main window's own window handle is read (not the keyboard focus, which depends on which window
+    ///     the desktop has active), so the test does not depend on the state of the desktop session.
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_Opened_MainWindowBehindItIsDisabledUntilItCloses()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        using var context = new AgentControlTestContext();
+        var mainWindow = context.Launch();
+        var mainHandle = mainWindow.Properties.NativeWindowHandle.Value;
+        Assert.True(IsWindowEnabled(mainHandle));
+
+        // Act
+        Find(mainWindow, "OpenSettingsButton").AsButton().Invoke();
+        var settingsWindow = context.WaitForWindowWithDescendant("ThemeComboBox", TimeSpan.FromSeconds(15));
+        Assert.NotNull(settingsWindow);
+
+        // Assert: the main window is disabled while the dialog is open
+        Assert.True(Retry.WhileTrue(
+            () => IsWindowEnabled(mainHandle),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Success);
+
+        // Act: save (which closes the dialog)
+        Find(settingsWindow, "SaveSettingsButton").AsButton().Invoke();
+
+        // Assert: the main window is enabled again
+        Assert.True(Retry.WhileFalse(
+            () => IsWindowEnabled(mainHandle),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Success);
+    }
+
+    /// <summary>
+    ///     Win32 <c>IsWindowEnabled</c>: whether a window accepts input (a window that owns an open modal dialog
+    ///     does not).
+    /// </summary>
+    /// <param name="window">The window handle.</param>
+    /// <returns><see langword="true"/> when the window accepts input.</returns>
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowEnabled(IntPtr window);
     /// <summary>
     ///     Opens Settings, picks a theme by its friendly name in the Appearance picker and saves.
     /// </summary>

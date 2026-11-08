@@ -28,11 +28,53 @@ sections:
           - AgentControl-LauncherUI-StatusBadges
           - AgentControl-LauncherUI-RepoCardChips
           - AgentControl-LauncherUI-CardIdentityAndStatus
+          - AgentControl-LauncherUI-UpToDateCue
           - AgentControl-GitIntegration-DetectCommittedFiles
           - AgentControl-GitIntegration-CurrentBranch
         tests:
           - windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId
           - windows@RepoCard_PinnedRepoWithNewerVersion_ShowsPackageAndUpgradeChips
+          - windows@UpToDateCue_ShownOnlyForPinnedPackageThatIsUpToDate
+
+      - id: AgentControl-System-Favorites
+        title: >-
+          The tool shall let the user favorite and unfavorite a repo with the star on its card,
+          list a favorite first (under a Favorites section when repos are grouped), return it to
+          its group when unfavorited, and remember the choice.
+        tags: [system]
+        justification: |
+          Promoting the repos a developer works in most to the top is the point of the star; it
+          must work in both directions, and the repo must follow the star between sections.
+        children:
+          - AgentControl-LauncherUI-FavoriteStar
+        tests:
+          - windows@FavoriteToggleButton_ToggledOnThenOff_MovesRepoBetweenSectionsAndStoresChoice
+
+      - id: AgentControl-System-MissingRepoRecheck
+        title: >-
+          The tool shall let the user re-check a repo whose folder is missing, from the card's
+          menu, so the repo is usable again once its folder is back, without restarting the tool.
+        tags: [system]
+        justification: |
+          A folder on an unmounted drive or share returns without the tool knowing; the user
+          needs an in-app way to tell it to look again.
+        children:
+          - AgentControl-LauncherUI-MissingRepoRecheck
+        tests:
+          - windows@RefreshMenuItem_MissingFolder_IsEnabledAsCheckAgain_AndFindsFolderOnceBack
+
+      - id: AgentControl-System-DialogKeyboard
+        title: >-
+          The tool shall show its dialogs as modal dialogs, so the window behind a dialog cannot be
+          used or reached with the keyboard while the dialog is open.
+        tags: [system]
+        justification: |
+          Keyboard-only operation is a baseline of accessible desktop software, and a dialog whose
+          focus is invisible or in the window behind it cannot be used from the keyboard.
+        children:
+          - AgentControl-LauncherUI-DialogKeyboard
+        tests:
+          - windows@SettingsWindow_Opened_MainWindowBehindItIsDisabledUntilItCloses
 
       - id: AgentControl-System-AddRemoveRepo
         title: >-
@@ -89,6 +131,7 @@ sections:
           - AgentControl-LauncherUI-Appearance
         tests:
           - windows@SettingsWindow_ChooseLightThenDark_ReThemesMainWindowWithoutRestart
+          - windows@SettingsWindow_AppearanceIsItsOwnSectionAboveTools
 
       - id: AgentControl-System-RepoGroups
         title: >-
@@ -244,7 +287,8 @@ sections:
           The tool shall offer to place a package's optional root-level AGENTS.md template at
           a repo's root when the repo has no AGENTS.md of its own and the package has a
           template to offer, shall never overwrite a pre-existing AGENTS.md, and shall
-          remember a user's decline so they are not re-prompted for that repo again.
+          remember a user's decline so they are not re-prompted for that repo again, and shall
+          show that offer before the release notes of the same upgrade.
         tags: [system]
         justification: |
           A package author may want to seed a repo with a starting AGENTS.md (the same
@@ -655,7 +699,9 @@ sections:
           - GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue
 
       - id: AgentControl-System-About
-        title: The tool shall provide an About dialog showing the application version, copyright, and license.
+        title: >-
+          The tool shall provide a modal About dialog showing the application version (as a labeled
+          row without build metadata), copyright, and license.
         tags: [system]
         justification: |
           Lets a developer identify exactly which build they are running (e.g. when

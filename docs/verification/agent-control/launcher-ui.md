@@ -12,7 +12,10 @@ The `LauncherUI` subsystem is verified by the combined unit tests of its six uni
 command, which together
 exercise the full recent-repos/card/select-package/settings/sign-in interaction surface without ever
 constructing an Avalonia `Window`. The windows themselves are exercised by headless Avalonia tests
-(`DialogWindowTests.cs`, `MainWindowTests.cs`, `RepoGroupWindowTests.cs` for the group headers, the card menu's
+(`DialogWindowTests.cs`, `MainWindowTests.cs`, `UsabilityWindowTests.cs` for the favorite star with real pointer
+and key input, the "Check again" menu item, the up-to-date check mark, the narrow card, the Settings sections, the
+keyboard behavior of the dialogs, the About version row and the order of the AGENTS.md question and the release
+notes, `RepoGroupWindowTests.cs` for the group headers, the card menu's
 "Move to group" submenu, the group-name prompt and the card color palette pop-up,
 `SettingsWindowServerSourceTests.cs` for the Settings
 window, the source editor window and its connection test, `SourceEditorSignatureWindowTests.cs` for the signature
@@ -174,7 +177,14 @@ re-raise the offer. This scenario is tested by
 `RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent`,
 `RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile`, and
 `RepoCardViewModel_DeclineAgentsMdTemplate_SubsequentApplySelectedPackage_DoesNotReprompt`,
-covering `AgentControl-LauncherUI-AgentsMdTemplateOffer`.
+covering `AgentControl-LauncherUI-AgentsMdTemplateOffer`. The order of the question and the release notes
+is tested in the headless main window: after an upgrade with an offer, only the modal question is open (the
+release-notes window is not), and answering it opens the release-notes window (the real application's
+`AgentsMdTemplateOffer_Accept_WritesTemplateToRepoRoot` checks the same through UI Automation); an upgrade
+without an offer opens the release notes at once. This is tested by
+`MainWindow_UpgradeWithAgentsMdOffer_ShowsQuestionFirstThenReleaseNotes` and
+`MainWindow_UpgradeWithoutAgentsMdOffer_ShowsReleaseNotesAtOnce`, also covering
+`AgentControl-LauncherUI-AgentsMdTemplateOffer`.
 
 **LauncherUI_Settings_SaveAndApplyPreservesRecentReposAndUpdatesFields**: The settings
 dialog's `SaveCommand` invokes its `onSave` callback and raises `Saved` with the current
@@ -186,13 +196,16 @@ existing recent-repos list while adopting the new field values. This scenario is
 
 **LauncherUI_About_EndToEndOnly_OpensAboutWindow**: The About dialog itself has no dedicated
 view-model class, so its end-to-end rendering is verified via the FlaUI project: opening the
-window and confirming the mission tagline, version, copyright, and license text are all
-present and non-empty, and that the third-party dependency list control is present and
+window (a modal dialog over the main window) and confirming the mission tagline, version (a
+labeled row without build metadata, and without the product name repeated), copyright, and license
+text are all present and non-empty, and that the third-party dependency list control is present and
 rendered with at least one entry. The application logo image is not automated-asserted (it has
 no text content to check) and remains a visual-inspection-only element. The dependency list's
 underlying data source (name/license entries matching the project file's package names, no
 duplicates, no empty fields, and the expected display format) has direct unit coverage. This scenario is tested by
 `windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright`,
+`AboutWindow_VersionRow_IsLabeledAndShortWithFullVersionInTooltip` (the Version row, its tooltip with the
+full build version and the shortening of the version),
 `ThirdPartyDependencies_All_MatchesCsprojDirectRuntimeDependencies`,
 `ThirdPartyDependencies_All_NoDuplicateNames`,
 `ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense`,
@@ -478,6 +491,56 @@ status accents and the favorite star at least 3:1. This scenario is tested by
 `App_ToThemeVariant_MapsEachPreferenceToItsVariant`, `App_ApplyTheme_SwitchesRunningApplicationTheme`,
 `AppStyles_LightAndDarkDictionaries_DefineTheSameKeys` and
 `AppStyles_TextAndGraphicColors_MeetContrastInBothThemes`, covering `AgentControl-LauncherUI-Appearance`.
+That the picker is in its own Appearance section, above the Tools heading and the git, agent tool and
+shell settings, is tested by `SettingsWindow_Layout_AppearanceIsItsOwnSectionBeforeTools` (headless) and
+`windows@SettingsWindow_AppearanceIsItsOwnSectionAboveTools` (the real application), also covering
+`AgentControl-LauncherUI-Appearance`.
+
+**LauncherUI_FavoriteStar_RealClickAndKeyToggleOncePerPressBothWays**: In the headless main window a
+real mouse click (a button press and release at the star's center) on an unfavorited repo's star favorites it
+
+- the star is on, the repo is listed under a Favorites section (which appears) and the choice is stored - and a
+second click unfavorites it again (back in its own section); the Space key toggles once per press, off to on and
+on to off, and the keyboard focus stays on the star although the card moves between sections; the star has no
+command (a command that also toggled flipped the state twice per click) and the accessible name "Favorite". In the
+real application the same moves happen through the UI Automation toggle pattern, and the choice is stored in the
+settings file. This scenario is tested by `MainWindow_FavoriteStar_MouseClick_FavoritesThenUnfavoritesMovingBetweenSections`,
+`MainWindow_FavoriteStar_SpaceKey_TogglesOncePerPress` and
+`windows@FavoriteToggleButton_ToggledOnThenOff_MovesRepoBetweenSectionsAndStoresChoice`, covering
+`AgentControl-LauncherUI-FavoriteStar`.
+
+**LauncherUI_MissingRepoRecheck_CheckAgainIsEnabledAndFindsTheFolder**: The menu of a repo whose folder is
+missing offers its refresh item enabled and labeled "Check again" with the tooltip "Check whether the folder is
+available again" (Git Pull stays disabled), and the menu of a present repo says "Refresh". In the real application,
+creating the missing folder and choosing the item clears the "Folder missing" badge. This scenario is tested by
+`MainWindow_MissingRepoMenu_OffersEnabledCheckAgain_PresentRepoOffersRefresh` and
+`windows@RefreshMenuItem_MissingFolder_IsEnabledAsCheckAgain_AndFindsFolderOnceBack`, covering
+`AgentControl-LauncherUI-MissingRepoRecheck`.
+
+**LauncherUI_UpToDateCue_CheckMarkOnlyOnAnUpToDateCardAndPathsKeepTheFolderName**: With three repos (pinned to the
+newest version, pinned to an older version, no package) exactly one "Agent files are up to date" check mark is
+visible, inside the package chip of the up-to-date card, with that text as its tooltip and accessible name. In a
+window at the narrowest width, a long repo name ends in an ellipsis with the whole name as its tooltip and never
+reaches the Launch button, and the path is shown as a folder part that gives way and a folder name that is never
+trimmed, with the whole path as the tooltip and accessible name. In the real application the check mark is found
+(with its name) on a card whose pinned package is the only version, and not on one with an upgrade badge. This
+scenario is tested by `MainWindow_UpToDateCue_ShownOnlyForPinnedAndUpToDateCard`,
+`MainWindow_NarrowWidth_NameEllipsisPathKeepsFolderNameAndNothingCollides` and
+`windows@UpToDateCue_ShownOnlyForPinnedPackageThatIsUpToDate`, covering `AgentControl-LauncherUI-UpToDateCue`.
+
+**LauncherUI_DialogKeyboard_FocusStartsInsideTabCyclesAndEscapeCancels**: Settings shown as a modal dialog over a window
+that has the focus puts the focus on its Add button with the keyboard focus ring, keeps the focus inside the dialog
+through more Tab presses than the dialog has stops (the window behind never gets it; the last control, Save, is reached
+and the focus wraps to the first), wraps backwards with Shift+Tab, and returns the focus to the window behind when it
+closes. The confirmation (No has the focus; Tab and Shift+Tab cycle between No and Yes; Escape answers No),
+the message box
+(OK; Escape closes), About (Close; Escape closes), the group-name prompt, the source editor and the sign-in prompt (the
+first field; Escape cancels) open with the focus in the expected control. In the real application the main window
+behind an open Settings dialog is disabled by the operating system until the dialog closes. This scenario is tested by
+`SettingsWindow_ShownModally_FocusStartsInsideTabCyclesInsideAndReturnsToOwner`,
+`Dialogs_ConfirmationMessageBoxAbout_InitialFocusTabCycleAndEscape`,
+`Dialogs_PromptsAndEditors_InitialFocusInFirstFieldAndEscapeCancels` and
+`windows@SettingsWindow_Opened_MainWindowBehindItIsDisabledUntilItCloses`, covering `AgentControl-LauncherUI-DialogKeyboard`.
 
 **LauncherUI_RepoGroups_HeadersCollapseMenuAndPromptWorkInTheWindow**: Headless main-window tests
 (`RepoGroupWindowTests.cs`, `RealProcess` collection) show that grouped repos are listed under headers

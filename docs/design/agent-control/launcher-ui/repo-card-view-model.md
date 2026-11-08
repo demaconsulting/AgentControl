@@ -23,11 +23,20 @@ packages (`AgentControl-RepoCardViewModel-SignatureIndicator`).
 
 **IsMissing**: `bool` — `true` when the repo path no longer exists on disk; when `true`, every
 other check/action short-circuits to its "unavailable" default rather than attempting a git/
-filesystem operation against a nonexistent path (`AgentControl-RepoCardViewModel-MissingRepo`).
+filesystem operation against a nonexistent path (`AgentControl-RepoCardViewModel-MissingRepo`). The refresh
+command is deliberately *not* disabled for a missing repo: it is the only in-app way to re-check once the folder
+(a remounted drive, a restored clone) is back, so **RefreshMenuText** reads "Check again" and **RefreshTooltip**
+"Check whether the folder is available again" while `IsMissing`, and "Refresh" / "Re-check this repo's branch,
+chips, and upgrade status" otherwise; the other commands stay disabled.
 
 **IsFavorite**, **LastLaunchedUtc**, **PinnedPackageName**, **PinnedPackageVersion**,
 **PinnedSource**: mirror the corresponding fields on the shared `RecentRepo`/pin file
 (`AgentControl-RepoCardViewModel-Favorite`, `AgentControl-RepoCardViewModel-DisplayInfo`).
+`IsFavorite` is the *only* owner of the favorite state: the card's star is a `ToggleButton` whose `IsChecked`
+binds to it two-way and the card has no favorite command. (An earlier design also bound a command that toggled
+the property, so one click flipped the state twice - the toggle itself, then the command - and a repo could
+neither be favorited nor unfavorited.) Setting it raises `FavoriteChanged` once per change; the owning
+`MainWindowViewModel` persists and re-sections the list.
 `PinnedSource` is the alias of the source the pin names (a pin written before sources existed
 reads as `Default`).
 
@@ -88,7 +97,14 @@ left edge. A problem outranks everything - the folder is missing (`IsMissing`), 
 problem or needs a sign-in (`HasSourceProblem`), or the last action failed (`LastActionFailed`) - then
 `UpgradeAvailable` (`IsUpgradeAvailable`), then `NoPackage` (`IsPackageSelectionNeeded`), then `Checking` (a
 package is pinned but the upgrade check is still running, so the card never claims "up to date" early), and
-otherwise `UpToDate`. Green, amber, red and grey are only the view's rendering of that value: `StatusText` says
+otherwise `UpToDate`. **ShowUpToDateCue** (`HasPinnedPackage && Status == UpToDate`,
+`AgentControl-RepoCardViewModel-UpToDateCue`) tells the card to draw a small check mark - with the tooltip and
+accessible name "Agent files are up to date" - inside its package chip, so a healthy card says so in words
+without an extra chip or row; it is hidden for every other status so it never contradicts the rest of the card.
+**RepoPathParent** and **RepoPathLeaf** split `RepoPath` at its last separator (the leaf keeps its separator, a
+trailing separator is ignored, and a path without a separator is all leaf): the card shows the parent with an end
+ellipsis and the leaf untrimmed, which reads as a middle ellipsis that keeps the folder name visible.
+Green, amber, red and grey are only the view's rendering of that value: `StatusText` says
 it in words ("Up to date", "Upgrade available", "Needs attention", "No agent package", "Checking for updates")
 and is the bar's accessible name, and `StatusTooltip` adds the reason (for a problem, the missing folder, the
 source problem or "the last action failed"). `LastActionFailed` is set whenever the card raises `ErrorOccurred`
@@ -206,7 +222,7 @@ AGENTS.md accept/decline), mirroring the logging convention already established 
 and `AgentToolLauncher`. Every call site is guarded by `_logger.IsEnabled(...)`.
 
 **LaunchCommand, PullCommand, UpgradeCommand, RefreshCommand**: `AsyncRelayCommand`;
-**SelectPackageCommand, FavoriteToggleCommand, RemoveCommand, CancelOperationCommand, NewGroupCommand,
+**SelectPackageCommand, RemoveCommand, CancelOperationCommand, NewGroupCommand,
 RemoveFromGroupCommand**:
 `RelayCommand` — see Interfaces in `docs/design/agent-control/launcher-ui.md`.
 
@@ -315,8 +331,11 @@ tolerated and replaced), acquires the package from its provider, extracts it
 agent folders (via `EnsureGitIgnoreCoversManagedFolders`, its own non-blocking step — see Error
 Handling), updates the loaded pin in place with the package's source alias, name and version and
 saves it (so `AgentsMdTemplateDeclined` and any unknown fields are preserved), refreshes
-pin/upgrade-status properties, raises `ReleaseNotesReady` with the new package's release notes,
-and finally calls `MaybeOfferAgentsMdTemplate`. The acquired package reader stays open until the
+pin/upgrade-status properties, calls `MaybeOfferAgentsMdTemplate` and finally raises
+`ReleaseNotesReady` with the new package's release notes. The offer is raised *before* the release notes so
+the view can show the modal question at once and hold the release notes back until it is answered
+(`MainWindow.ShowReleaseNotesAsync`): the notes window then opens in front as the completion of the upgrade
+instead of being covered by, or lost behind, the question. The acquired package reader stays open until the
 sequence ends.
 
 **MaybeOfferAgentsMdTemplate** (private): Decides whether to offer the package's optional

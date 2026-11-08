@@ -23,9 +23,10 @@ in that repo's working directory.
   with a colored **status bar** (green up to date, amber upgrade available, red a problem, grey no
   agent package - always backed by words and tooltips), a favorite star, its display name, a tile with its
   initials (or the repo's own root `icon.png`/`logo.png`), its path, and labeled chips for the pinned agent
-  package (name, version and source), an available upgrade, and the current git branch; **Launch** sits on
-  the card and everything else (Git Pull, Refresh, Select Package/Upgrade, Move to group, Card color, Remove) in
-  its grouped "..." menu
+  package (name, version and source, with a small check mark when it is the newest), an available upgrade, and
+  the current git branch; **Launch** sits on the card and everything else (Git Pull, Refresh - **Check again**
+  for a repo whose folder is missing - Select Package/Upgrade, Move to group, Card color, Remove) in its grouped
+  "..." menu; a long path is shortened in the middle so the repo's folder name stays visible
 - **Repo groups and card colors (just for you)**: put repos into groups of your own (**Move to group** in a
   card's "..." menu, then an existing group or **New group...**) and the list becomes collapsible sections -
   **Favorites** first, your groups alphabetically, **Ungrouped** last - with the number of repos in each; the
@@ -155,8 +156,8 @@ when you choose it; if reading a source fails, a **Retry** button appears beside
 Once a repo is pinned, its card shows an amber upgrade chip (for example **Upgrade to 1.1.0**) whenever a
 newer version of the pinned package is available at the source the pin names; click the chip, or use
 **Upgrade to 1.1.0** in the card's "..." menu, to upgrade. Upgrading re-runs the
-same validate → delete → extract → pin sequence and then shows the new package's
-`release-notes.md` (when present) in a non-modal window.
+same validate → delete → extract → pin sequence, offers the package's `AGENTS.md` template when it applies
+(below) and then shows the new package's `release-notes.md` (when present) in a non-modal window, in front.
 
 ### AGENTS.md template offer
 
@@ -227,8 +228,8 @@ The Settings window lets you configure:
   be changed once created, because repo pins refer to it. A single
   package source folder configured in an earlier version appears as a zip source named `Default`.
   See the [User Guide][link-guide] chapter "Package Sources".
-- **Appearance** — **System default** (follow the operating system's light/dark setting, live), **Light** or
-  **Dark**; applied as soon as you save, without a restart
+- **Appearance** (its own section) — the **Theme**: **System default** (follow the operating system's light/dark
+  setting, live), **Light** or **Dark**; applied as soon as you save, without a restart
 - **Git executable override** — a specific `git` executable to use instead of resolving it
   from `PATH`
 - **Agent tool selection** — GitHub Copilot CLI, Cursor, Claude Code, or a custom command
