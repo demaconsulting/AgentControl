@@ -51,8 +51,8 @@ Instead `launch` writes a record per alias to `%TEMP%\AgentControlPuppet\instanc
 start time, executable and `--config-dir`). Every command validates the record before it touches anything:
 
 - the process must be alive (a record of an exited instance is stale: exit 3);
-- the process must have started when the record says (this detects a process id that Windows reused for another
-  program);
+- the process must have started exactly when the record says, to the tick (this detects a process id that Windows
+  reused for another program; there is no tolerance, since a reused id inside one would be indistinguishable);
 - the process command line must carry a `--config-dir` argument that names exactly the recorded folder (the command line
   is split with the Windows rules and the paths are compared after normalization, so a nested folder or one that only
   shares a prefix does not match; checked when the command line can be read).
@@ -65,8 +65,9 @@ All UI Automation lookups are scoped to the process id of the instance, never to
 - `launch` starts `DemaConsulting.AgentControl.exe --config-dir <dir>` and waits until the process is alive, UI
   Automation attaches and the main window (titled `AgentControl`) is visible, then prints
   `OK instance=<alias> pid=<pid> exe=... config=... title=...`. It refuses (exit 4) when the alias already has a live
-  instance, unless `--allow-existing` (the old instance is then left running and the alias points to the new one). A
-  launch that never becomes ready is killed (process tree) and its record removed.
+  instance, unless `--allow-existing` (the old instance is then left running and, once the new one is ready, the alias
+  points to the new one; a launch that fails leaves the old record untouched). A
+  launch that never becomes ready, or whose record cannot be written, is killed (process tree).
 - **Isolation**: without `--config-dir` a fresh folder `%TEMP%\AgentControlPuppet\config-<alias>-<id>` is created, so
   the real `%APPDATA%\AgentControl\` settings are never touched. `--git-path` and `--agent-tool-command` are passed
   through to the application's startup options (the stored settings take precedence over them once loaded). Use
@@ -76,8 +77,10 @@ All UI Automation lookups are scoped to the process id of the instance, never to
 - `quit` closes the open dialogs (innermost first), then the main window (through the UI Automation Window pattern, the
   same request as the close button), and waits up to 10 seconds for the process to exit. `--kill` ends the whole process
   tree if it did
-  not. The record is removed. A config folder that `launch` created is left in place so settings and logs
-  (`<config>\logs`) can be inspected afterwards.
+  not; the record is removed only once the process is confirmed gone (a survivor keeps its record and the command
+  exits 2). A config folder that `launch` created is left in place so settings and logs
+  (`<config>\logs`) can be inspected afterwards. An option a command does not accept (for example a misspelled
+  `--instnace`) is refused with exit 5 instead of being ignored.
 
 ## UI Automation commands
 
@@ -196,7 +199,8 @@ agentcontrol-puppet wheel <notches> [--ctrl] [--on <automationId> | --at <x>,<y>
   `--double` double-clicks, `--shift` and `--ctrl` hold the modifier.
 - `drag-element <id> <dx> <dy>` presses at the centre of the element and drags by a screen offset (a splitter, a
   scrollbar thumb).
-- `wheel <notches>` turns the wheel (positive up, negative down) at the centre of the main window, at the centre of
+- `wheel <notches>` turns the wheel (positive up, negative down; a whole number from -1000 to 1000) at the centre of
+  the main window, at the centre of
   `--on <id>`, or at the screen pixel `--at x,y`; `--ctrl` holds Ctrl.
 
 Coordinates are **physical screen pixels**; the Puppet is per-monitor DPI aware, so `find` bounds and cursor positions

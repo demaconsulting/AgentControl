@@ -22,7 +22,8 @@ contains one unit: `RepoPinStore`.
   when it does not (`AgentControl-RepoPinStore-Load`). A pin written before pins named a source
   is returned as a pin to the source named `Default`
   (`AgentControl-RepoPinStore-LegacyV1`); a current-schema pin that names no source is rejected
-  with `InvalidOperationException` (`AgentControl-RepoPinStore-RejectUnnamedSource`).: Rejects a null repo root path with `ArgumentNullException`, and a pin file
+  with `InvalidOperationException` (`AgentControl-RepoPinStore-RejectUnnamedSource`).
+- *Constraints*: Rejects a null repo root path with `ArgumentNullException`, and a pin file
   from a newer schema with `UnsupportedPinSchemaException`
   (`AgentControl-RepoPinStore-RejectNewerSchema`).
 

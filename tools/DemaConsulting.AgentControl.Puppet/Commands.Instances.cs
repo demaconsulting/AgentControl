@@ -1,15 +1,15 @@
 // Copyright (c) DEMA Consulting
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in all
 // copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -87,17 +87,21 @@ internal static partial class Commands
 
         // The id and start time are read once: FlaUI takes over (and may dispose) the Process object it attaches to
         var pid = process.Id;
-        registry.Save(new InstanceRecord(alias, pid, process.StartTime.ToUniversalTime(), exe, plan.ConfigDir));
+        var record = new InstanceRecord(alias, pid, process.StartTime.ToUniversalTime(), exe, plan.ConfigDir);
         try
         {
             var title = WaitUntilReady(alias, process, pid);
+
+            // The record is written only once the instance is ready and inside the cleanup scope: a failed launch never
+            // replaces the record of an instance that --allow-existing left running, and a failure to write the record
+            // never leaves an unmanaged process behind
+            registry.Save(record);
             return Ok($"OK instance={alias} pid={pid} exe=\"{exe}\" config=\"{plan.ConfigDir}\" title=\"{title}\"");
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            // A half-started instance would hold the alias and a window; do not leave it behind
+            // A half-started instance would hold a window; do not leave it behind
             KillQuietly(process);
-            registry.Delete(alias);
             throw;
         }
     }
@@ -147,7 +151,7 @@ internal static partial class Commands
             throw new PuppetException(ExitCodes.NotRunning, NotRunningCode, NotRunningMessage(alias, state));
         }
 
-        RequestClose(alias, record.Pid);
+        RequestClose(registry, alias, record);
         if (WaitForExit(instance, QuitTimeout))
         {
             registry.Delete(alias);
@@ -157,7 +161,13 @@ internal static partial class Commands
         if (parsed.HasOption("kill"))
         {
             KillQuietly(instance);
-            WaitForExit(instance, QuitTimeout);
+
+            // The record is kept until the process is confirmed gone: a survivor must stay addressable by its alias
+            if (!WaitForExit(instance, QuitTimeout))
+            {
+                throw new PuppetException(ExitCodes.Timeout, "TIMEOUT", $"pid={record.Pid} did not exit after it was killed; the instance record was kept.");
+            }
+
             registry.Delete(alias);
             return Ok($"OK killed instance={alias} pid={record.Pid}");
         }
@@ -169,12 +179,21 @@ internal static partial class Commands
     ///     Asks an instance to close: its dialogs first (an open modal dialog would block the main window), then the main window,
     ///     through the UI Automation Window pattern (the same request as the close button).
     /// </summary>
+    /// <param name="registry">The instance registry.</param>
     /// <param name="alias">The instance alias.</param>
-    /// <param name="pid">The process id.</param>
-    private static void RequestClose(string alias, int pid)
+    /// <param name="record">The instance's record.</param>
+    private static void RequestClose(InstanceRegistry registry, string alias, InstanceRecord record)
     {
-        // A fresh Process object: FlaUI disposes the one it is given
-        using var process = Process.GetProcessById(pid);
+        // A second validated handle: the record is proved to describe this process at the moment the handle is opened,
+        // and the handle then stays open while FlaUI attaches, so the numeric id is never looked up without validation (an id
+        // that was reused meanwhile makes the validation fail instead of attaching to an unrelated program). It is a
+        // separate handle because FlaUI disposes the one it is given
+        using var process = registry.TryOpenValidated(record, out _);
+        if (process is null)
+        {
+            return;
+        }
+
         using var context = AttachContext.TryAttach(alias, process, out _);
         if (context is null)
         {

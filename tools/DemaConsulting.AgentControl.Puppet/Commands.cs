@@ -1,15 +1,15 @@
 // Copyright (c) DEMA Consulting
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in all
 // copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -43,6 +43,11 @@ internal static partial class Commands
     ///     The error label reported when an instance is not running.
     /// </summary>
     private const string NotRunningCode = "NOT_RUNNING";
+
+    /// <summary>
+    ///     The most mouse-wheel notches one <c>wheel</c> command may send (each takes a fraction of a second).
+    /// </summary>
+    internal const int MaxWheelNotches = 1000;
 
     /// <summary>
     ///     Attaches to the instance a command addresses.
@@ -109,9 +114,22 @@ internal static partial class Commands
     /// <returns>The value.</returns>
     /// <exception cref="PuppetException">Thrown when the text is not a number.</exception>
     private static double Number(string text, string what) =>
-        double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+        double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && double.IsFinite(value)
             ? value
-            : throw PuppetException.Usage($"{what} must be a number, not '{text}'.");
+            : throw PuppetException.Usage($"{what} must be a finite number, not '{text}'.");
+
+    /// <summary>
+    ///     Parses a whole number of mouse-wheel notches within a safe range.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <returns>The notches (positive up, negative down).</returns>
+    /// <exception cref="PuppetException">Thrown when the text is not an integer, or its size exceeds
+    ///     <see cref="MaxWheelNotches"/>.</exception>
+    internal static int WheelNotches(string text) =>
+        int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value)
+        && value is >= -MaxWheelNotches and <= MaxWheelNotches
+            ? value
+            : throw PuppetException.Usage($"notches must be a whole number between -{MaxWheelNotches} and {MaxWheelNotches}, not '{text}'.");
 
     /// <summary>
     ///     Reads an integer option.

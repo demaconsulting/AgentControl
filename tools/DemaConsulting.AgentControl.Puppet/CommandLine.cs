@@ -1,15 +1,15 @@
 // Copyright (c) DEMA Consulting
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in all
 // copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -112,5 +112,71 @@ internal static class CommandLineParser
         }
 
         return new ParsedCommand { CommandName = args[0], Options = options, Positional = positional };
+    }
+}
+
+/// <summary>
+///     The options each command accepts, so a misspelled option is refused instead of silently ignored.
+/// </summary>
+/// <remarks>
+///     An ignored option is dangerous here: <c>click Button --instnace other</c> would drive the default instance
+///     instead of failing, which matters when several instances are running.
+/// </remarks>
+internal static class CommandOptions
+{
+    /// <summary>
+    ///     The options every command accepts.
+    /// </summary>
+    private static readonly string[] Common = ["instance", "trace"];
+
+    /// <summary>
+    ///     The options that scope an element command to one window or repo card.
+    /// </summary>
+    private static readonly string[] Scope = ["item", "item-list", "window"];
+
+    /// <summary>
+    ///     The command-specific options of each command (on top of <see cref="Common"/>).
+    /// </summary>
+    private static readonly Dictionary<string, string[]> Specific = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["launch"] = ["exe", "config-dir", "git-path", "agent-tool-command", "allow-existing"],
+        ["instances"] = [],
+        ["quit"] = ["kill"],
+        ["window"] = [.. Scope],
+        ["tree"] = [.. Scope, "depth", "under"],
+        ["find"] = [.. Scope],
+        ["read"] = [.. Scope, "raw"],
+        ["click"] = [.. Scope],
+        ["type"] = [.. Scope],
+        ["choose"] = [.. Scope],
+        ["select"] = [.. Scope],
+        ["menu"] = [.. Scope],
+        ["dialogs"] = [.. Scope],
+        ["shot"] = [.. Scope, "screen"],
+        ["place"] = [.. Scope, "x", "y", "width", "height", "work-area", "left-gap", "margin"],
+        ["key"] = [.. Scope, "to"],
+        ["hover"] = [.. Scope, "wait", "shot"],
+        ["click-at"] = ["right", "double", "shift", "ctrl"],
+        ["drag-element"] = [.. Scope],
+        ["wheel"] = [.. Scope, "ctrl", "on", "at"],
+        ["fixture"] = ["packages", "repo", "pin"],
+    };
+
+    /// <summary>
+    ///     Finds the first option a command does not accept.
+    /// </summary>
+    /// <param name="parsed">The parsed command.</param>
+    /// <returns>The name of the first unknown option, or <see langword="null"/> when all are accepted (or the command
+    ///     is not known, which is reported separately).</returns>
+    internal static string? FindUnknown(ParsedCommand parsed)
+    {
+        ArgumentNullException.ThrowIfNull(parsed);
+        if (!Specific.TryGetValue(parsed.CommandName, out var specific))
+        {
+            return null;
+        }
+
+        return parsed.Options.Keys.FirstOrDefault(name =>
+            !Common.Contains(name, StringComparer.OrdinalIgnoreCase) && !specific.Contains(name, StringComparer.OrdinalIgnoreCase));
     }
 }

@@ -1,15 +1,15 @@
 // Copyright (c) DEMA Consulting
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in all
 // copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -59,6 +59,82 @@ public class CommandLineTests
             () => Assert.Empty(parsed.Positional),
             () => Assert.Equal("main", parsed.Instance));
     }
+
+    /// <summary>
+    ///     Validates that a misspelled option is reported instead of silently ignored.
+    /// </summary>
+    [Fact]
+    public void CommandOptions_FindUnknown_MisspelledInstanceOption_IsReported()
+    {
+        // Arrange
+        var parsed = CommandLineParser.Parse(["click", "Button", "--instnace", "other"]);
+
+        // Act / Assert
+        Assert.Equal("instnace", CommandOptions.FindUnknown(parsed));
+    }
+
+    /// <summary>
+    ///     Validates that the options a command documents are all accepted.
+    /// </summary>
+    [Theory]
+    [InlineData("launch", "--instance", "a", "--exe", "x.exe", "--config-dir", "c", "--git-path", "g", "--agent-tool-command", "t", "--allow-existing")]
+    [InlineData("tree", "--depth", "3", "--under", "id", "--item", "r", "--window", "w", "--trace")]
+    [InlineData("click-at", "1", "2", "--right", "--double", "--shift", "--ctrl")]
+    [InlineData("wheel", "3", "--ctrl", "--on", "id", "--item", "r")]
+    [InlineData("hover", "id", "--wait", "100", "--shot", "a.png")]
+    [InlineData("place", "--x", "1", "--y", "2", "--width", "3", "--height", "4")]
+    [InlineData("fixture", "dir", "--packages", "both", "--repo", "--pin", "p@1")]
+    [InlineData("quit", "--kill")]
+    public void CommandOptions_FindUnknown_DocumentedOptions_AreAccepted(params string[] args)
+    {
+        // Arrange
+        var parsed = CommandLineParser.Parse(args);
+
+        // Act / Assert
+        Assert.Null(CommandOptions.FindUnknown(parsed));
+    }
+
+    /// <summary>
+    ///     Validates that an option of another command is refused.
+    /// </summary>
+    [Fact]
+    public void CommandOptions_FindUnknown_OptionOfAnotherCommand_IsReported()
+    {
+        // Arrange
+        var parsed = CommandLineParser.Parse(["instances", "--kill"]);
+
+        // Act / Assert
+        Assert.Equal("kill", CommandOptions.FindUnknown(parsed));
+    }
+
+    /// <summary>
+    ///     Validates that wheel notches must be whole numbers within a safe range.
+    /// </summary>
+    [Theory]
+    [InlineData("-2147483648")]
+    [InlineData("2147483647")]
+    [InlineData("1001")]
+    [InlineData("1.5")]
+    [InlineData("NaN")]
+    [InlineData("Infinity")]
+    [InlineData("1e3")]
+    public void Commands_WheelNotches_UnsafeValue_IsUsageError(string text)
+    {
+        // Act / Assert
+        var ex = Assert.Throws<PuppetException>(() => Commands.WheelNotches(text));
+        Assert.Equal(ExitCodes.UsageError, ex.ExitCode);
+    }
+
+    /// <summary>
+    ///     Validates that notches within range, positive or negative, are accepted.
+    /// </summary>
+    [Theory]
+    [InlineData("3", 3)]
+    [InlineData("-5", -5)]
+    [InlineData("1000", 1000)]
+    [InlineData("-1000", -1000)]
+    public void Commands_WheelNotches_ValidValue_IsParsed(string text, int expected) =>
+        Assert.Equal(expected, Commands.WheelNotches(text));
 
     /// <summary>
     ///     Validates that the scope options <c>--item</c> and <c>--window</c> take their values.

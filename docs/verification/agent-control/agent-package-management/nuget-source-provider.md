@@ -66,7 +66,8 @@ widening a pin nor narrowing an unpinned source (the tests fail without the `<cl
 
 Requires the `NUGET_PACKAGES` environment variable to be unset (acquisition deliberately fails
 closed when it redirects the package cache outside the per-source folder); symbolic links are used only
-by the cache-link test, which skips where they cannot be created. The server tests need loopback networking and the ASP.NET Core shared framework that the
+by the cache-link test, which skips where they cannot be created. The server tests need loopback networking and the
+ASP.NET Core shared framework that the
 test project references. The real-signed-package tests need access to nuget.org on first use and an operating
 system whose trust store holds the roots the package's certificates chain to; they are skipped - and only then -
 when nuget.org cannot be reached or those roots are missing (a Linux distribution that dropped the legacy roots, for

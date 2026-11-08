@@ -35,6 +35,7 @@ words:
   - gitdir
   - gpgsign
   - headlessly
+  - instnace
   - HMAC
   - libsecret
   - lsfiles

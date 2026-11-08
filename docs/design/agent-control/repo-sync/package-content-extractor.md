@@ -83,7 +83,8 @@ repo if present, and copies the same four folders from the package into the repo
   (`AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink`).
   `CopyFile` repeats the check on its destination chain just before creating directories, as
   defense in depth, and checks the destination file itself for a link or reparse point
-  immediately before opening it (`AgentControl-PackageContentExtractor-RefuseLinkedDestinationFile`). A delete or copy I/O failure can
+  immediately before opening it (`AgentControl-PackageContentExtractor-RefuseLinkedDestinationFile`).
+  A delete or copy I/O failure can
   still leave the repo partially upgraded — there is intentionally no rollback, per
   architecture.md's "Upgrade sequence and failure handling" decision. Nothing is ever written to
   the package.
