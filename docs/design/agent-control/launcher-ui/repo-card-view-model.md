@@ -96,8 +96,10 @@ menu's "Repository" group and keeps its icon and the `PullButton` AutomationId.
 left edge. A problem outranks everything - the folder is missing (`IsMissing`), the pinned package's source has a
 problem or needs a sign-in (`HasSourceProblem`), or the last action failed (`LastActionFailed`) - then
 `UpgradeAvailable` (`IsUpgradeAvailable`), then `NoPackage` (`IsPackageSelectionNeeded`), then `Checking` (a
-package is pinned but the upgrade check is still running, so the card never claims "up to date" early), and
-otherwise `UpToDate`. **ShowUpToDateCue** (`HasPinnedPackage && Status == UpToDate`,
+package is pinned but the upgrade check is still running, so the card never claims "up to date" early), then
+`Unknown` (`IsUpgradeStatusUnknown`: the last upgrade check failed because the package source could not be read,
+so nothing established that the card is current; kept until a later check succeeds), and otherwise `UpToDate`.
+**ShowUpToDateCue** (`HasPinnedPackage && Status == UpToDate`,
 `AgentControl-RepoCardViewModel-UpToDateCue`) tells the card to draw a small check mark - with the tooltip and
 accessible name "Agent files are up to date" - inside its package chip, so a healthy card says so in words
 without an extra chip or row; it is hidden for every other status so it never contradicts the rest of the card.
@@ -106,7 +108,8 @@ trailing separator is ignored, and a path without a separator is all leaf): the 
 parent with an end ellipsis first and the leaf with a middle ellipsis only when it still does not fit, which keeps
 the start and the end of the folder name visible.
 Green, amber, red and grey are only the view's rendering of that value: `StatusText` says
-it in words ("Up to date", "Upgrade available", "Needs attention", "No agent package", "Checking for updates")
+it in words ("Up to date", "Upgrade available", "Needs attention", "No agent package", "Checking for updates",
+"Update check failed")
 and is the bar's accessible name, and `StatusTooltip` adds the reason (for a problem, the missing folder, the
 source problem or "the last action failed"). `LastActionFailed` is set whenever the card raises `ErrorOccurred`
 (the constructor subscribes to its own event, so no call site needs bookkeeping) and when a Git Pull ends with

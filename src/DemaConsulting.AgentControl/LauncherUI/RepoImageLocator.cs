@@ -299,10 +299,21 @@ internal static partial class RepoImageLocator
             return null;
         }
 
+        // The root's real location is fixed BEFORE the file is opened, and the root is confirmed
+        // not to be a link after that. If the root is swapped for a link at any point, then either
+        // this check sees the link, or the file below resolves into the link's target - which is
+        // not the real location recorded here - and the comparison after the open refuses it.
+        // (Resolving the root after the open instead would let both follow the same swapped link.)
+        var finalRoot = GetFinalDirectoryPath(rootPath);
+        if (finalRoot is null || IsLink(new DirectoryInfo(rootPath)))
+        {
+            return null;
+        }
+
         var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
-            if (IsDirectlyInRoot(stream, rootPath, fileName))
+            if (IsDirectlyInRoot(stream, finalRoot, fileName))
             {
                 return stream;
             }
@@ -319,18 +330,16 @@ internal static partial class RepoImageLocator
 
     /// <summary>
     ///     Tells whether the file an open stream is for is a file of the given name directly inside
-    ///     the root, by the operating system's resolved paths of both.
+    ///     the root, by the operating system's resolved path of the file.
     /// </summary>
     /// <param name="stream">The open file.</param>
-    /// <param name="rootPath">The repo root.</param>
+    /// <param name="finalRoot">The repo root's resolved path, determined before the file was opened.</param>
     /// <param name="fileName">The expected file name.</param>
     /// <returns><see langword="true"/> when the opened file is the named file in the root.</returns>
-    private static bool IsDirectlyInRoot(FileStream stream, string rootPath, string fileName)
+    private static bool IsDirectlyInRoot(FileStream stream, string finalRoot, string fileName)
     {
         var finalFile = GetFinalPath(stream);
-        var finalRoot = GetFinalDirectoryPath(rootPath);
         return finalFile is not null
-            && finalRoot is not null
             && PathsEqual(Path.GetDirectoryName(finalFile), finalRoot)
             && string.Equals(Path.GetFileName(finalFile), fileName, StringComparison.OrdinalIgnoreCase);
     }

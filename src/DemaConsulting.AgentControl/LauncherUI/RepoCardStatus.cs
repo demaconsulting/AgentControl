@@ -56,5 +56,12 @@ internal enum RepoCardStatus
     ///     A package is pinned, but whether an upgrade exists is not known yet because the
     ///     background check is still running (grey), so the card does not claim "up to date" early.
     /// </summary>
-    Checking
+    Checking,
+
+    /// <summary>
+    ///     A package is pinned, but the last background check failed (the package source could not
+    ///     be read) so it is not known whether an upgrade exists (grey); the card does not claim
+    ///     "up to date" on the strength of a check that did not succeed.
+    /// </summary>
+    Unknown
 }

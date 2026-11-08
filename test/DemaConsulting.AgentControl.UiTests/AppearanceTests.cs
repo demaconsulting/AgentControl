@@ -31,7 +31,7 @@ namespace DemaConsulting.AgentControl.UiTests;
 ///     window and saving changes how the running application looks at once, without a restart.
 /// </summary>
 /// <remarks>
-///     The look is checked from the pixels of the main window (the page background is light in the
+///     The look is checked from the pixels of the main window (the app bar background is light in the
 ///     light theme and dark in the dark theme), not from the settings file alone, so the test
 ///     fails if the choice is saved but never applied. The user's own operating-system theme is
 ///     never touched: the choices made here are explicit Light and Dark, not the system default.
@@ -187,18 +187,25 @@ public sealed class AppearanceTests
     }
 
     /// <summary>
-    ///     Measures how bright the main window's page background is, from the screen pixels of an
-    ///     empty part of the header row.
+    ///     Measures how bright the main window's app bar background is, from the screen pixels of
+    ///     the empty margin to the right of the last (About) button.
     /// </summary>
     /// <param name="mainWindow">The main window.</param>
     /// <returns>A brightness from 0 (black) to 1 (white).</returns>
     private static double PageBrightness(Window mainWindow)
     {
+        // The app bar is one row of controls with 12 px of padding to the right of the last button:
+        // that margin shows the bare app bar background (white in the light theme, near-black in the
+        // dark theme), whatever the window width. The position is derived from the button, not
+        // hard-coded, so it does not depend on the window size, the title bar or the layout.
+        var about = Find(mainWindow, "OpenAboutButton").BoundingRectangle;
+        var window = mainWindow.BoundingRectangle;
         using var image = Capture.Element(mainWindow);
         var bitmap = image.Bitmap;
 
-        // The header row is empty on the right: its right-hand part shows the bare page background
-        var color = bitmap.GetPixel(bitmap.Width - 120, 75);
+        var x = Math.Min(about.Right - window.Left + 6, bitmap.Width - 1);
+        var y = Math.Min(about.Top - window.Top + (about.Height / 2), bitmap.Height - 1);
+        var color = bitmap.GetPixel(x, y);
         return ((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B)) / 255.0;
     }
 

@@ -427,7 +427,9 @@ sections:
           The RepoCardViewModel class shall expose the card's overall status as one of up to
           date (an agent package is pinned and no newer version exists), upgrade available, a
           problem (the folder is missing, the package source has a problem or needs a sign-in, or
-          the last action failed) or no agent package, with the status in words and a tooltip that
+          the last action failed), no agent package, or unknown (the last upgrade check failed
+          because the package source could not be read, so it is not claimed to be up to date),
+          with the status in words and a tooltip that
           gives the reason, and shall clear a failed-action problem when the next operation starts.
         justification: |
           The card shows its overall status as a colored bar so a long list can be scanned; the
@@ -435,6 +437,7 @@ sections:
           and is available to assistive technology.
         tests:
           - RepoCardViewModel_Status_ReflectsPackageAndUpgradeState
+          - RepoCardViewModel_Status_UpgradeCheckFailed_IsUnknownNotUpToDate
           - RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason
           - RepoCardViewModel_Status_FailedPull_IsProblemUntilNextOperation
           - RepoCardViewModel_Status_ErrorReported_IsProblem

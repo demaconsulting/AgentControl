@@ -167,6 +167,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <summary>Backing field for <see cref="IsCheckingUpgrade"/>.</summary>
     private bool _isCheckingUpgrade;
 
+    /// <summary>Backing field for <see cref="IsUpgradeStatusUnknown"/>.</summary>
+    private bool _isUpgradeStatusUnknown;
+
     /// <summary>Backing field for <see cref="LastActionFailed"/>.</summary>
     private bool _lastActionFailed;
 
@@ -714,8 +717,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     A problem (missing folder, package source problem or sign-in needed, failed last action)
     ///     outranks everything else, then an available upgrade, then the absence of a package;
-    ///     a pinned package whose upgrade check is still running is neutral until the check ends,
-    ///     and only a pinned package with no newer version reports <see cref="RepoCardStatus.UpToDate"/>.
+    ///     a pinned package whose upgrade check is still running (or whose last check failed) is
+    ///     neutral, and only a pinned package whose check succeeded with no newer version reports
+    ///     <see cref="RepoCardStatus.UpToDate"/>.
     /// </remarks>
     public RepoCardStatus Status => this switch
     {
@@ -723,6 +727,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         { IsUpgradeAvailable: true } => RepoCardStatus.UpgradeAvailable,
         { IsPackageSelectionNeeded: true } => RepoCardStatus.NoPackage,
         { IsCheckingUpgrade: true } => RepoCardStatus.Checking,
+        { IsUpgradeStatusUnknown: true } => RepoCardStatus.Unknown,
         _ => RepoCardStatus.UpToDate
     };
 
@@ -744,6 +749,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RepoCardStatus.UpgradeAvailable => "Upgrade available",
         RepoCardStatus.Problem => "Needs attention",
         RepoCardStatus.NoPackage => "No agent package",
+        RepoCardStatus.Unknown => "Update check failed",
         _ => "Checking for updates"
     };
 
@@ -756,6 +762,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RepoCardStatus.UpgradeAvailable => $"Upgrade available: {PinnedPackageVersion} -> {LatestAvailableVersion}.",
         RepoCardStatus.NoPackage => "No agent package is pinned for this repo.",
         RepoCardStatus.Checking => "Checking whether a newer agent package version is available...",
+        RepoCardStatus.Unknown => "Update check failed: the package source could not be read, so it is not known whether a newer agent package version is available. Use Refresh in the card menu to try again.",
         _ when IsMissing => "Needs attention: this repo's folder could not be found on disk. Use Check again in the card menu once it is back.",
         _ when HasSourceProblem => $"Needs attention: {SourceProblem}",
         _ => "Needs attention: the last action failed."
@@ -1206,6 +1213,27 @@ internal sealed class RepoCardViewModel : ViewModelBase
         private set
         {
             if (SetField(ref _isCheckingUpgrade, value))
+            {
+                RaiseStatusChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether the last completed upgrade check failed (the pinned
+    ///     package's source could not be read), so nothing is known about whether a newer version
+    ///     exists.
+    /// </summary>
+    /// <remarks>
+    ///     Kept until a later check succeeds or the card no longer has anything to check (no pin,
+    ///     missing folder, unusable source), so a failed check is never shown as "up to date".
+    /// </remarks>
+    public bool IsUpgradeStatusUnknown
+    {
+        get => _isUpgradeStatusUnknown;
+        private set
+        {
+            if (SetField(ref _isUpgradeStatusUnknown, value))
             {
                 RaiseStatusChanged();
             }
@@ -2698,6 +2726,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         if (IsMissing)
         {
             IsUpgradeAvailable = false;
+            IsUpgradeStatusUnknown = false;
             LatestAvailableVersion = null;
             IsCheckingUpgrade = false;
             return;
@@ -2705,6 +2734,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         if (!EvaluatePinnedSource())
         {
+            IsUpgradeStatusUnknown = false;
             IsCheckingUpgrade = false;
             return;
         }
@@ -2722,16 +2752,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 LatestAvailableVersion = check.Latest?.Version.ToString();
                 IsUpgradeAvailable = check.IsNewerAvailable;
+                IsUpgradeStatusUnknown = false;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             // An unreachable or failing source (or invalid source configuration) means "no
             // upgrade can be offered", not a crash; the specific failure is surfaced by the
-            // actions that need the source
+            // actions that need the source. It is also not "up to date": the card says the
+            // check failed (a neutral status) rather than claiming currency nothing established.
             if (generation == _upgradeCheckGeneration)
             {
                 IsUpgradeAvailable = false;
+                IsUpgradeStatusUnknown = true;
                 LatestAvailableVersion = null;
 
                 // A server that needs a sign-in is worth telling the user about, because the

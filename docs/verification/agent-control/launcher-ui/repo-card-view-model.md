@@ -342,8 +342,11 @@ pinned with a newer version available, and not pinned report `UpToDate` ("Up to 
 ("Upgrade available", the tooltip naming both versions) and `NoPackage` ("No agent package"); a missing folder
 and a pin naming an unconfigured source report `Problem` ("Needs attention") with the reason in the tooltip; a
 git pull that git refuses, or an error the card reports to the user, makes the status a problem, and the next
-operation (a refresh) clears it again. This scenario is tested by
+operation (a refresh) clears it again. A pinned card whose package source cannot be read reports `Unknown`
+("Update check failed", the tooltip saying it is not known whether a newer version exists) with no up-to-date
+cue, and returns to `UpToDate` once a later check succeeds. This scenario is tested by
 `RepoCardViewModel_Status_ReflectsPackageAndUpgradeState`,
+`RepoCardViewModel_Status_UpgradeCheckFailed_IsUnknownNotUpToDate`,
 `RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason`,
 `RepoCardViewModel_Status_FailedPull_IsProblemUntilNextOperation` and
 `RepoCardViewModel_Status_ErrorReported_IsProblem`, covering `AgentControl-RepoCardViewModel-StatusAccent`.

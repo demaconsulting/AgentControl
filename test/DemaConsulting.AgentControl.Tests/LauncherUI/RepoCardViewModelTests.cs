@@ -2146,6 +2146,50 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a pinned card whose package source cannot be read is not shown as "up to date":
+    ///     no successful check established that, so the status is the neutral "update check failed"
+    ///     one (without the up-to-date cue), and it recovers to up to date once a check succeeds.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Status_UpgradeCheckFailed_IsUnknownNotUpToDate()
+    {
+        // Arrange: a pinned card whose source is down
+        var provider = new FakePackageSourceProvider("Default", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new PackageSourceAccessException(PackageSourceFailureKind.Unreachable, "The server is down.")
+        };
+        var registry = new PackageSourceRegistry([ZipSource("Default", CreateTempDirectory())], _ => provider);
+        var repoRoot = CreateTempDirectory();
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot, PinnedSource = "Default", PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0" },
+            () => new AppSettings(),
+            new PackageVersionCache(),
+            registryFactory: _ => registry);
+        card.RefreshCheap();
+
+        // Act
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: neither up to date nor upgradable, and the cue is not drawn
+        Assert.True(card.IsUpgradeStatusUnknown);
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Equal(RepoCardStatus.Unknown, card.Status);
+        Assert.Equal("Update check failed", card.StatusText);
+        Assert.Contains("not known", card.StatusTooltip, StringComparison.Ordinal);
+        Assert.False(card.ShowUpToDateCue);
+
+        // Act: the source recovers and the check is repeated (a failed check is not cached)
+        provider.ListVersionsException = null;
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(card.IsUpgradeStatusUnknown);
+        Assert.Equal(RepoCardStatus.UpToDate, card.Status);
+        Assert.True(card.ShowUpToDateCue);
+    }
+
+    /// <summary>
     ///     Test that a missing repo folder and a pin naming an unconfigured source are both a
     ///     problem (red) that outranks an available upgrade, with the reason in the tooltip.
     /// </summary>

@@ -382,9 +382,9 @@ This scenario is tested by `windows@UpgradeChip_Click_SyncsManagedFoldersAndShow
 `AgentControl-System-UpgradeFromChip`.
 
 **AgentControl_Appearance_ChoosingLightThenDarkReThemesWithoutRestart**: In the real application, Settings'
-Appearance picker is set to Light and saved, and the main window's page background (measured from the pixels of
+Appearance picker is set to Light and saved, and the main window's app bar background (measured from the pixels of
 a screenshot of the window) turns light without a restart and the file holds `"Theme": "Light"`; then Dark is
-chosen and saved and the page turns dark. The test never changes the operating-system theme (it chooses
+chosen and saved and the app bar turns dark. The test never changes the operating-system theme (it chooses
 explicit themes, not the system default). This scenario is tested by
 `windows@SettingsWindow_ChooseLightThenDark_ReThemesMainWindowWithoutRestart`, covering
 `AgentControl-System-Appearance`. A second scenario shows that Settings has an Appearance heading with the Theme

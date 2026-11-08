@@ -60,13 +60,17 @@ without being decoded (`AgentControl-RepoImageLocator-DimensionLimit`). Needs Av
 link before it is opened, so the check that counts is made on the *open handle*:
 
 1. Cheap refusals first: the name is a candidate, the file's folder is the root, the file is not a link.
-2. The file is opened read-only with `FileShare.Read`.
-3. The operating system is then asked which file the open handle is: on Windows `GetFinalPathNameByHandleW`
+2. The root's own final path is determined *before* the file is opened (on Windows by opening the folder with backup
+   semantics and asking for its final path; elsewhere by resolving each component), and the root is confirmed again
+   not to be a link. Done in this order, a root swapped for a link either is seen as a link, or leads the file open
+   into the link's target, which is not the root's recorded final path; resolving the root only after the open would
+   let both follow the same swapped link.
+3. The file is opened read-only with `FileShare.Read`.
+4. The operating system is then asked which file the open handle is: on Windows `GetFinalPathNameByHandleW`
    (source-generated `LibraryImport` P/Invoke; the `\\?\` prefixes are removed), on Linux the target of
    `/proc/self/fd/{descriptor}`, and where neither exists (macOS, which the product does not ship for) the path is
-   resolved link by link as a best effort. The root's own final path is obtained the same way (on Windows by opening
-   the folder with backup semantics and asking for its final path; elsewhere by resolving each component).
-4. The open file is accepted only if its final path is a file of the same name directly in the root's final path.
+   resolved link by link as a best effort.
+5. The open file is accepted only if its final path is a file of the same name directly in the root's final path.
    Comparing the *resolved* paths of both means a repo that sits under a linked parent folder still works, while a file
    that resolves to anywhere else - through a link swapped in after the checks - is refused
    (`AgentControl-RepoImageLocator-NoLinks`, `-StaysInRoot`). The comparison is case-insensitive on Windows and
