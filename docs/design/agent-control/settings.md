@@ -5,11 +5,11 @@
 ### Overview
 
 The `Settings` subsystem spans `SettingsStore.cs` (loads/saves application-wide settings),
-and the `AppSettings.cs`/`RecentRepo.cs`/`AgentToolKind.cs` data types, which are folded into
+and the `AppSettings.cs`/`RecentRepo.cs`/`AgentToolKind.cs`/`ThemePreference.cs` data types, which are folded into
 this subsystem-level description as they have no dedicated test file. It provides the
 observable behavior of persisting application-wide preferences (package sources, git/agent
-tool overrides, recent repos, shell preference) (`AgentControl-Settings-Persistence`,
-`AgentControl-Settings-PackageSources`). The subsystem contains one unit: `SettingsStore`.
+tool overrides, recent repos, shell preference, color theme) (`AgentControl-Settings-Persistence`,
+`AgentControl-Settings-PackageSources`, `AgentControl-Settings-Appearance`). The subsystem contains one unit: `SettingsStore`.
 
 ### Interfaces
 
@@ -63,6 +63,14 @@ display; the repo's own
 timestamp used by `LauncherUI`'s sort order. `AgentToolKind` enumerates the well-known agent
 tools (`CopilotCli`, `Cursor`, `ClaudeCode`) plus `Custom`, per architecture.md's
 "Configurable agent tool and shell" decision — the tool is never hardcoded to Copilot CLI.
+`ThemePreference` (`System`, `Light`, `Dark`) is the user's color-theme choice, stored in `AppSettings.Theme` and
+written by member name. `System` is the default, and is what a settings file without the value (written by an
+older version) means. Reading is tolerant: `AppSettings` declares a private JSON converter that accepts a name
+(ignoring case) or a number that is a defined member, and reads anything else - an unknown name, an
+out-of-range number, null, a boolean, an object or an array (which it skips whole) - as `System`, because the
+built-in enum handling would throw on an unknown name and `SettingsStore.Load` would report the whole file as
+corrupt; the appearance can therefore never keep the application from starting
+(`AgentControl-SettingsStore-Theme`, `AgentControl-Settings-Appearance`).
 
 `SettingsStore` is a static class with no persistent state of its own; it is called once at
 startup (`App.OnFrameworkInitializationCompleted`) to load settings, and again whenever

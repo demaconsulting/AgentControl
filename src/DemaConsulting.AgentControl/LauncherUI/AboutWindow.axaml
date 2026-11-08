@@ -15,7 +15,7 @@
             <!-- The AppIcon.ico logo has a black "D" on a transparent background, which
                  disappears against the app's dark theme; a light backing panel keeps the
                  full logo visible regardless of theme. -->
-            <Border Background="White" CornerRadius="6" Padding="4" Width="48" Height="48">
+            <Border Background="{DynamicResource LogoBackingBackground}" CornerRadius="6" Padding="4" Width="48" Height="48">
                 <Image Source="avares://DemaConsulting.AgentControl/Assets/AppIcon.ico"
                         Width="40" Height="40" />
             </Border>

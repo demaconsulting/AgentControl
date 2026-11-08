@@ -136,3 +136,11 @@ real `NuGetSourceProvider` for the settings window's connection test, built with
 (session store and prompt) as the cards, so a sign-in made during a test is remembered for the session. This
 scenario is tested by `MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials`
 (in `SettingsWindowServerSourceTests.cs`), covering `AgentControl-MainWindowViewModel-ConnectionTestProvider`.
+
+**MainWindowViewModel_ApplyTheme_SavedThemeIsHandedToTheApplierOnlyAfterTheSave**: With a recording theme
+applier, `ApplySettings` with the dark theme persists it and calls the applier once with it; when the write
+fails (the configuration "directory" is a file) the exception reaches the caller, the applier is not called and
+the live settings keep the system default. This scenario is tested by
+`MainWindowViewModel_ApplySettings_ThemeChanged_PersistsAndAppliesTheme` and
+`MainWindowViewModel_ApplySettings_SaveFails_DoesNotApplyTheme`, covering
+`AgentControl-MainWindowViewModel-ApplyTheme`.

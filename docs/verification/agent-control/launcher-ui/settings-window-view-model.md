@@ -119,3 +119,11 @@ new source cannot be saved with an alias already configured under a different le
 scenario is tested by
 `SettingsWindowViewModel_AddSource_AliasAlreadyConfiguredIgnoringCase_EditorCannotSave`, covering
 `AgentControl-SettingsWindowViewModel-AliasUnique`.
+
+**SettingsWindowViewModel_Appearance_DefaultsToSystemAndIsSavedWithSettings**: A view model built from
+settings without a theme starts at the system default, offers system default, light and dark in that order,
+passes a chosen theme to the save callback with the other settings, and starts from a saved theme. The picker's
+friendly names are checked by `ThemePreferenceDisplayNameConverterTests`. This scenario is tested by
+`SettingsWindowViewModel_Theme_DefaultsToSystemAndIsSavedWithSettings` and
+`ThemePreferenceDisplayNameConverter_Convert_KnownTheme_ReturnsFriendlyName`, covering
+`AgentControl-SettingsWindowViewModel-Appearance`.

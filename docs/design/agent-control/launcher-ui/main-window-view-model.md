@@ -119,7 +119,10 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
   executable is in effect; a present card that was already checked and whose executable path
   did not change only gets the cheap refresh, avoiding a synchronous `git status` call — which
   `GitClient` runs with no timeout — for every tracked repo on every settings save
-  (`AgentControl-MainWindowViewModel-ApplySettings`).
+  (`AgentControl-MainWindowViewModel-ApplySettings`). Once the settings are saved, the saved
+  `Theme` is handed to the injected theme applier (`Action<ThemePreference>`, supplied by `App`), so the
+  choice takes effect without a restart; a refused save never reaches this step
+  (`AgentControl-MainWindowViewModel-ApplyTheme`).
 
 **CreateConnectionTestProvider**: Creates the `NuGetSourceProvider` that the settings window's
 **Test connection** lists versions through for a source being edited, with the same credential facilities

@@ -20,13 +20,16 @@ in that repo's working directory.
 ## Features
 
 - **Recent-repos list**: add repos via a folder-browse button; each repo is shown as a card
-  with its display name, path, and labeled chips for the pinned agent package (name, version
-  and source), an available upgrade, and the current git branch
+  with a colored **status bar** (green up to date, amber upgrade available, red a problem, grey no
+  agent package - always backed by words and tooltips), a favorite star, its display name, a tile with its
+  initials (or the repo's own root `icon.png`/`logo.png`), its path, and labeled chips for the pinned agent
+  package (name, version and source), an available upgrade, and the current git branch; **Launch** sits on
+  the card and everything else (Git Pull, Refresh, Select Package/Upgrade, Remove) in its grouped "..." menu
 - **Version-pinned agent packages**: every repo names an exact agent package name and
   semantic version, and the source it came from, in its `.agentcontrol.json` pin file — there
   is no floating "latest" mode, so upgrades are always a deliberate, visible action
 - **Status chips**: each repo card shows an amber upgrade chip ("Upgrade to" and the version an upgrade
-  would move to), an uncommitted-changes warning, a committed-agent-files
+  would move to; click it to upgrade), an uncommitted-changes warning, a committed-agent-files
   warning (advisory only — flags when the managed folders were accidentally committed to
   git), a missing-folder indicator when the path no longer exists on disk, a
   package-source-problem indicator when the pinned source is not configured, and a sign-in-needed indicator
@@ -142,8 +145,8 @@ when you choose it; if reading a source fails, a **Retry** button appears beside
 ### Upgrading
 
 Once a repo is pinned, its card shows an amber upgrade chip (for example **Upgrade to 1.1.0**) whenever a
-newer version of the pinned package is available at the source the pin names, and its card's
-"..." menu offers **Upgrade**. Upgrading re-runs the
+newer version of the pinned package is available at the source the pin names; click the chip, or use
+**Upgrade to 1.1.0** in the card's "..." menu, to upgrade. Upgrading re-runs the
 same validate → delete → extract → pin sequence and then shows the new package's
 `release-notes.md` (when present) in a non-modal window.
 
@@ -174,9 +177,17 @@ with migrating away from committed agent files.
 
 ### Pulling changes
 
-The **Git Pull** button on a repo card runs `git pull` in that repo. The button is always visible, and is
-enabled only when the working tree is clean (it is disabled while the status is dirty or cannot be
-determined).
+**Git Pull**, in the "..." menu of a repo card (under *Repository*), runs `git pull` in that repo. The item is
+always present, and is enabled only when the working tree is clean (it is disabled, with a tooltip that says
+why, while the status is dirty or cannot be determined).
+
+### Card icon
+
+A repo card shows the repository's own picture instead of the generated initials tile when the repo's **root
+folder** has an `icon.png` (or else a `logo.png`; the name's case does not matter). Only a plain PNG file of
+at most 1 MB is used - never a link, and never a file in a subfolder - and anything else is ignored, so a
+repository you do not trust cannot make AgentControl read other files or load huge images. Choose **Refresh** in
+the card's "..." menu after adding or changing the file.
 
 ### Settings
 
@@ -184,13 +195,15 @@ The Settings window lets you configure:
 
 - **Package sources** — a list of the configured sources (alias, kind, location and whether the
   folder can be found; a server shows **Not checked** because AgentControl contacts it only when it is
-  needed). Use **Add Zip-Package Folder**, **Add NuGet-Package Folder** or **Add NuGet-Package Server**
+  needed). Use **Add** (a menu of **Zip-package folder**, **NuGet-package folder** and **NuGet-package server**)
   to add a source, and **Edit** or **Remove** to change one; a NuGet source also lists the package
   IDs it offers, a server can be checked with **Test connection** before it is saved, and a NuGet source can
   **Require signed packages** (optionally pinned to a publisher's certificate fingerprint). An alias cannot
   be changed once created, because repo pins refer to it. A single
   package source folder configured in an earlier version appears as a zip source named `Default`.
   See the [User Guide][link-guide] chapter "Package Sources".
+- **Appearance** — **System default** (follow the operating system's light/dark setting, live), **Light** or
+  **Dark**; applied as soon as you save, without a restart
 - **Git executable override** — a specific `git` executable to use instead of resolving it
   from `PATH`
 - **Agent tool selection** — GitHub Copilot CLI, Cursor, Claude Code, or a custom command

@@ -133,7 +133,7 @@ agentcontrol-puppet place (--x <px> --y <px> --width <px> --height <px> | --work
 
 ### Scoping repeated ids
 
-A repo card repeats its AutomationIds (`RepoNameText`, `LaunchButton`, `PullButton`, ...) once per card in the list, and
+A repo card repeats its AutomationIds (`RepoNameText`, `LaunchButton`, `RepoStatusAccent`, ...) once per card, and
 dialogs can repeat the main window's ids, so every element command accepts two scopes:
 
 - `--item <repo name | index>` limits the lookup to one item of `RepoListBox`: the card whose `RepoNameText` is the
@@ -152,14 +152,16 @@ without it.
 
 - **Main** (`AgentControl`): `FilterTextBox`, `AddRepoButton`, `OpenSettingsButton`, `OpenAboutButton`,
   `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`.
-- **Repo card** (repeated, one per list item): `RepoNameText`, `UpgradeAvailableBadge`, `CommittedAgentFilesBadge`,
-  `DirtyWorkingTreeBadge`, `MissingRepoBadge`, `RepoPathText`, `RepoPinnedVersionText`, `CurrentBranchText`,
-  `FavoriteToggleButton`, `LaunchButton`, `PullButton`, `MoreActionsButton`.
-- **Card menu** (pop-up of `MoreActionsButton`): `RefreshMenuItem`, `SelectPackageMenuItem` (only for a repo that has
-  no package yet), `UpgradeMenuItem`, `RemoveMenuItem`.
+- **Repo card** (repeated, one per list item): `RepoNameText`, `RepoStatusAccent` (the status bar; its name is the
+  status in words), `RepoAvatarText`, `RepoAvatarImage`, `UpgradeAvailableBadge` (a button: click it to upgrade),
+  `CommittedAgentFilesBadge`, `DirtyWorkingTreeBadge`, `MissingRepoBadge`, `RepoPathText`, `RepoPinnedVersionText`,
+  `CurrentBranchText`, `FavoriteToggleButton`, `LaunchButton`, `MoreActionsButton`.
+- **Card menu** (pop-up of `MoreActionsButton`): `PullButton` (Git Pull), `RefreshMenuItem`, `SelectPackageMenuItem`
+  (only for a repo that has no package yet), `UpgradeMenuItem` (only while an upgrade is available), `RemoveMenuItem`.
 - **Settings** (`AgentControl Settings`): the package sources `SourcesList` (rows with `SourceAliasText`,
-  `SourceLocationText`, `SourceStatusText`), `AddZipSourceButton`, `AddNuGetFolderSourceButton`,
-  `AddNuGetServerSourceButton`, `EditSourceButton`, `RemoveSourceButton`, `SourcesEmptyText`; and
+  `SourceLocationText`, `SourceStatusText`), `AddSourceButton` (opens the Add menu), its items
+  `AddZipSourceButton`, `AddNuGetFolderSourceButton`, `AddNuGetServerSourceButton`, `EditSourceButton`,
+  `RemoveSourceButton`, `SourcesEmptyText`; and `ThemeComboBox` (Appearance),
   `GitExecutablePathTextBox`, `AgentToolComboBox`, `CustomAgentCommandTextBox`, `ShellPreferenceComboBox`,
   `SettingsErrorTextBlock`, `SaveSettingsButton`. The **source editor** has `SourceAliasTextBox`,
   `SourceLocationTextBox`, `SourceBrowseButton`, `SourceEditorSaveButton`, `SourceEditorCancelButton` (and, for NuGet
@@ -308,8 +310,9 @@ $box = "$env:TEMP\acp-demo"
 & $puppet click Close --window "Release Notes"
 & $puppet read RepoPinnedVersionText --item repo --raw  # Pinned version: 1.0.0
 
-# Pull (the sample repo has no remote, so git reports a problem in a message box)
-& $puppet click PullButton --item repo
+# Pull (the sample repo has no remote, so git reports a problem in a message box); Git Pull is in the card menu
+& $puppet click MoreActionsButton --item repo
+& $puppet click PullButton
 & $puppet dialogs
 
 # Tooltips and disabled controls (real cursor)

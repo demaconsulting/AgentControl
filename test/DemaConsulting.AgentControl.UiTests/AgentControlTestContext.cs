@@ -255,6 +255,33 @@ internal sealed class AgentControlTestContext : IDisposable
     }
 
     /// <summary>
+    ///     Opens the Settings window's Add menu and invokes one of its items, the way a user picks
+    ///     a source type: the menu items only exist while the menu is open, so the Add button is
+    ///     invoked first and the item is then looked up in the opened menu.
+    /// </summary>
+    /// <param name="settingsWindow">The open Settings window.</param>
+    /// <param name="menuItemAutomationId">The AutomationId of the menu item to invoke, for example
+    ///     <c>AddZipSourceButton</c>.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the Add button or the menu item does
+    ///     not appear in time.</exception>
+    public static void InvokeAddSourceMenuItem(AutomationElement settingsWindow, string menuItemAutomationId)
+    {
+        var addButton = Retry.WhileNull(
+            () => settingsWindow.FindFirstDescendant(cf => cf.ByAutomationId("AddSourceButton")),
+            timeout: TimeSpan.FromSeconds(10),
+            interval: TimeSpan.FromMilliseconds(200)).Result?.AsButton()
+            ?? throw new InvalidOperationException("The Add button was not found in the Settings window.");
+        addButton.Invoke();
+
+        var menuItem = Retry.WhileNull(
+            () => settingsWindow.FindFirstDescendant(cf => cf.ByAutomationId(menuItemAutomationId)),
+            timeout: TimeSpan.FromSeconds(10),
+            interval: TimeSpan.FromMilliseconds(200)).Result?.AsMenuItem()
+            ?? throw new InvalidOperationException($"The Add menu item '{menuItemAutomationId}' did not appear.");
+        menuItem.Invoke();
+    }
+
+    /// <summary>
     ///     Closes/kills the launched AgentControl process, disposes the automation instance,
     ///     terminates only the shell (and stub) spawned by this context's agent-tool launch,
     ///     closes the terminal window that launch left behind, and best-effort deletes this

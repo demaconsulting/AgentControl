@@ -27,6 +27,7 @@ sections:
           - AgentControl-LauncherUI-RecentReposDisplay
           - AgentControl-LauncherUI-StatusBadges
           - AgentControl-LauncherUI-RepoCardChips
+          - AgentControl-LauncherUI-CardIdentityAndStatus
           - AgentControl-GitIntegration-DetectCommittedFiles
           - AgentControl-GitIntegration-CurrentBranch
         tests:
@@ -63,6 +64,32 @@ sections:
         tests:
           - windows@FilterTextBox_TypingNonMatchingText_HidesRepoCard_ClearingRestoresIt
 
+      - id: AgentControl-System-UpgradeFromChip
+        title: >-
+          The tool shall let the user start an agent package upgrade by clicking the card's
+          upgrade chip.
+        tags: [system]
+        justification: |
+          The chip that announces an available upgrade is the most direct place to start it; the
+          upgrade must run the same flow as the card menu's Upgrade item.
+        children:
+          - AgentControl-RepoCardViewModel-UpgradeFromChip
+        tests:
+          - windows@UpgradeChip_Click_SyncsManagedFoldersAndShowsReleaseNotes
+
+      - id: AgentControl-System-Appearance
+        title: >-
+          The tool shall let the user choose its color theme in Settings and apply the choice to
+          the running application without a restart.
+        tags: [system]
+        justification: |
+          Users work in light and dark surroundings and expect the application to match, or to
+          follow the operating system, without having to restart it.
+        children:
+          - AgentControl-LauncherUI-Appearance
+        tests:
+          - windows@SettingsWindow_ChooseLightThenDark_ReThemesMainWindowWithoutRestart
+
       - id: AgentControl-System-Launch
         title: >-
           The tool shall ensure a repo's agent files are synced before launching the
@@ -91,7 +118,7 @@ sections:
           - AgentControl-GitIntegration-PullGating
           - AgentControl-GitIntegration-Pull
         tests:
-          - windows@PullButton_Click_InvokesConfiguredGitExecutableWithPullArgument
+          - windows@PullMenuItem_Click_InvokesConfiguredGitExecutableWithPullArgument
 
       - id: AgentControl-System-SelectPackage
         title: >-
@@ -214,6 +241,7 @@ sections:
           - AgentControl-AgentPackageManagement-ZipFolderSource
           - AgentControl-AgentPackageManagement-NuGetFolderSource
           - AgentControl-AgentPackageManagement-NuGetServerSource
+          - AgentControl-LauncherUI-AddSourceMenu
         tests:
           # End to end: the published application runs with a zip source and a NuGet folder
           # source configured side by side, sources are added through the Settings dialogs

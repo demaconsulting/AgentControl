@@ -9,7 +9,8 @@
 #   SettingsWindowViewModel, SourceEditorViewModel, CredentialPromptViewModel), plus their
 #   Avalonia .axaml Views (including CredentialPromptWindow and the AvaloniaCredentialPrompt
 #   that shows it) and shared MVVM support types (RelayCommand, ViewModelBase,
-#   FavoriteIconConverter, FavoriteColorConverter, ThirdPartyDependencies), which are folded
+#   FavoriteIconConverter, ThemePreferenceDisplayNameConverter, AppStyles.axaml,
+#   ThirdPartyDependencies), which are folded
 #   into this subsystem-level description rather than given separate unit files
 #   (ThirdPartyDependencies is the one exception with a dedicated test file,
 #   ThirdPartyDependenciesTests.cs)
@@ -48,6 +49,57 @@ sections:
           - RepoCardViewModel_Refresh_NewerVersionAtSource_SetsUpgradeAvailableTrue
           - RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState
           - RepoCardViewModel_RefreshCheap_UnchangedHeadHash_CommittedFilesBadgeIsCached
+
+      - id: AgentControl-LauncherUI-CardIdentityAndStatus
+        title: >-
+          The LauncherUI subsystem shall show each repo card's overall status as a colored accent
+          bar on its left edge (green up to date, amber upgrade available, red a problem, grey no
+          agent package) that is also available in words, and shall show the repo's own root
+          icon.png or logo.png in place of the generated initials tile when present and valid.
+        justification: |
+          A long list of repos is scanned by status and by picture; color is backed by words so it
+          is never the only carrier of meaning, and an untrusted repo's picture is only used
+          when it is a small, genuine PNG.
+        children:
+          - AgentControl-RepoCardViewModel-StatusAccent
+          - AgentControl-RepoCardViewModel-AvatarTile
+          - AgentControl-RepoCardViewModel-RepoPicture
+        tests:
+          - RepoCardViewModel_Status_ReflectsPackageAndUpgradeState
+          - MainWindow_RepoCard_AvatarShowsRepoPictureWhenPresent
+
+      - id: AgentControl-LauncherUI-AddSourceMenu
+        title: >-
+          The LauncherUI subsystem shall offer one Add action in the Settings window that opens
+          a menu of the package source types that can be added (zip-package folder, NuGet-package
+          folder and NuGet-package server), each with its type's icon and a description.
+        justification: |
+          One entry point keeps the Settings window short as source types are added, and the
+          descriptions tell the user which type to choose.
+        tests:
+          - SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls
+          - SettingsWindow_AddZipSourceClicked_ShowsEditorAndSavingAddsSource
+
+      - id: AgentControl-LauncherUI-Appearance
+        title: >-
+          The LauncherUI subsystem shall let the user choose the system default, light or dark
+          theme in the Settings window, shall apply the saved choice to every window without a
+          restart (the system default following the operating system), and shall define every
+          color of its shared styles for both the light and the dark theme with at least AA (4.5:1)
+          contrast for text.
+        justification: |
+          The whole application must be legible in both themes, and the choice must be honored
+          immediately; defining each color for both themes keeps any window from being left
+          unreadable in one of them.
+        children:
+          - AgentControl-SettingsWindowViewModel-Appearance
+          - AgentControl-MainWindowViewModel-ApplyTheme
+          - AgentControl-Settings-Appearance
+        tests:
+          - App_ToThemeVariant_MapsEachPreferenceToItsVariant
+          - App_ApplyTheme_SwitchesRunningApplicationTheme
+          - AppStyles_LightAndDarkDictionaries_DefineTheSameKeys
+          - AppStyles_TextAndGraphicColors_MeetContrastInBothThemes
 
       - id: AgentControl-LauncherUI-AddRepo
         title: The LauncherUI subsystem shall let the user add an existing folder as a tracked repo.

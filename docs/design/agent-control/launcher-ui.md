@@ -13,8 +13,9 @@ window, the settings window, the package-source editor window and the sign-in di
 `SourceEditorWindow`, `CredentialPromptWindow`) and shared MVVM support types (`RelayCommand`,
 `AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
 `SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`,
-`FavoriteIconConverter`, `FavoriteColorConverter`, `AgentToolKindDisplayNameConverter`,
-`ThirdPartyDependencies`), which are folded
+`FavoriteIconConverter`, `AgentToolKindDisplayNameConverter`, `ThemePreferenceDisplayNameConverter`,
+`RepoCardStatus`, `RepoImageLocator`, `ThirdPartyDependencies`), the shared theme resources and styles
+(`AppStyles.axaml`, included by `App.axaml`), which are folded
 into this subsystem-level description rather than given separate unit files; `ThirdPartyDependencies`
 and `AsyncRelayCommand` are the exceptions with dedicated test files
 (`ThirdPartyDependenciesTests.cs`, `AsyncRelayCommandTests.cs`), since each is independent of
@@ -146,7 +147,7 @@ its tooltip - "Sign-in needed" when the pinned server needs a sign-in, otherwise
 (`SourceProblemChipText`)); the outcome of the last Launch/Pull/Upgrade action (`StatusMessage`) is shown
 under the repo path; a repo whose folder is missing offers no upgrade; the Launch button is labelled with a
 short name of the configured agent tool
-(falling back to plain "Launch" for a long or unknown name) and the pull button reads "Git Pull"
+(falling back to plain "Launch" for a long or unknown name) and Git Pull is an item of the card's "..." menu
 (`AgentControl-LauncherUI-RepoCardChips`). A lightweight `RefreshCheap` path (branch
 resolution, cached committed-files badge, pin and source problem - it never reads a package
 source) is kept separate from the full `Refresh` path (which also
@@ -174,9 +175,10 @@ construction and exposes `IsCustomAgentToolSelected` to drive the settings windo
 custom-command entry field visibility. It lists the configured package sources as
 `PackageSourceItemViewModel` rows (alias, kind icon from `PackageSourceIcons`, shortened
 location, and a folder-exists status computed on a background thread; a server source shows "Not checked"
-because it is never contacted merely to draw the list), offers Add Zip-Package Folder, Add NuGet-Package
-Folder and **Add NuGet-Package Server** beneath the list, with Edit and Remove (which act on the selected row) on
-the list's header line, and asks the window to open a
+because it is never contacted merely to draw the list), offers one **Add** button whose menu lists the
+source types (zip-package folder, NuGet-package folder, NuGet-package server), with Edit and Remove (which act
+on the selected row) beside it on the list's header line, and also exposes the **Theme** choice (system
+default, light or dark) saved with the other settings, and asks the window to open a
 `SourceEditorViewModel` dialog for adding and editing; removal asks for confirmation and warns
 that repos pinned to the source will show a source problem. `SourceEditorViewModel` validates the alias
 (required, unique ignoring case, fixed once the source exists), the location (absolute folder
@@ -259,13 +261,53 @@ source-generator package, to keep the dependency surface minimal) used by every 
 this subsystem. `RelayCommand` is a minimal hand-rolled `ICommand` used for every command
 property. `FavoriteIconConverter` binds `RepoCardViewModel.IsFavorite` to a filled or outlined
 star `MaterialIconKind` on the repo card's favorite toggle, per architecture.md's "UI icon
-convention" decision. `FavoriteColorConverter` complements it, binding the same `IsFavorite`
-value to the star glyph's color (gold when favorited, otherwise the icon's default theme
-foreground via `AvaloniaProperty.UnsetValue`), so a favorited repo's star also reads as
-"activated" through color rather than relying solely on the filled-vs-outline glyph shape.
+convention" decision; the toggle's checked style (`AppStyles.axaml`) colors the glyph gold from a theme
+resource, so a favorited repo's star also reads as "activated" through color rather than relying solely on
+the filled-vs-outline glyph shape.
 `AgentToolKindDisplayNameConverter` shows each `AgentToolKind` in the Settings window's agent tool picker
 under a friendly name (`GitHub Copilot CLI`, `Cursor`, `Claude Code`, `Custom command`) while the picker's
 selected value, and therefore the persisted setting, stays the enum value.
+`ThemePreferenceDisplayNameConverter` does the same for the Appearance picker (`System default`, `Light`,
+`Dark`).
+
+**Appearance and theme resources.** The user's theme choice (`ThemePreference`: system default, light or
+dark) is a setting edited in the Settings window's Appearance picker (`ThemeComboBox`) and persisted by
+`SettingsStore`. `App` maps it to an Avalonia theme variant (`ToThemeVariant`: `ThemeVariant.Default` for the
+system default, which makes Avalonia follow the operating system's light/dark setting live, otherwise
+`Light` or `Dark`) and applies it to the running application (`ApplyTheme`) before the main window is shown and
+again whenever `MainWindowViewModel.ApplySettings` has saved new settings (through an injected
+`Action<ThemePreference>`, so the view model stays free of the UI framework), so every open window changes
+at once without a restart (`AgentControl-LauncherUI-Appearance`). Every color the application's own XAML uses
+lives in `AppStyles.axaml` as a resource in a `Light` and a `Dark` theme dictionary (surfaces, borders,
+shadows, the status accent colors, chip fills and text, button states, the avatar palette, validation,
+caution and success text, the page background) consumed with `DynamicResource`; no template or setter holds a
+hard-coded color. Text colors were chosen for at least 4.5:1 contrast against the fill and surface they are
+drawn on, status accents and icons for 3:1, and `ThemeResourceTests` checks both dictionaries define the same
+keys and meet those ratios. The same file defines the shared styles: the repo card (surface, soft shadow,
+hover lift with 140 ms transitions, selection and keyboard-focus ring), the status accent bar, the avatar
+tile, the chips (one height, padding and font, tinted fill with a matching foreground, a flat button wrapper
+for clickable chips), the action buttons (primary accent with hover, pressed and disabled states, and a
+tinted secondary), the ghost icon buttons without a border (favorite star, "more actions"), the group headers of the
+card menu, and the empty state. Per-control color setters are avoided on purpose.
+
+**Repo card layout.** Each card has a colored status accent bar on its left edge (`RepoCardViewModel.Status`:
+green up to date, amber upgrade available, red a problem, grey no agent package; the bar has an accessible
+name and a tooltip, and the chips state the same facts in words). The first line holds the favorite star (a
+name, ghost toggle (no border, gold and filled when favorited) and the repo name a few pixels to its right, with the
+actions - **Launch** (primary) and the **...** menu - on the right of the same line. Below it sit the avatar
+tile, left-aligned under the star and as tall as the chip row plus the path row, beside the chips and the
+path. The tile shows the repo's own `icon.png`/`logo.png` when it has one (see `RepoCardViewModel`), otherwise
+the repo name's initials on a color chosen by a deterministic hash of the repo path, otherwise a folder glyph.
+The **...** menu is grouped: *Repository* (**Git Pull**, with its enablement rules and its explanatory tooltip
+shown even while it is disabled, and **Refresh**), *Agent files* (**Select Package...** or **Upgrade to
+x.y.z**, whichever applies; the group is hidden when neither does) and **Remove from list**. The upgrade
+chip is a button that runs the same `UpgradeCommand` as the menu's Upgrade item
+(`AgentControl-RepoCardViewModel-UpgradeFromChip`).
+
+**Settings window package-source actions.** One **Add** button opens a menu with the source types that can be
+added (zip-package folder, NuGet-package folder, NuGet-package server), each with its type's icon (the one
+the sources list uses) and a one-line description; another source type is added as one more menu item
+(`AgentControl-LauncherUI-AddSourceMenu`).
 The `.axaml` Views other than `MainWindow`
 (`AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`,
 `SettingsWindow`, `SourceEditorWindow`, `CredentialPromptWindow`) contain no logic beyond Avalonia's XAML-loading boilerplate,

@@ -57,9 +57,9 @@ filter is cleared.
 
 **Requirement coverage**: `AgentControl-OTS-FlaUI-DriveUiTests`.
 
-#### windows@PullButton_Click_InvokesConfiguredGitExecutableWithPullArgument
+#### windows@PullMenuItem_Click_InvokesConfiguredGitExecutableWithPullArgument
 
-**Scenario**: FlaUI clicks a repo card's pull button.
+**Scenario**: FlaUI opens a repo card's "..." menu and chooses Git Pull.
 
 **Expected**: The configured git executable is invoked with the pull argument.
 

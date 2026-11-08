@@ -140,3 +140,15 @@ sections:
           ambiguous.
         tests:
           - SettingsWindowViewModel_AddSource_AliasAlreadyConfiguredIgnoringCase_EditorCannotSave
+
+      - id: AgentControl-SettingsWindowViewModel-Appearance
+        title: >-
+          The SettingsWindowViewModel class shall offer the theme choices system default, light
+          and dark, start from the saved choice (the system default when none was saved), and
+          pass the chosen theme to its owner with the other settings on save.
+        justification: |
+          The user decides whether the application follows the operating system or always uses
+          one theme, and the choice must be saved with the rest of the settings.
+        tests:
+          - SettingsWindowViewModel_Theme_DefaultsToSystemAndIsSavedWithSettings
+          - ThemePreferenceDisplayNameConverter_Convert_KnownTheme_ReturnsFriendlyName

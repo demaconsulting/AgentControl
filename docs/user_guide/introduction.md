@@ -52,22 +52,37 @@ recent-repos list as a card.
 
 Each repo card shows:
 
-- The repo's name (its folder name) and, in smaller muted text below, its full path (hover for the
-  full text if it is shortened)
-- A row of **chips** — small rounded labels, each with a hover tooltip that explains it in full
-  (see *Reading the Chips* below)
-- A favorite star toggle, letting you pin specific repos above the default
-  most-recently-launched sort order
-- A **Launch** button labelled with your agent tool (see *Launching*)
-- A **Git Pull** button (see *Pulling Changes*)
-- A "..." menu offering Refresh, **Select Package...** or **Upgrade** (mutually exclusive —
-  see below), and Remove
-- A manual **Refresh** action that re-checks the repo's git state and committed-agent-files
-  chip without waiting for the next app launch
+- A colored **status bar** on the card's left edge: **green** — an agent package is pinned and no newer
+  version is available; **amber** — an upgrade is available; **red** — something needs attention (the folder is
+  missing, the package source has a problem or needs a sign-in, or the last action you started on the card
+  failed); **grey** — no agent package is pinned (or the upgrade check is still running). Color is never the
+  only signal: hover the bar for the status and its reason, and the chips below say the same in words.
+- On the first line, the **favorite star** (click it to pin the repo above the default
+  most-recently-launched sort order; it is a gold filled star when favorited and an outline otherwise) and
+  the repo's name (its folder name) right beside it
+- On the same line at the right, the **Launch** button, labelled with your agent tool (see *Launching*), and a
+  "..." menu
+- Below the first line, the repo's **picture tile** (see *Giving a Repo a Card Icon*) beside a row of **chips** —
+  small rounded labels, each with a hover tooltip that explains it in full (see *Reading the Chips* below) —
+  and, in smaller muted text below them, the repo's full path (hover for the full text if it is shortened)
+- The "..." menu is grouped. **Repository**: **Git Pull** (see *Pulling Changes*) and **Refresh** (re-checks
+  the repo's git state, upgrade status and committed-agent-files chip without waiting for the next app
+  launch). **Agent files**: **Select Package...** or **Upgrade to x.y.z** (mutually exclusive — see below;
+  the group is hidden when neither applies). Then **Remove from list**.
 
 Removing a repo from the list prompts for confirmation first, since it is a destructive
 action against AgentControl's own recent-repos state (it does not touch the repository
 itself).
+
+## Giving a Repo a Card Icon
+
+Instead of the colored tile with the repo name's first letters, a card can show your repository's own picture.
+Put a PNG file named `icon.png` (or, if there is no usable `icon.png`, `logo.png`) in the **root folder** of the
+repository - the name's letter case does not matter. AgentControl looks for it when it starts and whenever you
+choose **Refresh** in the card's "..." menu, and shows it, scaled down, inside the same rounded tile (a wide or
+transparent logo is centered on a light background so it stays tidy). A repository can be untrusted, so the
+picture is only used when it is a plain file (not a link) of at most 1 MB that really is a PNG image of a
+reasonable size; anything else is ignored and the colored tile stays. Pictures in folders below the root are never used.
 
 ## Reading the Chips
 
@@ -78,8 +93,10 @@ itself).
   from without hovering. The tooltip names the source in full: "Agent files: contoso-agents 1.0.0
   from source 'Default' (zip folder)". If the source is not configured, the tooltip says so.
 - **Upgrade chip** (amber, up arrow) — **Upgrade to** and the version an upgrade would move to, for example
-  `Upgrade to 1.1.0`. It appears only when the source the repo is pinned to has a newer version. Click
-  it, or use the card's "..." menu > **Upgrade**, to apply it. While AgentControl is still checking the
+  `Upgrade to 1.1.0`. It appears only when the source the repo is pinned to has a newer version. **Click
+  the chip** (its tooltip says "Upgrade the agent files to 1.1.0"), or use the card's "..." menu >
+  **Upgrade to 1.1.0**, to apply it: both do exactly the same thing, with the same confirmations, and both are
+  unavailable while another operation is running on the card. While AgentControl is still checking the
   source, the chip is not shown yet (the card shows "checking for updates..."); a slow or unreachable
   source never blocks the window.
 - **No agent package chip** (grey) — the repo has no pin yet. Click it, or use "..." > **Select
@@ -126,9 +143,9 @@ Each source has an **alias**, the short name shown in the app and recorded in a 
 
 ## Adding a Source
 
-1. Open Settings (the gear icon) and, in the **Package sources** list, click **Add Zip-Package
-   Folder**, **Add NuGet-Package Folder** or **Add NuGet-Package Server** (see
-   *Adding a NuGet-Package Server* for the last one).
+1. Open Settings (the gear icon) and, above the **Package sources** list, click **Add** and choose
+   **Zip-package folder**, **NuGet-package folder** or **NuGet-package server** from the menu (each item
+   shows its icon and a one-line description; see *Adding a NuGet-Package Server* for the last one).
 2. Type an **alias**. It must be unique (letters are compared ignoring case) and cannot be
    changed later, because repo pins refer to it.
 3. For a folder, enter the **location** as a full folder path, or use **Browse** to pick the
@@ -149,7 +166,7 @@ that could mean a wait, or a sign-in, for a window you only opened to look.
 
 ## Adding a NuGet-Package Server
 
-Click **Add NuGet-Package Server**. The dialog is a stack of titled sections - **Source**, **Packages**,
+Click **Add** and choose **NuGet-package server**. The dialog is a stack of titled sections - **Source**, **Packages**,
 **Sign-in**, **Package signatures** and **Connection test** - and scrolls when the screen is short, while its
 **Cancel** and **Save** buttons stay in view at the bottom. The **Source** section asks for:
 
@@ -493,9 +510,9 @@ that it is busy and offers **Cancel**.
 
 ## Upgrading an Already-Pinned Repo
 
-Once a repo has a pin, its "..." menu shows **Upgrade** instead, appearing whenever a newer
-version of the pinned package is available at the source named in the pin (shown by the
-upgrade chip). Upgrading:
+Once a repo has a pin, the "..." menu's **Agent files** group shows **Upgrade to x.y.z** instead, appearing
+whenever a newer version of the pinned package is available at the source named in the pin (shown by the
+upgrade chip, which you can also click to start the upgrade). Upgrading:
 
 1. Opens and validates the new package. If it opens without error, its contents are
    assumed good - unless the source requires signed packages (see
@@ -550,8 +567,9 @@ as an informational side action:
 
 # Pulling Changes
 
-The **Git Pull** button on a repo card runs `git pull` in that repo's working directory. It stays
-visible but is disabled (with a tooltip explaining why) whenever the repo's working tree has
+**Git Pull**, in the "..." menu of a repo card (under **Repository**), runs `git pull` in that repo's working
+directory. It stays in the menu but is disabled (with a tooltip explaining why, shown even while it is
+disabled) whenever the repo's working tree has
 uncommitted changes, the repo is missing, or the repo's Git status could not be determined
 (for example, the folder is not a Git repository, or git could not be run). It also starts
 disabled, with a "Git status has not been checked yet" tooltip, briefly while a repo card is
@@ -564,13 +582,18 @@ check that simply hasn't run yet.
 
 Open Settings from the gear icon on the toolbar to configure:
 
-- **Package sources** — the list of configured package sources, with **Add Zip-Package Folder**,
-  **Add NuGet-Package Folder**, **Add NuGet-Package Server**, **Edit** and **Remove** (see
+- **Package sources** — the list of configured package sources, with one **Add** button (a menu of
+  **Zip-package folder**, **NuGet-package folder** and **NuGet-package server**), **Edit** and **Remove** (see
   *Package Sources*).
   A NuGet source can require signed packages (see *Requiring Signed Packages*);
   a source that does not require them is not checked - no checksum or signature
   verification is performed on its packages by AgentControl, so the security and integrity of such a
   shared folder or server is the responsibility of whoever maintains it.
+- **Appearance (color theme)** — **System default** (the default; AgentControl follows your operating
+  system's light or dark setting, and follows it live if you change it while AgentControl is running),
+  **Light** or **Dark**. The choice applies as soon as you save Settings - no restart - to every window. A
+  settings file from an older version, or with a value AgentControl does not recognize, simply means System
+  default.
 - **Git executable path override** — a specific `git` executable to use instead of resolving
   `git` from the process `PATH`.
 - **Agent tool selection** — which agentic CLI tool Launch starts: **GitHub Copilot CLI**,

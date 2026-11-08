@@ -43,6 +43,11 @@ notification for `IsCustomAgentToolSelected`.
 (`CopilotCli`, `Cursor`, `ClaudeCode`, `Custom`), per architecture.md's "Configurable agent
 tool and shell" decision.
 
+**Theme** / **AvailableThemes**: `ThemePreference` / `static IReadOnlyList<ThemePreference>` — The
+Appearance choice (system default, light, dark, in that order), seeded from the saved setting (the system
+default when none was saved) and saved with the other settings; the Settings window shows it in a picker
+with friendly names (`AgentControl-SettingsWindowViewModel-Appearance`).
+
 **AvailableShellPreferences**: `static IReadOnlyList<string>` — The OS-conditional
 shell/terminal preset choices offered by the picker: `pwsh`, `powershell`, `cmd` on Windows, or
 `bash`, `zsh`, `sh` on other platforms, per architecture.md's "Configurable agent tool and
@@ -80,7 +85,8 @@ check of every source.
 **EditSourceCommand**: Raise
 `EditorRequested` asking the window to open a `SourceEditorViewModel`, created by
 `CreateEditor` (which passes the provider factory on), for a new source of the chosen kind
-("Add Zip-Package Folder", "Add NuGet-Package Folder", "Add NuGet-Package Server") or for the
+(the three items of the window's **Add** menu: zip-package folder, NuGet-package folder, NuGet-package
+server - one command per menu item, so another source type is one more command and one more item) or for the
 selected source; editing a source whose location is a web address opens the server editor. When the editor
 reports `Saved`, the resulting definition is appended to `Sources` and selected, or replaces the
 edited row in place keeping its position (`AgentControl-SettingsWindowViewModel-AddSource`,

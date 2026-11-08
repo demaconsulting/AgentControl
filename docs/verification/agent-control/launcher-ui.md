@@ -446,3 +446,29 @@ selection. This scenario is tested by
 `RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded` and
 `SelectPackageWindowViewModel_ChangeSelectedPackageName_SupersedesSlowerEarlierLoad`, covering
 `AgentControl-LauncherUI-StaleResultsDiscarded`.
+
+**LauncherUI_CardIdentityAndStatus_AccentAndPictureAreShown**: The status accent's meaning is verified as view
+model facts (see `RepoCardViewModel`), and a headless main window shows, for a repo with a root `icon.png`, the
+picture in the avatar tile (image visible, initials hidden) and, for a repo without one, the initials. This
+scenario is tested by `RepoCardViewModel_Status_ReflectsPackageAndUpgradeState` and
+`MainWindow_RepoCard_AvatarShowsRepoPictureWhenPresent`, covering `AgentControl-LauncherUI-CardIdentityAndStatus`.
+
+**LauncherUI_AddSourceMenu_OneAddButtonOffersEverySourceType**: The Settings window has one `AddSourceButton`
+whose menu holds the zip-package folder, NuGet-package folder and NuGet-package server items (each with an icon)
+under their stable AutomationIds; choosing an item opens the matching editor (zip: no package IDs section; NuGet
+folder: with it; server: feed-address controls), and saving the zip editor adds and selects the source. This
+scenario is tested by `SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls` and
+`SettingsWindow_AddZipSourceClicked_ShowsEditorAndSavingAddsSource`, covering
+`AgentControl-LauncherUI-AddSourceMenu`.
+
+**LauncherUI_Appearance_ThemeAppliesToTheApplicationAndEveryColorHasBothThemes**: Each theme choice maps to the
+matching Avalonia variant (system default to `ThemeVariant.Default`, which follows the operating system) and
+applying a choice changes the running application's requested and actual theme; the light and the dark
+dictionary of `AppStyles.axaml` define exactly the same keys; and in both themes every text color of the shared
+styles (the five chip palettes in every state, the secondary button in every state, the disabled primary button,
+the ghost icon buttons, validation, caution and success text on the page and on a card, the empty-state tile and
+all ten avatar letter colors) has at least 4.5:1 contrast against the fill and surface it is drawn on, and the
+status accents and the favorite star at least 3:1. This scenario is tested by
+`App_ToThemeVariant_MapsEachPreferenceToItsVariant`, `App_ApplyTheme_SwitchesRunningApplicationTheme`,
+`AppStyles_LightAndDarkDictionaries_DefineTheSameKeys` and
+`AppStyles_TextAndGraphicColors_MeetContrastInBothThemes`, covering `AgentControl-LauncherUI-Appearance`.

@@ -350,6 +350,49 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    ///     Gives a card's avatar tile the style class of its repo's palette color when the tile
+    ///     first attaches to the visual tree.
+    /// </summary>
+    /// <param name="sender">The avatar <see cref="Border"/>.</param>
+    /// <param name="e">Event arguments (unused).</param>
+    private static void RepoAvatar_AttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e) =>
+        ApplyAvatarColorClass(sender as Border);
+
+    /// <summary>
+    ///     Re-applies the avatar color class when a recycled list container is given another repo's
+    ///     card, so a virtualized row never keeps the previous repo's color.
+    /// </summary>
+    /// <param name="sender">The avatar <see cref="Border"/>.</param>
+    /// <param name="e">Event arguments (unused).</param>
+    private static void RepoAvatar_DataContextChanged(object? sender, EventArgs e) =>
+        ApplyAvatarColorClass(sender as Border);
+
+    /// <summary>
+    ///     Replaces the avatar's palette style class (<c>avatar0</c>, <c>avatar1</c>, ...) with the
+    ///     one its repo maps to. The class selects theme-aware background and foreground
+    ///     resources (see <c>RepoCardStyles.axaml</c>), so this code carries no color values.
+    /// </summary>
+    /// <param name="avatar">The avatar tile, or <see langword="null"/> (nothing to do).</param>
+    private static void ApplyAvatarColorClass(Border? avatar)
+    {
+        if (avatar is null)
+        {
+            return;
+        }
+
+        // Drop any earlier palette class first: a recycled container keeps its Classes
+        foreach (var existing in avatar.Classes.Where(c => c.StartsWith("avatar", StringComparison.Ordinal)).ToList())
+        {
+            avatar.Classes.Remove(existing);
+        }
+
+        if (avatar.DataContext is RepoCardViewModel card)
+        {
+            avatar.Classes.Add(card.AvatarStyleClass);
+        }
+    }
+
+    /// <summary>
     ///     Adds a repo to the recent-repos list. Always shows a native folder-browse dialog first;
     ///     if the user cancels the picker (empty result), does nothing - it never shows a
     ///     spurious error message box for a deliberate cancel.

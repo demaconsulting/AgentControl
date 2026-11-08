@@ -65,6 +65,11 @@ internal sealed class MainWindowViewModel : ViewModelBase
     private readonly StartupOptions? _startupOptions;
 
     /// <summary>
+    ///     Applies the user's theme choice to the running application, or <see langword="null"/>
+    ///     for none; see the constructor.
+    /// </summary>
+    private readonly Action<ThemePreference>? _applyTheme;
+    /// <summary>
     ///     The live application settings instance; mutated in place by
     ///     <see cref="ApplySettings"/> and persisted by <see cref="SaveSettings"/>.
     /// </summary>
@@ -93,19 +98,25 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// <param name="credentials">The credential facilities (session store and sign-in prompt) that
     ///     NuGet server sources use, shared by every card and by the settings window's connection
     ///     test; <see langword="null"/> for none.</param>
+    /// <param name="applyTheme">Applies the user's theme choice to the running application; called
+    ///     by <see cref="ApplySettings"/> after the settings were saved. <see langword="null"/>
+    ///     applies nothing (the view model then has no dependency on the UI framework, so tests
+    ///     can observe the call with a fake).</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
     public MainWindowViewModel(
         AppSettings settings,
         StartupOptions? startupOptions = null,
         string? configDirectory = null,
-        PackageCredentialContext? credentials = null)
+        PackageCredentialContext? credentials = null,
+        Action<ThemePreference>? applyTheme = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
         _settings = settings;
         _startupOptions = startupOptions;
         _configDirectory = configDirectory;
+        _applyTheme = applyTheme;
         Credentials = credentials;
 
         RepoCards = [];
@@ -331,6 +342,10 @@ internal sealed class MainWindowViewModel : ViewModelBase
         SettingsStore.Save(updated, _configDirectory);
         _settings = updated;
         OnPropertyChanged(nameof(Settings));
+
+        // The new settings are saved: make the theme choice take effect straight away, without a
+        // restart. A rejected save never reaches here, so a refused value is never applied.
+        _applyTheme?.Invoke(updated.Theme);
 
         InvalidateChangedSources(previousSources, updated.GetEffectiveSources());
         foreach (var card in RepoCards)

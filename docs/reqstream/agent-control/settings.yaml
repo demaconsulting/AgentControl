@@ -48,3 +48,16 @@ sections:
           - SettingsStore_SaveThenLoad_RoundTripsAllFields
           - SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource
           - SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties
+
+      - id: AgentControl-Settings-Appearance
+        title: >-
+          The Settings subsystem shall persist the user's theme choice, treating a missing or
+          unrecognized value as the system default.
+        justification: |
+          The theme is a per-user preference that must survive restarts, and a settings file from
+          an older or newer version must never prevent the application from starting.
+        children:
+          - AgentControl-SettingsStore-Theme
+        tests:
+          - SettingsStore_SaveThenLoad_Theme_RoundTripsByName
+          - SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem

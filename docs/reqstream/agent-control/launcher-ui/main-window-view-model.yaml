@@ -157,3 +157,15 @@ sections:
           happens.
         tests:
           - MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials
+
+      - id: AgentControl-MainWindowViewModel-ApplyTheme
+        title: >-
+          The MainWindowViewModel class shall, once saved settings have been written, hand the
+          saved theme choice to the application so it takes effect without a restart, and shall
+          not apply the theme of settings that were refused.
+        justification: |
+          A theme that only changes after a restart would look like a broken setting, and a
+          choice that was never saved must not be shown as if it had been.
+        tests:
+          - MainWindowViewModel_ApplySettings_ThemeChanged_PersistsAndAppliesTheme
+          - MainWindowViewModel_ApplySettings_SaveFails_DoesNotApplyTheme

@@ -132,11 +132,11 @@ proving launch only proceeds once agent files are confirmed synced. This scenari
 `windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory`, covering
 `AgentControl-System-Launch`.
 
-**AgentControl_Pull_PullButton_InvokesConfiguredGitExecutableWithPullArgument**: The Pull
-button is clicked on a repo card with a clean working tree; the configured (stubbed) git
+**AgentControl_Pull_PullMenuItem_InvokesConfiguredGitExecutableWithPullArgument**: Git Pull is
+chosen in the "..." menu of a repo card with a clean working tree; the configured (stubbed) git
 executable is invoked with the `pull` argument, proving the pull action is wired to the
 configured git executable and gated on a clean working tree. This scenario is tested by
-`windows@PullButton_Click_InvokesConfiguredGitExecutableWithPullArgument`, covering
+`windows@PullMenuItem_Click_InvokesConfiguredGitExecutableWithPullArgument`, covering
 `AgentControl-System-Pull`.
 
 **AgentControl_SelectPackage_SelectPackageMenuItem_AppliesChosenPackageAndSyncsFolders**: The
@@ -365,3 +365,17 @@ badge, offers no upgrade, and keeps its pin file unchanged. This scenario is tes
 `windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly` and
 `windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
 covering `AgentControl-System-SourcePinIntegrity`.
+
+**AgentControl_UpgradeFromChip_ClickStartsTheUpgrade**: On a repo pinned to 1.0.0 with 1.1.0 at the source, the
+real application shows the upgrade chip as a button (invocable through UI Automation); invoking it runs the same
+flow as the card menu's Upgrade item - the release notes window opens and the four managed folders are on disk.
+This scenario is tested by `windows@UpgradeChip_Click_SyncsManagedFoldersAndShowsReleaseNotes`, covering
+`AgentControl-System-UpgradeFromChip`.
+
+**AgentControl_Appearance_ChoosingLightThenDarkReThemesWithoutRestart**: In the real application, Settings'
+Appearance picker is set to Light and saved, and the main window's page background (measured from the pixels of
+a screenshot of the window) turns light without a restart and the file holds `"Theme": "Light"`; then Dark is
+chosen and saved and the page turns dark. The test never changes the operating-system theme (it chooses
+explicit themes, not the system default). This scenario is tested by
+`windows@SettingsWindow_ChooseLightThenDark_ReThemesMainWindowWithoutRestart`, covering
+`AgentControl-System-Appearance`.

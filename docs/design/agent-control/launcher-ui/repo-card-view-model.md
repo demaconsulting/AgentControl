@@ -67,19 +67,61 @@ confirmed dirty working tree before its first status check actually runs
 working tree, and any repo for which `GitStatusChecked` is still `false`
 (`AgentControl-RepoCardViewModel-PullDisabledExplanation`).
 
-**PullTooltip**: `string` (derived) — The `PullCommand` button's tooltip text, explaining why
+**PullTooltip**: `string` (derived) — The tooltip text of the Git Pull action, explaining why
 Pull is currently disabled (missing repo, not yet checked, an undeterminable git status, or
-dirty working tree) instead of leaving the button to silently disappear or disable with no
+dirty working tree) instead of leaving the action to silently disable with no
 explanation; when Pull is enabled, returns the original neutral "Pull the latest commits for
-this repo" text (`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The Pull button
-itself always stays visible in the view (never hidden via `IsVisible`), consistent with the
+this repo" text (`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The Git Pull item of the card's
+"..." menu is always present (never hidden via `IsVisible`), consistent with the
 "stay visible, disable, explain" pattern already used for Launch/Upgrade/Select-Package when
-the repo is missing. `MainWindow.axaml` sets `ToolTip.ShowOnDisabled="True"` on the Pull
-button so this explanatory text remains reachable while the button is disabled via
+the repo is missing. `MainWindow.axaml` sets `ToolTip.ShowOnDisabled="True"` on the item
+so this explanatory text remains reachable while the item is disabled via
 `PullCommand`'s `CanExecute` - Avalonia suppresses tooltips on disabled controls by default,
-which would otherwise hide the explanation precisely when it is most needed.
+which would otherwise hide the explanation precisely when it is most needed. The item is the first entry of the
+menu's "Repository" group and keeps its icon and the `PullButton` AutomationId.
 
 **IsPackageSelectionNeeded**: `bool` (derived) — `PinnedPackageName is null`.
+
+**Status** / **StatusText** / **StatusTooltip** / **LastActionFailed** (`AgentControl-RepoCardViewModel-StatusAccent`):
+`Status` is the card's overall `RepoCardStatus`, which the view shows as the colored accent bar on the card's
+left edge. A problem outranks everything - the folder is missing (`IsMissing`), the pinned package's source has a
+problem or needs a sign-in (`HasSourceProblem`), or the last action failed (`LastActionFailed`) - then
+`UpgradeAvailable` (`IsUpgradeAvailable`), then `NoPackage` (`IsPackageSelectionNeeded`), then `Checking` (a
+package is pinned but the upgrade check is still running, so the card never claims "up to date" early), and
+otherwise `UpToDate`. Green, amber, red and grey are only the view's rendering of that value: `StatusText` says
+it in words ("Up to date", "Upgrade available", "Needs attention", "No agent package", "Checking for updates")
+and is the bar's accessible name, and `StatusTooltip` adds the reason (for a problem, the missing folder, the
+source problem or "the last action failed"). `LastActionFailed` is set whenever the card raises `ErrorOccurred`
+(the constructor subscribes to its own event, so no call site needs bookkeeping) and when a Git Pull ends with
+git's refusal, and is cleared when the next operation starts (`RunOperationAsync`). **HasAgentFileActions**
+(`IsPackageSelectionNeeded || IsUpgradeAvailable`) lets the card menu hide its "Agent files" group when it has
+nothing to offer.
+
+**Avatar tile** (`AgentControl-RepoCardViewModel-AvatarTile`): **AvatarInitials** are the capital first letters
+of the first two words of `RepoName` (words are runs of letters and digits, so `alpha-service` gives `AS`), or
+one letter for a one-word name, and **HasAvatarInitials** is `false` when the name has none (the view then shows
+a folder glyph). **AvatarColorIndex** (and **AvatarStyleClass**, `avatar0` ... `avatar9`) picks one of
+`AvatarPaletteSize` palette entries with a 32-bit FNV-1a hash of the repo path compared without regard to case or
+a trailing separator; `string.GetHashCode` is deliberately not used because it is randomized per process, which
+would change a repo's color on every launch. The view model carries no color: the style class selects theme-aware
+`AvatarBackgroundN`/`AvatarForegroundN` resources (letter color chosen for contrast) from `AppStyles.axaml`.
+
+**Repo picture** (`AgentControl-RepoCardViewModel-RepoPicture`): **RepoImage** (`Bitmap?`), **HasRepoImage**,
+**ShowAvatarInitials** and **ShowAvatarFolderGlyph** tell the tile what to show. `RefreshCheap` starts
+`RefreshRepoImageAsync` (never for a missing folder, which just clears the picture); on a worker thread it asks
+`RepoImageLocator` for the repo's picture, and decodes it with `RepoImageLocator.Decode` unless it is the same
+file (path, last-write time and size) as the one already decoded - a failed decode is remembered the same way - and
+then publishes the bitmap on the caller's context, so the UI thread never touches the disk or the decoder and
+repeated refreshes cost one folder listing. A newer refresh supersedes an older one (a generation counter), and any
+I/O or decode failure means "no picture". `RepoImageLocator` looks only in the repo's root for `icon.png`, then
+`logo.png` (names matched without regard to case; an unacceptable `icon.png` does not stop `logo.png` being
+used), and accepts a file only if it is a regular file (never a symbolic link, junction or other reparse point,
+checked again when the file is read), directly inside the root, at most 1 MB, starting with the 8-byte PNG
+signature followed by the PNG header chunk, which declares at most 8192 pixels on a side and 4096 x 4096 pixels in all
+(so a small file cannot expand into a huge bitmap); the file is read into memory once, validated again, and decoded
+scaled down to 96 pixels wide (`Bitmap.DecodeToWidth`). The repo may be untrusted, so nothing else is trusted
+about the file and its contents are never logged. The view letterboxes the picture (`Stretch="Uniform"`) on a
+light backing inside the same tile.
 
 **Source access and asynchronous operations.** The card builds a `PackageSourceRegistry` from the
 current settings' effective sources for each operation (`CreateSourceRegistry`) and awaits the
@@ -121,8 +163,11 @@ session credentials and the user's saved sign-in (read without any dialog) but c
 - *No-package chip* — `HasNoPackageChip` and its tooltip, shown instead of the package chip for a
   present repo with no pin; clicking it opens Select Package.
 - *Upgrade chip* — `IsUpgradeAvailable`, `UpgradeChipText` (the version an upgrade would move to)
-  and `UpgradeChipTooltip` (both versions); `IsCheckingUpgrade` shows that the background check is
-  still running.
+  and `UpgradeTooltip` ("Upgrade the agent files to x.y.z (pinned: a.b.c). Same as the "..." menu >
+  Upgrade."); the chip is a button bound to `UpgradeCommand`, the same command as the menu's Upgrade item,
+  so it has the same guards (only while an upgrade is available and no operation is running) and the same
+  confirmations (`AgentControl-RepoCardViewModel-UpgradeFromChip`); `IsCheckingUpgrade` shows that the
+  background check is still running.
 - *Branch chip* — the branch name with a tooltip.
 - *Status chips* — uncommitted changes, committed agent files, folder missing and package source
   problem (whose tooltip is the actual problem), each color-coded amber or red

@@ -12,10 +12,9 @@
         Title="AgentControl"
         Icon="/Assets/AppIcon.ico"
         Width="720" Height="480"
-        MinWidth="480" MinHeight="320">
+        MinWidth="560" MinHeight="320">
     <Window.Resources>
         <vm:FavoriteIconConverter x:Key="FavoriteIconConverter" />
-        <vm:FavoriteColorConverter x:Key="FavoriteColorConverter" />
     </Window.Resources>
     <DockPanel Margin="12">
 
@@ -23,7 +22,7 @@
              the icon's black "D" stays visible against the dark theme) to give the window body
              its own identity beyond the native title bar. -->
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-            <Border Background="White" CornerRadius="6" Padding="3" Width="32" Height="32">
+            <Border Background="{DynamicResource LogoBackingBackground}" CornerRadius="6" Padding="3" Width="32" Height="32">
                 <Image Source="avares://DemaConsulting.AgentControl/Assets/AppIcon.ico"
                         Width="26" Height="26" />
             </Border>
@@ -82,176 +81,144 @@
         <!-- Recent-repos list, with an empty-state placeholder shown instead when there is
              nothing to display (no repos added yet, or the filter matches none). -->
         <Grid>
-            <StackPanel Name="EmptyStatePanel"
-                         AutomationProperties.AutomationId="EmptyStatePanel"
-                         IsVisible="{Binding HasNoDisplayedRepos}"
-                         HorizontalAlignment="Center"
-                         VerticalAlignment="Center"
-                         Spacing="8"
-                         Opacity="0.6">
-                <materialIcons:MaterialIcon Kind="FolderSearchOutline"
-                                              Width="48" Height="48"
-                                              HorizontalAlignment="Center" />
-                <TextBlock Name="EmptyStateText"
-                            AutomationProperties.AutomationId="EmptyStateText"
-                            Text="{Binding EmptyStateMessage}"
-                            HorizontalAlignment="Center"
-                            TextAlignment="Center"
-                            TextWrapping="Wrap"
-                            MaxWidth="420" />
-            </StackPanel>
+            <!-- Empty state: an intentional, card-like placeholder (icon tile, then the message)
+                 instead of loose text floating on the page -->
+            <Border Name="EmptyStatePanel"
+                     AutomationProperties.AutomationId="EmptyStatePanel"
+                     Classes="EmptyState"
+                     IsVisible="{Binding HasNoDisplayedRepos}"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center">
+                <StackPanel Spacing="14">
+                    <Border Classes="EmptyStateTile" HorizontalAlignment="Center">
+                        <materialIcons:MaterialIcon Kind="FolderSearchOutline"
+                                                      Width="34" Height="34"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Name="EmptyStateText"
+                                AutomationProperties.AutomationId="EmptyStateText"
+                                Text="{Binding EmptyStateMessage}"
+                                HorizontalAlignment="Center"
+                                TextAlignment="Center"
+                                TextWrapping="Wrap"
+                                FontSize="14"
+                                MaxWidth="420" />
+                </StackPanel>
+            </Border>
 
+            <!-- The shared card, chip, button and avatar styles live in RepoCardStyles.axaml (included
+                 by App.axaml), with every color in its Light/Dark theme dictionaries. -->
             <ListBox Name="RepoListBox"
                       AutomationProperties.AutomationId="RepoListBox"
+                      Classes="repoList"
+                      Margin="-8,0,-8,0"
                       IsVisible="{Binding !HasNoDisplayedRepos}"
                       ItemsSource="{Binding DisplayedRepoCards}">
-            <ListBox.Styles>
-                <!-- A subtle lift on hover (accented border plus a soft shadow nudged upward)
-                     makes the (otherwise flat) card list feel interactive. -->
-                <Style Selector="Border.RepoCard">
-                    <Setter Property="BorderBrush" Value="Gray" />
-                    <Setter Property="Background" Value="#0DFFFFFF" />
-                    <Setter Property="Transitions">
-                        <Transitions>
-                            <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
-                            <BoxShadowsTransition Property="BoxShadow" Duration="0:0:0.15" />
-                        </Transitions>
-                    </Setter>
-                </Style>
-                <Style Selector="Border.RepoCard:pointerover">
-                    <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}" />
-                    <Setter Property="Background" Value="#1AFFFFFF" />
-                    <Setter Property="BoxShadow" Value="0 4 12 0 #40000000" />
-                </Style>
-
-                <!-- Chips: small rounded labels (icon plus short text) that each state one fact about
-                     the repo. Neutral (default) chips state facts; amber chips ask for attention;
-                     red chips report a problem. Mid-tone colors stay readable on the light and the
-                     dark theme. A clickable chip is a flat button that wraps a chip. -->
-                <Style Selector="Border.Chip">
-                    <Setter Property="CornerRadius" Value="10" />
-                    <Setter Property="BorderThickness" Value="1" />
-                    <Setter Property="Padding" Value="7,1" />
-                    <Setter Property="Margin" Value="0,0,6,4" />
-                    <Setter Property="Background" Value="#14808080" />
-                    <Setter Property="BorderBrush" Value="#55808080" />
-                </Style>
-                <Style Selector="Border.Chip.amber">
-                    <Setter Property="Background" Value="#26D29922" />
-                    <Setter Property="BorderBrush" Value="#99D29922" />
-                    <Setter Property="TextElement.Foreground" Value="#BF8700" />
-                </Style>
-                <Style Selector="Border.Chip.red">
-                    <Setter Property="Background" Value="#26E5534B" />
-                    <Setter Property="BorderBrush" Value="#99E5534B" />
-                    <Setter Property="TextElement.Foreground" Value="#E5534B" />
-                </Style>
-                <Style Selector="Border.Chip.grey">
-                    <Setter Property="Background" Value="#0F808080" />
-                    <Setter Property="BorderBrush" Value="#40808080" />
-                    <Setter Property="Opacity" Value="0.85" />
-                </Style>
-                <Style Selector="Border.Chip.package">
-                    <Setter Property="Background" Value="#1F3FA9F5" />
-                    <Setter Property="BorderBrush" Value="#803FA9F5" />
-                </Style>
-                <Style Selector="Border.Chip TextBlock">
-                    <Setter Property="FontSize" Value="11" />
-                    <Setter Property="VerticalAlignment" Value="Center" />
-                </Style>
-                <Style Selector="Border.Chip materialIcons|MaterialIcon">
-                    <Setter Property="Width" Value="13" />
-                    <Setter Property="Height" Value="13" />
-                    <Setter Property="VerticalAlignment" Value="Center" />
-                </Style>
-                <Style Selector="Button.chipButton">
-                    <Setter Property="Background" Value="Transparent" />
-                    <Setter Property="BorderThickness" Value="0" />
-                    <Setter Property="Padding" Value="0" />
-                    <Setter Property="MinHeight" Value="0" />
-                    <Setter Property="Cursor" Value="Hand" />
-                </Style>
-                <Style Selector="Button.chipButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-                    <Setter Property="Background" Value="Transparent" />
-                </Style>
-                <Style Selector="Button.chipButton:pressed /template/ ContentPresenter#PART_ContentPresenter">
-                    <Setter Property="Background" Value="Transparent" />
-                </Style>
-                <Style Selector="Button.chipButton:pointerover Border.Chip">
-                    <Setter Property="BorderThickness" Value="2" />
-                    <Setter Property="Padding" Value="6,0" />
-                </Style>
-                <Style Selector="Button.chipButton:disabled">
-                    <Setter Property="Opacity" Value="0.5" />
-                </Style>
-            </ListBox.Styles>
             <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:RepoCardViewModel">
                     <Border Classes="RepoCard"
-                             BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,8"
                              AttachedToVisualTree="RepoCard_AttachedToVisualTree">
-                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                        <!-- Accent bar (overall status) | card body -->
+                        <Grid ColumnDefinitions="Auto,*">
+                            <!-- Status accent: green = up to date, amber = upgrade available, red =
+                                 a problem, grey = no package yet. Color is never the only carrier:
+                                 the bar has an accessible name and tooltip, and the chips say the
+                                 same in words. -->
+                            <Border Name="RepoStatusAccent"
+                                     AutomationProperties.AutomationId="RepoStatusAccent"
+                                     AutomationProperties.AccessibilityView="Content"
+                                     AutomationProperties.Name="{Binding StatusText}"
+                                     Classes="StatusAccent"
+                                     Classes.statusUpToDate="{Binding Status, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static vm:RepoCardStatus.UpToDate}}"
+                                     Classes.statusUpgrade="{Binding Status, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static vm:RepoCardStatus.UpgradeAvailable}}"
+                                     Classes.statusProblem="{Binding Status, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static vm:RepoCardStatus.Problem}}"
+                                     ToolTip.Tip="{Binding StatusTooltip}" />
 
-                            <!-- Title row: the repo's name on the left, its actions on the right -->
-                            <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6"
-                                         VerticalAlignment="Center">
-                                <materialIcons:MaterialIcon Kind="Folder"
-                                                              Width="16" Height="16"
-                                                              Opacity="0.6"
-                                                              VerticalAlignment="Center" />
-                                <TextBlock Name="RepoNameText"
+                            <!-- Card body. Row 0 is the identity line - favorite star, then the repo
+                                 name right beside it - with the actions (Launch, more) on its right.
+                                 Below it sits the avatar tile, left-aligned under the star, beside
+                                 the chips and the path. -->
+                            <Grid Grid.Column="1" Margin="14,12,14,14"
+                                   ColumnDefinitions="*,Auto" ColumnSpacing="12"
+                                   RowDefinitions="Auto,Auto">
+
+                            <Grid Grid.Row="0" Grid.Column="0"
+                                   ColumnDefinitions="Auto,*" ColumnSpacing="1"
+                                   VerticalAlignment="Center">
+                                <!-- Favorite star: a borderless ghost toggle, gold and filled when
+                                     favorited, an outline otherwise. It is 28px (the glyph is 18px),
+                                     and the negative left margin puts the glyph itself - not the
+                                     button's invisible edge - on the card's content edge, in line
+                                     with the avatar tile below. -->
+                                <ToggleButton Grid.Column="0"
+                                         Name="FavoriteToggleButton"
+                                         AutomationProperties.AutomationId="FavoriteToggleButton"
+                                         Classes="iconGhost"
+                                         Width="28" Height="28" MinWidth="28" MinHeight="28"
+                                         Margin="-7,0,0,0"
+                                         ToolTip.Tip="Favorite/pin this repo to the top of the list"
+                                         IsChecked="{Binding IsFavorite, Mode=TwoWay}"
+                                         Command="{Binding FavoriteToggleCommand}">
+                                    <materialIcons:MaterialIcon Width="18" Height="18"
+                                                                  Kind="{Binding IsFavorite, Converter={StaticResource FavoriteIconConverter}}" />
+                                </ToggleButton>
+
+                                <!-- The repo's name, a small gap from the star -->
+                                <TextBlock Grid.Column="1"
+                                            Name="RepoNameText"
+                                            Margin="-3,0,0,0"
                                             AutomationProperties.AutomationId="RepoNameText"
                                             Text="{Binding RepoName}"
                                             ToolTip.Tip="{Binding RepoName}"
-                                            FontWeight="Bold"
+                                            FontWeight="Bold" FontSize="15"
                                             TextTrimming="CharacterEllipsis"
                                             VerticalAlignment="Center" />
-                            </StackPanel>
+                            </Grid>
 
-                            <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                                <ToggleButton Name="FavoriteToggleButton"
-                                         AutomationProperties.AutomationId="FavoriteToggleButton"
-                                         ToolTip.Tip="Favorite/pin this repo to the top of the list"
-                                         IsChecked="{Binding IsFavorite, Mode=TwoWay}"
-                                         Command="{Binding FavoriteToggleCommand}"
+                            <!-- Actions: only the repo's actions live on the right, level with the
+                                 identity line, so the chips, status message and progress rows that
+                                 come and go below never move them -->
+                            <StackPanel Grid.Row="0" Grid.Column="1"
+                                         Orientation="Horizontal" Spacing="8"
                                          VerticalAlignment="Center">
-                                    <materialIcons:MaterialIcon Kind="{Binding IsFavorite, Converter={StaticResource FavoriteIconConverter}}"
-                                                                  Foreground="{Binding IsFavorite, Converter={StaticResource FavoriteColorConverter}}" />
-                                </ToggleButton>
-
                                 <Button Name="LaunchButton"
                                          AutomationProperties.AutomationId="LaunchButton"
-                                         Classes="accent"
+                                         Classes="actionButton primary"
                                          Command="{Binding LaunchCommand}"
-                                         ToolTip.Tip="{Binding LaunchTooltip}"
-                                         VerticalAlignment="Center">
-                                    <StackPanel Orientation="Horizontal" Spacing="4">
-                                        <materialIcons:MaterialIcon Kind="Rocket" />
+                                         ToolTip.Tip="{Binding LaunchTooltip}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <materialIcons:MaterialIcon Kind="Rocket" Width="16" Height="16" />
                                         <TextBlock Name="LaunchButtonText"
                                                     AutomationProperties.AutomationId="LaunchButtonText"
+                                                    VerticalAlignment="Center"
                                                     Text="{Binding LaunchButtonText}" />
-                                    </StackPanel>
-                                </Button>
-
-                                <Button Name="PullButton"
-                                         AutomationProperties.AutomationId="PullButton"
-                                         Command="{Binding PullCommand}"
-                                         ToolTip.Tip="{Binding PullTooltip}"
-                                         ToolTip.ShowOnDisabled="True"
-                                         VerticalAlignment="Center">
-                                    <StackPanel Orientation="Horizontal" Spacing="4">
-                                        <materialIcons:MaterialIcon Kind="SourcePull" />
-                                        <TextBlock Text="Git Pull" />
                                     </StackPanel>
                                 </Button>
 
                                 <Button Name="MoreActionsButton"
                                          AutomationProperties.AutomationId="MoreActionsButton"
-                                         ToolTip.Tip="More actions"
-                                         VerticalAlignment="Center">
-                                    <materialIcons:MaterialIcon Kind="DotsHorizontal" />
+                                         Classes="iconGhost"
+                                         ToolTip.Tip="More actions">
+                                    <materialIcons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
                                     <Button.Flyout>
+                                        <!-- Grouped menu: Repository (Git Pull, Refresh), Agent files (Select
+                                             Package or Upgrade, whichever applies), then Remove. The group
+                                             headers are disabled items (not interactive, skipped by the
+                                             keyboard) styled as small captions. -->
                                         <MenuFlyout>
+                                            <MenuItem Classes="groupHeader" IsEnabled="False" Focusable="False"
+                                                       Header="Repository" />
+                                            <MenuItem Name="PullButton"
+                                                       AutomationProperties.AutomationId="PullButton"
+                                                       Header="Git Pull"
+                                                       ToolTip.Tip="{Binding PullTooltip}"
+                                                       ToolTip.ShowOnDisabled="True"
+                                                       Command="{Binding PullCommand}">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="SourcePull" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
                                             <MenuItem Name="RefreshMenuItem"
                                                        AutomationProperties.AutomationId="RefreshMenuItem"
                                                        Header="Refresh"
@@ -261,6 +228,10 @@
                                                     <materialIcons:MaterialIcon Kind="Refresh" />
                                                 </MenuItem.Icon>
                                             </MenuItem>
+                                            <Separator IsVisible="{Binding HasAgentFileActions}" />
+                                            <MenuItem Classes="groupHeader" IsEnabled="False" Focusable="False"
+                                                       Header="Agent files"
+                                                       IsVisible="{Binding HasAgentFileActions}" />
                                             <MenuItem Name="SelectPackageMenuItem"
                                                        AutomationProperties.AutomationId="SelectPackageMenuItem"
                                                        Header="Select Package..."
@@ -273,7 +244,7 @@
                                             </MenuItem>
                                             <MenuItem Name="UpgradeMenuItem"
                                                        AutomationProperties.AutomationId="UpgradeMenuItem"
-                                                       Header="Upgrade"
+                                                       Header="{Binding UpgradeChipText, StringFormat='Upgrade to {0}'}"
                                                        ToolTip.Tip="{Binding UpgradeTooltip}"
                                                        IsVisible="{Binding IsUpgradeAvailable}"
                                                        Command="{Binding UpgradeCommand}">
@@ -281,6 +252,7 @@
                                                     <materialIcons:MaterialIcon Kind="ArrowUpBold" />
                                                 </MenuItem.Icon>
                                             </MenuItem>
+                                            <Separator />
                                             <MenuItem Name="RemoveMenuItem"
                                                        AutomationProperties.AutomationId="RemoveMenuItem"
                                                        Header="Remove from list"
@@ -295,11 +267,51 @@
                                 </Button>
                             </StackPanel>
 
+                            <!-- Body: the avatar tile (left-aligned under the star, as tall as the chip
+                                 row plus the path row) beside the chips, the path and, when present,
+                                 the last action's message and the progress of a running operation -->
+                            <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,8,0,0"
+                                   ColumnDefinitions="Auto,*" ColumnSpacing="12"
+                                   RowDefinitions="Auto,Auto,Auto,Auto">
+
+                            <!-- Avatar: the repo's own picture (root icon.png or logo.png) letterboxed on
+                                 the tile, else its initials on a stable per-repo color (the color class
+                                 is applied by RepoAvatar_DataContextChanged), else a folder glyph when
+                                 the name has no letters or digits -->
+                            <Border Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
+                                     Name="RepoAvatar"
+                                     Classes="Avatar"
+                                     Classes.hasImage="{Binding HasRepoImage}"
+                                     VerticalAlignment="Top" HorizontalAlignment="Left"
+                                     ClipToBounds="True"
+                                     DataContextChanged="RepoAvatar_DataContextChanged"
+                                     AttachedToVisualTree="RepoAvatar_AttachedToVisualTree">
+                                <Panel>
+                                    <Image Name="RepoAvatarImage"
+                                            AutomationProperties.AutomationId="RepoAvatarImage"
+                                            Source="{Binding RepoImage}"
+                                            IsVisible="{Binding HasRepoImage}"
+                                            Stretch="Uniform" Margin="3" />
+                                    <TextBlock Name="RepoAvatarText"
+                                                AutomationProperties.AutomationId="RepoAvatarText"
+                                                Text="{Binding AvatarInitials}"
+                                                IsVisible="{Binding ShowAvatarInitials}"
+                                                FontSize="16" FontWeight="Bold"
+                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <materialIcons:MaterialIcon Kind="Folder"
+                                                                  IsVisible="{Binding ShowAvatarFolderGlyph}"
+                                                                  Width="22" Height="22"
+                                                                  HorizontalAlignment="Center"
+                                                                  VerticalAlignment="Center" />
+                                </Panel>
+                            </Border>
+
                             <!-- Chip row: what the repo has (agent package and where it came from, an
                                  available upgrade, the branch) and what needs attention (status
                                  chips). Every chip has a tooltip that explains it in full. -->
-                            <WrapPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
-                                        Orientation="Horizontal" Margin="0,4,0,0">
+                            <WrapPanel Grid.Row="0" Grid.Column="1"
+                                        Orientation="Horizontal" ItemSpacing="6" LineSpacing="6"
+                                        MinHeight="22">
 
                                 <!-- Agent package: robot icon, package name and version, then where it came
                                      from: the source kind's icon (zip folder, NuGet folder, server) and the
@@ -360,8 +372,8 @@
                                             AutomationProperties.AutomationId="UpgradeCheckingText"
                                             IsVisible="{Binding IsCheckingUpgrade}"
                                             Text="checking for updates..."
-                                            FontSize="11" FontStyle="Italic" Opacity="0.6"
-                                            VerticalAlignment="Center" Margin="0,0,6,4" />
+                                            FontSize="12" FontStyle="Italic" Opacity="0.7"
+                                            VerticalAlignment="Center" />
 
                                 <!-- No agent package pinned: clicking selects one -->
                                 <Button Name="NoPackageChip"
@@ -438,30 +450,30 @@
                                 </Border>
                             </WrapPanel>
 
-                            <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                            <TextBlock Grid.Row="1" Grid.Column="1"
                                         Name="RepoPathText"
                                         AutomationProperties.AutomationId="RepoPathText"
                                         Text="{Binding RepoPath}"
                                         ToolTip.Tip="{Binding RepoPath}"
                                         TextTrimming="CharacterEllipsis"
-                                        FontSize="11" Opacity="0.55" />
+                                        FontSize="12" Opacity="0.65" Margin="0,6,0,0" />
 
                             <!-- The outcome of the last action (for example a failed Git Pull and
                                  git's reason), so a button that was clicked always shows what happened -->
-                            <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
+                            <TextBlock Grid.Row="2" Grid.Column="1"
                                         Name="RepoStatusMessageText"
                                         AutomationProperties.AutomationId="RepoStatusMessageText"
                                         IsVisible="{Binding HasStatusMessage}"
                                         Text="{Binding StatusMessage}"
                                         ToolTip.Tip="{Binding StatusMessage}"
                                         TextTrimming="CharacterEllipsis" MaxLines="2" TextWrapping="Wrap"
-                                        FontSize="11" Opacity="0.85" Margin="0,2,0,0" />
+                                        FontSize="12" Opacity="0.9" Margin="0,8,0,0" />
 
                             <!-- Progress of a running package operation, with a cancel button when the
                                  operation can be stopped -->
-                            <Grid Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
+                            <Grid Grid.Row="3" Grid.Column="1"
                                    ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8"
-                                   IsVisible="{Binding IsBusy}" Margin="0,4,0,0">
+                                   IsVisible="{Binding IsBusy}" Margin="0,8,0,0">
                                 <TextBlock Name="BusyMessageText"
                                             AutomationProperties.AutomationId="BusyMessageText"
                                             Grid.Column="0"
@@ -484,6 +496,8 @@
                                         <TextBlock Text="Cancel" FontSize="11" />
                                     </StackPanel>
                                 </Button>
+                            </Grid>
+                            </Grid>
                             </Grid>
                         </Grid>
                     </Border>

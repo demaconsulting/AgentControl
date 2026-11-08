@@ -80,3 +80,12 @@ and without the password appearing in the error. This scenario is tested by
 configuration directory holds exactly the settings file, with the second save's content. This
 scenario is tested by `SettingsStore_Save_RepeatedSaves_LeavesOnlySettingsFileWithLatestContent`,
 covering `AgentControl-SettingsStore-AtomicSave`.
+
+**SettingsStore_Theme_DefaultsToSystemRoundTripsByNameAndToleratesInvalidValues**: A settings file without a
+`Theme` value loads as the system default (as does a new `AppSettings`); each of system default, light and dark
+survives save and load and is written by name; and an unknown name, an empty string, an out-of-range or negative
+number, null, a boolean, an object and an array all load as the system default - with the setting that follows
+the value still read, proving the reader stays positioned - while a name in another letter case and a defined
+number are accepted. This scenario is tested by `SettingsStore_Load_NoThemeValue_DefaultsToSystem`,
+`SettingsStore_SaveThenLoad_Theme_RoundTripsByName` and
+`SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem`, covering `AgentControl-SettingsStore-Theme`.

@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Globalization;
+using Avalonia.Media.Imaging;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Logging;
@@ -165,6 +167,30 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <summary>Backing field for <see cref="IsCheckingUpgrade"/>.</summary>
     private bool _isCheckingUpgrade;
 
+    /// <summary>Backing field for <see cref="LastActionFailed"/>.</summary>
+    private bool _lastActionFailed;
+
+    /// <summary>
+    ///     Decodes the repo's picture file for the avatar tile; see the constructor.
+    /// </summary>
+    private readonly Func<RepoImageFile, Bitmap?> _decodeImage;
+
+    /// <summary>
+    ///     The picture file whose decode result (a bitmap, or a failure) <see cref="RepoImage"/>
+    ///     currently reflects, so a refresh that finds the same file (path, last-write time and
+    ///     size) does not decode it again; <see langword="null"/> when there is no picture file.
+    /// </summary>
+    private RepoImageFile? _loadedImageFile;
+
+    /// <summary>
+    ///     Identifies the most recent picture refresh, so a slower, older one cannot overwrite the
+    ///     result of a newer one.
+    /// </summary>
+    private int _imageGeneration;
+
+    /// <summary>Backing field for <see cref="RepoImage"/>.</summary>
+    private Bitmap? _repoImage;
+
     /// <summary>
     ///     Logs the actual work this card performs on behalf of the user - fetching/applying
     ///     packages, pulling the repo, and launching the agent tool - so an operator can audit
@@ -184,6 +210,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     in-memory sources whose timing they control.</param>
     /// <param name="credentials">The credential facilities NuGet server sources use to sign in,
     ///     or <see langword="null"/> for none.</param>
+    /// <param name="decodeImage">Decodes the repo's picture file for the avatar tile;
+    ///     <see langword="null"/> uses <see cref="RepoImageLocator.Decode"/>. Supplied so tests can
+    ///     count decodes or avoid needing a graphics platform.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="recentRepo"/>,
     ///     <paramref name="getSettings"/>, or <paramref name="packageVersionCache"/> is
     ///     <see langword="null"/>.</exception>
@@ -193,7 +222,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         PackageVersionCache packageVersionCache,
         Startup.StartupOptions? startupOptions = null,
         Func<AppSettings, PackageSourceRegistry>? registryFactory = null,
-        PackageCredentialContext? credentials = null)
+        PackageCredentialContext? credentials = null,
+        Func<RepoImageFile, Bitmap?>? decodeImage = null)
     {
         ArgumentNullException.ThrowIfNull(recentRepo);
         ArgumentNullException.ThrowIfNull(getSettings);
@@ -205,6 +235,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         _startupOptions = startupOptions;
         _registryFactory = registryFactory;
         _credentials = credentials;
+        _decodeImage = decodeImage ?? (file => RepoImageLocator.Decode(file));
 
         LaunchCommand = new AsyncRelayCommand(LaunchAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
         PullCommand = new AsyncRelayCommand(PullAsync, ReportUnexpectedFailure, () => CanPull && !IsMissing && !IsBusy);
@@ -216,6 +247,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
         FavoriteToggleCommand = new RelayCommand(() => IsFavorite = !IsFavorite);
         RemoveCommand = new RelayCommand(() => RemoveRequested?.Invoke(this, EventArgs.Empty));
         CancelOperationCommand = new RelayCommand(CancelOperation, () => CanCancelOperation);
+
+        // Every error the card reports to the user also marks the card's status as a problem, so
+        // the status accent needs no bookkeeping at the dozens of places that raise an error
+        ErrorOccurred += (_, _) => LastActionFailed = true;
     }
 
     /// <summary>
@@ -259,6 +294,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 OnPropertyChanged(nameof(PullTooltip));
                 OnPropertyChanged(nameof(HasPinnedPackage));
                 OnPropertyChanged(nameof(ShowNoPackageChip));
+                RaiseStatusChanged();
             }
         }
     }
@@ -375,6 +411,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(HasSourceProblem));
                 OnPropertyChanged(nameof(SourceProblemChipText));
+                RaiseStatusChanged();
             }
         }
     }
@@ -472,18 +509,311 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(UpgradeTooltip));
                 UpgradeCommand.RaiseCanExecuteChanged();
+                RaiseStatusChanged();
             }
         }
     }
 
     /// <summary>
-    ///     Gets the tooltip text shown on the upgrade chip, naming both versions and how to
-    ///     upgrade, or <see langword="null"/> when no upgrade is available.
+    ///     Gets the tooltip text shown on the upgrade chip and the "Upgrade" menu item: what
+    ///     clicking does (upgrade the agent files to the newer version), the version it replaces
+    ///     and that the chip and the "..." menu start the same upgrade, or <see langword="null"/>
+    ///     when no upgrade is available.
     /// </summary>
     public string? UpgradeTooltip => IsUpgradeAvailable
-        ? $"Agent package update available: {PinnedPackageVersion} -> {LatestAvailableVersion} " +
-          "(click this chip, or use the \"...\" menu > Upgrade)."
+        ? $"Upgrade the agent files to {LatestAvailableVersion} (pinned: {PinnedPackageVersion}). " +
+          "Same as the \"...\" menu > Upgrade."
         : null;
+
+    /// <summary>
+    ///     Gets a value indicating whether the last action the user started on this card (launch,
+    ///     pull, upgrade, package selection or refresh) reported an error.
+    /// </summary>
+    /// <remarks>
+    ///     Set whenever <see cref="ErrorOccurred"/> is raised or a Git Pull ends with git's
+    ///     refusal, and cleared when the next operation starts, so a problem stays visible on the
+    ///     card (as <see cref="RepoCardStatus.Problem"/>) until the user tries again.
+    /// </remarks>
+    public bool LastActionFailed
+    {
+        get => _lastActionFailed;
+        private set
+        {
+            if (SetField(ref _lastActionFailed, value))
+            {
+                RaiseStatusChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets the overall status of the card, which drives the colored accent bar on its left
+    ///     edge.
+    /// </summary>
+    /// <remarks>
+    ///     A problem (missing folder, package source problem or sign-in needed, failed last action)
+    ///     outranks everything else, then an available upgrade, then the absence of a package;
+    ///     a pinned package whose upgrade check is still running is neutral until the check ends,
+    ///     and only a pinned package with no newer version reports <see cref="RepoCardStatus.UpToDate"/>.
+    /// </remarks>
+    public RepoCardStatus Status => this switch
+    {
+        { IsMissing: true } or { HasSourceProblem: true } or { LastActionFailed: true } => RepoCardStatus.Problem,
+        { IsUpgradeAvailable: true } => RepoCardStatus.UpgradeAvailable,
+        { IsPackageSelectionNeeded: true } => RepoCardStatus.NoPackage,
+        { IsCheckingUpgrade: true } => RepoCardStatus.Checking,
+        _ => RepoCardStatus.UpToDate
+    };
+
+    /// <summary>
+    ///     Gets a value indicating whether the card menu's "Agent files" group has anything to offer:
+    ///     "Select Package..." (no package pinned yet) or "Upgrade to ..." (a newer version exists).
+    ///     When neither applies the group, its header and its separator are hidden rather than shown
+    ///     empty.
+    /// </summary>
+    public bool HasAgentFileActions => IsPackageSelectionNeeded || IsUpgradeAvailable;
+
+    /// <summary>
+    ///     Gets the status in words, for the accent bar's accessible name so the status is never
+    ///     conveyed by color alone.
+    /// </summary>
+    public string StatusText => Status switch
+    {
+        RepoCardStatus.UpToDate => "Up to date",
+        RepoCardStatus.UpgradeAvailable => "Upgrade available",
+        RepoCardStatus.Problem => "Needs attention",
+        RepoCardStatus.NoPackage => "No agent package",
+        _ => "Checking for updates"
+    };
+
+    /// <summary>
+    ///     Gets the tooltip of the accent bar: the status and, for a problem, the reason.
+    /// </summary>
+    public string StatusTooltip => Status switch
+    {
+        RepoCardStatus.UpToDate => "Up to date: the pinned agent package is the newest one available.",
+        RepoCardStatus.UpgradeAvailable => $"Upgrade available: {PinnedPackageVersion} -> {LatestAvailableVersion}.",
+        RepoCardStatus.NoPackage => "No agent package is pinned for this repo.",
+        RepoCardStatus.Checking => "Checking whether a newer agent package version is available...",
+        _ when IsMissing => "Needs attention: this repo's folder could not be found on disk.",
+        _ when HasSourceProblem => $"Needs attention: {SourceProblem}",
+        _ => "Needs attention: the last action failed."
+    };
+
+    /// <summary>
+    ///     The number of colors in the avatar palette. The view defines one background and one
+    ///     foreground resource per index (<c>AvatarBackground0</c>, <c>AvatarForeground0</c>, ...)
+    ///     for each theme variant.
+    /// </summary>
+    internal const int AvatarPaletteSize = 10;
+
+    /// <summary>
+    ///     Gets the one or two capital letters shown in the card's avatar tile: the first letters of
+    ///     the first two words of the repo name (words are separated by anything that is not a
+    ///     letter or digit, so <c>alpha-service</c> gives <c>AS</c>), or the first letter of a
+    ///     single-word name. Empty when the name has no letter or digit.
+    /// </summary>
+    public string AvatarInitials => GetAvatarInitials(RepoName);
+
+    /// <summary>
+    ///     Gets a value indicating whether <see cref="AvatarInitials"/> has text; when not, the
+    ///     avatar shows a folder glyph instead.
+    /// </summary>
+    public bool HasAvatarInitials => AvatarInitials.Length > 0;
+
+    /// <summary>
+    ///     Gets the repo's own picture (its root <c>icon.png</c>, else <c>logo.png</c>) decoded at the
+    ///     tile's size, or <see langword="null"/> when the repo has none, it is not acceptable, or
+    ///     it has not finished loading; the tile then shows the generated initials instead.
+    /// </summary>
+    /// <remarks>
+    ///     Loaded in the background by <see cref="RefreshCheap"/> (so at startup and on every
+    ///     Refresh) and never on the UI thread; see <see cref="RepoImageLocator"/> for what is
+    ///     accepted.
+    /// </remarks>
+    public Bitmap? RepoImage
+    {
+        get => _repoImage;
+        private set
+        {
+            if (SetField(ref _repoImage, value))
+            {
+                OnPropertyChanged(nameof(HasRepoImage));
+                OnPropertyChanged(nameof(ShowAvatarInitials));
+                OnPropertyChanged(nameof(ShowAvatarFolderGlyph));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether the tile shows the repo's own picture.
+    /// </summary>
+    public bool HasRepoImage => _repoImage is not null;
+
+    /// <summary>
+    ///     Gets a value indicating whether the tile shows the generated initials: the repo has no
+    ///     picture and its name has initials.
+    /// </summary>
+    public bool ShowAvatarInitials => !HasRepoImage && HasAvatarInitials;
+
+    /// <summary>
+    ///     Gets a value indicating whether the tile shows the folder glyph: the repo has no picture
+    ///     and its name has no letter or digit to make initials from.
+    /// </summary>
+    public bool ShowAvatarFolderGlyph => !HasRepoImage && !HasAvatarInitials;
+
+    /// <summary>
+    ///     Gets the task of the most recent picture refresh, so a caller (a test) can wait for it.
+    ///     Completes without throwing: every failure means "no picture".
+    /// </summary>
+    internal Task RepoImageRefreshTask { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    ///     Looks for the repo's picture and decodes it on a worker thread, then publishes it (or
+    ///     its absence) to <see cref="RepoImage"/>.
+    /// </summary>
+    /// <remarks>
+    ///     A file already decoded (same path, last-write time and size) is not decoded again, so
+    ///     repeated refreshes cost one folder listing. A decode that failed is remembered the same
+    ///     way, so an unusable file is not retried until it changes. The publish step runs on the
+    ///     caller's context (the UI thread in the application), after the work on the pool.
+    /// </remarks>
+    /// <returns>A task that completes when the picture state is current.</returns>
+    private async Task RefreshRepoImageAsync()
+    {
+        try
+        {
+            await LoadRepoImageAsync();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+                                       or ArgumentException or NotSupportedException)
+        {
+            // Whatever went wrong with a repo's picture file, the card just keeps its generated tile
+            _loadedImageFile = null;
+            RepoImage = null;
+        }
+    }
+
+    /// <summary>
+    ///     The body of <see cref="RefreshRepoImageAsync"/>, which only adds the "any failure means
+    ///     no picture" guard around it.
+    /// </summary>
+    /// <returns>A task that completes when the picture state is current.</returns>
+    private async Task LoadRepoImageAsync()
+    {
+        var generation = ++_imageGeneration;
+        var previous = _loadedImageFile;
+        var path = RepoPath;
+
+        // Off the UI thread: the folder listing, the file read and the decode
+        var (file, bitmap, decoded) = await Task.Run(() =>
+        {
+            var found = RepoImageLocator.Find(path);
+            return found is { } candidate && candidate != previous
+                ? (found, _decodeImage(candidate), true)
+                : (found, null, false);
+        }, CancellationToken.None);
+
+        // A newer refresh started meanwhile: let it have the last word
+        if (generation != _imageGeneration)
+        {
+            return;
+        }
+
+        // Same file as before: nothing to do; no file at all: back to the generated tile
+        if (!decoded)
+        {
+            if (file is null)
+            {
+                _loadedImageFile = null;
+                RepoImage = null;
+            }
+
+            return;
+        }
+
+        _loadedImageFile = file;
+        RepoImage = bitmap;
+    }
+
+    /// <summary>
+    ///     Gets the index (0 up to <see cref="AvatarPaletteSize"/> - 1) of this repo's avatar color,
+    ///     derived from a stable hash of the repo path so the same repo always has the same color
+    ///     in every session and on every machine.
+    /// </summary>
+    public int AvatarColorIndex => GetAvatarColorIndex(RepoPath);
+
+    /// <summary>
+    ///     Gets the style class (<c>avatar0</c>, <c>avatar1</c>, ...) that selects this repo's avatar
+    ///     colors from the theme-aware palette resources, so no color value lives in the view model
+    ///     or the card template.
+    /// </summary>
+    public string AvatarStyleClass => $"avatar{AvatarColorIndex}";
+
+    /// <summary>
+    ///     Derives the avatar's initials from a repo name.
+    /// </summary>
+    /// <param name="repoName">The repo's folder name; may be empty.</param>
+    /// <returns>One or two upper-case letters or digits; an empty string when
+    ///     <paramref name="repoName"/> has none.</returns>
+    internal static string GetAvatarInitials(string repoName)
+    {
+        // Split into the runs of letters and digits (so '-', '_', '.' and spaces all separate
+        // words), then take the first text element of up to two words
+        var words = SplitOnNonAlphanumeric(repoName).Take(2);
+        return string.Concat(words.Select(word => StringInfo.GetNextTextElement(word))).ToUpperInvariant();
+    }
+
+    /// <summary>
+    ///     Splits text into the runs of letters and digits it contains.
+    /// </summary>
+    /// <param name="text">The text to split.</param>
+    /// <returns>The non-empty runs of letters and digits, in order.</returns>
+    private static IEnumerable<string> SplitOnNonAlphanumeric(string text)
+    {
+        var start = -1;
+        for (var i = 0; i <= text.Length; i++)
+        {
+            var isNameChar = i < text.Length && char.IsLetterOrDigit(text[i]);
+            if (isNameChar && start < 0)
+            {
+                start = i;
+            }
+            else if (!isNameChar && start >= 0)
+            {
+                yield return text[start..i];
+                start = -1;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Maps a repo path to an avatar palette index with a deterministic 32-bit FNV-1a hash.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="string.GetHashCode()"/> is deliberately not used: it is randomized per process,
+    ///     which would give a repo a different color on every launch. The path is compared
+    ///     without regard to case and trailing separators, as Windows paths are, so the same
+    ///     folder never changes color because of how it was typed.
+    /// </remarks>
+    /// <param name="repoPath">The repo path (or any name); may be empty.</param>
+    /// <returns>An index from 0 up to <see cref="AvatarPaletteSize"/> - 1.</returns>
+    internal static int GetAvatarColorIndex(string repoPath)
+    {
+        const uint offsetBasis = 2166136261;
+        const uint prime = 16777619;
+
+        var normalized = repoPath
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .ToUpperInvariant();
+        var hash = offsetBasis;
+        foreach (var character in normalized)
+        {
+            hash = (hash ^ character) * prime;
+        }
+
+        return (int)(hash % AvatarPaletteSize);
+    }
 
     /// <summary>
     ///     Gets a value indicating whether this repo has never had an agent package pinned (its
@@ -667,7 +997,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public bool IsCheckingUpgrade
     {
         get => _isCheckingUpgrade;
-        private set => SetField(ref _isCheckingUpgrade, value);
+        private set
+        {
+            if (SetField(ref _isCheckingUpgrade, value))
+            {
+                RaiseStatusChanged();
+            }
+        }
     }
 
     /// <summary>
@@ -777,6 +1113,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(UpgradeTooltip));
         OnPropertyChanged(nameof(LaunchButtonText));
         OnPropertyChanged(nameof(LaunchTooltip));
+        RaiseStatusChanged();
+    }
+
+    /// <summary>
+    ///     Raises the change notifications for the card's overall status after any fact it
+    ///     is derived from changed.
+    /// </summary>
+    private void RaiseStatusChanged()
+    {
+        OnPropertyChanged(nameof(Status));
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(StatusTooltip));
+        OnPropertyChanged(nameof(HasAgentFileActions));
     }
 
     /// <summary>
@@ -1090,6 +1439,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
             GitStatusChecked = false;
             GitStatusUnavailable = false;
             RaisePackageChipChanged();
+
+            // A folder that does not exist has no picture: no lookup, just the generated tile
+            _imageGeneration++;
+            _loadedImageFile = null;
+            RepoImage = null;
             return;
         }
 
@@ -1097,6 +1451,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RefreshBranchAndCommittedFiles();
         EvaluatePinnedSource();
         RaisePackageChipChanged();
+
+        // The picture is looked for in the background, so the UI never waits for the disk or the
+        // decoder; the tile shows the generated initials until (and unless) it arrives
+        RepoImageRefreshTask = RefreshRepoImageAsync();
     }
 
     /// <summary>
@@ -1383,6 +1741,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             StatusMessage = result.Succeeded
                 ? "Pull succeeded."
                 : $"Pull failed: {result.StandardError.Trim()}";
+            LastActionFailed = !result.Succeeded;
 
             if (result.Succeeded)
             {
@@ -2237,6 +2596,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return;
         }
 
+        // A new operation starts from a clean slate: the previous failure (if any) no longer
+        // describes the card once the user tries again
+        LastActionFailed = false;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _operationCancellation = cancellation;
         BusyMessage = busyMessage;

@@ -96,3 +96,18 @@ sections:
           a crash or full disk during a save must not leave it truncated.
         tests:
           - SettingsStore_Save_RepeatedSaves_LeavesOnlySettingsFileWithLatestContent
+
+      - id: AgentControl-SettingsStore-Theme
+        title: >-
+          The SettingsStore class shall persist the user's theme choice (system default, light or
+          dark) by name, shall read a settings file without the value as the system default, and
+          shall read an unknown or invalid value as the system default instead of failing the
+          load.
+        justification: |
+          Existing settings files have no theme value and must keep following the operating
+          system; a mistyped or future value in the file must never keep the application from
+          starting.
+        tests:
+          - SettingsStore_Load_NoThemeValue_DefaultsToSystem
+          - SettingsStore_SaveThenLoad_Theme_RoundTripsByName
+          - SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem

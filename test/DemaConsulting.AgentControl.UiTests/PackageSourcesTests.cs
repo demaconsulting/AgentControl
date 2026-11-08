@@ -57,7 +57,7 @@ public sealed class PackageSourcesTests
 
             // Act: open Settings and the Add Zip-Package Folder dialog
             var settingsWindow = OpenSettings(context, mainWindow);
-            Find(settingsWindow, "AddZipSourceButton").AsButton().Invoke();
+            AgentControlTestContext.InvokeAddSourceMenuItem(settingsWindow, "AddZipSourceButton");
             var editor = context.WaitForWindowWithDescendant("SourceAliasTextBox", TimeSpan.FromSeconds(15));
             Assert.NotNull(editor);
 
@@ -114,7 +114,7 @@ public sealed class PackageSourcesTests
 
             // Act: open the Add NuGet-Package Folder dialog and fill in alias and folder only
             var settingsWindow = OpenSettings(context, mainWindow);
-            Find(settingsWindow, "AddNuGetFolderSourceButton").AsButton().Invoke();
+            AgentControlTestContext.InvokeAddSourceMenuItem(settingsWindow, "AddNuGetFolderSourceButton");
             var editor = context.WaitForWindowWithDescendant("SourcePackageIdTextBox", TimeSpan.FromSeconds(15));
             Assert.NotNull(editor);
             Find(editor, "SourceAliasTextBox").AsTextBox().Text = "Feed";
@@ -273,10 +273,15 @@ public sealed class PackageSourcesTests
             Assert.True(WaitForText(mainWindow, "UpgradeChipText", "1.1.0"));
             Assert.Null(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("NoPackageChip")));
 
-            // Assert: the buttons carry their labels (the arg-logger stub's name is too long to
-            // spell out in the Launch label)
+            // Assert: the Launch button carries its label (the arg-logger stub's name is too long to
+            // spell out in the Launch label) and Git Pull is in the card's "..." menu
             Assert.True(WaitForText(mainWindow, "LaunchButtonText", "Launch"));
-            Assert.NotNull(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("PullButton")));
+            Assert.Null(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("PullButton")));
+            mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MoreActionsButton"))!.AsButton().Invoke();
+            Assert.NotNull(Retry.WhileNull(
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("PullButton")),
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200)).Result);
         }
         finally
         {
@@ -293,7 +298,7 @@ public sealed class PackageSourcesTests
     private static Window OpenSettings(AgentControlTestContext context, Window mainWindow)
     {
         Find(mainWindow, "OpenSettingsButton").AsButton().Invoke();
-        var settingsWindow = context.WaitForWindowWithDescendant("AddZipSourceButton", TimeSpan.FromSeconds(15));
+        var settingsWindow = context.WaitForWindowWithDescendant("AddSourceButton", TimeSpan.FromSeconds(15));
         Assert.NotNull(settingsWindow);
         return settingsWindow;
     }

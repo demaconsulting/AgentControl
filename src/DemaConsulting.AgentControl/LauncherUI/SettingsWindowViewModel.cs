@@ -115,6 +115,11 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     private string? _shellPreference;
 
     /// <summary>
+    ///     Backing field for <see cref="Theme"/>.
+    /// </summary>
+    private ThemePreference _theme;
+
+    /// <summary>
     ///     Backing field for <see cref="ErrorMessage"/>.
     /// </summary>
     private string? _errorMessage;
@@ -157,6 +162,7 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
         _agentTool = initial.AgentTool;
         _customAgentCommand = initial.CustomAgentCommand;
         _shellPreference = initial.ShellPreference;
+        _theme = initial.Theme;
         _onSave = onSave;
 
         Sources = [];
@@ -185,6 +191,17 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
         AgentToolKind.Cursor,
         AgentToolKind.ClaudeCode,
         AgentToolKind.Custom
+    ];
+
+    /// <summary>
+    ///     Gets the appearance choices offered by the picker: follow the system first (the
+    ///     default), then light and dark.
+    /// </summary>
+    public static IReadOnlyList<ThemePreference> AvailableThemes { get; } =
+    [
+        ThemePreference.System,
+        ThemePreference.Light,
+        ThemePreference.Dark
     ];
 
     /// <summary>
@@ -308,6 +325,16 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     {
         get => _shellPreference;
         set => SetField(ref _shellPreference, value);
+    }
+
+    /// <summary>
+    ///     Gets or sets the color theme: follow the system (the default), light or dark. Takes
+    ///     effect when the settings are saved.
+    /// </summary>
+    public ThemePreference Theme
+    {
+        get => _theme;
+        set => SetField(ref _theme, value);
     }
 
     /// <summary>
@@ -490,7 +517,8 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
             GitExecutablePath = GitExecutablePath,
             AgentTool = AgentTool,
             CustomAgentCommand = CustomAgentCommand,
-            ShellPreference = ShellPreference
+            ShellPreference = ShellPreference,
+            Theme = Theme
         };
 
         var problem = sources.Select(source => source.GetCredentialProblem()).FirstOrDefault(p => p is not null);

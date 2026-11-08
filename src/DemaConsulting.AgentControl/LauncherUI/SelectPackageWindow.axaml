@@ -16,7 +16,7 @@
     <Window.Styles>
         <!-- A source that could not be read is shown in red, like an inline error -->
         <Style Selector="TextBlock.sourceFailed">
-            <Setter Property="Foreground" Value="#E5534B" />
+            <Setter Property="Foreground" Value="{DynamicResource ErrorForeground}" />
         </Style>
     </Window.Styles>
     <Grid Margin="16" RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="8">

@@ -114,12 +114,12 @@ public sealed class LaunchAndPullTests
     }
 
     /// <summary>
-    ///     Clicking "Pull" on a repo card with a clean git status (as reported by the arg-logger
-    ///     stub substituted for git) must invoke the configured git executable with pull-like
-    ///     arguments.
+    ///     Choosing "Git Pull" in a repo card's "..." menu, on a repo with a clean git status (as
+    ///     reported by the arg-logger stub substituted for git), must invoke the configured git
+    ///     executable with pull-like arguments.
     /// </summary>
     [Fact]
-    public void PullButton_Click_InvokesConfiguredGitExecutableWithPullArgument()
+    public void PullMenuItem_Click_InvokesConfiguredGitExecutableWithPullArgument()
     {
         if (!System.OperatingSystem.IsWindows())
         {
@@ -130,26 +130,29 @@ public sealed class LaunchAndPullTests
         using var context = new AgentControlTestContext();
         var mainWindow = context.Launch();
 
-        // The "Pull" button is always rendered, but only becomes enabled once
-        // RefreshGitStatus() has run "git status --porcelain" (via the arg-logger stub, which
-        // always exits 0 with no output - i.e. a clean working tree) during startup; wait for it
-        // to appear and become enabled before clicking.
-        var pullButtonElement = Retry.WhileNull(
-            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("PullButton")),
+        // Open the card's "..." menu: Git Pull is its first item. The item is always there, but
+        // only becomes enabled once RefreshGitStatus() has run "git status --porcelain" (via the
+        // arg-logger stub, which always exits 0 with no output - i.e. a clean working tree)
+        // during startup; wait for it to become enabled before choosing it.
+        var moreActionsButton = Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MoreActionsButton"))?.AsButton(),
             timeout: TimeSpan.FromSeconds(10),
             interval: TimeSpan.FromMilliseconds(200)).Result;
-        Assert.NotNull(pullButtonElement);
+        Assert.NotNull(moreActionsButton);
+        moreActionsButton.Invoke();
 
-        var pullButton = pullButtonElement.AsButton();
-        Retry.WhileFalse(
-            () => pullButton.IsEnabled,
+        var pullMenuItem = Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("PullButton"))?.AsMenuItem(),
             timeout: TimeSpan.FromSeconds(10),
-            interval: TimeSpan.FromMilliseconds(200));
-
-        Assert.NotNull(pullButton);
+            interval: TimeSpan.FromMilliseconds(200)).Result;
+        Assert.NotNull(pullMenuItem);
+        Assert.True(Retry.WhileFalse(
+            () => pullMenuItem.IsEnabled,
+            timeout: TimeSpan.FromSeconds(10),
+            interval: TimeSpan.FromMilliseconds(200)).Result);
 
         // Act
-        pullButton.Invoke();
+        pullMenuItem.Invoke();
 
         // Assert: a later "pull" invocation was recorded, distinct from the earlier "status
         // --porcelain" status check(s) also recorded against the arg-logger stub.

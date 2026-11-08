@@ -41,6 +41,66 @@ namespace DemaConsulting.AgentControl.UiTests;
 public sealed class UpgradeTests
 {
     /// <summary>
+    ///     Clicking the "Upgrade to x.y.z" chip itself (not the card menu) starts the same upgrade
+    ///     flow: the managed folders are synced and the release notes window opens.
+    /// </summary>
+    [Fact]
+    public void UpgradeChip_Click_SyncsManagedFoldersAndShowsReleaseNotes()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        const string packageName = "contoso-agents";
+        var sourceDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-source-" + Guid.NewGuid());
+
+        try
+        {
+            FixturePackageBuilder.Create(sourceDirectory, packageName, "1.0.0", "# v1.0.0\n");
+            FixturePackageBuilder.Create(sourceDirectory, packageName, "1.1.0", "# v1.1.0\n\nNew things.\n");
+
+            using var context = new AgentControlTestContext(
+                packageSourcePath: sourceDirectory,
+                pinnedPackageName: packageName,
+                pinnedPackageVersion: "1.0.0");
+            var mainWindow = context.Launch();
+
+            // The chip is a button (invocable through UI Automation) that appears once the
+            // background check has found the newer version
+            var chip = Retry.WhileNull(
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeAvailableBadge"))?.AsButton(),
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200)).Result;
+            Assert.NotNull(chip);
+            Assert.True(chip.IsEnabled);
+
+            // Act: click the chip
+            chip.Invoke();
+
+            // Assert: the same flow as the menu's Upgrade item - release notes, synced folders
+            var releaseNotesWindow = context.WaitForWindow(
+                title => title.StartsWith("Release Notes", StringComparison.Ordinal),
+                TimeSpan.FromSeconds(15));
+            Assert.NotNull(releaseNotesWindow);
+            Assert.True(File.Exists(Path.Combine(context.RepoPath, ".github", "agents", "test.md")));
+            Assert.True(File.Exists(Path.Combine(context.RepoPath, ".github", "skills", "test.md")));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(sourceDirectory, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup only.
+            }
+        }
+    }
+
+    /// <summary>
     ///     Clicking "Upgrade" on a repo card with a newer package version available performs the
     ///     blind-delete-and-replace sync and opens a non-modal release-notes window.
     /// </summary>

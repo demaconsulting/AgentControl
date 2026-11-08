@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 
@@ -172,6 +173,75 @@ internal sealed class AppSettings
     ///     this settings model needing to enumerate every possible shell.
     /// </remarks>
     public string? ShellPreference { get; set; }
+
+    /// <summary>
+    ///     Gets or sets the color theme the user chose; <see cref="ThemePreference.System"/> (follow
+    ///     the operating system) by default.
+    /// </summary>
+    /// <remarks>
+    ///     Persisted as the member's name. A settings file without the value (written by an older
+    ///     version), or with one this version does not know (a typo, or a value from a newer
+    ///     version), reads as <see cref="ThemePreference.System"/> instead of failing the load, so
+    ///     the appearance can never keep the application from starting.
+    /// </remarks>
+    [JsonConverter(typeof(ThemePreferenceJsonConverter))]
+    public ThemePreference Theme { get; set; } = ThemePreference.System;
+
+    /// <summary>
+    ///     Reads and writes <see cref="ThemePreference"/> by name and falls back to
+    ///     <see cref="ThemePreference.System"/> for anything it does not recognize.
+    /// </summary>
+    /// <remarks>
+    ///     A custom converter is needed because the built-in enum handling throws on an unknown
+    ///     name, which <see cref="SettingsStore.Load"/> would report as a corrupt settings file.
+    ///     Stateless and thread-safe.
+    /// </remarks>
+    private sealed class ThemePreferenceJsonConverter : JsonConverter<ThemePreference>
+    {
+        /// <inheritdoc />
+        public override bool HandleNull => true;
+
+        /// <summary>
+        ///     Reads a theme preference from a JSON string (a member name, case-insensitive) or
+        ///     number (a member's value).
+        /// </summary>
+        /// <param name="reader">The reader positioned on the value.</param>
+        /// <param name="typeToConvert">The target type (unused).</param>
+        /// <param name="options">The serializer options (unused).</param>
+        /// <returns>The preference the JSON names, or <see cref="ThemePreference.System"/> when
+        ///     the value is not a known member (including null, booleans, objects and arrays).</returns>
+        public override ThemePreference Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.String
+                    when Enum.TryParse<ThemePreference>(reader.GetString(), ignoreCase: true, out var named)
+                         && Enum.IsDefined(named):
+                    return named;
+
+                case JsonTokenType.Number
+                    when reader.TryGetInt32(out var number) && Enum.IsDefined(typeof(ThemePreference), number):
+                    return (ThemePreference)number;
+
+                case JsonTokenType.StartObject or JsonTokenType.StartArray:
+                    // Consume the whole nested value so the reader stays positioned correctly
+                    reader.Skip();
+                    return ThemePreference.System;
+
+                default:
+                    return ThemePreference.System;
+            }
+        }
+
+        /// <summary>
+        ///     Writes a theme preference as its member name.
+        /// </summary>
+        /// <param name="writer">The writer.</param>
+        /// <param name="value">The preference to write.</param>
+        /// <param name="options">The serializer options (unused).</param>
+        public override void Write(Utf8JsonWriter writer, ThemePreference value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(value.ToString());
+    }
 
     /// <summary>
     ///     Gets or sets the recent-repos list, most-recently-used first.

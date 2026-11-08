@@ -16,10 +16,10 @@
         WindowStartupLocation="CenterOwner">
     <Window.Styles>
         <Style Selector="materialIcons|MaterialIcon.testOk">
-            <Setter Property="Foreground" Value="#2EA043" />
+            <Setter Property="Foreground" Value="{DynamicResource SuccessForeground}" />
         </Style>
         <Style Selector="materialIcons|MaterialIcon.testFail">
-            <Setter Property="Foreground" Value="#E5534B" />
+            <Setter Property="Foreground" Value="{DynamicResource ErrorForeground}" />
         </Style>
 
         <!-- The form is a stack of sections (Source, Packages, Sign-in, Package signatures,
@@ -32,7 +32,7 @@
         </Style>
         <Style Selector="Border.sectionRule">
             <Setter Property="Height" Value="1" />
-            <Setter Property="Background" Value="Gray" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceDivider}" />
             <Setter Property="Opacity" Value="0.4" />
             <Setter Property="Margin" Value="0,12,0,2" />
         </Style>
@@ -68,7 +68,7 @@
                     AutomationProperties.AutomationId="SourceAliasErrorText"
                     IsVisible="{Binding AliasError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                     Text="{Binding AliasError}"
-                    Foreground="Red" FontSize="12" TextWrapping="Wrap" />
+                    Foreground="{DynamicResource ErrorForeground}" FontSize="12" TextWrapping="Wrap" />
 
         <TextBlock Name="SourceLocationLabel"
                     AutomationProperties.AutomationId="SourceLocationLabel"
@@ -101,7 +101,7 @@
                     AutomationProperties.AutomationId="SourceLocationErrorText"
                     IsVisible="{Binding LocationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                     Text="{Binding LocationError}"
-                    Foreground="Red" FontSize="12" TextWrapping="Wrap" />
+                    Foreground="{DynamicResource ErrorForeground}" FontSize="12" TextWrapping="Wrap" />
 
         <!-- Plain http: off unless the user insists, with a warning while it is on -->
         <StackPanel IsVisible="{Binding IsServer}" Spacing="4">
@@ -114,7 +114,7 @@
                         AutomationProperties.AutomationId="SourceInsecureHttpWarningText"
                         IsVisible="{Binding ShowInsecureWarning}"
                         Text="Warning: with plain http, the user name and password you type are sent unencrypted. Only use this on a network you trust."
-                        Foreground="#D29922" FontSize="12" TextWrapping="Wrap" />
+                        Foreground="{DynamicResource WarningForeground}" FontSize="12" TextWrapping="Wrap" />
         </StackPanel>
 
         <!-- Section: Packages (NuGet sources). A NuGet source lists the packages it offers. -->
@@ -151,14 +151,14 @@
                         AutomationProperties.AutomationId="SourceNewPackageIdErrorText"
                         IsVisible="{Binding NewPackageIdError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                         Text="{Binding NewPackageIdError}"
-                        Foreground="Red" FontSize="12" TextWrapping="Wrap" />
+                        Foreground="{DynamicResource ErrorForeground}" FontSize="12" TextWrapping="Wrap" />
             <Grid ColumnDefinitions="*,Auto">
                 <ListBox Grid.Column="0"
                           Name="SourcePackageIdList"
                           AutomationProperties.AutomationId="SourcePackageIdList"
                           ItemsSource="{Binding PackageIds}"
                           SelectedItem="{Binding SelectedPackageId, Mode=TwoWay}"
-                          BorderBrush="Gray" BorderThickness="1" CornerRadius="4"
+                          BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="1" CornerRadius="4"
                           MinHeight="60" MaxHeight="120"
                           Margin="0,0,8,0" />
                 <Button Grid.Column="1"
@@ -174,7 +174,7 @@
                         AutomationProperties.AutomationId="SourcePackageIdsErrorText"
                         IsVisible="{Binding PackageIdsError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                         Text="{Binding PackageIdsError}"
-                        Foreground="Red" FontSize="12" TextWrapping="Wrap" />
+                        Foreground="{DynamicResource ErrorForeground}" FontSize="12" TextWrapping="Wrap" />
         </StackPanel>
 
         <!-- Section: Sign-in (servers only). AgentControl asks when the server needs it; this is where
@@ -242,7 +242,7 @@
                         AutomationProperties.AutomationId="SourceFingerprintErrorText"
                         IsVisible="{Binding FingerprintError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                         Text="{Binding FingerprintError}"
-                        Foreground="Red" FontSize="12" TextWrapping="Wrap" />
+                        Foreground="{DynamicResource ErrorForeground}" FontSize="12" TextWrapping="Wrap" />
         </StackPanel>
 
         <!-- Section: Connection test (servers only): try the address before saving. Shows progress with
@@ -286,7 +286,7 @@
             <Border Name="SourceTestResultPanel"
                      AutomationProperties.AutomationId="SourceTestResultPanel"
                      IsVisible="{Binding HasTestResult}"
-                     BorderThickness="1" BorderBrush="Gray" CornerRadius="4" Padding="10,8">
+                     BorderThickness="1" BorderBrush="{DynamicResource SurfaceBorder}" CornerRadius="4" Padding="10,8">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <materialIcons:MaterialIcon Kind="CheckCircleOutline" Width="22" Height="22"
                                                   VerticalAlignment="Top" Classes="testOk"

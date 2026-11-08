@@ -9,7 +9,8 @@ test substitutes a stub script for the git executable (via `GitStub`, mirroring
 pin-file checks, so these tests never depend on a real git installation, a real repository,
 or a real package source. The server-source tests start the in-process `MockNuGetFeed` (Kestrel, plain HTTP on
 a fresh loopback port, optionally requiring a Basic sign-in) and a `FakeCredentialPrompt`, with the NuGet HTTP
-cache isolated per test process (`HttpCacheIsolation`). No Avalonia `Window` is ever constructed; only the
+cache isolated per test process (`HttpCacheIsolation`). Apart from the picture tests, which show a card in a
+headless Avalonia window (and decode small generated PNG files), no Avalonia `Window` is constructed; only the
 view-model class itself is under test.
 
 #### Test Environment
@@ -316,3 +317,50 @@ the shield and its tooltip. This scenario is tested by
 `RepoCardViewModel_NoSignatureRequirement_ShowsNoShield` and
 `RepoCardViewModel_SourceRequirementChanges_RaisesChangeNotificationsForTheShield`, in
 `RepoCardSignatureTests.cs`, covering `AgentControl-RepoCardViewModel-SignatureIndicator`.
+
+**RepoCardViewModel_StatusAccent_StatusFollowsStateAndHasWordsAndReason**: Cards that are pinned and current,
+pinned with a newer version available, and not pinned report `UpToDate` ("Up to date"), `UpgradeAvailable`
+("Upgrade available", the tooltip naming both versions) and `NoPackage` ("No agent package"); a missing folder
+and a pin naming an unconfigured source report `Problem` ("Needs attention") with the reason in the tooltip; a
+git pull that git refuses, or an error the card reports to the user, makes the status a problem, and the next
+operation (a refresh) clears it again. This scenario is tested by
+`RepoCardViewModel_Status_ReflectsPackageAndUpgradeState`,
+`RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason`,
+`RepoCardViewModel_Status_FailedPull_IsProblemUntilNextOperation` and
+`RepoCardViewModel_Status_ErrorReported_IsProblem`, covering `AgentControl-RepoCardViewModel-StatusAccent`.
+
+**RepoCardViewModel_UpgradeFromChip_OneGuardedCommandForChipAndMenu**: The upgrade chip shows the target version
+with a tooltip that says it upgrades the agent files to it; the chip and the menu's Upgrade item are bound to the
+same command, which can run while an upgrade is available and is disabled while the card is busy with another
+operation, and which performs the upgrade (pin, release notes) when run. The click on the real chip is also
+exercised end to end by `windows@UpgradeChip_Click_SyncsManagedFoldersAndShowsReleaseNotes`. This scenario is
+tested by `RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions`,
+`RepoCardViewModel_UpgradeCommand_ChipAndMenuShareOneGuardedCommand` and
+`RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesPinAndRaisesReleaseNotesReady`, covering
+`AgentControl-RepoCardViewModel-UpgradeFromChip`.
+
+**RepoCardViewModel_AvatarTile_InitialsStableColorAndFolderFallback**: Repo names give the capital letters of
+their first two words (or one letter, or none for a name without letters or digits, which falls back to the
+folder glyph); the color index is a fixed value for a fixed path (pinning the hash function), is the same
+whatever the case of the path or a trailing separator, always lies in the palette and uses several colors across
+many paths. This scenario is tested by `RepoCardViewModel_AvatarInitials_RepoName_UsesFirstLettersOfFirstTwoWords`,
+`RepoCardViewModel_Avatar_EmptyName_FallsBackToFolderGlyph` and
+`RepoCardViewModel_AvatarColorIndex_SamePath_IsStableAndInPalette`, covering
+`AgentControl-RepoCardViewModel-AvatarTile`.
+
+**RepoCardViewModel_RepoPicture_OnlySafeRootPngIsShownAndLoadedOnce**: Small PNG files generated in the tests
+(`TestPng`, no binary assets) show that `icon.png` is preferred to `logo.png`, names are matched in any letter
+case, a file without the PNG signature (a renamed text or JPEG file), an empty file, a file over the 1 MB cap
+(while one exactly at the cap is accepted) and a file declaring absurd dimensions are refused (falling through
+to `logo.png` where there is one), pictures in folders below the root and a folder named `icon.png` are ignored, a symbolic
+link is refused (the test is skipped on an account that may not create one, like the repo's other link tests), a
+missing folder has no picture, and the found file's identity changes when the file changes. Decoding (headless
+Avalonia) scales a large logo down to the tile width keeping its aspect ratio and returns no bitmap, without
+throwing, for a corrupt, vanished or replaced file. The view model loads a found picture in the background,
+does not decode an unchanged file again on a second refresh but does after the file changes, falls back to the
+initials when the file is removed, never looks for a picture for a missing folder, and keeps the tile - without
+retrying - when the decoder fails or throws. A headless main window shows the picture (image visible, initials
+hidden, light backing) for the repo that has one and the initials for the one that does not. This scenario is
+tested by the `RepoImageLocator_Find_*` and `RepoImageLocator_Decode_*` tests of `RepoImageLocatorTests.cs` and the
+`RepoCardViewModel_RepoImage_*` and `MainWindow_RepoCard_AvatarShowsRepoPictureWhenPresent` tests of
+`RepoCardImageTests.cs`, covering `AgentControl-RepoCardViewModel-RepoPicture`.

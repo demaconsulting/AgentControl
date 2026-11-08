@@ -407,3 +407,78 @@ sections:
           - RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip
           - RepoCardViewModel_NoSignatureRequirement_ShowsNoShield
           - RepoCardViewModel_SourceRequirementChanges_RaisesChangeNotificationsForTheShield
+
+      - id: AgentControl-RepoCardViewModel-StatusAccent
+        title: >-
+          The RepoCardViewModel class shall expose the card's overall status as one of up to
+          date (an agent package is pinned and no newer version exists), upgrade available, a
+          problem (the folder is missing, the package source has a problem or needs a sign-in, or
+          the last action failed) or no agent package, with the status in words and a tooltip that
+          gives the reason, and shall clear a failed-action problem when the next operation starts.
+        justification: |
+          The card shows its overall status as a colored bar so a long list can be scanned; the
+          status is a fact of the view model, with words, so it is never conveyed by color alone
+          and is available to assistive technology.
+        tests:
+          - RepoCardViewModel_Status_ReflectsPackageAndUpgradeState
+          - RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason
+          - RepoCardViewModel_Status_FailedPull_IsProblemUntilNextOperation
+          - RepoCardViewModel_Status_ErrorReported_IsProblem
+
+      - id: AgentControl-RepoCardViewModel-UpgradeFromChip
+        title: >-
+          The RepoCardViewModel class shall start an upgrade from one command that both the
+          upgrade chip and the card menu's Upgrade item use, available only while an upgrade is
+          available and no other operation is running, with a tooltip that says it upgrades the
+          agent files to the new version.
+        justification: |
+          The chip that announces an upgrade is also the quickest way to start it; sharing the
+          menu's command keeps the confirmations and guards identical however it is started.
+        tests:
+          - RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions
+          - RepoCardViewModel_UpgradeCommand_ChipAndMenuShareOneGuardedCommand
+          - RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesPinAndRaisesReleaseNotesReady
+
+      - id: AgentControl-RepoCardViewModel-AvatarTile
+        title: >-
+          The RepoCardViewModel class shall expose, for the card's avatar tile, the one or two
+          capital letters that start the repo name's first two words, a palette color chosen by a
+          deterministic hash of the repo path (the same repo always the same color, whatever the
+          case of the path), and no letters - so a folder glyph is shown - when the name has no
+          letter or digit.
+        justification: |
+          A recognizable, stable tile per repo makes a long list quicker to scan; a hash that is
+          not randomized per process keeps a repo's color the same in every session.
+        tests:
+          - RepoCardViewModel_AvatarInitials_RepoName_UsesFirstLettersOfFirstTwoWords
+          - RepoCardViewModel_Avatar_EmptyName_FallsBackToFolderGlyph
+          - RepoCardViewModel_AvatarColorIndex_SamePath_IsStableAndInPalette
+
+      - id: AgentControl-RepoCardViewModel-RepoPicture
+        title: >-
+          The RepoCardViewModel class shall, in the background, look in the repo's root folder
+          only for icon.png and then logo.png (names matched without regard to case), and expose
+          the picture, scaled down to the tile size, in place of the generated tile when the file
+          is a regular file (not a link) of at most 1 MB that starts with the PNG signature and
+          declares sane dimensions; for a missing folder, an unacceptable or undecodable file it
+          shall expose no picture, and it shall not decode an unchanged file again.
+        justification: |
+          A repository that ships its own icon or logo is recognizable at a glance; because the
+          repository may be untrusted, only a small, genuine PNG that is a plain file in the root
+          is read, the decode is bounded and any failure silently keeps the generated tile.
+        tests:
+          - RepoImageLocator_Find_IconAndLogoPresent_ReturnsIcon
+          - RepoImageLocator_Find_OnlyLogoPresent_ReturnsLogo
+          - RepoImageLocator_Find_NameInOtherCase_IsFound
+          - RepoImageLocator_Find_IconWithoutPngSignature_IsRefusedAndLogoUsed
+          - RepoImageLocator_Find_OnlyNonPngCandidates_ReturnsNull
+          - RepoImageLocator_Find_FileOverSizeCap_IsRefused
+          - RepoImageLocator_Find_AbsurdDeclaredDimensions_IsRefused
+          - RepoImageLocator_Find_SubfolderImageAndFolderNamedIcon_AreIgnored
+          - RepoImageLocator_Find_SymbolicLinkIcon_IsRefused
+          - RepoImageLocator_Decode_ValidLargePng_IsScaledDownToTileWidth
+          - RepoImageLocator_Decode_CorruptVanishedOrReplacedFile_ReturnsNull
+          - RepoCardViewModel_RepoImage_IconPresent_LoadsOnceUntilFileChanges
+          - RepoCardViewModel_RepoImage_FileRemoved_FallsBackToInitials
+          - RepoCardViewModel_RepoImage_MissingFolder_NeverLooksForAnImage
+          - RepoCardViewModel_RepoImage_DecodeFailsOrThrows_KeepsTileAndDoesNotRetry

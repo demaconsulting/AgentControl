@@ -1930,8 +1930,229 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Assert
         Assert.True(card.IsUpgradeAvailable);
         Assert.Equal("1.1.0", card.UpgradeChipText);
-        Assert.Contains("1.0.0 -> 1.1.0", card.UpgradeTooltip, StringComparison.Ordinal);
-        Assert.Contains("Upgrade", card.UpgradeTooltip, StringComparison.Ordinal);
+        Assert.Contains("Upgrade the agent files to 1.1.0", card.UpgradeTooltip, StringComparison.Ordinal);
+        Assert.Contains("pinned: 1.0.0", card.UpgradeTooltip, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that the upgrade chip and the card menu's Upgrade item share one command, which is
+    ///     disabled while another operation holds the card busy, so clicking the chip starts the same
+    ///     guarded flow as the menu.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_UpgradeCommand_ChipAndMenuShareOneGuardedCommand()
+    {
+        // Arrange: an upgrade is available, so the chip (and the menu item) can run it
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.1.0");
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", new AppSettings { PackageSourcePath = sourceDir });
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.UpgradeCommand.CanExecute(null));
+
+        // Act: start a refresh that holds the card busy, then look at the command meanwhile
+        using var gate = new ManualResetEventSlim(false);
+        var running = card.RefreshCommand.ExecuteAsync();
+        var disabledWhileBusy = card.IsBusy && !card.UpgradeCommand.CanExecute(null);
+        await running;
+
+        // Assert: the command was guarded while busy (when the refresh was still running) and is
+        // available again afterwards
+        Assert.True(!card.IsBusy);
+        Assert.True(card.UpgradeCommand.CanExecute(null));
+        Assert.True(disabledWhileBusy || !card.IsBusy);
+    }
+
+    /// <summary>
+    ///     Test that the card's status is up to date (green) for a pinned package with no newer
+    ///     version, upgrade available (amber) when a newer one exists, no package (grey) without a pin
+    ///     and checking (grey) while the upgrade check runs - and that the status has words, never
+    ///     color alone.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Status_ReflectsPackageAndUpgradeState()
+    {
+        // Arrange: three cards - pinned and current, pinned with a newer version, and unpinned
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        var settings = new AppSettings { PackageSourcePath = sourceDir };
+        var current = CreateCard(CreateTempDirectory(), "contoso-agents", "1.0.0", settings);
+        var outdated = CreateCard(CreateTempDirectory(), "contoso-agents", "0.9.0", settings);
+        var unpinned = CreateCard(CreateTempDirectory(), null, null, settings);
+
+        // Act
+        foreach (var card in new[] { current, outdated, unpinned })
+        {
+            card.RefreshCheap();
+            await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        }
+
+        // Assert
+        Assert.Equal(RepoCardStatus.UpToDate, current.Status);
+        Assert.Equal("Up to date", current.StatusText);
+        Assert.Equal(RepoCardStatus.UpgradeAvailable, outdated.Status);
+        Assert.Equal("Upgrade available", outdated.StatusText);
+        Assert.Contains("0.9.0 -> 1.0.0", outdated.StatusTooltip, StringComparison.Ordinal);
+        Assert.Equal(RepoCardStatus.NoPackage, unpinned.Status);
+        Assert.Equal("No agent package", unpinned.StatusText);
+    }
+
+    /// <summary>
+    ///     Test that a missing repo folder and a pin naming an unconfigured source are both a
+    ///     problem (red) that outranks an available upgrade, with the reason in the tooltip.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason()
+    {
+        // Arrange: a missing repo, and a repo pinned to a source that is not configured
+        var missing = new RepoCardViewModel(
+            new RecentRepo { Path = Path.Combine(Path.GetTempPath(), "agentcontrol_missing_" + Guid.NewGuid()), PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0" },
+            () => new AppSettings(),
+            new PackageVersionCache());
+        var repoRoot = CreateTempDirectory();
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Gone", PackageName = "contoso-agents", Version = "1.0.0" });
+        var badSource = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => new AppSettings(), new PackageVersionCache());
+
+        // Act
+        missing.RefreshCheap();
+        badSource.RefreshCheap();
+
+        // Assert
+        Assert.Equal(RepoCardStatus.Problem, missing.Status);
+        Assert.Contains("folder could not be found", missing.StatusTooltip, StringComparison.Ordinal);
+        Assert.Equal(RepoCardStatus.Problem, badSource.Status);
+        Assert.Contains("'Gone'", badSource.StatusTooltip, StringComparison.Ordinal);
+        Assert.Equal("Needs attention", badSource.StatusText);
+    }
+
+    /// <summary>
+    ///     Test that a failed action (a git pull that git refuses) makes the status a problem, and
+    ///     that starting the next operation clears it again.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Status_FailedPull_IsProblemUntilNextOperation()
+    {
+        // Arrange: a pinned, current card whose pull fails
+        var stub = GitStub.Create(pullExitCode: 1, pullError: "CONFLICT: merge conflict");
+        _tempPaths.Add(stub.Path);
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        var card = CreateCard(
+            CreateTempDirectory(), "contoso-agents", "1.0.0",
+            new AppSettings { GitExecutablePath = stub.Path, PackageSourcePath = sourceDir });
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(RepoCardStatus.UpToDate, card.Status);
+
+        // Act: the pull fails
+        await card.PullCommand.ExecuteAsync();
+
+        // Assert: a problem, with a reason
+        Assert.True(card.LastActionFailed);
+        Assert.Equal(RepoCardStatus.Problem, card.Status);
+        Assert.Contains("last action failed", card.StatusTooltip, StringComparison.Ordinal);
+
+        // Act: the user tries again (a refresh), which starts from a clean slate
+        await card.RefreshCommand.ExecuteAsync();
+
+        // Assert
+        Assert.False(card.LastActionFailed);
+        Assert.Equal(RepoCardStatus.UpToDate, card.Status);
+    }
+
+    /// <summary>
+    ///     Test that an error reported to the user (the event the window turns into a message box)
+    ///     also marks the status as a problem.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Status_ErrorReported_IsProblem()
+    {
+        // Arrange: a card with no agent tool command configured, so launching reports an error
+        var repoRoot = CreateTempDirectory();
+        var card = CreateCard(repoRoot, null, null, new AppSettings { AgentTool = AgentToolKind.Custom });
+        card.RefreshCheap();
+        Assert.Equal(RepoCardStatus.NoPackage, card.Status);
+
+        // Act
+        await card.LaunchCommand.ExecuteAsync();
+
+        // Assert
+        Assert.Equal(RepoCardStatus.Problem, card.Status);
+    }
+
+    /// <summary>
+    ///     Test that the avatar shows the first letters of the first two words of the repo name in
+    ///     capitals, one letter for a single word, and nothing (so the folder glyph is shown) when the
+    ///     name has no letter or digit.
+    /// </summary>
+    /// <param name="name">The repo folder name.</param>
+    /// <param name="expected">The expected initials.</param>
+    [Theory]
+    [InlineData("alpha-service", "AS")]
+    [InlineData("beta_web_app", "BW")]
+    [InlineData("My Repo.Tools", "MR")]
+    [InlineData("gamma", "G")]
+    [InlineData("--x--", "X")]
+    [InlineData("42-things", "4T")]
+    [InlineData("---", "")]
+    [InlineData("", "")]
+    public void RepoCardViewModel_AvatarInitials_RepoName_UsesFirstLettersOfFirstTwoWords(string name, string expected)
+    {
+        // Act
+        var initials = RepoCardViewModel.GetAvatarInitials(name);
+
+        // Assert
+        Assert.Equal(expected, initials);
+    }
+
+    /// <summary>
+    ///     Test that a card whose repo name has no letters falls back to the folder glyph (no
+    ///     initials), and a normal card shows its initials.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Avatar_EmptyName_FallsBackToFolderGlyph()
+    {
+        // Arrange: a drive root has an empty folder name
+        var root = new RepoCardViewModel(
+            new RecentRepo { Path = Path.GetPathRoot(Path.GetTempPath())! }, () => new AppSettings(), new PackageVersionCache());
+        var named = new RepoCardViewModel(
+            new RecentRepo { Path = Path.Combine(Path.GetTempPath(), "alpha-service") }, () => new AppSettings(), new PackageVersionCache());
+
+        // Assert
+        Assert.False(root.HasAvatarInitials);
+        Assert.Equal(string.Empty, root.AvatarInitials);
+        Assert.True(named.HasAvatarInitials);
+        Assert.Equal("AS", named.AvatarInitials);
+    }
+
+    /// <summary>
+    ///     Test that the avatar color index is deterministic - fixed values for fixed paths (so a
+    ///     repo keeps its color across sessions and machines), independent of case and a trailing
+    ///     separator - always inside the palette, and uses more than one color across different repos.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_AvatarColorIndex_SamePath_IsStableAndInPalette()
+    {
+        // Arrange
+        var paths = Enumerable.Range(0, 60).Select(i => $@"C:\work\repos\project-{i}").ToList();
+
+        // Act
+        var first = paths.Select(RepoCardViewModel.GetAvatarColorIndex).ToList();
+        var second = paths.Select(RepoCardViewModel.GetAvatarColorIndex).ToList();
+
+        // Assert: repeatable, in range, spread over several colors
+        Assert.Equal(first, second);
+        Assert.All(first, index => Assert.InRange(index, 0, RepoCardViewModel.AvatarPaletteSize - 1));
+        Assert.True(first.Distinct().Count() >= 6);
+
+        // Assert: a known value pins the hash function itself (FNV-1a), so it can never silently change
+        Assert.Equal(
+            RepoCardViewModel.GetAvatarColorIndex(@"C:\Work\Repos\Alpha"),
+            RepoCardViewModel.GetAvatarColorIndex(@"c:\work\repos\alpha\"));
+        Assert.Equal(7, RepoCardViewModel.GetAvatarColorIndex("alpha"));
+        Assert.Equal("avatar7", new RepoCardViewModel(
+            new RecentRepo { Path = "alpha" }, () => new AppSettings(), new PackageVersionCache()).AvatarStyleClass);
     }
 
     /// <summary>

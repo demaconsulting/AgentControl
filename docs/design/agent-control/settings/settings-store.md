@@ -39,7 +39,9 @@ path.
   yet — first run is expected, not an error (`AgentControl-SettingsStore-Load`). An explicit JSON
   `null` for the source list, the recent-repos list or a source's package IDs (which bypasses the
   property initializers) is normalized to an empty collection by `AppSettings.NormalizeNulls`
-  before migration runs, so it can never crash migration, startup or a source provider.
+  before migration runs, so it can never crash migration, startup or a source provider. A missing
+  `Theme` value loads as `ThemePreference.System`, and an unknown or invalid one does too instead of failing
+  the load (`AgentControl-SettingsStore-Theme`); `Save` writes the theme by name.
 
 **Save**: Saves `AppSettings` to a configuration directory, creating the directory if needed.
 
