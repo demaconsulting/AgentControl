@@ -59,7 +59,7 @@
                     <SolidColorBrush x:Key="ChipPackageForeground" Color="#9CCBFF" />
                     <SolidColorBrush x:Key="ChipAmberBackground" Color="#40F5A623" />
                     <SolidColorBrush x:Key="ChipAmberBackgroundHover" Color="#59F5A623" />
-                    <SolidColorBrush x:Key="ChipAmberBackgroundPressed" Color="#73F5A623" />
+                    <SolidColorBrush x:Key="ChipAmberBackgroundPressed" Color="#66F5A623" />
                     <SolidColorBrush x:Key="ChipAmberBorder" Color="#80F5A623" />
                     <SolidColorBrush x:Key="ChipAmberBorderHover" Color="#F5A623" />
                     <SolidColorBrush x:Key="ChipAmberForeground" Color="#FFD479" />

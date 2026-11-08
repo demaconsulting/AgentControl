@@ -165,23 +165,21 @@ blank, reserved, overlong or look-alike group names load without failing. This s
 `MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader`,
 `MainWindowViewModel_ToggleGroupCollapsed_KeepsHeaderAndUnchangedCardsInPlace`,
 `MainWindowViewModel_Constructor_NullAndInvalidOrganizingSettings_FallBack`,
-`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection` and the
-`RepoGroupHeaderViewModelTests.cs` tests `RepoGroupHeaderViewModel_Kind_SelectsSectionFlags`,
-`RepoGroupHeaderViewModel_Update_DescribesCountAndState`, `RepoGroupHeaderViewModel_ToString_IsTheAccessibleName`
-and `RepoGroupHeaderViewModel_Constructor_BlankName_Throws`, covering
-`AgentControl-MainWindowViewModel-GroupSections`.
+`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection`, covering
+`AgentControl-MainWindowViewModel-GroupSections`; the header rows themselves are verified by the
+`RepoGroupHeaderViewModel` unit.
 
 **MainWindowViewModel_GroupCollapse_HidesCardsAndIsRemembered**: Collapsing a group leaves its header (with
 its count) and no cards, writes the name to the settings file, and a view model built from those settings
 shows it collapsed; expanding forgets it (letter case ignored); Favorites and Ungrouped collapse the same
 way; a list of only collapsed sections still shows its headers; applying other settings keeps the collapsed
-names; and a header's toggle command is unavailable while toggling is disabled. This scenario is tested by
+names. This scenario is tested by
 `MainWindowViewModel_ToggleGroupCollapsed_HidesCardsAndPersists`,
 `MainWindowViewModel_ToggleGroupCollapsed_BuiltInSections_CollapseAndPersist`,
-`MainWindowViewModel_AllGroupsCollapsed_HeadersRemainAndListIsNotEmpty`,
-`MainWindowViewModel_ApplySettings_KeepsCollapsedGroups` and
-`RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled`, covering
-`AgentControl-MainWindowViewModel-GroupCollapse`.
+`MainWindowViewModel_AllGroupsCollapsed_HeadersRemainAndListIsNotEmpty` and
+`MainWindowViewModel_ApplySettings_KeepsCollapsedGroups`, covering
+`AgentControl-MainWindowViewModel-GroupCollapse`; the header's toggle command is verified by the
+`RepoGroupHeaderViewModel` unit.
 
 **MainWindowViewModel_GroupFilter_ShowsEveryMatchEvenInCollapsedGroups**: With a group collapsed, a filter
 shows its matching repos expanded, counts only the matches, omits the sections without one, disables the
@@ -198,22 +196,7 @@ with the group's name and change nothing by themselves; and after moving, colori
 the repository folder is still empty while the settings file holds the choices. This scenario is tested by
 `MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames`,
 `MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped`,
-`MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName`,
-`RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests` and
+`MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName` and
 `RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository`, covering
-`AgentControl-MainWindowViewModel-GroupManagement`.
-
-**GroupNameViewModel_Prompt_ValidatesWhileTypingAndCompletesOnce**: Tested by `GroupNameViewModelTests.cs`
-(no window, no temporary files). An empty prompt is neutral; a valid name is cleaned up and accepted; a blank
-name, a name over 40 characters and the built-in names show their message and cannot be accepted; creating a
-group with an existing group's name (other letter case) gives a note and adopts that spelling; renaming
-refuses another group's name but accepts a change of letter case, keeping what was typed; canceling
-completes once with no name, whatever happens afterwards; and null arguments throw. This scenario is tested by
-`GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName`,
-`GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept`,
-`GroupNameViewModel_TooLongName_ShowsLengthMessage`,
-`GroupNameViewModel_NewGroup_ExistingName_HintsAndAdoptsSpelling`,
-`GroupNameViewModel_Rename_RefusesOtherGroupsAcceptsCaseChange`,
-`GroupNameViewModel_Cancel_CompletesOnceWithNull` and
-`GroupNameViewModel_Constructor_NullArguments_Throw`, covering
-`AgentControl-MainWindowViewModel-GroupNamePrompt`.
+`AgentControl-MainWindowViewModel-GroupManagement`. The prompt that asks for a group's name is verified by the
+`GroupNameViewModel` unit.

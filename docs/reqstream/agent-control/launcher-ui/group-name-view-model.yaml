@@ -1,0 +1,65 @@
+---
+# Software Unit Requirements for the GroupNameViewModel Class
+#
+# GroupNameViewModel backs the small prompt that asks for a repo group's name, used both to
+# create a group (and move a repo into it) and to rename one. Each requirement states one
+# observable behavior of the prompt.
+
+sections:
+  - title: GroupNameViewModel Unit Requirements
+    requirements:
+      - id: AgentControl-GroupNameViewModel-ValidatesAsTyped
+        title: >-
+          The GroupNameViewModel class shall validate the typed name as the user types, telling
+          why a name cannot be used - blank, longer than 40 characters, or one of the built-in
+          names Favorites and Ungrouped - saying nothing before anything is typed, and shall
+          accept only a usable name.
+        justification: |
+          Telling the user why as they type is quicker than refusing afterwards, and a prompt that
+          opens already scolding would be hostile.
+        tests:
+          - GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept
+          - GroupNameViewModel_TooLongName_ShowsLengthMessage
+          - GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName
+
+      - id: AgentControl-GroupNameViewModel-NewGroup
+        title: >-
+          The GroupNameViewModel class shall, when creating a group, let a name that matches an
+          existing group ignoring letter case be accepted - with a note that the repo will be
+          added to that group - and shall answer with the existing group's own spelling.
+        justification: |
+          A group must not exist twice under different letter case; joining the existing group is
+          what the user meant.
+        tests:
+          - GroupNameViewModel_NewGroup_ExistingName_HintsAndAdoptsSpelling
+
+      - id: AgentControl-GroupNameViewModel-Rename
+        title: >-
+          The GroupNameViewModel class shall, when renaming a group, start with the group's
+          current name, refuse another group's name, and accept a change of letter case only,
+          answering with exactly what was typed.
+        justification: |
+          Renaming into another group would silently merge two groups; a change of letter case
+          only must be possible, or a group could never be corrected.
+        tests:
+          - GroupNameViewModel_Rename_RefusesOtherGroupsAcceptsCaseChange
+
+      - id: AgentControl-GroupNameViewModel-CompletesOnce
+        title: >-
+          The GroupNameViewModel class shall complete exactly once, with the accepted name or with
+          none when canceled, however many times it is accepted or canceled afterwards.
+        justification: |
+          The window can be closed in several ways, and the one who asked must hear exactly one
+          answer, never two.
+        tests:
+          - GroupNameViewModel_Cancel_CompletesOnceWithNull
+
+      - id: AgentControl-GroupNameViewModel-RequiresArguments
+        title: >-
+          The GroupNameViewModel class shall refuse to be created without its title, prompt,
+          accept text or list of existing groups.
+        justification: |
+          A prompt missing any of these could not be shown or validated; failing at creation is
+          clearer than failing later.
+        tests:
+          - GroupNameViewModel_Constructor_NullArguments_Throw

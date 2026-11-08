@@ -21,6 +21,10 @@ flowchart TD
         SettingsWindowViewModel
         SourceEditorViewModel
         CredentialPromptViewModel
+        RepoImageLocator
+        RepoGroupHeaderViewModel
+        GroupNameViewModel
+        DialogBehavior
     end
     subgraph AgentPackageManagement
         PackageSource

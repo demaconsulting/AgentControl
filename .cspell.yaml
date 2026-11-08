@@ -39,6 +39,9 @@ words:
   - gitdir
   - gpgsign
   - headlessly
+  - IHDR
+  - mklink
+  - Skia
   - instnace
   - HMAC
   - libsecret

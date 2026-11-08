@@ -43,11 +43,11 @@ public sealed class MainWindowTests : IDisposable
     private readonly List<string> _tempPaths = [];
 
     /// <summary>
-    ///     Test that the About button opens a tracked child window that is closed with the main
-    ///     window.
+    ///     Test that the About button opens About as a modal dialog owned by the main window, and
+    ///     that closing it leaves nothing open.
     /// </summary>
     [Fact]
-    public void MainWindow_AboutClicked_OpensTrackedChildClosedWithMainWindow() => HeadlessTestApp.Run(() =>
+    public void MainWindow_AboutClicked_OpensModalAboutOwnedByMainWindow() => HeadlessTestApp.Run(() =>
     {
         // Arrange
         var window = CreateWindow(out _);
@@ -55,11 +55,13 @@ public sealed class MainWindowTests : IDisposable
 
         // Act: open About
         DialogWindowTests.Click(window, "OpenAboutButton");
+        Dispatcher.UIThread.RunJobs();
 
-        // Assert: tracked, then closed along with the main window
-        Assert.Single(GetOpenChildWindows(window));
-        window.Close();
-        Assert.Empty(GetOpenChildWindows(window));
+        // Assert: owned by the main window, gone when closed
+        var about = Assert.Single(window.OwnedWindows.OfType<AboutWindow>());
+        about.Close();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Empty(window.OwnedWindows.OfType<AboutWindow>());
     });
 
     /// <summary>
@@ -278,11 +280,6 @@ public sealed class MainWindowTests : IDisposable
         _tempPaths.Add(path);
         return path;
     }
-
-    private static List<Window> GetOpenChildWindows(MainWindow window) =>
-        (List<Window>)typeof(MainWindow)
-            .GetField("_openChildWindows", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(window)!;
 
     private static void InvokeStatic(string methodName, object sender) =>
         typeof(MainWindow)

@@ -524,7 +524,7 @@ public sealed class RepoGroupWindowTests : IDisposable
             ]
         };
         var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
-        var window = new MainWindow { DataContext = viewModel };
+        var window = new MainWindow { DataContext = viewModel, Height = 1600 };
         window.Show();
         Dispatcher.UIThread.RunJobs();
         return (window, viewModel);

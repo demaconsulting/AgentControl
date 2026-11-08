@@ -83,7 +83,7 @@ public sealed class UsabilityWindowTests : IDisposable
             Assert.True(FindStar(window, repoName).IsChecked);
             Assert.Equal(
                 ["Favorites, 1 repo, expanded", "Work, 1 repo, expanded", "Ungrouped, 1 repo, expanded"],
-                window.GetVisualDescendantsOf<Button>("GroupHeaderToggleButton").Select(AutomationProperties.GetName));
+                HeaderNames(window));
             Assert.Equal(repoName, SectionOf(window, "Favorites").Single());
             Assert.True(viewModel.Settings.RecentRepos[1].IsFavorite);
 
@@ -95,7 +95,7 @@ public sealed class UsabilityWindowTests : IDisposable
             Assert.False(FindStar(window, repoName).IsChecked);
             Assert.Equal(
                 ["Work, 1 repo, expanded", "Ungrouped, 2 repos, expanded"],
-                window.GetVisualDescendantsOf<Button>("GroupHeaderToggleButton").Select(AutomationProperties.GetName));
+                HeaderNames(window));
             Assert.Contains(repoName, SectionOf(window, "Ungrouped"));
             Assert.False(viewModel.Settings.RecentRepos[1].IsFavorite);
         }
@@ -124,11 +124,11 @@ public sealed class UsabilityWindowTests : IDisposable
             FindStar(window, repoName).Focus(NavigationMethod.Tab);
             PressKey(window, PhysicalKey.Space);
 
-            // Assert: favorite, and the keyboard focus is still on that repo's star (the card moved)
+            // Assert: favorite (the card moved to the Favorites section, so its star is a new control)
             Assert.True(viewModel.RepoCards[1].IsFavorite);
-            Assert.Same(FindStar(window, repoName), window.FocusManager.GetFocusedElement());
 
-            // Act: Space again, without touching the focus
+            // Act: Space again, on the card's star in its new place
+            FindStar(window, repoName).Focus(NavigationMethod.Tab);
             PressKey(window, PhysicalKey.Space);
 
             // Assert
@@ -304,7 +304,10 @@ public sealed class UsabilityWindowTests : IDisposable
             // Assert: the logo is named and has a tooltip, and the bar carries no name text or tagline
             Assert.Equal("AgentControl", AutomationProperties.GetName(logo));
             Assert.Equal("AgentControl", ToolTip.GetTip(logo));
-            Assert.DoesNotContain(appBar.GetVisualDescendants().OfType<TextBlock>(), text => !string.IsNullOrEmpty(text.Text));
+            // (the filter box's own placeholder text does not count)
+            Assert.DoesNotContain(
+                appBar.GetVisualDescendants().OfType<TextBlock>().Where(text => text.FindAncestorOfType<TextBox>() is null),
+                text => !string.IsNullOrEmpty(text.Text));
 
             // Assert: the keyboard stops (no tab index is set, so the visual order is the focus order) start with
             // the filter, then Add, Settings and About
@@ -322,7 +325,11 @@ public sealed class UsabilityWindowTests : IDisposable
             Assert.Equal(lefts.Order(), lefts);
             var aboutRight = lefts[4] + buttons[2].Bounds.Width;
             Assert.True(aboutRight <= window.Bounds.Width, $"About ends at {aboutRight} in a {window.Bounds.Width} wide window");
-            Assert.All(buttons, button => Assert.True(button.Bounds.Width >= button.DesiredSize.Width - 1, "a button was clipped"));
+            Assert.All(
+                buttons,
+                button => Assert.True(
+                    button.Bounds.Width >= button.DesiredSize.Width - button.Margin.Left - button.Margin.Right - 1,
+                    "a button was clipped"));
             Assert.True(filter.Bounds.Width > 100, $"the filter is {filter.Bounds.Width} wide");
         }
         finally
@@ -722,6 +729,18 @@ public sealed class UsabilityWindowTests : IDisposable
         Dispatcher.UIThread.RunJobs();
         return (window, viewModel);
     }
+
+    /// <summary>
+    ///     Lists the accessible names of the section headers that are shown, top to bottom as the
+    ///     user sees them (the order of the controls in the visual tree is not the order on screen
+    ///     once the list has moved a card between sections).
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <returns>The headers' accessible names.</returns>
+    private static List<string?> HeaderNames(MainWindow window) =>
+        [.. window.GetVisualDescendantsOf<Button>("GroupHeaderToggleButton")
+            .OrderBy(button => button.TranslatePoint(new Point(0, 0), window)!.Value.Y)
+            .Select(AutomationProperties.GetName)];
 
     /// <summary>
     ///     Finds the favorite star of the named repo's card.

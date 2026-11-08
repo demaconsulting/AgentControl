@@ -42,13 +42,14 @@ public static class HeadlessTestApp
     /// </summary>
     /// <returns>The configured <see cref="AppBuilder"/>.</returns>
     public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<App>().UseHeadless(new AvaloniaHeadlessPlatformOptions());
+        AppBuilder.Configure<App>().UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false });
 
     /// <summary>
     ///     Runs <paramref name="action"/> on the headless UI thread and waits for it to finish.
     /// </summary>
     /// <param name="action">The UI test body.</param>
-    public static void Run(Action action) => Session.Value.Dispatch(action, CancellationToken.None);
+    public static void Run(Action action) =>
+        Session.Value.Dispatch(action, CancellationToken.None).GetAwaiter().GetResult();
 
     /// <summary>
     ///     Runs <paramref name="action"/> on the headless UI thread and waits for it to finish, so

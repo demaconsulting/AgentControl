@@ -1,0 +1,67 @@
+---
+# Software Unit Requirements for the RepoGroupHeaderViewModel Class
+#
+# RepoGroupHeaderViewModel is the header row that starts a section of the main window's repo list
+# (Favorites, one of the user's groups, or Ungrouped). Each requirement states one observable
+# behavior of the header; which headers the list shows, and in what order, is the
+# MainWindowViewModel unit's.
+
+sections:
+  - title: RepoGroupHeaderViewModel Unit Requirements
+    requirements:
+      - id: AgentControl-RepoGroupHeaderViewModel-SectionKind
+        title: >-
+          The RepoGroupHeaderViewModel class shall identify whether its header introduces the
+          Favorites section, one of the user's own groups or the Ungrouped section, so that only
+          the user's own groups offer the rename and remove actions.
+        justification: |
+          The built-in sections cannot be renamed or removed; the header must say what kind of
+          section it is so the window offers only the actions that make sense.
+        tests:
+          - RepoGroupHeaderViewModel_Kind_SelectsSectionFlags
+
+      - id: AgentControl-RepoGroupHeaderViewModel-DescribesSection
+        title: >-
+          The RepoGroupHeaderViewModel class shall describe its section - the name, the number of
+          repos that match the current filter (in the singular for one) and whether the section is
+          collapsed or expanded - in an accessible name that is also the text of the row, and shall
+          update that description in place when the count or the state changes.
+        justification: |
+          A screen reader, and a UI test, need the section, its size and its state in one
+          sentence; updating the same header in place lets it keep the keyboard focus when it is
+          toggled.
+        tests:
+          - RepoGroupHeaderViewModel_Update_DescribesCountAndState
+          - RepoGroupHeaderViewModel_ToString_IsTheAccessibleName
+
+      - id: AgentControl-RepoGroupHeaderViewModel-Toggle
+        title: >-
+          The RepoGroupHeaderViewModel class shall request that its section be collapsed or
+          expanded when the user toggles the header, only while its owner allows toggling, and
+          shall explain in the toggle's tooltip why the toggle is unavailable while a filter is
+          active.
+        justification: |
+          A filter shows every match whatever the collapsed state, so the toggle must not appear
+          to work then; saying why avoids a control that looks broken.
+        tests:
+          - RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled
+
+      - id: AgentControl-RepoGroupHeaderViewModel-GroupActions
+        title: >-
+          The RepoGroupHeaderViewModel class shall request that its group be renamed, or removed,
+          when the user chooses the corresponding action of the header, and shall leave doing
+          either to its owner.
+        justification: |
+          Renaming and removing need dialogs and confirmation that belong to the window; the
+          header only reports what the user asked for.
+        tests:
+          - RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests
+
+      - id: AgentControl-RepoGroupHeaderViewModel-RequiresName
+        title: >-
+          The RepoGroupHeaderViewModel class shall refuse to be created without a name.
+        justification: |
+          A header with no name could not be identified by the user or by assistive technology,
+          and the name is also the key under which the collapsed state is remembered.
+        tests:
+          - RepoGroupHeaderViewModel_Constructor_BlankName_Throws

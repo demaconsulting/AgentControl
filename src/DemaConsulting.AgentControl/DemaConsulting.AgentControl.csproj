@@ -7,6 +7,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
+    <!-- Needed by the source-generated P/Invokes (LibraryImport) that ask the operating system
+         for the final path of an opened file; no unsafe code is written by hand -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
     <!-- Avalonia Configuration -->
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 

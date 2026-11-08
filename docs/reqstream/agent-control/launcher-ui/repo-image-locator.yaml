@@ -1,0 +1,145 @@
+---
+# Software Unit Requirements for the RepoImageLocator Class
+#
+# RepoImageLocator finds and decodes the picture a repo offers for its card (icon.png, else
+# logo.png, in the repo's root folder). The repo may be untrusted, so the requirements state the
+# observable outcomes: which pictures are shown and which are never shown, and that a bad
+# picture never interrupts anything. How the checks are made (handles, resolved paths, header
+# parsing) is in the unit's design document. Link tests are filtered by platform: junctions exist
+# only on Windows, and symbolic links are exercised on Ubuntu where they need no privilege.
+
+sections:
+  - title: RepoImageLocator Unit Requirements
+    requirements:
+      - id: AgentControl-RepoImageLocator-FindsPicture
+        title: >-
+          The RepoImageLocator class shall offer, for a repo folder, the picture icon.png or else
+          logo.png from the repo's root (the names matched without regard to letter case, and an
+          icon.png that cannot be used not preventing logo.png from being offered), shall offer
+          none for a folder that does not exist, and shall never offer a picture from a folder
+          below the root.
+        justification: |
+          A repository that ships its own icon or logo is recognizable at a glance, but only the
+          well-known names in the root are looked for so a repo cannot make the application read
+          arbitrary files.
+        tests:
+          - RepoImageLocator_Find_IconAndLogoPresent_ReturnsIcon
+          - RepoImageLocator_Find_OnlyLogoPresent_ReturnsLogo
+          - RepoImageLocator_Find_NameInOtherCase_IsFound
+          - RepoImageLocator_Find_IconWithoutPngSignature_IsRefusedAndLogoUsed
+          - RepoImageLocator_Find_SubfolderImageAndFolderNamedIcon_AreIgnored
+          - RepoImageLocator_Find_MissingFolder_ReturnsNull
+          - RepoImageLocator_Find_LargestAllowedDimensions_IsAcceptedAndTrailingSeparatorIsTolerated
+
+      - id: AgentControl-RepoImageLocator-OnlyGenuinePng
+        title: >-
+          The RepoImageLocator class shall never offer a file that is not a genuine PNG picture:
+          an empty file, a file that does not begin with the PNG signature followed by a PNG header
+          (whatever its name says), or a file that cannot be read.
+        justification: |
+          The extension proves nothing about a file from an untrusted repository; handing anything
+          else to the image decoder would expose the decoder to arbitrary input.
+        tests:
+          - RepoImageLocator_Find_IconWithoutPngSignature_IsRefusedAndLogoUsed
+          - RepoImageLocator_Find_OnlyNonPngCandidates_ReturnsNull
+
+      - id: AgentControl-RepoImageLocator-SizeLimit
+        title: >-
+          The RepoImageLocator class shall never offer a picture file larger than 1 MB, and shall
+          offer one of exactly 1 MB.
+        justification: |
+          A card icon needs no more, and the limit bounds the memory a hostile file can make the
+          application use.
+        tests:
+          - RepoImageLocator_Find_FileOverSizeCap_IsRefused
+
+      - id: AgentControl-RepoImageLocator-DimensionLimit
+        title: >-
+          The RepoImageLocator class shall never offer, and never decode, a picture that declares
+          a width or height of zero or more than 4096 pixels, including when the file was replaced
+          by such a picture after it was offered, so that a small file cannot expand into a bitmap
+          large enough to exhaust memory.
+        justification: |
+          A few dozen bytes can declare a picture of billions of pixels; refusing it before the
+          decoder allocates anything is what keeps a hostile repo from crashing the application.
+        tests:
+          - RepoImageLocator_Find_AbsurdDeclaredDimensions_IsRefused
+          - RepoImageLocator_Find_LargestAllowedDimensions_IsAcceptedAndTrailingSeparatorIsTolerated
+          - RepoImageLocator_Decode_ReplacedByOversizedDimensions_ReturnsNullWithoutDecoding
+
+      - id: AgentControl-RepoImageLocator-NoLinks
+        title: >-
+          The RepoImageLocator class shall never offer or read a picture that is a link - a
+          symbolic link, a junction or any other reparse point - including a picture that was a
+          plain file when it was offered and was replaced by a link before it was read.
+        justification: |
+          A link can lead anywhere (a secret file, a network share); a picture that is a link is
+          a stand-in for something outside the repo.
+        tests:
+          - ubuntu@RepoImageLocator_Find_SymbolicLinkIcon_IsRefused
+          - ubuntu@RepoImageLocator_Decode_IconReplacedBySymbolicLinkAfterFind_ReturnsNull
+
+      - id: AgentControl-RepoImageLocator-LinkedRoot
+        title: >-
+          The RepoImageLocator class shall offer no picture for a repo whose root folder is itself
+          a link (a symbolic link or a junction), including a root that was replaced by a link
+          after its picture was offered, while a repo that is an ordinary folder inside a linked
+          parent folder shall keep its picture.
+        justification: |
+          A linked root lets the repo choose which folder is searched, so for the picture feature
+          the repo then simply shows its generated tile; a user who keeps their repos under a
+          linked parent folder must not lose the picture for that.
+        tests:
+          - windows@RepoImageLocator_Find_RootIsJunction_ReturnsNull
+          - ubuntu@RepoImageLocator_Find_RootIsSymbolicLink_ReturnsNull
+          - windows@RepoImageLocator_Decode_RootReplacedByJunctionAfterFind_ReturnsNull
+          - ubuntu@RepoImageLocator_Decode_RootReplacedBySymbolicLinkAfterFind_ReturnsNull
+          - windows@RepoImageLocator_FindAndDecode_RootUnderJunctionParent_StillWorks
+          - ubuntu@RepoImageLocator_FindAndDecode_RootUnderSymbolicLinkedParent_StillWorks
+
+      - id: AgentControl-RepoImageLocator-StaysInRoot
+        title: >-
+          The RepoImageLocator class shall decode only a file that is, when it is read, a picture
+          directly inside the repo root it was offered from, and shall give no picture for a file
+          that is outside that root, has vanished or has been replaced by something that is not an
+          acceptable picture.
+        justification: |
+          Between offering a picture and reading it the repo can change; checking again at the
+          moment of reading, against the root that was validated, closes the gap in which a file
+          is swapped for something else.
+        tests:
+          - RepoImageLocator_Decode_FileOutsideTheRecordedRoot_ReturnsNull
+          - RepoImageLocator_Decode_CorruptVanishedOrReplacedFile_ReturnsNull
+
+      - id: AgentControl-RepoImageLocator-DecodeToTile
+        title: >-
+          The RepoImageLocator class shall decode an acceptable picture scaled to the 96 pixel
+          width used for a card tile's picture, keeping its aspect ratio.
+        justification: |
+          The picture is shown in a small tile; decoding it at its own size would waste memory and
+          time for nothing.
+        tests:
+          - RepoImageLocator_Decode_ValidLargePng_IsScaledDownToTileWidth
+
+      - id: AgentControl-RepoImageLocator-NeverFails
+        title: >-
+          The RepoImageLocator class shall report any failure to read or decode a picture - of
+          whatever kind - as no picture, and shall never throw it to its caller.
+        justification: |
+          The picture is decorative and comes from an untrusted repo; a corrupt file must cost the
+          card its picture and nothing else, and must never interrupt the background refresh that
+          asked for it.
+        tests:
+          - RepoImageLocator_Decode_CorruptVanishedOrReplacedFile_ReturnsNull
+          - RepoImageLocator_Decode_ReplacedByOversizedDimensions_ReturnsNullWithoutDecoding
+
+      - id: AgentControl-RepoImageLocator-ChangeIdentity
+        title: >-
+          The RepoImageLocator class shall identify an offered picture by its root, path,
+          last-write time and size, so that a caller can tell whether the picture changed since it
+          was last decoded.
+        justification: |
+          A card is refreshed often; recognizing an unchanged file lets it skip decoding the same
+          picture again.
+        tests:
+          - RepoImageLocator_Find_FileChanged_KeyDiffers

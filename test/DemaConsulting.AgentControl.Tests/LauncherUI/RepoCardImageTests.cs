@@ -176,6 +176,19 @@ public sealed class RepoCardImageTests : IDisposable
         // Assert: swallowed, tile kept
         Assert.False(throwing.HasRepoImage);
         Assert.True(throwing.ShowAvatarInitials);
+
+        // Arrange / Act: decoders that throw other kinds of exception, resource exhaustion included
+        foreach (Exception failure in new Exception[] { new FormatException(), new OutOfMemoryException(), new DivideByZeroException() })
+        {
+            var unexpected = CreateCard(repo, _ => throw failure);
+            unexpected.RefreshCheap();
+            await unexpected.RepoImageRefreshTask;
+
+            // Assert: whatever it was, the background task did not fault and the tile is kept
+            Assert.True(unexpected.RepoImageRefreshTask.IsCompletedSuccessfully);
+            Assert.False(unexpected.HasRepoImage);
+            Assert.True(unexpected.ShowAvatarInitials);
+        }
     });
 
     /// <summary>

@@ -486,28 +486,19 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-RepoPicture
         title: >-
-          The RepoCardViewModel class shall, in the background, look in the repo's root folder
-          only for icon.png and then logo.png (names matched without regard to case), and expose
-          the picture, scaled down to the tile size, in place of the generated tile when the file
-          is a regular file (not a link) of at most 1 MB that starts with the PNG signature and
-          declares sane dimensions; for a missing folder, an unacceptable or undecodable file it
-          shall expose no picture, and it shall not decode an unchanged file again.
+          The RepoCardViewModel class shall, without blocking the user interface, show on the
+          card the icon.png or logo.png picture that the repo's root folder offers in place of
+          the generated tile, shall show the generated tile when the repo offers no picture, when
+          its folder is missing or when its picture has been removed, shall never show an
+          untrusted picture that is not a valid PNG, is too large, is a link or lies outside the
+          repo, shall never let a picture that cannot be read or decoded - whatever the failure -
+          interrupt the card, and shall not decode an unchanged picture again.
         justification: |
           A repository that ships its own icon or logo is recognizable at a glance; because the
-          repository may be untrusted, only a small, genuine PNG that is a plain file in the root
-          is read, the decode is bounded and any failure silently keeps the generated tile.
+          repository may be untrusted, a picture that is not a small, genuine PNG plain file in
+          the repo's root is ignored (the rules are the RepoImageLocator unit's), and any failure
+          keeps the generated tile, so a hostile or damaged file costs only the picture.
         tests:
-          - RepoImageLocator_Find_IconAndLogoPresent_ReturnsIcon
-          - RepoImageLocator_Find_OnlyLogoPresent_ReturnsLogo
-          - RepoImageLocator_Find_NameInOtherCase_IsFound
-          - RepoImageLocator_Find_IconWithoutPngSignature_IsRefusedAndLogoUsed
-          - RepoImageLocator_Find_OnlyNonPngCandidates_ReturnsNull
-          - RepoImageLocator_Find_FileOverSizeCap_IsRefused
-          - RepoImageLocator_Find_AbsurdDeclaredDimensions_IsRefused
-          - RepoImageLocator_Find_SubfolderImageAndFolderNamedIcon_AreIgnored
-          - RepoImageLocator_Find_SymbolicLinkIcon_IsRefused
-          - RepoImageLocator_Decode_ValidLargePng_IsScaledDownToTileWidth
-          - RepoImageLocator_Decode_CorruptVanishedOrReplacedFile_ReturnsNull
           - RepoCardViewModel_RepoImage_IconPresent_LoadsOnceUntilFileChanges
           - RepoCardViewModel_RepoImage_FileRemoved_FallsBackToInitials
           - RepoCardViewModel_RepoImage_MissingFolder_NeverLooksForAnImage

@@ -5,8 +5,9 @@
 The `Settings` subsystem is verified indirectly through its `SettingsStore` unit's test suite
 (`SettingsStoreTests.cs` and `SettingsStoreOrganizingTests.cs`, with `RepoGroupNameTests.cs` for the group-name
 rules), documented in the `SettingsStore` unit-level verification design.
-The `AppSettings`, `RecentRepo`, and `AgentToolKind` data types have no dedicated test file
-and are exercised only as values round-tripped through `SettingsStore`'s save/load tests. All
+The `AppSettings`, `RecentRepo`, `AgentToolKind` and `ThemePreference` data types have no dedicated test file
+and are exercised only as values round-tripped through `SettingsStore`'s save/load tests; `RepoGroupName` is a
+supporting rules helper with its own `RepoGroupNameTests.cs`. All
 tests use a real temporary configuration directory on disk.
 
 ### Test Environment

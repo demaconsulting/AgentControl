@@ -5,9 +5,10 @@
 ### Overview
 
 The `Settings` subsystem spans `SettingsStore.cs` (loads/saves application-wide settings),
-and the `AppSettings.cs`/`RecentRepo.cs`/`AgentToolKind.cs`/`ThemePreference.cs`/`RepoGroupName.cs` data types and
-helper, which are folded into
-this subsystem-level description as they have no dedicated test file. It provides the
+and the `AppSettings.cs`/`RecentRepo.cs`/`AgentToolKind.cs`/`ThemePreference.cs` data types and the `RepoGroupName.cs`
+rules helper, which are documented as supporting types of this subsystem rather than as units of their own: the data
+types carry no behavior, and `RepoGroupName` only validates and cleans group names (it has its own
+`RepoGroupNameTests.cs`, and is exercised through `SettingsStore` and the `LauncherUI` group prompt). It provides the
 observable behavior of persisting application-wide preferences (package sources, git/agent
 tool overrides, recent repos, shell preference, color theme) and the user's own organizing choices (repo groups,
 card colors, collapsed sections) (`AgentControl-Settings-Persistence`,

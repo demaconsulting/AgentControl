@@ -2,16 +2,20 @@
 
 ### Verification Approach
 
-The `LauncherUI` subsystem is verified by the combined unit tests of its six units
-(`MainWindowViewModelTests.cs`, `RepoCardViewModelTests.cs` and `RepoCardServerSourceTests.cs`,
+The `LauncherUI` subsystem is verified by the combined unit tests of its ten units
+(`MainWindowViewModelTests.cs` and `RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`, `RepoCardServerSourceTests.cs`
+and `RepoCardImageTests.cs`,
 `SelectPackageWindowViewModelTests.cs` and `SelectPackageRetryTests.cs`,
 `SettingsWindowViewModelTests.cs`, `SourceEditorViewModelTests.cs`,
 `SourceEditorServerViewModelTests.cs` and `SourceEditorSignatureViewModelTests.cs`,
-`CredentialPromptViewModelTests.cs`), plus
+`CredentialPromptViewModelTests.cs`, `RepoImageLocatorTests.cs`, `RepoGroupHeaderViewModelTests.cs`,
+`GroupNameViewModelTests.cs` and `DialogBehaviorTests.cs`, the last four units each with its own verification
+document), plus
 `AsyncRelayCommandTests.cs` for the shared asynchronous
 command, which together
 exercise the full recent-repos/card/select-package/settings/sign-in interaction surface without ever
-constructing an Avalonia `Window`. The windows themselves are exercised by headless Avalonia tests
+constructing an Avalonia `Window` (apart from the picture decoder and `DialogBehavior`, which need Avalonia's headless
+session). The windows themselves are exercised by headless Avalonia tests
 (`DialogWindowTests.cs`, `MainWindowTests.cs`, `UsabilityWindowTests.cs` for the favorite star with real pointer
 and key input, the "Check again" menu item, the up-to-date check mark, the narrow card, the Settings sections, the
 keyboard behavior of the dialogs, the About version row and the order of the AGENTS.md question and the release
@@ -39,19 +43,26 @@ end-to-end rendering (opening the window and showing the tagline, version, copyr
 and a non-empty dependency list) is verified only via the FlaUI
 `DemaConsulting.AgentControl.UiTests` project. The logo image itself is not asserted by any
 automated test (it has no bound text content to check) and remains a visual-inspection-only
-element. `FavoriteIconConverter`/`FavoriteColorConverter`, the favorite-star glyph's
-shape/color converters, are likewise visual-only value converters with no bound text content
-to assert and remain visual-inspection-only elements; `RepoCardViewModel.IsFavorite` itself
-(the state they render) is covered indirectly by the sort-order scenario below.
+element. `FavoriteIconConverter`, the favorite-star glyph's shape converter (its color is the theme resource
+`FavoriteStarForeground`, checked for contrast by `ThemeResourceTests`), is likewise a visual-only value converter
+with no bound text content to assert and remains a visual-inspection-only element;
+`RepoCardViewModel.IsFavorite` itself
+(the state it renders) is covered indirectly by the sort-order scenario below. The pure display helpers
+(`AgentToolKindDisplayNameConverter`, `ThemePreferenceDisplayNameConverter` and the `PathEllipsisText` control) are
+supporting types of the subsystem with their own test files, whose tests are cited by the subsystem requirements
+(`AgentToolKindDisplayNameConverterTests.cs`, `ThemePreferenceDisplayNameConverterTests.cs`,
+`PathEllipsisTextTests.cs`).
 
 The server-source tests use scripted fakes at the subsystem boundary instead of a network: a
 `FakePackageSourceProvider` (which can be gated to simulate a slow source and can be told to throw
 a given exception, including a `PackageSourceAccessException` of each failure kind) stands behind the view
 models, and `FakeCredentialPrompt` stands in for the sign-in dialog; the real `NuGetSourceProvider` against
 a mock NuGet server is verified in the `AgentPackageManagement` subsystem. The headless window tests rely on
-two test-infrastructure properties that were corrected in this pass: `HeadlessTestApp.RunAsync` now waits for
-the asynchronous body to finish (it previously returned without waiting, so an assertion failing inside an
-asynchronous headless test never failed the test), and the `DialogWindowTests.Click` helper now also executes a
+test-infrastructure properties that were corrected in this pass: `HeadlessTestApp.Run` and
+`HeadlessTestApp.RunAsync` now wait for the body to finish (`Run` previously returned without waiting, so an assertion
+failing inside a headless test never failed the test, and the asynchronous variant had the same defect before it),
+the headless application now uses the real Skia drawing backend (so pictures are genuinely decoded and text is
+measured, which the earlier stub backend could not do), and the `DialogWindowTests.Click` helper also executes a
 button's bound `Command` (raising the click event alone does not run a view-model command).
 
 ### Test Environment
@@ -469,7 +480,8 @@ selection. This scenario is tested by
 model facts (see `RepoCardViewModel`), and a headless main window shows, for a repo with a root `icon.png`, the
 picture in the avatar tile (image visible, initials hidden) and, for a repo without one, the initials. This
 scenario is tested by `RepoCardViewModel_Status_ReflectsPackageAndUpgradeState` and
-`MainWindow_RepoCard_AvatarShowsRepoPictureWhenPresent`, covering `AgentControl-LauncherUI-CardIdentityAndStatus`.
+`MainWindow_RepoCard_AvatarShowsRepoPictureWhenPresent`, covering `AgentControl-LauncherUI-CardIdentityAndStatus`
+(which pictures are acceptable, and the security checks on them, are verified by the `RepoImageLocator` unit).
 
 **LauncherUI_AddSourceMenu_OneAddButtonOffersEverySourceType**: The Settings window has one `AddSourceButton`
 whose menu holds the zip-package folder, NuGet-package folder and NuGet-package server items (each with an icon)
@@ -553,7 +565,8 @@ behind an open Settings dialog is disabled by the operating system until the dia
 `SettingsWindow_ShownModally_FocusStartsInsideTabCyclesInsideAndReturnsToOwner`,
 `Dialogs_ConfirmationMessageBoxAbout_InitialFocusTabCycleAndEscape`,
 `Dialogs_PromptsAndEditors_InitialFocusInFirstFieldAndEscapeCancels` and
-`windows@SettingsWindow_Opened_MainWindowBehindItIsDisabledUntilItCloses`, covering `AgentControl-LauncherUI-DialogKeyboard`.
+`windows@SettingsWindow_Opened_MainWindowBehindItIsDisabledUntilItCloses`, covering `AgentControl-LauncherUI-DialogKeyboard`
+(the keyboard behavior itself is verified in isolation by the `DialogBehavior` unit's tests).
 
 **LauncherUI_RepoGroups_HeadersCollapseMenuAndPromptWorkInTheWindow**: Headless main-window tests
 (`RepoGroupWindowTests.cs`, `RealProcess` collection) show that grouped repos are listed under headers

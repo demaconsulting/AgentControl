@@ -154,14 +154,11 @@ class); with no picture the color fills the tile and the letters use the entry's
 file (path, last-write time and size) as the one already decoded - a failed decode is remembered the same way - and
 then publishes the bitmap on the caller's context, so the UI thread never touches the disk or the decoder and
 repeated refreshes cost one folder listing. A newer refresh supersedes an older one (a generation counter), and any
-I/O or decode failure means "no picture". `RepoImageLocator` looks only in the repo's root for `icon.png`, then
-`logo.png` (names matched without regard to case; an unacceptable `icon.png` does not stop `logo.png` being
-used), and accepts a file only if it is a regular file (never a symbolic link, junction or other reparse point,
-checked again when the file is read), directly inside the root, at most 1 MB, starting with the 8-byte PNG
-signature followed by the PNG header chunk, which declares at most 8192 pixels on a side and 4096 x 4096 pixels in all
-(so a small file cannot expand into a huge bitmap); the file is read into memory once, validated again, and decoded
-scaled down to 96 pixels wide (`Bitmap.DecodeToWidth`). The repo may be untrusted, so nothing else is trusted
-about the file and its contents are never logged. The view letterboxes the picture (`Stretch="Uniform"`) on a
+exception from the locator, the decoder or an injected decoder - of whatever type - means "no picture", so the
+background task never faults. Which file is acceptable, and how it is checked (the repo root, links, PNG header
+limits, handle verification), is the `RepoImageLocator` unit's design; this view model relies on it to return
+only a bounded, scaled bitmap and treats its result as untrusted-derived display data. The view letterboxes the
+picture (`Stretch="Uniform"`) on a
 light backing inside the same tile.
 
 **Source access and asynchronous operations.** The card builds a `PackageSourceRegistry` from the
@@ -445,6 +442,8 @@ refused by returning `false` and changing nothing, and stored values that are mi
 
 - **RepoGroupName** (`Settings` subsystem) — cleans up, validates and repairs group names, and unifies the
   spelling of groups that differ only in letter case.
+- **RepoImageLocator** (`LauncherUI`) — finds and decodes the repo's picture, enforcing every rule about what
+  may be shown.
 - **RepoPinStore** (`RepoConfig` subsystem) — reads/writes the repo's pin.
 - **PackageSourceRegistry**, **IPackageSourceProvider**, **PackageVersionCache**,
   **DiscoveredPackage**, **PackageSourceAccessException** (`AgentPackageManagement` subsystem) — source

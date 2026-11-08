@@ -12,10 +12,10 @@ changes. Window-management concerns (opening
 intentionally left to `MainWindow`'s code-behind, since they require live Avalonia
 `Window`/`IStorageProvider` instances that cannot be constructed in a headless unit test.
 
-Three small helper types belong to this unit's description rather than having files of their own:
-`RepoGroupHeaderViewModel` (the header row that starts a section), `RepoGroupKind` (which kind of
-section a header introduces) and `GroupNameViewModel` (the validating view model of the group-name
-prompt window `GroupNameWindow`).
+The unit uses two independently documented `LauncherUI` units: `RepoGroupHeaderViewModel` (the header row that
+starts a section, with `RepoGroupKind`, which kind of section a header introduces - see its own design) and
+`GroupNameViewModel` (the validating view model of the group-name prompt window `GroupNameWindow` - see its own
+design).
 
 #### Data Model
 
@@ -65,20 +65,14 @@ code-behind.
 (keyed by kind and name, ignoring letter case), reused while the section exists so a header keeps
 keyboard focus when it is toggled.
 
-**RepoGroupHeaderViewModel**: `Kind` (`RepoGroupKind`: `Favorites`, `Group`, `Ungrouped`), `Name`,
-`Count` (matching repos), `IsCollapsed`, `IsToggleEnabled` (false while a filter is active),
-`AccessibleName` (for example `Work, 2 repos, collapsed`; also its `ToString()`, which names the
-hosting list item for assistive technology), the tooltips, and the commands `ToggleCommand`,
-`RenameCommand`, `RemoveGroupCommand` that only raise requests. The view model updates a header in
-place with `Update(count, isCollapsed, isToggleEnabled)`.
+**RepoGroupHeaderViewModel**: the unit that represents a section's header (`Kind`, `Name`, `Count`,
+`IsCollapsed`, `IsToggleEnabled`, `AccessibleName` and the request-only commands; see its own design). This view
+model updates a header in place with `Update(count, isCollapsed, isToggleEnabled)` and handles its three request
+events (toggle, rename, remove).
 
-**GroupNameViewModel**: `Text` (re-validated on every change), `ErrorText`/`HasError`,
-`HintText`/`HasHint`, `CanAccept`, `AcceptCommand`, `CancelCommand` and the `Completed` event. The
-rules come from `RepoGroupName` (`Settings` subsystem): a blank name, a name longer than 40
-characters and the built-in names *Favorites* and *Ungrouped* are refused; when renaming, another
-existing group's name is refused too, while creating a group a name that matches an existing group
-(ignoring letter case) is allowed with a note and adopts that group's spelling. `Completed` is raised
-once, with the name or `null` when canceled (`AgentControl-MainWindowViewModel-GroupNamePrompt`).
+**GroupNameViewModel**: the unit behind the group-name prompt (see its own design). The window shows it for a new
+group (from a card's menu) and for a rename (from a header), and this view model applies the name it completes with
+(`AgentControl-MainWindowViewModel-GroupManagement`, `AgentControl-RepoCardViewModel-MoveToGroup`).
 
 **_packageVersionCache**: `PackageVersionCache` — The shared, session-scoped package-version
 cache passed to every `RepoCardViewModel`, per architecture.md's repo-fact caching strategy.
@@ -225,6 +219,8 @@ succeeding.
 
 - **RepoCardViewModel** — one instance per tracked repo; `MainWindowViewModel` constructs,
   refreshes, and disposes of card membership in `RepoCards`.
+- **RepoGroupHeaderViewModel** (`LauncherUI`) — one header per section, updated in place; its
+  toggle, rename and remove requests are handled here.
 - **RepoPinStore** (`RepoConfig` subsystem) — `AddRepo` attempts to load an existing pin for a
   newly-added repo.
 - **SettingsStore** (`Settings` subsystem) — `SaveSettings` persists the live `AppSettings`;

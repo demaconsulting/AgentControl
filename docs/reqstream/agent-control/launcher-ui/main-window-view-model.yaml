@@ -190,10 +190,6 @@ sections:
           - MainWindowViewModel_ToggleGroupCollapsed_KeepsHeaderAndUnchangedCardsInPlace
           - MainWindowViewModel_Constructor_NullAndInvalidOrganizingSettings_FallBack
           - MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection
-          - RepoGroupHeaderViewModel_Kind_SelectsSectionFlags
-          - RepoGroupHeaderViewModel_Update_DescribesCountAndState
-          - RepoGroupHeaderViewModel_ToString_IsTheAccessibleName
-          - RepoGroupHeaderViewModel_Constructor_BlankName_Throws
 
       - id: AgentControl-MainWindowViewModel-GroupCollapse
         title: >-
@@ -209,7 +205,6 @@ sections:
           - MainWindowViewModel_ToggleGroupCollapsed_BuiltInSections_CollapseAndPersist
           - MainWindowViewModel_AllGroupsCollapsed_HeadersRemainAndListIsNotEmpty
           - MainWindowViewModel_ApplySettings_KeepsCollapsedGroups
-          - RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled
 
       - id: AgentControl-MainWindowViewModel-GroupFilter
         title: >-
@@ -237,24 +232,4 @@ sections:
           - MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames
           - MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped
           - MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName
-          - RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests
           - RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository
-
-      - id: AgentControl-MainWindowViewModel-GroupNamePrompt
-        title: >-
-          The group-name prompt shall validate the typed name as the user types - refusing a blank
-          name, a name longer than 40 characters and the built-in names Favorites and Ungrouped,
-          and, when renaming, another group's name - shall let a new group join an existing group
-          of the same name ignoring letter case (with a note), shall only accept a usable name, and
-          shall complete exactly once, with the name or with none when canceled.
-        justification: |
-          A name can only be used if it is valid; telling the user why as they type is quicker than
-          refusing afterwards, and a group must not exist twice under different letter case.
-        tests:
-          - GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName
-          - GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept
-          - GroupNameViewModel_TooLongName_ShowsLengthMessage
-          - GroupNameViewModel_NewGroup_ExistingName_HintsAndAdoptsSpelling
-          - GroupNameViewModel_Rename_RefusesOtherGroupsAcceptsCaseChange
-          - GroupNameViewModel_Cancel_CompletesOnceWithNull
-          - GroupNameViewModel_Constructor_NullArguments_Throw

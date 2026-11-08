@@ -10,20 +10,31 @@ window, the settings window, the package-source editor window and the sign-in di
 (`MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`, `SettingsWindowViewModel`,
 `SourceEditorViewModel`, `CredentialPromptViewModel`), plus their `.axaml` Views (`MainWindow`,
 `AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`, `SettingsWindow`,
-`SourceEditorWindow`, `CredentialPromptWindow`) and shared MVVM support types (`RelayCommand`,
+`SourceEditorWindow`, `CredentialPromptWindow`, `GroupNameWindow`) and shared MVVM support types (`RelayCommand`,
 `AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
-`SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`,
-`FavoriteIconConverter`, `AgentToolKindDisplayNameConverter`, `ThemePreferenceDisplayNameConverter`,
-`RepoCardStatus`, `RepoImageLocator`, `RepoGroupHeaderViewModel`, `RepoGroupKind`, `GroupNameViewModel`,
-`GroupNameWindow`, `CardColorPalette`, `PathEllipsisText`, `DialogBehavior`, `ThirdPartyDependencies`), the shared
-theme resources and styles
-(`AppStyles.axaml`, included by `App.axaml`), which are folded
-into this subsystem-level description rather than given separate unit files; `ThirdPartyDependencies`
-and `AsyncRelayCommand` are the exceptions with dedicated test files
-(`ThirdPartyDependenciesTests.cs`, `AsyncRelayCommandTests.cs`), since each is independent of
-any Avalonia control. The subsystem contains
-six units: `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
-`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`. It depends on the
+`SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`, `RepoCardStatus`,
+`CardColorPalette`, `ThirdPartyDependencies`), the shared theme resources and styles
+(`AppStyles.axaml`, included by `App.axaml`). The subsystem contains ten units: the six
+view-model units `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
+`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`, and four further
+independently testable classes with behavior of their own, each with its own requirements, design, verification
+document and review set: `RepoImageLocator` (finds and decodes a repo's untrusted picture; security-relevant),
+`RepoGroupHeaderViewModel` (with `RepoGroupKind`; the header row of a repo-list section), `GroupNameViewModel` (the
+validating view model of the group-name prompt) and `DialogBehavior` (the keyboard behavior every dialog shares).
+
+**Supporting types.** The remaining types are documented here, as supporting types of the subsystem, rather than as
+units: the `RelayCommand`/`ViewModelBase`/`PackageSourceItemViewModel`-style MVVM plumbing and the `.axaml` Views are
+declared glue with no logic of their own to verify apart from the units that bind them; `RepoCardStatus`,
+`ConnectionTestResultKind` and `CardColorPalette` are small enumerations and static tables belonging to the card view
+model; `AsyncRelayCommand` and `ThirdPartyDependencies` have dedicated test files
+(`AsyncRelayCommandTests.cs`, `ThirdPartyDependenciesTests.cs`) because each is independent of any Avalonia control;
+and the pure display helpers - the value converters `FavoriteIconConverter`, `AgentToolKindDisplayNameConverter` and
+`ThemePreferenceDisplayNameConverter` (each maps one value to its display text or glyph; the last two have their own
+test files) and the `PathEllipsisText` control (a presentational control that only shortens text to the width it is
+given, with its own `PathEllipsisTextTests.cs`) - are exercised through the subsystem requirements that name their
+tests (`AgentControl-LauncherUI-UpToDateCue`, `AgentControl-LauncherUI-Appearance`,
+`AgentControl-LauncherUI-FavoriteStar`) and are reviewed with the subsystem. This is the same convention the
+`Settings` subsystem uses for its data types and its `RepoGroupName` rules helper. The subsystem depends on the
 `AgentPackageManagement` subsystem (sources, providers, failure causes) and on the `PackageCredentials`
 subsystem (`PackageCredentialContext`, and the `ICredentialPrompt` that `AvaloniaCredentialPrompt` implements) and
 on `SignatureVerificationSupport` (whether the signature requirement can be offered). The repo card's package chip
@@ -297,7 +308,10 @@ shadows, the status accent colors, chip fills and text, button states, the avata
 caution and success text, the page background) consumed with `DynamicResource`; no template or setter holds a
 hard-coded color. Text colors were chosen for at least 4.5:1 contrast against the fill and surface they are
 drawn on, status accents and icons for 3:1, and `ThemeResourceTests` checks both dictionaries define the same
-keys and meet those ratios. The same file defines the shared styles: the repo card (surface, soft shadow,
+keys and meet those ratios in every control state it covers. Defining every color for both themes is the design
+rule that makes the "legible in both themes" requirement (`AgentControl-LauncherUI-Appearance`) hold: no window can
+be left with a color that exists in one theme only. The same file defines the shared styles: the repo card
+(surface, soft shadow,
 hover lift with 140 ms transitions, selection and keyboard-focus ring), the status accent bar, the avatar
 tile, the chips (one height, padding and font, tinted fill with a matching foreground, a flat button wrapper
 for clickable chips), the action buttons (primary accent with hover, pressed and disabled states, and a
@@ -386,7 +400,8 @@ is simple enough not to warrant a separate class.
 **Dialog keyboard behavior.** Every dialog (Settings, the source editors, the sign-in prompt, the package
 picker, the confirmations, the message boxes, the group-name prompt and About) is shown with
 `ShowDialog(owner)`, so the window behind is disabled by the operating system, and applies the shared
-`DialogBehavior.Apply` from its code-behind (`AgentControl-LauncherUI-DialogKeyboard`): Tab navigation on the
+`DialogBehavior.Apply` from its code-behind (`AgentControl-LauncherUI-DialogKeyboard`; the behavior itself is the
+`DialogBehavior` unit's, see its design): Tab navigation on the
 window is `Cycle`, so Tab from the last control wraps to the first and Shift+Tab back, never leaving the
 dialog; the first sensible control takes the focus when the dialog opens (Settings: Add; the confirmation: the
 safe answer No; the message box and About: their button; the editors and prompts: their first field), taken

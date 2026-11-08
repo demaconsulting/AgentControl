@@ -6,14 +6,15 @@
 # - LauncherUI spans the recent-repos main window, per-repo cards, the package-selection
 #   window, the settings window, the package-source editor and the sign-in dialog
 #   (MainWindowViewModel, RepoCardViewModel, SelectPackageWindowViewModel,
-#   SettingsWindowViewModel, SourceEditorViewModel, CredentialPromptViewModel), plus their
+#   SettingsWindowViewModel, SourceEditorViewModel, CredentialPromptViewModel), plus four
+#   further independently testable units with their own requirements files (RepoImageLocator,
+#   RepoGroupHeaderViewModel, GroupNameViewModel, DialogBehavior), plus their
 #   Avalonia .axaml Views (including CredentialPromptWindow and the AvaloniaCredentialPrompt
 #   that shows it) and shared MVVM support types (RelayCommand, ViewModelBase,
-#   FavoriteIconConverter, ThemePreferenceDisplayNameConverter, PathEllipsisText, AppStyles.axaml,
-#   ThirdPartyDependencies), which are folded
-#   into this subsystem-level description rather than given separate unit files
-#   (ThirdPartyDependencies is the one exception with a dedicated test file,
-#   ThirdPartyDependenciesTests.cs)
+#   the display-name and favorite converters, PathEllipsisText, AppStyles.axaml,
+#   ThirdPartyDependencies), which are documented as supporting types of this subsystem
+#   rather than given separate unit files (their dedicated test files, where they have one, are
+#   named in the design and verification documents)
 # - Subsystem requirements describe the aggregate UI behavior a user experiences
 
 sections:
@@ -55,15 +56,26 @@ sections:
           The LauncherUI subsystem shall show each repo card's overall status as a colored accent
           bar on its left edge (green up to date, amber upgrade available, red a problem, grey no
           agent package) that is also available in words, and shall show the repo's own root
-          icon.png or logo.png in place of the generated initials tile when present and valid.
+          icon.png or logo.png in place of the generated initials tile when present and valid,
+          and never when it is not a genuine small PNG, is a link or lies outside the repo.
         justification: |
           A long list of repos is scanned by status and by picture; color is backed by words so it
           is never the only carrier of meaning, and an untrusted repo's picture is only used
-          when it is a small, genuine PNG.
+          when it is a small, genuine PNG that really is a plain file of the repo's root.
         children:
           - AgentControl-RepoCardViewModel-StatusAccent
           - AgentControl-RepoCardViewModel-AvatarTile
           - AgentControl-RepoCardViewModel-RepoPicture
+          - AgentControl-RepoImageLocator-FindsPicture
+          - AgentControl-RepoImageLocator-OnlyGenuinePng
+          - AgentControl-RepoImageLocator-SizeLimit
+          - AgentControl-RepoImageLocator-DimensionLimit
+          - AgentControl-RepoImageLocator-NoLinks
+          - AgentControl-RepoImageLocator-LinkedRoot
+          - AgentControl-RepoImageLocator-StaysInRoot
+          - AgentControl-RepoImageLocator-DecodeToTile
+          - AgentControl-RepoImageLocator-NeverFails
+          - AgentControl-RepoImageLocator-ChangeIdentity
         tests:
           - RepoCardViewModel_Status_ReflectsPackageAndUpgradeState
           - MainWindow_RepoCard_AvatarShowsRepoPictureWhenPresent
@@ -85,13 +97,14 @@ sections:
           The LauncherUI subsystem shall let the user choose the system default, light or dark
           theme in an Appearance section of the Settings window (separate from the Tools
           section), shall apply the saved choice to every window without a
-          restart (the system default following the operating system), and shall define every
-          color of its shared styles for both the light and the dark theme with at least AA (4.5:1)
-          contrast for text.
+          restart (the system default following the operating system), and shall keep every window
+          legible in both the light and the dark theme: text at least AA (4.5:1) contrast and
+          meaningful graphics (status bars, icons) at least 3:1 against what they are drawn on,
+          in every state of the controls.
         justification: |
           The whole application must be legible in both themes, and the choice must be honored
-          immediately; defining each color for both themes keeps any window from being left
-          unreadable in one of them.
+          immediately; a window that is readable in one theme only would be unusable for whoever
+          chose the other (how the colors are defined for each theme is in the design).
         children:
           - AgentControl-SettingsWindowViewModel-Appearance
           - AgentControl-MainWindowViewModel-ApplyTheme
@@ -138,7 +151,16 @@ sections:
           - AgentControl-MainWindowViewModel-GroupCollapse
           - AgentControl-MainWindowViewModel-GroupFilter
           - AgentControl-MainWindowViewModel-GroupManagement
-          - AgentControl-MainWindowViewModel-GroupNamePrompt
+          - AgentControl-RepoGroupHeaderViewModel-SectionKind
+          - AgentControl-RepoGroupHeaderViewModel-DescribesSection
+          - AgentControl-RepoGroupHeaderViewModel-Toggle
+          - AgentControl-RepoGroupHeaderViewModel-GroupActions
+          - AgentControl-RepoGroupHeaderViewModel-RequiresName
+          - AgentControl-GroupNameViewModel-ValidatesAsTyped
+          - AgentControl-GroupNameViewModel-NewGroup
+          - AgentControl-GroupNameViewModel-Rename
+          - AgentControl-GroupNameViewModel-CompletesOnce
+          - AgentControl-GroupNameViewModel-RequiresArguments
           - AgentControl-RepoCardViewModel-MoveToGroup
           - AgentControl-Settings-RepoOrganization
         tests:
@@ -244,6 +266,11 @@ sections:
           A keyboard user must be able to operate a dialog without the focus wandering into the
           window behind it or being invisible, and Escape is the standard way out of a dialog.
           One shared behavior keeps all the dialogs alike.
+        children:
+          - AgentControl-DialogBehavior-TabStaysInside
+          - AgentControl-DialogBehavior-InitialFocus
+          - AgentControl-DialogBehavior-EscapeCancels
+          - AgentControl-DialogBehavior-RequiresDialog
         tests:
           - SettingsWindow_ShownModally_FocusStartsInsideTabCyclesInsideAndReturnsToOwner
           - Dialogs_ConfirmationMessageBoxAbout_InitialFocusTabCycleAndEscape

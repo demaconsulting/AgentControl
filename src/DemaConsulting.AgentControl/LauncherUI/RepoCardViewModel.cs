@@ -846,10 +846,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             await LoadRepoImageAsync();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
-                                       or ArgumentException or NotSupportedException)
+        catch (Exception)
         {
-            // Whatever went wrong with a repo's picture file, the card just keeps its generated tile
+            // Whatever went wrong with a repo's picture file - the locator, the decoder or an
+            // injected decoder - the card just keeps its generated tile, and the background task
+            // never faults
             _loadedImageFile = null;
             RepoImage = null;
         }

@@ -4,8 +4,9 @@
 # PURPOSE:
 # - Define requirements for the AgentControl Settings subsystem
 # - Settings spans SettingsStore.cs (loads/saves application-wide settings), and the
-#   AppSettings.cs/RecentRepo.cs/AgentToolKind.cs data types, which are folded into this
-#   subsystem-level description as they have no dedicated test file
+#   AppSettings.cs/RecentRepo.cs/AgentToolKind.cs/ThemePreference.cs data types and the
+#   RepoGroupName.cs rules helper, which are documented as supporting types of this subsystem
+#   rather than as units of their own (RepoGroupName has its own RepoGroupNameTests.cs)
 # - Subsystem requirements describe the observable behavior of persisting application-wide
 #   preferences (package sources, git/agent tool overrides, recent repos, shell preference)
 

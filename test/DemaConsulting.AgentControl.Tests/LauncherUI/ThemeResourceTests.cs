@@ -259,7 +259,9 @@ public class ThemeResourceTests
             new Uri("avares://DemaConsulting.AgentControl/LauncherUI/AppStyles.axaml"));
         var resources = (ResourceDictionary)styles.Resources;
         var dictionary = (ResourceDictionary)resources.ThemeDictionaries[variant];
-        return dictionary.ToDictionary(pair => pair.Key, pair => pair.Value);
+        // TryGetResource materializes each value (the loader stores brushes as deferred content)
+        return dictionary.Keys.ToDictionary(
+            key => key, key => dictionary.TryGetResource(key, variant, out var value) ? value : null);
     }
 
     /// <summary>
