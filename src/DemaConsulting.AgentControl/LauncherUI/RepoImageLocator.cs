@@ -99,8 +99,9 @@ internal static partial class RepoImageLocator
     private const int HeaderLength = 24;
 
     /// <summary>
-    ///     The most files that differ from a candidate name only in letter case that are looked at, so a
-    ///     root crowded with similar names cannot make a lookup long.
+    ///     The most files that differ from a candidate name only in letter case, other than the exact
+    ///     spelling, that are looked at (in ordinal order of their names), so a root crowded with
+    ///     similar names cannot make a lookup long. A spelling beyond the bound is ignored.
     /// </summary>
     private const int MaxCaseVariants = 8;
 
@@ -182,32 +183,51 @@ internal static partial class RepoImageLocator
 
     /// <summary>
     ///     Yields the files in a repo root that have the given name (in any letter case), probing for
-    ///     them instead of reading the whole folder.
+    ///     them instead of reading the whole folder, in a deterministic order.
     /// </summary>
     /// <remarks>
-    ///     A streaming enumeration filtered by the literal name: the file system produces only the
-    ///     entries spelled like the name, the folder is never listed into a collection, and the
-    ///     enumeration is cut off after <see cref="MaxCaseVariants"/> matches, so neither the memory
-    ///     nor the work done on the matches depends on how many files an untrusted repo root holds.
-    ///     The files carry the names they have on disk, and the exact (lower-case) spelling is offered
-    ///     first.
+    ///     Streaming enumerations filtered by the literal name: the file system produces only the
+    ///     entries spelled like the name and the folder is never listed into a collection, so neither
+    ///     the memory nor the work done on the matches depends on how many unrelated files an untrusted
+    ///     repo root holds (a name of seven letters has at most 128 spellings in any case, so the
+    ///     matches are few). The choice never depends on the order the file system enumerates in: the
+    ///     exact (lower-case) spelling is probed for first and always offered first; the other spellings
+    ///     follow in ordinal order of their names, and only the first <see cref="MaxCaseVariants"/> of
+    ///     them are offered - a spelling beyond that bound is ignored, however it would have sorted in
+    ///     the file system's own order.
     /// </remarks>
     /// <param name="root">The repo root.</param>
     /// <param name="name">The candidate file name.</param>
-    /// <returns>The matching files, the exact spelling first.</returns>
+    /// <returns>The matching files: the exact spelling first, then the other spellings in ordinal
+    ///     order of their names.</returns>
     private static IEnumerable<FileInfo> EnumerateNamed(DirectoryInfo root, string name)
     {
         var options = new EnumerationOptions
         {
-            MatchCasing = MatchCasing.CaseInsensitive,
+            MatchCasing = MatchCasing.CaseSensitive,
             MatchType = MatchType.Simple,
             RecurseSubdirectories = false,
             AttributesToSkip = 0,
             IgnoreInaccessible = true
         };
-        return root.EnumerateFiles(name, options)
-            .Take(MaxCaseVariants)
-            .OrderBy(file => string.Equals(file.Name, name, StringComparison.Ordinal) ? 0 : 1);
+
+        // The exact spelling, as the file system names the file (a case-sensitive match on the listed
+        // name, so on a case-insensitive file system "Icon.PNG" is not mistaken for it)
+        foreach (var exact in root.EnumerateFiles(name, options).Take(1))
+        {
+            yield return exact;
+        }
+
+        // The other spellings, in a fixed order, bounded
+        options.MatchCasing = MatchCasing.CaseInsensitive;
+        var others = root.EnumerateFiles(name, options)
+            .Where(file => !string.Equals(file.Name, name, StringComparison.Ordinal))
+            .OrderBy(file => file.Name, StringComparer.Ordinal)
+            .Take(MaxCaseVariants);
+        foreach (var other in others)
+        {
+            yield return other;
+        }
     }
 
     /// <summary>

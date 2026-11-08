@@ -40,12 +40,20 @@ sections:
       - id: AgentControl-RepoImageLocator-CaseInsensitiveNames
         title: >-
           The RepoImageLocator class shall match the names icon.png and logo.png without regard to
-          letter case.
+          letter case, shall prefer the exact lower-case spelling over any other spelling, and shall
+          choose among other spellings in a fixed order (ordinal order of their names, considering
+          only a bounded number of them) that does not depend on the order the file system lists
+          them in.
         justification: |
           Repositories spell their picture names in many ways (Icon.PNG, LOGO.png), and the same
-          repo is checked out on case-sensitive and case-insensitive file systems.
+          repo is checked out on case-sensitive and case-insensitive file systems. The picture a
+          card shows must not change with the file system's enumeration order, and a crowd of
+          similarly spelled files must not be able to hide the exact name or make a lookup long.
         tests:
           - RepoImageLocator_Find_NameInOtherCase_IsFound
+          - ubuntu@RepoImageLocator_Find_ManyCaseVariantsAndExactSpelling_PrefersExactSpelling
+          - ubuntu@RepoImageLocator_Find_OnlyCaseVariants_ChoosesFirstAcceptableInOrdinalOrder
+          - ubuntu@RepoImageLocator_Find_AcceptableVariantBeyondTheBound_IsIgnored
 
       - id: AgentControl-RepoImageLocator-MissingFolder
         title: >-

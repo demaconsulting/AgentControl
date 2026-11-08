@@ -66,6 +66,68 @@ public sealed class RepoImageLocatorTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that the exact lower-case spelling is preferred even when more than
+    ///     <see cref="RepoImageLocator"/>'s bound of other spellings exist, whatever order the file
+    ///     system lists them in. Needs a case-sensitive file system, where the spellings can coexist.
+    /// </summary>
+    [Fact]
+    public void RepoImageLocator_Find_ManyCaseVariantsAndExactSpelling_PrefersExactSpelling()
+    {
+        // Arrange: the exact name plus 40 other spellings, all valid pictures
+        var files = new List<(string Name, byte[] Content)> { ("icon.png", TestPng.Create(8, 8)) };
+        files.AddRange(CaseVariants("icon.png").Take(40).Select(name => (name, TestPng.Create(16, 16))));
+        var root = CreateRepo(files.ToArray());
+        SkipUnlessSpellingsCoexist(root);
+
+        // Act
+        var found = RepoImageLocator.Find(root);
+
+        // Assert: the exact spelling, not whichever variant the file system listed first
+        Assert.NotNull(found);
+        Assert.Equal("icon.png", Path.GetFileName(found.Value.Path));
+    }
+
+    /// <summary>
+    ///     Test that with no exact spelling the choice among case variants is deterministic: the first
+    ///     acceptable one in ordinal order of the names, however many variants there are.
+    /// </summary>
+    [Fact]
+    public void RepoImageLocator_Find_OnlyCaseVariants_ChoosesFirstAcceptableInOrdinalOrder()
+    {
+        // Arrange: ordinal order is ICON.PNG, ICON.png, Icon.PNG, Icon.png; the first is not a PNG
+        var root = CreateRepo(
+            ("Icon.png", TestPng.Create(8, 8)),
+            ("ICON.PNG", System.Text.Encoding.ASCII.GetBytes("<svg>not a png</svg> padded to be long enough")),
+            ("Icon.PNG", TestPng.Create(8, 8)),
+            ("ICON.png", TestPng.Create(8, 8)));
+        SkipUnlessSpellingsCoexist(root);
+
+        // Act
+        var found = RepoImageLocator.Find(root);
+
+        // Assert: the smallest name is refused, so the next smallest is chosen
+        Assert.NotNull(found);
+        Assert.Equal("ICON.png", Path.GetFileName(found.Value.Path));
+    }
+
+    /// <summary>
+    ///     Test that only a bounded number of other spellings is considered: one beyond the bound, in
+    ///     ordinal order, is ignored even though it is the only acceptable picture.
+    /// </summary>
+    [Fact]
+    public void RepoImageLocator_Find_AcceptableVariantBeyondTheBound_IsIgnored()
+    {
+        // Arrange: 20 spellings in ordinal order; every one but the last is not a PNG
+        var names = CaseVariants("icon.png").OrderBy(name => name, StringComparer.Ordinal).Take(20).ToList();
+        var notPng = System.Text.Encoding.ASCII.GetBytes("<svg>not a png</svg> padded to be long enough");
+        var root = CreateRepo(names.Select(name => (name, name == names[^1] ? TestPng.Create(8, 8) : notPng)).ToArray());
+        SkipUnlessSpellingsCoexist(root);
+
+        // Act / Assert
+        Assert.Null(RepoImageLocator.Find(root));
+    }
+
+    /// <summary>
     ///     Test that the names are matched without regard to case, so Icon.PNG and LOGO.png count.
     /// </summary>
     /// <param name="fileName">The file name as the repo spells it.</param>
@@ -723,6 +785,45 @@ public sealed class RepoImageLocatorTests : IDisposable
         {
             Assert.Skip($"Creating a symbolic link needs a privilege this account does not have: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    ///     Gives every spelling of a lower-case name in other letter case, in a fixed order, not
+    ///     including the name itself.
+    /// </summary>
+    /// <param name="name">The lower-case name.</param>
+    /// <returns>The other spellings.</returns>
+    private static IEnumerable<string> CaseVariants(string name)
+    {
+        var letters = Enumerable.Range(0, name.Length).Where(i => char.IsLetter(name[i])).ToArray();
+        for (var mask = 1; mask < 1 << letters.Length; mask++)
+        {
+            var chars = name.ToCharArray();
+            for (var bit = 0; bit < letters.Length; bit++)
+            {
+                if ((mask & (1 << bit)) != 0)
+                {
+                    chars[letters[bit]] = char.ToUpperInvariant(chars[letters[bit]]);
+                }
+            }
+
+            yield return new string(chars);
+        }
+    }
+
+    /// <summary>
+    ///     Skips the test unless the temporary folder's file system is case-sensitive, so that files
+    ///     whose names differ only in letter case can exist side by side.
+    /// </summary>
+    /// <param name="root">The repo folder the test created, in which the spellings must all exist.</param>
+    private static void SkipUnlessSpellingsCoexist(string root)
+    {
+        var lower = Path.Combine(root, "probe-case.tmp");
+        var upper = Path.Combine(root, "PROBE-CASE.tmp");
+        File.WriteAllBytes(lower, [1]);
+        var caseSensitive = !File.Exists(upper);
+        File.Delete(lower);
+        Assert.SkipUnless(caseSensitive, "The file system is case-insensitive: spellings that differ only in letter case cannot coexist.");
     }
 
     /// <summary>

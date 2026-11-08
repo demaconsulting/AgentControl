@@ -28,8 +28,8 @@ what lets a caller tell whether the picture changed (`AgentControl-RepoImageLoca
 hostile file can use); `MaxDimension` = 4096 pixels (the largest width or height the PNG header may declare, so at
 most 4096 x 4096 pixels, 64 MB as a 32-bit bitmap); `TileDecodeWidth` = 96 pixels (twice the 44 pixel tile, so the
 picture stays sharp at 200 percent display scaling). Private: `HeaderChunkLength` = 13 (the exact length of the PNG
-header chunk, `AgentControl-RepoImageLocator-HeaderChunkLength`) and `MaxCaseVariants` = 8 (the most files of one
-candidate name that are looked at, see `Find`).
+header chunk, `AgentControl-RepoImageLocator-HeaderChunkLength`) and `MaxCaseVariants` = 8 (the most spellings of one
+candidate name, other than the exact one, that are looked at, in ordinal order, see `Find`).
 
 **Candidate names**: `icon.png`, then `logo.png`, matched without regard to letter case.
 
@@ -43,9 +43,12 @@ candidate name that are looked at, see `Find`).
    deliberately accept a repo under a linked parent folder, and so does this one; only a root that *is* a link is
    refused, because it lets the repo pick which folder is searched.
 2. The folder is never listed. For each candidate name in turn, `EnumerateNamed` asks the file system for the files
-   directly in the root whose name matches that name (a streaming enumeration with a literal pattern,
-   case-insensitive, no recursion, inaccessible entries skipped) and takes at most `MaxCaseVariants` matches, the
-   exactly spelled name first; a file in a folder below the root is therefore never considered. The memory used and
+   directly in the root whose name matches that name (a streaming enumeration with a literal pattern, no recursion,
+   inaccessible entries skipped). The choice is deterministic, never a function of the file system's listing order: the
+   exact spelling is probed first (a case-sensitive match on the listed name) and always offered first; the other
+   spellings (a seven-letter name has at most 128, so the matches are few) follow in ordinal order of their names, and
+   only the first `MaxCaseVariants` of those are offered - a spelling beyond that bound is ignored. A file in a folder
+   below the root is never considered. The memory used and
    the number of entries examined do not depend on how many files an untrusted root holds
    (`AgentControl-RepoImageLocator-CrowdedRoot`), where reading the whole listing first would have let a hostile repo
    impose that cost on every refresh. Candidates are examined in the order of the candidate names; an unacceptable
@@ -108,6 +111,15 @@ link before it is opened, so the check that counts is made on the *open handle*:
 A hard link in the root to a file elsewhere is an ordinary file of the root by every test the file system offers
 and is not detected; it is a file the user's own account can already read, it is subject to the same size, signature
 and dimension checks, and it cannot make the read leave the root.
+
+**Accepted residual risk - a replaced repository directory.** The root's resolved path is recorded before the file is
+opened, the root is confirmed not to be a link, and the open handle's final path is compared with the recorded path;
+that closes the replacement of the root by a link at or below it. What remains is a swap of the repository directory
+*itself* (or of one of its parents) for a different real directory between those steps. Doing that takes write access
+to the repository's parent folder - an attacker who already has it can change the repository outright. Even then the
+file must still pass the PNG signature, the `IHDR` chunk with length 13, the 1 MB and 4096 pixel limits and is decoded
+down-scaled off the UI thread, so the only effect is which picture appears on that card. Links at or below the root
+are refused. This residual risk is accepted and not mitigated further.
 
 #### Error Handling
 

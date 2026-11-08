@@ -69,7 +69,14 @@ offered. This scenario is tested by `RepoImageLocator_Find_IconWithoutPngSignatu
 `AgentControl-RepoImageLocator-LogoFallback`.
 
 **RepoImageLocator_CaseInsensitiveNames**: Pictures named `ICON.PNG`, `Icon.png`, `Logo.Png` and `LOGO.PNG` are found.
-This scenario is tested by `RepoImageLocator_Find_NameInOtherCase_IsFound`, covering
+On a case-sensitive file system (the ubuntu job; the spellings cannot coexist elsewhere, where the tests skip), the
+exact `icon.png` is chosen although 40 other spellings exist, so the choice does not follow the file system's listing
+order; with no exact spelling the first acceptable spelling in ordinal order of the names is chosen (a refused
+`ICON.PNG` gives way to `ICON.png`); and an acceptable spelling beyond the bound of considered spellings is ignored.
+This scenario is tested by `RepoImageLocator_Find_NameInOtherCase_IsFound`,
+`ubuntu@RepoImageLocator_Find_ManyCaseVariantsAndExactSpelling_PrefersExactSpelling`,
+`ubuntu@RepoImageLocator_Find_OnlyCaseVariants_ChoosesFirstAcceptableInOrdinalOrder` and
+`ubuntu@RepoImageLocator_Find_AcceptableVariantBeyondTheBound_IsIgnored`, covering
 `AgentControl-RepoImageLocator-CaseInsensitiveNames`.
 
 **RepoImageLocator_MissingFolder**: A folder that does not exist gives no picture and no exception. This scenario is
