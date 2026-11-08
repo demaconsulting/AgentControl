@@ -205,6 +205,9 @@ sections:
           - windows@RepoImageLocator_FindAndDecode_RootUnderSymbolicLinkedParent_StillWorks
           - ubuntu@RepoImageLocator_FindAndDecode_RootUnderSymbolicLinkedParent_StillWorks
           - macos@RepoImageLocator_FindAndDecode_RootUnderSymbolicLinkedParent_StillWorks
+          - windows@RepoImageLocator_Find_LinkedParentWhoseTargetIsBelowAnotherLink_StillWorks
+          - ubuntu@RepoImageLocator_Find_LinkedParentWhoseTargetIsBelowAnotherLink_StillWorks
+          - macos@RepoImageLocator_Find_LinkedParentWhoseTargetIsBelowAnotherLink_StillWorks
 
       - id: AgentControl-RepoImageLocator-StaysInRoot
         title: >-

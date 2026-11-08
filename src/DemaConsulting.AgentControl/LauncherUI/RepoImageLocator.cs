@@ -573,12 +573,21 @@ internal static partial class RepoImageLocator
     ///     Resolves every link along a path by walking it from the root, one component at a time
     ///     (the platform-neutral way of finding a path's real location).
     /// </summary>
+    /// <remarks>
+    ///     The target of a link can itself lie below another link (on macOS a temporary folder is
+    ///     under <c>/var</c>, which is a link to <c>/private/var</c>), so a link's target is resolved
+    ///     the same way before the walk goes on; otherwise the result would not be the canonical
+    ///     path that the operating system reports for an open file in the same place.
+    /// </remarks>
     /// <param name="fullPath">The full path.</param>
-    /// <returns>The path with each symbolic link replaced by its final target.</returns>
-    private static string? ResolveLinks(string fullPath)
+    /// <param name="depth">How many links deep this resolution is; guards against a cycle.</param>
+    /// <returns>The path with each symbolic link replaced by its final target, or
+    ///     <see langword="null"/> when the links nest too deeply.</returns>
+    private static string? ResolveLinks(string fullPath, int depth = 0)
     {
+        const int maxDepth = 32;
         var current = Path.GetPathRoot(fullPath);
-        if (current is null)
+        if (current is null || depth > maxDepth)
         {
             return null;
         }
@@ -590,7 +599,11 @@ internal static partial class RepoImageLocator
             var target = new FileInfo(current).ResolveLinkTarget(returnFinalTarget: true);
             if (target is not null)
             {
-                current = target.FullName;
+                current = ResolveLinks(target.FullName, depth + 1);
+                if (current is null)
+                {
+                    return null;
+                }
             }
         }
 

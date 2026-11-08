@@ -139,7 +139,9 @@ covering `AgentControl-RepoImageLocator-LinkedRootSwap`.
 **RepoImageLocator_LinkedParentKept**: A repo that is an ordinary folder inside a folder reached through a junction
 (Windows only) or a symbolic link is found and decoded. This scenario is tested by
 `windows@RepoImageLocator_FindAndDecode_RootUnderJunctionParent_StillWorks` and by
-`RepoImageLocator_FindAndDecode_RootUnderSymbolicLinkedParent_StillWorks` on `windows@`, `ubuntu@` and `macos@`,
+`RepoImageLocator_FindAndDecode_RootUnderSymbolicLinkedParent_StillWorks` on `windows@`, `ubuntu@` and `macos@`, and
+a parent link whose own target lies below another link (as a temporary folder does on macOS, under `/var`) by
+`RepoImageLocator_Find_LinkedParentWhoseTargetIsBelowAnotherLink_StillWorks` on `windows@`, `ubuntu@` and `macos@`,
 covering `AgentControl-RepoImageLocator-LinkedParentKept`.
 
 **RepoImageLocator_StaysInRoot**: A file found in one repo and claimed for another repo's root, for a missing root and

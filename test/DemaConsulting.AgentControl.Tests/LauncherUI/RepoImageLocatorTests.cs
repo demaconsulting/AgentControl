@@ -449,6 +449,33 @@ public sealed class RepoImageLocatorTests : IDisposable
         AssertRootUnderLinkedParentWorks(CreateDirectorySymlinkOrSkip);
 
     /// <summary>
+    ///     Test that a repo under a linked parent whose own target lies below another link (as a
+    ///     temporary folder does on macOS, under <c>/var</c> which links to <c>/private/var</c>) is
+    ///     still found: the link's target is resolved to its canonical location too, so it equals the
+    ///     path the operating system reports for the open file.
+    /// </summary>
+    [Fact]
+    public void RepoImageLocator_Find_LinkedParentWhoseTargetIsBelowAnotherLink_StillWorks()
+    {
+        // Arrange: <base>/real/sub/repo/icon.png; <base>/first -> <base>/real; and a parent link
+        // <other>/second -> <base>/first/sub, whose target passes through the first link
+        var realBase = CreateRepo();
+        var sub = Path.Combine(realBase, "real", "sub");
+        Directory.CreateDirectory(Path.Combine(sub, "repo"));
+        File.WriteAllBytes(Path.Combine(sub, "repo", "icon.png"), TestPng.Create(64, 64));
+        var first = Path.Combine(realBase, "first");
+        CreateDirectorySymlinkOrSkip(first, Path.Combine(realBase, "real"));
+        var second = Path.Combine(CreateRepo(), "second");
+        CreateDirectorySymlinkOrSkip(second, Path.Combine(first, "sub"));
+
+        // Act
+        var found = RepoImageLocator.Find(Path.Combine(second, "repo"));
+
+        // Assert
+        Assert.NotNull(found);
+    }
+
+    /// <summary>
     ///     Test that decoding refuses a file whose recorded root is not the folder the file is in
     ///     (a picture outside the repo root, however it was reached).
     /// </summary>
