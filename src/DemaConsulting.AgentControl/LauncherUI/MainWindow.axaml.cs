@@ -245,6 +245,7 @@ internal sealed partial class MainWindow : Window
         }
 
         viewModel.RepoCards.CollectionChanged += OnRepoCardsChanged;
+        viewModel.SettingsSaveFailed += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
         viewModel.GroupRenameRequested += async (_, name) => await ShowRenameGroupPrompt(viewModel, name);
         viewModel.GroupRemoveRequested += async (_, name) => await ConfirmAndRemoveGroup(viewModel, name);
 
@@ -260,6 +261,17 @@ internal sealed partial class MainWindow : Window
     /// <param name="e">Describes which cards were added.</param>
     private void OnRepoCardsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        // Cards that left the list: undo what was attached and drop what was remembered about them
+        if (e.OldItems is not null)
+        {
+            DetachCardHandlers(e.OldItems.OfType<RepoCardViewModel>());
+        }
+
+        if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            DetachCardHandlers([.. _cardHandlerRemovers.Keys]);
+        }
+
         if (e.NewItems is null)
         {
             return;
@@ -289,14 +301,16 @@ internal sealed partial class MainWindow : Window
     /// <param name="card">The card to subscribe to.</param>
     private void AttachCardHandlers(RepoCardViewModel card)
     {
-        // Runs after the view model has regrouped the list (its handler was attached when the card was created)
-        card.FavoriteChanged += (_, _) => RestoreStarFocus(card);
-        card.ErrorOccurred += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
-        card.ReleaseNotesReady += async (_, releaseNotes) => await ShowReleaseNotesAsync(card, releaseNotes);
-        card.RemoveRequested += async (_, _) => await ConfirmAndRemoveCard(card);
-        card.SelectPackageRequested += async (_, _) => await ShowSelectPackageDialog(card);
-        card.NewGroupRequested += async (_, _) => await ShowNewGroupPrompt(card);
-        card.AgentsMdTemplateOfferRequested += async (_, templateContent) =>
+        // Each handler is a local so exactly the same delegate can be detached again when the card is
+        // removed: a removed card must not keep this window alive (or be kept alive by it)
+        void OnFavoriteChanged(object? sender, EventArgs e) => RestoreStarFocus(card);
+        void OnErrorOccurred(object? sender, string message) => new MessageBoxWindow(message).ShowDialog(this);
+        async void OnReleaseNotesReady(object? sender, string releaseNotes) =>
+            await ShowReleaseNotesAsync(card, releaseNotes);
+        async void OnRemoveRequested(object? sender, EventArgs e) => await ConfirmAndRemoveCard(card);
+        async void OnSelectPackageRequested(object? sender, EventArgs e) => await ShowSelectPackageDialog(card);
+        async void OnNewGroupRequested(object? sender, EventArgs e) => await ShowNewGroupPrompt(card);
+        async void OnTemplateOfferRequested(object? sender, string templateContent)
         {
             // Remember the question until it is answered, so the release notes that follow it can wait
             // (the handler runs up to its first await before returning, so this is in place in time)
@@ -310,8 +324,68 @@ internal sealed partial class MainWindow : Window
             {
                 answered.SetResult();
             }
+        }
+
+        // Runs after the view model has regrouped the list (its handler was attached when the card was created)
+        card.FavoriteChanged += OnFavoriteChanged;
+        card.ErrorOccurred += OnErrorOccurred;
+        card.ReleaseNotesReady += OnReleaseNotesReady;
+        card.RemoveRequested += OnRemoveRequested;
+        card.SelectPackageRequested += OnSelectPackageRequested;
+        card.NewGroupRequested += OnNewGroupRequested;
+        card.AgentsMdTemplateOfferRequested += OnTemplateOfferRequested;
+
+        _cardHandlerRemovers[card] = () =>
+        {
+            card.FavoriteChanged -= OnFavoriteChanged;
+            card.ErrorOccurred -= OnErrorOccurred;
+            card.ReleaseNotesReady -= OnReleaseNotesReady;
+            card.RemoveRequested -= OnRemoveRequested;
+            card.SelectPackageRequested -= OnSelectPackageRequested;
+            card.NewGroupRequested -= OnNewGroupRequested;
+            card.AgentsMdTemplateOfferRequested -= OnTemplateOfferRequested;
         };
     }
+
+    /// <summary>
+    ///     Detaches the handlers of <see cref="AttachCardHandlers"/> from each card and forgets what
+    ///     this window remembered about it.
+    /// </summary>
+    /// <remarks>
+    ///     Called when cards leave <see cref="MainWindowViewModel.RepoCards"/>. Without it a removed
+    ///     card stayed referenced by this window's handlers and by its per-card bookkeeping
+    ///     (<see cref="_dirtyStatusRefreshedCards"/>, <see cref="_agentsMdPrompts"/>, the focused
+    ///     star), and a pending operation could still show a message box or release notes for a repo
+    ///     that is no longer listed.
+    /// </remarks>
+    /// <param name="cards">The cards that were removed.</param>
+    private void DetachCardHandlers(IEnumerable<RepoCardViewModel> cards)
+    {
+        foreach (var card in cards)
+        {
+            if (_cardHandlerRemovers.Remove(card, out var remove))
+            {
+                remove();
+            }
+
+            _dirtyStatusRefreshedCards.Remove(card);
+            _agentsMdPrompts.Remove(card);
+            _paletteCard = _paletteCard == card ? null : _paletteCard;
+            _focusedStarCard = _focusedStarCard == card ? null : _focusedStarCard;
+        }
+    }
+
+    /// <summary>
+    ///     Removes, per card, what <see cref="AttachCardHandlers"/> attached, so
+    ///     <see cref="DetachCardHandlers"/> can undo it.
+    /// </summary>
+    private readonly Dictionary<RepoCardViewModel, Action> _cardHandlerRemovers = [];
+
+    /// <summary>
+    ///     Gets how many cards this window currently holds handlers for (and remembers things about);
+    ///     it equals the number of cards in the list, which is what tests of the removal clean-up check.
+    /// </summary>
+    internal int TrackedCardCount => _cardHandlerRemovers.Count;
 
     /// <summary>
     ///     The AGENTS.md template questions that are open (a card has one at most), so the release notes
@@ -400,7 +474,15 @@ internal sealed partial class MainWindow : Window
 
         if (confirmed)
         {
-            viewModel.RemoveRepo(card);
+            try
+            {
+                viewModel.RemoveRepo(card);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // The removal was not saved, so the repo is still listed; say why
+                await new MessageBoxWindow($"The repo was not removed. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
+            }
         }
     }
 
@@ -694,7 +776,14 @@ internal sealed partial class MainWindow : Window
         var name = await new GroupNameWindow(prompt).ShowDialog<string?>(this);
         if (name is not null)
         {
-            viewModel.RenameGroup(groupName, name);
+            try
+            {
+                viewModel.RenameGroup(groupName, name);
+            }
+            catch (InvalidOperationException ex)
+            {
+                await new MessageBoxWindow($"The group was not renamed. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
+            }
         }
     }
 
@@ -715,7 +804,14 @@ internal sealed partial class MainWindow : Window
 
         if (confirmed)
         {
-            viewModel.RemoveGroup(groupName);
+            try
+            {
+                viewModel.RemoveGroup(groupName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                await new MessageBoxWindow($"The group was not removed. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
+            }
         }
     }
 
@@ -739,7 +835,19 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        if (!viewModel.AddRepo(path))
+        bool added;
+        try
+        {
+            added = viewModel.AddRepo(path);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The repo was not added because the list could not be saved; say why
+            await new MessageBoxWindow($"'{path}' could not be added. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
+            return;
+        }
+
+        if (!added)
         {
             await new MessageBoxWindow($"'{path}' could not be added: it does not exist or is already in the list.")
                 .ShowDialog(this);

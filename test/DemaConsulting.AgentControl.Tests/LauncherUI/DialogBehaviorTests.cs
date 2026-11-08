@@ -42,19 +42,133 @@ public sealed class DialogBehaviorTests
         Assert.Throws<ArgumentNullException>(() => DialogBehavior.Apply(null!));
 
     /// <summary>
-    ///     Test that Tab navigation cycles inside the dialog (from the last control to the first).
+    ///     Test that Tab from the last control in tab order wraps to the first one instead of leaving the
+    ///     dialog, with the default order and with an explicit tab order that differs from the visual order.
     /// </summary>
-    [Fact]
-    public void DialogBehavior_Apply_TabNavigation_CyclesInsideTheDialog() => HeadlessTestApp.Run(() =>
+    /// <param name="explicitTabOrder">Whether the controls get tab indices that reorder them.</param>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DialogBehavior_Apply_TabFromLastControl_WrapsToFirst(bool explicitTabOrder) => HeadlessTestApp.Run(() =>
     {
         // Arrange
-        var (window, _, _) = CreateDialog();
+        var (window, inTabOrder) = CreateTabOrderDialog(explicitTabOrder);
+        DialogBehavior.Apply(window, "NoSuchControl");
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
 
-        // Act
+        try
+        {
+            inTabOrder[^1].Focus(NavigationMethod.Tab);
+
+            // Act
+            PressKey(window, PhysicalKey.Tab, RawInputModifiers.None);
+
+            // Assert
+            Assert.Same(inTabOrder[0], window.FocusManager.GetFocusedElement());
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that Shift+Tab from the first control in tab order wraps to the last one instead of leaving
+    ///     the dialog, with the default order and with an explicit tab order that differs from the visual
+    ///     order.
+    /// </summary>
+    /// <param name="explicitTabOrder">Whether the controls get tab indices that reorder them.</param>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DialogBehavior_Apply_ShiftTabFromFirstControl_WrapsToLast(bool explicitTabOrder) => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, inTabOrder) = CreateTabOrderDialog(explicitTabOrder);
+        DialogBehavior.Apply(window, "NoSuchControl");
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            inTabOrder[0].Focus(NavigationMethod.Tab);
+
+            // Act
+            PressKey(window, PhysicalKey.Tab, RawInputModifiers.Shift);
+
+            // Assert
+            Assert.Same(inTabOrder[^1], window.FocusManager.GetFocusedElement());
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that without a usable named control the control Tab reaches first - by the explicit tab
+    ///     order, not by position in the visual tree - takes the focus when the dialog opens.
+    /// </summary>
+    [Fact]
+    public void DialogBehavior_Apply_ExplicitTabOrder_FocusesFirstControlInTabOrder() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: the last control in the visual tree has the lowest tab index
+        var (window, inTabOrder) = CreateTabOrderDialog(true);
         DialogBehavior.Apply(window);
 
+        // Act
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
         // Assert
-        Assert.Equal(KeyboardNavigationMode.Cycle, KeyboardNavigation.GetTabNavigation(window));
+        try
+        {
+            Assert.Same(inTabOrder[0], window.FocusManager.GetFocusedElement());
+            Assert.Equal("Third", ((Control)inTabOrder[0]).Name);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a control that is first in tab order but disabled or hidden is skipped, the next one
+    ///     in tab order taking the focus.
+    /// </summary>
+    /// <param name="disable">Whether the first control is disabled (otherwise it is hidden).</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void DialogBehavior_Apply_FirstInTabOrderUnusable_FocusesNextInTabOrder(bool disable) => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, inTabOrder) = CreateTabOrderDialog(true);
+        if (disable)
+        {
+            ((Control)inTabOrder[0]).IsEnabled = false;
+        }
+        else
+        {
+            ((Control)inTabOrder[0]).IsVisible = false;
+        }
+
+        DialogBehavior.Apply(window);
+
+        // Act
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert
+        try
+        {
+            Assert.Same(inTabOrder[1], window.FocusManager.GetFocusedElement());
+        }
+        finally
+        {
+            window.Close();
+        }
     });
 
     /// <summary>
@@ -183,6 +297,54 @@ public sealed class DialogBehaviorTests
             window.Close();
         }
     });
+
+    /// <summary>
+    ///     Presses and releases a key on the window, as the keyboard does.
+    /// </summary>
+    /// <param name="window">The window that has the keyboard.</param>
+    /// <param name="key">The key.</param>
+    /// <param name="modifiers">The modifier keys held down.</param>
+    private static void PressKey(Window window, PhysicalKey key, RawInputModifiers modifiers)
+    {
+        window.KeyPressQwerty(key, modifiers);
+        window.KeyReleaseQwerty(key, modifiers);
+    }
+
+    /// <summary>
+    ///     Creates a dialog window of three buttons (<c>First</c>, <c>Second</c>, <c>Third</c>, in that
+    ///     visual order).
+    /// </summary>
+    /// <param name="explicitTabOrder">Whether the buttons get tab indices that make the keyboard order
+    ///     <c>Third</c>, <c>First</c>, <c>Second</c>, which differs from the visual order.</param>
+    /// <returns>The window and its buttons in keyboard (tab) order.</returns>
+    private static (Window Window, IReadOnlyList<Button> InTabOrder) CreateTabOrderDialog(bool explicitTabOrder)
+    {
+        var first = new Button { Name = "First", Content = "First" };
+        var second = new Button { Name = "Second", Content = "Second" };
+        var third = new Button { Name = "Third", Content = "Third" };
+        if (explicitTabOrder)
+        {
+            third.TabIndex = 0;
+            first.TabIndex = 1;
+            second.TabIndex = 2;
+        }
+
+        var window = new Window
+        {
+            Width = 300,
+            Height = 200,
+            Content = new StackPanel { Children = { first, second, third } }
+        };
+
+        // Controls created in code are found by name through the window's name scope
+        var scope = new NameScope();
+        NameScope.SetNameScope(window, scope);
+        scope.Register("First", first);
+        scope.Register("Second", second);
+        scope.Register("Third", third);
+
+        return (window, explicitTabOrder ? [third, first, second] : [first, second, third]);
+    }
 
     /// <summary>
     ///     Creates a small dialog window: a button, a text box, and a disabled text box.

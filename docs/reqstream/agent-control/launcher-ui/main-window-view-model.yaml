@@ -161,33 +161,81 @@ sections:
       - id: AgentControl-MainWindowViewModel-ApplyTheme
         title: >-
           The MainWindowViewModel class shall, once saved settings have been written, hand the
-          saved theme choice to the application so it takes effect without a restart, and shall
-          not apply the theme of settings that were refused.
+          saved theme choice to the application so it takes effect without a restart.
         justification: |
-          A theme that only changes after a restart would look like a broken setting, and a
-          choice that was never saved must not be shown as if it had been.
+          A theme that only changes after a restart would look like a broken setting.
         tests:
           - MainWindowViewModel_ApplySettings_ThemeChanged_PersistsAndAppliesTheme
+
+      - id: AgentControl-MainWindowViewModel-RefusedThemeNotApplied
+        title: >-
+          The MainWindowViewModel class shall not apply the theme of settings that were refused.
+        justification: |
+          A choice that was never saved must not be shown as if it had been.
+        tests:
           - MainWindowViewModel_ApplySettings_SaveFails_DoesNotApplyTheme
 
       - id: AgentControl-MainWindowViewModel-GroupSections
         title: >-
           The MainWindowViewModel class shall, while at least one repo is in a group, order the
-          displayed items as sections - a Favorites section of the favorite repos (a favorite
-          only there), then one section per group alphabetically ignoring letter case, then an
-          Ungrouped section last - each introduced by a header with the section's name and its
-          number of matching repos, repos within a section by most recent launch, and no header
-          for a section without a repo; while no repo is in a group it shall show the flat list
-          without any header, favorites first.
+          displayed items as sections - a Favorites section first, then one section per group
+          alphabetically ignoring letter case, then an Ungrouped section last.
         justification: |
-          Sections let a long list be read by topic; listing a favorite once keeps every repo
-          in exactly one place, and a user who has no groups must see the list exactly as before.
+          Sections let a long list be read by topic, with the repos the user cares about most
+          first and the repos that belong to no group last.
+        tests:
+          - MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered
+          - MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection
+
+      - id: AgentControl-MainWindowViewModel-GroupSectionHeaders
+        title: >-
+          The MainWindowViewModel class shall introduce each section of repos with a header that
+          shows the section's name and its number of matching repos, and shall show no header for a
+          section without a repo.
+        justification: |
+          The header names what the section holds and how much is in it; a header with nothing
+          under it would only be clutter.
+        tests:
+          - MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered
+          - MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader
+
+      - id: AgentControl-MainWindowViewModel-GroupSectionRepoOrder
+        title: >-
+          The MainWindowViewModel class shall order the repos within a section by most recent
+          launch, those never launched last.
+        justification: |
+          Inside a section the repo used last is the one most likely wanted next.
+        tests:
+          - MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered
+
+      - id: AgentControl-MainWindowViewModel-FavoriteListedOnce
+        title: >-
+          The MainWindowViewModel class shall, while repos are in groups, list a favorite repo only
+          in the Favorites section, not again in its own group, and shall keep its group.
+        justification: |
+          Listing a favorite once keeps every repo in exactly one place, while remembering its group
+          lets it return there when it stops being a favorite.
+        tests:
+          - MainWindowViewModel_Favorite_IsListedOnlyUnderFavoritesAndKeepsItsGroup
+
+      - id: AgentControl-MainWindowViewModel-FlatListWithoutGroups
+        title: >-
+          The MainWindowViewModel class shall, while no repo is in a group, show the displayed
+          repos as one list without any header, favorites first.
+        justification: |
+          A user who has no groups must see the list exactly as before.
         tests:
           - MainWindowViewModel_DisplayedItems_NoGroups_FlatListWithoutHeaders
-          - MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered
-          - MainWindowViewModel_Favorite_IsListedOnlyUnderFavoritesAndKeepsItsGroup
-          - MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader
-          - MainWindowViewModel_ToggleGroupCollapsed_KeepsHeaderAndUnchangedCardsInPlace
+
+      - id: AgentControl-MainWindowViewModel-DamagedGroupSettings
+        title: >-
+          The MainWindowViewModel class shall show a usable list when the group names or the
+          collapsed sections in the settings are damaged (a missing list, blank, reserved or
+          overlong names, names that differ only in letter case) instead of failing.
+        justification: |
+          The settings file can be edited by hand or damaged; the application must still start and
+          show every repo.
+        tests:
           - MainWindowViewModel_Constructor_NullAndInvalidOrganizingSettings_FallBack
           - MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection
 
@@ -195,41 +243,210 @@ sections:
         title: >-
           The MainWindowViewModel class shall collapse and expand any section (a group, Favorites
           or Ungrouped) on request, hiding the cards of a collapsed section but keeping its header
-          with its count, shall remember the collapsed sections in the settings file, and shall
-          keep them when other settings are applied.
+          with its count.
         justification: |
-          A user collapses what they are not working on and expects it to stay that way the next
-          time the application starts.
+          A user collapses what they are not working on and still sees that the section is there.
         tests:
           - MainWindowViewModel_ToggleGroupCollapsed_HidesCardsAndPersists
           - MainWindowViewModel_ToggleGroupCollapsed_BuiltInSections_CollapseAndPersist
           - MainWindowViewModel_AllGroupsCollapsed_HeadersRemainAndListIsNotEmpty
+          - MainWindowViewModel_ToggleGroupCollapsed_KeepsHeaderAndUnchangedCardsInPlace
+
+      - id: AgentControl-MainWindowViewModel-GroupCollapseRemembered
+        title: >-
+          The MainWindowViewModel class shall remember the collapsed sections in the settings file
+          so that they are still collapsed the next time the application starts.
+        justification: |
+          A user who collapsed a section expects it to stay that way.
+        tests:
+          - MainWindowViewModel_ToggleGroupCollapsed_HidesCardsAndPersists
+          - MainWindowViewModel_ToggleGroupCollapsed_BuiltInSections_CollapseAndPersist
+
+      - id: AgentControl-MainWindowViewModel-GroupCollapseKeptOnApplySettings
+        title: >-
+          The MainWindowViewModel class shall keep the collapsed sections when other settings are
+          applied.
+        justification: |
+          Changing a package source or the theme must not reopen the sections the user collapsed.
+        tests:
           - MainWindowViewModel_ApplySettings_KeepsCollapsedGroups
 
       - id: AgentControl-MainWindowViewModel-GroupFilter
         title: >-
           The MainWindowViewModel class shall, while a filter is active, show every repo that
-          matches it - including those in a collapsed section - under headers that count only the
-          matches, omit sections without a match, disable the headers' collapse toggles and leave
-          the remembered collapsed state unchanged, so that clearing the filter restores it.
+          matches it, including those in a collapsed section.
         justification: |
           A repo the user searches for must never be hidden by the way the list is organized.
         tests:
           - MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes
           - MainWindowViewModel_FilterText_NoMatch_ShowsNothing
 
+      - id: AgentControl-MainWindowViewModel-GroupFilterCounts
+        title: >-
+          The MainWindowViewModel class shall, while a filter is active, show in each section's
+          header the number of matching repos only.
+        justification: |
+          The count tells how many repos the filter found in that section, not how many the section
+          holds.
+        tests:
+          - MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes
+
+      - id: AgentControl-MainWindowViewModel-GroupFilterOmitsEmpty
+        title: >-
+          The MainWindowViewModel class shall, while a filter is active, show no header for a
+          section without a match.
+        justification: |
+          Sections the filter found nothing in are noise while the user is searching.
+        tests:
+          - MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes
+          - MainWindowViewModel_FilterText_NoMatch_ShowsNothing
+
+      - id: AgentControl-MainWindowViewModel-GroupFilterToggleDisabled
+        title: >-
+          The MainWindowViewModel class shall, while a filter is active, disable the collapse
+          toggles of the section headers.
+        justification: |
+          While searching every match is shown, so collapsing a section would do nothing visible
+          and only confuse the user.
+        tests:
+          - MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes
+
+      - id: AgentControl-MainWindowViewModel-GroupFilterKeepsCollapsedState
+        title: >-
+          The MainWindowViewModel class shall leave the remembered collapsed sections unchanged
+          while a filter is active, so that clearing the filter restores them.
+        justification: |
+          Searching must not undo how the user organized the list.
+        tests:
+          - MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes
+
       - id: AgentControl-MainWindowViewModel-GroupManagement
         title: >-
-          The MainWindowViewModel class shall rename a group (moving all its repos and its
-          collapsed state, accepting a change of letter case only, and refusing an unknown group,
-          an invalid name and another group's name) and shall remove a group (its repos become
-          ungrouped and its collapsed state is forgotten), persisting the result to the settings
-          file only, and shall forward a header's rename and remove requests to the window.
+          The MainWindowViewModel class shall rename a group, moving all its repos and its
+          collapsed state to the new name.
         justification: |
-          Groups must be maintainable without editing a file; the user's own repositories must
-          not be touched by it.
+          Groups must be maintainable without editing a file.
         tests:
           - MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames
+
+      - id: AgentControl-MainWindowViewModel-GroupRenameRules
+        title: >-
+          The MainWindowViewModel class shall accept a group rename that changes only the letter
+          case of the group's own name, and shall refuse, changing nothing, a rename of an unknown
+          group, to an invalid name or to another group's name.
+        justification: |
+          A rename must never merge two groups or leave a repo in a group that has an unusable
+          name.
+        tests:
+          - MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames
+
+      - id: AgentControl-MainWindowViewModel-GroupRemove
+        title: >-
+          The MainWindowViewModel class shall remove a group so that its repos become ungrouped and
+          its collapsed state is forgotten.
+        justification: |
+          Removing a group removes only the grouping, never the repos in it.
+        tests:
           - MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped
-          - MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName
+
+      - id: AgentControl-MainWindowViewModel-GroupSettingsOnly
+        title: >-
+          The MainWindowViewModel class shall persist grouping, card color and collapsed sections to
+          the settings file only, writing nothing into a repository.
+        justification: |
+          The user's own repositories must not be touched by how the list is organized.
+        tests:
           - RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository
+
+      - id: AgentControl-MainWindowViewModel-GroupHeaderRequests
+        title: >-
+          The MainWindowViewModel class shall forward a section header's rename and remove requests
+          to the window, with the group's name, changing nothing by itself.
+        justification: |
+          The window shows the name prompt or the confirmation; the list must change only after
+          the user has answered.
+        tests:
+          - MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName
+
+      - id: AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved
+        title: >-
+          The MainWindowViewModel class shall, for every change the user makes to a repo or a section
+          (favorite, group, card color, launch time, collapse, rename or removal of a group, adding
+          or removing a repo), apply the change and write it to the settings file when the save
+          succeeds.
+        justification: |
+          A change the user makes must be there the next time the application starts.
+        tests:
+          - MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten
+
+      - id: AgentControl-MainWindowViewModel-FailedSaveChangesNothing
+        title: >-
+          The MainWindowViewModel class shall, when a change the user makes cannot be saved, leave
+          the settings in memory, the repo cards, the displayed list and the settings file as they
+          were.
+        justification: |
+          A list that shows a change the file does not have would be lost at the next start without
+          the user knowing; applying a change only after it was saved keeps what the user sees equal
+          to what is kept.
+        tests:
+          - MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt
+          - MainWindowViewModel_MoveToGroupSaveFails_ChangesNothingAndReports
+          - MainWindowViewModel_CardColorSaveFails_ChangesNothingAndReports
+          - MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports
+          - MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded
+          - MainWindowViewModel_RenameGroupSaveFails_GroupUnchanged
+          - MainWindowViewModel_RemoveGroupSaveFails_GroupUnchanged
+          - MainWindowViewModel_AddRepoSaveFails_NothingAdded
+          - MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking
+
+      - id: AgentControl-MainWindowViewModel-FailedSaveNotPersistedLater
+        title: >-
+          The MainWindowViewModel class shall never write a change whose save failed with a later,
+          unrelated save.
+        justification: |
+          A change the user was told was not applied must not reappear in the file because of
+          something else they did afterwards.
+        tests:
+          - MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt
+          - MainWindowViewModel_AddRepoSaveFails_NothingAdded
+          - MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking
+
+      - id: AgentControl-MainWindowViewModel-SaveFailureReported
+        title: >-
+          The MainWindowViewModel class shall tell the user, through a notice to the window with a
+          message, when a favorite, group, card color, launch time or collapse request from a card
+          or a header button could not be saved.
+        justification: |
+          The user pressed a button and nothing visible happened; without a message they cannot
+          tell that the change was refused or why.
+        tests:
+          - MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt
+          - MainWindowViewModel_MoveToGroupSaveFails_ChangesNothingAndReports
+          - MainWindowViewModel_CardColorSaveFails_ChangesNothingAndReports
+          - MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports
+          - MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded
+
+      - id: AgentControl-MainWindowViewModel-SaveFailureRefusesOperation
+        title: >-
+          The MainWindowViewModel class shall refuse the collapse of a section, the rename or removal
+          of a group and the adding or removing of a repo whose save failed, by reporting the failure
+          to the caller instead of returning normally.
+        justification: |
+          The window that called the operation tells the user; an operation that failed to save must
+          not look as if it had succeeded.
+        tests:
+          - MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded
+          - MainWindowViewModel_RenameGroupSaveFails_GroupUnchanged
+          - MainWindowViewModel_RemoveGroupSaveFails_GroupUnchanged
+          - MainWindowViewModel_AddRepoSaveFails_NothingAdded
+          - MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking
+
+      - id: AgentControl-MainWindowViewModel-RemoveRepoRetiresCard
+        title: >-
+          The MainWindowViewModel class shall, once a repo's removal was saved, retire its card so
+          that nothing the card still has running reports anything afterwards.
+        justification: |
+          A removed repo's pending upgrade check or running operation must not show an error, release
+          notes or a prompt for a repo that is no longer in the list.
+        tests:
+          - MainWindowViewModel_RemoveRepo_RetiresTheCard

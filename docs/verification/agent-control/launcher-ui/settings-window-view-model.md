@@ -35,6 +35,8 @@ N/A - standard test environment.
 - Add, edit and remove change the list as documented, and a removal's warning names the repos
   pinned to the source.
 - A new source's alias must differ from every configured alias, ignoring case.
+- The theme choices are system default, light and dark in that order; the theme starts from the saved choice, the
+  system default when none was saved; and the chosen theme reaches the owner's save callback with the other settings.
 
 #### Test Scenarios
 
@@ -120,10 +122,20 @@ scenario is tested by
 `SettingsWindowViewModel_AddSource_AliasAlreadyConfiguredIgnoringCase_EditorCannotSave`, covering
 `AgentControl-SettingsWindowViewModel-AliasUnique`.
 
-**SettingsWindowViewModel_Appearance_DefaultsToSystemAndIsSavedWithSettings**: A view model built from
-settings without a theme starts at the system default, offers system default, light and dark in that order,
-passes a chosen theme to the save callback with the other settings, and starts from a saved theme. The picker's
-friendly names are checked by `ThemePreferenceDisplayNameConverterTests`. This scenario is tested by
-`SettingsWindowViewModel_Theme_DefaultsToSystemAndIsSavedWithSettings` and
-`ThemePreferenceDisplayNameConverter_Convert_KnownTheme_ReturnsFriendlyName`, covering
+**SettingsWindowViewModel_Appearance_OffersSystemLightAndDarkInOrder**: A view model built from settings without a
+theme offers system default, light and dark in that order. This scenario is tested by
+`SettingsWindowViewModel_Theme_DefaultsToSystemAndIsSavedWithSettings`, covering
 `AgentControl-SettingsWindowViewModel-Appearance`.
+
+**SettingsWindowViewModel_Appearance_StartsFromSavedTheme**: A view model built from settings without a theme starts
+at the system default, and one built from settings that saved the light theme starts at light. This scenario is
+tested by `SettingsWindowViewModel_Theme_DefaultsToSystemAndIsSavedWithSettings`, covering
+`AgentControl-SettingsWindowViewModel-AppearanceStartsFromSaved`.
+
+**SettingsWindowViewModel_Appearance_ChosenThemeIsSaved**: After the dark theme is chosen and saved, the owner's
+save callback receives settings whose theme is dark. This scenario is tested by
+`SettingsWindowViewModel_Theme_DefaultsToSystemAndIsSavedWithSettings`, covering
+`AgentControl-SettingsWindowViewModel-AppearanceSaved`.
+
+The picker's friendly theme names belong to the supporting type `ThemePreferenceDisplayNameConverter` and are
+checked by `ThemePreferenceDisplayNameConverterTests` at the `LauncherUI` subsystem level.

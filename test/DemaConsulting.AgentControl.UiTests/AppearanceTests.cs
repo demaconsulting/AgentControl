@@ -155,6 +155,59 @@ public sealed class AppearanceTests
     }
 
     /// <summary>
+    ///     A Light theme saved by an earlier session is applied when the application starts: the main
+    ///     window is light before anything is changed, whatever the operating system's own theme is.
+    /// </summary>
+    [Fact]
+    public void MainWindow_LaunchWithPersistedLightTheme_AppliesLightFromStartup() =>
+        AssertPersistedThemeAppliedAtStartup("Light", brightnessMatches: brightness => brightness > 0.7);
+
+    /// <summary>
+    ///     A Dark theme saved by an earlier session is applied when the application starts: the main
+    ///     window is dark before anything is changed, whatever the operating system's own theme is.
+    /// </summary>
+    [Fact]
+    public void MainWindow_LaunchWithPersistedDarkTheme_AppliesDarkFromStartup() =>
+        AssertPersistedThemeAppliedAtStartup("Dark", brightnessMatches: brightness => brightness < 0.3);
+
+    /// <summary>
+    ///     Launches the application with a theme already saved in its settings and checks that the first
+    ///     window shows it, that Settings offers it as the current choice, and that the start did not
+    ///     overwrite the saved choice.
+    /// </summary>
+    /// <param name="theme">The saved theme's friendly name, <c>Light</c> or <c>Dark</c>.</param>
+    /// <param name="brightnessMatches">Tells whether the measured app bar brightness is the theme's.</param>
+    private static void AssertPersistedThemeAppliedAtStartup(string theme, Func<double, bool> brightnessMatches)
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: a settings file that already holds the theme, as an earlier session left it
+        using var context = new AgentControlTestContext(customizeSettings: (settings, _) => settings["Theme"] = theme);
+
+        // Act: start the application and look at the first window, without changing anything
+        var mainWindow = context.Launch();
+
+        // Assert: the window is drawn in the saved theme
+        Assert.True(Retry.WhileFalse(
+            () => brightnessMatches(PageBrightness(mainWindow)),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(250)).Result);
+
+        // Act: look at the Appearance setting
+        Find(mainWindow, "OpenSettingsButton").AsButton().Invoke();
+        var settingsWindow = context.WaitForWindowWithDescendant("ThemeComboBox", TimeSpan.FromSeconds(15));
+        Assert.NotNull(settingsWindow);
+
+        // Assert: Settings shows the saved theme as the current choice, and the file still holds it
+        Assert.Equal(theme, Find(settingsWindow, "ThemeComboBox").AsComboBox().SelectedItem?.Text);
+        Assert.Contains($"\"Theme\": \"{theme}\"", ReadSettings(context), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Win32 <c>IsWindowEnabled</c>: whether a window accepts input (a window that owns an open modal dialog
     ///     does not).
     /// </summary>

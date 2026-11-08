@@ -153,7 +153,7 @@ internal static partial class WindowCapture
     /// </summary>
     /// <param name="handle">The window.</param>
     /// <returns>The owner, or zero when the window has none.</returns>
-    private static IntPtr OwnerOf(IntPtr handle) => GetWindow(handle, GetWindowOwner);
+    internal static IntPtr OwnerOf(IntPtr handle) => GetWindow(handle, GetWindowOwner);
 
     /// <summary>
     ///     Gets the window's whole frame (title bar and borders included), which <c>PrintWindow</c> draws.

@@ -22,6 +22,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Definitions;
 using FlaUI.Core.Tools;
 using FlaUI.UIA3;
 
@@ -260,6 +261,53 @@ internal sealed class AgentControlTestContext : IDisposable
     }
 
     /// <summary>
+    ///     Finds the open dialog (a modal window shown over the main window) that contains an
+    ///     element with the given AutomationId, polling until found or the timeout elapses.
+    /// </summary>
+    /// <remarks>
+    ///     UI Automation exposes a dialog as a window inside the main window's tree rather than as a
+    ///     top-level window of its own, so <see cref="WaitForWindowWithDescendant"/> returns the
+    ///     main window for a dialog's element. This method returns the dialog window itself (the
+    ///     innermost one when dialogs are stacked), whose own handle, bounds and enabled state can
+    ///     be examined. A window that is top-level in the tree is returned when no inner window
+    ///     contains the element.
+    /// </remarks>
+    /// <param name="automationId">The AutomationId of an element the wanted dialog contains.</param>
+    /// <param name="timeout">Maximum time to wait.</param>
+    /// <returns>The dialog window, or <see langword="null"/> if none appeared in time.</returns>
+    public Window? WaitForDialog(string automationId, TimeSpan timeout)
+    {
+        if (App is null || Automation is null)
+        {
+            return null;
+        }
+
+        return Retry.WhileNull(
+            () =>
+            {
+                foreach (var topLevel in App.GetAllTopLevelWindows(Automation))
+                {
+                    var inner = topLevel.FindAllDescendants(cf => cf.ByControlType(ControlType.Window))
+                        .LastOrDefault(window =>
+                            window.FindFirstDescendant(cf => cf.ByAutomationId(automationId)) is not null);
+                    if (inner is not null)
+                    {
+                        return inner.AsWindow();
+                    }
+
+                    if (topLevel.FindFirstDescendant(cf => cf.ByAutomationId(automationId)) is not null)
+                    {
+                        return topLevel;
+                    }
+                }
+
+                return null;
+            },
+            timeout: timeout,
+            interval: TimeSpan.FromMilliseconds(200)).Result;
+    }
+
+    /// <summary>
     ///     Opens the Settings window's Add menu and invokes one of its items, the way a user picks
     ///     a source type: the menu items only exist while the menu is open, so the Add button is
     ///     invoked first and the item is then looked up in the opened menu.
@@ -287,20 +335,12 @@ internal sealed class AgentControlTestContext : IDisposable
     }
 
     /// <summary>
-    ///     Closes/kills the launched AgentControl process, disposes the automation instance,
-    ///     terminates only the shell (and stub) spawned by this context's agent-tool launch,
-    ///     closes the terminal window that launch left behind, and best-effort deletes this
-    ///     context's temp directory tree.
+    ///     Closes the launched AgentControl process and disposes the FlaUI instances without touching
+    ///     the temp directories, so a later <see cref="Launch"/> starts a new session against the same
+    ///     config directory and repo (to prove that something was remembered across a restart).
     /// </summary>
-    public void Dispose()
+    public void CloseApplication()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-
         try
         {
             App?.Close();
@@ -321,6 +361,24 @@ internal sealed class AgentControlTestContext : IDisposable
 
         App?.Dispose();
         Automation?.Dispose();
+    }
+
+    /// <summary>
+    ///     Closes/kills the launched AgentControl process, disposes the automation instance,
+    ///     terminates only the shell (and stub) spawned by this context's agent-tool launch,
+    ///     closes the terminal window that launch left behind, and best-effort deletes this
+    ///     context's temp directory tree.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        CloseApplication();
 
         // Only after the app is gone: terminate exactly the shell (and stub) it launched and
         // close the terminal window left behind - see LaunchedShellCleaner for the rationale.

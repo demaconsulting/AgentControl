@@ -4,16 +4,19 @@
 
 ### Overview
 
-The `Settings` subsystem spans `SettingsStore.cs` (loads/saves application-wide settings),
-and the `AppSettings.cs`/`RecentRepo.cs`/`AgentToolKind.cs`/`ThemePreference.cs` data types and the `RepoGroupName.cs`
-rules helper, which are documented as supporting types of this subsystem rather than as units of their own: the data
-types carry no behavior, and `RepoGroupName` only validates and cleans group names (it has its own
-`RepoGroupNameTests.cs`, and is exercised through `SettingsStore` and the `LauncherUI` group prompt). It provides the
+The `Settings` subsystem spans `SettingsStore.cs` (loads/saves application-wide settings), the `RepoGroupName.cs` rules
+helper, and the `AppSettings.cs`/`RecentRepo.cs`/`AgentToolKind.cs`/`ThemePreference.cs` data types, which are
+documented as supporting types of this subsystem rather than as units of their own: they hold the settings data and
+the small repairs `SettingsStore.Load` applies to it (legacy-source migration, tolerant reading, group-name and
+card-color repair). `RepoGroupName` is a unit: its rules for group names (what is a valid name, how a stored name is
+repaired, how look-alike names are given one spelling) are logic of their own, with their own requirements, design
+(`docs/design/agent-control/settings/repo-group-name.md`), verification, `RepoGroupNameTests.cs` and review set; the
+`LauncherUI` group prompt and cards use it as well as `SettingsStore`. The subsystem provides the
 observable behavior of persisting application-wide preferences (package sources, git/agent
 tool overrides, recent repos, shell preference, color theme) and the user's own organizing choices (repo groups,
 card colors, collapsed sections) (`AgentControl-Settings-Persistence`,
 `AgentControl-Settings-PackageSources`, `AgentControl-Settings-Appearance`,
-`AgentControl-Settings-RepoOrganization`). The subsystem contains one unit: `SettingsStore`.
+`AgentControl-Settings-RepoOrganization`). The subsystem contains two units: `SettingsStore` and `RepoGroupName`.
 
 ### Interfaces
 
@@ -69,7 +72,7 @@ one group per repo) and an optional `CardColor` (a palette color's name; absent 
 and `AppSettings.CollapsedGroups` (the names of the collapsed list sections, including the built-in *Favorites* and
 *Ungrouped*) are per-user view state that exists only in the settings file and is never written to a repository. A
 group has no record of its own: it exists while a repo names it, so there is no list of groups that could disagree
-with the repos. `RepoGroupName` (a static helper of this subsystem) holds the rules for group names: control
+with the repos. `RepoGroupName` (the subsystem's unit for these rules) holds the rules for group names: control
 characters and runs of white space fold into one space and the ends are trimmed, the longest name is 40 characters,
 *Favorites* and *Ungrouped* are reserved (so the collapsed state of the built-in sections can be stored beside the
 groups'), names are compared by ordinal comparison ignoring letter case, and `DistinctNames`/`Canonicalize` give a
@@ -79,8 +82,13 @@ limit, reserved or blank means no group). Reading is tolerant like the theme: `R
 converter that reads a string for `GroupName`/`CardColor` and anything else (a number, boolean, null, object or
 array) as `null`, and `AppSettings` declares one that reads `CollapsedGroups` as the string entries of an array and
 anything else as an empty list; `AppSettings.NormalizeNulls` (called by `Load`) then sanitizes every group name,
-gives look-alike groups the first spelling, and cleans the collapsed list - so none of these values can keep the
-application from starting (`AgentControl-SettingsStore-RepoOrganization`, `AgentControl-Settings-RepoOrganization`).
+gives look-alike groups the first spelling, cleans the collapsed list, and repairs every repo's `CardColor` with
+`RecentRepo.NormalizeCardColor` - an unknown or blank name becomes `null` (the automatic color) and a known name in
+any letter case, or with surrounding white space, gets its canonical spelling from `RecentRepo.CardColorNames`, the
+one list of valid card colors that the `LauncherUI` palette is built from - so none of these values can keep the
+application from starting, and an unknown color is neither kept nor written back
+(`AgentControl-SettingsStore-RepoOrganization`, `AgentControl-SettingsStore-UnknownCardColorIsAutomatic`,
+`AgentControl-Settings-RepoOrganization`).
 `GroupName` and `CardColor` are omitted from the file when `null`. `AgentToolKind` enumerates the well-known agent
 tools (`CopilotCli`, `Cursor`, `ClaudeCode`) plus `Custom`, per architecture.md's
 "Configurable agent tool and shell" decision — the tool is never hardcoded to Copilot CLI.

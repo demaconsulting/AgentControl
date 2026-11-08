@@ -26,6 +26,35 @@ level down, with deliberately slow and failing package sources, because a frozen
 UI automation without an artificially slow share; those behaviors are specified by the `LauncherUI` requirements and
 are not claimed as system-level behavior.
 
+Four groups of system requirements state only what the end-to-end tests can observe; the rest of what the
+corresponding `LauncherUI` and `Settings` requirements say is verified one level down, and is not claimed here:
+
+- Modal dialogs and keyboard (`AgentControl-System-DialogModal`, `AgentControl-System-DialogKeyboard`): the real
+  mouse and keyboard are used (`ModalDialogTests.cs`), because a UI Automation call can act on a window that a real
+  user could not. The requirements name the dialogs that are exercised - Settings and About for modality, and the
+  Select Package dialog besides them for the keyboard - and the other dialogs are verified in the headless window
+  tests of the `LauncherUI` subsystem. The keyboard focus ring is invisible to UI Automation, so it is not asserted
+  end to end at all: it is verified (as the focus-visible state of the focused control) by the headless dialog tests
+  and by the `DialogBehavior` unit tests.
+- Legibility (`AgentControl-System-WindowsLegible`): every window of the application is opened in both themes
+  (`WindowAppearanceTests.cs`) and, from the pixels of a screenshot, the backdrop of the window must have the
+  brightness of the theme and one text of the window must contrast with it by at least 4.5:1. The contrast of every
+  state of every control is not measured, and the focus ring is not asserted; the contrast of the theme's text and
+  graphic colors is verified in the `LauncherUI` subsystem tests.
+- Groups, card colors and favorites (`AgentControl-System-RepoGroups` and the requirements next to it,
+  `AgentControl-System-CardColor` and its two companions): the scenarios below name what is exercised. Renaming and
+  removing a group from its header and the keeping of the keyboard focus on the star are not exercised end to end;
+  they are verified in the headless window tests of the `LauncherUI` subsystem.
+- A change that cannot be saved (`AgentControl-System-ListChangesKept`): a failing save cannot be provoked through
+  the published application, so only the keeping of the changes is shown end to end; the refusal and the message are
+  verified in the `LauncherUI` subsystem and unit tests.
+
+`AgentControl-System-AgentsMdOfferBeforeReleaseNotes` is verified end to end by
+`MainWindow_UpgradeWithAgentsMdOfferInRealUi_ShowsQuestionFirstThenReleaseNotes` in `AgentsMdTemplateOfferTests.cs`; the
+headless window test of the `LauncherUI` subsystem has the same name, so the trace matrix cannot tell the two apart
+by name - the `windows@` link of the system requirement is satisfied by either run on Windows, and the end-to-end
+test is the one this scenario describes.
+
 The credential system requirements (`AgentControl-System-CredentialSafety`,
 `AgentControl-System-CredentialSessionScope`, `AgentControl-System-SavedSignInLifecycle` and
 `AgentControl-System-CredentialOriginScope`) are verified end to end in `NuGetServerSourceTests.cs` and
@@ -96,11 +125,21 @@ on a fresh port.
   to remember is found only in the user's own (emulated) credential helper, is used again without a dialog and is
   removed by "Forget saved sign-in".
 - A repo can be favorited and unfavorited through the real UI (moving between sections), a missing repo can be
-  re-checked from its menu, an opened Settings dialog disables the main window behind it, and a pinned
-  package that is up to date shows its check mark.
-- A repo can be moved into a new group through the real UI, the group shows as a header and is stored only in the
-  user's settings (the repository stays untouched), the filter finds a repo inside a collapsed group, and a
-  chosen card color is stored the same way.
+  re-checked from its menu, a pinned package that is up to date shows its check mark, and a click on the card's
+  upgrade chip runs the upgrade with all four managed folders synced.
+- While the Settings or About dialog is open, the main window behind it is disabled and neither a real mouse click
+  nor real key presses reach it, Tab and Shift+Tab stay inside the dialog, and the main window is usable again when
+  the dialog closes; the Select Package dialog starts with the keyboard focus inside, keeps Tab inside and is canceled
+  by Escape.
+- Every window is legible in both themes (the backdrop has the theme's brightness and the text contrasts by at
+  least 4.5:1), a theme saved by an earlier session is in effect when the application starts, and choosing a theme
+  in Settings re-themes the running application without a restart.
+- A repo can be moved into a new group, into an existing group and out of its group through the real UI; the
+  groups show as sections - favorites first, then the groups alphabetically, then the repos in no group, and no
+  sections while no repo is in a group; a collapsed section is still collapsed after a restart; the filter finds a
+  repo inside a collapsed group; groups and card colors are stored only in the user's settings (the repository stays
+  untouched), and a chosen card color leaves the card's status unchanged.
+- The AGENTS.md question of an upgrade is shown before its release notes.
 - A source that requires signed packages is refused an unsigned package end to end and the repo is left unchanged;
   a valid signature, the publisher pin and the platform fail-closed behavior are proven at the subsystem and unit
   levels.
@@ -176,17 +215,17 @@ persistence it depends on. This scenario is tested by
 dedicated FlaUI end-to-end scenario drives the AGENTS.md template offer's modal
 `ConfirmationWindow` dialog end-to-end (accept writes the template verbatim to the repo root;
 decline neither writes the file nor re-prompts on a later sync, even after a fresh app
-session), exercising the real `MainWindow` event subscription/dialog-routing wiring in
-addition to the `RepoCardViewModel` unit tests that verify the same behavior in isolation.
-After an upgrade that offers the template, only the question is open: the release-notes window of the
-same upgrade opens after the question is answered (the accept scenario checks that no release-notes window
-exists while the question is open, and that one appears after Yes).
-These scenarios are tested by `windows@AgentsMdTemplateOffer_Accept_WritesTemplateToRepoRoot`
-and `windows@AgentsMdTemplateOffer_Decline_DoesNotWriteFileAndDoesNotReprompt`, plus
-`RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent`,
-`RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent`, and
-`RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile`, covering
+session), exercising the real `MainWindow` event subscription/dialog-routing wiring. The
+`RepoCardViewModel` unit tests verify the same behavior in isolation and carry the unit requirements. This
+scenario is tested by `windows@AgentsMdTemplateOffer_Accept_WritesTemplateToRepoRoot` and
+`windows@AgentsMdTemplateOffer_Decline_DoesNotWriteFileAndDoesNotReprompt`, covering
 `AgentControl-System-AgentsMdTemplate`.
+
+**AgentControl_AgentsMdOfferBeforeReleaseNotes_QuestionComesFirstThenReleaseNotes**: An upgrade of a repo with no
+`AGENTS.md`, whose newer package offers a template, is run in the real application: while the question is open no
+release-notes window exists, and the release-notes window appears only after the question is answered. This scenario
+is tested by `windows@MainWindow_UpgradeWithAgentsMdOfferInRealUi_ShowsQuestionFirstThenReleaseNotes`, covering
+`AgentControl-System-AgentsMdOfferBeforeReleaseNotes`.
 
 **AgentControl_Settings_SourceDialogs_AddSourcesAndPersistPreferences**: The Settings window is
 opened, a zip-package folder source is added through the add dialog and appears in the sources
@@ -197,7 +236,8 @@ git/agent-tool overrides and shell preference, proving the edited preferences ar
 communicated for persistence (this part is verified only by the view-model's own unit test, a
 disclosed granularity limitation). The Add NuGet-Package Server dialog is also exercised: plain `http` is refused
 until "Allow insecure HTTP" is ticked, and after saving the source is listed as "Not checked" and persisted with its
-insecure-HTTP choice. This scenario is tested by
+insecure-HTTP choice. The tooltip that shows the whole location of a source in the editor is not exercised end to
+end; it is verified in the `LauncherUI` subsystem tests. This scenario is tested by
 `windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt`,
 `windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt`,
 `windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword` and
@@ -227,10 +267,17 @@ by `GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue` (one such passing test),
 `AgentControl-System-DiagnosticLogging`.
 
 **AgentControl_About_AboutButton_OpensAboutWindowShowingVersionAndCopyright**: The About
-button is clicked; the About window (a modal dialog) opens showing the application version, as a
-labeled row without build metadata, and the copyright notice. This scenario is tested by
+button is clicked; the About window opens showing the application version, the copyright notice, the license
+summary and a non-empty dependency list. This scenario is tested by
 `windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright`, covering
-`AgentControl-System-About` and `AgentControl-Program-Version`.
+`AgentControl-System-About` and `AgentControl-Program-Version`. That the dialog is modal is the
+`AgentControl_DialogModal_SettingsAndAboutDisableTheMainWindowUntilTheyClose` scenario.
+
+**AgentControl_AboutVersionRow_VersionIsLabeledAndWithoutBuildMetadata**: In the same run the version is one short,
+labeled "Version" value: it contains no build metadata (no `+`) and does not repeat the product name. This scenario is
+tested by `windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright`, covering
+`AgentControl-System-AboutVersionRow`. That the full build version is the tooltip of the value is verified in the
+headless window tests of the `LauncherUI` subsystem.
 
 **AgentControl_TestIsolation_StartupOptions_CapturesConfigDirOverride**: The `--config-dir`
 startup argument is parsed; the resulting `StartupOptions.ConfigDirectory` captures the
@@ -391,17 +438,54 @@ explicit themes, not the system default). This scenario is tested by
 picker under it, above the Tools heading and the git setting, tested by
 `windows@SettingsWindow_AppearanceIsItsOwnSectionAboveTools`, also covering `AgentControl-System-Appearance`.
 
-**AgentControl_RepoGroups_MoveToNewGroupShowsHeaderAndFilterFindsRepoInCollapsedGroup**: In the real
-application a repo is moved to a new group through the card's "..." menu (Move to group, then New group...), a
-name is typed into the prompt and confirmed, and a header named after the group, counting one repo and expanded,
-appears with the repo under it; the group is found in the settings file, and the repository folder stays empty
-(nothing is written to the repository). In a second run settings put the seeded repo in a group that is
-remembered as collapsed: its header is shown collapsed and only the other repo is listed; typing the seeded
-repo's path in the filter box lists that repo (the filter expands the group) and nothing else, and clearing the
-filter collapses the group again. This scenario is tested by
-`windows@CardMenu_MoveToNewGroup_ShowsGroupHeaderAndStoresInSettingsOnly` and
-`windows@FilterTextBox_RepoInCollapsedGroup_IsFoundByFilterAndHiddenAgainAfterwards`, covering
+**AgentControl_RepoGroups_MoveToNewExistingAndOutOfGroup**: In the real application a repo is moved to a new group
+through the card's "..." menu (Move to group, then New group...), a name is typed into the prompt and confirmed,
+and a header named after the group, counting one repo and expanded, appears with the repo under it. In a second
+run a repo is moved to an existing group through the same submenu: that section now counts both repos and the
+section the repo left is gone. In a third run "Remove from group" takes the only grouped repo out of its group
+and the list is flat again, without any header. Renaming and removing a group from its header is not exercised
+end to end (see the Verification Approach). This scenario is tested by
+`windows@CardMenu_MoveToNewGroup_ShowsGroupHeaderAndStoresInSettingsOnly`,
+`windows@CardMenu_MoveToExistingGroup_JoinsThatSectionAndStoresInSettingsOnly` and
+`windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader`, covering
 `AgentControl-System-RepoGroups`.
+
+**AgentControl_RepoGroupSections_FavoritesThenGroupsAlphabeticallyThenUngrouped**: With one favorite, repos in two
+groups and one repo in no group, the real application lists the sections in the order Favorites, then the groups
+alphabetically, then the repos in no group, with each repo under its section (a favorite only under Favorites); and
+after the last repo has been taken out of its group no section header is left. This scenario is tested by
+`windows@RepoList_FavoritesAndGroups_SectionsAreFavoritesThenGroupsAlphabeticallyThenUngrouped` and
+`windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader`, covering
+`AgentControl-System-RepoGroupSections`.
+
+**AgentControl_RepoGroupCollapseRemembered_CollapsedSectionStaysCollapsedAfterRestart**: Clicking a section header
+in the real application collapses the section (its repos leave the list) and stores the choice; after the
+application is closed and started again the section is still collapsed, and clicking the header expands it. This
+scenario is tested by `windows@GroupHeaderToggleButton_Click_CollapsesSectionAndRemembersItAfterRestart`, covering
+`AgentControl-System-RepoGroupCollapseRemembered`.
+
+**AgentControl_RepoGroupFilter_FilterFindsRepoInCollapsedGroup**: Settings put the seeded repo in a group that is
+remembered as collapsed: its header is shown collapsed and only the other repo is listed; typing the seeded repo's
+path in the filter box lists that repo (the filter expands the group) and nothing else, and clearing the filter
+collapses the group again. This scenario is tested by
+`windows@FilterTextBox_RepoInCollapsedGroup_IsFoundByFilterAndHiddenAgainAfterwards`, covering
+`AgentControl-System-RepoGroupFilter`.
+
+**AgentControl_RepoGroupsSettingsOnly_GroupIsStoredInSettingsAndNeverInTheRepo**: After a repo is moved to a new
+group, and in another run to an existing group, the group is found in the settings file and the repository folder
+stays empty (nothing is written to the repository). This scenario is tested by
+`windows@CardMenu_MoveToNewGroup_ShowsGroupHeaderAndStoresInSettingsOnly` and
+`windows@CardMenu_MoveToExistingGroup_JoinsThatSectionAndStoresInSettingsOnly`, covering
+`AgentControl-System-RepoGroupsSettingsOnly`.
+
+**AgentControl_ListChangesKept_FavoriteCollapseAndColorAreStored**: The favorite star, a section's collapse and a
+card color are each changed in the real application and found in the settings file (the collapse also after a
+restart). That a change which cannot be saved changes nothing and is reported is verified in the `LauncherUI`
+subsystem and unit tests, because a failing save cannot be provoked through the published application. This scenario
+is tested by `windows@FavoriteToggleButton_ToggledOnThenOff_MovesRepoBetweenSectionsAndStoresChoice`,
+`windows@GroupHeaderToggleButton_Click_CollapsesSectionAndRemembersItAfterRestart` and
+`windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly`, covering
+`AgentControl-System-ListChangesKept`.
 
 **AgentControl_Favorites_ToggleStarMovesRepoBetweenSections**: In the real application, with one repo in a
 group and one in none, the first card's star (accessible name "Favorite") is toggled on: a Favorites section
@@ -417,21 +501,80 @@ created, choosing it clears the badge. This scenario is tested by
 `windows@RefreshMenuItem_MissingFolder_IsEnabledAsCheckAgain_AndFindsFolderOnceBack`, covering
 `AgentControl-System-MissingRepoRecheck`.
 
-**AgentControl_DialogKeyboard_SettingsIsModalOverTheMainWindow**: In the real application, while the Settings
-window is open the operating system has disabled the main window behind it (read from the main window's own
-window handle), so neither clicks nor Tab can reach it, and saving enables it again. This scenario is tested by
-`windows@SettingsWindow_Opened_MainWindowBehindItIsDisabledUntilItCloses`, covering
-`AgentControl-System-DialogKeyboard`. The initial focus, the Tab cycle, Escape and the other dialogs are verified
-in the headless windows (see the LauncherUI verification), because the keyboard focus of the real application
-depends on which window the desktop session has active.
+**AgentControl_DialogKeyboard_KeyboardStaysInsideTheDialog**: In the real application, with the Settings window
+and then the About window open over the main window, a real mouse click on a main-window button opens nothing,
+typed keys do not change the main window's filter box, and Tab and Shift+Tab go all the way round without the
+keyboard focus leaving the dialog; the Select Package dialog opened from a repo card starts with the keyboard focus
+on its first control, keeps Tab and Shift+Tab inside, and is canceled by Escape (pinning nothing) with the focus
+handed back to the main window. This scenario is tested by
+`windows@SettingsWindow_Opened_ClicksAndKeysOnMainWindowDoNotReachIt`,
+`windows@AboutWindow_Opened_ClicksAndKeysOnMainWindowDoNotReachIt` and
+`windows@SelectPackageWindow_Opened_FocusStartsInsideTabCyclesAndEscapeCancels`, covering
+`AgentControl-System-DialogKeyboard`. The focus ring is not claimed end to end (see the Verification Approach).
+
+**AgentControl_DialogModal_SettingsAndAboutDisableTheMainWindowUntilTheyClose**: In the real application, while the
+Settings window is open the operating system has disabled the main window behind it (read from the main window's own
+window handle) and saving enables it again; while About is open the main window is disabled and About itself is
+enabled, and closing About enables the main window again and hands it the focus; and with either dialog open a real
+click on the main window does not reach it. This scenario is tested by
+`windows@SettingsWindow_Opened_MainWindowBehindItIsDisabledUntilItCloses`,
+`windows@SettingsWindow_Opened_ClicksAndKeysOnMainWindowDoNotReachIt`,
+`windows@AboutWindow_Opened_MainWindowIsDisabledUntilItCloses_AndRegainsFocus` and
+`windows@AboutWindow_Opened_ClicksAndKeysOnMainWindowDoNotReachIt`, covering `AgentControl-System-DialogModal`.
+The other dialogs are verified in the headless windows of the `LauncherUI` subsystem.
 
 **AgentControl_UpToDateCue_CheckMarkOnlyWhenPinnedPackageIsNewest**: In the real application a repo pinned to the
 only version of a package shows the "Agent files are up to date" check mark in its package chip; with a newer version
 at the source the upgrade badge appears and the check mark does not. This scenario is tested by
 `windows@UpToDateCue_ShownOnlyForPinnedPackageThatIsUpToDate`, covering `AgentControl-System-RecentRepos`.
 
-**AgentControl_CardColor_ChooseSwatchStoresColorInSettingsOnly**: In the real application the card's "..."
-menu item "Card color..." opens the palette pop-up, which offers a swatch for every palette color and Automatic;
-invoking the Teal swatch stores `"CardColor": "Teal"` in the settings file, the repository folder stays
-empty, and the card's status accent bar keeps its accessible status text. This scenario is tested by
-`windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly`, covering `AgentControl-System-CardColor`.
+**AgentControl_CardColor_PaletteOffersEveryColorAndAutomaticClearsTheChoice**: In the real application the card's
+"..." menu item "Card color..." opens the palette pop-up, which offers a swatch for every palette color, each by its
+name, and Automatic; invoking the Teal swatch stores `"CardColor": "Teal"` in the settings file, and choosing
+Automatic clears the stored choice again. This scenario is tested by
+`windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly` and
+`windows@CardMenu_CardColor_PaletteOffersEveryColorAndAutomaticClearsTheChoice`, covering
+`AgentControl-System-CardColor`. The legibility of the letters on every palette color is verified in the
+`LauncherUI` subsystem tests.
+
+**AgentControl_CardColorKeepsStatus_StatusAccentIsUnchangedByTheChosenColor**: In both card-color scenarios the
+card's status accent bar keeps its accessible status text before and after the color is chosen and after Automatic is
+chosen. This scenario is tested by `windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly` and
+`windows@CardMenu_CardColor_PaletteOffersEveryColorAndAutomaticClearsTheChoice`, covering
+`AgentControl-System-CardColorKeepsStatus`.
+
+**AgentControl_CardColorSettingsOnly_ColorIsStoredInSettingsAndNeverInTheRepo**: After the Teal swatch is invoked the
+color is found in the settings file and the repository folder stays empty. This scenario is tested by
+`windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly`, covering
+`AgentControl-System-CardColorSettingsOnly`.
+
+**AgentControl_AddSourceMenu_OffersThreeSourceTypesWithIconAndDescription**: In the real application the Settings
+window's one Add button opens a menu with the zip-package folder, NuGet-package folder and NuGet-package server
+types, each with an icon and a description. This scenario is tested by
+`windows@SettingsWindow_AddMenu_OffersThreeSourceTypesWithIconAndDescription`, covering
+`AgentControl-System-AddSourceMenu`.
+
+**AgentControl_AppearanceAtStartup_SavedThemeIsInEffectFromTheFirstWindow**: The application is launched with Light,
+and in another run Dark, already saved in its settings: the main window's app bar has the theme's brightness before
+anything is changed, Settings offers the saved theme as the current choice, and the start did not overwrite the
+saved choice. The operating-system theme is never changed. This scenario is tested by
+`windows@MainWindow_LaunchWithPersistedLightTheme_AppliesLightFromStartup` and
+`windows@MainWindow_LaunchWithPersistedDarkTheme_AppliesDarkFromStartup`, covering
+`AgentControl-System-AppearanceAtStartup` (and the `Program` unit requirement
+`AgentControl-Program-StartupTheme`).
+
+**AgentControl_WindowsLegible_EveryWindowIsLegibleInBothThemes**: With the theme seeded in the settings file, each
+window of the application is opened in the real application - the main window, Settings, the source editor, About,
+the group-name prompt, the confirmation, the message box, the package picker, the release notes window and the
+sign-in prompt - and the pixels of a screenshot show that the backdrop behind a text of the window has the
+brightness of the theme (light in the light theme, dark in the dark theme) and that the text contrasts with it by at
+least 4.5:1. The contrast of every control state and the keyboard focus ring are not measured. This scenario is
+tested by `windows@MainSettingsSourceEditorAndAbout_LightTheme_RenderLegibly`,
+`windows@MainSettingsSourceEditorAndAbout_DarkTheme_RenderLegibly`,
+`windows@GroupNameConfirmationAndMessageBox_LightTheme_RenderLegibly`,
+`windows@GroupNameConfirmationAndMessageBox_DarkTheme_RenderLegibly`,
+`windows@SelectPackageAndReleaseNotes_LightTheme_RenderLegibly`,
+`windows@SelectPackageAndReleaseNotes_DarkTheme_RenderLegibly`,
+`windows@CredentialPrompt_LightTheme_RendersLegibly` and `windows@CredentialPrompt_DarkTheme_RendersLegibly`,
+covering `AgentControl-System-WindowsLegible`. The 3:1 contrast of the status bars and the favorite star, which its
+child requirement adds, is verified in the `LauncherUI` subsystem tests only.

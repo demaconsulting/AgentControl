@@ -27,7 +27,14 @@ namespace DemaConsulting.AgentControl.Puppet;
 /// <param name="IsOffscreen">Whether the element is not visible on the screen.</param>
 /// <param name="IsWindow">Whether the element is a real window (supports the UI Automation window pattern), not a pop-up
 ///     such as a tooltip.</param>
-internal readonly record struct DialogCandidate(string? Name, bool IsOffscreen, bool IsWindow);
+/// <param name="Handle">The native window handle, or zero when the root has none (it keeps the order given).</param>
+/// <param name="Owner">The handle of the window that owns it (the window a dialog was opened from), or zero.</param>
+internal readonly record struct DialogCandidate(
+    string? Name,
+    bool IsOffscreen,
+    bool IsWindow,
+    IntPtr Handle = default,
+    IntPtr Owner = default);
 
 /// <summary>
 ///     Chooses which root of an instance is the innermost open dialog (no window is touched).
@@ -38,18 +45,30 @@ internal static class DialogSelector
     ///     Finds the innermost visible, titled dialog among the roots that follow the main window.
     /// </summary>
     /// <remarks>
-    ///     The roots of an instance list the main window first, then its dialogs and then any open pop-ups, so a tooltip that
-    ///     is still showing is among them. Only real windows qualify: focusing or raising a tooltip would send the keyboard
-    ///     to the wrong window while a modal dialog is open.
+    ///     The roots are stacked as <see cref="WindowStacking"/> stacks a shot: by the process's z-order, with an owner
+    ///     always below the dialogs it owns, so the innermost dialog is the topmost one that qualifies, however UI
+    ///     Automation happens to enumerate the roots. A root without a handle keeps the order given and counts as on
+    ///     top; that order lists the main window first, then its dialogs and then any open pop-ups (a tooltip still
+    ///     showing is among them). Only real windows qualify: focusing or raising a tooltip would send the keyboard to
+    ///     the wrong window while a modal dialog is open.
     /// </remarks>
-    /// <param name="roots">The roots in the order the instance lists them (the main window first, the innermost last).</param>
+    /// <param name="roots">The roots in the order the instance lists them (the main window first).</param>
+    /// <param name="topDownZOrder">The z-order of the process's top-level windows, topmost first; empty when unknown.
+    ///     </param>
     /// <returns>The index in <paramref name="roots"/> of the innermost dialog, or -1 when there is none.</returns>
-    internal static int InnermostDialog(IReadOnlyList<DialogCandidate> roots)
+    internal static int InnermostDialog(
+        IReadOnlyList<DialogCandidate> roots,
+        IReadOnlyList<IntPtr>? topDownZOrder = null)
     {
-        for (var index = roots.Count - 1; index >= 1; index--)
+        var entries = roots.Select(root => new StackEntry(root.Handle, root.Owner)).ToList();
+        var bottomUp = WindowStacking.DrawOrder(entries, topDownZOrder ?? []);
+
+        // The top of the stack is the end of the draw order; the main window (index 0) is never the dialog
+        for (var position = bottomUp.Count - 1; position >= 0; position--)
         {
+            var index = bottomUp[position];
             var root = roots[index];
-            if (root.IsWindow && !root.IsOffscreen && !string.IsNullOrWhiteSpace(root.Name))
+            if (index >= 1 && root.IsWindow && !root.IsOffscreen && !string.IsNullOrWhiteSpace(root.Name))
             {
                 return index;
             }

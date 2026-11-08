@@ -83,7 +83,8 @@ internal sealed class AppSettings
 
     /// <summary>
     ///     Replaces every collection (and source text field) that an explicit JSON <c>null</c> may
-    ///     have left <see langword="null"/> with an empty value, and drops null list entries.
+    ///     have left <see langword="null"/> with an empty value, drops null list entries, and
+    ///     repairs the repos' organizing values (group names and unknown card colors).
     /// </summary>
     /// <remarks>
     ///     <see cref="System.Text.Json.JsonSerializer"/> bypasses a property's initializer when the
@@ -107,6 +108,10 @@ internal sealed class AppSettings
         foreach (var repo in RecentRepos)
         {
             repo.Path ??= string.Empty;
+
+            // A card color this version does not know reads as the automatic color and is not
+            // kept, so it is never written back either
+            repo.CardColor = RecentRepo.NormalizeCardColor(repo.CardColor);
         }
 
         NormalizeGroups();
@@ -246,7 +251,8 @@ internal sealed class AppSettings
         /// <param name="options">The serializer options (unused).</param>
         /// <returns>The preference the JSON names, or <see cref="ThemePreference.System"/> when
         ///     the value is not a known member (including null, booleans, objects and arrays).</returns>
-        public override ThemePreference Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        public override ThemePreference Read(
+            ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
         {
             switch (reader.TokenType)
             {

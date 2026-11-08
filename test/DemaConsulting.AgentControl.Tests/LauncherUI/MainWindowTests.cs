@@ -141,6 +141,73 @@ public sealed class MainWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that a card that is removed is released by the window: its handlers are detached and
+    ///     what the window remembered about it is dropped, so a removed card is not kept alive by the
+    ///     window and can no longer show anything.
+    /// </summary>
+    [Fact]
+    public void MainWindow_RepoRemoved_ReleasesTheCardHandlers() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: a window with two cards
+        var window = CreateWindow(out var viewModel);
+        window.Show();
+        Assert.True(viewModel.AddRepo(CreateTempDirectory()));
+        Assert.True(viewModel.AddRepo(CreateTempDirectory()));
+        Assert.Equal(2, window.TrackedCardCount);
+        var removed = viewModel.RepoCards[0];
+
+        // Act
+        viewModel.RemoveRepo(removed);
+
+        // Assert: only the card that is still listed is tracked
+        Assert.Equal(1, window.TrackedCardCount);
+        window.Close();
+    });
+
+    /// <summary>
+    ///     Test that a change that cannot be saved is reported in a message box and leaves the card as
+    ///     it was (here a favorite that could not be saved), and that a removal that cannot be saved
+    ///     keeps the repo listed and says so.
+    /// </summary>
+    [Fact]
+    public void MainWindow_SettingsCannotBeSaved_ShowsMessageAndKeepsStateAsItWas() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: a configuration "directory" that is really a file, so every save fails
+        var blockingFile = Path.Combine(CreateTempDirectory(), "not-a-directory");
+        File.WriteAllText(blockingFile, "blocker");
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = CreateTempDirectory() }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: blockingFile);
+        var window = new MainWindow { DataContext = viewModel };
+        window.Show();
+        var card = Assert.Single(viewModel.RepoCards);
+
+        // Act: mark a favorite
+        card.IsFavorite = true;
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert: a message was shown and nothing changed
+        var message = Assert.Single(window.OwnedWindows.OfType<MessageBoxWindow>());
+        Assert.False(card.IsFavorite);
+        Assert.False(settings.RecentRepos[0].IsFavorite);
+        message.Close();
+        Dispatcher.UIThread.RunJobs();
+
+        // Act: confirm removing the repo
+        card.RemoveCommand.Execute(null);
+        var confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+        DialogWindowTests.Click(confirmation, "ConfirmationYesButton");
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert: the repo is still listed and the user was told it was not removed
+        Assert.Single(viewModel.RepoCards);
+        Assert.Single(settings.RecentRepos);
+        var removalMessage = Assert.Single(window.OwnedWindows.OfType<MessageBoxWindow>());
+        removalMessage.Close();
+        Dispatcher.UIThread.RunJobs();
+        window.Close();
+    });
+
+    /// <summary>
     ///     Test that the card menu-item handlers route through the card's commands.
     /// </summary>
     [Fact]

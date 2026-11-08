@@ -216,6 +216,42 @@ public class SettingsStoreOrganizingTests
     }
 
     /// <summary>
+    ///     Test that a card color string this version does not know (a typo, or a color from a newer
+    ///     version) reads as the automatic color on load and is not written back, while a known
+    ///     name in any letter case is kept under its canonical spelling.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_UnknownCardColorName_ReadsAsAutomaticAndIsNotSavedBack()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"RecentRepos\": [" +
+                " { \"Path\": \"a\", \"CardColor\": \"Chartreuse\" }," +
+                " { \"Path\": \"b\", \"CardColor\": \"  tEAL \" }," +
+                " { \"Path\": \"c\", \"CardColor\": \"   \" }" +
+                "] }");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+            SettingsStore.Save(loaded, configDir);
+            var json = File.ReadAllText(Path.Combine(configDir, "settings.json"));
+
+            // Assert: unknown and blank names are gone, the known one is canonical
+            Assert.Equal([null, "Teal", null], loaded.RecentRepos.Select(repo => repo.CardColor));
+            Assert.DoesNotContain("Chartreuse", json, StringComparison.Ordinal);
+            Assert.Equal(1, CountOccurrences(json, "\"CardColor\""));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Counts how often a text occurs in another.
     /// </summary>
     /// <param name="text">The text to search.</param>

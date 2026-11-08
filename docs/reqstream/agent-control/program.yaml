@@ -35,6 +35,21 @@ sections:
         tests:
           - Program_BuildAvaloniaApp_ReturnsConfiguredAppBuilder
 
+      - id: AgentControl-Program-StartupTheme
+        title: >-
+          The Program class shall configure the application so that the theme saved in the user's
+          settings is in effect before the first window is shown.
+        justification: |
+          A window that opened in the system theme and then switched to the saved one would flash
+          the wrong theme at every start, and a saved choice that was ignored at start would make
+          the setting look broken.
+        tests:
+          # The application object that applies the theme (App.axaml.cs) has no unit test file of its
+          # own - see the header comment - so the saved theme being applied at start is verified
+          # end to end, with a theme seeded in an isolated configuration directory.
+          - windows@MainWindow_LaunchWithPersistedLightTheme_AppliesLightFromStartup
+          - windows@MainWindow_LaunchWithPersistedDarkTheme_AppliesDarkFromStartup
+
       - id: AgentControl-Program-ErrorHandling
         title: >-
           The Program class shall report a startup argument error to stderr and return a

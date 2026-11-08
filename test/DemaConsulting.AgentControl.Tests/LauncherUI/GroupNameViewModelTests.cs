@@ -179,6 +179,31 @@ public class GroupNameViewModelTests
     }
 
     /// <summary>
+    ///     Test that accepting completes with the name exactly once, however many times the prompt is
+    ///     accepted or canceled afterwards (the one-shot guarantee holds for the accepted path too).
+    /// </summary>
+    [Fact]
+    public void GroupNameViewModel_Accept_CompletesOnceWithTheName()
+    {
+        // Arrange
+        var viewModel = CreateNew();
+        var results = new List<string?>();
+        viewModel.Completed += (_, name) => results.Add(name);
+        viewModel.Text = "Work";
+
+        // Act: accept, then try to accept, cancel and change the text again
+        viewModel.AcceptCommand.Execute(null);
+        viewModel.AcceptCommand.Execute(null);
+        viewModel.CancelCommand.Execute(null);
+        viewModel.Cancel();
+        viewModel.Text = "Home";
+        viewModel.AcceptCommand.Execute(null);
+
+        // Assert: one completion, with the name that was accepted
+        Assert.Equal(["Work"], results);
+    }
+
+    /// <summary>
     ///     Test that the constructor rejects missing arguments.
     /// </summary>
     [Fact]

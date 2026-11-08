@@ -33,12 +33,19 @@ dialog window. It must be called once, from the dialog's constructor, on the UI 
   is given, an Escape key-down handler is attached.
 
 **FocusInitialControl** (private): Takes the named control if it exists and can take the focus, otherwise the first
-control in the window's visual tree that can; the focus is set with `NavigationMethod.Tab`, so the control shows its
+control the Tab key reaches (`FirstTabStop`); the focus is set with `NavigationMethod.Tab`, so the control shows its
 keyboard focus ring (a focus set from code with the default method would show none, leaving the user unable to see
 where the keyboard is) (`AgentControl-DialogBehavior-InitialFocus`).
 
+**FirstTabStop** (private): Finds the first control Tab reaches in *keyboard navigation order*, not visual-tree order,
+because an explicit tab index (or a navigation container) makes the two differ. It asks Avalonia's own navigation for
+the first focusable control of the dialog (`FocusManager.FindFirstFocusableElement`), which honors the tab indices;
+that search does not skip a disabled control, so while the candidate cannot take the focus it steps forward with
+`FocusManager.FindNextElement(Next)` from the candidate. The search ends at a control outside the dialog or at a
+repeat, in which case the dialog gets no initial focus.
+
 **CanTakeFocus** (private): A control can hold the focus when it is focusable, effectively visible, effectively
-enabled and a tab stop - so a hidden or disabled named control is skipped.
+enabled and a tab stop - so a hidden or disabled control, named or reached by navigation, is skipped.
 
 **Escape handler**: Attached for the bubbling phase of the key-down event, so Escape is seen on the way back up from
 the focused control: a control that uses Escape itself (an open drop-down, an open menu) marks it handled and keeps it,
@@ -48,13 +55,13 @@ and only an unhandled Escape runs `onEscape` (once, marking the key handled)
 #### Error Handling
 
 `Apply` throws `ArgumentNullException` for a `null` dialog (`AgentControl-DialogBehavior-RequiresDialog`). Everything
-else is tolerant: a missing, hidden or disabled named control falls back to the first tab stop, and a dialog with
-nothing focusable simply gets no initial focus.
+else is tolerant: a missing, hidden or disabled named control falls back to the first tab stop in keyboard order, and
+a dialog with nothing focusable simply gets no initial focus.
 
 #### Dependencies
 
-- **Avalonia** (OTS) - `Window`, `KeyboardNavigation`, `InputElement.KeyDownEvent`, `FocusManager` via
-  `Control.Focus`.
+- **Avalonia** (OTS) - `Window`, `KeyboardNavigation`, `FocusManager` (`FindFirstFocusableElement`,
+  `FindNextElement`), `InputElement.KeyDownEvent`, and `Control.Focus`.
 
 #### Callers
 

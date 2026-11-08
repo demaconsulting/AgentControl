@@ -18,9 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// cspell:ignore fcntl getpath maxpathlen vnode libc
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
+using System.Text;
 using Avalonia.Media.Imaging;
 using Microsoft.Win32.SafeHandles;
 
@@ -46,15 +48,19 @@ internal readonly record struct RepoImageFile(string Root, string Path, DateTime
 ///     <para>
 ///     The repo may be untrusted, so everything about the file is checked before it is decoded:
 ///     the repo root itself must not be a link (a linked root, for this feature only, simply has no
-///     picture), only the repo root is searched (never the folders below it), the name is matched
-///     without regard to case, links (symbolic links, junctions and other reparse points) are
-///     refused so the file can never be a stand-in for something outside the repo, the size is
+///     picture), only the repo root is searched (never the folders below it, and the root is probed
+///     for the two names rather than listed, so a root holding millions of files costs no more), the
+///     name is matched without regard to case, links (symbolic links, junctions and other reparse
+///     points) are refused so the file can never be a stand-in for something outside the repo, the size is
 ///     capped, the file must start with the PNG signature (the extension alone proves nothing), and
-///     the declared dimensions must be sane so a tiny file cannot expand into a huge bitmap - this
+///     the declared dimensions must be sane (and the header chunk's length must be the 13 bytes a PNG
+///     header always has) so a tiny file cannot expand into a huge bitmap - this
 ///     bound is what keeps a hostile file from exhausting memory in the decoder. The file is then
 ///     opened and, once it is open, the operating system's own answer to "which file is this
-///     handle?" must be a file directly in the root, so a file or folder swapped for a link between
-///     the checks and the open cannot redirect the read. <see cref="Decode"/> repeats every check
+///     handle?" (<c>GetFinalPathNameByHandle</c> on Windows, <c>/proc/self/fd</c> on Linux,
+///     <c>fcntl(F_GETPATH)</c> on macOS) must be a file directly in the root, so a file or folder
+///     swapped for a link between the checks and the open cannot redirect the read; where the
+///     operating system cannot answer, the file is not used. <see cref="Decode"/> repeats every check
 ///     against the root <see cref="Find"/> recorded, because the file may have changed since. The
 ///     decode is scaled down to the tile size, and every failure - I/O or decode, of any exception
 ///     type - means "no image" so the card falls back to its generated tile and the background
@@ -91,6 +97,28 @@ internal static partial class RepoImageLocator
     ///     height: all that is read to validate a file before it is decoded.
     /// </summary>
     private const int HeaderLength = 24;
+
+    /// <summary>
+    ///     The most files that differ from a candidate name only in letter case that are looked at, so a
+    ///     root crowded with similar names cannot make a lookup long.
+    /// </summary>
+    private const int MaxCaseVariants = 8;
+
+    /// <summary>
+    ///     The value of the PNG header chunk's length field: the header chunk always holds exactly
+    ///     13 bytes (width, height, bit depth, color type, compression, filter, interlace).
+    /// </summary>
+    private const uint HeaderChunkLength = 13;
+
+    /// <summary>
+    ///     macOS <c>F_GETPATH</c>: the <c>fcntl</c> command that returns the path of an open file.
+    /// </summary>
+    private const int FcntlGetPathCommand = 50;
+
+    /// <summary>
+    ///     macOS <c>MAXPATHLEN</c>: the size, in bytes, of the buffer <c>F_GETPATH</c> writes into.
+    /// </summary>
+    private const int MacMaxPathLength = 1024;
 
     /// <summary>Win32 <c>FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE</c>.</summary>
     private const uint FileShareAll = 7;
@@ -130,11 +158,12 @@ internal static partial class RepoImageLocator
                 return null;
             }
 
-            // Root only: files in the folders below it are never considered
-            var files = root.EnumerateFiles().ToList();
+            // Root only: files in the folders below it are never considered. Only the two candidate
+            // names are looked for - the folder is never listed - so the work does not depend on how
+            // many files an untrusted repo root holds
             foreach (var name in CandidateNames)
             {
-                foreach (var file in files.Where(file => string.Equals(file.Name, name, StringComparison.OrdinalIgnoreCase)))
+                foreach (var file in EnumerateNamed(root, name))
                 {
                     if (IsAcceptable(file, root))
                     {
@@ -149,6 +178,36 @@ internal static partial class RepoImageLocator
         }
 
         return null;
+    }
+
+    /// <summary>
+    ///     Yields the files in a repo root that have the given name (in any letter case), probing for
+    ///     them instead of reading the whole folder.
+    /// </summary>
+    /// <remarks>
+    ///     A streaming enumeration filtered by the literal name: the file system produces only the
+    ///     entries spelled like the name, the folder is never listed into a collection, and the
+    ///     enumeration is cut off after <see cref="MaxCaseVariants"/> matches, so neither the memory
+    ///     nor the work done on the matches depends on how many files an untrusted repo root holds.
+    ///     The files carry the names they have on disk, and the exact (lower-case) spelling is offered
+    ///     first.
+    /// </remarks>
+    /// <param name="root">The repo root.</param>
+    /// <param name="name">The candidate file name.</param>
+    /// <returns>The matching files, the exact spelling first.</returns>
+    private static IEnumerable<FileInfo> EnumerateNamed(DirectoryInfo root, string name)
+    {
+        var options = new EnumerationOptions
+        {
+            MatchCasing = MatchCasing.CaseInsensitive,
+            MatchType = MatchType.Simple,
+            RecurseSubdirectories = false,
+            AttributesToSkip = 0,
+            IgnoreInaccessible = true
+        };
+        return root.EnumerateFiles(name, options)
+            .Take(MaxCaseVariants)
+            .OrderBy(file => string.Equals(file.Name, name, StringComparison.Ordinal) ? 0 : 1);
     }
 
     /// <summary>
@@ -345,7 +404,8 @@ internal static partial class RepoImageLocator
     }
 
     /// <summary>
-    ///     Compares two full paths the way the platform's file system does.
+    ///     Compares two full paths the way the platform's file system does (without regard to letter
+    ///     case on Windows and macOS, whose usual file systems are case-insensitive).
     /// </summary>
     /// <param name="left">One path (or <see langword="null"/>).</param>
     /// <param name="right">The other path (or <see langword="null"/>).</param>
@@ -356,7 +416,9 @@ internal static partial class RepoImageLocator
         && string.Equals(
             Path.TrimEndingDirectorySeparator(left),
             Path.TrimEndingDirectorySeparator(right),
-            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal);
 
     /// <summary>
     ///     Tells whether the first bytes of a file are a PNG signature followed by a header chunk
@@ -372,7 +434,13 @@ internal static partial class RepoImageLocator
         }
 
         // cspell:disable-next-line
-        // The header chunk follows the signature: 4 bytes of length, "IHDR", then width and height
+        // The header chunk follows the signature: 4 bytes of length (always 13), "IHDR", then width
+        // and height
+        if (BinaryPrimitives.ReadUInt32BigEndian(header.Slice(8, 4)) != HeaderChunkLength)
+        {
+            return false;
+        }
+
         // cspell:disable-next-line
         if (!header.Slice(12, 4).SequenceEqual("IHDR"u8))
         {
@@ -394,24 +462,93 @@ internal static partial class RepoImageLocator
         entry.LinkTarget is not null || entry.Attributes.HasFlag(FileAttributes.ReparsePoint);
 
     /// <summary>
-    ///     Gets the final path - every link resolved - of the file an open stream is for.
+    ///     Gets the final path - every link resolved - of the file an open stream is for, as the
+    ///     operating system reports it for the open handle.
     /// </summary>
+    /// <remarks>
+    ///     Windows, Linux and macOS each have a way to ask the kernel which file a handle is for, and
+    ///     only that answer is trusted. Re-resolving the stream's name instead would look the path up a
+    ///     second time, after the open, and a link swapped in between would be followed to a different
+    ///     file than the one that is open; so on any other platform, or when the question cannot be
+    ///     answered, there is no answer and the picture is not used.
+    /// </remarks>
     /// <param name="stream">The open file.</param>
-    /// <returns>The final full path, or <see langword="null"/> when it cannot be determined.</returns>
-    private static string? GetFinalPath(FileStream stream)
+    /// <returns>The final full path, or <see langword="null"/> when the operating system cannot say
+    ///     (which means the file is not used).</returns>
+    internal static string? GetFinalPath(FileStream stream)
     {
         if (OperatingSystem.IsWindows())
         {
             return GetFinalPathOfHandle(stream.SafeFileHandle);
         }
 
-        // Linux names the file behind a descriptor in /proc; elsewhere the best that can be done is
-        // to resolve the path the stream was opened by. The descriptor number is only read (the
+        if (OperatingSystem.IsMacOS())
+        {
+            return GetFinalPathOfDescriptor(stream.SafeFileHandle);
+        }
+
+        if (!OperatingSystem.IsLinux())
+        {
+            return null;
+        }
+
+        // Linux names the file behind a descriptor in /proc. The descriptor number is only read (the
         // stream, which owns the handle, outlives this call), never used to close or duplicate it
 #pragma warning disable S3869 // Reading the descriptor number is the only way to name it in /proc
         var viaProc = new FileInfo($"/proc/self/fd/{stream.SafeFileHandle.DangerousGetHandle()}").LinkTarget;
 #pragma warning restore S3869
-        return viaProc is not null && Path.IsPathRooted(viaProc) ? viaProc : ResolveLinks(stream.Name);
+        return viaProc is not null && Path.IsPathRooted(viaProc) ? viaProc : null;
+    }
+
+    /// <summary>
+    ///     Asks macOS for the path of the file an open descriptor is for
+    ///     (<c>fcntl(fd, F_GETPATH)</c>).
+    /// </summary>
+    /// <remarks>
+    ///     The kernel writes the path of the vnode behind the descriptor, with every link on the way
+    ///     resolved, into a buffer that must hold at least <see cref="MacMaxPathLength"/> bytes. Any
+    ///     failure (a non-zero result, an empty or unreadable answer, an exception from the call
+    ///     itself) is "unknown". <c>fcntl</c> is a variadic C function, whose extra argument Apple's
+    ///     ARM64 calling convention passes on the stack rather than in a register; see
+    ///     <see cref="FcntlGetPathArm64"/>. The descriptor is kept alive for the duration of the call.
+    /// </remarks>
+    /// <param name="handle">The open file's handle.</param>
+    /// <returns>The path, or <see langword="null"/> when macOS cannot give one.</returns>
+    private static string? GetFinalPathOfDescriptor(SafeFileHandle handle)
+    {
+        var added = false;
+        try
+        {
+            handle.DangerousAddRef(ref added);
+#pragma warning disable S3869 // The descriptor number is what fcntl takes; the reference added above keeps it open
+            var descriptor = (int)handle.DangerousGetHandle();
+#pragma warning restore S3869
+
+            var buffer = new byte[MacMaxPathLength];
+            var result = RuntimeInformation.ProcessArchitecture == Architecture.Arm64
+                ? FcntlGetPathArm64(descriptor, FcntlGetPathCommand, 0, 0, 0, 0, 0, 0, buffer)
+                : FcntlGetPathX64(descriptor, FcntlGetPathCommand, buffer);
+            if (result != 0)
+            {
+                return null;
+            }
+
+            var length = Array.IndexOf(buffer, (byte)0);
+            return length > 0 ? Encoding.UTF8.GetString(buffer, 0, length) : null;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or ArgumentException
+                                       or ObjectDisposedException or DecoderFallbackException)
+        {
+            // The question could not be asked or answered: unknown
+            return null;
+        }
+        finally
+        {
+            if (added)
+            {
+                handle.DangerousRelease();
+            }
+        }
     }
 
     /// <summary>
@@ -525,4 +662,47 @@ internal static partial class RepoImageLocator
         [Out][MarshalUsing(CountElementName = nameof(bufferLength))] char[] buffer,
         int bufferLength,
         uint flags);
+
+    /// <summary>
+    ///     Calls <c>fcntl(fd, command, buffer)</c> on x86-64 macOS, where the variadic argument is
+    ///     passed in a register like any other.
+    /// </summary>
+    /// <param name="descriptor">The open file's descriptor.</param>
+    /// <param name="command">The fcntl command (<see cref="FcntlGetPathCommand"/>).</param>
+    /// <param name="path">Receives the path; at least <see cref="MacMaxPathLength"/> bytes.</param>
+    /// <returns>Zero on success, otherwise -1.</returns>
+    [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
+    private static partial int FcntlGetPathX64(int descriptor, int command, Span<byte> path);
+
+    /// <summary>
+    ///     Calls <c>fcntl(fd, command, buffer)</c> on ARM64 macOS.
+    /// </summary>
+    /// <remarks>
+    ///     Apple's ARM64 calling convention passes the arguments of a variadic function on the
+    ///     stack, where the callee expects them, while a call declared with a fixed argument list puts
+    ///     the third argument in a register. The six unused arguments fill the registers so that the
+    ///     buffer is the ninth argument, which is passed on the stack - exactly where the variadic
+    ///     <c>fcntl</c> reads its first extra argument.
+    /// </remarks>
+    /// <param name="descriptor">The open file's descriptor.</param>
+    /// <param name="command">The fcntl command (<see cref="FcntlGetPathCommand"/>).</param>
+    /// <param name="unused0">Unused register filler.</param>
+    /// <param name="unused1">Unused register filler.</param>
+    /// <param name="unused2">Unused register filler.</param>
+    /// <param name="unused3">Unused register filler.</param>
+    /// <param name="unused4">Unused register filler.</param>
+    /// <param name="unused5">Unused register filler.</param>
+    /// <param name="path">Receives the path; at least <see cref="MacMaxPathLength"/> bytes.</param>
+    /// <returns>Zero on success, otherwise -1.</returns>
+    [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
+    private static partial int FcntlGetPathArm64(
+        int descriptor,
+        int command,
+        nint unused0,
+        nint unused1,
+        nint unused2,
+        nint unused3,
+        nint unused4,
+        nint unused5,
+        Span<byte> path);
 }

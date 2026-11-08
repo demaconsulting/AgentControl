@@ -2,7 +2,9 @@
 
 #### Verification Approach
 
-`MainWindowViewModel` is verified with unit tests defined in `MainWindowViewModelTests.cs`.
+`MainWindowViewModel` is verified with unit tests defined in `MainWindowViewModelTests.cs`, `RepoGroupingTests.cs`
+(sections, collapse, filter, rename and removal of groups) and `MainWindowViewModelPersistenceTests.cs` (every change
+the user makes when the settings file cannot be written).
 Each test constructs a real `MainWindowViewModel` against a unique temporary configuration
 directory (via `SettingsStore`) and unique temporary repo directories, so tests are hermetic
 and can run in parallel with each other, subject to the `RealProcess` xUnit collection (which
@@ -32,6 +34,10 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
   cards but keep their headers, a filter shows every match (even in a collapsed group) and leaves the
   remembered state alone, and group changes are stored in the settings file only.
 - The group-name prompt validates as the user types and completes exactly once.
+- Every change the user makes (favorite, group, card color, recorded launch, collapse, group rename and removal,
+  adding and removing a repo) is applied and written when the settings can be saved; when they cannot, nothing changes
+  (settings, cards, displayed list, file), a later unrelated save does not write the failed change, the user is told
+  (changes from a card or a header button) or the operation fails to its caller (the others).
 
 #### Test Scenarios
 
@@ -143,60 +149,130 @@ scenario is tested by `MainWindowViewModel_CreateConnectionTestProvider_ReturnsN
 (in `SettingsWindowServerSourceTests.cs`), covering `AgentControl-MainWindowViewModel-ConnectionTestProvider`.
 
 **MainWindowViewModel_ApplyTheme_SavedThemeIsHandedToTheApplierOnlyAfterTheSave**: With a recording theme
-applier, `ApplySettings` with the dark theme persists it and calls the applier once with it; when the write
-fails (the configuration "directory" is a file) the exception reaches the caller, the applier is not called and
-the live settings keep the system default. This scenario is tested by
+applier, `ApplySettings` with the dark theme persists it and calls the applier once with it, covering
+`AgentControl-MainWindowViewModel-ApplyTheme`; when the write fails (the configuration "directory" is a file) the
+exception reaches the caller, the applier is not called and the live settings keep the system default, covering
+`AgentControl-MainWindowViewModel-RefusedThemeNotApplied`. This scenario is tested by
 `MainWindowViewModel_ApplySettings_ThemeChanged_PersistsAndAppliesTheme` and
-`MainWindowViewModel_ApplySettings_SaveFails_DoesNotApplyTheme`, covering
-`AgentControl-MainWindowViewModel-ApplyTheme`.
+`MainWindowViewModel_ApplySettings_SaveFails_DoesNotApplyTheme`.
 
 **MainWindowViewModel_GroupSections_FlatListWithoutGroupsSectionedListWithThem**: Tested by
 `RepoGroupingTests.cs` (same `RealProcess` collection and temporary-directory approach, with repos
 created under a unique parent so the card name is the folder name). Settings with no group give a flat
-list without any header, favorites first. Settings with groups give Favorites first, the groups
-alphabetically ignoring letter case, then Ungrouped, each header with its count, repos by most recent
-launch, no header for an empty section, and a favorite listed only under Favorites (and back in its group
-when it is no longer a favorite). Toggling a section keeps the header and the unchanged cards as the same
-objects with only the hidden cards removed, and settings built in memory with a null collapsed list,
-blank, reserved, overlong or look-alike group names load without failing. This scenario is tested by
-`MainWindowViewModel_DisplayedItems_NoGroups_FlatListWithoutHeaders`,
-`MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered`,
-`MainWindowViewModel_Favorite_IsListedOnlyUnderFavoritesAndKeepsItsGroup`,
-`MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader`,
-`MainWindowViewModel_ToggleGroupCollapsed_KeepsHeaderAndUnchangedCardsInPlace`,
-`MainWindowViewModel_Constructor_NullAndInvalidOrganizingSettings_FallBack`,
-`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection`, covering
-`AgentControl-MainWindowViewModel-GroupSections`; the header rows themselves are verified by the
-`RepoGroupHeaderViewModel` unit.
+list without any header, favorites first (`AgentControl-MainWindowViewModel-FlatListWithoutGroups`, tested by
+`MainWindowViewModel_DisplayedItems_NoGroups_FlatListWithoutHeaders`). Settings with groups give Favorites first,
+the groups alphabetically ignoring letter case, then Ungrouped; names that differ only in letter case form one
+section (`AgentControl-MainWindowViewModel-GroupSections`, tested by
+`MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered` and
+`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection`). Each section has a header with its count
+and a section without a repo has none (`AgentControl-MainWindowViewModel-GroupSectionHeaders`, tested by
+`MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered` and
+`MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader`); repos within a section are in order of most recent
+launch, never-launched last (`AgentControl-MainWindowViewModel-GroupSectionRepoOrder`, tested by
+`MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered`). A favorite is listed only under Favorites, and
+back in its group when it is no longer a favorite (`AgentControl-MainWindowViewModel-FavoriteListedOnce`, tested by
+`MainWindowViewModel_Favorite_IsListedOnlyUnderFavoritesAndKeepsItsGroup`). Settings built in memory with a null
+collapsed list, blank, reserved, overlong or look-alike group names load without failing
+(`AgentControl-MainWindowViewModel-DamagedGroupSettings`, tested by
+`MainWindowViewModel_Constructor_NullAndInvalidOrganizingSettings_FallBack` and
+`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection`). The header rows themselves are verified by
+the `RepoGroupHeaderViewModel` unit.
 
 **MainWindowViewModel_GroupCollapse_HidesCardsAndIsRemembered**: Collapsing a group leaves its header (with
-its count) and no cards, writes the name to the settings file, and a view model built from those settings
-shows it collapsed; expanding forgets it (letter case ignored); Favorites and Ungrouped collapse the same
-way; a list of only collapsed sections still shows its headers; applying other settings keeps the collapsed
-names. This scenario is tested by
+its count) and no cards, and expanding forgets it (letter case ignored); Favorites and Ungrouped collapse the same
+way; a list of only collapsed sections still shows its headers; toggling a section keeps the header and the
+unchanged cards as the same objects with only the hidden cards removed. This scenario is tested by
 `MainWindowViewModel_ToggleGroupCollapsed_HidesCardsAndPersists`,
 `MainWindowViewModel_ToggleGroupCollapsed_BuiltInSections_CollapseAndPersist`,
 `MainWindowViewModel_AllGroupsCollapsed_HeadersRemainAndListIsNotEmpty` and
-`MainWindowViewModel_ApplySettings_KeepsCollapsedGroups`, covering
-`AgentControl-MainWindowViewModel-GroupCollapse`; the header's toggle command is verified by the
+`MainWindowViewModel_ToggleGroupCollapsed_KeepsHeaderAndUnchangedCardsInPlace`, covering
+`AgentControl-MainWindowViewModel-GroupCollapse`. The collapsed name is written to the settings file and a view
+model built from those settings shows the section collapsed
+(`MainWindowViewModel_ToggleGroupCollapsed_HidesCardsAndPersists` and
+`MainWindowViewModel_ToggleGroupCollapsed_BuiltInSections_CollapseAndPersist`, covering
+`AgentControl-MainWindowViewModel-GroupCollapseRemembered`), and applying other settings keeps the collapsed names
+(`MainWindowViewModel_ApplySettings_KeepsCollapsedGroups`, covering
+`AgentControl-MainWindowViewModel-GroupCollapseKeptOnApplySettings`). The header's toggle command is verified by the
 `RepoGroupHeaderViewModel` unit.
 
 **MainWindowViewModel_GroupFilter_ShowsEveryMatchEvenInCollapsedGroups**: With a group collapsed, a filter
-shows its matching repos expanded, counts only the matches, omits the sections without one, disables the
-toggles and leaves the file's collapsed names unchanged; clearing the filter brings the collapsed state back;
-a filter that matches nothing shows no header at all. This scenario is tested by
-`MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes` and
-`MainWindowViewModel_FilterText_NoMatch_ShowsNothing`, covering `AgentControl-MainWindowViewModel-GroupFilter`.
+shows its matching repos expanded (`AgentControl-MainWindowViewModel-GroupFilter`), counts only the matches in the
+headers (`-GroupFilterCounts`), omits the sections without one (`-GroupFilterOmitsEmpty`), disables the toggles
+(`-GroupFilterToggleDisabled`) and leaves the file's collapsed names unchanged, so clearing the filter brings the
+collapsed state back (`-GroupFilterKeepsCollapsedState`); a filter that matches nothing shows no header at all. This
+scenario is tested by `MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes` (covering all
+five requirements) and `MainWindowViewModel_FilterText_NoMatch_ShowsNothing` (covering `-GroupFilter` and
+`-GroupFilterOmitsEmpty`); each requirement id here is prefixed `AgentControl-MainWindowViewModel`.
 
 **MainWindowViewModel_GroupManagement_RenameRemoveAndNothingWrittenToRepos**: Renaming moves every member
-and the collapsed entry and is persisted, accepts a change of letter case only, and is refused for an
-unknown group, a blank, reserved or overlong name and another group's name; removing a group leaves its
-repos ungrouped and forgets its collapsed entry; a header's rename and remove commands raise the view model's requests
-with the group's name and change nothing by themselves; and after moving, coloring, collapsing and renaming
-the repository folder is still empty while the settings file holds the choices. This scenario is tested by
-`MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames`,
-`MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped`,
-`MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName` and
-`RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository`, covering
-`AgentControl-MainWindowViewModel-GroupManagement`. The prompt that asks for a group's name is verified by the
+and the collapsed entry and is persisted (`AgentControl-MainWindowViewModel-GroupManagement`), accepts a change of
+letter case only, and is refused for an unknown group, a blank, reserved or overlong name and another group's name
+(`AgentControl-MainWindowViewModel-GroupRenameRules`); both are tested by
+`MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames`. Removing a group leaves its repos ungrouped and
+forgets its collapsed entry (`MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped`, covering
+`AgentControl-MainWindowViewModel-GroupRemove`). A header's rename and remove commands raise the view model's requests
+with the group's name and change nothing by themselves
+(`MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName`, covering
+`AgentControl-MainWindowViewModel-GroupHeaderRequests`); and after moving, coloring, collapsing and renaming
+the repository folder is still empty while the settings file holds the choices
+(`RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository`, covering
+`AgentControl-MainWindowViewModel-GroupSettingsOnly`). The prompt that asks for a group's name is verified by the
 `GroupNameViewModel` unit.
+
+**MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten**: A favorite, a group and a card color chosen on a card
+are applied and read back from the settings file in the stored (canonical) spelling, and no failure is reported. This
+scenario is tested by `MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten`, covering
+`AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved`.
+
+**MainWindowViewModel_FailedSave_ChangesNothing**: Tested by `MainWindowViewModelPersistenceTests.cs` (the
+`RealProcess` collection, because every card's eager refresh spawns git). A failing save is produced by making
+`settings.json` in the configuration folder a directory, which no write can replace; deleting that directory makes
+saving work again. With saving broken, each change is made and nothing is checked to have changed: a favorite (card,
+settings and displayed list as before), a move to a group, a card color, a recorded launch (the stamp stays unset and
+no launch is recorded), a collapse (through the API, and through the header's button), a group rename and a group
+removal (the group, its members and its collapsed state as before), adding a repo (nothing added to the cards, the
+displayed list or the settings) and removing a repo (still listed, the settings unchanged). This scenario is tested by
+`MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt`,
+`MainWindowViewModel_MoveToGroupSaveFails_ChangesNothingAndReports`,
+`MainWindowViewModel_CardColorSaveFails_ChangesNothingAndReports`,
+`MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports`,
+`MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded`,
+`MainWindowViewModel_RenameGroupSaveFails_GroupUnchanged`,
+`MainWindowViewModel_RemoveGroupSaveFails_GroupUnchanged`, `MainWindowViewModel_AddRepoSaveFails_NothingAdded` and
+`MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking`, covering
+`AgentControl-MainWindowViewModel-FailedSaveChangesNothing`.
+
+**MainWindowViewModel_FailedSave_IsNotPersistedLater**: After a failed favorite, saving is made to work and an
+unrelated change (a card color on another repo) is saved: the file holds the color but not the favorite, and the
+same favorite then succeeds. After a failed add the same repo can be added, and after a failed removal the card still
+works (a favorite can be set on it) and can then be removed. This scenario is tested by
+`MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt`,
+`MainWindowViewModel_AddRepoSaveFails_NothingAdded` and
+`MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking`, covering
+`AgentControl-MainWindowViewModel-FailedSaveNotPersistedLater`.
+
+**MainWindowViewModel_FailedSave_IsReported**: A failed favorite, group move, card color, recorded launch and collapse
+from the header's button each raise the save-failed notice exactly once, with a message saying the change was not
+applied (the favorite test also checks that the two-way bound star is told to read its value again). This scenario is
+tested by `MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt`,
+`MainWindowViewModel_MoveToGroupSaveFails_ChangesNothingAndReports`,
+`MainWindowViewModel_CardColorSaveFails_ChangesNothingAndReports`,
+`MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports` and
+`MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded`, covering
+`AgentControl-MainWindowViewModel-SaveFailureReported`.
+
+**MainWindowViewModel_FailedSave_RefusesTheOperation**: Collapsing through the API, renaming a group, removing a
+group, adding a repo and removing a repo with saving broken each throw to the caller. This scenario is tested by
+`MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded`,
+`MainWindowViewModel_RenameGroupSaveFails_GroupUnchanged`, `MainWindowViewModel_RemoveGroupSaveFails_GroupUnchanged`,
+`MainWindowViewModel_AddRepoSaveFails_NothingAdded` and
+`MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking`, covering
+`AgentControl-MainWindowViewModel-SaveFailureRefusesOperation`. How the window shows that failure is verified at the
+`LauncherUI` subsystem level.
+
+**MainWindowViewModel_RemoveRepo_RetiresTheCard**: A repo's card is asked to report an error (its select-package
+action with no package source configured) and does; the repo is removed and the same action is tried again: nothing is
+reported for the removed card. What a retired card does with work that is still running is verified by the
+`RepoCardViewModel` unit, which owns `Retire`. This scenario is tested by
+`MainWindowViewModel_RemoveRepo_RetiresTheCard`, covering
+`AgentControl-MainWindowViewModel-RemoveRepoRetiresCard`.

@@ -146,7 +146,9 @@ public sealed class RepoCardFeatureTests
 
     /// <summary>
     ///     A repo whose folder is missing keeps an enabled menu item that re-checks it, labeled "Check
-    ///     again"; once the folder is back, choosing it clears the "Folder missing" badge.
+    ///     again"; choosing it while the folder is still missing leaves the card missing (so the badge
+    ///     is not just stale), and once the folder is back, choosing it clears the "Folder missing"
+    ///     badge and enables Launch again.
     /// </summary>
     [Fact]
     public void RefreshMenuItem_MissingFolder_IsEnabledAsCheckAgain_AndFindsFolderOnceBack()
@@ -171,27 +173,39 @@ public sealed class RepoCardFeatureTests
             timeout: TimeSpan.FromSeconds(10),
             interval: TimeSpan.FromMilliseconds(200)).Result);
 
+        Assert.False(FindLaunchButton(mainWindow).IsEnabled);
+
         // Act: open the card menu
-        mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MoreActionsButton"))!.AsButton().Invoke();
-        var refresh = Retry.WhileNull(
-            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("RefreshMenuItem")),
-            timeout: TimeSpan.FromSeconds(10),
-            interval: TimeSpan.FromMilliseconds(200)).Result?.AsMenuItem();
+        var refresh = OpenRefreshMenuItem(mainWindow);
 
         // Assert: Refresh is offered as "Check again" and is enabled (Launch is not)
-        Assert.NotNull(refresh);
         Assert.Equal("Check again", refresh.Name);
         Assert.True(refresh.IsEnabled);
 
-        // Act: the folder comes back, then the user chooses Check again
-        Directory.CreateDirectory(missingPath!);
+        // Act: choose Check again while the folder is still missing
         refresh.Invoke();
 
-        // Assert: the card is no longer missing
+        // Assert: the card is still missing - the badge stays (the wait for it to vanish times out)
+        Assert.False(Retry.WhileNotNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MissingRepoBadge")),
+            timeout: TimeSpan.FromSeconds(3),
+            interval: TimeSpan.FromMilliseconds(200)).Success);
+        Assert.False(FindLaunchButton(mainWindow).IsEnabled);
+
+        // Act: the folder comes back, then the user chooses Check again
+        Directory.CreateDirectory(missingPath!);
+        OpenRefreshMenuItem(mainWindow).Invoke();
+
+        // Assert: the badge is gone (the wait for it to vanish succeeds with nothing left) and the
+        // recovered card can launch again
         Assert.True(Retry.WhileNotNull(
             () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MissingRepoBadge")),
             timeout: TimeSpan.FromSeconds(15),
             interval: TimeSpan.FromMilliseconds(200)).Success);
+        Assert.True(Retry.WhileFalse(
+            () => FindLaunchButton(mainWindow).IsEnabled,
+            timeout: TimeSpan.FromSeconds(15),
+            interval: TimeSpan.FromMilliseconds(200)).Result);
     }
 
     /// <summary>
@@ -249,6 +263,37 @@ public sealed class RepoCardFeatureTests
                 // Best-effort cleanup only.
             }
         }
+    }
+
+    /// <summary>
+    ///     Opens the seeded repo card's "..." menu and returns its Refresh (or "Check again") item.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    /// <returns>The menu item.</returns>
+    private static MenuItem OpenRefreshMenuItem(Window mainWindow)
+    {
+        mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MoreActionsButton"))!.AsButton().Invoke();
+        var refresh = Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("RefreshMenuItem")),
+            timeout: TimeSpan.FromSeconds(10),
+            interval: TimeSpan.FromMilliseconds(200)).Result?.AsMenuItem();
+        Assert.NotNull(refresh);
+        return refresh;
+    }
+
+    /// <summary>
+    ///     Finds the seeded repo card's Launch button.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    /// <returns>The button.</returns>
+    private static Button FindLaunchButton(Window mainWindow)
+    {
+        var button = Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("LaunchButton")),
+            timeout: TimeSpan.FromSeconds(10),
+            interval: TimeSpan.FromMilliseconds(200)).Result?.AsButton();
+        Assert.NotNull(button);
+        return button;
     }
 
     /// <summary>

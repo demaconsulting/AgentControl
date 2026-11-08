@@ -252,11 +252,7 @@ sections:
           selection, upgrade, or the ensure-synced-before-launch re-extraction, offer the
           package's optional root-level AGENTS.md template to the user only when the repo has
           no AGENTS.md file of its own, the package has a template to offer, and the user has
-          not previously declined the offer for this repo; shall write the accepted template
-          verbatim to the repo root without extracting it into any managed folder; shall
-          persist a decline so the user is never re-prompted for that repo again; and shall
-          raise the offer before the release notes of the same upgrade, so the view can ask
-          first and show the notes after the answer.
+          not previously declined the offer for this repo.
         justification: |
           A package may ship a starting AGENTS.md template for a repo that lacks one, but
           AgentControl must never overwrite a developer's own AGENTS.md, must never nag a user
@@ -268,13 +264,23 @@ sections:
           - AgentControl-RepoCardViewModel-DeclineAgentsMdTemplate
         tests:
           - RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent
-          - RepoCardViewModel_ApplySelectedPackage_TemplateOfferAndReleaseNotes_RaisesOfferBeforeReleaseNotes
           - RepoCardViewModel_ApplySelectedPackage_AgentsMdAlreadyExists_DoesNotRaiseAgentsMdTemplateOfferRequested
           - RepoCardViewModel_ApplySelectedPackage_PackageHasNoAgentsMdTemplate_DoesNotRaiseAgentsMdTemplateOfferRequested
           - RepoCardViewModel_ApplySelectedPackage_PreviouslyDeclined_DoesNotRaiseAgentsMdTemplateOfferRequestedAgain
           - RepoCardViewModel_UpgradeCommand_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ReExtractsAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequested
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FoldersAlreadyPresent_NeverReadsZipOrRaisesOffer
+
+      - id: AgentControl-RepoCardViewModel-AgentsMdOfferBeforeReleaseNotes
+        title: >-
+          The RepoCardViewModel class shall raise the AGENTS.md template offer before the release
+          notes of the same upgrade, so the view can ask first and show the notes after the answer.
+        justification: |
+          The question is modal and the release notes are the completion of the upgrade; raising the
+          offer first lets the notes open in front once the question is answered, instead of being
+          covered by it or lost behind it.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_TemplateOfferAndReleaseNotes_RaisesOfferBeforeReleaseNotes
 
       - id: AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate
         title: >-
@@ -311,17 +317,33 @@ sections:
       - id: AgentControl-RepoCardViewModel-MissingRepo
         title: >-
           The RepoCardViewModel class shall mark the repo as missing, and suppress other
-          status computation, when the repo's folder no longer exists on disk, shall keep
-          its refresh command available then (labeled "Check again", with a tooltip that
-          says it checks whether the folder is available again), and shall stop reporting
-          the repo as missing once a refresh finds the folder.
+          status computation, when the repo's folder no longer exists on disk.
         justification: |
           A repo folder can be deleted or moved outside AgentControl's knowledge; the card
-          must reflect that rather than show stale or misleading status information. A folder
-          on a drive or share that is not mounted comes back by itself, and re-checking is the
-          only way to tell AgentControl, so the refresh must stay available for a missing repo.
+          must reflect that rather than show stale or misleading status information.
         tests:
           - RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState
+
+      - id: AgentControl-RepoCardViewModel-MissingRepoRecheck
+        title: >-
+          The RepoCardViewModel class shall keep its refresh command available for a missing
+          repo, labeled "Check again" with a tooltip that says it checks whether the folder is
+          available again.
+        justification: |
+          A folder on a drive or share that is not mounted comes back by itself, and re-checking is
+          the only way to tell AgentControl, so the refresh must stay available for a missing repo.
+        tests:
+          - RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState
+          - RepoCardViewModel_RefreshCommand_MissingFolderReturns_ClearsMissingAndRestoresActions
+
+      - id: AgentControl-RepoCardViewModel-MissingRepoCleared
+        title: >-
+          The RepoCardViewModel class shall stop reporting the repo as missing, and make its
+          actions available again, once a refresh finds the folder.
+        justification: |
+          A repo whose folder is back must not stay marked as missing until the application is
+          restarted.
+        tests:
           - RepoCardViewModel_RefreshCommand_MissingFolderReturns_ClearsMissingAndRestoresActions
 
       - id: AgentControl-RepoCardViewModel-CommittedFilesBadge
@@ -340,14 +362,13 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-Favorite
         title: >-
-          The RepoCardViewModel class shall let the user set the repo's favorite status through
-          one property that is the only owner of that state, changing the shared repo record and
-          raising its change notification once per change.
+          The RepoCardViewModel class shall let the user mark the repo as a favorite and clear the
+          mark again, recording the status on the repo's settings entry and raising its change
+          notification exactly once per change.
         justification: |
           Marking a repo as a favorite is how a developer promotes it to the top of the
-          sorted recent-repos list. The card's star binds to this one property (it has no command
-          of its own), because a second owner of the state - a command that also toggled - flipped
-          it twice per click, so a repo could neither be favorited nor unfavorited.
+          sorted recent-repos list; a single click must change the status exactly once, so a repo
+          can both be favorited and unfavorited.
         tests:
           - RepoCardViewModel_IsFavorite_Set_UpdatesRecentRepoAndRaisesFavoriteChangedOncePerChange
 
@@ -428,13 +449,11 @@ sections:
           date (an agent package is pinned and no newer version exists), upgrade available, a
           problem (the folder is missing, the package source has a problem or needs a sign-in, or
           the last action failed), no agent package, or unknown (the last upgrade check failed
-          because the package source could not be read, so it is not claimed to be up to date),
-          with the status in words and a tooltip that
-          gives the reason, and shall clear a failed-action problem when the next operation starts.
+          because the package source could not be read, so it is not claimed to be up to date).
         justification: |
           The card shows its overall status as a colored bar so a long list can be scanned; the
-          status is a fact of the view model, with words, so it is never conveyed by color alone
-          and is available to assistive technology.
+          status is a fact of the view model, so it is available to assistive technology and never
+          depends on the color.
         tests:
           - RepoCardViewModel_Status_ReflectsPackageAndUpgradeState
           - RepoCardViewModel_Status_UpgradeCheckFailed_IsUnknownNotUpToDate
@@ -442,104 +461,333 @@ sections:
           - RepoCardViewModel_Status_FailedPull_IsProblemUntilNextOperation
           - RepoCardViewModel_Status_ErrorReported_IsProblem
 
+      - id: AgentControl-RepoCardViewModel-StatusWords
+        title: >-
+          The RepoCardViewModel class shall give the card's overall status in words and a tooltip
+          that gives the reason.
+        justification: |
+          A status conveyed by color alone is not available to every user; the words are also the
+          accessible name of the status bar.
+        tests:
+          - RepoCardViewModel_Status_ReflectsPackageAndUpgradeState
+          - RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason
+
+      - id: AgentControl-RepoCardViewModel-StatusProblemCleared
+        title: >-
+          The RepoCardViewModel class shall clear a failed-action problem from the card's status
+          when the next operation starts.
+        justification: |
+          A failure that was reported once must not keep the card marked as a problem after the user
+          has tried again.
+        tests:
+          - RepoCardViewModel_Status_FailedPull_IsProblemUntilNextOperation
+
+      - id: AgentControl-RepoCardViewModel-InvalidSourceConfigurationIsProblem
+        title: >-
+          The RepoCardViewModel class shall show a pin whose package source cannot be used because
+          the configured sources are invalid (for example two sources with the same alias) as a
+          problem with a reason, and never as up to date.
+        justification: |
+          A card that claims to be current because its source could not be read at all would hide a
+          configuration problem the user must fix.
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_InvalidSourceConfiguration_IsAProblemNotUpToDate
+
       - id: AgentControl-RepoCardViewModel-UpToDateCue
         title: >-
           The RepoCardViewModel class shall tell the card to show its "up to date" cue only while
-          an agent package is pinned and the card's overall status is up to date, and shall expose
-          the repo's path as a folder part and a last segment (the repo's folder name, with its
-          separator) so the card can shorten the path in the middle.
+          an agent package is pinned and the card's overall status is up to date.
         justification: |
           A healthy card would otherwise be recognized only by a green bar and the absence of an
           upgrade chip, so it shows a small check mark in its package chip; the cue must never
-          contradict the status (an upgrade, a problem, a check still running, no package). A
-          narrow card must still show the folder name that tells similar repos apart, which needs
-          the path in two parts.
+          contradict the status (an upgrade, a problem, a check still running, no package).
         tests:
           - RepoCardViewModel_ShowUpToDateCue_OnlyForPinnedAndUpToDate
+
+      - id: AgentControl-RepoCardViewModel-RepoPathKeepsFolderName
+        title: >-
+          The RepoCardViewModel class shall give the card the repo's path in a form that keeps the
+          repo's own folder name intact when the card shortens the path to fit.
+        justification: |
+          A narrow card must still show the folder name that tells similar repos apart.
+        tests:
           - RepoCardViewModel_RepoPathParts_SplitAtLastSeparator
 
       - id: AgentControl-RepoCardViewModel-UpgradeFromChip
         title: >-
-          The RepoCardViewModel class shall start an upgrade from one command that both the
-          upgrade chip and the card menu's Upgrade item use, available only while an upgrade is
-          available and no other operation is running, with a tooltip that says it upgrades the
-          agent files to the new version.
+          The RepoCardViewModel class shall let the user start an upgrade from the upgrade chip
+          with the same effect and the same guards as the card menu's Upgrade item.
         justification: |
-          The chip that announces an upgrade is also the quickest way to start it; sharing the
-          menu's command keeps the confirmations and guards identical however it is started.
+          The chip that announces an upgrade is also the quickest way to start it; it must behave
+          exactly like the menu item, with the same confirmations and guards.
         tests:
-          - RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions
           - RepoCardViewModel_UpgradeCommand_ChipAndMenuShareOneGuardedCommand
           - RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesPinAndRaisesReleaseNotesReady
+
+      - id: AgentControl-RepoCardViewModel-UpgradeChipAvailability
+        title: >-
+          The RepoCardViewModel class shall make the upgrade available only while an upgrade is
+          available and no other operation is running.
+        justification: |
+          An upgrade that is not available, or that would run beside another operation on the same
+          repo, must not be started from the chip or from the menu.
+        tests:
+          - RepoCardViewModel_UpgradeCommand_ChipAndMenuShareOneGuardedCommand
+
+      - id: AgentControl-RepoCardViewModel-UpgradeChipTooltip
+        title: >-
+          The RepoCardViewModel class shall give the upgrade chip a tooltip that says it upgrades
+          the agent files to the new version.
+        justification: |
+          A chip that starts an upgrade must say what it will do before it is clicked.
+        tests:
+          - RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions
 
       - id: AgentControl-RepoCardViewModel-AvatarTile
         title: >-
           The RepoCardViewModel class shall expose, for the card's avatar tile, the one or two
-          capital letters that start the repo name's first two words, a palette color chosen by a
-          deterministic hash of the repo path (the same repo always the same color, whatever the
-          case of the path), and no letters - so a folder glyph is shown - when the name has no
-          letter or digit.
+          capital letters that start the repo name's first two words.
         justification: |
-          A recognizable, stable tile per repo makes a long list quicker to scan; a hash that is
-          not randomized per process keeps a repo's color the same in every session.
+          A recognizable tile per repo makes a long list quicker to scan.
         tests:
           - RepoCardViewModel_AvatarInitials_RepoName_UsesFirstLettersOfFirstTwoWords
+
+      - id: AgentControl-RepoCardViewModel-AvatarFolderGlyph
+        title: >-
+          The RepoCardViewModel class shall expose no letters for the avatar tile, so that a folder
+          glyph is shown, when the repo name has no letter or digit.
+        justification: |
+          A name made of symbols has no initials; the tile must still show something recognizable.
+        tests:
           - RepoCardViewModel_Avatar_EmptyName_FallsBackToFolderGlyph
+
+      - id: AgentControl-RepoCardViewModel-AvatarColorStable
+        title: >-
+          The RepoCardViewModel class shall give the avatar tile a palette color that is the same
+          for the same repo in every session, whatever the letter case of its path, and that is
+          always one of the palette's colors.
+        justification: |
+          A repo that changed color every time the application started could not be recognized by
+          its color.
+        tests:
           - RepoCardViewModel_AvatarColorIndex_SamePath_IsStableAndInPalette
 
       - id: AgentControl-RepoCardViewModel-RepoPicture
         title: >-
           The RepoCardViewModel class shall, without blocking the user interface, show on the
           card the icon.png or logo.png picture that the repo's root folder offers in place of
-          the generated tile, shall show the generated tile when the repo offers no picture, when
-          its folder is missing or when its picture has been removed, shall never show an
-          untrusted picture that is not a valid PNG, is too large, is a link or lies outside the
-          repo, shall never let a picture that cannot be read or decoded - whatever the failure -
-          interrupt the card, and shall not decode an unchanged picture again.
+          the generated tile.
         justification: |
           A repository that ships its own icon or logo is recognizable at a glance; because the
-          repository may be untrusted, a picture that is not a small, genuine PNG plain file in
-          the repo's root is ignored (the rules are the RepoImageLocator unit's), and any failure
-          keeps the generated tile, so a hostile or damaged file costs only the picture.
+          repository may be untrusted, which pictures are acceptable is decided by the
+          RepoImageLocator unit and this unit shows only what that unit returns.
         tests:
           - RepoCardViewModel_RepoImage_IconPresent_LoadsOnceUntilFileChanges
+
+      - id: AgentControl-RepoCardViewModel-RepoPictureFallback
+        title: >-
+          The RepoCardViewModel class shall show the generated tile when the repo offers no
+          picture, when its folder is missing or when its picture has been removed.
+        justification: |
+          The generated tile is always a correct picture of the card; a missing picture must cost
+          nothing else.
+        tests:
           - RepoCardViewModel_RepoImage_FileRemoved_FallsBackToInitials
           - RepoCardViewModel_RepoImage_MissingFolder_NeverLooksForAnImage
+
+      - id: AgentControl-RepoCardViewModel-RepoPictureFailureIsolated
+        title: >-
+          The RepoCardViewModel class shall never let a picture that cannot be read or decoded -
+          whatever the failure - interrupt the card, and shall keep the tile as it was.
+        justification: |
+          The picture is decorative and comes from an untrusted repo; a damaged or hostile file
+          costs the card its picture and nothing else.
+        tests:
           - RepoCardViewModel_RepoImage_DecodeFailsOrThrows_KeepsTileAndDoesNotRetry
           - RepoCardViewModel_RepoImage_OlderRefreshFailsAfterNewerPublished_KeepsNewerImage
 
+      - id: AgentControl-RepoCardViewModel-RepoPictureNotDecodedAgain
+        title: >-
+          The RepoCardViewModel class shall not decode an unchanged picture again.
+        justification: |
+          The card is refreshed often; decoding the same file each time would waste time and memory.
+        tests:
+          - RepoCardViewModel_RepoImage_IconPresent_LoadsOnceUntilFileChanges
+
+      - id: AgentControl-RepoCardViewModel-RepoPictureReleased
+        title: >-
+          The RepoCardViewModel class shall release the picture it no longer shows - one replaced
+          by a newer picture, cleared, never shown because a newer refresh took over, or dropped
+          when the card is retired - so that no picture resource is retained after the card
+          stopped showing it.
+        justification: |
+          A picture occupies native memory; a card that is refreshed for days must not accumulate
+          the pictures it has replaced.
+        tests:
+          - RepoCardViewModel_RepoImage_SupersededClearedOrRetired_BitmapIsDisposed
+          - RepoCardViewModel_RepoImage_DecodedByOvertakenRefresh_IsDisposedAndNotPublished
+
       - id: AgentControl-RepoCardViewModel-MoveToGroup
         title: >-
-          The RepoCardViewModel class shall move its repo into a valid group (adopting the
-          spelling of an existing group whose name matches ignoring letter case, and refusing a
-          name that is too long or one of the built-in section names) or out of its group, record
-          the choice on the repo's settings entry only, raise a change notification, list the
-          existing groups, request the new-group prompt, and show its group as a chip only while
-          the repo is a favorite.
+          The RepoCardViewModel class shall move its repo into a valid group or out of its group,
+          record the choice on the repo's settings entry only, and raise a change notification.
         justification: |
-          The card is where the user decides which group a repo belongs to; the rules must be the
-          same wherever the move comes from, and a favorite - listed under Favorites - still has to
-          show which group it belongs to.
+          The card is where the user decides which group a repo belongs to; the choice is the
+          user's own and belongs in the settings, never in the repository.
         tests:
           - RepoCardViewModel_MoveToGroup_UpdatesGroupAndRaisesChange
-          - RepoCardViewModel_NewGroupCommand_RaisesRequest_AndChipShowsForGroupedFavorites
           - RepoCardViewModel_MoveToGroup_NewExistingInvalidAndRemove
+
+      - id: AgentControl-RepoCardViewModel-GroupNameRules
+        title: >-
+          The RepoCardViewModel class shall adopt the spelling of an existing group whose name
+          matches ignoring letter case, and shall refuse, changing nothing, a name that is too long
+          or one of the built-in section names.
+        justification: |
+          The rules must be the same wherever the move comes from, and two spellings of one group
+          would split it in two.
+        tests:
+          - RepoCardViewModel_MoveToGroup_UpdatesGroupAndRaisesChange
+          - RepoCardViewModel_MoveToGroup_NewExistingInvalidAndRemove
+
+      - id: AgentControl-RepoCardViewModel-GroupList
+        title: >-
+          The RepoCardViewModel class shall list the existing groups of all the repos.
+        justification: |
+          The card's menu offers the groups a repo can be moved to.
+        tests:
+          - RepoCardViewModel_MoveToGroup_UpdatesGroupAndRaisesChange
+
+      - id: AgentControl-RepoCardViewModel-NewGroupPrompt
+        title: >-
+          The RepoCardViewModel class shall request the prompt for a new group's name without
+          changing the repo's group itself.
+        justification: |
+          The name is asked for by the window; the group must change only after the user has
+          answered.
+        tests:
+          - RepoCardViewModel_NewGroupCommand_RaisesRequest_AndChipShowsForGroupedFavorites
+
+      - id: AgentControl-RepoCardViewModel-GroupChipForFavorites
+        title: >-
+          The RepoCardViewModel class shall show its group as a chip only while the repo is a
+          favorite.
+        justification: |
+          A favorite is listed under Favorites instead of under its group, so the card must still
+          show which group it belongs to.
+        tests:
+          - RepoCardViewModel_NewGroupCommand_RaisesRequest_AndChipShowsForGroupedFavorites
 
       - id: AgentControl-RepoCardViewModel-CardColor
         title: >-
-          The RepoCardViewModel class shall let the tile's color be chosen from the palette by name
-          (ignoring letter case) or reset to the automatic color derived from the repo path, record
-          the choice on the repo's settings entry only, raise a change notification, refuse a name
-          that is not in the palette, read a stored name that is not in the palette as the
-          automatic color, and leave the card's status unchanged.
+          The RepoCardViewModel class shall let the tile's color be chosen from the palette by
+          name (ignoring letter case) or reset to the automatic color derived from the repo path.
         justification: |
-          The choice must be reversible and safe against a stale or damaged stored value, and the
-          card's status colors must keep their meaning whatever color the user picks.
+          The choice must be the user's and reversible.
         tests:
           - CardColorPalette_All_MatchesTheAvatarPalette
-          - CardColorPalette_Find_ToleratesAnyStoredValue
           - RepoCardViewModel_CardColor_Default_IsAutomatic
           - RepoCardViewModel_SetCardColor_ChoosesAndClearsColor
+
+      - id: AgentControl-RepoCardViewModel-CardColorRecorded
+        title: >-
+          The RepoCardViewModel class shall record the chosen card color on the repo's settings
+          entry only, and raise a change notification.
+        justification: |
+          The color is the user's own choice and belongs in the settings, never in the repository.
+        tests:
+          - RepoCardViewModel_SetCardColor_ChoosesAndClearsColor
+
+      - id: AgentControl-RepoCardViewModel-CardColorUnknownRefused
+        title: >-
+          The RepoCardViewModel class shall refuse a color name that is not in the palette,
+          changing nothing.
+        justification: |
+          A stale or mistyped name must not replace a valid choice.
+        tests:
           - RepoCardViewModel_SetCardColor_UnknownName_IsRefused
+
+      - id: AgentControl-RepoCardViewModel-CardColorStoredFallback
+        title: >-
+          The RepoCardViewModel class shall read a stored color name that is not in the palette as
+          the automatic color.
+        justification: |
+          The settings file can be edited by hand or written by another version; a value this
+          version does not know must not break the card.
+        tests:
+          - CardColorPalette_Find_ToleratesAnyStoredValue
           - RepoCardViewModel_CardColor_UnknownStoredValue_FallsBackToAutomatic
+
+      - id: AgentControl-RepoCardViewModel-CardColorKeepsStatus
+        title: >-
+          The RepoCardViewModel class shall leave the card's status unchanged whatever color the
+          user chooses.
+        justification: |
+          The status colors must keep their meaning on every card.
+        tests:
           - RepoCardViewModel_SetCardColor_DoesNotChangeStatus
+
+      - id: AgentControl-RepoCardViewModel-ChangeSavedBeforeApplied
+        title: >-
+          The RepoCardViewModel class shall change its favorite status, its group, its card color
+          and its launch time only after its owner has saved the change, and shall remain as it was
+          (reporting the refusal of a group move or color choice to its caller) when the owner
+          refuses it.
+        justification: |
+          A card that shows a change the settings file does not have would be wrong after the next
+          start; applying a change only once it is saved keeps what the user sees equal to what is
+          kept.
+        tests:
+          - RepoCardViewModel_Changes_GoThroughTheOwnerAndAreNotAppliedWhenItRefuses
+
+      - id: AgentControl-RepoCardViewModel-StaleUpgradeCheckDiscarded
+        title: >-
+          The RepoCardViewModel class shall never publish the answer of an upgrade check that was
+          started before the repo's pin changed or before the repo became missing or unusable.
+        justification: |
+          An answer about a pin or a repo that is gone describes something the card no longer
+          shows; publishing it would offer an upgrade for the wrong version.
+        tests:
+          - RepoCardViewModel_RefreshCheap_PinChangesDuringUpgradeCheck_StaleResultIsNotPublished
+          - RepoCardViewModel_RefreshCheap_RepoBecomesMissingDuringUpgradeCheck_StateIsResetAndResultIgnored
+
+      - id: AgentControl-RepoCardViewModel-UpgradeStateResetOnRefresh
+        title: >-
+          The RepoCardViewModel class shall, when it re-reads the repo, stop showing "checking" and
+          "check failed" for a check that was overtaken, and drop the upgrade it had found when the
+          pin changed.
+        justification: |
+          A card stuck on "checking" or showing a failure of a check nobody waits for any more would
+          mislead the user.
+        tests:
+          - RepoCardViewModel_RefreshCheap_PinChangesDuringUpgradeCheck_StaleResultIsNotPublished
+          - RepoCardViewModel_RefreshCheap_RepoBecomesMissingDuringUpgradeCheck_StateIsResetAndResultIgnored
+
+      - id: AgentControl-RepoCardViewModel-RetiredCardReportsNothing
+        title: >-
+          The RepoCardViewModel class shall, once its repo was removed from the list (the card is
+          retired), publish no result of an upgrade check that was still running and report no
+          error, release notes or prompt for anything it still has running.
+        justification: |
+          A removed repo's pending work must not show an error, release notes or a question for a
+          repo that is no longer in the list.
+        tests:
+          - RepoCardViewModel_Retire_UpgradeCheckStillRunning_PublishesNothingAndRaisesNothing
+          - RepoCardViewModel_Retire_OperationRunning_IsCancelledAndNothingIsReported
+
+      - id: AgentControl-RepoCardViewModel-RetireCancelsRunningWork
+        title: >-
+          The RepoCardViewModel class shall cancel the operation it is running when it is retired.
+        justification: |
+          Work for a removed repo is wasted and may still change the repo's files.
+        tests:
+          - RepoCardViewModel_Retire_OperationRunning_IsCancelledAndNothingIsReported
+
+      - id: AgentControl-RepoCardViewModel-RetiredCardChecksNothing
+        title: >-
+          The RepoCardViewModel class shall, once retired, check nothing and read no package source
+          when it is asked to refresh.
+        justification: |
+          A card that was removed must not do work for a repo that is no longer listed.
+        tests:
+          - RepoCardViewModel_Retire_LaterRefresh_DoesNothing

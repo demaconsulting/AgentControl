@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using DemaConsulting.AgentControl.Settings;
+
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
@@ -39,7 +41,9 @@ internal sealed record CardColor(string Name, int Index);
 ///     resources defined for the light and the dark theme (the letters were chosen, and are checked
 ///     by a test, for at least 4.5:1 contrast with the fill in both themes), so this unit carries no
 ///     color values. Entries are looked up by name, never by position, so reordering the palette in a
-///     later version cannot change anyone's choice. Stateless and thread-safe.
+///     later version cannot change anyone's choice. The names themselves come from
+///     <see cref="RecentRepo.CardColorNames"/>, which is also what the settings load repairs an
+///     unknown stored name against. Stateless and thread-safe.
 /// </remarks>
 internal static class CardColorPalette
 {
@@ -48,18 +52,7 @@ internal static class CardColorPalette
     ///     palette index.
     /// </summary>
     private static readonly CardColor[] Entries =
-    [
-        new("Blue", 0),
-        new("Violet", 1),
-        new("Magenta", 2),
-        new("Green", 3),
-        new("Amber", 4),
-        new("Teal", 5),
-        new("Orange", 6),
-        new("Indigo", 7),
-        new("Red", 8),
-        new("Lime", 9)
-    ];
+        [.. RecentRepo.CardColorNames.Select((name, index) => new CardColor(name, index))];
 
     /// <summary>
     ///     Gets the number of colors in the palette.

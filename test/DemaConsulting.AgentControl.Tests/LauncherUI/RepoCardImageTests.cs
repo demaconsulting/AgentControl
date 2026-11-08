@@ -234,6 +234,95 @@ public sealed class RepoCardImageTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the card owns the bitmaps it publishes: a picture that is replaced by a newer one,
+    ///     or cleared because the file is gone, or dropped because the card was retired, is disposed
+    ///     once it is no longer published, while the current picture stays usable.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_RepoImage_SupersededClearedOrRetired_BitmapIsDisposed() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a card showing a picture
+        var repo = CreateRepo(("icon.png", TestPng.Create(64, 64)));
+        var card = CreateCard(repo, file => RepoImageLocator.Decode(file));
+        card.RefreshCheap();
+        await card.RepoImageRefreshTask;
+        var first = card.RepoImage!;
+        Assert.True(first.PixelSize.Width > 0);
+
+        // Act: the repo replaces its icon
+        File.WriteAllBytes(Path.Combine(repo, "icon.png"), TestPng.Create(128, 64));
+        card.RefreshCheap();
+        await card.RepoImageRefreshTask;
+        var second = card.RepoImage!;
+
+        // Assert: the superseded bitmap is released, the current one is not
+        Assert.NotSame(first, second);
+        Assert.Throws<ObjectDisposedException>(() => first.PixelSize);
+        Assert.True(second.PixelSize.Width > 0);
+
+        // Act: the icon is removed
+        File.Delete(Path.Combine(repo, "icon.png"));
+        card.RefreshCheap();
+        await card.RepoImageRefreshTask;
+
+        // Assert: cleared, and the bitmap that was shown is released
+        Assert.Null(card.RepoImage);
+        Assert.Throws<ObjectDisposedException>(() => second.PixelSize);
+
+        // Act: a picture again, then the card is retired
+        File.WriteAllBytes(Path.Combine(repo, "logo.png"), TestPng.Create(64, 64));
+        card.RefreshCheap();
+        await card.RepoImageRefreshTask;
+        var third = card.RepoImage!;
+        card.Retire();
+
+        // Assert
+        Assert.Null(card.RepoImage);
+        Assert.Throws<ObjectDisposedException>(() => third.PixelSize);
+    });
+
+    /// <summary>
+    ///     Test that a bitmap decoded by a refresh that a newer one has overtaken (so it is never
+    ///     published) is disposed by the refresh that decoded it, and the published one is not.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_RepoImage_DecodedByOvertakenRefresh_IsDisposedAndNotPublished() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: the first decode waits to be released and then returns a bitmap; the second returns at once
+        var repo = CreateRepo(("icon.png", TestPng.Create(64, 64)));
+        using var release = new ManualResetEventSlim(false);
+        Bitmap? overtaken = null;
+        var calls = 0;
+        var card = CreateCard(repo, file =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                Assert.True(release.Wait(TimeSpan.FromSeconds(30)), "the older decode was never released");
+                overtaken = RepoImageLocator.Decode(file);
+                return overtaken;
+            }
+
+            return RepoImageLocator.Decode(file);
+        });
+
+        // Act: the older refresh is blocked in its decoder, the newer one publishes, then the older finishes
+        card.RefreshCheap();
+        var older = card.RepoImageRefreshTask;
+        card.RefreshCheap();
+        await card.RepoImageRefreshTask;
+        var published = card.RepoImage!;
+        release.Set();
+        await older;
+
+        // Assert: the overtaken bitmap was released, the published one is intact and still shown
+        Assert.NotNull(overtaken);
+        Assert.NotSame(published, overtaken);
+        Assert.Throws<ObjectDisposedException>(() => overtaken.PixelSize);
+        Assert.Same(published, card.RepoImage);
+        Assert.True(published.PixelSize.Width > 0);
+    });
+
+    /// <summary>
     ///     Test that the main window's avatar tile shows the repo's picture when it has one - the
     ///     image visible, the initials hidden - and the initials when it has none.
     /// </summary>

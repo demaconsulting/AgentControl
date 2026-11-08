@@ -65,7 +65,7 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   auto-upgrades to a newer version on your behalf. This sync attempt is purely informational
   and never blocks the launch: repos with committed agent files skip it entirely, repos with
   no pin launch anyway, and a failed re-extraction only surfaces a warning
-- **Git integration**: pull the latest commits for a repo directly from its card (offered
+- **Git integration**: pull the latest commits for a repo with **Git Pull** in its card's "..." menu (enabled
   only when the working tree is clean), with a configurable git executable override
 - **Configurable agent tool**: choose GitHub Copilot CLI, Cursor, Claude Code, or a custom
   command line, plus a shell/terminal preference

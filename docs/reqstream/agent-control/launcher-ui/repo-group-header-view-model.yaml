@@ -11,49 +11,92 @@ sections:
     requirements:
       - id: AgentControl-RepoGroupHeaderViewModel-SectionKind
         title: >-
-          The RepoGroupHeaderViewModel class shall identify whether its header introduces the
-          Favorites section, one of the user's own groups or the Ungrouped section, so that only
-          the user's own groups offer the rename and remove actions.
+          The RepoGroupHeaderViewModel class shall classify its header as exactly one of the
+          Favorites section, one of the user's own groups or the Ungrouped section.
         justification: |
           The built-in sections cannot be renamed or removed; the header must say what kind of
-          section it is so the window offers only the actions that make sense.
+          section it is so the window offers the rename and remove actions only for the user's
+          own groups.
         tests:
-          - RepoGroupHeaderViewModel_Kind_SelectsSectionFlags
+          - RepoGroupHeaderViewModel_Kind_SelectsExactlyTheMatchingSectionFlag
 
       - id: AgentControl-RepoGroupHeaderViewModel-DescribesSection
         title: >-
           The RepoGroupHeaderViewModel class shall describe its section - the name, the number of
           repos that match the current filter (in the singular for one) and whether the section is
-          collapsed or expanded - in an accessible name that is also the text of the row, and shall
-          update that description in place when the count or the state changes.
+          collapsed or expanded - in an accessible name.
         justification: |
           A screen reader, and a UI test, need the section, its size and its state in one
-          sentence; updating the same header in place lets it keep the keyboard focus when it is
-          toggled.
+          sentence.
         tests:
           - RepoGroupHeaderViewModel_Update_DescribesCountAndState
+
+      - id: AgentControl-RepoGroupHeaderViewModel-AccessibleNameIsText
+        title: >-
+          The RepoGroupHeaderViewModel class shall use its accessible name as its text form.
+        justification: |
+          The text form names the list item that hosts the header for assistive technology and
+          for UI tests; without it the item would be named after the type.
+        tests:
           - RepoGroupHeaderViewModel_ToString_IsTheAccessibleName
+
+      - id: AgentControl-RepoGroupHeaderViewModel-UpdatesInPlace
+        title: >-
+          The RepoGroupHeaderViewModel class shall update its description on the same header
+          instance, announcing the change of the accessible name, when the count or the
+          collapsed state changes.
+        justification: |
+          Updating the same header instead of replacing it lets the header keep the keyboard
+          focus when it is toggled.
+        tests:
+          - RepoGroupHeaderViewModel_Update_DescribesCountAndState
 
       - id: AgentControl-RepoGroupHeaderViewModel-Toggle
         title: >-
           The RepoGroupHeaderViewModel class shall request that its section be collapsed or
-          expanded when the user toggles the header, only while its owner allows toggling, and
-          shall explain in the toggle's tooltip why the toggle is unavailable while a filter is
-          active.
+          expanded when the user toggles the header while its owner allows toggling.
+        justification: |
+          Whether a section is collapsed is the owner's state, remembered across restarts; the
+          header only reports that the user asked for the change.
+        tests:
+          - RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled
+
+      - id: AgentControl-RepoGroupHeaderViewModel-ToggleUnavailable
+        title: >-
+          The RepoGroupHeaderViewModel class shall make the toggle unavailable, and raise no
+          request, while its owner does not allow toggling.
         justification: |
           A filter shows every match whatever the collapsed state, so the toggle must not appear
-          to work then; saying why avoids a control that looks broken.
+          to work then.
+        tests:
+          - RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled
+
+      - id: AgentControl-RepoGroupHeaderViewModel-ToggleExplained
+        title: >-
+          The RepoGroupHeaderViewModel class shall explain in the toggle's tooltip that a filter
+          is the reason while toggling is not allowed.
+        justification: |
+          A control that is unavailable without saying why looks broken.
         tests:
           - RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled
 
       - id: AgentControl-RepoGroupHeaderViewModel-GroupActions
         title: >-
-          The RepoGroupHeaderViewModel class shall request that its group be renamed, or removed,
-          when the user chooses the corresponding action of the header, and shall leave doing
-          either to its owner.
+          The RepoGroupHeaderViewModel class shall request that its group be renamed when the
+          user chooses the rename action of the header.
         justification: |
-          Renaming and removing need dialogs and confirmation that belong to the window; the
-          header only reports what the user asked for.
+          Renaming needs a dialog that belongs to the window; the header only reports what the
+          user asked for.
+        tests:
+          - RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests
+
+      - id: AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest
+        title: >-
+          The RepoGroupHeaderViewModel class shall request that its group be removed when the
+          user chooses the remove action of the header.
+        justification: |
+          Removing a group needs a confirmation that belongs to the window; the header only
+          reports what the user asked for.
         tests:
           - RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests
 

@@ -31,6 +31,8 @@ N/A - standard test environment.
   that is not an `https` `index.json` address unless insecure HTTP is ticked) and a missing NuGet package
   identifier each show an inline message and block saving.
 - A package identifier that is invalid or already listed is refused; a listed one can be removed.
+- The location box's tooltip is the whole entered folder or feed address, announces every change of the location
+  through a change notification, and is `null` (no tooltip) while the location is empty or white space.
 - Saving a valid source raises `Saved` with the entered values (for a server also the insecure-HTTP choice);
   saving an invalid editor raises nothing.
 - Editing an existing source keeps its alias and any value of it the dialog does not show.
@@ -72,6 +74,12 @@ This scenario is tested by
 `-PackageIdRequiredServerMessage` and `-NoErrorsUntilTouched` (each prefixed `AgentControl-SourceEditorViewModel`; the
 mapping of test to requirement is in the requirements file). The null-alias-callback test is defensive and is not cited
 by a requirement.
+
+**SourceEditorViewModel_Location_TooltipShowsWholeValueAndIsNullWhenEmpty**: A new editor has no location tooltip;
+after a long UNC path is typed the tooltip is that whole path and the change notification for `LocationTooltip` was
+raised; after the location is changed to white space only the tooltip is `null` again. This scenario is tested by
+`SourceEditorViewModel_Location_TooltipShowsWholeValueAndIsNullWhenEmpty`, covering
+`AgentControl-SourceEditorViewModel-LocationTooltip`.
 
 **SourceEditorViewModel_ServerSource_TitleLabelExamplesAndInsecureChoice**: A new server editor has the
 server title, the "Feed address" label, the JFrog Artifactory and Azure Artifacts examples, the package ID

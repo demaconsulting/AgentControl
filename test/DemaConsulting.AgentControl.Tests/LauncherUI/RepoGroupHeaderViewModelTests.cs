@@ -29,24 +29,33 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 public class RepoGroupHeaderViewModelTests
 {
     /// <summary>
-    ///     Test that the kind decides which icon and which actions the header offers.
+    ///     Test that the kind decides the section's classification: for every kind exactly its own
+    ///     flag is set and the other two are not (a full truth table).
     /// </summary>
-    [Fact]
-    public void RepoGroupHeaderViewModel_Kind_SelectsSectionFlags()
+    /// <param name="kindName">The name of the kind of section (a member of
+    ///     <see cref="RepoGroupKind"/>; the enum is internal, so the test takes its name).</param>
+    /// <param name="favorites">Whether the favorites flag is expected.</param>
+    /// <param name="userGroup">Whether the user-group flag is expected.</param>
+    /// <param name="ungrouped">Whether the ungrouped flag is expected.</param>
+    [Theory]
+    [InlineData(nameof(RepoGroupKind.Favorites), true, false, false)]
+    [InlineData(nameof(RepoGroupKind.Group), false, true, false)]
+    [InlineData(nameof(RepoGroupKind.Ungrouped), false, false, true)]
+    public void RepoGroupHeaderViewModel_Kind_SelectsExactlyTheMatchingSectionFlag(
+        string kindName, bool favorites, bool userGroup, bool ungrouped)
     {
-        // Act
-        var favorites = new RepoGroupHeaderViewModel(RepoGroupKind.Favorites, "Favorites");
-        var group = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
-        var ungrouped = new RepoGroupHeaderViewModel(RepoGroupKind.Ungrouped, "Ungrouped");
+        // Arrange
+        var kind = Enum.Parse<RepoGroupKind>(kindName);
 
-        // Assert
+        // Act
+        var header = new RepoGroupHeaderViewModel(kind, "Name");
+
+        // Assert: all three flags, so exactly the matching one is set
         Assert.Multiple(
-            () => Assert.True(favorites.IsFavoritesSection),
-            () => Assert.False(favorites.IsUserGroup),
-            () => Assert.True(group.IsUserGroup),
-            () => Assert.False(group.IsUngroupedSection),
-            () => Assert.True(ungrouped.IsUngroupedSection),
-            () => Assert.False(ungrouped.IsUserGroup));
+            () => Assert.Equal(kind, header.Kind),
+            () => Assert.Equal(favorites, header.IsFavoritesSection),
+            () => Assert.Equal(userGroup, header.IsUserGroup),
+            () => Assert.Equal(ungrouped, header.IsUngroupedSection));
     }
 
     /// <summary>

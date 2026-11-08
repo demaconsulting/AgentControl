@@ -168,6 +168,114 @@ public sealed class RepoImageLocatorTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a file whose header chunk does not declare the 13-byte length every PNG header
+    ///     chunk has is refused by <see cref="RepoImageLocator.Find"/>, so a malformed header is never
+    ///     handed to the decoder.
+    /// </summary>
+    /// <param name="declaredLength">The length the header chunk declares for itself.</param>
+    [Theory]
+    [InlineData(0u)]
+    [InlineData(12u)]
+    [InlineData(14u)]
+    [InlineData(25u)]
+    [InlineData(uint.MaxValue)]
+    public void RepoImageLocator_Find_HeaderChunkLengthIsNotThirteen_IsRefused(uint declaredLength)
+    {
+        // Arrange: sane dimensions and a valid signature and chunk type, but a wrong chunk length
+        var root = CreateRepo(("icon.png", TestPng.CreateHeaderOnly(16, 16, declaredLength)));
+
+        // Act / Assert
+        Assert.Null(RepoImageLocator.Find(root));
+    }
+
+    /// <summary>
+    ///     Test that a picture replaced, after it was found, by one whose header chunk declares a
+    ///     length other than 13 is refused when it is decoded, without being decoded.
+    /// </summary>
+    [Fact]
+    public void RepoImageLocator_Decode_ReplacedByWrongHeaderChunkLength_ReturnsNull() =>
+        HeadlessTestApp.Run(() =>
+        {
+            // Arrange: a found valid picture, then a replacement with a malformed header chunk
+            var root = CreateRepo(("icon.png", TestPng.Create(8, 8)));
+            var found = RepoImageLocator.Find(root)!.Value;
+            var malformed = TestPng.Create(8, 8);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(malformed.AsSpan(8, 4), 14);
+            File.WriteAllBytes(found.Path, malformed);
+
+            // Act / Assert
+            Assert.Null(RepoImageLocator.Decode(found));
+        });
+
+    /// <summary>
+    ///     Test that a picture is found in a root that holds thousands of other files (the root is
+    ///     probed for the two names, not listed), whichever way the file system spells the name.
+    /// </summary>
+    [Fact]
+    public void RepoImageLocator_Find_RootWithManyUnrelatedFiles_FindsThePicture()
+    {
+        // Arrange: a crowded root with the picture spelled in another case
+        var root = CreateRepo(("Icon.PNG", TestPng.Create(8, 8)));
+        for (var i = 0; i < 3000; i++)
+        {
+            File.WriteAllBytes(Path.Combine(root, $"file-{i:D5}.txt"), [1]);
+        }
+
+        // Act
+        var found = RepoImageLocator.Find(root);
+
+        // Assert
+        Assert.NotNull(found);
+        Assert.Equal("Icon.PNG", Path.GetFileName(found.Value.Path), ignoreCase: true);
+    }
+
+    /// <summary>
+    ///     Test that the operating system's answer to "which file is this open handle?" names the
+    ///     real file (every link on the way resolved), not the path the file was opened by: this is
+    ///     what the picture's checks after the open rely on, and on macOS it is the
+    ///     file-control call with its get-path command, so the macOS test run is the evidence for it.
+    /// </summary>
+    [Fact]
+    public void RepoImageLocator_GetFinalPath_OpenedThroughLinkedFolder_NamesTheRealFile()
+    {
+        // Arrange: a real folder holding a picture, reached through a symbolic link
+        var real = CreateRepo(("icon.png", TestPng.Create(8, 8)));
+        var link = Path.Combine(CreateRepo(), "linked-folder");
+        CreateDirectorySymlinkOrSkip(link, real);
+        using var stream = new FileStream(Path.Combine(link, "icon.png"), FileMode.Open, FileAccess.Read);
+
+        // Act
+        var finalPath = RepoImageLocator.GetFinalPath(stream);
+
+        // Assert: a real path (not through the link) of the same file
+        Assert.NotNull(finalPath);
+        Assert.DoesNotContain("linked-folder", finalPath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("icon.png", Path.GetFileName(finalPath));
+        Assert.Equal(Path.GetFileName(real), Path.GetFileName(Path.GetDirectoryName(finalPath)));
+        Assert.Equal(new FileInfo(Path.Combine(real, "icon.png")).Length, new FileInfo(finalPath).Length);
+    }
+
+    /// <summary>
+    ///     Test that a picture is still found and decoded through the handle-based check on every
+    ///     platform the application runs on (an ordinary repo folder), which fails if the operating
+    ///     system's answer is missing or wrong.
+    /// </summary>
+    [Fact]
+    public void RepoImageLocator_FindAndDecode_OrdinaryRepo_PassesTheOpenHandleCheck() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var root = CreateRepo(("icon.png", TestPng.Create(64, 64)));
+
+        // Act
+        var found = RepoImageLocator.Find(root);
+        using var bitmap = found is { } file ? RepoImageLocator.Decode(file) : null;
+
+        // Assert
+        Assert.NotNull(found);
+        Assert.NotNull(bitmap);
+    });
+
+    /// <summary>
     ///     Test that only the repo root is searched: an icon in a subfolder, and a folder that is
     ///     merely named icon.png, are ignored.
     /// </summary>

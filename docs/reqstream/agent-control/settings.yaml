@@ -4,11 +4,17 @@
 # PURPOSE:
 # - Define requirements for the AgentControl Settings subsystem
 # - Settings spans SettingsStore.cs (loads/saves application-wide settings), and the
-#   AppSettings.cs/RecentRepo.cs/AgentToolKind.cs/ThemePreference.cs data types and the
-#   RepoGroupName.cs rules helper, which are documented as supporting types of this subsystem
-#   rather than as units of their own (RepoGroupName has its own RepoGroupNameTests.cs)
+#   AppSettings.cs/RecentRepo.cs/AgentToolKind.cs/ThemePreference.cs data types, which are
+#   documented as supporting types of this subsystem rather than as units of their own, and
+#   RepoGroupName.cs, the rules for the names of the user's own repo groups, which is a unit
+#   with its own requirements file (settings/repo-group-name.yaml)
 # - Subsystem requirements describe the observable behavior of persisting application-wide
-#   preferences (package sources, git/agent tool overrides, recent repos, shell preference)
+#   preferences (package sources, git/agent tool overrides, recent repos, shell preference,
+#   color theme) and the user's own organizing choices (repo groups, card colors, collapsed
+#   sections)
+# - The theme and organization requirements are evidenced by the Settings subsystem tests
+#   (SettingsSubsystemTests.cs), which use the subsystem the way the application does: saved by
+#   one session, loaded by the next; the unit requirements below them carry the unit tests
 
 sections:
   - title: Settings Subsystem Requirements
@@ -59,9 +65,10 @@ sections:
           an older or newer version must never prevent the application from starting.
         children:
           - AgentControl-SettingsStore-Theme
+          - AgentControl-SettingsStore-ThemeDefaultsToSystem
+          - AgentControl-SettingsStore-ThemeInvalidReadsAsSystem
         tests:
-          - SettingsStore_SaveThenLoad_Theme_RoundTripsByName
-          - SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem
+          - Settings_Appearance_ChosenThemeSurvivesSessionsAndDamagedValueReadsAsSystemDefault
 
       - id: AgentControl-Settings-RepoOrganization
         title: >-
@@ -75,9 +82,26 @@ sections:
           hand or written by another version must never keep the application from starting.
         children:
           - AgentControl-SettingsStore-RepoOrganization
+          - AgentControl-SettingsStore-RepoOrganizationOmitsUnset
+          - AgentControl-SettingsStore-RepoOrganizationDefaults
+          - AgentControl-SettingsStore-InvalidGroupOrColorReadsAsNone
+          - AgentControl-SettingsStore-InvalidCollapsedGroupsRepaired
+          - AgentControl-SettingsStore-GroupNamesRepaired
+          - AgentControl-SettingsStore-UnknownCardColorIsAutomatic
+          - AgentControl-RepoGroupName-Normalize
+          - AgentControl-RepoGroupName-NormalizeNothingLeft
+          - AgentControl-RepoGroupName-AcceptsUsableName
+          - AgentControl-RepoGroupName-RefusesBlankName
+          - AgentControl-RepoGroupName-RefusesTooLongName
+          - AgentControl-RepoGroupName-RefusesReservedNames
+          - AgentControl-RepoGroupName-SanitizeStoredName
+          - AgentControl-RepoGroupName-SanitizeCutsLongName
+          - AgentControl-RepoGroupName-SanitizeReservedIsNoGroup
+          - AgentControl-RepoGroupName-DistinctNames
+          - AgentControl-RepoGroupName-DistinctNamesSorted
+          - AgentControl-RepoGroupName-DistinctNamesLeaveOutNoGroup
+          - AgentControl-RepoGroupName-CanonicalizeAdoptsExisting
+          - AgentControl-RepoGroupName-CanonicalizeKeepsNewName
         tests:
-          - SettingsStore_SaveThenLoad_GroupColorAndCollapsedGroups_RoundTrip
-          - SettingsStore_Load_FileWithoutOrganizingValues_UsesDefaults
-          - SettingsStore_Load_InvalidGroupOrColorType_ReadsAsNone
-          - SettingsStore_Load_InvalidCollapsedGroups_KeepsOnlyCleanStrings
-          - SettingsStore_Load_GroupNames_AreRepairedAndUnified
+          - Settings_RepoOrganization_GroupColorAndCollapsedSectionsSurviveSessionsInSettingsFileOnly
+          - Settings_RepoOrganization_DamagedValuesFallBackAndNextSaveWritesCleanFile

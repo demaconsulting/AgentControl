@@ -10,17 +10,18 @@ group. Its single responsibility is to describe one section to the user and to a
 what the user asked for (collapse or expand, rename, remove); it never changes any state itself. The
 `RepoGroupKind` enumeration that accompanies it (`Favorites`, `Group`, `Ungrouped`) is part of this unit. Its
 behavior is specified by the unit requirements `AgentControl-RepoGroupHeaderViewModel-SectionKind`,
-`-DescribesSection`, `-Toggle`, `-GroupActions` and `-RequiresName` (each prefixed
-`AgentControl-RepoGroupHeaderViewModel`), and together with `MainWindowViewModel` (which decides which headers the
-list has) it provides `AgentControl-LauncherUI-RepoGroups`.
+`-DescribesSection`, `-AccessibleNameIsText`, `-UpdatesInPlace`, `-Toggle`, `-ToggleUnavailable`, `-ToggleExplained`,
+`-GroupActions`, `-RemoveGroupRequest` and `-RequiresName` (each prefixed `AgentControl-RepoGroupHeaderViewModel`), and
+together with `MainWindowViewModel` (which decides which headers the list has) it provides
+`AgentControl-LauncherUI-RepoGroups`.
 
 #### Data Model
 
 **Kind** (`RepoGroupKind`) and **Name**: which kind of section the header introduces and the section's display name -
 the user's group name, or the built-in *Favorites* / *Ungrouped*. The name is also the key under which the owner
 stores the section's collapsed state. **IsFavoritesSection**, **IsUserGroup**, **IsUngroupedSection** are derived
-flags for the view; the rename and remove actions are offered for `IsUserGroup` only
-(`AgentControl-RepoGroupHeaderViewModel-SectionKind`).
+flags for the view, exactly one of which is true for any kind; the rename and remove actions are offered for
+`IsUserGroup` only (`AgentControl-RepoGroupHeaderViewModel-SectionKind`).
 
 **Count**: the number of repos in the section that match the current filter (all of them without a filter), whether
 or not the section is collapsed. **IsCollapsed** / **IsExpanded**: whether the section's cards are hidden (never true
@@ -29,14 +30,16 @@ now - false while a filter is active.
 
 **AccessibleName**: the section, its count and its state in one sentence, for example `Work, 2 repos, collapsed`
 (singular for one repo), also the result of `ToString()`, which names the hosting list item for assistive technology
-(otherwise the item would be named after the type). **ToggleTooltip** says `Collapse {Name}` or `Expand {Name}`, or -
+(otherwise the item would be named after the type) (`AgentControl-RepoGroupHeaderViewModel-AccessibleNameIsText`).
+**ToggleTooltip** says `Collapse {Name}` or `Expand {Name}`, or -
 while toggling is disabled - that groups stay expanded while a filter is active so no match is hidden;
 **CountTooltip** says `1 repo` or `{n} repos` (`AgentControl-RepoGroupHeaderViewModel-DescribesSection`,
-`-Toggle`).
+`-ToggleExplained`).
 
 **ToggleCommand**, **RenameCommand**, **RemoveGroupCommand** (`RelayCommand`) and the events **ToggleRequested**,
 **RenameRequested**, **RemoveGroupRequested**: each command only raises its event; `ToggleCommand` can execute only
-while `IsToggleEnabled` (`AgentControl-RepoGroupHeaderViewModel-Toggle`, `-GroupActions`).
+while `IsToggleEnabled` (`AgentControl-RepoGroupHeaderViewModel-Toggle`, `-ToggleUnavailable`, `-GroupActions`,
+`-RemoveGroupRequest`).
 
 #### Key Methods
 
@@ -47,7 +50,7 @@ blank. *Postconditions*: `Count` is 0, the section is expanded and toggling is e
 **Update(count, isCollapsed, isToggleEnabled)**: Brings the header up to date with the current list, in place, raising
 change notifications only for what changed (and for the derived accessible name and tooltips). The owner keeps one
 header instance per section and updates it rather than replacing it, so a header keeps the keyboard focus when it is
-toggled.
+toggled (`AgentControl-RepoGroupHeaderViewModel-UpdatesInPlace`).
 
 **ToString()**: Returns `AccessibleName`.
 
@@ -59,7 +62,7 @@ simply ignored.
 #### Dependencies
 
 - **ViewModelBase**, **RelayCommand** (`LauncherUI`) - change notification and commands.
-- **RepoGroupName** (`Settings` subsystem) - the built-in section names the owner passes as `Name`.
+- **RepoGroupName** (`Settings` subsystem unit) - the built-in section names the owner passes as `Name`.
 
 #### Callers
 

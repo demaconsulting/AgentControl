@@ -74,10 +74,17 @@ internal static partial class InputDriver
         // The innermost visible titled dialog owns the keyboard while it is open. Pop-ups (a tooltip still showing) are
         // among the roots too, but only real windows can be the dialog
         var roots = context.Roots();
-        var dialogIndex = DialogSelector.InnermostDialog([.. roots.Select(root => new DialogCandidate(
-            UiActions.Safe(() => root.Properties.Name.ValueOrDefault, string.Empty),
-            UiActions.Safe(() => root.Properties.IsOffscreen.ValueOrDefault, false),
-            UiActions.Safe(() => root.Patterns.Window.IsSupported, false)))]);
+        var handles = roots
+            .Select(root => UiActions.Safe(() => root.Properties.NativeWindowHandle.ValueOrDefault, IntPtr.Zero))
+            .ToList();
+        var dialogIndex = DialogSelector.InnermostDialog(
+            [.. roots.Select((root, i) => new DialogCandidate(
+                UiActions.Safe(() => root.Properties.Name.ValueOrDefault, string.Empty),
+                UiActions.Safe(() => root.Properties.IsOffscreen.ValueOrDefault, false),
+                UiActions.Safe(() => root.Patterns.Window.IsSupported, false),
+                handles[i],
+                handles[i] == IntPtr.Zero ? IntPtr.Zero : WindowCapture.OwnerOf(handles[i])))],
+            WindowCapture.ZOrderOf(context.ProcessId));
         var front = dialogIndex >= 0 ? roots[dialogIndex] : context.MainWindow;
         var handle = front.Properties.NativeWindowHandle.ValueOrDefault;
         if (handle != IntPtr.Zero && IsIconic(handle))

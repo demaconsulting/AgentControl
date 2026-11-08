@@ -94,6 +94,66 @@ public sealed class PackageSourcesTests
     }
 
     /// <summary>
+    ///     The Settings window's Add button opens a menu that offers all three source types - a
+    ///     zip-package folder, a NuGet-package folder and a NuGet-package server - each with a drawn icon
+    ///     and a one-line description, and choosing the NuGet-package folder item opens its own dialog.
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_AddMenu_OffersThreeSourceTypesWithIconAndDescription()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: the Settings window
+        using var context = new AgentControlTestContext();
+        var mainWindow = context.Launch();
+        var settingsWindow = OpenSettings(context, mainWindow);
+
+        // Act: open the Add menu
+        Find(settingsWindow, "AddSourceButton").AsButton().Invoke();
+
+        // Assert: each source type has its item, titled and described, with an icon drawn at its left
+        (string Id, string Title, string Description)[] expected =
+        [
+            ("AddZipSourceButton", "Zip-package folder", "A folder of agent package .zip files"),
+            ("AddNuGetFolderSourceButton", "NuGet-package folder", "A folder of NuGet packages (.nupkg files)"),
+            ("AddNuGetServerSourceButton", "NuGet-package server", "A server such as Artifactory or Azure Artifacts")
+        ];
+        foreach (var (id, title, description) in expected)
+        {
+            var item = Find(settingsWindow, id);
+            Assert.NotNull(item.FindFirstDescendant(cf => cf.ByName(title)));
+            Assert.NotNull(item.FindFirstDescendant(cf => cf.ByName(description)));
+
+            // The menu slides open: measure once the item has stopped moving
+            var previous = default(System.Drawing.Rectangle);
+            Assert.True(Retry.WhileFalse(
+                () =>
+                {
+                    var current = item.BoundingRectangle;
+                    var still = current == previous;
+                    previous = current;
+                    return still;
+                },
+                TimeSpan.FromSeconds(10),
+                TimeSpan.FromMilliseconds(300)).Result);
+            var bounds = previous;
+            var iconArea = new System.Drawing.Rectangle(
+                bounds.Left + 4, bounds.Top + 4, 28, Math.Max(bounds.Height - 8, 1));
+            Assert.True(RenderedTextProbe.CountInkPixels(iconArea) > 20, $"{id} shows no icon.");
+        }
+
+        // Act: choose the NuGet-package folder item
+        Find(settingsWindow, "AddNuGetFolderSourceButton").AsMenuItem().Invoke();
+
+        // Assert: its own dialog opens, with the package-ID entry a NuGet source needs
+        Assert.NotNull(context.WaitForDialog("SourcePackageIdTextBox", TimeSpan.FromSeconds(15)));
+    }
+
+    /// <summary>
     ///     Adding a NuGet-package folder through the dialog requires at least one package ID, and the
     ///     saved source lists the IDs entered.
     /// </summary>

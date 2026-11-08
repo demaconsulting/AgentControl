@@ -658,10 +658,10 @@ public sealed class RepoCardViewModelTests : IDisposable
     [Fact]
     public void RepoCardViewModel_RefreshCheap_UnchangedHeadHash_CommittedFilesBadgeIsCached()
     {
-        // Arrange: a stub whose "ls-files" output would flip if invoked a second time is not
-        // directly observable here, but the badge value itself must remain stable across repeated
-        // refreshes against the same (stubbed, constant) HEAD hash.
-        var stub = GitStub.Create(revParseHeadOutput: "abc123", lsFilesOutput: ".github/agents/copilot.md");
+        // Arrange: a git stub that logs each invocation, answering a constant HEAD hash
+        var invocationLog = Path.Combine(CreateTempDirectory(), "git-invocations.log");
+        var stub = GitStub.Create(
+            revParseHeadOutput: "abc123", lsFilesOutput: ".github/agents/copilot.md", invocationLogPath: invocationLog);
         _tempPaths.Add(stub.Path);
         var repoRoot = CreateTempDirectory();
         var settings = new AppSettings { GitExecutablePath = stub.Path };
@@ -673,9 +673,15 @@ public sealed class RepoCardViewModelTests : IDisposable
         card.RefreshCheap();
         var secondResult = card.HasCommittedAgentFiles;
 
-        // Assert: both refreshes observe the same (cached) badge value
+        // Assert: both refreshes show the badge, but the file listing ran only once - the second
+        // refresh was served from the cache, which the invocation log proves (the HEAD hash itself
+        // is asked for every time, as that is what the cache is keyed by)
+        var invocations = ReadInvocationLog(invocationLog);
         Assert.True(firstResult);
         Assert.True(secondResult);
+        Assert.Single(invocations, line => line.StartsWith("ls-files", StringComparison.Ordinal));
+        Assert.Equal(2, invocations.Count(line => line.StartsWith("rev-parse", StringComparison.Ordinal) &&
+                                                  !line.Contains("--abbrev-ref", StringComparison.Ordinal)));
     }
 
     /// <summary>
@@ -2089,26 +2095,37 @@ public sealed class RepoCardViewModelTests : IDisposable
     [Fact]
     public async Task RepoCardViewModel_UpgradeCommand_ChipAndMenuShareOneGuardedCommand()
     {
-        // Arrange: an upgrade is available, so the chip (and the menu item) can run it
-        var repoRoot = CreateTempDirectory();
-        var sourceDir = CreateTempDirectory();
-        CreatePackageZip(sourceDir, "contoso-agents", "1.1.0");
-        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", new AppSettings { PackageSourcePath = sourceDir });
+        // Arrange: an upgrade is available, so the chip (and the menu item) can run it; the source
+        // answers the upgrade check at once but keeps a later version listing waiting
+        var release = new TaskCompletionSource();
+        var provider = new DelegatePackageSourceProvider(async (call, token) =>
+        {
+            if (call > 1)
+            {
+                await release.Task.WaitAsync(token);
+            }
+
+            return [Package("contoso-agents", "1.1.0")];
+        });
+        var card = CreateCardWithProvider(CreateTempDirectory(), "contoso-agents", "1.0.0", provider);
         card.RefreshCheap();
         await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.IsUpgradeAvailable);
         Assert.True(card.UpgradeCommand.CanExecute(null));
 
-        // Act: start a refresh that holds the card busy, then look at the command meanwhile
-        using var gate = new ManualResetEventSlim(false);
-        var running = card.RefreshCommand.ExecuteAsync();
-        var disabledWhileBusy = card.IsBusy && !card.UpgradeCommand.CanExecute(null);
+        // Act: another operation holds the card busy, then the command is looked at meanwhile
+        var running = card.ApplySelectedPackageAsync(
+            new PackageReference("Default", "contoso-agents", "1.1.0"), TestContext.Current.CancellationToken);
+        var busyWhileHeld = card.IsBusy;
+        var availableWhileBusy = card.UpgradeCommand.CanExecute(null);
+        card.CancelOperationCommand.Execute(null);
         await running;
 
-        // Assert: the command was guarded while busy (when the refresh was still running) and is
-        // available again afterwards
-        Assert.True(!card.IsBusy);
+        // Assert: the command was disabled while the card was busy and is available again afterwards
+        Assert.True(busyWhileHeld);
+        Assert.False(availableWhileBusy);
+        Assert.False(card.IsBusy);
         Assert.True(card.UpgradeCommand.CanExecute(null));
-        Assert.True(disabledWhileBusy || !card.IsBusy);
     }
 
     /// <summary>
@@ -2518,27 +2535,48 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a second apply while one is running is ignored and does not read the source
-    ///     again.
+    ///     Test that a second apply while one is running is ignored (it returns at once, does not read
+    ///     the source and does not disturb the running one), and that it is the busy guard that
+    ///     refused it: once the first has ended an apply is accepted again.
     /// </summary>
     [Fact]
     public async Task RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored()
     {
-        // Arrange
-        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        // Arrange: a source that signals when it is being read and then never answers
+        var started = new TaskCompletionSource();
+        var provider = new DelegatePackageSourceProvider((_, token) =>
+        {
+            started.TrySetResult();
+            return WaitForCancellationAsync(token);
+        });
         var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
         var selection = new PackageReference("Default", "contoso-agents", "1.1.0");
         var running = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+        await started.Task;
+        Assert.True(card.IsBusy);
 
-        // Act: a second request while the first is still running
-        await card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+        // Act: a second request while the first is really reading the source
+        var second = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
 
-        // Assert: the source was read only once
+        // Assert: it returned at once, read nothing and left the first operation running
+        Assert.True(second.IsCompletedSuccessfully);
         Assert.Equal(1, provider.ListVersionsCalls);
+        Assert.False(running.IsCompleted);
+        Assert.True(card.IsBusy);
+
+        // Act: the first ends, then a new apply is requested
+        card.CancelOperationCommand.Execute(null);
+        await running;
+        Assert.False(card.IsBusy);
+        var third = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+
+        // Assert: it is accepted now (the source is read again), so the refusal was the busy guard's
+        Assert.False(third.IsCompleted);
+        Assert.Equal(2, provider.ListVersionsCalls);
 
         // Cleanup
         card.CancelOperationCommand.Execute(null);
-        await running;
+        await third;
     }
 
     /// <summary>
@@ -2687,6 +2725,217 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.False(card.IsUpgradeAvailable);
         Assert.Equal("1.0.0", card.LatestAvailableVersion);
         Assert.False(card.IsCheckingUpgrade);
+    }
+
+    /// <summary>
+    ///     Test that an upgrade check still waiting for its source when the repo's pin changes does
+    ///     not publish its answer for the old pin, and stops being shown as checking.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshCheap_PinChangesDuringUpgradeCheck_StaleResultIsNotPublished()
+    {
+        // Arrange: a check held at the source, which would answer 9.0.0 for the old pin
+        var release = new TaskCompletionSource();
+        var provider = new DelegatePackageSourceProvider(async (_, _) =>
+        {
+            await release.Task;
+            return [Package("contoso-agents", "9.0.0")];
+        });
+        var repoRoot = CreateTempDirectory();
+        var card = CreateCardWithProvider(repoRoot, "contoso-agents", "1.0.0", provider);
+        var check = card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.IsCheckingUpgrade);
+
+        // Act: the pin file changes to another version and the card re-reads it, then the old check answers
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "2.0.0" });
+        card.RefreshCheap();
+        release.SetResult();
+        await check;
+
+        // Assert: nothing learned for the old pin shows; the card is not stuck on "checking"
+        Assert.Equal("2.0.0", card.PinnedPackageVersion);
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Null(card.LatestAvailableVersion);
+        Assert.False(card.IsCheckingUpgrade);
+        Assert.False(card.IsUpgradeStatusUnknown);
+    }
+
+    /// <summary>
+    ///     Test that an upgrade check still waiting when the repo folder disappears does not publish an
+    ///     upgrade afterwards, and that the card stops showing "checking" and "check failed".
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshCheap_RepoBecomesMissingDuringUpgradeCheck_StateIsResetAndResultIgnored()
+    {
+        // Arrange: a check held at the source
+        var release = new TaskCompletionSource();
+        var provider = new DelegatePackageSourceProvider(async (_, _) =>
+        {
+            await release.Task;
+            throw new IOException("the source failed after the repo disappeared");
+        });
+        var repoRoot = CreateTempDirectory();
+        var card = CreateCardWithProvider(repoRoot, "contoso-agents", "1.0.0", provider);
+        var check = card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.IsCheckingUpgrade);
+
+        // Act: the folder is deleted and the card re-checks; then the old check fails
+        Directory.Delete(repoRoot, recursive: true);
+        card.RefreshCheap();
+        Assert.False(card.IsCheckingUpgrade);
+        release.SetResult();
+        await check;
+
+        // Assert: still missing, with no late "check failed" and no upgrade
+        Assert.True(card.IsMissing);
+        Assert.False(card.IsCheckingUpgrade);
+        Assert.False(card.IsUpgradeStatusUnknown);
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Equal(RepoCardStatus.Problem, card.Status);
+    }
+
+    /// <summary>
+    ///     Test that a pin whose source cannot be used because the configured sources are invalid (a
+    ///     duplicated alias) is shown as a problem and never as "up to date".
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshUpgradeStatusAsync_InvalidSourceConfiguration_IsAProblemNotUpToDate()
+    {
+        // Arrange: two sources with the same alias
+        var folder = CreateTempDirectory();
+        var settings = new AppSettings { Sources = [ZipSource("Default", folder), ZipSource("Default", folder)] };
+        var repoRoot = CreateTempDirectory();
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings);
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: needs attention, with the reason, and no up-to-date cue
+        Assert.True(card.HasSourceProblem);
+        Assert.Contains("not configured correctly", card.SourceProblem, StringComparison.Ordinal);
+        Assert.Equal(RepoCardStatus.Problem, card.Status);
+        Assert.False(card.ShowUpToDateCue);
+        Assert.False(card.IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that a card that was retired (its repo was removed from the list) publishes nothing
+    ///     from an upgrade check that is still running and reports no error for it.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Retire_UpgradeCheckStillRunning_PublishesNothingAndRaisesNothing()
+    {
+        // Arrange: a check held at the source, which would then fail
+        var release = new TaskCompletionSource();
+        var provider = new DelegatePackageSourceProvider(async (_, _) =>
+        {
+            await release.Task;
+            return [Package("contoso-agents", "9.0.0")];
+        });
+        var card = CreateCardWithProvider(CreateTempDirectory(), "contoso-agents", "1.0.0", provider);
+        var raised = new List<string>();
+        card.ErrorOccurred += (_, message) => raised.Add(message);
+        card.ReleaseNotesReady += (_, notes) => raised.Add(notes);
+        var check = card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Act: the card is removed from the list, then the source answers
+        card.Retire();
+        release.SetResult();
+        await check;
+
+        // Assert
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.False(card.IsCheckingUpgrade);
+        Assert.Empty(raised);
+    }
+
+    /// <summary>
+    ///     Test that retiring a card cancels the package operation it is running and that nothing the
+    ///     operation does afterwards is reported to the user.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Retire_OperationRunning_IsCancelledAndNothingIsReported()
+    {
+        // Arrange: a package apply that waits for its source
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
+        var raised = new List<string>();
+        card.ErrorOccurred += (_, message) => raised.Add(message);
+        var running = card.ApplySelectedPackageAsync(
+            new PackageReference("Default", "contoso-agents", "1.1.0"), TestContext.Current.CancellationToken);
+        Assert.True(card.IsBusy);
+
+        // Act
+        card.Retire();
+        await running;
+
+        // Assert: it ended (cancelled), idle, with nothing reported and nothing pinned
+        Assert.False(card.IsBusy);
+        Assert.Empty(raised);
+        Assert.Null(RepoPinStore.Load(card.RepoPath));
+    }
+
+    /// <summary>
+    ///     Test that a retired card no longer checks anything: a refresh does not touch it.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Retire_LaterRefresh_DoesNothing()
+    {
+        // Arrange
+        var provider = new DelegatePackageSourceProvider((_, _) => Task.FromResult<IReadOnlyList<DiscoveredPackage>>(
+            [Package("contoso-agents", "9.0.0")]));
+        var card = CreateCardWithProvider(CreateTempDirectory(), "contoso-agents", "1.0.0", provider);
+        card.Retire();
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the source was never read and no upgrade is offered
+        Assert.Equal(0, provider.ListVersionsCalls);
+        Assert.False(card.IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that a card created with an owner that applies its changes (and saves them) changes
+    ///     through it, and that an owner that refuses (the save failed) leaves the card as it was.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Changes_GoThroughTheOwnerAndAreNotAppliedWhenItRefuses()
+    {
+        // Arrange: an owner that accepts the first change and refuses the rest
+        var recentRepo = new RecentRepo { Path = CreateTempDirectory() };
+        var calls = 0;
+        var card = new RepoCardViewModel(
+            recentRepo,
+            () => new AppSettings(),
+            new PackageVersionCache(),
+            commitChange: (repo, change) =>
+            {
+                calls++;
+                if (calls > 1)
+                {
+                    return false;
+                }
+
+                change(repo);
+                return true;
+            });
+
+        // Act
+        card.IsFavorite = true;
+        var moved = card.MoveToGroup("Work");
+        var colored = card.SetCardColor("Teal");
+        card.IsFavorite = false;
+
+        // Assert: only the first change was applied
+        Assert.True(recentRepo.IsFavorite);
+        Assert.False(moved);
+        Assert.False(colored);
+        Assert.Null(recentRepo.GroupName);
+        Assert.Null(recentRepo.CardColor);
+        Assert.Equal(4, calls);
     }
 
     /// <summary>

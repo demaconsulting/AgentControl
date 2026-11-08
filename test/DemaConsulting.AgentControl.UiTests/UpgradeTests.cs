@@ -41,6 +41,11 @@ namespace DemaConsulting.AgentControl.UiTests;
 public sealed class UpgradeTests
 {
     /// <summary>
+    ///     The four folders under <c>.github</c> that a package sync replaces.
+    /// </summary>
+    private static readonly string[] ManagedFolders = ["agents", "standards", "templates", "skills"];
+
+    /// <summary>
     ///     Clicking the "Upgrade to x.y.z" chip itself (not the card menu) starts the same upgrade
     ///     flow: the managed folders are synced and the release notes window opens.
     /// </summary>
@@ -61,10 +66,20 @@ public sealed class UpgradeTests
             FixturePackageBuilder.Create(sourceDirectory, packageName, "1.0.0", "# v1.0.0\n");
             FixturePackageBuilder.Create(sourceDirectory, packageName, "1.1.0", "# v1.1.0\n\nNew things.\n");
 
+            // Arrange: each managed folder holds a stale file that a blind delete-and-replace must remove
             using var context = new AgentControlTestContext(
                 packageSourcePath: sourceDirectory,
                 pinnedPackageName: packageName,
-                pinnedPackageVersion: "1.0.0");
+                pinnedPackageVersion: "1.0.0",
+                customizeSettings: (_, self) =>
+                {
+                    foreach (var folder in ManagedFolders)
+                    {
+                        var path = Path.Combine(self.RepoPath, ".github", folder);
+                        Directory.CreateDirectory(path);
+                        File.WriteAllText(Path.Combine(path, "stale.md"), "# Stale\n");
+                    }
+                });
             var mainWindow = context.Launch();
 
             // The chip is a button (invocable through UI Automation) that appears once the
@@ -84,8 +99,18 @@ public sealed class UpgradeTests
                 title => title.StartsWith("Release Notes", StringComparison.Ordinal),
                 TimeSpan.FromSeconds(15));
             Assert.NotNull(releaseNotesWindow);
-            Assert.True(File.Exists(Path.Combine(context.RepoPath, ".github", "agents", "test.md")));
-            Assert.True(File.Exists(Path.Combine(context.RepoPath, ".github", "skills", "test.md")));
+            foreach (var folder in ManagedFolders)
+            {
+                Assert.True(File.Exists(Path.Combine(context.RepoPath, ".github", folder, "test.md")), folder);
+                Assert.False(File.Exists(Path.Combine(context.RepoPath, ".github", folder, "stale.md")), folder);
+            }
+
+            // The repo is now pinned to the upgraded version
+            var pinPath = Path.Combine(context.RepoPath, ".agentcontrol.json");
+            Assert.True(Retry.WhileFalse(
+                () => File.ReadAllText(pinPath).Contains("1.1.0", StringComparison.Ordinal),
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200)).Result);
         }
         finally
         {

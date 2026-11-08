@@ -47,6 +47,11 @@ day as a quick-launch utility for AI-assisted development sessions.
   shell, in the repo's working directory
 - Per-user settings (package source path, git executable override, agent tool
   selection, shell preference)
+- Personal organization and appearance, stored only in the user's own settings
+  (never in a repo): favorites, repo groups shown as collapsible sections,
+  card colors, an optional repo picture (`icon.png`/`logo.png`) on the card,
+  and a light/dark/system color theme; every change is saved before it is
+  applied
 - Repo-card status badges: upgrade-available, committed-agent-files warning,
   missing-repo, dirty-working-tree; per-repo current branch name; recent-repos
   search/filter and most-recently-launched sort order (with pinning/favorites);
@@ -107,7 +112,32 @@ day as a quick-launch utility for AI-assisted development sessions.
 ```text
 AgentControl
 ├── LauncherUI (Avalonia) - recent repos list, launch button, settings page,
-│                           upgrade notification badges/tooltips
+│   │                       upgrade notification badges/tooltips
+│   ├── MainWindowViewModel - owns the recent-repos list; creates a
+│   │                         RepoCardViewModel per repo and a
+│   │                         RepoGroupHeaderViewModel per list section;
+│   │                         saves every change (candidate copy -> save ->
+│   │                         commit -> refresh) through Settings
+│   ├── RepoCardViewModel - one repo's status and actions; asks
+│   │                       RepoImageLocator for the repo's picture, validates
+│   │                       group names with RepoGroupName and card colors
+│   │                       with CardColorPalette
+│   ├── RepoImageLocator - finds and safely decodes a repo's icon.png/logo.png
+│   │                      (called by RepoCardViewModel only)
+│   ├── RepoGroupHeaderViewModel - a section's collapsible header row; raises
+│   │                              toggle/rename/remove requests that
+│   │                              MainWindowViewModel handles or forwards
+│   ├── GroupNameViewModel - validates the group-name prompt with
+│   │                        RepoGroupName; shown by the main window when a
+│   │                        card asks for a new group or a header for a rename
+│   ├── DialogBehavior - Tab cycle, initial focus and Escape, applied by every
+│   │                    dialog window
+│   ├── SettingsWindowViewModel, SourceEditorViewModel,
+│   │   SelectPackageWindowViewModel, CredentialPromptViewModel - the dialogs
+│   └── supporting types (documented in the LauncherUI design, not units):
+│       CardColorPalette (built from the Settings card-color names),
+│       PathEllipsisText (card path control),
+│       ThemePreferenceDisplayNameConverter (theme picker text)
 ├── GitIntegration - git status check (gates pull offer on clean working tree),
 │                     git pull, configurable git executable path override
 ├── AgentPackageManagement - resolves available package versions and fetches
@@ -132,9 +162,15 @@ AgentControl
 │                       macOS/Linux) and launches the configured agentic CLI
 │                       tool in the repo's working directory
 └── Settings - per-user settings: package source path (editable textbox +
-               folder-browse dialog), git executable path override, agent
-               tool selection (Copilot CLI / Cursor / Claude Code / Custom
-               command), shell/terminal preference
+    │          folder-browse dialog), git executable path override, agent
+    │          tool selection (Copilot CLI / Cursor / Claude Code / Custom
+    │          command), shell/terminal preference, color theme, and the
+    │          user's own repo groups, card colors and collapsed sections
+    ├── SettingsStore - loads (repairing unusable values, such as an unknown
+    │                   card color) and saves the settings file
+    └── RepoGroupName - the rules for group names, used by SettingsStore,
+                        RepoCardViewModel, MainWindowViewModel and
+                        GroupNameViewModel
 ```
 
 ## Architectural Decisions

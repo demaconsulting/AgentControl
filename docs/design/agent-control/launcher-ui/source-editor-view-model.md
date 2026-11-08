@@ -15,7 +15,8 @@ identifiers it offers, and a server is addressed by a web address rather than a 
 source can forget the sign-in saved for it. The unit requirements this view model satisfies are in
 `docs/reqstream/agent-control/launcher-ui/source-editor-view-model.yaml`, one observable behavior each, grouped as
 validation (`AgentControl-SourceEditorViewModel-Validation` and its alias, location, credential, server-address and
-package-ID rules), server source (`-ServerSource` and its examples, insecure-HTTP and saved-settings rules),
+package-ID rules), location tooltip (`-LocationTooltip`), server source (`-ServerSource` and its examples,
+insecure-HTTP and saved-settings rules),
 connection test
 (`-TestConnection` and its availability, progress, cancel, outcome and stale-result rules), package IDs, save,
 signature options (`-SignatureOptions`), signer fingerprint (`-SignerFingerprint`) and forgetting a saved sign-in
@@ -46,6 +47,13 @@ enter - a folder, or for a server the "Feed address" with the feed's V3 service 
 
 **Alias**, **Location**: `string` — The editable values. A field shows no error until the user
 has typed in it, so a freshly opened dialog is not covered in red.
+
+**LocationTooltip**: `string?` (read-only, derived from `Location`) — The tooltip of the location box: the whole
+entered folder or feed address, exactly as typed, because a long UNC path or feed address does not fit the box even
+when it wraps and the user must be able to verify the whole value before saving
+(`AgentControl-SourceEditorViewModel-LocationTooltip`). It is `null` - no tooltip at all, rather than an empty one -
+while the location is empty or only white space. Every change of `Location` raises the change notification for
+`LocationTooltip` together with the one for `Location`, so the bound tooltip follows what is typed.
 
 **AllowInsecureHttp**: `bool` — The "Allow insecure HTTP" choice for a server, off by default;
 **ShowInsecureWarning** is `true` while it is ticked, to warn that a password typed for this server would

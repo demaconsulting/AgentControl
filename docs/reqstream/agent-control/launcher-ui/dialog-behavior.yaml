@@ -17,20 +17,23 @@ sections:
         justification: |
           A keyboard user must not lose the focus into the window behind a dialog.
         tests:
-          - DialogBehavior_Apply_TabNavigation_CyclesInsideTheDialog
+          - DialogBehavior_Apply_TabFromLastControl_WrapsToFirst
+          - DialogBehavior_Apply_ShiftTabFromFirstControl_WrapsToLast
 
       - id: AgentControl-DialogBehavior-InitialFocus
         title: >-
           The DialogBehavior class shall, when a dialog opens, give the keyboard focus - shown
           with the keyboard focus ring - to the control the dialog names as its starting point,
           or, when none is named or the named control is missing, hidden or disabled, to the
-          first control that Tab reaches.
+          first control that Tab reaches, in keyboard navigation order.
         justification: |
           A keyboard user must be able to start typing as the dialog opens, and must be able to
           see where the keyboard is.
         tests:
           - DialogBehavior_Apply_Opened_FocusesNamedControlWithVisibleKeyboardFocus
           - DialogBehavior_Apply_NoUsableNamedControl_FocusesFirstTabStop
+          - DialogBehavior_Apply_ExplicitTabOrder_FocusesFirstControlInTabOrder
+          - DialogBehavior_Apply_FirstInTabOrderUnusable_FocusesNextInTabOrder
 
       - id: AgentControl-DialogBehavior-EscapeCancels
         title: >-

@@ -3,15 +3,23 @@
 #### Verification Approach
 
 `RepoCardViewModel` is verified with unit tests defined in `RepoCardViewModelTests.cs`, for NuGet server
-sources, `RepoCardServerSourceTests.cs` and, for the signature indicator, `RepoCardSignatureTests.cs`. Every
+sources, `RepoCardServerSourceTests.cs`, for the signature indicator, `RepoCardSignatureTests.cs`, for the
+card color and group chip, `RepoCardColorTests.cs` (and, for moving into groups, `RepoGroupingTests.cs`) and, for the
+repo picture, `RepoCardImageTests.cs`. Every
 test substitutes a stub script for the git executable (via `GitStub`, mirroring
 `GitClientTests`) and uses real temporary directories/zip fixtures for package-source and
 pin-file checks, so these tests never depend on a real git installation, a real repository,
-or a real package source. The server-source tests start the in-process `MockNuGetFeed` (Kestrel, plain HTTP on
+or a real package source. The tests that must control exactly when a package source answers (stale and retired
+upgrade checks, the busy guard) give the card an in-memory source whose answer a test releases, or that signals when it
+is read and then never answers, so no timing assumption is needed. One test gives the card an owner callback that
+accepts the first change and refuses the rest; the other tests build cards without an owner. The server-source
+tests start the
+in-process `MockNuGetFeed` (Kestrel, plain HTTP on
 a fresh loopback port, optionally requiring a Basic sign-in) and a `FakeCredentialPrompt`, with the NuGet HTTP
 cache isolated per test process (`HttpCacheIsolation`). Apart from the picture tests (`RepoCardImageTests.cs`),
 which show a card in a headless Avalonia window (using the `RepoImageLocator` unit with small generated PNG files
-or an injected decoder), no Avalonia `Window` is constructed; only the view-model class itself is under test. The
+or an injected decoder, and checking that replaced, cleared and overtaken bitmaps are disposed), no Avalonia `Window`
+is constructed; only the view-model class itself is under test. The
 `RepoImageLocator` unit has its own verification document.
 
 #### Test Environment
@@ -25,6 +33,9 @@ invocations are not parallelized with other tests using real process launches).
 - Display fields, badges, and gating conditions reflect the correct underlying pin/git/source
   state for every tested input.
 - Launch is never blocked by the outcome of the best-effort ensure-synced check.
+- The committed-agent-files result is read from git once for an unchanged HEAD hash (proved by the stub's invocation
+  log), and a second operation requested while one is really running is refused by the busy guard and accepted again
+  after the first ended.
 - Upgrade and select-package flows never mutate the pin when their preconditions are not met.
 - Remove requests never mutate state on their own.
 - The AGENTS.md template offer fires only when the repo genuinely has no AGENTS.md and the
@@ -42,6 +53,12 @@ invocations are not parallelized with other tests using real process launches).
   a change of that requirement.
 - A repo moves into, between and out of groups under the group-name rules, an unknown stored color reads as
   the automatic color, and a chosen color never changes the card's status.
+- A change to the favorite status, group, card color or launch time is applied only after the owner saved it, and a
+  refusal leaves the card as it was.
+- An upgrade check that was overtaken by a changed pin or a missing repo publishes nothing and leaves no "checking"
+  or "check failed" behind; an invalid source configuration is a problem, never "up to date".
+- A retired card cancels what it runs, reports nothing and checks nothing; every picture a card replaces, clears,
+  never shows or drops when retired is disposed, and the picture it shows is intact.
 
 #### Test Scenarios
 
@@ -95,9 +112,12 @@ again. This scenario is tested by
 `RepoCardViewModel_ApplySelectedPackageAsync_Running_ReportsBusyAndDisablesOtherActions`, covering
 `AgentControl-RepoCardViewModel-OperationBusyState`.
 
-**RepoCardViewModel_OneOperationAtATime_SecondRequestIsIgnored**: A second apply requested while one is
-running returns without reading the source again. This scenario is tested by
-`RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored`, covering
+**RepoCardViewModel_OneOperationAtATime_SecondRequestIsIgnored**: A package source signals when it is being read
+and then never answers. A second apply requested while the first is really reading the source returns at once,
+does not read the source again (the source's call count stays at one) and leaves the first operation running and
+the card busy; once the first has been cancelled and has ended, a new apply is accepted (the source is read a
+second time), which proves it was the busy guard, not some other cause, that refused the second request. This
+scenario is tested by `RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored`, covering
 `AgentControl-RepoCardViewModel-OneOperationAtATime`.
 
 **RepoCardViewModel_CancelOperation_NoErrorAndPinUnchanged**: Cancelling a running package apply ends it with
@@ -213,10 +233,8 @@ the repo has no `AGENTS.md` and the package has a template; it does not fire whe
 already has an `AGENTS.md` (which is left untouched), when the package has no template, when
 a prior decline is on record for the repo, or when the ensure-synced-before-launch check found
 all four managed folders already present (so no re-extraction, and no zip read, occurred at
-all). When both the offer and the release notes apply, the offer is raised first, then the release
-notes. This scenario is tested by
+all). This scenario is tested by
 `RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent`,
-`RepoCardViewModel_ApplySelectedPackage_TemplateOfferAndReleaseNotes_RaisesOfferBeforeReleaseNotes`,
 `RepoCardViewModel_ApplySelectedPackage_AgentsMdAlreadyExists_DoesNotRaiseAgentsMdTemplateOfferRequested`,
 `RepoCardViewModel_ApplySelectedPackage_PackageHasNoAgentsMdTemplate_DoesNotRaiseAgentsMdTemplateOfferRequested`,
 `RepoCardViewModel_ApplySelectedPackage_PreviouslyDeclined_DoesNotRaiseAgentsMdTemplateOfferRequestedAgain`,
@@ -225,6 +243,12 @@ notes. This scenario is tested by
 and
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FoldersAlreadyPresent_NeverReadsZipOrRaisesOffer`,
 covering `AgentControl-RepoCardViewModel-AgentsMdTemplateOffer`.
+
+**RepoCardViewModel_AgentsMdOfferBeforeReleaseNotes_OfferIsRaisedFirst**: When both the offer and the release
+notes apply to an apply of a package, the offer is raised first and the release notes after it. This scenario is
+tested by
+`RepoCardViewModel_ApplySelectedPackage_TemplateOfferAndReleaseNotes_RaisesOfferBeforeReleaseNotes`, covering
+`AgentControl-RepoCardViewModel-AgentsMdOfferBeforeReleaseNotes`.
 
 **RepoCardViewModel_AcceptAgentsMdTemplate_WritesTemplateVerbatimToRepoRoot**: Accepting the
 offer writes the given template content verbatim to `AGENTS.md` at the repo root (never into
@@ -248,37 +272,59 @@ pin-write failure raises `ErrorOccurred` rather than throwing. This scenario is 
 
 **RepoCardViewModel_MissingRepo_SuppressesOtherStatusWhenFolderAbsent**: A lightweight refresh
 against a repo path that no longer exists sets `IsMissing` and suppresses other status
-computation, while `RefreshCommand` stays executable and is offered as "Check again" (tooltip
-"Check whether the folder is available again"). Creating the folder and executing the command
-clears `IsMissing`, restores the label "Refresh" and re-enables Launch. This scenario is tested by
-`RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState` and
-`RepoCardViewModel_RefreshCommand_MissingFolderReturns_ClearsMissingAndRestoresActions`, covering
+computation. This scenario is tested by
+`RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState`, covering
 `AgentControl-RepoCardViewModel-MissingRepo`.
 
-**RepoCardViewModel_CommittedFilesBadge_CachedByHeadHashAndResolvesBranchCheaply**: A
-lightweight refresh reuses the cached committed-files badge when the HEAD hash is unchanged,
-resolves the current branch, and does not invoke the working-tree dirty-check subprocess. This
+**RepoCardViewModel_MissingRepoRecheck_RefreshStaysAvailableAsCheckAgain**: For a missing repo `RefreshCommand`
+stays executable (Launch does not) and is offered as "Check again" with the tooltip "Check whether the folder is
+available again". This scenario is tested by
+`RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState` and
+`RepoCardViewModel_RefreshCommand_MissingFolderReturns_ClearsMissingAndRestoresActions`, covering
+`AgentControl-RepoCardViewModel-MissingRepoRecheck`.
+
+**RepoCardViewModel_MissingRepoCleared_FolderComesBack**: Creating the folder and executing the refresh command
+clears `IsMissing`, restores the label "Refresh" and its tooltip and re-enables Launch. This scenario is tested by
+`RepoCardViewModel_RefreshCommand_MissingFolderReturns_ClearsMissingAndRestoresActions`, covering
+`AgentControl-RepoCardViewModel-MissingRepoCleared`.
+
+**RepoCardViewModel_CommittedFilesBadge_CachedByHeadHashAndResolvesBranchCheaply**: Against a git stub that logs
+every invocation and answers a constant HEAD hash, two lightweight refreshes both show the committed-files badge,
+and the stub's invocation log proves the cache: the file listing (`ls-files`) ran exactly once, while the HEAD hash
+was asked for on each refresh (the cache is keyed by it); a refresh also resolves the current branch and does not
+invoke the working-tree dirty-check subprocess. This
 scenario is tested by
 `RepoCardViewModel_RefreshCheap_UnchangedHeadHash_CommittedFilesBadgeIsCached`,
 `RepoCardViewModel_RefreshCheap_ResolvesCurrentBranch`, and
 `RepoCardViewModel_RefreshCheap_DoesNotRunWorkingTreeDirtyCheck`, covering
 `AgentControl-RepoCardViewModel-CommittedFilesBadge`.
 
-**RepoCardViewModel_Favorite_SettingTheStateRaisesTheEventOncePerChange**: `IsFavorite` is the only
-owner of the favorite state (the card has no favorite command): setting it on, repeating that, and
-setting it off updates the shared repo record each time it changes and raises `FavoriteChanged`
-exactly once per change. This scenario is tested by
+**RepoCardViewModel_Favorite_SettingTheStateRaisesTheEventOncePerChange**: Setting `IsFavorite` on, repeating
+that, and setting it off updates the repo's settings entry each time it changes and raises `FavoriteChanged`
+exactly once per change (nothing for a set to the value it already has). This scenario is tested by
 `RepoCardViewModel_IsFavorite_Set_UpdatesRecentRepoAndRaisesFavoriteChangedOncePerChange`, covering
-`AgentControl-RepoCardViewModel-Favorite`.
+`AgentControl-RepoCardViewModel-Favorite`. That the card has a single owner of the state (no favorite command that
+could toggle a second time) is a design property.
+
+**RepoCardViewModel_ChangeSavedBeforeApplied_OwnerDecidesAndRefusalChangesNothing**: A card created with an owner
+callback that accepts the first change and refuses the rest changes through it: the first change (a favorite) is
+applied, and the following ones - a move to a group (returns `false`), a card color (returns `false`) and clearing
+the favorite - leave the settings entry as it was; the owner was asked for every one of the four changes. How
+the owning `MainWindowViewModel` saves, and what the user is told, is verified by that unit. This scenario is tested
+by `RepoCardViewModel_Changes_GoThroughTheOwnerAndAreNotAppliedWhenItRefuses`, covering
+`AgentControl-RepoCardViewModel-ChangeSavedBeforeApplied`.
 
 **RepoCardViewModel_UpToDateCue_OnlyForPinnedAndUpToDate**: `ShowUpToDateCue` is true for a pinned
 package that is the newest one, and false for an older pin with an upgrade available, a repo with no
-package, a missing folder, and a pin whose source is not configured; `RepoPathParent` and
-`RepoPathLeaf` split the path at its last separator (a trailing separator ignored; a path with no
-separator is all leaf) so the card can shorten the path in the middle. This scenario is tested by
-`RepoCardViewModel_ShowUpToDateCue_OnlyForPinnedAndUpToDate` and
-`RepoCardViewModel_RepoPathParts_SplitAtLastSeparator`, covering
+package, a missing folder, and a pin whose source is not configured. This scenario is tested by
+`RepoCardViewModel_ShowUpToDateCue_OnlyForPinnedAndUpToDate`, covering
 `AgentControl-RepoCardViewModel-UpToDateCue`.
+
+**RepoCardViewModel_RepoPathKeepsFolderName_PathIsSplitAtTheLastSeparator**: `RepoPathParent` and
+`RepoPathLeaf` split the path at its last separator (a trailing separator ignored; a path with no
+separator is all leaf), so the card can shorten the parent and keep the repo's folder name. This scenario is tested
+by `RepoCardViewModel_RepoPathParts_SplitAtLastSeparator`, covering
+`AgentControl-RepoCardViewModel-RepoPathKeepsFolderName`.
 
 **RepoCardViewModel_RemoveRequest_RaisesEventWithoutMutatingState**: `RemoveCommand` raises
 `RemoveRequested` without changing any of the card's own state, deferring the removal decision
@@ -337,74 +383,132 @@ the shield and its tooltip. This scenario is tested by
 `RepoCardViewModel_SourceRequirementChanges_RaisesChangeNotificationsForTheShield`, in
 `RepoCardSignatureTests.cs`, covering `AgentControl-RepoCardViewModel-SignatureIndicator`.
 
-**RepoCardViewModel_StatusAccent_StatusFollowsStateAndHasWordsAndReason**: Cards that are pinned and current,
-pinned with a newer version available, and not pinned report `UpToDate` ("Up to date"), `UpgradeAvailable`
-("Upgrade available", the tooltip naming both versions) and `NoPackage` ("No agent package"); a missing folder
-and a pin naming an unconfigured source report `Problem` ("Needs attention") with the reason in the tooltip; a
-git pull that git refuses, or an error the card reports to the user, makes the status a problem, and the next
-operation (a refresh) clears it again. A pinned card whose package source cannot be read reports `Unknown`
-("Update check failed", the tooltip saying it is not known whether a newer version exists) with no up-to-date
-cue, and returns to `UpToDate` once a later check succeeds. This scenario is tested by
+**RepoCardViewModel_StatusAccent_StatusFollowsState**: Cards that are pinned and current, pinned with a newer
+version available, and not pinned report `UpToDate`, `UpgradeAvailable` and `NoPackage`; a missing folder and a pin
+naming an unconfigured source report `Problem`; a git pull that git refuses, or an error the card reports to the
+user, makes the status a problem. A pinned card whose package source cannot be read reports `Unknown` (with no
+up-to-date cue) and returns to `UpToDate` once a later check succeeds. This scenario is tested by
 `RepoCardViewModel_Status_ReflectsPackageAndUpgradeState`,
 `RepoCardViewModel_Status_UpgradeCheckFailed_IsUnknownNotUpToDate`,
 `RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason`,
 `RepoCardViewModel_Status_FailedPull_IsProblemUntilNextOperation` and
 `RepoCardViewModel_Status_ErrorReported_IsProblem`, covering `AgentControl-RepoCardViewModel-StatusAccent`.
 
-**RepoCardViewModel_UpgradeFromChip_OneGuardedCommandForChipAndMenu**: The upgrade chip shows the target version
-with a tooltip that says it upgrades the agent files to it; the chip and the menu's Upgrade item are bound to the
-same command, which can run while an upgrade is available and is disabled while the card is busy with another
-operation, and which performs the upgrade (pin, release notes) when run. The click on the real chip is also
-exercised end to end by `windows@UpgradeChip_Click_SyncsManagedFoldersAndShowsReleaseNotes`. This scenario is
-tested by `RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions`,
-`RepoCardViewModel_UpgradeCommand_ChipAndMenuShareOneGuardedCommand` and
-`RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesPinAndRaisesReleaseNotesReady`, covering
-`AgentControl-RepoCardViewModel-UpgradeFromChip`.
+**RepoCardViewModel_StatusWords_TextAndReason**: The status texts are "Up to date", "Upgrade available" (the tooltip
+naming both versions) and "No agent package"; a missing folder or a pin naming an unconfigured source says
+"Needs attention" with the reason in the tooltip; an unreadable source says "Update check failed" with a tooltip that
+says it is not known whether a newer version exists. This scenario is tested by
+`RepoCardViewModel_Status_ReflectsPackageAndUpgradeState` and
+`RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason`, covering
+`AgentControl-RepoCardViewModel-StatusWords`.
+
+**RepoCardViewModel_StatusProblemCleared_NextOperationClearsFailure**: After a refused pull the status is a
+problem, and the next operation (a refresh) clears it again. This scenario is tested by
+`RepoCardViewModel_Status_FailedPull_IsProblemUntilNextOperation`, covering
+`AgentControl-RepoCardViewModel-StatusProblemCleared`.
+
+**RepoCardViewModel_InvalidSourceConfiguration_IsAProblemNotUpToDate**: A card pinned to a package whose
+configured sources are invalid (two sources with the same alias) is refreshed and its upgrade is checked: the card
+shows a source problem (status `Problem`) with a reason that says the sources are not configured correctly, offers
+no upgrade and is not reported as up to date. This scenario is tested by
+`RepoCardViewModel_RefreshUpgradeStatusAsync_InvalidSourceConfiguration_IsAProblemNotUpToDate`, covering
+`AgentControl-RepoCardViewModel-InvalidSourceConfigurationIsProblem`.
+
+**RepoCardViewModel_StaleUpgradeCheck_ResultIsNotPublishedAfterPinOrRepoChanged**: An upgrade check is held at its
+source (the source would answer 9.0.0 for the old pin). In one case the pin file changes to another version and the
+card re-reads it before the source answers: afterwards the card shows the new pin, no upgrade, no latest version, and
+neither "checking" nor "check failed". In the other the folder is deleted and the card re-checks before the source
+fails: afterwards the card is still missing (status `Problem`), shows no "checking", no late "check failed" and no
+upgrade. This scenario is tested by
+`RepoCardViewModel_RefreshCheap_PinChangesDuringUpgradeCheck_StaleResultIsNotPublished` and
+`RepoCardViewModel_RefreshCheap_RepoBecomesMissingDuringUpgradeCheck_StateIsResetAndResultIgnored`, covering
+`AgentControl-RepoCardViewModel-StaleUpgradeCheckDiscarded` and
+`AgentControl-RepoCardViewModel-UpgradeStateResetOnRefresh`.
+
+**RepoCardViewModel_UpgradeFromChip_ChipAndMenuBehaveAlike**: The upgrade chip shows the target version with a
+tooltip that says it upgrades the agent files to it (`AgentControl-RepoCardViewModel-UpgradeChipTooltip`, tested by
+`RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions`); the chip and the
+menu's Upgrade item are one command, which can run while an upgrade is available and no other operation holds the
+card busy (`AgentControl-RepoCardViewModel-UpgradeChipAvailability`, tested by
+`RepoCardViewModel_UpgradeCommand_ChipAndMenuShareOneGuardedCommand`); and the command performs the upgrade (pin,
+release notes) when run (`AgentControl-RepoCardViewModel-UpgradeFromChip`, tested by that same test and by
+`RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesPinAndRaisesReleaseNotesReady`). The click on the
+real chip is also exercised end to end by `windows@UpgradeChip_Click_SyncsManagedFoldersAndShowsReleaseNotes`.
 
 **RepoCardViewModel_AvatarTile_InitialsStableColorAndFolderFallback**: Repo names give the capital letters of
-their first two words (or one letter, or none for a name without letters or digits, which falls back to the
-folder glyph); the color index is a fixed value for a fixed path (pinning the hash function), is the same
-whatever the case of the path or a trailing separator, always lies in the palette and uses several colors across
-many paths. This scenario is tested by `RepoCardViewModel_AvatarInitials_RepoName_UsesFirstLettersOfFirstTwoWords`,
-`RepoCardViewModel_Avatar_EmptyName_FallsBackToFolderGlyph` and
-`RepoCardViewModel_AvatarColorIndex_SamePath_IsStableAndInPalette`, covering
-`AgentControl-RepoCardViewModel-AvatarTile`.
+their first two words, or one letter (`AgentControl-RepoCardViewModel-AvatarTile`, tested by
+`RepoCardViewModel_AvatarInitials_RepoName_UsesFirstLettersOfFirstTwoWords`); a name without letters or digits
+gives none, so the folder glyph is shown (`AgentControl-RepoCardViewModel-AvatarFolderGlyph`, tested by
+`RepoCardViewModel_Avatar_EmptyName_FallsBackToFolderGlyph`); the color index is a fixed value for a fixed path, is
+the same whatever the case of the path or a trailing separator, always lies in the palette and uses several colors
+across many paths (`AgentControl-RepoCardViewModel-AvatarColorStable`, tested by
+`RepoCardViewModel_AvatarColorIndex_SamePath_IsStableAndInPalette`).
 
-**RepoCardViewModel_RepoPicture_ShownInPlaceOfTileAndNeverInterruptsTheCard**: The view model loads a found picture
-in the background, does not decode an unchanged file again on a second refresh but does after the file changes,
-falls back to the initials when the file is removed, never looks for a picture for a missing folder, and keeps the
-tile - without retrying - when the decoder fails or throws (a decoder that throws several kinds of exception,
-resource exhaustion included, never faults the background refresh task); an older refresh that fails after a newer
-one has published leaves the newer picture in place. A headless main window shows the picture
-(image visible, initials hidden, light backing) for the repo that has one and the initials for the one that does not.
-Which files are acceptable, and the security checks on them (genuine PNG, size and dimension limits, links, the
-repo root), are verified by the `RepoImageLocator` unit with the `RepoImageLocatorTests.cs` tests; the picture
-files for the tests here are the small PNGs generated by `TestPng` (no binary assets). This scenario is tested by
-the `RepoCardViewModel_RepoImage_*` and `MainWindow_RepoCard_AvatarShowsRepoPictureWhenPresent` tests of
-`RepoCardImageTests.cs`, covering `AgentControl-RepoCardViewModel-RepoPicture`.
+**RepoCardViewModel_RepoPicture_ShownInPlaceOfTileAndNeverInterruptsTheCard**: Tested by `RepoCardImageTests.cs`
+with small PNGs generated by `TestPng` (no binary assets), on a headless Avalonia session. The view model loads a
+found picture in the background, does not decode an unchanged file again on a second refresh but does after the
+file changes (`AgentControl-RepoCardViewModel-RepoPicture` and `-RepoPictureNotDecodedAgain`, tested by
+`RepoCardViewModel_RepoImage_IconPresent_LoadsOnceUntilFileChanges`); falls back to the initials when the file is
+removed and never looks for a picture for a missing folder (`AgentControl-RepoCardViewModel-RepoPictureFallback`,
+tested by `RepoCardViewModel_RepoImage_FileRemoved_FallsBackToInitials` and
+`RepoCardViewModel_RepoImage_MissingFolder_NeverLooksForAnImage`); and keeps the tile - without retrying - when the
+decoder fails or throws (a decoder that throws several kinds of exception, resource exhaustion included, never
+faults the background refresh task), while an older refresh that fails after a newer one has published leaves the
+newer picture in place (`AgentControl-RepoCardViewModel-RepoPictureFailureIsolated`, tested by
+`RepoCardViewModel_RepoImage_DecodeFailsOrThrows_KeepsTileAndDoesNotRetry` and
+`RepoCardViewModel_RepoImage_OlderRefreshFailsAfterNewerPublished_KeepsNewerImage`). A headless main window shows the
+picture (image visible, initials hidden, light backing) for the repo that has one and the initials for the one that
+does not (`MainWindow_RepoCard_AvatarShowsRepoPictureWhenPresent`, supporting evidence at the window level). Which
+files are acceptable, and the security checks on them (genuine PNG, size and dimension limits, links, the repo
+root), are verified by the `RepoImageLocator` unit with the `RepoImageLocatorTests.cs` tests.
+
+**RepoCardViewModel_RepoPictureReleased_ReplacedClearedOvertakenAndRetiredBitmapsAreDisposed**: A card shows a
+picture; the repo replaces its icon, and the first bitmap is disposed (touching it throws
+`ObjectDisposedException`) while the new one is usable; the icon is removed, the property is cleared and the second
+bitmap is disposed; a picture appears again, the card is retired, the property is cleared and the third bitmap is
+disposed. In the second test a decode is held in the decoder while a newer refresh publishes: when the older decode
+is released, the bitmap it decoded is disposed and never published, and the published bitmap stays intact and shown.
+This scenario is tested by `RepoCardViewModel_RepoImage_SupersededClearedOrRetired_BitmapIsDisposed` and
+`RepoCardViewModel_RepoImage_DecodedByOvertakenRefresh_IsDisposedAndNotPublished`, covering
+`AgentControl-RepoCardViewModel-RepoPictureReleased`.
 
 **RepoCardViewModel_MoveToGroup_RulesEventsAndGroupChip**: Tested by `RepoCardColorTests.cs` and
 `RepoGroupingTests.cs` (cards are built over a settings entry, without a refresh, so no git is started for
-`RepoCardColorTests`). A blank stored group reads as no group and the existing groups of the settings are
-listed; moving into a group whose name matches an existing one in another letter case adopts the existing
-spelling and raises the change event once; the remove command is available only while the repo is in a group
-and takes it out; names that are too long or are *Favorites* or *Ungrouped* are refused without any change; a
-valid name is cleaned up and persisted to the settings only; the new-group command only raises its request; and
-the group chip shows only for a favorite that has a group. This scenario is tested by
-`RepoCardViewModel_MoveToGroup_UpdatesGroupAndRaisesChange`,
-`RepoCardViewModel_NewGroupCommand_RaisesRequest_AndChipShowsForGroupedFavorites` and
-`RepoCardViewModel_MoveToGroup_NewExistingInvalidAndRemove`, covering
-`AgentControl-RepoCardViewModel-MoveToGroup`.
+`RepoCardColorTests`). A blank stored group reads as no group and the existing groups of the settings are listed
+(`AgentControl-RepoCardViewModel-GroupList`); moving into a group raises the change event once, the remove command
+is available only while the repo is in a group and takes it out, and a valid name is cleaned up and recorded on the
+settings entry (`AgentControl-RepoCardViewModel-MoveToGroup`, tested by
+`RepoCardViewModel_MoveToGroup_UpdatesGroupAndRaisesChange` and
+`RepoCardViewModel_MoveToGroup_NewExistingInvalidAndRemove`); a name that matches an existing one in another letter
+case adopts the existing spelling, and names that are too long or are *Favorites* or *Ungrouped* are refused without
+any change (`AgentControl-RepoCardViewModel-GroupNameRules`, tested by the same two tests); the new-group command
+only raises its request (`AgentControl-RepoCardViewModel-NewGroupPrompt`) and the group chip shows only for a
+favorite that has a group (`AgentControl-RepoCardViewModel-GroupChipForFavorites`), both tested by
+`RepoCardViewModel_NewGroupCommand_RaisesRequest_AndChipShowsForGroupedFavorites`.
 
 **RepoCardViewModel_CardColor_ChooseResetRefuseAndFallBack**: The palette has one entry per avatar palette
-index with distinct names, and finds a stored name ignoring case and white space (a blank, null or unknown name
-means the automatic color); a card with no choice uses the path-hash color; choosing "tEaL" stores `Teal`, moves
-the palette index and style class, raises the change event once (choosing the same color again raises nothing)
-and choosing Automatic returns to the hash color and clears the value; an unknown name is refused and changes
-nothing; an unknown stored name reads as Automatic; and the card's status, status text and status tooltip are
-the same before and after a color is chosen. This scenario is tested by
-`CardColorPalette_All_MatchesTheAvatarPalette`, `CardColorPalette_Find_ToleratesAnyStoredValue`,
-`RepoCardViewModel_CardColor_Default_IsAutomatic`, `RepoCardViewModel_SetCardColor_ChoosesAndClearsColor`,
-`RepoCardViewModel_SetCardColor_UnknownName_IsRefused`,
-`RepoCardViewModel_CardColor_UnknownStoredValue_FallsBackToAutomatic` and
-`RepoCardViewModel_SetCardColor_DoesNotChangeStatus`, covering `AgentControl-RepoCardViewModel-CardColor`.
+index with distinct names; a card with no choice uses the path-hash color; choosing "tEaL" stores `Teal` and moves
+the palette index and style class, and choosing Automatic returns to the hash color and clears the value
+(`AgentControl-RepoCardViewModel-CardColor`, tested by `CardColorPalette_All_MatchesTheAvatarPalette`,
+`RepoCardViewModel_CardColor_Default_IsAutomatic` and `RepoCardViewModel_SetCardColor_ChoosesAndClearsColor`); the
+choice is recorded on the settings entry, the change event is raised once and choosing the same color again raises
+nothing (`AgentControl-RepoCardViewModel-CardColorRecorded`, tested by
+`RepoCardViewModel_SetCardColor_ChoosesAndClearsColor`); an unknown name is refused and changes nothing
+(`AgentControl-RepoCardViewModel-CardColorUnknownRefused`, tested by
+`RepoCardViewModel_SetCardColor_UnknownName_IsRefused`); a stored name is found ignoring case and white space and a
+blank, null or unknown stored name reads as the automatic color
+(`AgentControl-RepoCardViewModel-CardColorStoredFallback`, tested by `CardColorPalette_Find_ToleratesAnyStoredValue`
+and `RepoCardViewModel_CardColor_UnknownStoredValue_FallsBackToAutomatic`); and the card's status, status text and
+status tooltip are the same before and after a color is chosen
+(`AgentControl-RepoCardViewModel-CardColorKeepsStatus`, tested by
+`RepoCardViewModel_SetCardColor_DoesNotChangeStatus`).
+
+**RepoCardViewModel_Retire_RemovedCardStopsAndReportsNothing**: An upgrade check held at its source is overtaken by
+retiring the card; when the source then answers, the card shows no upgrade and no "checking", and neither an error
+nor release notes were raised (`AgentControl-RepoCardViewModel-RetiredCardReportsNothing`, tested by
+`RepoCardViewModel_Retire_UpgradeCheckStillRunning_PublishesNothingAndRaisesNothing`). A package apply waiting for its
+source is cancelled by retiring: it ends, the card is idle, nothing was reported and nothing was pinned
+(`AgentControl-RepoCardViewModel-RetiredCardReportsNothing` and `-RetireCancelsRunningWork`, tested by
+`RepoCardViewModel_Retire_OperationRunning_IsCancelledAndNothingIsReported`). A refresh and an upgrade check on a
+retired card read no source and offer no upgrade (`AgentControl-RepoCardViewModel-RetiredCardChecksNothing`, tested by
+`RepoCardViewModel_Retire_LaterRefresh_DoesNothing`).

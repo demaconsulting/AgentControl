@@ -144,6 +144,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     private int _upgradeCheckGeneration;
 
+    /// <summary>
+    ///     Applies a change to this repo's settings entry on behalf of the card, saving it first; see
+    ///     the constructor. <see langword="null"/> applies the change directly, without saving.
+    /// </summary>
+    private readonly Func<RecentRepo, Action<RecentRepo>, bool>? _commitChange;
+
+    /// <summary>
+    ///     Whether <see cref="Retire"/> was called: the card was removed from the list, so nothing it
+    ///     still has running may report back or publish a result.
+    /// </summary>
+    private bool _isRetired;
+
     private bool _isMissing;
     private bool _isUpgradeAvailable;
     private string? _latestAvailableVersion;
@@ -216,6 +228,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="decodeImage">Decodes the repo's picture file for the avatar tile;
     ///     <see langword="null"/> uses <see cref="RepoImageLocator.Decode"/>. Supplied so tests can
     ///     count decodes or avoid needing a graphics platform.</param>
+    /// <param name="commitChange">Applies a change to this repo's settings entry and saves it,
+    ///     returning whether that succeeded (the owning <see cref="MainWindowViewModel"/> saves a
+    ///     candidate first and changes the live entry only then); <see langword="null"/> applies the
+    ///     change to the entry directly and saves nothing.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="recentRepo"/>,
     ///     <paramref name="getSettings"/>, or <paramref name="packageVersionCache"/> is
     ///     <see langword="null"/>.</exception>
@@ -226,7 +242,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         Startup.StartupOptions? startupOptions = null,
         Func<AppSettings, PackageSourceRegistry>? registryFactory = null,
         PackageCredentialContext? credentials = null,
-        Func<RepoImageFile, Bitmap?>? decodeImage = null)
+        Func<RepoImageFile, Bitmap?>? decodeImage = null,
+        Func<RecentRepo, Action<RecentRepo>, bool>? commitChange = null)
     {
         ArgumentNullException.ThrowIfNull(recentRepo);
         ArgumentNullException.ThrowIfNull(getSettings);
@@ -239,6 +256,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         _registryFactory = registryFactory;
         _credentials = credentials;
         _decodeImage = decodeImage ?? (file => RepoImageLocator.Decode(file));
+        _commitChange = commitChange;
 
         LaunchCommand = new AsyncRelayCommand(LaunchAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
         PullCommand = new AsyncRelayCommand(PullAsync, ReportUnexpectedFailure, () => CanPull && !IsMissing && !IsBusy);
@@ -310,9 +328,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Gets or sets whether the user has pinned/favorited this repo.
     /// </summary>
     /// <remarks>
-    ///     Mutates the shared <see cref="RecentRepo"/> in place and raises
-    ///     <see cref="FavoriteChanged"/> so the owning <see cref="MainWindowViewModel"/> can
-    ///     persist settings and re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     Saved through the owning <see cref="MainWindowViewModel"/> (see the constructor's
+    ///     <c>commitChange</c>) <em>before</em> the shared <see cref="RecentRepo"/> is changed, and
+    ///     only then does the card raise <see cref="FavoriteChanged"/> so the owner can re-sort
+    ///     <see cref="MainWindowViewModel.DisplayedRepoCards"/>. When the save fails the value is not
+    ///     changed (the owner tells the user) and the star is told to show the real state again.
     ///     This property is the <b>only</b> owner of the toggle state: the card's star is a
     ///     <c>ToggleButton</c> whose <c>IsChecked</c> binds here two-way, and it has no command.
     ///     An earlier design also bound a toggling command, so one click flipped the state twice
@@ -328,11 +348,36 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return;
             }
 
-            _recentRepo.IsFavorite = value;
+            if (!CommitChange(repo => repo.IsFavorite = value))
+            {
+                // Not saved, so not changed: make the two-way bound star show the real state
+                OnPropertyChanged();
+                return;
+            }
+
             OnPropertyChanged();
             OnPropertyChanged(nameof(ShowGroupChip));
             FavoriteChanged?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    /// <summary>
+    ///     Applies a change to this repo's settings entry through the owner (which saves it first),
+    ///     or directly when the card has no owner.
+    /// </summary>
+    /// <param name="change">The change to the entry; it may run more than once (on a candidate copy,
+    ///     then on the live entry), so it must be a plain assignment of fixed values.</param>
+    /// <returns><see langword="true"/> when the change was applied; <see langword="false"/> when it
+    ///     could not be saved and so was not applied.</returns>
+    private bool CommitChange(Action<RecentRepo> change)
+    {
+        if (_commitChange is null)
+        {
+            change(_recentRepo);
+            return true;
+        }
+
+        return _commitChange(_recentRepo, change);
     }
 
     /// <summary>
@@ -372,15 +417,17 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     A name that matches an existing group ignoring letter case joins that group under its own
     ///     spelling, so look-alike groups cannot arise. The choice is stored only in the per-user
-    ///     settings (on the shared <see cref="RecentRepo"/>), never in the repository. Raises
+    ///     settings (on the shared <see cref="RecentRepo"/>), never in the repository, and is saved
+    ///     before it is applied (see <see cref="IsFavorite"/>). Raises
     ///     <see cref="GroupChanged"/> when the group actually changed, so the owning
-    ///     <see cref="MainWindowViewModel"/> persists the settings and rebuilds the list.
+    ///     <see cref="MainWindowViewModel"/> rebuilds the list.
     /// </remarks>
     /// <param name="groupName">The group's name, or <see langword="null"/> (or blank) to take the
     ///     repo out of its group.</param>
     /// <returns><see langword="true"/> when the repo is now in the requested place (including when
     ///     it already was); <see langword="false"/> when <paramref name="groupName"/> is not a valid
-    ///     group name (too long, or a built-in section's name) and nothing changed.</returns>
+    ///     group name (too long, or a built-in section's name), or the choice could not be saved,
+    ///     and nothing changed.</returns>
     public bool MoveToGroup(string? groupName)
     {
         // Blank means "no group"; anything else must be a name the rules accept
@@ -396,7 +443,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return true;
         }
 
-        _recentRepo.GroupName = target;
+        if (!CommitChange(repo => repo.GroupName = target))
+        {
+            return false;
+        }
+
         RaiseGroupPropertiesChanged();
         GroupChanged?.Invoke(this, EventArgs.Empty);
         return true;
@@ -455,14 +506,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     ///     Only the tile changes: the status accent bar keeps its fixed, meaningful colors. The choice
-    ///     is stored by name in the per-user settings only, and raises <see cref="CardColorChanged"/>
-    ///     so the owning <see cref="MainWindowViewModel"/> persists it.
+    ///     is stored by name in the per-user settings only, saved before it is applied (see
+    ///     <see cref="IsFavorite"/>), and raises <see cref="CardColorChanged"/> once applied.
     /// </remarks>
     /// <param name="colorName">A palette color's name (letter case ignored), or
     ///     <see langword="null"/> (or blank) for the automatic color.</param>
     /// <returns><see langword="true"/> when the card now has the requested color (including when it
     ///     already had); <see langword="false"/> when <paramref name="colorName"/> names no palette
-    ///     color and nothing changed.</returns>
+    ///     color or the choice could not be saved, and nothing changed.</returns>
     public bool SetCardColor(string? colorName)
     {
         var requested = string.IsNullOrWhiteSpace(colorName) ? null : CardColorPalette.Find(colorName);
@@ -476,7 +527,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return true;
         }
 
-        _recentRepo.CardColor = requested?.Name;
+        var name = requested?.Name;
+        if (!CommitChange(repo => repo.CardColor = name))
+        {
+            return false;
+        }
+
         OnPropertyChanged(nameof(CardColorName));
         OnPropertyChanged(nameof(HasCustomCardColor));
         OnPropertyChanged(nameof(IsCardColorAutomatic));
@@ -797,18 +853,27 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     Loaded in the background by <see cref="RefreshCheap"/> (so at startup and on every
     ///     Refresh) and never on the UI thread; see <see cref="RepoImageLocator"/> for what is
-    ///     accepted.
+    ///     accepted. <b>Ownership:</b> the card owns the bitmap it publishes here. When the value is
+    ///     replaced or cleared the superseded bitmap is disposed - right after the change was
+    ///     announced, so the tile (bound to this property) no longer shows it - and a bitmap that
+    ///     never gets published (a newer refresh took over) is disposed by the refresh that decoded
+    ///     it. Consumers must therefore not keep the value beyond the moment they read it.
     /// </remarks>
     public Bitmap? RepoImage
     {
         get => _repoImage;
         private set
         {
+            var superseded = _repoImage;
             if (SetField(ref _repoImage, value))
             {
                 OnPropertyChanged(nameof(HasRepoImage));
                 OnPropertyChanged(nameof(ShowAvatarInitials));
                 OnPropertyChanged(nameof(ShowAvatarFolderGlyph));
+
+                // The view has dropped the old bitmap by now (its binding was updated by the
+                // notifications above), so the native image can be released
+                superseded?.Dispose();
             }
         }
     }
@@ -890,9 +955,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 : (found, null, false);
         }, CancellationToken.None);
 
-        // A newer refresh started meanwhile: let it have the last word
+        // A newer refresh started meanwhile (or the card was removed): let it have the last word.
+        // The bitmap this refresh decoded will never be shown, so release it here.
         if (generation != _imageGeneration)
         {
+            bitmap?.Dispose();
             return;
         }
 
@@ -1588,15 +1655,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public event EventHandler<string>? ErrorOccurred;
 
     /// <summary>
-    ///     Raised when <see cref="IsFavorite"/> changes, so the owning
-    ///     <see cref="MainWindowViewModel"/> can persist settings and re-sort
-    ///     <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     Raised after <see cref="IsFavorite"/> changed (and was saved), so the owning
+    ///     <see cref="MainWindowViewModel"/> can re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
     /// </summary>
     public event EventHandler? FavoriteChanged;
 
     /// <summary>
-    ///     Raised when <see cref="MoveToGroup"/> changes the repo's group, so the owning
-    ///     <see cref="MainWindowViewModel"/> can persist settings and rebuild the sectioned list.
+    ///     Raised after <see cref="MoveToGroup"/> changed the repo's group (and it was saved), so the
+    ///     owning <see cref="MainWindowViewModel"/> can rebuild the sectioned list.
     /// </summary>
     public event EventHandler? GroupChanged;
 
@@ -1607,14 +1673,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public event EventHandler? NewGroupRequested;
 
     /// <summary>
-    ///     Raised when <see cref="SetCardColor"/> changes the tile color, so the owning
-    ///     <see cref="MainWindowViewModel"/> can persist settings.
+    ///     Raised after <see cref="SetCardColor"/> changed the tile color (and it was saved).
     /// </summary>
     public event EventHandler? CardColorChanged;
 
     /// <summary>
-    ///     Raised when a launch is recorded, so the owning <see cref="MainWindowViewModel"/> can
-    ///     persist settings and re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     Raised after a launch was recorded (and saved), so the owning
+    ///     <see cref="MainWindowViewModel"/> can re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
     /// </summary>
     public event EventHandler? LaunchRecorded;
 
@@ -1625,6 +1690,46 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see cref="MainWindowViewModel.RemoveRepo"/>.
     /// </summary>
     public event EventHandler? RemoveRequested;
+
+    /// <summary>
+    ///     Stops this card for good because it was removed from the recent-repos list: whatever it
+    ///     still has running is cancelled or its result ignored, nothing it does afterwards can
+    ///     report to the user (no error box, no release notes, no prompt), and the picture it holds is
+    ///     released.
+    /// </summary>
+    /// <remarks>
+    ///     Called by <see cref="MainWindowViewModel"/> once the removal was saved. Without it a card
+    ///     the user removed - kept alive by handlers the window attached, or by an operation that is
+    ///     still running - could still raise <see cref="ErrorOccurred"/> or
+    ///     <see cref="ReleaseNotesReady"/> for a repo that is no longer listed. A retired card is never
+    ///     reused; adding the repo again creates a new card. Idempotent.
+    /// </remarks>
+    internal void Retire()
+    {
+        _isRetired = true;
+
+        // Results of checks and picture loads that are still on their way are dropped
+        _upgradeCheckGeneration++;
+        _imageGeneration++;
+        _loadedImageFile = null;
+        IsCheckingUpgrade = false;
+        CancelOperation();
+
+        // Nobody is listening any more: release the window's handlers and anything they reference
+        ReleaseNotesReady = null;
+        ErrorOccurred = null;
+        FavoriteChanged = null;
+        GroupChanged = null;
+        NewGroupRequested = null;
+        CardColorChanged = null;
+        LaunchRecorded = null;
+        RemoveRequested = null;
+        SelectPackageRequested = null;
+        AgentsMdTemplateOfferRequested = null;
+
+        // The picture is disposed here, once the view has been told it is gone
+        RepoImage = null;
+    }
 
     /// <summary>
     ///     Raised by <see cref="SelectPackageCommand"/> to request the "Select Package..." dialog
@@ -1690,6 +1795,17 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </remarks>
     public void RefreshCheap()
     {
+        // A card that was removed from the list checks nothing any more
+        if (_isRetired)
+        {
+            return;
+        }
+
+        // Whatever upgrade check is still in flight was started against the repo, pin and sources as
+        // they were: its result must not be published over what this refresh finds (the caller starts
+        // a new check when one is wanted)
+        InvalidateUpgradeCheck();
+
         IsMissing = !Directory.Exists(RepoPath);
         if (IsMissing)
         {
@@ -1752,13 +1868,20 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Records that this repo was just successfully launched, stamping
-    ///     <see cref="LastLaunchedUtc"/> with the current UTC time and raising
-    ///     <see cref="LaunchRecorded"/> so the owning <see cref="MainWindowViewModel"/> can
-    ///     persist settings and re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     <see cref="LastLaunchedUtc"/> with the current UTC time (saved before it is applied, see
+    ///     <see cref="IsFavorite"/>) and raising <see cref="LaunchRecorded"/> so the owning
+    ///     <see cref="MainWindowViewModel"/> can re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     The launch itself has already happened; when the stamp cannot be saved it is simply not
+    ///     recorded (the owner tells the user).
     /// </summary>
     private void RecordLaunched()
     {
-        _recentRepo.LastLaunchedUtc = DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow;
+        if (!CommitChange(repo => repo.LastLaunchedUtc = now))
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(LastLaunchedUtc));
         LaunchRecorded?.Invoke(this, EventArgs.Empty);
     }
@@ -2618,6 +2741,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     private void RefreshPin()
     {
+        var previous = (PinnedPackageName, PinnedPackageVersion, PinnedSource);
         try
         {
             var pin = RepoPinStore.Load(RepoPath);
@@ -2637,6 +2761,26 @@ internal sealed class RepoCardViewModel : ViewModelBase
             PinnedSource = null;
             StatusMessage = $"Failed to read pin file: {ex.Message}";
         }
+
+        // A different pin makes everything learned about upgrades for the old one meaningless: drop
+        // it and ignore any check still running for it (the caller starts a new one)
+        if ((PinnedPackageName, PinnedPackageVersion, PinnedSource) != previous)
+        {
+            InvalidateUpgradeCheck();
+            IsUpgradeAvailable = false;
+            LatestAvailableVersion = null;
+        }
+    }
+
+    /// <summary>
+    ///     Makes any upgrade check that is still in flight irrelevant: its result will not be
+    ///     published, and the card stops showing "checking" and "check failed" for it.
+    /// </summary>
+    private void InvalidateUpgradeCheck()
+    {
+        _upgradeCheckGeneration++;
+        IsCheckingUpgrade = false;
+        IsUpgradeStatusUnknown = false;
     }
 
     /// <summary>
@@ -2726,6 +2870,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     is cancelled; the card keeps its previous upgrade state.</exception>
     public async Task RefreshUpgradeStatusAsync(CancellationToken cancellationToken = default, bool allowPrompt = false)
     {
+        // A card that was removed from the list checks nothing any more
+        if (_isRetired)
+        {
+            return;
+        }
+
         var generation = ++_upgradeCheckGeneration;
 
         // A repo whose folder is gone offers no upgrade: its package chip is hidden, so an upgrade
@@ -2822,12 +2972,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return false;
             }
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
-            // Invalid source configuration (for example a duplicated alias): nothing can be
-            // offered; the actions that need the source report the specific reason
+            // Invalid source configuration (for example a duplicated alias): no upgrade can be
+            // offered and the card must not claim it is up to date, so it is a problem the card
+            // shows; the actions that need the source report the specific reason again
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
+            SetSourceProblem(
+                $"The package sources are not configured correctly: {SecretRedactor.SafeMessage(ex)}",
+                needsSignIn: false);
             return false;
         }
 

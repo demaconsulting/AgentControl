@@ -118,12 +118,53 @@ internal sealed class RecentRepo
     ///     A user-specific appearance choice stored only in the per-user settings file, never in
     ///     the repository. Kept as the palette entry's name (for example <c>Teal</c>) rather than an
     ///     index so reordering the palette cannot change anyone's choice; a name the palette does
-    ///     not know (a typo, or a color from a newer version) simply reads as the automatic color.
+    ///     not know (a typo, or a color from a newer version) is repaired to <see langword="null"/>,
+    ///     the automatic color, by <see cref="AppSettings.NormalizeNulls"/> when the settings are
+    ///     loaded (see <see cref="NormalizeCardColor"/>), so it is neither kept nor written back.
     ///     Persisted only when set.
     /// </remarks>
     [JsonConverter(typeof(OptionalStringJsonConverter))]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CardColor { get; set; }
+
+    /// <summary>
+    ///     The names of the colors a repo card's tile can be given, in the order of the palette (a
+    ///     name's position is its palette index); the single source of truth for which
+    ///     <see cref="CardColor"/> values are valid.
+    /// </summary>
+    /// <remarks>
+    ///     Owned here, where the value is stored, so that <see cref="AppSettings.NormalizeNulls"/>
+    ///     can repair an unknown name at load time; the launcher's color palette takes its entries
+    ///     from this list rather than repeating it.
+    /// </remarks>
+    internal static readonly IReadOnlyList<string> CardColorNames =
+        ["Blue", "Violet", "Magenta", "Green", "Amber", "Teal", "Orange", "Indigo", "Red", "Lime"];
+
+    /// <summary>
+    ///     Finds the canonical spelling of a stored card color name.
+    /// </summary>
+    /// <param name="name">The stored name; may be <see langword="null"/>, blank or unknown. Leading
+    ///     and trailing white space and letter case are ignored.</param>
+    /// <returns>The name as listed in <see cref="CardColorNames"/>, or <see langword="null"/> (the
+    ///     automatic color) when <paramref name="name"/> is not blank but names no known color, so
+    ///     an unknown value (a typo, or a color from a newer version) is never kept or written back.</returns>
+    internal static string? NormalizeCardColor(string? name)
+    {
+        var trimmed = name?.Trim();
+        return string.IsNullOrEmpty(trimmed)
+            ? null
+            : CardColorNames.FirstOrDefault(entry => string.Equals(entry, trimmed, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    ///     Creates an independent copy of this entry, so a change can be tried on the copy (and
+    ///     saved) before it is applied to the live entry.
+    /// </summary>
+    /// <returns>A new instance with the same values; every member is a value or an immutable
+    ///     string, so the copy shares no mutable state with this instance.</returns>
+    internal RecentRepo Clone() =>
+        // cspell:disable-next-line
+        (RecentRepo)MemberwiseClone();
 
     /// <summary>
     ///     Reads an optional string and treats a JSON value of any other kind as

@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Definitions;
 using FlaUI.Core.Tools;
 
 namespace DemaConsulting.AgentControl.UiTests;
@@ -238,6 +239,333 @@ public sealed class RepoGroupsAndColorsTests
     }
 
     /// <summary>
+    ///     Choosing "Move to group" and then an existing group puts the repo in that group's section: the
+    ///     section now counts both repos, the section the repo left is gone, and the choice is stored in
+    ///     the settings file only.
+    /// </summary>
+    [Fact]
+    public void CardMenu_MoveToExistingGroup_JoinsThatSectionAndStoresInSettingsOnly()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: one repo in the group "Work", another in no group
+        using var context = new AgentControlTestContext(customizeSettings: SeedWorkGroupAndUngroupedRepo);
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        Assert.Equal(["repo", "elsewhere"], RepoNames(mainWindow));
+
+        // Act: ... > Move to group > Work, on the second (ungrouped) repo's card
+        Find(mainWindow, "MoreActionsButton", index: 1).AsButton().Invoke();
+        ExpandMenuItem(Find(mainWindow, "MoveToGroupMenuItem"));
+        Find(mainWindow, "MoveToGroupItem", candidate => candidate.Name == "Work").AsMenuItem().Invoke();
+
+        // Assert: one section for both repos, and no section for the ungrouped ones any more
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(mainWindow).SequenceEqual(["Work, 2 repos, expanded"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Equal(2, RepoNames(mainWindow).Count);
+
+        // Assert: stored for both repos in the settings, and nothing was written into either repository
+        Assert.True(Retry.WhileFalse(
+            () => ReadSettings(context).Split("\"GroupName\": \"Work\"").Length == 3,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(context.RepoPath));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(context.RootDirectory, "elsewhere")));
+    }
+
+    /// <summary>
+    ///     Choosing "Remove from group" takes the repo out of its group: with no repo left in any group the
+    ///     list is flat again (no section headers), and the group is no longer stored for the repo.
+    /// </summary>
+    [Fact]
+    public void CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: the only repo is in the group "Work", so there is one section header
+        using var context = new AgentControlTestContext(customizeSettings: (settings, self) =>
+            settings["RecentRepos"] = new object[] { new { Path = self.RepoPath, GroupName = "Work" } });
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        Assert.Equal(["Work, 1 repo, expanded"], HeaderNames(mainWindow));
+
+        // Act: ... > Move to group > Remove from group
+        Find(mainWindow, "MoreActionsButton").AsButton().Invoke();
+        ExpandMenuItem(Find(mainWindow, "MoveToGroupMenuItem"));
+        Find(mainWindow, "RemoveFromGroupMenuItem").AsMenuItem().Invoke();
+
+        // Assert: a flat list again, with the repo still listed, and no group stored for it
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(mainWindow).Count == 0,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Equal(["repo"], RepoNames(mainWindow));
+        Assert.True(Retry.WhileFalse(
+            () => !ReadSettings(context).Contains("\"GroupName\": \"Work\"", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+    }
+
+    /// <summary>
+    ///     The sections are listed favorites first, then the groups alphabetically, then the repos in no
+    ///     group, each with its repos under it (a favorite appears only under Favorites).
+    /// </summary>
+    [Fact]
+    public void RepoList_FavoritesAndGroups_SectionsAreFavoritesThenGroupsAlphabeticallyThenUngrouped()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: a favorite in "Zeta", another repo in "Zeta", one in "Alpha" and one in no group
+        using var context = new AgentControlTestContext(customizeSettings: (settings, self) =>
+        {
+            string[] names = ["zeta-favorite", "zeta-plain", "alpha-one", "ungrouped-one"];
+            foreach (var name in names)
+            {
+                Directory.CreateDirectory(Path.Combine(self.RootDirectory, name));
+            }
+
+            settings["RecentRepos"] = new object[]
+            {
+                new { Path = Path.Combine(self.RootDirectory, "zeta-favorite"), GroupName = "Zeta", IsFavorite = true },
+                new { Path = Path.Combine(self.RootDirectory, "zeta-plain"), GroupName = "Zeta" },
+                new { Path = Path.Combine(self.RootDirectory, "alpha-one"), GroupName = "Alpha" },
+                new { Path = Path.Combine(self.RootDirectory, "ungrouped-one") }
+            };
+        });
+
+        // Act
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+
+        // The list shows only the rows that fit, so give it the whole screen to show all eight rows
+        mainWindow.Patterns.Window.Pattern.SetWindowVisualState(WindowVisualState.Maximized);
+
+        // Assert: the sections in order, and each repo under its own section
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(mainWindow).Count == 4,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Equal(
+            [
+                "Favorites, 1 repo, expanded",
+                "Alpha, 1 repo, expanded",
+                "Zeta, 1 repo, expanded",
+                "Ungrouped, 1 repo, expanded"
+            ],
+            HeaderNames(mainWindow));
+        Assert.Equal(["zeta-favorite", "alpha-one", "zeta-plain", "ungrouped-one"], RepoNames(mainWindow));
+    }
+
+    /// <summary>
+    ///     Clicking a section header collapses it (its repos leave the list) and stores that choice; the
+    ///     section is still collapsed after a restart, and clicking the header again expands it.
+    /// </summary>
+    [Fact]
+    public void GroupHeaderToggleButton_Click_CollapsesSectionAndRemembersItAfterRestart()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: one repo in the group "Work", another in no group
+        using var context = new AgentControlTestContext(customizeSettings: SeedWorkGroupAndUngroupedRepo);
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        var work = Find(
+            mainWindow,
+            "GroupHeaderToggleButton",
+            header => header.Name.StartsWith("Work", StringComparison.Ordinal));
+        Assert.Equal("Work, 1 repo, expanded", work.Name);
+
+        // Act: collapse the section
+        work.AsButton().Invoke();
+
+        // Assert: its repo left the list, and the collapsed section is stored
+        Assert.True(Retry.WhileFalse(
+            () => RepoNames(mainWindow).SequenceEqual(["elsewhere"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Contains("Work, 1 repo, collapsed", HeaderNames(mainWindow));
+        Assert.True(Retry.WhileFalse(
+            () => CollapsedGroupsInSettings(context).SequenceEqual(["Work"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+
+        // Act: restart the application against the same settings
+        context.CloseApplication();
+        var restarted = context.Launch();
+        restarted.SetForeground();
+
+        // Assert: the section is still collapsed
+        Assert.Contains("Work, 1 repo, collapsed", HeaderNames(restarted));
+        Assert.Equal(["elsewhere"], RepoNames(restarted));
+
+        // Act: expand the section again
+        Find(restarted, "GroupHeaderToggleButton", header => header.Name.StartsWith("Work", StringComparison.Ordinal))
+            .AsButton().Invoke();
+
+        // Assert: both repos are listed and the collapsed state is no longer stored
+        Retry.WhileFalse(
+            () => RepoNames(restarted).Count == 2,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200));
+        Assert.Equal(["repo", "elsewhere"], RepoNames(restarted));
+        Assert.True(Retry.WhileFalse(
+            () => CollapsedGroupsInSettings(context).Count == 0,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+    }
+
+    /// <summary>
+    ///     The card color palette offers every color, each by its name, and Automatic; choosing a swatch
+    ///     recolors the card's tile and choosing Automatic clears the stored choice again, with the status
+    ///     accent unchanged and nothing written into the repository.
+    /// </summary>
+    [Fact]
+    public void CardMenu_CardColor_PaletteOffersEveryColorAndAutomaticClearsTheChoice()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        string[] colors = ["Blue", "Violet", "Magenta", "Green", "Amber", "Teal", "Orange", "Indigo", "Red", "Lime"];
+        using var context = new AgentControlTestContext();
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        var statusBefore = Find(mainWindow, "RepoStatusAccent").Name;
+
+        // Act: ... > Card color...
+        OpenCardColorPalette(mainWindow);
+
+        // Assert: one swatch per color, named for it, and Automatic
+        foreach (var color in colors)
+        {
+            Assert.Equal(color, Find(mainWindow, $"CardColorSwatch_{color}").Name);
+        }
+
+        Assert.NotNull(Find(mainWindow, "CardColorAutomaticButton"));
+
+        // Act: choose Teal, then Red
+        Find(mainWindow, "CardColorSwatch_Teal").AsButton().Invoke();
+        var teal = SettledTileColor(mainWindow);
+        OpenCardColorPalette(mainWindow);
+        Find(mainWindow, "CardColorSwatch_Red").AsButton().Invoke();
+
+        // Assert: the tile changes with the choice, and Red is stored in place of Teal
+        var red = SettledTileColor(mainWindow);
+        Assert.NotEqual(teal, red);
+        Assert.True(Retry.WhileFalse(
+            () => ReadSettings(context).Contains("\"CardColor\": \"Red\"", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+
+        // Act: choose Automatic
+        OpenCardColorPalette(mainWindow);
+        Find(mainWindow, "CardColorAutomaticButton").AsButton().Invoke();
+
+        // Assert: no color is stored any more, the status is unchanged and the repository is untouched
+        Assert.True(Retry.WhileFalse(
+            () => !ReadSettings(context).Contains("\"CardColor\": \"", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Equal(statusBefore, Find(mainWindow, "RepoStatusAccent").Name);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(context.RepoPath));
+    }
+
+    /// <summary>
+    ///     Seeds the settings with the repo in the group "Work" and a second repo in no group.
+    /// </summary>
+    /// <param name="settings">The settings dictionary to edit.</param>
+    /// <param name="context">The test context, whose repo is the first one.</param>
+    private static void SeedWorkGroupAndUngroupedRepo(
+        Dictionary<string, object?> settings, AgentControlTestContext context)
+    {
+        var other = Path.Combine(context.RootDirectory, "elsewhere");
+        Directory.CreateDirectory(other);
+        settings["RecentRepos"] = new object[]
+        {
+            new { Path = context.RepoPath, GroupName = "Work" },
+            new { Path = other }
+        };
+    }
+
+    /// <summary>
+    ///     Opens the first card's "..." menu and then its Card color palette.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    private static void OpenCardColorPalette(Window mainWindow)
+    {
+        Find(mainWindow, "MoreActionsButton").AsButton().Invoke();
+        Find(mainWindow, "CardColorMenuItem").AsMenuItem().Invoke();
+        Assert.NotNull(Find(mainWindow, "CardColorPalette"));
+    }
+
+    /// <summary>
+    ///     Reads the first card's tile color once it has stopped changing, so a color read right after a
+    ///     choice is not the one drawn before the card was redrawn.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    /// <returns>The tile color.</returns>
+    private static System.Drawing.Color SettledTileColor(Window mainWindow)
+    {
+        Thread.Sleep(600);
+        var color = default(System.Drawing.Color);
+        var settled = Retry.WhileFalse(
+            () =>
+            {
+                var previous = color;
+                color = RenderedTextProbe.SurfaceColor(mainWindow, Find(mainWindow, "RepoAvatarText"));
+                return color == previous;
+            },
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(600)).Result;
+        Assert.True(settled, "The tile color never settled.");
+        return color;
+    }
+
+    /// <summary>
+    ///     Lists the names of the section headers currently shown, in order; each names the section, its
+    ///     repo count and whether it is expanded.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    /// <returns>The name of each <c>GroupHeaderToggleButton</c>.</returns>
+    private static List<string> HeaderNames(Window mainWindow) =>
+        [.. mainWindow.FindAllDescendants(cf => cf.ByAutomationId("GroupHeaderToggleButton"))
+            .OrderBy(element => element.BoundingRectangle.Top).Select(element => element.Name)];
+
+    /// <summary>
+    ///     Reads the collapsed sections stored in the settings file.
+    /// </summary>
+    /// <param name="context">The running test context.</param>
+    /// <returns>The names in <c>CollapsedGroups</c>, or none when the key is missing.</returns>
+    private static List<string> CollapsedGroupsInSettings(AgentControlTestContext context)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(ReadSettings(context));
+        return document.RootElement.TryGetProperty("CollapsedGroups", out var groups)
+            && groups.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? [.. groups.EnumerateArray().Select(group => group.GetString() ?? string.Empty)]
+            : [];
+    }
+
+    /// <summary>
     ///     Expands a menu item that has a submenu, through its UI Automation expand pattern when it
     ///     has one, else by invoking it.
     /// </summary>
@@ -261,7 +589,8 @@ public sealed class RepoGroupsAndColorsTests
     /// <param name="mainWindow">The main window.</param>
     /// <returns>The text of each <c>RepoNameText</c>.</returns>
     private static List<string> RepoNames(Window mainWindow) =>
-        [.. mainWindow.FindAllDescendants(cf => cf.ByAutomationId("RepoNameText")).Select(element => element.Name)];
+        [.. mainWindow.FindAllDescendants(cf => cf.ByAutomationId("RepoNameText"))
+            .OrderBy(element => element.BoundingRectangle.Top).Select(element => element.Name)];
 
     /// <summary>
     ///     Reads the persisted settings file, or an empty string when it does not exist yet.
@@ -275,19 +604,21 @@ public sealed class RepoGroupsAndColorsTests
     }
 
     /// <summary>
-    ///     Finds an element by AutomationId (optionally the first one that also passes a filter),
-    ///     waiting for it to appear.
+    ///     Finds an element by AutomationId (optionally one that also passes a filter, and optionally the
+    ///     n-th such element, as repeated card controls exist once per card), waiting for it to appear.
     /// </summary>
     /// <param name="parent">The window or element to search under.</param>
     /// <param name="automationId">The AutomationId to find.</param>
     /// <param name="filter">An extra condition the element must meet, or <see langword="null"/>.</param>
+    /// <param name="index">Which of the matching elements to return, counting from zero.</param>
     /// <returns>The element.</returns>
     private static AutomationElement Find(
-        AutomationElement parent, string automationId, Func<AutomationElement, bool>? filter = null)
+        AutomationElement parent, string automationId, Func<AutomationElement, bool>? filter = null, int index = 0)
     {
         var element = Retry.WhileNull(
             () => parent.FindAllDescendants(cf => cf.ByAutomationId(automationId))
-                .FirstOrDefault(candidate => filter is null || filter(candidate)),
+                .Where(candidate => filter is null || filter(candidate))
+                .ElementAtOrDefault(index),
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(200)).Result;
         Assert.NotNull(element);

@@ -98,10 +98,41 @@ internal static class DialogBehavior
         var target = initialFocusName is null ? null : dialog.FindControl<Control>(initialFocusName);
         if (target is null || !CanTakeFocus(target))
         {
-            target = dialog.GetVisualDescendants().OfType<Control>().FirstOrDefault(CanTakeFocus);
+            target = FirstTabStop(dialog);
         }
 
         target?.Focus(NavigationMethod.Tab);
+    }
+
+    /// <summary>
+    ///     Finds the first control the Tab key reaches inside a dialog, in keyboard navigation order.
+    /// </summary>
+    /// <remarks>
+    ///     Asks Avalonia's own keyboard navigation for the first focusable control of the dialog (so
+    ///     explicit tab indices and navigation containers are honored; visual-tree order would differ as
+    ///     soon as a tab index is set), then steps forward with the same Tab navigation past any control
+    ///     that cannot take the focus (Avalonia's first-focusable search does not skip a disabled one).
+    ///     Anything the navigation returns outside the dialog, or a repeat, ends the search.
+    /// </remarks>
+    /// <param name="dialog">The dialog window.</param>
+    /// <returns>The first control Tab reaches, or <see langword="null"/> when there is none.</returns>
+    private static Control? FirstTabStop(Window dialog)
+    {
+        var visited = new HashSet<IInputElement>();
+        var candidate = FocusManager.FindFirstFocusableElement(dialog);
+        while (candidate is Control control && dialog.IsVisualAncestorOf(control) && visited.Add(control))
+        {
+            if (CanTakeFocus(control))
+            {
+                return control;
+            }
+
+            candidate = dialog.FocusManager?.FindNextElement(
+                NavigationDirection.Next,
+                new FindNextElementOptions { SearchRoot = dialog, FocusedElement = control });
+        }
+
+        return null;
     }
 
     /// <summary>

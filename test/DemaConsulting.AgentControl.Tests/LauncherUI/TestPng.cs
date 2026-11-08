@@ -89,8 +89,10 @@ internal static class TestPng
     /// </summary>
     /// <param name="width">The declared width.</param>
     /// <param name="height">The declared height.</param>
+    /// <param name="headerChunkLength">The length the header chunk declares for itself; a real PNG
+    ///     header chunk is always 13 bytes long, so any other value makes the file malformed.</param>
     /// <returns>The bytes: a header only, with no image data.</returns>
-    public static byte[] CreateHeaderOnly(uint width, uint height)
+    public static byte[] CreateHeaderOnly(uint width, uint height, uint headerChunkLength = 13)
     {
         var header = new byte[13];
         BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(0, 4), width);
@@ -102,7 +104,11 @@ internal static class TestPng
         png.Write(Signature);
         // cspell:disable-next-line
         WriteChunk(png, "IHDR", header);
-        return png.ToArray();
+        var bytes = png.ToArray();
+
+        // The chunk length is the four bytes straight after the signature
+        BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(Signature.Length, 4), headerChunkLength);
+        return bytes;
     }
 
     /// <summary>

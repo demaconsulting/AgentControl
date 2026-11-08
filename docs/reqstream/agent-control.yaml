@@ -28,8 +28,13 @@ sections:
           - AgentControl-LauncherUI-StatusBadges
           - AgentControl-LauncherUI-RepoCardChips
           - AgentControl-LauncherUI-CardIdentityAndStatus
+          - AgentControl-LauncherUI-CardAvatarTile
+          - AgentControl-LauncherUI-RepoPicture
+          - AgentControl-LauncherUI-RepoPictureTrusted
+          - AgentControl-LauncherUI-LongTextShortened
           - AgentControl-LauncherUI-UpToDateCue
           - AgentControl-LauncherUI-AppBar
+          - AgentControl-LauncherUI-AppBarNarrow
           - AgentControl-GitIntegration-DetectCommittedFiles
           - AgentControl-GitIntegration-CurrentBranch
         tests:
@@ -48,6 +53,8 @@ sections:
           must work in both directions, and the repo must follow the star between sections.
         children:
           - AgentControl-LauncherUI-FavoriteStar
+          - AgentControl-LauncherUI-FavoriteStarMovesRepo
+          - AgentControl-LauncherUI-FavoriteStarKeepsFocus
         tests:
           - windows@FavoriteToggleButton_ToggledOnThenOff_MovesRepoBetweenSectionsAndStoresChoice
 
@@ -61,21 +68,45 @@ sections:
           needs an in-app way to tell it to look again.
         children:
           - AgentControl-LauncherUI-MissingRepoRecheck
+          - AgentControl-LauncherUI-MissingRepoRecheckClears
         tests:
           - windows@RefreshMenuItem_MissingFolder_IsEnabledAsCheckAgain_AndFindsFolderOnceBack
 
       - id: AgentControl-System-DialogKeyboard
         title: >-
-          The tool shall show its dialogs as modal dialogs, so the window behind a dialog cannot be
-          used or reached with the keyboard while the dialog is open.
+          The tool shall keep the keyboard inside its Settings, About and Select Package dialogs
+          while they are open: Tab and Shift+Tab move only between the dialog's own controls and
+          typed keys do not reach the window behind it.
         tags: [system]
         justification: |
-          Keyboard-only operation is a baseline of accessible desktop software, and a dialog whose
-          focus is invisible or in the window behind it cannot be used from the keyboard.
+          Keyboard-only operation is a baseline of accessible desktop software, and a dialog
+          whose keyboard focus wanders into the window behind it cannot be used from the keyboard.
         children:
           - AgentControl-LauncherUI-DialogKeyboard
+          - AgentControl-LauncherUI-DialogInitialFocus
+          - AgentControl-LauncherUI-DialogEscapeCancels
+          - AgentControl-LauncherUI-DialogFocusReturn
+        tests:
+          - windows@SettingsWindow_Opened_ClicksAndKeysOnMainWindowDoNotReachIt
+          - windows@AboutWindow_Opened_ClicksAndKeysOnMainWindowDoNotReachIt
+          - windows@SelectPackageWindow_Opened_FocusStartsInsideTabCyclesAndEscapeCancels
+
+      - id: AgentControl-System-DialogModal
+        title: >-
+          The tool shall show its Settings and About dialogs as modal dialogs: while one is open
+          the main window behind it is disabled and a mouse click aimed at it does not reach it,
+          and the main window is usable again when the dialog closes.
+        tags: [system]
+        justification: |
+          A dialog that leaves the window behind it usable lets the user act on that window while
+          the dialog's question is still open.
+        children:
+          - AgentControl-LauncherUI-DialogModal
         tests:
           - windows@SettingsWindow_Opened_MainWindowBehindItIsDisabledUntilItCloses
+          - windows@SettingsWindow_Opened_ClicksAndKeysOnMainWindowDoNotReachIt
+          - windows@AboutWindow_Opened_MainWindowIsDisabledUntilItCloses_AndRegainsFocus
+          - windows@AboutWindow_Opened_ClicksAndKeysOnMainWindowDoNotReachIt
 
       - id: AgentControl-System-AddRemoveRepo
         title: >-
@@ -89,8 +120,30 @@ sections:
         children:
           - AgentControl-LauncherUI-AddRepo
           - AgentControl-LauncherUI-RemoveRepo
+          - AgentControl-LauncherUI-RemovedRepoGoesQuiet
         tests:
           - windows@RemoveMenuItem_ClickThenConfirm_RemovesCard_DecliningLeavesItInPlace
+
+      - id: AgentControl-System-ListChangesKept
+        title: >-
+          The tool shall keep the changes the user makes to the recent-repos list (favorite, group,
+          card color, collapsed sections) in the user's settings, so they are still there when the
+          tool is started again, and shall never show a change that it could not save.
+        tags: [system]
+        justification: |
+          A choice that has to be repeated at every start is not a choice that was kept, and a
+          change that is shown but not saved would be lost without the user knowing.
+        children:
+          - AgentControl-LauncherUI-ChangeAppliedWhenSaved
+          - AgentControl-LauncherUI-FailedSaveChangesNothing
+          - AgentControl-LauncherUI-FailedSaveReported
+        tests:
+          # End to end the saving of a change is shown; a save that fails cannot be provoked
+          # through the published application, so that part is verified at the LauncherUI
+          # subsystem and unit levels.
+          - windows@FavoriteToggleButton_ToggledOnThenOff_MovesRepoBetweenSectionsAndStoresChoice
+          - windows@GroupHeaderToggleButton_Click_CollapsesSectionAndRemembersItAfterRestart
+          - windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly
 
       - id: AgentControl-System-SearchAndSort
         title: >-
@@ -116,7 +169,7 @@ sections:
           The chip that announces an available upgrade is the most direct place to start it; the
           upgrade must run the same flow as the card menu's Upgrade item.
         children:
-          - AgentControl-RepoCardViewModel-UpgradeFromChip
+          - AgentControl-LauncherUI-UpgradeFromChip
         tests:
           - windows@UpgradeChip_Click_SyncsManagedFoldersAndShowsReleaseNotes
 
@@ -130,45 +183,163 @@ sections:
           follow the operating system, without having to restart it.
         children:
           - AgentControl-LauncherUI-Appearance
+          - AgentControl-LauncherUI-ThemeApplied
+          - AgentControl-Settings-Appearance
         tests:
           - windows@SettingsWindow_ChooseLightThenDark_ReThemesMainWindowWithoutRestart
           - windows@SettingsWindow_AppearanceIsItsOwnSectionAboveTools
 
+      - id: AgentControl-System-AppearanceAtStartup
+        title: >-
+          The tool shall start in the color theme the user chose in an earlier session.
+        tags: [system]
+        justification: |
+          A choice that is forgotten when the tool is closed would have to be made again at every
+          start, and a window that opens in one theme and then changes to another is jarring.
+        children:
+          - AgentControl-Program-StartupTheme
+          - AgentControl-Settings-Appearance
+        tests:
+          - windows@MainWindow_LaunchWithPersistedLightTheme_AppliesLightFromStartup
+          - windows@MainWindow_LaunchWithPersistedDarkTheme_AppliesDarkFromStartup
+
+      - id: AgentControl-System-WindowsLegible
+        title: >-
+          The tool shall draw each of its windows in the color theme the user chose, with the
+          window's surface light in the light theme and dark in the dark theme and its text legible
+          against it, at least AA (4.5:1) contrast.
+        tags: [system]
+        justification: |
+          A window that is readable in one theme only would be unusable for whoever chose the
+          other. The rendered windows are measured for their surface and one text; the contrast of
+          every state of every control and the keyboard focus ring are not claimed.
+        children:
+          - AgentControl-LauncherUI-ThemeTextLegible
+          - AgentControl-LauncherUI-ThemeGraphicsLegible
+        tests:
+          - windows@MainSettingsSourceEditorAndAbout_LightTheme_RenderLegibly
+          - windows@MainSettingsSourceEditorAndAbout_DarkTheme_RenderLegibly
+          - windows@GroupNameConfirmationAndMessageBox_LightTheme_RenderLegibly
+          - windows@GroupNameConfirmationAndMessageBox_DarkTheme_RenderLegibly
+          - windows@SelectPackageAndReleaseNotes_LightTheme_RenderLegibly
+          - windows@SelectPackageAndReleaseNotes_DarkTheme_RenderLegibly
+          - windows@CredentialPrompt_LightTheme_RendersLegibly
+          - windows@CredentialPrompt_DarkTheme_RendersLegibly
+
       - id: AgentControl-System-RepoGroups
         title: >-
-          The tool shall let the user organize the recent-repos list into groups of their own:
-          move a repo into a new or an existing group or out of its group, show the groups as
-          collapsible sections (favorites first, then the groups alphabetically, then the repos
-          in no group; no sections at all while no repo is in a group), remember which sections
-          are collapsed, and let the filter find a repo even in a collapsed group. Groups shall
-          be stored only in the user's own AgentControl settings and never in a repository.
+          The tool shall let the user organize the recent-repos list into groups of their own by
+          moving a repo into a new group, into an existing group, or out of its group.
         tags: [system]
         justification: |
           Developers who work across many repos (several clients, or work and personal) need
-          to keep related repos together and collapse the rest out of the way. Groups are a
-          personal way of organizing the list, so they must not be written into a repository
-          where they would be committed and shared with other people, and a filter that could
-          not find a repo because its group is collapsed would make the grouping a trap.
+          to keep related repos together.
         children:
-          - AgentControl-LauncherUI-RepoGroups
+          - AgentControl-LauncherUI-RepoGroupMove
+          - AgentControl-LauncherUI-GroupNamePrompt
+          # Renaming and removing a group are verified at the LauncherUI subsystem level only.
+          - AgentControl-LauncherUI-RepoGroupManagement
         tests:
           - windows@CardMenu_MoveToNewGroup_ShowsGroupHeaderAndStoresInSettingsOnly
+          - windows@CardMenu_MoveToExistingGroup_JoinsThatSectionAndStoresInSettingsOnly
+          - windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader
+
+      - id: AgentControl-System-RepoGroupSections
+        title: >-
+          The tool shall show the recent-repos list as collapsible sections once a repo is in a
+          group - the favorites first, then the groups alphabetically, then the repos in no group
+          - and as a list without sections while no repo is in a group.
+        tags: [system]
+        justification: |
+          Sections keep a long list readable; the list must stay exactly as it was for a user who
+          does not use groups, and the order must be predictable.
+        children:
+          - AgentControl-LauncherUI-RepoGroups
+          - AgentControl-LauncherUI-RepoGroupsFlatList
+          - AgentControl-LauncherUI-RepoGroupCollapse
+        tests:
+          - windows@RepoList_FavoritesAndGroups_SectionsAreFavoritesThenGroupsAlphabeticallyThenUngrouped
+          - windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader
+
+      - id: AgentControl-System-RepoGroupCollapseRemembered
+        title: >-
+          The tool shall remember which sections of the recent-repos list the user collapsed, so
+          that they are still collapsed when the tool is started again.
+        tags: [system]
+        justification: |
+          Collapsing the groups not in use is only worth doing if the list stays that way.
+        children:
+          - AgentControl-LauncherUI-RepoGroupCollapseRemembered
+          - AgentControl-Settings-RepoOrganization
+        tests:
+          - windows@GroupHeaderToggleButton_Click_CollapsesSectionAndRemembersItAfterRestart
+
+      - id: AgentControl-System-RepoGroupFilter
+        title: >-
+          The tool shall let the filter find a repo even when it is in a collapsed group.
+        tags: [system]
+        justification: |
+          A filter that could not find a repo because its group is collapsed would make the
+          grouping a trap.
+        children:
+          - AgentControl-LauncherUI-RepoGroupFilter
+        tests:
           - windows@FilterTextBox_RepoInCollapsedGroup_IsFoundByFilterAndHiddenAgainAfterwards
+
+      - id: AgentControl-System-RepoGroupsSettingsOnly
+        title: >-
+          The tool shall store the user's groups only in the user's own AgentControl settings and
+          never in a repository.
+        tags: [system]
+        justification: |
+          Groups are a personal way of organizing the list, so they must not be written into a
+          repository where they would be committed and shared with other people.
+        children:
+          - AgentControl-LauncherUI-RepoGroupsSettingsOnly
+          - AgentControl-Settings-RepoOrganization
+        tests:
+          - windows@CardMenu_MoveToNewGroup_ShowsGroupHeaderAndStoresInSettingsOnly
+          - windows@CardMenu_MoveToExistingGroup_JoinsThatSectionAndStoresInSettingsOnly
 
       - id: AgentControl-System-CardColor
         title: >-
           The tool shall let the user choose the color of a repo card's tile from a palette, or
-          return to the automatic color, without changing the status colors of the card, and
-          shall store the choice only in the user's own AgentControl settings, never in a
-          repository.
+          return to the automatic color.
         tags: [system]
         justification: |
-          A color of their own lets a developer recognize a repo at a glance among many. The
-          status colors carry a fixed meaning (up to date, upgrade available, problem) and must
-          never be confused with a personal choice, and the choice is personal, so it must not
-          be written into a repository.
+          A color of their own lets a developer recognize a repo at a glance among many.
         children:
           - AgentControl-LauncherUI-CardColor
+          - AgentControl-LauncherUI-CardColorLettersLegible
+        tests:
+          - windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly
+          - windows@CardMenu_CardColor_PaletteOffersEveryColorAndAutomaticClearsTheChoice
+
+      - id: AgentControl-System-CardColorKeepsStatus
+        title: >-
+          The tool shall not change the status colors of a repo card when the user chooses the
+          color of its tile.
+        tags: [system]
+        justification: |
+          The status colors carry a fixed meaning (up to date, upgrade available, problem) and must
+          never be confused with a personal choice.
+        children:
+          - AgentControl-LauncherUI-CardColorKeepsStatus
+        tests:
+          - windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly
+          - windows@CardMenu_CardColor_PaletteOffersEveryColorAndAutomaticClearsTheChoice
+
+      - id: AgentControl-System-CardColorSettingsOnly
+        title: >-
+          The tool shall store the chosen card color only in the user's own AgentControl settings
+          and never in a repository.
+        tags: [system]
+        justification: |
+          The choice is personal, so it must not be written into a repository where it would be
+          committed and shared with other people.
+        children:
+          - AgentControl-LauncherUI-RepoGroupsSettingsOnly
+          - AgentControl-Settings-RepoOrganization
         tests:
           - windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly
 
@@ -288,8 +459,7 @@ sections:
           The tool shall offer to place a package's optional root-level AGENTS.md template at
           a repo's root when the repo has no AGENTS.md of its own and the package has a
           template to offer, shall never overwrite a pre-existing AGENTS.md, and shall
-          remember a user's decline so they are not re-prompted for that repo again, and shall
-          show that offer before the release notes of the same upgrade.
+          remember a user's decline so they are not re-prompted for that repo again.
         tags: [system]
         justification: |
           A package author may want to seed a repo with a starting AGENTS.md (the same
@@ -304,9 +474,19 @@ sections:
         tests:
           - windows@AgentsMdTemplateOffer_Accept_WritesTemplateToRepoRoot
           - windows@AgentsMdTemplateOffer_Decline_DoesNotWriteFileAndDoesNotReprompt
-          - RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent
-          - RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent
-          - RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile
+
+      - id: AgentControl-System-AgentsMdOfferBeforeReleaseNotes
+        title: >-
+          The tool shall show the AGENTS.md template offer before the release notes of the same
+          upgrade, and open the release notes only after the offer is answered.
+        tags: [system]
+        justification: |
+          The release notes window opened first would cover the question, which would then wait
+          unseen behind it.
+        children:
+          - AgentControl-LauncherUI-AgentsMdOfferBeforeReleaseNotes
+        tests:
+          - windows@MainWindow_UpgradeWithAgentsMdOfferInRealUi_ShowsQuestionFirstThenReleaseNotes
 
       - id: AgentControl-System-MultipleSources
         title: >-
@@ -324,7 +504,6 @@ sections:
           - AgentControl-AgentPackageManagement-ZipFolderSource
           - AgentControl-AgentPackageManagement-NuGetFolderSource
           - AgentControl-AgentPackageManagement-NuGetServerSource
-          - AgentControl-LauncherUI-AddSourceMenu
         tests:
           # End to end: the published application runs with a zip source and a NuGet folder
           # source configured side by side, sources are added through the Settings dialogs
@@ -334,6 +513,20 @@ sections:
           - windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt
           - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
           - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
+
+      - id: AgentControl-System-AddSourceMenu
+        title: >-
+          The tool shall let the user choose which type of package source to add (zip-package
+          folder, NuGet-package folder or NuGet-package server) from one Add menu in Settings,
+          each choice shown with its type's icon and a description.
+        tags: [system]
+        justification: |
+          One entry point keeps the Settings window short as source types are added, and the
+          descriptions tell the user which type to choose.
+        children:
+          - AgentControl-LauncherUI-AddSourceMenu
+        tests:
+          - windows@SettingsWindow_AddMenu_OffersThreeSourceTypesWithIconAndDescription
 
       - id: AgentControl-System-SourcesPersisted
         title: >-
@@ -466,6 +659,7 @@ sections:
           - AgentControl-LauncherUI-PackageSources
           - AgentControl-LauncherUI-AddPackageSource
           - AgentControl-LauncherUI-PackageSourceValidation
+          - AgentControl-LauncherUI-PackageSourceLocationTooltip
           - AgentControl-LauncherUI-PackageSourcePackageIds
           - AgentControl-LauncherUI-ServerSourceEditor
           - AgentControl-LauncherUI-ServerSourceSettingsKept
@@ -700,9 +894,7 @@ sections:
           - GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue
 
       - id: AgentControl-System-About
-        title: >-
-          The tool shall provide a modal About dialog showing the application version (as a labeled
-          row without build metadata), copyright, and license.
+        title: The tool shall provide an About dialog showing the application version, copyright, and license.
         tags: [system]
         justification: |
           Lets a developer identify exactly which build they are running (e.g. when
@@ -710,6 +902,18 @@ sections:
         children:
           - AgentControl-LauncherUI-About
           - AgentControl-Program-Version
+        tests:
+          - windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright
+
+      - id: AgentControl-System-AboutVersionRow
+        title: >-
+          The tool shall show the application version in its About dialog as a labeled Version
+          row, without the build metadata.
+        tags: [system]
+        justification: |
+          A short, labeled version is easy to read out when reporting an issue.
+        children:
+          - AgentControl-LauncherUI-AboutVersionRow
         tests:
           - windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright
 

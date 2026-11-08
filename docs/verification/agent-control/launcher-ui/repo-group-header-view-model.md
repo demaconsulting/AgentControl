@@ -14,34 +14,53 @@ N/A - standard test environment (no window, no files and no processes are involv
 
 #### Acceptance Criteria
 
-- Each kind of header sets exactly its own section flag; only a user group is a user group.
+- Each kind of header sets exactly its own section flag and leaves the other two off (a full truth table over the
+  three kinds); only a user group is a user group.
 - The accessible name says the section, its repo count (singular for one) and whether it is collapsed or expanded,
-  is also the header's text form, and the tooltips and change notifications follow `Update`.
-- The toggle command can execute only while toggling is enabled, raises its request when executed, and its tooltip
-  explains the filter when it cannot.
+  is also the header's text form, and the tooltips and change notifications follow `Update`, on the same header
+  instance.
+- The toggle command can execute only while toggling is enabled and raises its request when executed; while it
+  cannot, no request is raised and its tooltip explains the filter.
 - The rename and remove commands raise exactly one request per execution and change nothing themselves.
 - A header without a name (blank or `null`) is refused.
 
 #### Test Scenarios
 
-**RepoGroupHeaderViewModel_SectionKind**: Headers of each kind are created and their section flags are read. This
-scenario is tested by `RepoGroupHeaderViewModel_Kind_SelectsSectionFlags`, covering
+**RepoGroupHeaderViewModel_SectionKind**: A header of each of the three kinds is created and all three section flags
+are read, so exactly the matching flag is set for each kind. This scenario is tested by the theory
+`RepoGroupHeaderViewModel_Kind_SelectsExactlyTheMatchingSectionFlag`, covering
 `AgentControl-RepoGroupHeaderViewModel-SectionKind`.
 
 **RepoGroupHeaderViewModel_DescribesSection**: A header is updated to one repo expanded and then to three repos
-collapsed; the accessible name, the toggle and count tooltips, the expanded flag and the change notification of the
-accessible name are checked, and the text form of a favorites header is its accessible name. This scenario is tested
-by `RepoGroupHeaderViewModel_Update_DescribesCountAndState` and `RepoGroupHeaderViewModel_ToString_IsTheAccessibleName`,
-covering `AgentControl-RepoGroupHeaderViewModel-DescribesSection`.
+collapsed; the accessible name, the toggle and count tooltips and the expanded flag are checked. This scenario is
+tested by `RepoGroupHeaderViewModel_Update_DescribesCountAndState`, covering
+`AgentControl-RepoGroupHeaderViewModel-DescribesSection`.
 
-**RepoGroupHeaderViewModel_Toggle**: With toggling enabled the command can execute and raises one request; with it
-disabled (a filter is active) the command cannot execute and the tooltip names the filter. This scenario is tested by
-`RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled`, covering `AgentControl-RepoGroupHeaderViewModel-Toggle`.
+**RepoGroupHeaderViewModel_AccessibleNameIsText**: The text form of a favorites header that was updated to two repos
+collapsed is its accessible name. This scenario is tested by `RepoGroupHeaderViewModel_ToString_IsTheAccessibleName`,
+covering `AgentControl-RepoGroupHeaderViewModel-AccessibleNameIsText`.
+
+**RepoGroupHeaderViewModel_UpdatesInPlace**: The same header instance is updated twice, to one repo expanded and to
+three repos collapsed, and raises the change notification of its accessible name. This scenario is tested by
+`RepoGroupHeaderViewModel_Update_DescribesCountAndState`, covering `AgentControl-RepoGroupHeaderViewModel-UpdatesInPlace`.
+
+**RepoGroupHeaderViewModel_Toggle**: With toggling enabled the toggle command can execute and raises one request.
+This scenario is tested by `RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled`, covering
+`AgentControl-RepoGroupHeaderViewModel-Toggle`.
+
+**RepoGroupHeaderViewModel_ToggleUnavailable**: With toggling disabled (a filter is active) the toggle command
+cannot execute. This scenario is tested by `RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled`, covering
+`AgentControl-RepoGroupHeaderViewModel-ToggleUnavailable`.
+
+**RepoGroupHeaderViewModel_ToggleExplained**: With toggling disabled the toggle tooltip names the filter. This
+scenario is tested by `RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled`, covering
+`AgentControl-RepoGroupHeaderViewModel-ToggleExplained`.
 
 **RepoGroupHeaderViewModel_GroupActions**: The rename command is executed once and the remove command twice; one
-rename request and two removal requests are raised. This scenario is tested by
-`RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests`, covering
-`AgentControl-RepoGroupHeaderViewModel-GroupActions`.
+rename request and two removal requests are raised, so each command raises its own request exactly once per
+execution. This scenario is tested by `RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests`, covering
+`AgentControl-RepoGroupHeaderViewModel-GroupActions` (the rename request) and
+`AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest` (the removal requests).
 
 **RepoGroupHeaderViewModel_RequiresName**: A blank name and a `null` name are refused. This scenario is tested by
 `RepoGroupHeaderViewModel_Constructor_BlankName_Throws`, covering `AgentControl-RepoGroupHeaderViewModel-RequiresName`.

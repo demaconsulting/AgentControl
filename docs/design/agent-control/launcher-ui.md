@@ -33,8 +33,13 @@ and the pure display helpers - the value converters `FavoriteIconConverter`, `Ag
 test files) and the `PathEllipsisText` control (a presentational control that only shortens text to the width it is
 given, with its own `PathEllipsisTextTests.cs`) - are exercised through the subsystem requirements that name their
 tests (`AgentControl-LauncherUI-UpToDateCue`, `AgentControl-LauncherUI-Appearance`,
-`AgentControl-LauncherUI-FavoriteStar`) and are reviewed with the subsystem. This is the same convention the
-`Settings` subsystem uses for its data types and its `RepoGroupName` rules helper. The subsystem depends on the
+`AgentControl-LauncherUI-FavoriteStar`) and are reviewed with the subsystem. `PathEllipsisText` and
+`ThemePreferenceDisplayNameConverter` are thus deliberately documented supporting types, not units: the SysML2
+model points their design, verification and requirements at this subsystem's documents (the convention for units
+without a dedicated companion document) and the subsystem requirements link their tests. `RepoGroupName` is
+different: it is a unit of the `Settings` subsystem with its own requirements, design
+(`docs/design/agent-control/settings/repo-group-name.md`), verification and review set, which this subsystem only
+uses. The subsystem depends on the
 `AgentPackageManagement` subsystem (sources, providers, failure causes) and on the `PackageCredentials`
 subsystem (`PackageCredentialContext`, and the `ICredentialPrompt` that `AvaloniaCredentialPrompt` implements) and
 on `SignatureVerificationSupport` (whether the signature requirement can be offered). The repo card's package chip
@@ -154,8 +159,9 @@ a NuGet source's editor and the "Forget saved sign-in" action of a server source
 
 `MainWindowViewModel` owns the `ObservableCollection<RepoCardViewModel>` backing the
 recent-repos list; on construction it creates one `RepoCardViewModel` per `RecentRepo` in the
-loaded `AppSettings`. It exposes `AddRepo`/`RemoveRepo` (persisting via `SettingsStore` after
-each mutation), a `FilterText` property driving `DisplayedRepoCards`, and `ApplySettings`
+loaded `AppSettings`. It exposes `AddRepo`/`RemoveRepo` (each saved through `SettingsStore` before it takes effect, see
+*Transactional persistence* below), a `FilterText` property driving `DisplayedRepoCards`/`DisplayedItems`, and
+`ApplySettings`
 (invoked when `SettingsWindowViewModel` reports `Saved`), which persists the new settings
 while preserving the existing recent-repos list and invalidates the shared
 `PackageVersionCache` for each package source that was edited or removed.
@@ -183,6 +189,64 @@ checks working-tree cleanliness) so the main window's frequent UI refresh does n
 git subprocess for every card. Removal never mutates state directly: `RemoveCommand` raises
 `RemoveRequested` and `MainWindowViewModel` shows a `ConfirmationWindow`, removing the card only if
 the user confirms (`AgentControl-LauncherUI-RemoveRepo`).
+
+**How the units collaborate.** `MainWindowViewModel` is the owner and the hub. It creates one `RepoCardViewModel` per
+`RecentRepo` (giving each the shared package-version cache, the credentials and a *commit* callback that is how the
+card's own changes are saved, see below), subscribes to the card events that change the list (`FavoriteChanged`,
+`GroupChanged`, `LaunchRecorded`) and rebuilds `DisplayedItems` when they fire; the window's code-behind subscribes to
+the events that need a dialog.
+
+- *`RepoCardViewModel` and `RepoImageLocator`*: the card is the only caller. `RefreshCheap` starts the picture
+  refresh on a worker thread, which calls `RepoImageLocator.Find` for the repo's root and, when the returned
+  `RepoImageFile` differs from the one already shown, decodes it (`RepoImageLocator.Decode` by default; the decoder is
+  an injectable delegate so tests need no Avalonia platform). The `RepoImageFile` is the cache key, the card owns and
+  disposes the `Bitmap` it publishes in `RepoImage`, and `Retire` clears it. The locator knows nothing of cards;
+  any failure reaches the card as "no picture".
+- *`MainWindowViewModel` and `RepoGroupHeaderViewModel`*: the main view-model creates, and keeps one instance per
+  section (Favorites, each group, Ungrouped), and updates its `Count`, collapsed state and toggle availability in place
+  so the header keeps keyboard focus. It subscribes to the header's three request events: `ToggleRequested` it handles
+  itself (`ToggleGroupCollapsed`, saved before applied); `RenameRequested` and `RemoveGroupRequested` it forwards,
+  with the group's name, as its own `GroupRenameRequested` and `GroupRemoveRequested` events, to which `MainWindow`
+  responds with a prompt or a confirmation and then calls `RenameGroup`/`RemoveGroup`. The header holds no settings
+  and no reference to the main view-model.
+- *`GroupNameViewModel` and `GroupNameWindow`*: neither the card nor the main view-model creates the prompt; the
+  window's code-behind does, when `RepoCardViewModel` raises `NewGroupRequested` (with the card's existing group
+  names) or the header's rename is forwarded (with the group's name as the name being renamed), and shows
+  `GroupNameWindow` modally. `GroupNameViewModel` validates through `RepoGroupName` (the `Settings` unit that also
+  validates the card's `MoveToGroup` and repairs stored names, so the prompt, the card and the settings file agree on
+  what a group name is) and raises `Completed` exactly once - with the accepted name, or `null` for Cancel - which
+  closes the window; the code-behind then calls `RepoCardViewModel.MoveToGroup` or `MainWindowViewModel.RenameGroup`.
+- *`DialogBehavior`*: a stateless helper that every dialog window's code-behind calls once from its constructor
+  (`DialogBehavior.Apply(window, initial-focus control, cancel action)`): `SettingsWindow`, `SourceEditorWindow`,
+  `CredentialPromptWindow`, `SelectPackageWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `AboutWindow` and
+  `GroupNameWindow`. It knows no view-model; a window that has a view-model passes its `Cancel` as the cancel
+  action. The release-notes window is the only window that does not apply it.
+- *Supporting types*: `CardColorPalette` is a static table built from `RecentRepo.CardColorNames` (the single list of
+  valid names, owned by `Settings`); the card uses it to accept a color name and to find the tile's palette index, and
+  the main window's palette pop-up draws one swatch per entry. `PathEllipsisText` is a control in the card's template
+  that draws the card's `RepoPathParent` and `RepoPathLeaf` and collaborates with no other unit.
+  `ThemePreferenceDisplayNameConverter` is used by the Settings window's theme picker to show a `ThemePreference`
+  under a friendly name; the persisted value stays the enum member.
+
+**Transactional persistence.** Every change the user makes in the main window is saved before it takes effect, so
+memory, the list and the settings file never disagree. `MainWindowViewModel.CommitSettingsChange` tries the change on
+a candidate copy of the settings (`CreatePersistedCopy`, with the repos cloned by `RecentRepo.Clone` and the collapsed
+list copied), saves the candidate with `SettingsStore.Save`, and only when that succeeded applies the same change to
+the live settings; then the list is refreshed (candidate copy, save, commit, refresh). A change made on a card -
+`IsFavorite`, `MoveToGroup`, `SetCardColor`, and the launch timestamp - reaches this through the card's
+`commitChange` callback (`MainWindowViewModel.CommitRepoChange`), which returns whether the change was saved: when it
+was not, the card property keeps its value (the two-way bound star is told to read it again),
+`MoveToGroup`/`SetCardColor` return `false`, and the main view-model raises `SettingsSaveFailed` with the message
+for the user, which `MainWindow` shows in a message box. A collapse toggle from a header is reported the same way.
+`AddRepo`, `RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and `RemoveGroup` instead throw
+`InvalidOperationException` when the save fails, having changed nothing, and the window's code-behind shows it in a
+message box. A failed save therefore leaves the live settings, the cards, the displayed list and the file as they
+were, and a later unrelated save can never write the failed change. `ApplySettings` follows the same rule for the
+Settings window's values: it saves them and adopts them only after that. When a repo is removed, `RemoveRepo` saves
+the removal and then calls `RepoCardViewModel.Retire`: the card cancels its running operation, ignores the results of
+upgrade checks and picture loads still in flight, clears all its events (so nothing it still does can show an error
+box, release notes or a prompt), and disposes its picture; `MainWindow` detaches its per-card handlers when a card
+leaves `RepoCards` and forgets its bookkeeping for it.
 
 `SelectPackageWindowViewModel` backs the package-selection dialog opened from a card with no
 existing pin. It shows three columns - source, package, version. Selecting a source loads that

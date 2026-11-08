@@ -10,47 +10,137 @@ sections:
     requirements:
       - id: AgentControl-GroupNameViewModel-ValidatesAsTyped
         title: >-
-          The GroupNameViewModel class shall validate the typed name as the user types, telling
-          why a name cannot be used - blank, longer than 40 characters, or one of the built-in
-          names Favorites and Ungrouped - saying nothing before anything is typed, and shall
-          accept only a usable name.
+          The GroupNameViewModel class shall re-check the typed name each time it changes, so that
+          the message shown and whether the name can be accepted always follow the current text.
         justification: |
-          Telling the user why as they type is quicker than refusing afterwards, and a prompt that
-          opens already scolding would be hostile.
+          Telling the user why as they type is quicker than refusing afterwards, and a message
+          that lingers after the name was corrected would be wrong.
+        tests:
+          - GroupNameViewModel_TooLongName_ShowsLengthMessage
+          - GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName
+
+      - id: AgentControl-GroupNameViewModel-NeutralUntilTyped
+        title: >-
+          The GroupNameViewModel class shall show no message, and shall not accept a name, before
+          anything has been typed.
+        justification: |
+          A prompt that opens already scolding would be hostile.
+        tests:
+          - GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName
+
+      - id: AgentControl-GroupNameViewModel-RefusesBlankName
+        title: >-
+          The GroupNameViewModel class shall refuse a typed name that is blank, saying that it
+          cannot be blank.
+        justification: |
+          A group with no name could not be shown or told apart from no group.
         tests:
           - GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept
+
+      - id: AgentControl-GroupNameViewModel-RefusesTooLongName
+        title: >-
+          The GroupNameViewModel class shall refuse a typed name longer than 40 characters,
+          saying how many characters a name may have at most, and shall accept one of exactly 40.
+        justification: |
+          A header must never be unmanageably wide; refusing at the limit rather than cutting the
+          name keeps what the user typed and what is stored the same.
+        tests:
           - GroupNameViewModel_TooLongName_ShowsLengthMessage
+
+      - id: AgentControl-GroupNameViewModel-RefusesBuiltInNames
+        title: >-
+          The GroupNameViewModel class shall refuse the names of the built-in sections, Favorites
+          and Ungrouped in any letter case, saying that they are built in.
+        justification: |
+          The built-in sections cannot be taken over by a group of the user's own, or two
+          sections would carry the same name.
+        tests:
+          - GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept
+
+      - id: AgentControl-GroupNameViewModel-AcceptsUsableName
+        title: >-
+          The GroupNameViewModel class shall accept a usable name, completing with the name
+          cleaned of surrounding white space and repeated inner white space.
+        justification: |
+          A stray space typed before or inside a name must not create a group that looks like
+          another one.
+        tests:
           - GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName
 
       - id: AgentControl-GroupNameViewModel-NewGroup
         title: >-
-          The GroupNameViewModel class shall, when creating a group, let a name that matches an
-          existing group ignoring letter case be accepted - with a note that the repo will be
-          added to that group - and shall answer with the existing group's own spelling.
+          The GroupNameViewModel class shall, when creating a group, accept - not refuse - a name
+          that matches an existing group ignoring letter case.
         justification: |
           A group must not exist twice under different letter case; joining the existing group is
           what the user meant.
         tests:
           - GroupNameViewModel_NewGroup_ExistingName_HintsAndAdoptsSpelling
 
+      - id: AgentControl-GroupNameViewModel-NewGroupHint
+        title: >-
+          The GroupNameViewModel class shall, when creating a group with a name that matches an
+          existing group ignoring letter case, show a note, not an error, naming the existing
+          group that the repo will be added to.
+        justification: |
+          The user should know the repo joins a group that already exists instead of starting a
+          new one.
+        tests:
+          - GroupNameViewModel_NewGroup_ExistingName_HintsAndAdoptsSpelling
+
+      - id: AgentControl-GroupNameViewModel-NewGroupAdoptsSpelling
+        title: >-
+          The GroupNameViewModel class shall, when creating a group with a name that matches an
+          existing group ignoring letter case, complete with the existing group's own spelling.
+        justification: |
+          Using the existing spelling keeps one group from appearing under two spellings.
+        tests:
+          - GroupNameViewModel_NewGroup_ExistingName_HintsAndAdoptsSpelling
+
       - id: AgentControl-GroupNameViewModel-Rename
         title: >-
-          The GroupNameViewModel class shall, when renaming a group, start with the group's
-          current name, refuse another group's name, and accept a change of letter case only,
-          answering with exactly what was typed.
+          The GroupNameViewModel class shall, when renaming a group, refuse the name of another
+          group, saying that it already exists.
         justification: |
-          Renaming into another group would silently merge two groups; a change of letter case
-          only must be possible, or a group could never be corrected.
+          Renaming into another group would silently merge two groups.
+        tests:
+          - GroupNameViewModel_Rename_RefusesOtherGroupsAcceptsCaseChange
+
+      - id: AgentControl-GroupNameViewModel-RenameStartsWithCurrentName
+        title: >-
+          The GroupNameViewModel class shall, when renaming a group, start with the group's
+          current name as the typed name.
+        justification: |
+          The user renames what is there, usually by correcting a few characters.
+        tests:
+          - GroupNameViewModel_Rename_RefusesOtherGroupsAcceptsCaseChange
+
+      - id: AgentControl-GroupNameViewModel-RenameAcceptsCaseChange
+        title: >-
+          The GroupNameViewModel class shall, when renaming a group, accept a change of letter
+          case only, completing with exactly what was typed.
+        justification: |
+          A change of letter case only must be possible, or a group could never be corrected.
         tests:
           - GroupNameViewModel_Rename_RefusesOtherGroupsAcceptsCaseChange
 
       - id: AgentControl-GroupNameViewModel-CompletesOnce
         title: >-
-          The GroupNameViewModel class shall complete exactly once, with the accepted name or with
-          none when canceled, however many times it is accepted or canceled afterwards.
+          The GroupNameViewModel class shall, once accepted, complete exactly once with the
+          accepted name, however many times it is accepted or canceled afterwards.
         justification: |
           The window can be closed in several ways, and the one who asked must hear exactly one
           answer, never two.
+        tests:
+          - GroupNameViewModel_Accept_CompletesOnceWithTheName
+
+      - id: AgentControl-GroupNameViewModel-CancelCompletesOnce
+        title: >-
+          The GroupNameViewModel class shall, once canceled, complete exactly once with no name,
+          however many times it is canceled or accepted afterwards.
+        justification: |
+          A prompt closed by the title bar after the cancel button, or accepted after it was
+          canceled, must not answer twice or change its answer.
         tests:
           - GroupNameViewModel_Cancel_CompletesOnceWithNull
 

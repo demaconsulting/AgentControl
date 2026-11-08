@@ -51,6 +51,7 @@ includes:
   - docs/reqstream/agent-control/git-integration/committed-agent-files-cache.yaml
   - docs/reqstream/agent-control/settings.yaml
   - docs/reqstream/agent-control/settings/settings-store.yaml
+  - docs/reqstream/agent-control/settings/repo-group-name.yaml
   - docs/reqstream/agent-control/logging.yaml
   - docs/reqstream/agent-control/startup.yaml
   - docs/reqstream/agent-control/startup/startup-options.yaml

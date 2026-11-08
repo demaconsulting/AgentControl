@@ -211,7 +211,9 @@ agentcontrol-puppet wheel <notches> [--ctrl] [--on <automationId> | --at <x>,<y>
 ```
 
 - `key` sends **real** key presses to the focused element of the instance (or to `--to <id>` after focusing it); the
-  window that is raised for it is the innermost open dialog when there is one (a modal dialog keeps the keyboard, and
+  window that is raised for it is the innermost open dialog when there is one (the topmost titled dialog window by
+  z-order, a dialog opened from a dialog sitting above its owner, whatever order UI Automation lists them in; a
+  modal dialog keeps the keyboard, and
   the disabled main window behind it must not be pushed in front of it), else the main window. A
   chord is modifiers joined with `+`: `Ctrl+C`, `Ctrl+Shift+Z`, `Delete`, `F2`, `Escape`, `Enter`, `Ctrl+Enter`,
   letters, digits, `F1`-`F12`, `Tab`, `Space`, `Backspace`, arrows, `Home`/`End`/`PageUp`/`PageDown`, `Plus`, `Minus`.

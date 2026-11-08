@@ -258,6 +258,8 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// </returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="repoPath"/> is null,
     ///     empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
+    ///     the repo was not added (the list, the cards and the file are unchanged).</exception>
     public bool AddRepo(string repoPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoPath);
@@ -281,14 +283,23 @@ internal sealed class MainWindowViewModel : ViewModelBase
             PinnedSource = pin?.Source
         };
 
-        _settings.RecentRepos.Insert(0, recentRepo);
+        // Prepare the card first, then persist; only a successful save puts the repo in the live
+        // list, so a failed save leaves the list, the cards and the file exactly as they were
         var card = CreateCard(recentRepo);
-        AttachCardEvents(card);
         card.RefreshCheap();
         card.RefreshDirtyStatus();
-        RepoCards.Insert(0, card);
+        try
+        {
+            CommitSettingsChange(settings => settings.RecentRepos.Insert(0, recentRepo));
+        }
+        catch (InvalidOperationException)
+        {
+            card.Retire();
+            throw;
+        }
 
-        SaveSettings();
+        AttachCardEvents(card);
+        RepoCards.Insert(0, card);
         UpdateDisplayedRepoCards();
 
         // The new card's upgrade check reads its package source, so it runs in the background
@@ -306,18 +317,24 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     view/view-model separation, <c>MainWindow</c>'s code-behind is responsible for showing
     ///     a confirmation dialog (via <c>ConfirmationWindow</c>) before calling this, in response
     ///     to <paramref name="card"/> raising <see cref="RepoCardViewModel.RemoveRequested"/>.
+    ///     The updated settings are saved before the card is removed, so a failed save leaves the
+    ///     list as it was; the removed card is then retired (see
+    ///     <see cref="RepoCardViewModel.Retire"/>) so nothing it still has running can report back.
     /// </remarks>
     /// <param name="card">The card to remove.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="card"/> is
     ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
+    ///     nothing was removed.</exception>
     public void RemoveRepo(RepoCardViewModel card)
     {
         ArgumentNullException.ThrowIfNull(card);
 
-        _settings.RecentRepos.RemoveAll(r => string.Equals(r.Path, card.RepoPath, StringComparison.OrdinalIgnoreCase));
+        CommitSettingsChange(settings => settings.RecentRepos.RemoveAll(
+            r => string.Equals(r.Path, card.RepoPath, StringComparison.OrdinalIgnoreCase)));
         RepoCards.Remove(card);
+        card.Retire();
 
-        SaveSettings();
         UpdateDisplayedRepoCards();
     }
 
@@ -499,9 +516,97 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// <summary>
     ///     Persists the current settings to the configured directory.
     /// </summary>
+    /// <remarks>
+    ///     Writes the live settings as they are. The changes the user makes in the main window do
+    ///     not use this: they go through <see cref="CommitSettingsChange"/>, which saves a candidate
+    ///     first and changes the live settings only when that succeeded.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be
     ///     written.</exception>
     public void SaveSettings() => SettingsStore.Save(_settings, _configDirectory);
+
+    /// <summary>
+    ///     Raised when a change the user made in the main window (marking a favorite, choosing a group
+    ///     or a card color, collapsing a section, a launch being recorded) could not be saved. The
+    ///     change was not applied, so the list still shows what is on disk; the argument is the
+    ///     message for the user and the window shows it.
+    /// </summary>
+    public event EventHandler<string>? SettingsSaveFailed;
+
+    /// <summary>
+    ///     Makes a change to the settings all-or-nothing: the change is tried on a candidate copy,
+    ///     the candidate is saved, and only when that succeeded is the same change applied to the
+    ///     live settings.
+    /// </summary>
+    /// <remarks>
+    ///     This is what keeps memory, the displayed list and the settings file in step. A failed save
+    ///     leaves the live settings untouched, so a later, unrelated save can never write the change
+    ///     that failed. The candidate copies the repos (so the change never reaches the live
+    ///     entries) and the collapsed list; everything else is shared and must not be changed by
+    ///     <paramref name="change"/>. The change runs twice (on the candidate, then on the live
+    ///     settings), so it must give the same result both times and must not depend on state that the
+    ///     first run changed.
+    /// </remarks>
+    /// <param name="change">The change, expressed on the settings it is given.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the candidate cannot be saved (the
+    ///     file cannot be written, or a source embeds a credential); the live settings are unchanged.</exception>
+    private void CommitSettingsChange(Action<AppSettings> change)
+    {
+        // Candidate copy: the user's repos and collapsed sections are copied, so the trial change
+        // cannot reach the live objects
+        var candidate = _settings.CreatePersistedCopy();
+        candidate.RecentRepos = [.. _settings.RecentRepos.Select(repo => repo.Clone())];
+        candidate.CollapsedGroups = [.. _settings.CollapsedGroups ?? []];
+        change(candidate);
+
+        // Save the candidate; an exception here leaves the live settings as they were
+        SettingsStore.Save(candidate, _configDirectory);
+
+        // Saved: adopt the change
+        change(_settings);
+    }
+
+    /// <summary>
+    ///     Applies a change to one repo's entry all-or-nothing, on behalf of its card (see
+    ///     <see cref="CommitSettingsChange"/>); a failed save is reported to the user instead of
+    ///     thrown, because the change comes from a button the user pressed.
+    /// </summary>
+    /// <param name="repo">The repo's entry; a repo that is no longer in the list (a card that was
+    ///     removed) is changed without saving anything.</param>
+    /// <param name="change">The change to the repo's entry.</param>
+    /// <returns><see langword="true"/> when the change was saved and applied (or needed no saving);
+    ///     <see langword="false"/> when the save failed, in which case nothing changed and
+    ///     <see cref="SettingsSaveFailed"/> was raised.</returns>
+    private bool CommitRepoChange(RecentRepo repo, Action<RecentRepo> change)
+    {
+        if (!_settings.RecentRepos.Contains(repo))
+        {
+            change(repo);
+            return true;
+        }
+
+        try
+        {
+            CommitSettingsChange(settings =>
+                change(settings.RecentRepos.First(
+                    entry => string.Equals(entry.Path, repo.Path, StringComparison.OrdinalIgnoreCase))));
+            return true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            ReportSaveFailure(ex);
+            return false;
+        }
+    }
+
+    /// <summary>
+    ///     Tells the user (through <see cref="SettingsSaveFailed"/>) that a change was not saved and
+    ///     so not applied.
+    /// </summary>
+    /// <param name="exception">The failure.</param>
+    private void ReportSaveFailure(InvalidOperationException exception) =>
+        SettingsSaveFailed?.Invoke(
+            this, $"The change was not applied because it could not be saved. {SecretRedactor.SafeMessage(exception)}");
 
     /// <summary>
     ///     Drops the shared cache's entries for every source that existed before a settings change
@@ -684,7 +789,7 @@ internal sealed class MainWindowViewModel : ViewModelBase
         }
 
         var header = new RepoGroupHeaderViewModel(kind, name);
-        header.ToggleRequested += (_, _) => ToggleGroupCollapsed(header.Name);
+        header.ToggleRequested += (_, _) => RunReportingSaveFailure(() => ToggleGroupCollapsed(header.Name));
         header.RenameRequested += (_, _) => GroupRenameRequested?.Invoke(this, header.Name);
         header.RemoveGroupRequested += (_, _) => GroupRemoveRequested?.Invoke(this, header.Name);
         _headers[key] = header;
@@ -710,18 +815,24 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// </remarks>
     /// <param name="name">The section's name (a group name, or <c>Favorites</c> or
     ///     <c>Ungrouped</c>); letter case is ignored.</param>
-    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
+    ///     the section keeps its state.</exception>
     public void ToggleGroupCollapsed(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        _settings.CollapsedGroups ??= [];
-        if (_settings.CollapsedGroups.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, name)) == 0)
+        // Decided once, from the live state, so the trial change and the real one agree
+        var collapse = !IsGroupCollapsed(name);
+        CommitSettingsChange(settings =>
         {
-            _settings.CollapsedGroups.Add(name);
-        }
+            settings.CollapsedGroups ??= [];
+            settings.CollapsedGroups.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, name));
+            if (collapse)
+            {
+                settings.CollapsedGroups.Add(name);
+            }
+        });
 
-        SaveSettings();
         UpdateDisplayedRepoCards();
     }
 
@@ -736,7 +847,8 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// <returns><see langword="true"/> when the group was renamed (or the name was already so);
     ///     <see langword="false"/> when the group does not exist or the new name cannot be used, in
     ///     which case nothing changed.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
+    ///     the group is unchanged.</exception>
     public bool RenameGroup(string oldName, string newName)
     {
         var target = RepoGroupName.Normalize(newName);
@@ -750,18 +862,20 @@ internal sealed class MainWindowViewModel : ViewModelBase
         }
 
         // Every member takes the new spelling; the collapsed state follows the name
-        foreach (var repo in _settings.RecentRepos.Where(
-                     repo => RepoGroupName.Comparer.Equals(RepoGroupName.Sanitize(repo.GroupName) ?? string.Empty, oldName)))
-        {
-            repo.GroupName = target;
-        }
-
         var wasCollapsed = IsGroupCollapsed(oldName);
-        _settings.CollapsedGroups?.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, oldName));
-        if (wasCollapsed)
+        CommitSettingsChange(settings =>
         {
-            (_settings.CollapsedGroups ??= []).Add(target);
-        }
+            foreach (var repo in settings.RecentRepos.Where(repo => IsInGroup(repo, oldName)))
+            {
+                repo.GroupName = target;
+            }
+
+            settings.CollapsedGroups?.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, oldName));
+            if (wasCollapsed)
+            {
+                (settings.CollapsedGroups ??= []).Add(target);
+            }
+        });
 
         FinishGroupEdit();
         return true;
@@ -773,7 +887,8 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// </summary>
     /// <param name="name">The group's name; letter case is ignored.</param>
     /// <returns><see langword="true"/> when the group existed and was removed.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
+    ///     the group is unchanged.</exception>
     public bool RemoveGroup(string name)
     {
         if (!GroupNames.Contains(name, RepoGroupName.Comparer))
@@ -781,23 +896,25 @@ internal sealed class MainWindowViewModel : ViewModelBase
             return false;
         }
 
-        foreach (var repo in _settings.RecentRepos.Where(
-                     repo => RepoGroupName.Comparer.Equals(RepoGroupName.Sanitize(repo.GroupName) ?? string.Empty, name)))
+        CommitSettingsChange(settings =>
         {
-            repo.GroupName = null;
-        }
+            foreach (var repo in settings.RecentRepos.Where(repo => IsInGroup(repo, name)))
+            {
+                repo.GroupName = null;
+            }
 
-        _settings.CollapsedGroups?.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, name));
+            settings.CollapsedGroups?.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, name));
+        });
+
         FinishGroupEdit();
         return true;
     }
 
     /// <summary>
-    ///     Persists a group rename or removal and brings the cards and the list up to date.
+    ///     Brings the cards and the list up to date after a group rename or removal that was saved.
     /// </summary>
     private void FinishGroupEdit()
     {
-        SaveSettings();
         foreach (var card in RepoCards)
         {
             card.RaiseGroupPropertiesChanged();
@@ -805,6 +922,16 @@ internal sealed class MainWindowViewModel : ViewModelBase
 
         UpdateDisplayedRepoCards();
     }
+
+    /// <summary>
+    ///     Gets whether a repo's entry is in the named group (letter case ignored; whatever the entry
+    ///     holds is read through <see cref="RepoGroupName.Sanitize"/>).
+    /// </summary>
+    /// <param name="repo">The repo's entry.</param>
+    /// <param name="groupName">The group's name.</param>
+    /// <returns><see langword="true"/> when the repo is in that group.</returns>
+    private static bool IsInGroup(RecentRepo repo, string groupName) =>
+        RepoGroupName.Comparer.Equals(RepoGroupName.Sanitize(repo.GroupName) ?? string.Empty, groupName);
 
     /// <summary>
     ///     Raised when the user asks to rename a group (its name is the argument); the window shows
@@ -820,9 +947,10 @@ internal sealed class MainWindowViewModel : ViewModelBase
 
     /// <summary>
     ///     Subscribes to a card's <see cref="RepoCardViewModel.FavoriteChanged"/>,
-    ///     <see cref="RepoCardViewModel.GroupChanged"/>, <see cref="RepoCardViewModel.CardColorChanged"/> and
-    ///     <c>LaunchRecorded</c> events so settings are persisted and
-    ///     <see cref="DisplayedRepoCards"/> is kept current. Deliberately does <em>not</em>
+    ///     <see cref="RepoCardViewModel.GroupChanged"/> and <c>LaunchRecorded</c> events so
+    ///     <see cref="DisplayedRepoCards"/> is kept current. The change itself has already been saved
+    ///     by then: the card applies it through <see cref="CommitRepoChange"/> and raises its event
+    ///     only when that succeeded. Deliberately does <em>not</em>
     ///     subscribe to <see cref="RepoCardViewModel.RemoveRequested"/> here - that event is a
     ///     view-layer wiring point only (the view shows a confirmation dialog and calls
     ///     <see cref="RemoveRepo"/> itself only if the user confirms); subscribing to it directly
@@ -831,33 +959,44 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// <param name="card">The card to subscribe to.</param>
     private void AttachCardEvents(RepoCardViewModel card)
     {
-        card.FavoriteChanged += (_, _) =>
+        card.FavoriteChanged += (_, _) => UpdateDisplayedRepoCards();
+        card.GroupChanged += (_, _) => UpdateDisplayedRepoCards();
+        card.LaunchRecorded += (_, _) => UpdateDisplayedRepoCards();
+    }
+
+    /// <summary>
+    ///     Runs a change that saves settings from an event handler and, when the save fails, tells
+    ///     the user instead of letting the exception escape into the UI framework.
+    /// </summary>
+    /// <param name="change">The change; it saves before applying, so a failure changed nothing.</param>
+    private void RunReportingSaveFailure(Action change)
+    {
+        try
         {
-            SaveSettings();
-            UpdateDisplayedRepoCards();
-        };
-        card.GroupChanged += (_, _) =>
+            change();
+        }
+        catch (InvalidOperationException ex)
         {
-            SaveSettings();
-            UpdateDisplayedRepoCards();
-        };
-        card.CardColorChanged += (_, _) => SaveSettings();
-        card.LaunchRecorded += (_, _) =>
-        {
-            SaveSettings();
-            UpdateDisplayedRepoCards();
-        };
+            ReportSaveFailure(ex);
+        }
     }
 
     /// <summary>
     ///     Creates a <see cref="RepoCardViewModel"/> for a recent-repos entry, wired to always
-    ///     read the live <see cref="_settings"/>/<see cref="_startupOptions"/> fields and share
-    ///     this view model's <see cref="PackageVersionCache"/>.
+    ///     read the live <see cref="_settings"/>/<see cref="_startupOptions"/> fields, share
+    ///     this view model's <see cref="PackageVersionCache"/> and save the card's own changes
+    ///     all-or-nothing (see <see cref="CommitRepoChange"/>).
     /// </summary>
     /// <param name="recentRepo">The recent-repos entry to create a card for.</param>
     /// <returns>The created card, not yet refreshed.</returns>
     private RepoCardViewModel CreateCard(RecentRepo recentRepo) =>
-        new(recentRepo, () => _settings, _packageVersionCache, _startupOptions, credentials: Credentials);
+        new(
+            recentRepo,
+            () => _settings,
+            _packageVersionCache,
+            _startupOptions,
+            credentials: Credentials,
+            commitChange: CommitRepoChange);
 
     /// <summary>
     ///     Creates the provider that the settings window's "Test connection" lists versions

@@ -89,6 +89,62 @@ public class DialogSelectorTests
     }
 
     /// <summary>
+    ///     Validates that the topmost dialog by z-order is chosen, not the one enumerated last.
+    /// </summary>
+    [Fact]
+    public void DialogSelector_InnermostDialog_EnumerationDiffersFromZOrder_ReturnsTheTopmost()
+    {
+        // Arrange: Settings is on top of the stack although the editor is listed after it; the main window owns both
+        var main = new DialogCandidate("AgentControl", false, true, 1);
+        var settings = new DialogCandidate("Settings", false, true, 2, 1);
+        var editor = new DialogCandidate("Edit source", false, true, 3, 1);
+
+        // Act
+        var index = DialogSelector.InnermostDialog([main, settings, editor], [2, 3, 1]);
+
+        // Assert
+        Assert.Equal(1, index);
+    }
+
+    /// <summary>
+    ///     Validates that a dialog opened from a dialog is chosen over its owner, whatever order they are listed in.
+    /// </summary>
+    [Fact]
+    public void DialogSelector_InnermostDialog_OwnerChain_ReturnsTheInnermostOwnedDialog()
+    {
+        // Arrange: enumeration lists the innermost editor before the Settings window that owns it
+        var main = new DialogCandidate("AgentControl", false, true, 1);
+        var editor = new DialogCandidate("Edit source", false, true, 3, 2);
+        var settings = new DialogCandidate("Settings", false, true, 2, 1);
+
+        // Act
+        var index = DialogSelector.InnermostDialog([main, editor, settings], [2, 3, 1]);
+
+        // Assert
+        Assert.Equal(1, index);
+    }
+
+    /// <summary>
+    ///     Validates that a topmost root that does not qualify (a tooltip window, an untitled one) is skipped for the
+    ///     topmost one that does.
+    /// </summary>
+    [Fact]
+    public void DialogSelector_InnermostDialog_TopmostRootDoesNotQualify_ReturnsNextTopmostDialog()
+    {
+        // Arrange
+        var main = new DialogCandidate("AgentControl", false, true, 1);
+        var settings = new DialogCandidate("Settings", false, true, 2, 1);
+        var editor = new DialogCandidate("Edit source", false, true, 3, 2);
+        var tooltip = new DialogCandidate("Save", false, false, 4);
+
+        // Act
+        var index = DialogSelector.InnermostDialog([main, tooltip, editor, settings], [4, 3, 2, 1]);
+
+        // Assert
+        Assert.Equal(2, index);
+    }
+
+    /// <summary>
     ///     Validates that off-screen and untitled windows are skipped in favor of an earlier visible titled one.
     /// </summary>
     [Fact]

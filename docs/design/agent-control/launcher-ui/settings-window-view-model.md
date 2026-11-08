@@ -44,9 +44,12 @@ notification for `IsCustomAgentToolSelected`.
 tool and shell" decision.
 
 **Theme** / **AvailableThemes**: `ThemePreference` / `static IReadOnlyList<ThemePreference>` — The
-Appearance choice (system default, light, dark, in that order), seeded from the saved setting (the system
-default when none was saved) and saved with the other settings; the Settings window shows it in a picker
-with friendly names (`AgentControl-SettingsWindowViewModel-Appearance`).
+Appearance choice. `AvailableThemes` lists system default, light, dark, in that order
+(`AgentControl-SettingsWindowViewModel-Appearance`); `Theme` is seeded from the saved setting, the system
+default when none was saved (`AgentControl-SettingsWindowViewModel-AppearanceStartsFromSaved`), and is passed to
+the owner with the other settings on save (`AgentControl-SettingsWindowViewModel-AppearanceSaved`); the Settings
+window shows it in a picker with friendly names, which are produced by the `LauncherUI` supporting type
+`ThemePreferenceDisplayNameConverter`, not by this view model.
 
 **AvailableShellPreferences**: `static IReadOnlyList<string>` — The OS-conditional
 shell/terminal preset choices offered by the picker: `pwsh`, `powershell`, `cmd` on Windows, or
