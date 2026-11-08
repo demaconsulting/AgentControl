@@ -1,0 +1,151 @@
+---
+# Software Unit Requirements for the RepoGroupName Class
+#
+# RepoGroupName holds the rules for the names of the user's own repo groups: how a typed or stored
+# name is cleaned up, which names are acceptable, how a stored name is repaired and how names that
+# differ only in letter case are treated as one group. A group exists only as a name stored on its
+# repos, so these rules are one shared, pure unit that the settings loader, the view models and the
+# name prompt all agree on. Each requirement states one observable behavior.
+
+sections:
+  - title: RepoGroupName Unit Requirements
+    requirements:
+      # ---- Cleaning up a name ----
+      - id: AgentControl-RepoGroupName-Normalize
+        title: >-
+          The RepoGroupName class shall clean up a name by turning each run of white space and
+          control characters into a single space and removing the spaces at both ends.
+        justification: |
+          A stray space, tab or control character typed or pasted into a name must not create a
+          group that looks like another group.
+        tests:
+          - RepoGroupName_Normalize_CleansWhiteSpaceAndControlCharacters
+
+      - id: AgentControl-RepoGroupName-NormalizeNothingLeft
+        title: >-
+          The RepoGroupName class shall treat a name that is missing, empty or left with nothing
+          but white space and control characters as no group.
+        justification: |
+          Leaving the group box empty is how the user says "no group", and a repo with no group
+          must not be filed under an invisible name.
+        tests:
+          - RepoGroupName_Normalize_CleansWhiteSpaceAndControlCharacters
+
+      # ---- Checking a typed name ----
+      - id: AgentControl-RepoGroupName-AcceptsUsableName
+        title: >-
+          The RepoGroupName class shall report a typed name that is not blank, is at most 40
+          characters long and is not a built-in section name as usable.
+        justification: |
+          The prompt and the repo menu need one answer to "may this name be used" so that they
+          cannot disagree.
+        tests:
+          - RepoGroupName_Validate_ReportsEachProblem
+
+      - id: AgentControl-RepoGroupName-RefusesBlankName
+        title: >-
+          The RepoGroupName class shall refuse a typed name that is empty or only white space,
+          reporting that it is empty.
+        justification: |
+          A group with no name could not be shown or told apart from no group.
+        tests:
+          - RepoGroupName_Validate_ReportsEachProblem
+
+      - id: AgentControl-RepoGroupName-RefusesTooLongName
+        title: >-
+          The RepoGroupName class shall refuse a typed name longer than 40 characters, reporting
+          that it is too long, and shall not refuse one of exactly 40 characters.
+        justification: |
+          A header can never be unmanageably wide when no name is longer than the limit.
+        tests:
+          - RepoGroupName_Validate_ReportsEachProblem
+
+      - id: AgentControl-RepoGroupName-RefusesReservedNames
+        title: >-
+          The RepoGroupName class shall refuse the names of the two built-in sections, Favorites
+          and Ungrouped, in any letter case and with surrounding white space, reporting that they
+          are reserved.
+        justification: |
+          The built-in sections may not be taken over by a group of the user's own, or two
+          sections would carry the same name and the collapsed state of the built-in sections
+          could not be stored beside the groups'.
+        tests:
+          - RepoGroupName_Validate_ReportsEachProblem
+
+      # ---- Repairing a stored name ----
+      - id: AgentControl-RepoGroupName-SanitizeStoredName
+        title: >-
+          The RepoGroupName class shall repair a stored name instead of refusing it, returning a
+          usable stored name cleaned up like a typed one.
+        justification: |
+          A settings file that was edited by hand or damaged must never keep the application from
+          starting, so stored names are repaired rather than refused.
+        tests:
+          - RepoGroupName_Sanitize_RepairsStoredNames
+
+      - id: AgentControl-RepoGroupName-SanitizeCutsLongName
+        title: >-
+          The RepoGroupName class shall cut a stored name longer than 40 characters to its first
+          40 characters.
+        justification: |
+          A stored name must obey the same limit as a typed one without the file being refused.
+        tests:
+          - RepoGroupName_Sanitize_RepairsStoredNames
+
+      - id: AgentControl-RepoGroupName-SanitizeReservedIsNoGroup
+        title: >-
+          The RepoGroupName class shall read a stored name that is missing, blank or one of the
+          built-in section names as no group.
+        justification: |
+          A repo whose stored group is unusable is shown ungrouped, so the damage never hides it.
+        tests:
+          - RepoGroupName_Sanitize_RepairsStoredNames
+
+      # ---- One group per name ----
+      - id: AgentControl-RepoGroupName-DistinctNames
+        title: >-
+          The RepoGroupName class shall list names that differ only in letter case as one group,
+          spelled the way the first member that uses the group spells it.
+        justification: |
+          Work and work are one group on every machine and culture, and one group needs exactly
+          one spelling however its repos were recorded.
+        tests:
+          - RepoGroupName_DistinctNames_UnifiesCaseAndSorts
+
+      - id: AgentControl-RepoGroupName-DistinctNamesSorted
+        title: >-
+          The RepoGroupName class shall list the distinct groups alphabetically, ignoring letter
+          case.
+        justification: |
+          The sections of the repo list and the groups offered by the repo menu follow one
+          predictable order.
+        tests:
+          - RepoGroupName_DistinctNames_UnifiesCaseAndSorts
+
+      - id: AgentControl-RepoGroupName-DistinctNamesLeaveOutNoGroup
+        title: >-
+          The RepoGroupName class shall leave out of the list of groups the repos that are in no
+          group.
+        justification: |
+          A repo in no group does not make a group of its own.
+        tests:
+          - RepoGroupName_DistinctNames_UnifiesCaseAndSorts
+
+      - id: AgentControl-RepoGroupName-CanonicalizeAdoptsExisting
+        title: >-
+          The RepoGroupName class shall give a name that matches an existing group ignoring
+          letter case that group's own spelling.
+        justification: |
+          A name typed with another letter case must join the existing group instead of creating
+          a look-alike.
+        tests:
+          - RepoGroupName_Canonicalize_AdoptsExistingSpelling
+
+      - id: AgentControl-RepoGroupName-CanonicalizeKeepsNewName
+        title: >-
+          The RepoGroupName class shall leave a name that matches no existing group as it was
+          typed.
+        justification: |
+          A new group is spelled the way the user chose.
+        tests:
+          - RepoGroupName_Canonicalize_AdoptsExistingSpelling

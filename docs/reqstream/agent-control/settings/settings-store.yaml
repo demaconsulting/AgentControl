@@ -96,3 +96,104 @@ sections:
           a crash or full disk during a save must not leave it truncated.
         tests:
           - SettingsStore_Save_RepeatedSaves_LeavesOnlySettingsFileWithLatestContent
+
+      - id: AgentControl-SettingsStore-Theme
+        title: >-
+          The SettingsStore class shall save the user's theme choice (system default, light or
+          dark) by name and read it back.
+        justification: |
+          The theme is a per-user preference that must survive a restart, and a name rather than
+          a number keeps the file readable and valid when the choices are reordered.
+        tests:
+          - SettingsStore_SaveThenLoad_Theme_RoundTripsByName
+
+      - id: AgentControl-SettingsStore-ThemeDefaultsToSystem
+        title: >-
+          The SettingsStore class shall read a settings file that has no theme value as the
+          system default.
+        justification: |
+          Existing settings files have no theme value and must keep following the operating
+          system.
+        tests:
+          - SettingsStore_Load_NoThemeValue_DefaultsToSystem
+
+      - id: AgentControl-SettingsStore-ThemeInvalidReadsAsSystem
+        title: >-
+          The SettingsStore class shall read an unknown or invalid theme value as the system
+          default instead of failing the load.
+        justification: |
+          A mistyped or future value in the file must never keep the application from starting.
+        tests:
+          - SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem
+
+      - id: AgentControl-SettingsStore-RepoOrganization
+        title: >-
+          The SettingsStore class shall save a repo's group, a repo's chosen card color and the
+          collapsed section names in the settings file and read them back.
+        justification: |
+          These values are personal choices that must survive a restart; they belong in the
+          user's own settings file and must not reach a repository.
+        tests:
+          - SettingsStore_SaveThenLoad_GroupColorAndCollapsedGroups_RoundTrip
+
+      - id: AgentControl-SettingsStore-RepoOrganizationOmitsUnset
+        title: >-
+          The SettingsStore class shall write nothing for a repo's group or card color when the
+          repo has none.
+        justification: |
+          A repo without a group or a chosen color must leave the file as plain as before these
+          choices existed.
+        tests:
+          - SettingsStore_SaveThenLoad_GroupColorAndCollapsedGroups_RoundTrip
+
+      - id: AgentControl-SettingsStore-RepoOrganizationDefaults
+        title: >-
+          The SettingsStore class shall read a settings file written before groups, card colors
+          and collapsed sections existed as no group, the automatic color and nothing collapsed.
+        justification: |
+          Existing settings files must load unchanged with the plain list.
+        tests:
+          - SettingsStore_Load_FileWithoutOrganizingValues_UsesDefaults
+
+      - id: AgentControl-SettingsStore-InvalidGroupOrColorReadsAsNone
+        title: >-
+          The SettingsStore class shall read a repo's group or card color that is null or of the
+          wrong type as none, without disturbing the values after it.
+        justification: |
+          A hand-edited or damaged file must degrade to the plain list instead of keeping the
+          application from starting.
+        tests:
+          - SettingsStore_Load_InvalidGroupOrColorType_ReadsAsNone
+
+      - id: AgentControl-SettingsStore-InvalidCollapsedGroupsRepaired
+        title: >-
+          The SettingsStore class shall read a collapsed-sections value that is not a list of
+          strings as an empty list, and shall keep only the clean, distinct string entries of a
+          damaged list.
+        justification: |
+          A damaged list of collapsed sections must not keep the application from starting, and
+          must not lose the entries that can still be understood.
+        tests:
+          - SettingsStore_Load_InvalidCollapsedGroups_KeepsOnlyCleanStrings
+
+      - id: AgentControl-SettingsStore-GroupNamesRepaired
+        title: >-
+          The SettingsStore class shall repair every stored group name on load by the repo group
+          name rules, so that a loaded group name is always a usable name and names that differ
+          only in letter case are one group.
+        justification: |
+          A group exists only as the name stored on its repos, so a hand-edited or damaged file
+          must never produce an unusable group or two look-alike groups; what a usable name is
+          is decided by the repo group name rules, which the store only applies.
+        tests:
+          - SettingsStore_Load_GroupNames_AreRepairedAndUnified
+
+      - id: AgentControl-SettingsStore-UnknownCardColorIsAutomatic
+        title: >-
+          The SettingsStore class shall read a card color name that is not one of the known card
+          colors as the automatic color, so that a later save does not write it back.
+        justification: |
+          A mistyped color, or one from a newer version, must not stay in the settings where
+          nothing can show it; the card then follows the automatic color again.
+        tests:
+          - SettingsStore_Load_UnknownCardColorName_ReadsAsAutomaticAndIsNotSavedBack

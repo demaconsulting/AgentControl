@@ -27,6 +27,10 @@ input-files:
   - docs/verification/agent-control/launcher-ui/settings-window-view-model.md
   - docs/verification/agent-control/launcher-ui/source-editor-view-model.md
   - docs/verification/agent-control/launcher-ui/credential-prompt-view-model.md
+  - docs/verification/agent-control/launcher-ui/repo-image-locator.md
+  - docs/verification/agent-control/launcher-ui/repo-group-header-view-model.md
+  - docs/verification/agent-control/launcher-ui/group-name-view-model.md
+  - docs/verification/agent-control/launcher-ui/dialog-behavior.md
   - docs/verification/agent-control/agent-package-management.md
   - docs/verification/agent-control/agent-package-management/package-source.md
   - docs/verification/agent-control/agent-package-management/package-source-registry.md

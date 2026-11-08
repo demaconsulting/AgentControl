@@ -334,7 +334,7 @@ public sealed class RememberedSignInTests
     private static Window FillServerEditor(
         AgentControlTestContext context, Window settingsWindow, MockNuGetFeed feed, string alias = "Feed")
     {
-        Find(settingsWindow, "AddNuGetServerSourceButton").AsButton().Invoke();
+        AgentControlTestContext.InvokeAddSourceMenuItem(settingsWindow, "AddNuGetServerSourceButton");
         var editor = context.WaitForWindowWithDescendant("SourceTestConnectionButton", TimeSpan.FromSeconds(15));
         Assert.NotNull(editor);
         Find(editor, "SourceAliasTextBox").AsTextBox().Text = alias;
@@ -356,7 +356,7 @@ public sealed class RememberedSignInTests
     private static Window OpenSettings(AgentControlTestContext context, Window mainWindow)
     {
         Find(mainWindow, "OpenSettingsButton").AsButton().Invoke();
-        var settingsWindow = context.WaitForWindowWithDescendant("AddZipSourceButton", TimeSpan.FromSeconds(15));
+        var settingsWindow = context.WaitForWindowWithDescendant("AddSourceButton", TimeSpan.FromSeconds(15));
         Assert.NotNull(settingsWindow);
         return settingsWindow;
     }

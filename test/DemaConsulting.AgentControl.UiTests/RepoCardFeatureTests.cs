@@ -145,6 +145,158 @@ public sealed class RepoCardFeatureTests
     }
 
     /// <summary>
+    ///     A repo whose folder is missing keeps an enabled menu item that re-checks it, labeled "Check
+    ///     again"; choosing it while the folder is still missing leaves the card missing (so the badge
+    ///     is not just stale), and once the folder is back, choosing it clears the "Folder missing"
+    ///     badge and enables Launch again.
+    /// </summary>
+    [Fact]
+    public void RefreshMenuItem_MissingFolder_IsEnabledAsCheckAgain_AndFindsFolderOnceBack()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: a repo whose folder does not exist (yet)
+        string? missingPath = null;
+        using var context = new AgentControlTestContext(customizeSettings: (settings, self) =>
+        {
+            missingPath = Path.Combine(self.RootDirectory, "returning-repo");
+            settings["RecentRepos"] = new object[] { new { Path = missingPath } };
+        });
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        Assert.NotNull(Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MissingRepoBadge")),
+            timeout: TimeSpan.FromSeconds(10),
+            interval: TimeSpan.FromMilliseconds(200)).Result);
+
+        Assert.False(FindLaunchButton(mainWindow).IsEnabled);
+
+        // Act: open the card menu
+        var refresh = OpenRefreshMenuItem(mainWindow);
+
+        // Assert: Refresh is offered as "Check again" and is enabled (Launch is not)
+        Assert.Equal("Check again", refresh.Name);
+        Assert.True(refresh.IsEnabled);
+
+        // Act: choose Check again while the folder is still missing
+        refresh.Invoke();
+
+        // Assert: the card is still missing - the badge stays (the wait for it to vanish times out)
+        Assert.False(Retry.WhileNotNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MissingRepoBadge")),
+            timeout: TimeSpan.FromSeconds(3),
+            interval: TimeSpan.FromMilliseconds(200)).Success);
+        Assert.False(FindLaunchButton(mainWindow).IsEnabled);
+
+        // Act: the folder comes back, then the user chooses Check again
+        Directory.CreateDirectory(missingPath!);
+        OpenRefreshMenuItem(mainWindow).Invoke();
+
+        // Assert: the badge is gone (the wait for it to vanish succeeds with nothing left) and the
+        // recovered card can launch again
+        Assert.True(Retry.WhileNotNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MissingRepoBadge")),
+            timeout: TimeSpan.FromSeconds(15),
+            interval: TimeSpan.FromMilliseconds(200)).Success);
+        Assert.True(Retry.WhileFalse(
+            () => FindLaunchButton(mainWindow).IsEnabled,
+            timeout: TimeSpan.FromSeconds(15),
+            interval: TimeSpan.FromMilliseconds(200)).Result);
+    }
+
+    /// <summary>
+    ///     A pinned package that is the newest one shows the small "Agent files are up to date" check mark
+    ///     in its chip; a pinned package with an upgrade available does not.
+    /// </summary>
+    [Fact]
+    public void UpToDateCue_ShownOnlyForPinnedPackageThatIsUpToDate()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        const string packageName = "contoso-agents";
+        var sourceDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-source-" + Guid.NewGuid());
+
+        try
+        {
+            FixturePackageBuilder.Create(sourceDirectory, packageName, "1.0.0");
+
+            // Up to date: pinned to the only version there is
+            using (var current = new AgentControlTestContext(
+                packageSourcePath: sourceDirectory, pinnedPackageName: packageName, pinnedPackageVersion: "1.0.0"))
+            {
+                var mainWindow = current.Launch();
+                var cue = Retry.WhileNull(
+                    () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpToDateCue")),
+                    timeout: TimeSpan.FromSeconds(15),
+                    interval: TimeSpan.FromMilliseconds(200)).Result;
+                Assert.NotNull(cue);
+                Assert.Equal("Agent files are up to date", cue.Name);
+            }
+
+            // Upgrade available: a newer version exists, so no cue
+            FixturePackageBuilder.Create(sourceDirectory, packageName, "1.1.0");
+            using var older = new AgentControlTestContext(
+                packageSourcePath: sourceDirectory, pinnedPackageName: packageName, pinnedPackageVersion: "1.0.0");
+            var olderWindow = older.Launch();
+            Assert.NotNull(Retry.WhileNull(
+                () => olderWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeAvailableBadge")),
+                timeout: TimeSpan.FromSeconds(15),
+                interval: TimeSpan.FromMilliseconds(200)).Result);
+            Assert.Null(olderWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpToDateCue")));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(sourceDirectory, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup only.
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Opens the seeded repo card's "..." menu and returns its Refresh (or "Check again") item.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    /// <returns>The menu item.</returns>
+    private static MenuItem OpenRefreshMenuItem(Window mainWindow)
+    {
+        mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MoreActionsButton"))!.AsButton().Invoke();
+        var refresh = Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("RefreshMenuItem")),
+            timeout: TimeSpan.FromSeconds(10),
+            interval: TimeSpan.FromMilliseconds(200)).Result?.AsMenuItem();
+        Assert.NotNull(refresh);
+        return refresh;
+    }
+
+    /// <summary>
+    ///     Finds the seeded repo card's Launch button.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    /// <returns>The button.</returns>
+    private static Button FindLaunchButton(Window mainWindow)
+    {
+        var button = Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("LaunchButton")),
+            timeout: TimeSpan.FromSeconds(10),
+            interval: TimeSpan.FromMilliseconds(200)).Result?.AsButton();
+        Assert.NotNull(button);
+        return button;
+    }
+
+    /// <summary>
     ///     Opens the seeded repo card's "..." menu flyout and clicks its "Remove from list" item.
     /// </summary>
     /// <param name="mainWindow">The main window.</param>

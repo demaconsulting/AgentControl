@@ -79,6 +79,9 @@ internal static class TestSettingsWriter
     /// <param name="nuGetServerIndexUrl">The service-index address of a NuGet package server (plain
     ///     http allowed) to configure as an additional source with alias <c>Server</c>, or
     ///     <see langword="null"/> for none; its package IDs are <paramref name="nuGetPackageIds"/>.</param>
+    /// <param name="customize">Edits the settings dictionary just before it is written (for example
+    ///     to add more repos, a repo's group or the collapsed groups), or <see langword="null"/>
+    ///     for none.</param>
     public static void Write(
         string configDirectory,
         string argLoggerStubExePath,
@@ -89,7 +92,8 @@ internal static class TestSettingsWriter
         string? nuGetFeedPath = null,
         IReadOnlyList<string>? nuGetPackageIds = null,
         bool nuGetRequireSigned = false,
-        string? nuGetServerIndexUrl = null)
+        string? nuGetServerIndexUrl = null,
+        Action<Dictionary<string, object?>>? customize = null)
     {
         Directory.CreateDirectory(configDirectory);
 
@@ -153,6 +157,8 @@ internal static class TestSettingsWriter
 
             settings["Sources"] = sources;
         }
+
+        customize?.Invoke(settings);
 
         var json = JsonSerializer.Serialize(settings, SerializerOptions);
         File.WriteAllText(Path.Combine(configDirectory, "settings.json"), json);

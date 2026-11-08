@@ -18,6 +18,10 @@ includes:
   - docs/reqstream/agent-control/launcher-ui/settings-window-view-model.yaml
   - docs/reqstream/agent-control/launcher-ui/source-editor-view-model.yaml
   - docs/reqstream/agent-control/launcher-ui/credential-prompt-view-model.yaml
+  - docs/reqstream/agent-control/launcher-ui/repo-image-locator.yaml
+  - docs/reqstream/agent-control/launcher-ui/repo-group-header-view-model.yaml
+  - docs/reqstream/agent-control/launcher-ui/group-name-view-model.yaml
+  - docs/reqstream/agent-control/launcher-ui/dialog-behavior.yaml
   - docs/reqstream/agent-control/package-credentials.yaml
   - docs/reqstream/agent-control/package-credentials/feed-origin.yaml
   - docs/reqstream/agent-control/package-credentials/session-credential-store.yaml
@@ -47,6 +51,7 @@ includes:
   - docs/reqstream/agent-control/git-integration/committed-agent-files-cache.yaml
   - docs/reqstream/agent-control/settings.yaml
   - docs/reqstream/agent-control/settings/settings-store.yaml
+  - docs/reqstream/agent-control/settings/repo-group-name.yaml
   - docs/reqstream/agent-control/logging.yaml
   - docs/reqstream/agent-control/startup.yaml
   - docs/reqstream/agent-control/startup/startup-options.yaml

@@ -142,16 +142,26 @@ reviews:
       - "src/**/LauncherUI/PackageSourceItemViewModel.cs"
       - "src/**/LauncherUI/SelectPackageSourceViewModel.cs"
       - "src/**/LauncherUI/FavoriteIconConverter.cs"
-      - "src/**/LauncherUI/FavoriteColorConverter.cs"
       - "src/**/LauncherUI/AgentToolKindDisplayNameConverter.cs"
+      - "src/**/LauncherUI/FavoriteColorConverter.cs"  # deleted: keeps the removal of the file reviewable
+      - "src/**/LauncherUI/ThemePreferenceDisplayNameConverter.cs"
+      - "src/**/LauncherUI/PathEllipsisText.cs"
+      - "src/**/LauncherUI/AppStyles.axaml"
+      - "src/**/LauncherUI/GroupNameWindow.axaml"
+      - "src/**/LauncherUI/GroupNameWindow.axaml.cs"
       - "src/**/LauncherUI/ThirdPartyDependencies.cs"
       - "test/**/LauncherUI/AsyncRelayCommandTests.cs"
       - "test/**/LauncherUI/AgentToolKindDisplayNameConverterTests.cs"
+      - "test/**/LauncherUI/ThemePreferenceDisplayNameConverterTests.cs"
+      - "test/**/LauncherUI/PathEllipsisTextTests.cs"
+      - "test/**/LauncherUI/ThemeResourceTests.cs"
       - "test/**/LauncherUI/CredentialPromptWindowTests.cs"
       - "test/**/LauncherUI/SourceEditorSignatureWindowTests.cs"
       - "test/**/LauncherUI/DialogWindowTests.cs"
       - "test/**/LauncherUI/HeadlessTestApp.cs"
       - "test/**/LauncherUI/MainWindowTests.cs"
+      - "test/**/LauncherUI/RepoGroupWindowTests.cs"
+      - "test/**/LauncherUI/UsabilityWindowTests.cs"
       - "test/**/LauncherUI/ThirdPartyDependenciesTests.cs"
 
   - id: AgentControl-LauncherUI-MainWindowViewModel
@@ -167,6 +177,65 @@ reviews:
       - "docs/verification/agent-control/launcher-ui/main-window-view-model.md"
       - "src/**/LauncherUI/MainWindowViewModel.cs"
       - "test/**/LauncherUI/MainWindowViewModelTests.cs"
+      - "test/**/LauncherUI/MainWindowViewModelPersistenceTests.cs"
+      - "test/**/LauncherUI/RepoGroupingTests.cs"
+
+  - id: AgentControl-LauncherUI-RepoGroupHeaderViewModel
+    title: Review of Agent Control RepoGroupHeaderViewModel unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/launcher-ui.md
+      - docs/reqstream/agent-control/launcher-ui.yaml
+    paths:
+      - "docs/reqstream/agent-control/launcher-ui/repo-group-header-view-model.yaml"
+      - "docs/design/agent-control/launcher-ui/repo-group-header-view-model.md"
+      - "docs/verification/agent-control/launcher-ui/repo-group-header-view-model.md"
+      - "src/**/LauncherUI/RepoGroupHeaderViewModel.cs"
+      - "test/**/LauncherUI/RepoGroupHeaderViewModelTests.cs"
+
+  - id: AgentControl-LauncherUI-GroupNameViewModel
+    title: Review of Agent Control GroupNameViewModel unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/launcher-ui.md
+      - docs/reqstream/agent-control/launcher-ui.yaml
+    paths:
+      - "docs/reqstream/agent-control/launcher-ui/group-name-view-model.yaml"
+      - "docs/design/agent-control/launcher-ui/group-name-view-model.md"
+      - "docs/verification/agent-control/launcher-ui/group-name-view-model.md"
+      - "src/**/LauncherUI/GroupNameViewModel.cs"
+      - "test/**/LauncherUI/GroupNameViewModelTests.cs"
+
+  - id: AgentControl-LauncherUI-DialogBehavior
+    title: Review of Agent Control DialogBehavior unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/launcher-ui.md
+      - docs/reqstream/agent-control/launcher-ui.yaml
+    paths:
+      - "docs/reqstream/agent-control/launcher-ui/dialog-behavior.yaml"
+      - "docs/design/agent-control/launcher-ui/dialog-behavior.md"
+      - "docs/verification/agent-control/launcher-ui/dialog-behavior.md"
+      - "src/**/LauncherUI/DialogBehavior.cs"
+      - "test/**/LauncherUI/DialogBehaviorTests.cs"
+
+  - id: AgentControl-LauncherUI-RepoImageLocator
+    title: Review of Agent Control RepoImageLocator unit implementation (security-relevant)
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/launcher-ui.md
+      - docs/reqstream/agent-control/launcher-ui.yaml
+    paths:
+      - "docs/reqstream/agent-control/launcher-ui/repo-image-locator.yaml"
+      - "docs/design/agent-control/launcher-ui/repo-image-locator.md"
+      - "docs/verification/agent-control/launcher-ui/repo-image-locator.md"
+      - "src/**/LauncherUI/RepoImageLocator.cs"
+      - "test/**/LauncherUI/RepoImageLocatorTests.cs"
+      - "test/**/LauncherUI/TestPng.cs"
 
   - id: AgentControl-LauncherUI-RepoCardViewModel
     title: Review of Agent Control RepoCardViewModel unit implementation
@@ -180,7 +249,12 @@ reviews:
       - "docs/design/agent-control/launcher-ui/repo-card-view-model.md"
       - "docs/verification/agent-control/launcher-ui/repo-card-view-model.md"
       - "src/**/LauncherUI/RepoCardViewModel.cs"
+      - "src/**/LauncherUI/RepoCardStatus.cs"
+      - "src/**/LauncherUI/CardColorPalette.cs"
       - "test/**/LauncherUI/RepoCardViewModelTests.cs"
+      - "test/**/LauncherUI/RepoCardColorTests.cs"
+      - "test/**/LauncherUI/RepoCardImageTests.cs"
+      - "test/**/LauncherUI/TestPng.cs"
       - "test/**/LauncherUI/RepoCardServerSourceTests.cs"
       - "test/**/LauncherUI/RepoCardSignatureTests.cs"
       - "test/**/LauncherUI/RepoCardViewModelTestExtensions.cs"
@@ -655,6 +729,8 @@ reviews:
       - "src/**/Settings/AppSettings.cs"
       - "src/**/Settings/RecentRepo.cs"
       - "src/**/Settings/AgentToolKind.cs"
+      - "src/**/Settings/ThemePreference.cs"
+      - "test/**/Settings/SettingsSubsystemTests.cs"
 
   - id: AgentControl-Settings-SettingsStore
     title: Review of Agent Control SettingsStore unit implementation
@@ -669,6 +745,21 @@ reviews:
       - "docs/verification/agent-control/settings/settings-store.md"
       - "src/**/Settings/SettingsStore.cs"
       - "test/**/Settings/SettingsStoreTests.cs"
+      - "test/**/Settings/SettingsStoreOrganizingTests.cs"
+
+  - id: AgentControl-Settings-RepoGroupName
+    title: Review of Agent Control RepoGroupName unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/settings.md
+      - docs/reqstream/agent-control/settings.yaml
+    paths:
+      - "docs/reqstream/agent-control/settings/repo-group-name.yaml"
+      - "docs/design/agent-control/settings/repo-group-name.md"
+      - "docs/verification/agent-control/settings/repo-group-name.md"
+      - "src/**/Settings/RepoGroupName.cs"
+      - "test/**/Settings/RepoGroupNameTests.cs"
 
   # AgentControl - Logging (documented at subsystem level only; LoggingSetupTests covers the setup unit)
   - id: AgentControl-Logging

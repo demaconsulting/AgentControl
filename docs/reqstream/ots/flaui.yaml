@@ -29,7 +29,7 @@ sections:
               - windows@RemoveMenuItem_ClickThenConfirm_RemovesCard_DecliningLeavesItInPlace
               - windows@FilterTextBox_TypingNonMatchingText_HidesRepoCard_ClearingRestoresIt
               - windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory
-              - windows@PullButton_Click_InvokesConfiguredGitExecutableWithPullArgument
+              - windows@PullMenuItem_Click_InvokesConfiguredGitExecutableWithPullArgument
               - windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders
               - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
               - windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright

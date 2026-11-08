@@ -16,24 +16,84 @@
         CanResize="False"
         WindowStartupLocation="CenterOwner">
     <Window.Styles>
-        <!-- Status colors for the sources list: found = green, not found = red. Mid-tone values
-             stay readable on both the light and the dark theme. -->
+        <!-- Status colors for the sources list: found = green, not found = red (theme-aware
+             resources from RepoCardStyles.axaml) -->
         <Style Selector="materialIcons|MaterialIcon.sourceAvailable">
-            <Setter Property="Foreground" Value="#2EA043" />
+            <Setter Property="Foreground" Value="{DynamicResource StatusAccentUpToDate}" />
         </Style>
         <Style Selector="materialIcons|MaterialIcon.sourceMissing">
-            <Setter Property="Foreground" Value="#E5534B" />
+            <Setter Property="Foreground" Value="{DynamicResource StatusAccentProblem}" />
         </Style>
     </Window.Styles>
     <StackPanel Margin="16" Spacing="12">
 
         <!-- Package sources: where agent packages come from. Each repo is pinned to one source by
-             its alias. Edit and Remove act on the selected row, so they sit on the header line right
-             above the list; the three add buttons share one row below it. -->
+             its alias. Add opens a menu of the source types; Edit and Remove act on the selected
+             row, so all three sit on the header line right above the list. -->
         <Grid ColumnDefinitions="*,Auto">
             <TextBlock Grid.Column="0" Text="Package sources" FontWeight="Bold" FontSize="15"
                         VerticalAlignment="Center" />
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <!-- One Add button opens a menu of the source types that can be added. To offer
+                     another type (for example a Git repository), add one more MenuItem below:
+                     nothing else about the layout changes. Each item shows its type's icon (the
+                     same icon the sources list uses) and a one-line description. -->
+                <Button Name="AddSourceButton"
+                         AutomationProperties.AutomationId="AddSourceButton"
+                         Classes="actionButton primary"
+                         ToolTip.Tip="Add a package source: a zip-package folder, a NuGet-package folder or a NuGet-package server">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <materialIcons:MaterialIcon Kind="Plus" Width="16" Height="16" />
+                        <TextBlock Text="Add" VerticalAlignment="Center" />
+                        <materialIcons:MaterialIcon Kind="ChevronDown" Width="16" Height="16" />
+                    </StackPanel>
+                    <Button.Flyout>
+                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                            <MenuItem Name="AddZipSourceButton"
+                                       AutomationProperties.AutomationId="AddZipSourceButton"
+                                       Command="{Binding AddZipSourceCommand}"
+                                       ToolTip.Tip="Add a folder that contains agent package zip files">
+                                <MenuItem.Icon>
+                                    <materialIcons:MaterialIcon Kind="FolderZip" Width="20" Height="20" />
+                                </MenuItem.Icon>
+                                <MenuItem.Header>
+                                    <StackPanel MinWidth="290" Margin="0,4">
+                                        <TextBlock Text="Zip-package folder" FontWeight="SemiBold" />
+                                        <TextBlock Text="A folder of agent package .zip files" FontSize="12" Opacity="0.7" />
+                                    </StackPanel>
+                                </MenuItem.Header>
+                            </MenuItem>
+                            <MenuItem Name="AddNuGetFolderSourceButton"
+                                       AutomationProperties.AutomationId="AddNuGetFolderSourceButton"
+                                       Command="{Binding AddNuGetFolderSourceCommand}"
+                                       ToolTip.Tip="Add a folder that contains NuGet packages (.nupkg files)">
+                                <MenuItem.Icon>
+                                    <materialIcons:MaterialIcon Kind="PackageVariant" Width="20" Height="20" />
+                                </MenuItem.Icon>
+                                <MenuItem.Header>
+                                    <StackPanel MinWidth="290" Margin="0,4">
+                                        <TextBlock Text="NuGet-package folder" FontWeight="SemiBold" />
+                                        <TextBlock Text="A folder of NuGet packages (.nupkg files)" FontSize="12" Opacity="0.7" />
+                                    </StackPanel>
+                                </MenuItem.Header>
+                            </MenuItem>
+                            <MenuItem Name="AddNuGetServerSourceButton"
+                                       AutomationProperties.AutomationId="AddNuGetServerSourceButton"
+                                       Command="{Binding AddNuGetServerSourceCommand}"
+                                       ToolTip.Tip="Add a NuGet server (for example JFrog Artifactory or Azure Artifacts) that serves agent packages">
+                                <MenuItem.Icon>
+                                    <materialIcons:MaterialIcon Kind="ServerNetwork" Width="20" Height="20" />
+                                </MenuItem.Icon>
+                                <MenuItem.Header>
+                                    <StackPanel MinWidth="290" Margin="0,4">
+                                        <TextBlock Text="NuGet-package server" FontWeight="SemiBold" />
+                                        <TextBlock Text="A server such as Artifactory or Azure Artifacts" FontSize="12" Opacity="0.7" />
+                                    </StackPanel>
+                                </MenuItem.Header>
+                            </MenuItem>
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
                 <Button Name="EditSourceButton"
                          AutomationProperties.AutomationId="EditSourceButton"
                          Command="{Binding EditSourceCommand}"
@@ -56,15 +116,15 @@
                 </Button>
             </StackPanel>
         </Grid>
-        <TextBlock Text="Agent packages are read from these sources. A repo is pinned to one source by its alias. Select a source to edit or remove it."
+        <TextBlock Text="Agent packages are read from these sources. A repo is pinned to one source by its alias. Use Add to add a source; select a source to edit or remove it."
                     FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
 
-        <Border BorderThickness="1" BorderBrush="Gray" CornerRadius="4" MinHeight="120">
+        <Border BorderThickness="1" BorderBrush="{DynamicResource SurfaceBorder}" CornerRadius="4" MinHeight="120">
             <Grid>
                 <TextBlock Name="SourcesEmptyText"
                             AutomationProperties.AutomationId="SourcesEmptyText"
                             IsVisible="{Binding HasNoSources}"
-                            Text="No package sources yet. Add a zip-package folder, a NuGet-package folder or a NuGet-package server below."
+                            Text="No package sources yet. Use Add (above) to add a zip-package folder, a NuGet-package folder or a NuGet-package server."
                             TextWrapping="Wrap" TextAlignment="Center"
                             Opacity="0.65" MaxWidth="360"
                             HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -116,44 +176,38 @@
             </Grid>
         </Border>
 
-        <Grid ColumnDefinitions="*,Auto">
-            <WrapPanel Grid.Column="0" Orientation="Horizontal">
-                <Button Name="AddZipSourceButton"
-                         AutomationProperties.AutomationId="AddZipSourceButton"
-                         Command="{Binding AddZipSourceCommand}"
-                         ToolTip.Tip="Add a folder that contains agent package zip files"
-                         Margin="0,0,8,4">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <materialIcons:MaterialIcon Kind="FolderZip" />
-                        <TextBlock Text="Add Zip-Package Folder" />
-                    </StackPanel>
-                </Button>
-                <Button Name="AddNuGetFolderSourceButton"
-                         AutomationProperties.AutomationId="AddNuGetFolderSourceButton"
-                         Command="{Binding AddNuGetFolderSourceCommand}"
-                         ToolTip.Tip="Add a folder that contains NuGet packages (.nupkg files)"
-                         Margin="0,0,8,4">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <materialIcons:MaterialIcon Kind="PackageVariant" />
-                        <TextBlock Text="Add NuGet-Package Folder" />
-                    </StackPanel>
-                </Button>
-                <Button Name="AddNuGetServerSourceButton"
-                         AutomationProperties.AutomationId="AddNuGetServerSourceButton"
-                         Command="{Binding AddNuGetServerSourceCommand}"
-                         ToolTip.Tip="Add a NuGet server (for example JFrog Artifactory or Azure Artifacts) that serves agent packages"
-                         Margin="0,0,8,4">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <materialIcons:MaterialIcon Kind="ServerNetwork" />
-                        <TextBlock Text="Add NuGet-Package Server" />
-                    </StackPanel>
-                </Button>
-            </WrapPanel>
+        <Border Height="1" Background="{DynamicResource SurfaceDivider}" Margin="0,4,0,0" />
+
+        <!-- Appearance: how AgentControl looks, apart from the tools it runs below -->
+        <TextBlock Name="AppearanceHeadingText"
+                    AutomationProperties.AutomationId="AppearanceHeadingText"
+                    Text="Appearance" FontWeight="Bold" FontSize="15" />
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+            <TextBlock Grid.Column="0" Text="Theme" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1"
+                       Name="ThemeComboBox"
+                       AutomationProperties.AutomationId="ThemeComboBox"
+                       AutomationProperties.Name="Theme"
+                       ToolTip.Tip="Choose the color theme: follow the system setting, or always use the light or the dark theme. Applies when you save."
+                       ItemsSource="{x:Static vm:SettingsWindowViewModel.AvailableThemes}"
+                       SelectedItem="{Binding Theme}"
+                       HorizontalAlignment="Stretch">
+                <!-- The picker shows friendly names; the selected value (and the saved setting) is the
+                     ThemePreference itself -->
+                <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="settings:ThemePreference">
+                        <TextBlock Text="{Binding Converter={x:Static vm:ThemePreferenceDisplayNameConverter.Instance}}" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
         </Grid>
 
-        <Border Height="1" Background="Gray" Opacity="0.4" Margin="0,4,0,0" />
+        <Border Height="1" Background="{DynamicResource SurfaceDivider}" Margin="0,4,0,0" />
 
-        <TextBlock Text="Tools" FontWeight="Bold" FontSize="15" />
+        <!-- Tools: the programs AgentControl runs -->
+        <TextBlock Name="ToolsHeadingText"
+                    AutomationProperties.AutomationId="ToolsHeadingText"
+                    Text="Tools" FontWeight="Bold" FontSize="15" />
 
         <TextBlock Text="Git executable path override (blank = use PATH)" FontWeight="SemiBold" />
         <TextBox Name="GitExecutablePathTextBox"
@@ -195,7 +249,7 @@
                     AutomationProperties.AutomationId="SettingsErrorTextBlock"
                     Text="{Binding ErrorMessage}"
                     IsVisible="{Binding HasError}"
-                    Foreground="Red"
+                    Foreground="{DynamicResource ErrorForeground}"
                     TextWrapping="Wrap" />
 
         <Button Name="SaveSettingsButton"

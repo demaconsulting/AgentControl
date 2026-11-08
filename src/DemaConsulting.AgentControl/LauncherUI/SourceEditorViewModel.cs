@@ -382,11 +382,22 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
             if (SetField(ref _location, value ?? string.Empty))
             {
                 _locationTouched = true;
+                OnPropertyChanged(nameof(LocationTooltip));
                 RefreshHelperAvailability();
                 RaiseValidationChanged();
             }
         }
     }
+
+    /// <summary>
+    ///     Gets the tooltip of the location box: the whole entered folder or feed address, or
+    ///     <see langword="null"/> (no tooltip at all) while the box is empty.
+    /// </summary>
+    /// <remarks>
+    ///     A long UNC path or feed address does not fit the box even when it wraps, and the user must
+    ///     be able to verify the whole value before saving, so the tooltip always shows all of it.
+    /// </remarks>
+    public string? LocationTooltip => string.IsNullOrWhiteSpace(_location) ? null : _location;
 
     /// <summary>
     ///     Gets or sets a value indicating whether a plain <c>http</c> feed address is accepted.

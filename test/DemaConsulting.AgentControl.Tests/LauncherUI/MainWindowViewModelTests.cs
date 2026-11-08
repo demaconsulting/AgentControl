@@ -403,6 +403,48 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a saved theme choice is persisted and handed to the theme applier straight
+    ///     away (so it takes effect without a restart), once per save.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_ThemeChanged_PersistsAndAppliesTheme()
+    {
+        // Arrange: a view model with a recording theme applier
+        var configDir = CreateTempDirectory();
+        var applied = new List<ThemePreference>();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings(), configDirectory: configDir, applyTheme: applied.Add);
+
+        // Act: save a settings object that chooses the dark theme
+        viewModel.ApplySettings(new AppSettings { Theme = ThemePreference.Dark });
+
+        // Assert: the applier received the choice and it was persisted
+        Assert.Equal([ThemePreference.Dark], applied);
+        Assert.Equal(ThemePreference.Dark, viewModel.Settings.Theme);
+        Assert.Equal(ThemePreference.Dark, SettingsStore.Load(configDir).Theme);
+    }
+
+    /// <summary>
+    ///     Test that a rejected save never applies the theme it carried.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_SaveFails_DoesNotApplyTheme()
+    {
+        // Arrange: a configuration "directory" that is really a file, so every write fails
+        var blockingFile = Path.Combine(CreateTempDirectory(), "not-a-directory");
+        File.WriteAllText(blockingFile, "blocker");
+        var applied = new List<ThemePreference>();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings(), configDirectory: blockingFile, applyTheme: applied.Add);
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(
+            () => viewModel.ApplySettings(new AppSettings { Theme = ThemePreference.Light }));
+        Assert.Empty(applied);
+        Assert.Equal(ThemePreference.System, viewModel.Settings.Theme);
+    }
+
+    /// <summary>
     ///     Test that a failed settings write leaves the previous settings live, so a later save
     ///     (for example when a repo is marked as a favorite) can never persist the rejected candidate.
     /// </summary>

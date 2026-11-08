@@ -6,14 +6,26 @@
 # - LauncherUI spans the recent-repos main window, per-repo cards, the package-selection
 #   window, the settings window, the package-source editor and the sign-in dialog
 #   (MainWindowViewModel, RepoCardViewModel, SelectPackageWindowViewModel,
-#   SettingsWindowViewModel, SourceEditorViewModel, CredentialPromptViewModel), plus their
+#   SettingsWindowViewModel, SourceEditorViewModel, CredentialPromptViewModel), plus four
+#   further independently testable units with their own requirements files (RepoImageLocator,
+#   RepoGroupHeaderViewModel, GroupNameViewModel, DialogBehavior), plus their
 #   Avalonia .axaml Views (including CredentialPromptWindow and the AvaloniaCredentialPrompt
 #   that shows it) and shared MVVM support types (RelayCommand, ViewModelBase,
-#   FavoriteIconConverter, FavoriteColorConverter, ThirdPartyDependencies), which are folded
-#   into this subsystem-level description rather than given separate unit files
-#   (ThirdPartyDependencies is the one exception with a dedicated test file,
-#   ThirdPartyDependenciesTests.cs)
+#   the display-name and favorite converters, PathEllipsisText, AppStyles.axaml,
+#   ThirdPartyDependencies), which are documented as supporting types of this subsystem
+#   rather than given separate unit files (their dedicated test files, where they have one, are
+#   named in the design and verification documents)
 # - Subsystem requirements describe the aggregate UI behavior a user experiences
+# - Evidence at this level: the headless window tests (MainWindow*, SettingsWindow*, Dialogs*,
+#   AboutWindow*, ...), the tests of the supporting types listed above (PathEllipsisText,
+#   the display-name converters, App and AppStyles), and, where a behavior is observable only
+#   in the view-model layer the window is drawn from, the tests of the units that realize it
+#   (see the Verification Approach of docs/verification/agent-control/launcher-ui.md). The
+#   FlaUI end-to-end tests are the evidence of the system requirements and are linked here
+#   only where nothing else can exercise the behavior (the package picker's keyboard use,
+#   the About dialog)
+# - A subsystem requirement lists only the requirements of its own units as children; the
+#   Settings subsystem's requirements are children of the system requirements, not of these
 
 sections:
   - title: LauncherUI Subsystem Requirements
@@ -48,6 +60,631 @@ sections:
           - RepoCardViewModel_Refresh_NewerVersionAtSource_SetsUpgradeAvailableTrue
           - RepoCardViewModel_RefreshCheap_RepoPathDoesNotExist_SetsIsMissingAndSuppressesOtherState
           - RepoCardViewModel_RefreshCheap_UnchangedHeadHash_CommittedFilesBadgeIsCached
+
+      - id: AgentControl-LauncherUI-CardIdentityAndStatus
+        title: >-
+          The LauncherUI subsystem shall show each repo card's overall status as a colored accent
+          bar on its left edge (green up to date, amber upgrade available, red a problem, grey no
+          agent package) that is also available in words.
+        justification: |
+          A long list of repos is scanned by status; color is backed by words so it is never the
+          only carrier of meaning.
+        children:
+          - AgentControl-RepoCardViewModel-StatusAccent
+          - AgentControl-RepoCardViewModel-StatusWords
+          - AgentControl-RepoCardViewModel-StatusProblemCleared
+          - AgentControl-RepoCardViewModel-InvalidSourceConfigurationIsProblem
+        tests:
+          # The status is observable in the view-model layer the card is drawn from; the colors
+          # of the bars are checked for contrast by the theme requirements below.
+          - RepoCardViewModel_Status_ReflectsPackageAndUpgradeState
+          - RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason
+
+      - id: AgentControl-LauncherUI-CardAvatarTile
+        title: >-
+          The LauncherUI subsystem shall show on each repo card a generated tile with the one or
+          two capital letters that start the repo's name (a folder symbol when the name has no
+          letter or digit), in a color that is the same for the same repo in every session.
+        justification: |
+          A tile of its own lets the user recognize a repo at a glance among many, and a color
+          that changed from one start to the next would defeat that.
+        children:
+          - AgentControl-RepoCardViewModel-AvatarTile
+          - AgentControl-RepoCardViewModel-AvatarFolderGlyph
+          - AgentControl-RepoCardViewModel-AvatarColorStable
+        tests:
+          - RepoCardViewModel_AvatarInitials_RepoName_UsesFirstLettersOfFirstTwoWords
+          - RepoCardViewModel_Avatar_EmptyName_FallsBackToFolderGlyph
+          - RepoCardViewModel_AvatarColorIndex_SamePath_IsStableAndInPalette
+
+      - id: AgentControl-LauncherUI-RepoPicture
+        title: >-
+          The LauncherUI subsystem shall show the repo's own root icon.png or logo.png in place of
+          the generated tile when the repo offers a usable one, and the generated tile otherwise,
+          without ever letting a picture that cannot be read interrupt the card.
+        justification: |
+          A picture the repo's owners chose is the best way to recognize a repo; a card must still
+          work, with its generated tile, when there is none or it cannot be used.
+        children:
+          - AgentControl-RepoCardViewModel-RepoPicture
+          - AgentControl-RepoCardViewModel-RepoPictureFallback
+          - AgentControl-RepoCardViewModel-RepoPictureFailureIsolated
+          - AgentControl-RepoCardViewModel-RepoPictureNotDecodedAgain
+          - AgentControl-RepoCardViewModel-RepoPictureReleased
+          - AgentControl-RepoImageLocator-FindsPicture
+          - AgentControl-RepoImageLocator-LogoFallback
+          - AgentControl-RepoImageLocator-CaseInsensitiveNames
+          - AgentControl-RepoImageLocator-MissingFolder
+          - AgentControl-RepoImageLocator-CrowdedRoot
+          - AgentControl-RepoImageLocator-DecodeToTile
+          - AgentControl-RepoImageLocator-NeverFails
+          - AgentControl-RepoImageLocator-ChangeIdentity
+        tests:
+          - MainWindow_RepoCard_AvatarShowsRepoPictureWhenPresent
+          - RepoCardViewModel_RepoImage_FileRemoved_FallsBackToInitials
+          - RepoCardViewModel_RepoImage_DecodeFailsOrThrows_KeepsTileAndDoesNotRetry
+
+      - id: AgentControl-LauncherUI-RepoPictureTrusted
+        title: >-
+          The LauncherUI subsystem shall never show a repo's picture that is not a genuine small
+          PNG, is a link or lies outside the repo's root folder.
+        justification: |
+          The repo is untrusted input: a picture is only used when it is a small, genuine PNG that
+          really is a plain file of the repo's root, so that a repo cannot make the application
+          read a file elsewhere or spend its memory on a hostile image.
+        children:
+          - AgentControl-RepoImageLocator-OnlyGenuinePng
+          - AgentControl-RepoImageLocator-SizeLimit
+          - AgentControl-RepoImageLocator-DimensionLimit
+          - AgentControl-RepoImageLocator-NoLinks
+          - AgentControl-RepoImageLocator-LinkedRoot
+          - AgentControl-RepoImageLocator-StaysInRoot
+          - AgentControl-RepoImageLocator-RootOnly
+          - AgentControl-RepoImageLocator-NoEmptyFile
+          - AgentControl-RepoImageLocator-HeaderChunkLength
+          - AgentControl-RepoImageLocator-DecodeDimensionLimit
+          - AgentControl-RepoImageLocator-LinkSwap
+          - AgentControl-RepoImageLocator-LinkedRootSwap
+          - AgentControl-RepoImageLocator-LinkedParentKept
+          - AgentControl-RepoImageLocator-ChangedFileRefused
+          - AgentControl-RepoImageLocator-OpenFileVerified
+          - AgentControl-RepoImageLocator-MacOsOpenFileVerified
+        tests:
+          # The rules are the RepoImageLocator unit's; the card, which is what shows or refuses the
+          # picture, is exercised with the real locator by these tests, and the platform-specific
+          # rules (links, junctions, final path of the open file) by the unit tests on each platform.
+          - RepoCardViewModel_RepoImage_IconPresent_LoadsOnceUntilFileChanges
+          - windows@RepoImageLocator_Find_RootIsJunction_ReturnsNull
+          - ubuntu@RepoImageLocator_Find_SymbolicLinkIcon_IsRefused
+          - macos@RepoImageLocator_Find_SymbolicLinkIcon_IsRefused
+
+      - id: AgentControl-LauncherUI-AddSourceMenu
+        title: >-
+          The LauncherUI subsystem shall offer one Add action in the Settings window that opens
+          a menu of the package source types that can be added (zip-package folder, NuGet-package
+          folder and NuGet-package server), each with its type's icon and a description.
+        justification: |
+          One entry point keeps the Settings window short as source types are added, and the
+          descriptions tell the user which type to choose.
+        children:
+          - AgentControl-SettingsWindowViewModel-AddSource
+        tests:
+          - SettingsWindow_AddZipSourceClicked_ShowsEditorAndSavingAddsSource
+          - SettingsWindow_AddNuGetFolderClickedThenCancelled_AddsNothing
+          - SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls
+
+      - id: AgentControl-LauncherUI-Appearance
+        title: >-
+          The LauncherUI subsystem shall let the user choose the system default, light or dark
+          theme in an Appearance section of the Settings window, separate from the Tools section,
+          starting from the choice that was saved.
+        justification: |
+          The theme is a personal choice that belongs with the other settings; keeping it in a
+          section of its own makes it easy to find, and starting from the saved choice shows the
+          user what is in effect.
+        children:
+          - AgentControl-SettingsWindowViewModel-Appearance
+          - AgentControl-SettingsWindowViewModel-AppearanceStartsFromSaved
+          - AgentControl-SettingsWindowViewModel-AppearanceSaved
+        tests:
+          - SettingsWindow_Layout_AppearanceIsItsOwnSectionBeforeTools
+          - ThemePreferenceDisplayNameConverter_Convert_KnownTheme_ReturnsFriendlyName
+          - ThemePreferenceDisplayNameConverter_Convert_NotATheme_ReturnsEmpty
+
+      - id: AgentControl-LauncherUI-ThemeApplied
+        title: >-
+          The LauncherUI subsystem shall apply the saved theme choice to the running application,
+          and so to every window, without a restart, the system default following the operating
+          system, and shall not apply the choice of settings that were refused.
+        justification: |
+          The choice must be honored immediately; a user who had to restart the application to see
+          it would not know whether it had been understood.
+        children:
+          - AgentControl-MainWindowViewModel-ApplyTheme
+          - AgentControl-MainWindowViewModel-RefusedThemeNotApplied
+        tests:
+          - App_ToThemeVariant_MapsEachPreferenceToItsVariant
+          - App_ApplyTheme_SwitchesRunningApplicationTheme
+
+      - id: AgentControl-LauncherUI-ThemeTextLegible
+        title: >-
+          The LauncherUI subsystem shall keep the text of every window legible in both the light
+          and the dark theme: at least AA (4.5:1) contrast against what it is drawn on.
+        justification: |
+          A window that is readable in one theme only would be unusable for whoever chose the
+          other (how the colors are defined for each theme is in the design). What is measured
+          is the text of each window against its surface; the contrast of every state of every
+          control is not claimed.
+        tests:
+          - AppStyles_LightAndDarkDictionaries_DefineTheSameKeys
+          - AppStyles_TextAndGraphicColors_MeetContrastInBothThemes
+
+      - id: AgentControl-LauncherUI-ThemeGraphicsLegible
+        title: >-
+          The LauncherUI subsystem shall draw the meaningful graphics of a card (the status bars
+          and the favorite star) at least 3:1 against what they are drawn on, in both the light
+          and the dark theme.
+        justification: |
+          A status that cannot be seen against the card in one of the themes cannot be read from
+          it.
+        tests:
+          - AppStyles_TextAndGraphicColors_MeetContrastInBothThemes
+
+      - id: AgentControl-LauncherUI-AppBar
+        title: >-
+          The LauncherUI subsystem shall show the main window's controls in one compact app bar,
+          below the window's normal title bar, holding the application logo (with an accessible
+          name and a tooltip), the filter box, then the Add repository, Settings and About
+          buttons, in that keyboard focus order.
+        justification: |
+          A branded header plus a separate toolbar used two bands of vertical space before the
+          first repo; one bar keeps the name in the title bar and the About box, gives the repo
+          list the room, and keeps the filter, the control used most, first for the keyboard.
+        tests:
+          # The bar is a view with no unit of its own, so the headless window test is its evidence.
+          - MainWindow_AppBar_LogoFilterAndButtonsInOrderAndNothingClipsAtMinimumWidth
+
+      - id: AgentControl-LauncherUI-AppBarNarrow
+        title: >-
+          The LauncherUI subsystem shall let the filter box of the app bar shrink first at narrow
+          widths, so that no button of the bar is clipped.
+        justification: |
+          At the smallest window width the buttons must stay reachable; the filter box can give
+          way without losing anything.
+        tests:
+          - MainWindow_AppBar_LogoFilterAndButtonsInOrderAndNothingClipsAtMinimumWidth
+
+      - id: AgentControl-LauncherUI-RepoGroups
+        title: >-
+          The LauncherUI subsystem shall list the repos in sections once at least one repo is in a
+          group of the user's own - the favorites first (a favorite is listed only there, with its
+          group shown on its card), then the groups alphabetically, then the repos in no group -
+          each section introduced by a header showing the section's name and its number of repos.
+        justification: |
+          Grouping is how a developer with many repos keeps related ones together; the sections
+          must be predictable, and a favorite must not be listed twice.
+        children:
+          - AgentControl-MainWindowViewModel-GroupSections
+          - AgentControl-MainWindowViewModel-GroupSectionHeaders
+          - AgentControl-MainWindowViewModel-GroupSectionRepoOrder
+          - AgentControl-MainWindowViewModel-FavoriteListedOnce
+          - AgentControl-MainWindowViewModel-DamagedGroupSettings
+          - AgentControl-RepoGroupHeaderViewModel-SectionKind
+          - AgentControl-RepoGroupHeaderViewModel-DescribesSection
+          - AgentControl-RepoGroupHeaderViewModel-AccessibleNameIsText
+          - AgentControl-RepoGroupHeaderViewModel-UpdatesInPlace
+          - AgentControl-RepoGroupHeaderViewModel-RequiresName
+          - AgentControl-RepoCardViewModel-GroupChipForFavorites
+        tests:
+          - MainWindow_GroupedRepos_ShowHeadersWithNameCountAndState
+          - MainWindow_FavoriteInGroup_ShowsGroupChip
+
+      - id: AgentControl-LauncherUI-RepoGroupsFlatList
+        title: >-
+          The LauncherUI subsystem shall list the repos without any section header while no repo is
+          in a group.
+        justification: |
+          The list must stay exactly as it was for a user who does not use groups.
+        children:
+          - AgentControl-MainWindowViewModel-FlatListWithoutGroups
+        tests:
+          - MainWindow_NoGroups_ShowsNoHeader
+
+      - id: AgentControl-LauncherUI-RepoGroupMove
+        title: >-
+          The LauncherUI subsystem shall offer, in each card's menu, moving the repo into an
+          existing group, into a new group, or out of its group.
+        justification: |
+          The grouping must be discoverable where the user already acts, the card's menu.
+        children:
+          - AgentControl-RepoCardViewModel-MoveToGroup
+          - AgentControl-RepoCardViewModel-GroupNameRules
+          - AgentControl-RepoCardViewModel-GroupList
+          - AgentControl-RepoCardViewModel-NewGroupPrompt
+        tests:
+          - MainWindow_CardMenu_MoveToGroupSubmenu_ListsChoicesAndMovesRepo
+          - MainWindow_NewGroupMenuItem_PromptsForNameAndCreatesGroup
+
+      - id: AgentControl-LauncherUI-GroupNamePrompt
+        title: >-
+          The LauncherUI subsystem shall ask for the name of a new group in a small prompt that
+          validates the name as it is typed and that can be canceled without changing anything.
+        justification: |
+          A group is only a name, so the prompt must keep the user from a name that cannot be
+          used, say why, and never change the repo unless the user accepts.
+        children:
+          - AgentControl-GroupNameViewModel-ValidatesAsTyped
+          - AgentControl-GroupNameViewModel-NewGroup
+          - AgentControl-GroupNameViewModel-CompletesOnce
+          - AgentControl-GroupNameViewModel-RequiresArguments
+          - AgentControl-GroupNameViewModel-NeutralUntilTyped
+          - AgentControl-GroupNameViewModel-AcceptsUsableName
+          - AgentControl-GroupNameViewModel-RefusesBlankName
+          - AgentControl-GroupNameViewModel-RefusesTooLongName
+          - AgentControl-GroupNameViewModel-RefusesBuiltInNames
+          - AgentControl-GroupNameViewModel-NewGroupHint
+          - AgentControl-GroupNameViewModel-NewGroupAdoptsSpelling
+          - AgentControl-GroupNameViewModel-CancelCompletesOnce
+        tests:
+          - GroupNameWindow_ValidatesWhileTyping_AndAccepts
+          - MainWindow_NewGroupPrompt_Canceled_ChangesNothing
+
+      - id: AgentControl-LauncherUI-RepoGroupManagement
+        title: >-
+          The LauncherUI subsystem shall offer, in a group's header, renaming and removing the
+          group, the repos of a removed group becoming ungrouped.
+        justification: |
+          Groups change over time; the header is where the user sees the group, so it is where the
+          group is managed.
+        children:
+          - AgentControl-MainWindowViewModel-GroupManagement
+          - AgentControl-MainWindowViewModel-GroupRenameRules
+          - AgentControl-MainWindowViewModel-GroupRemove
+          - AgentControl-MainWindowViewModel-GroupHeaderRequests
+          - AgentControl-RepoGroupHeaderViewModel-GroupActions
+          - AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest
+          - AgentControl-GroupNameViewModel-Rename
+          - AgentControl-GroupNameViewModel-RenameStartsWithCurrentName
+          - AgentControl-GroupNameViewModel-RenameAcceptsCaseChange
+        tests:
+          - MainWindow_HeaderMenu_RenameAndRemoveGroup
+
+      - id: AgentControl-LauncherUI-RepoGroupCollapse
+        title: >-
+          The LauncherUI subsystem shall let the user collapse and expand a section from its
+          header, a collapsed section hiding its cards but keeping its header and count.
+        justification: |
+          Collapsing the sections not in use keeps a long list manageable without losing sight of
+          what is there.
+        children:
+          - AgentControl-MainWindowViewModel-GroupCollapse
+          - AgentControl-RepoGroupHeaderViewModel-Toggle
+        tests:
+          - MainWindow_HeaderToggle_CollapsesAndExpandsSection
+
+      - id: AgentControl-LauncherUI-RepoGroupCollapseRemembered
+        title: >-
+          The LauncherUI subsystem shall keep the sections the user collapsed collapsed the next
+          time the application starts, and when other settings are changed.
+        justification: |
+          A choice the user has to repeat at every start is not a choice that was kept.
+        children:
+          - AgentControl-MainWindowViewModel-GroupCollapseRemembered
+          - AgentControl-MainWindowViewModel-GroupCollapseKeptOnApplySettings
+        tests:
+          - MainWindowViewModel_ToggleGroupCollapsed_HidesCardsAndPersists
+          - MainWindowViewModel_ApplySettings_KeepsCollapsedGroups
+
+      - id: AgentControl-LauncherUI-RepoGroupFilter
+        title: >-
+          The LauncherUI subsystem shall, while a filter is active, show every repo that matches
+          it, including those in a collapsed section, and show the count of matches only.
+        justification: |
+          A filter that could not find a repo because its group is collapsed would make the
+          grouping a trap.
+        children:
+          - AgentControl-MainWindowViewModel-GroupFilter
+          - AgentControl-MainWindowViewModel-GroupFilterCounts
+          - AgentControl-MainWindowViewModel-GroupFilterOmitsEmpty
+          - AgentControl-MainWindowViewModel-GroupFilterToggleDisabled
+          - AgentControl-MainWindowViewModel-GroupFilterKeepsCollapsedState
+          - AgentControl-RepoGroupHeaderViewModel-ToggleUnavailable
+          - AgentControl-RepoGroupHeaderViewModel-ToggleExplained
+        tests:
+          - MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes
+          - MainWindowViewModel_FilterText_NoMatch_ShowsNothing
+
+      - id: AgentControl-LauncherUI-RepoGroupsSettingsOnly
+        title: >-
+          The LauncherUI subsystem shall keep the user's groups, card colors and collapsed sections
+          in the user's own settings only, and write nothing about them into a repository.
+        justification: |
+          These are personal ways of organizing the list; written into a repository they would be
+          committed and shared with other people.
+        children:
+          - AgentControl-MainWindowViewModel-GroupSettingsOnly
+        tests:
+          - RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository
+
+      - id: AgentControl-LauncherUI-CardColor
+        title: >-
+          The LauncherUI subsystem shall offer, in each card's menu, a palette pop-up of colors
+          for the card's tile and an Automatic choice, mark the chosen color, and show it on the
+          tile (as a ring around a repo's own picture).
+        justification: |
+          The color is a personal aid to recognition; it must be easy to choose and to undo.
+        children:
+          - AgentControl-RepoCardViewModel-CardColor
+          - AgentControl-RepoCardViewModel-CardColorRecorded
+          - AgentControl-RepoCardViewModel-CardColorUnknownRefused
+          - AgentControl-RepoCardViewModel-CardColorStoredFallback
+        tests:
+          - MainWindow_CardColorPalette_ChoosingSwatchColorsTileAndAutomaticClears
+          - MainWindow_CardColorPalette_HeadingNamesTheChosenColor
+
+      - id: AgentControl-LauncherUI-CardColorKeepsStatus
+        title: >-
+          The LauncherUI subsystem shall show the chosen card color without changing the card's
+          status accent bar.
+        justification: |
+          The status colors carry a fixed meaning and must not be mistaken for a personal choice.
+        children:
+          - AgentControl-RepoCardViewModel-CardColorKeepsStatus
+        tests:
+          - RepoCardViewModel_SetCardColor_DoesNotChangeStatus
+
+      - id: AgentControl-LauncherUI-CardColorLettersLegible
+        title: >-
+          The LauncherUI subsystem shall draw the letters of the card tile on every palette color
+          in whichever of white and near-black reads better, with at least AA (4.5:1) contrast in
+          both themes.
+        justification: |
+          The repo's initials must stay readable whatever color is chosen and in either theme.
+        tests:
+          - AppStyles_TileLetters_AreTheBetterOfLightAndDarkTextOnEveryPaletteColor
+
+      - id: AgentControl-LauncherUI-FavoriteStar
+        title: >-
+          The LauncherUI subsystem shall let the user favorite an unfavorited repo, and unfavorite
+          a favorite, with the star on its card (by pointer or keyboard, one change per click or
+          key press), and shall give the star an accessible name.
+        justification: |
+          The star is the only way to promote a repo. A click that toggled twice (the star's own
+          toggle and a command bound to it) left the star off and the repo where it was, so the
+          control appeared broken; one owner of the state and a test with real pointer and key
+          input keep it working in both directions.
+        children:
+          - AgentControl-RepoCardViewModel-Favorite
+        tests:
+          - MainWindow_FavoriteStar_MouseClick_FavoritesThenUnfavoritesMovingBetweenSections
+          - MainWindow_FavoriteStar_SpaceKey_TogglesOncePerPress
+
+      - id: AgentControl-LauncherUI-FavoriteStarMovesRepo
+        title: >-
+          The LauncherUI subsystem shall list a favorite under the Favorites section and return it
+          to its own section when it is unfavorited.
+        justification: |
+          The repo must follow the star: a favorite that stayed where it was would not be promoted.
+        children:
+          - AgentControl-RepoCardViewModel-Favorite
+        tests:
+          - MainWindow_FavoriteStar_MouseClick_FavoritesThenUnfavoritesMovingBetweenSections
+
+      - id: AgentControl-LauncherUI-FavoriteStarKeepsFocus
+        title: >-
+          The LauncherUI subsystem shall keep the keyboard focus on a repo's star when the star had
+          it and the card moves to or from the Favorites section.
+        justification: |
+          The move re-creates the card's controls, which would otherwise drop the keyboard focus
+          and send a keyboard user back to the top of the list after every press.
+        tests:
+          - MainWindow_FavoriteStar_SpaceKey_TogglesOncePerPress
+
+      - id: AgentControl-LauncherUI-MissingRepoRecheck
+        title: >-
+          The LauncherUI subsystem shall keep the card menu's refresh item enabled for a repo whose
+          folder is missing, labeled "Check again" with a tooltip that says it checks whether the
+          folder is available again, while the actions that need the folder stay disabled.
+        justification: |
+          A folder on a drive or share that is not mounted comes back without AgentControl's
+          knowledge; without an enabled re-check the user had to restart the application or
+          remove and add the repo again.
+        children:
+          - AgentControl-RepoCardViewModel-MissingRepo
+          - AgentControl-RepoCardViewModel-MissingRepoRecheck
+        tests:
+          - MainWindow_MissingRepoMenu_OffersEnabledCheckAgain_PresentRepoOffersRefresh
+
+      - id: AgentControl-LauncherUI-MissingRepoRecheckClears
+        title: >-
+          The LauncherUI subsystem shall clear the missing state of a repo, and enable its actions
+          again, when a check finds its folder back.
+        justification: |
+          The point of checking again is that the repo is usable once its folder is back.
+        children:
+          - AgentControl-RepoCardViewModel-MissingRepoCleared
+        tests:
+          - RepoCardViewModel_RefreshCommand_MissingFolderReturns_ClearsMissingAndRestoresActions
+
+      - id: AgentControl-LauncherUI-UpToDateCue
+        title: >-
+          The LauncherUI subsystem shall show a small check mark, with the tooltip and accessible
+          name "Agent files are up to date", inside the agent package chip of a repo whose pinned
+          package is the newest one, and nowhere else.
+        justification: |
+          A healthy card showed only a green bar, which says nothing in words to a mouse user; the
+          cue adds the words inside an existing chip without adding clutter.
+        children:
+          - AgentControl-RepoCardViewModel-UpToDateCue
+        tests:
+          - MainWindow_UpToDateCue_ShownOnlyForPinnedAndUpToDateCard
+
+      - id: AgentControl-LauncherUI-LongTextShortened
+        title: >-
+          The LauncherUI subsystem shall shorten a long repo path (the folder part first, then the
+          middle of a very long folder name so that its start and its end stay visible) and a long
+          repo name at its end, each with the full value as its tooltip and the path also as its
+          accessible name, without the name reaching the Launch button.
+        justification: |
+          At a narrow width the end of a long path is what tells similar repos apart, so that part
+          is kept, and nothing on the card may collide.
+        children:
+          - AgentControl-RepoCardViewModel-RepoPathKeepsFolderName
+        tests:
+          - MainWindow_NarrowWidth_NameEllipsisPathKeepsFolderNameAndNothingCollides
+          - PathEllipsisText_MiddleEllipsis_KeepsStartAndEnd
+          - PathEllipsisText_EndEllipsis_KeepsStart
+          - PathEllipsisText_Ellipsis_NeverSplitsASurrogatePair
+          - PathEllipsisText_WideEnough_DrawsTheWholePath
+          - PathEllipsisText_SlightlyTooNarrow_ShortensTheFolderPartAndKeepsTheFolderName
+          - PathEllipsisText_VeryLongFolderName_KeepsItsStartAndItsEnd
+          - PathEllipsisText_NoFolderPartOrNoPath_StillFitsOrDrawsNothing
+
+      - id: AgentControl-LauncherUI-UpgradeFromChip
+        title: >-
+          The LauncherUI subsystem shall let the user start an upgrade by clicking the upgrade chip
+          of a card, with the same effect and the same availability as the card menu's Upgrade
+          item, the chip's tooltip saying that it upgrades the agent files to the new version.
+        justification: |
+          The chip that announces an available upgrade is the most direct place to start it; a
+          chip that behaved differently from the menu item would surprise the user.
+        children:
+          - AgentControl-RepoCardViewModel-UpgradeFromChip
+          - AgentControl-RepoCardViewModel-UpgradeChipAvailability
+          - AgentControl-RepoCardViewModel-UpgradeChipTooltip
+        tests:
+          - RepoCardViewModel_UpgradeCommand_ChipAndMenuShareOneGuardedCommand
+          - RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions
+
+      - id: AgentControl-LauncherUI-DialogModal
+        title: >-
+          The LauncherUI subsystem shall show every dialog (Settings, the source editors, the
+          sign-in prompt, the package picker, confirmations, message boxes, the group-name prompt
+          and About) as a modal dialog over the main window.
+        justification: |
+          A dialog that does not hold the window behind it lets the user act on that window while
+          the dialog's question is still open.
+        tests:
+          # The dialogs are views with no unit of their own; the windows are opened in headless
+          # sessions and their ownership and modal behavior checked.
+          - MainWindow_AboutClicked_OpensModalAboutOwnedByMainWindow
+          - SettingsWindow_ShownModally_FocusStartsInsideTabCyclesInsideAndReturnsToOwner
+          - Dialogs_ConfirmationMessageBoxAbout_InitialFocusTabCycleAndEscape
+          - Dialogs_PromptsAndEditors_InitialFocusInFirstFieldAndEscapeCancels
+
+      - id: AgentControl-LauncherUI-DialogKeyboard
+        title: >-
+          The LauncherUI subsystem shall keep Tab and Shift+Tab inside a dialog, moving between its
+          controls in a cycle.
+        justification: |
+          A keyboard user must be able to operate a dialog without the focus wandering into the
+          window behind it. One shared behavior keeps all the dialogs alike.
+        children:
+          - AgentControl-DialogBehavior-TabStaysInside
+          - AgentControl-DialogBehavior-RequiresDialog
+        tests:
+          - SettingsWindow_ShownModally_FocusStartsInsideTabCyclesInsideAndReturnsToOwner
+          - Dialogs_ConfirmationMessageBoxAbout_InitialFocusTabCycleAndEscape
+          # The package picker is verified end to end only: its keyboard behavior needs the real
+          # picker opened from a repo card.
+          - windows@SelectPackageWindow_Opened_FocusStartsInsideTabCyclesAndEscapeCancels
+
+      - id: AgentControl-LauncherUI-DialogInitialFocus
+        title: >-
+          The LauncherUI subsystem shall put the keyboard focus on the first sensible control of a
+          dialog when it opens, with the keyboard focus ring when the keyboard is in use.
+        justification: |
+          A keyboard user must be able to start typing as the dialog opens, and must be able to
+          see where the keyboard is.
+        children:
+          - AgentControl-DialogBehavior-InitialFocus
+        tests:
+          - SettingsWindow_ShownModally_FocusStartsInsideTabCyclesInsideAndReturnsToOwner
+          - Dialogs_ConfirmationMessageBoxAbout_InitialFocusTabCycleAndEscape
+          - Dialogs_PromptsAndEditors_InitialFocusInFirstFieldAndEscapeCancels
+          - windows@SelectPackageWindow_Opened_FocusStartsInsideTabCyclesAndEscapeCancels
+
+      - id: AgentControl-LauncherUI-DialogEscapeCancels
+        title: >-
+          The LauncherUI subsystem shall cancel a dialog that has a way to cancel when Escape is
+          pressed.
+        justification: |
+          Escape is the standard way out of a dialog.
+        children:
+          - AgentControl-DialogBehavior-EscapeCancels
+        tests:
+          - Dialogs_ConfirmationMessageBoxAbout_InitialFocusTabCycleAndEscape
+          - Dialogs_PromptsAndEditors_InitialFocusInFirstFieldAndEscapeCancels
+          - windows@SelectPackageWindow_Opened_FocusStartsInsideTabCyclesAndEscapeCancels
+
+      - id: AgentControl-LauncherUI-DialogFocusReturn
+        title: >-
+          The LauncherUI subsystem shall return the keyboard focus to the window behind a dialog
+          when the dialog closes.
+        justification: |
+          A keyboard user who closes a dialog must find the focus where they left it, not at the
+          top of the window.
+        tests:
+          - SettingsWindow_ShownModally_FocusStartsInsideTabCyclesInsideAndReturnsToOwner
+          - windows@SelectPackageWindow_Opened_FocusStartsInsideTabCyclesAndEscapeCancels
+
+      - id: AgentControl-LauncherUI-ChangeAppliedWhenSaved
+        title: >-
+          The LauncherUI subsystem shall apply a change the user makes to a repo or a section
+          (favorite, group, card color, launch time, collapse, rename or removal of a group, adding
+          or removing a repo) only once it has been saved to the user's settings.
+        justification: |
+          What the window shows must be what the settings hold, or the next start would show
+          something else than the user saw.
+        children:
+          - AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved
+          - AgentControl-RepoCardViewModel-ChangeSavedBeforeApplied
+        tests:
+          - MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten
+          - RepoCardViewModel_Changes_GoThroughTheOwnerAndAreNotAppliedWhenItRefuses
+
+      - id: AgentControl-LauncherUI-FailedSaveChangesNothing
+        title: >-
+          The LauncherUI subsystem shall, when a change the user makes cannot be saved, leave the
+          repo cards, the displayed list and the settings file as they were, and never write that
+          change with a later, unrelated save.
+        justification: |
+          A change that is shown but not saved is lost at the next start, and one that is written
+          later without the user asking surprises them.
+        children:
+          - AgentControl-MainWindowViewModel-FailedSaveChangesNothing
+          - AgentControl-MainWindowViewModel-FailedSaveNotPersistedLater
+          - AgentControl-MainWindowViewModel-SaveFailureRefusesOperation
+        tests:
+          - MainWindow_SettingsCannotBeSaved_ShowsMessageAndKeepsStateAsItWas
+          - MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt
+
+      - id: AgentControl-LauncherUI-FailedSaveReported
+        title: >-
+          The LauncherUI subsystem shall tell the user, in a message, when a change they made
+          cannot be saved.
+        justification: |
+          A change that silently does nothing looks like a broken control.
+        children:
+          - AgentControl-MainWindowViewModel-SaveFailureReported
+        tests:
+          - MainWindow_SettingsCannotBeSaved_ShowsMessageAndKeepsStateAsItWas
+
+      - id: AgentControl-LauncherUI-RemovedRepoGoesQuiet
+        title: >-
+          The LauncherUI subsystem shall, once a repo was removed from the list, show no result,
+          error, release notes or prompt from work that was still running for it.
+        justification: |
+          A message about a repo the user has removed would be about something that is no longer
+          there.
+        children:
+          - AgentControl-MainWindowViewModel-RemoveRepoRetiresCard
+          - AgentControl-RepoCardViewModel-RetiredCardReportsNothing
+          - AgentControl-RepoCardViewModel-RetireCancelsRunningWork
+          - AgentControl-RepoCardViewModel-RetiredCardChecksNothing
+        tests:
+          - MainWindow_RepoRemoved_ReleasesTheCardHandlers
+          - MainWindowViewModel_RemoveRepo_RetiresTheCard
 
       - id: AgentControl-LauncherUI-AddRepo
         title: The LauncherUI subsystem shall let the user add an existing folder as a tracked repo.
@@ -194,6 +831,20 @@ sections:
           - RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent
           - RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile
 
+      - id: AgentControl-LauncherUI-AgentsMdOfferBeforeReleaseNotes
+        title: >-
+          The LauncherUI subsystem shall show the AGENTS.md template offer before the release notes
+          of the same upgrade, opening the release notes (in front) only after the offer is
+          answered, and shall show the release notes at once when there is no offer.
+        justification: |
+          The release notes window opened first would cover the question, which would then wait
+          unseen behind it.
+        children:
+          - AgentControl-RepoCardViewModel-AgentsMdOfferBeforeReleaseNotes
+        tests:
+          - MainWindow_UpgradeWithAgentsMdOffer_ShowsQuestionFirstThenReleaseNotes
+          - MainWindow_UpgradeWithoutAgentsMdOffer_ShowsReleaseNotesAtOnce
+
       - id: AgentControl-LauncherUI-Settings
         title: >-
           The LauncherUI subsystem shall let the user view and edit the git executable
@@ -273,6 +924,18 @@ sections:
           - SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave
           - SourceEditorViewModel_NuGetSource_NoPackageIds_CannotSaveUntilOneIsAdded
           - SourceEditorViewModel_SaveCommand_InvalidEditor_DoesNotRaiseSaved
+
+      - id: AgentControl-LauncherUI-PackageSourceLocationTooltip
+        title: >-
+          The LauncherUI subsystem shall offer the whole folder or feed address that was entered
+          as the tooltip of the location box in the editor of a package source.
+        justification: |
+          A long location does not fit in the box; the user must be able to read all of it to
+          check it.
+        children:
+          - AgentControl-SourceEditorViewModel-LocationTooltip
+        tests:
+          - SourceEditorViewModel_Location_TooltipShowsWholeValueAndIsNullWhenEmpty
 
       - id: AgentControl-LauncherUI-PackageSourcePackageIds
         title: >-
@@ -716,6 +1379,8 @@ sections:
           overwrite what the user is now looking at.
         children:
           - AgentControl-RepoCardViewModel-SupersededUpgradeCheck
+          - AgentControl-RepoCardViewModel-StaleUpgradeCheckDiscarded
+          - AgentControl-RepoCardViewModel-UpgradeStateResetOnRefresh
         tests:
           - RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded
           - SelectPackageWindowViewModel_ChangeSelectedPackageName_SupersedesSlowerEarlierLoad
@@ -735,10 +1400,22 @@ sections:
           # verified end-to-end only, via the FlaUI UiTests project; the dependency list's
           # underlying data source has direct unit coverage.
           - windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright
+          - MainWindow_AboutClicked_OpensModalAboutOwnedByMainWindow
           - ThirdPartyDependencies_All_MatchesCsprojDirectRuntimeDependencies
           - ThirdPartyDependencies_All_NoDuplicateNames
           - ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense
           - DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat
+
+      - id: AgentControl-LauncherUI-AboutVersionRow
+        title: >-
+          The LauncherUI subsystem shall show the application version in the About dialog as a
+          labeled Version row, without its build metadata, with the full build version as its
+          tooltip.
+        justification: |
+          A short, labeled version is easy to read out when reporting an issue, and the full build
+          version is still there for whoever needs it.
+        tests:
+          - AboutWindow_VersionRow_IsLabeledAndShortWithFullVersionInTooltip
 
       - id: AgentControl-LauncherUI-SourceAwareActions
         title: >-

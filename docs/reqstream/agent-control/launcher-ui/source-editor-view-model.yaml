@@ -120,6 +120,16 @@ sections:
         tests:
           - SourceEditorViewModel_NewEmptyEditor_CannotSaveButShowsNoErrorsYet
 
+      - id: AgentControl-SourceEditorViewModel-LocationTooltip
+        title: >-
+          The SourceEditorViewModel class shall offer the whole entered folder or feed address
+          as the tooltip of the location box.
+        justification: |
+          A long folder path or feed address does not fit the location box even when it wraps,
+          and the user must be able to verify the whole value before saving the source.
+        tests:
+          - SourceEditorViewModel_Location_TooltipShowsWholeValueAndIsNullWhenEmpty
+
       # ---- Server source ----
       - id: AgentControl-SourceEditorViewModel-ServerSource
         title: >-

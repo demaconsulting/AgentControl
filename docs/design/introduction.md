@@ -58,7 +58,11 @@ parts. The system has eleven subsystems: `LauncherUI`, `AgentPackageManagement`,
 `PackageCredentials` (credentials for package servers), `RepoSync`, `RepoConfig`, `AgentToolLauncher`,
 `GitIntegration`, `Settings`, `Logging`, `Startup` and `Utilities`, plus the top-level `Program` unit. Of
 the units, `GitCredentialClient` (in `GitIntegration`) and `SignatureVerificationSupport` (in
-`AgentPackageManagement`) belong to the package-authenticity and saved-sign-in features.
+`AgentPackageManagement`) belong to the package-authenticity and saved-sign-in features. `RepoGroupName` (in
+`Settings`) is the unit holding the rules for the names of the user's repo groups, and `RepoImageLocator`,
+`RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in `LauncherUI`) belong to the repo-picture,
+repo-group and dialog features; `PathEllipsisText` and `ThemePreferenceDisplayNameConverter` are documented
+supporting types of `LauncherUI`, not units.
 
 ![Software Structure](SoftwareStructureView.svg)
 
@@ -80,7 +84,10 @@ the units, `GitCredentialClient` (in `GitIntegration`) and `SignatureVerificatio
     - **AgentToolLauncher/** - shell detection and agent-tool process launching
     - **GitIntegration/** - git status/pull/branch queries and the user's Git credential helper
       (saved package-feed sign-ins)
-    - **Settings/** - application-wide settings persistence (including the package sources)
+    - **Settings/** - application-wide settings persistence (including the package sources and the user's repo
+      groups, card colors and theme; `SettingsStore`, which repairs unusable stored values on load - an unknown card
+      color reads as automatic) and the `RepoGroupName` unit, the rules for the names of the
+      user's repo groups
     - **Logging/** - diagnostic file logging setup
     - **Startup/** - startup-argument parsing
     - **Utilities/** - shared utilities subsystem

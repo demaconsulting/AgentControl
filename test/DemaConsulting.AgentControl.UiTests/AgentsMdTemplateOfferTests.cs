@@ -68,15 +68,22 @@ public sealed class AgentsMdTemplateOfferTests
 
             InvokeUpgradeMenuItem(mainWindow);
 
-            // The non-modal release-notes window and the modal AGENTS.md offer are both raised
-            // from the same ApplyPackageAndShowReleaseNotes call; only the latter blocks further
-            // interaction, so wait for the offer's ConfirmationWindow specifically.
+            // The AGENTS.md offer (modal) comes first: the release notes of the same upgrade are held
+            // back until it is answered, so the question never covers them
             var confirmationWindow = WaitForAgentsMdOfferWindow(context);
             Assert.NotNull(confirmationWindow);
+            Assert.Null(context.WaitForWindow(
+                title => title.StartsWith("Release Notes", StringComparison.Ordinal),
+                TimeSpan.FromSeconds(2)));
 
             var yesButton = confirmationWindow.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationYesButton"))?.AsButton();
             Assert.NotNull(yesButton);
             yesButton.Invoke();
+
+            // Answering the question brings up the release notes
+            Assert.NotNull(context.WaitForWindow(
+                title => title.StartsWith("Release Notes", StringComparison.Ordinal),
+                TimeSpan.FromSeconds(15)));
 
             // The template must be written verbatim to the repo root, not into any managed folder.
             var agentsMdPath = Path.Combine(context.RepoPath, "AGENTS.md");
@@ -195,6 +202,73 @@ public sealed class AgentsMdTemplateOfferTests
     }
 
     /// <summary>
+    ///     An upgrade whose package carries an AGENTS.md template shows the offer first and holds the
+    ///     release notes of that same upgrade back until the offer is answered, so the question never
+    ///     covers the notes; once answered, the offer is gone and the release notes appear.
+    /// </summary>
+    [Fact]
+    public void MainWindow_UpgradeWithAgentsMdOfferInRealUi_ShowsQuestionFirstThenReleaseNotes()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        const string packageName = "contoso-agents";
+        var sourceDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-source-" + Guid.NewGuid());
+
+        try
+        {
+            // Arrange: an upgrade whose newer package includes an AGENTS.md template
+            FixturePackageBuilder.Create(sourceDirectory, packageName, "1.0.0", "# v1.0.0\n");
+            FixturePackageBuilder.Create(
+                sourceDirectory, packageName, "1.1.0", "# v1.1.0\n\nNew things.\n", "# AGENTS\n\nOffer order.\n");
+
+            using var context = new AgentControlTestContext(
+                packageSourcePath: sourceDirectory,
+                pinnedPackageName: packageName,
+                pinnedPackageVersion: "1.0.0");
+            var mainWindow = context.Launch();
+
+            // Act: start the upgrade
+            InvokeUpgradeMenuItem(mainWindow);
+
+            // Assert: the offer is shown, and the release notes stay hidden while it is open
+            var offerWindow = WaitForAgentsMdOfferWindow(context);
+            Assert.NotNull(offerWindow);
+            var offerText = offerWindow.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationMessageText"));
+            Assert.NotNull(offerText);
+            Assert.Contains("AGENTS.md", offerText.Name, StringComparison.Ordinal);
+            Assert.Null(context.WaitForWindow(
+                title => title.StartsWith("Release Notes", StringComparison.Ordinal),
+                TimeSpan.FromSeconds(3)));
+
+            // Act: answer the question
+            var noButton = offerWindow.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationNoButton"))?.AsButton();
+            Assert.NotNull(noButton);
+            noButton.Invoke();
+
+            // Assert: the release notes appear, and by then the offer has gone
+            Assert.NotNull(context.WaitForWindow(
+                title => title.StartsWith("Release Notes", StringComparison.Ordinal),
+                TimeSpan.FromSeconds(15)));
+            Assert.Null(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationMessageText")));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(sourceDirectory, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup only.
+            }
+        }
+    }
+
+    /// <summary>
     ///     Opens the seeded repo card's "..." menu flyout and clicks its "Upgrade" item.
     /// </summary>
     /// <param name="mainWindow">The main window.</param>
@@ -214,7 +288,7 @@ public sealed class AgentsMdTemplateOfferTests
             timeout: TimeSpan.FromSeconds(10),
             interval: TimeSpan.FromMilliseconds(200)).Result?.AsMenuItem();
         Assert.NotNull(upgradeMenuItem);
-        upgradeMenuItem.Click();
+        upgradeMenuItem.Invoke();
     }
 
     /// <summary>

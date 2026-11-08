@@ -1,0 +1,56 @@
+---
+# Software Unit Requirements for the DialogBehavior Class
+#
+# DialogBehavior is the keyboard behavior every AgentControl dialog shares. Each requirement
+# states one observable behavior of a dialog it is applied to; that every dialog does apply it,
+# and is shown modally, is the LauncherUI subsystem's requirement
+# (AgentControl-LauncherUI-DialogKeyboard).
+
+sections:
+  - title: DialogBehavior Unit Requirements
+    requirements:
+      - id: AgentControl-DialogBehavior-TabStaysInside
+        title: >-
+          The DialogBehavior class shall make Tab and Shift+Tab move between the controls of a
+          dialog in a cycle, from the last control to the first and from the first to the last,
+          never leaving the dialog.
+        justification: |
+          A keyboard user must not lose the focus into the window behind a dialog.
+        tests:
+          - DialogBehavior_Apply_TabFromLastControl_WrapsToFirst
+          - DialogBehavior_Apply_ShiftTabFromFirstControl_WrapsToLast
+
+      - id: AgentControl-DialogBehavior-InitialFocus
+        title: >-
+          The DialogBehavior class shall, when a dialog opens, give the keyboard focus - shown
+          with the keyboard focus ring - to the control the dialog names as its starting point,
+          or, when none is named or the named control is missing, hidden or disabled, to the
+          first control that Tab reaches, in keyboard navigation order.
+        justification: |
+          A keyboard user must be able to start typing as the dialog opens, and must be able to
+          see where the keyboard is.
+        tests:
+          - DialogBehavior_Apply_Opened_FocusesNamedControlWithVisibleKeyboardFocus
+          - DialogBehavior_Apply_NoUsableNamedControl_FocusesFirstTabStop
+          - DialogBehavior_Apply_ExplicitTabOrder_FocusesFirstControlInTabOrder
+          - DialogBehavior_Apply_FirstInTabOrderUnusable_FocusesNextInTabOrder
+
+      - id: AgentControl-DialogBehavior-EscapeCancels
+        title: >-
+          The DialogBehavior class shall run the dialog's cancel action once when Escape is pressed
+          in a dialog that has one, unless the focused control used the key itself, and shall do
+          nothing on Escape in a dialog that has no way to cancel.
+        justification: |
+          Escape is the standard way out of a dialog, but a drop-down or menu that is open uses it
+          to close itself and must keep it.
+        tests:
+          - DialogBehavior_Apply_Escape_RunsCancelOnceUnlessTheFocusedControlUsedIt
+          - DialogBehavior_Apply_EscapeWithoutCancelAction_DoesNothing
+
+      - id: AgentControl-DialogBehavior-RequiresDialog
+        title: >-
+          The DialogBehavior class shall refuse to be applied to no dialog.
+        justification: |
+          Applying the behavior to nothing is a defect of the caller and must be reported at once.
+        tests:
+          - DialogBehavior_Apply_NullDialog_Throws

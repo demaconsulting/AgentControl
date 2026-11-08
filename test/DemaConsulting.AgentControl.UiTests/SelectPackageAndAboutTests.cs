@@ -20,6 +20,7 @@
 
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Tools;
+using FlaUI.Core.WindowsAPI;
 
 namespace DemaConsulting.AgentControl.UiTests;
 
@@ -130,9 +131,104 @@ public sealed class SelectPackageAndAboutTests
     }
 
     /// <summary>
-    ///     Clicking "About" must open a non-modal window showing the app name, its tagline, its
-    ///     <c>Program.Version</c>, a copyright/license summary, and a non-empty third-party
-    ///     dependency list.
+    ///     The Select Package dialog is operable from the keyboard alone: the keyboard focus starts on
+    ///     its first control, Tab and Shift+Tab cycle inside it and never reach the window behind, and
+    ///     Escape cancels the dialog (pinning nothing) and hands the focus back to the main window.
+    /// </summary>
+    [Fact]
+    public void SelectPackageWindow_Opened_FocusStartsInsideTabCyclesAndEscapeCancels()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        const string packageName = "contoso-agents";
+        var sourceDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-source-" + Guid.NewGuid());
+
+        try
+        {
+            // Arrange: a never-pinned repo and the package picker open over the main window
+            FixturePackageBuilder.Create(sourceDirectory, packageName, "1.0.0", "# v1.0.0\n");
+            using var context = new AgentControlTestContext(packageSourcePath: sourceDirectory);
+            var mainWindow = context.Launch();
+            mainWindow.SetForeground();
+            mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MoreActionsButton"))!.AsButton().Invoke();
+            var selectPackageMenuItem = Retry.WhileNull(
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("SelectPackageMenuItem")),
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200)).Result?.AsMenuItem();
+            Assert.NotNull(selectPackageMenuItem);
+            selectPackageMenuItem.Invoke();
+            var picker = context.WaitForDialog("SelectPackageNameList", TimeSpan.FromSeconds(15));
+            Assert.NotNull(picker);
+            var pickerHandle = picker.Properties.NativeWindowHandle.Value;
+            Assert.True(DialogInputProbe.BringToForeground(picker));
+
+            // Assert: the keyboard focus starts on the first control, the source list, inside the dialog
+            Retry.WhileFalse(
+                () => FocusedPickerControl(context) == "SelectPackageSourceList",
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200));
+            Assert.Equal("SelectPackageSourceList", FocusedPickerControl(context));
+            Assert.Equal(pickerHandle, DialogInputProbe.FocusedWindowHandle(context));
+
+            // Act / Assert: Tab goes round the dialog's controls, never leaves it, and wraps to the first
+            var visited = new List<string>();
+            for (var press = 0; press < 12; press++)
+            {
+                DialogInputProbe.Press(VirtualKeyShort.TAB);
+                Assert.Equal(pickerHandle, DialogInputProbe.FocusedWindowHandle(context));
+                visited.Add(FocusedPickerControl(context));
+            }
+
+            Assert.Contains("SelectPackageNameList", visited);
+            Assert.Contains("SelectPackageCancelButton", visited);
+            Assert.Contains("SelectPackageSourceList", visited);
+
+            // Act / Assert: Shift+Tab from the first control wraps to the last one, still inside the dialog
+            for (var press = 0; press < 12 && FocusedPickerControl(context) != "SelectPackageSourceList"; press++)
+            {
+                DialogInputProbe.Press(VirtualKeyShort.TAB);
+            }
+
+            Assert.Equal("SelectPackageSourceList", FocusedPickerControl(context));
+            DialogInputProbe.PressShiftTab();
+            Assert.Equal(pickerHandle, DialogInputProbe.FocusedWindowHandle(context));
+            Assert.Contains(
+                FocusedPickerControl(context),
+                new[] { "SelectPackageCancelButton", "SelectPackageConfirmButton" });
+
+            // Act: cancel with Escape
+            DialogInputProbe.Press(VirtualKeyShort.ESCAPE);
+
+            // Assert: the dialog is gone, nothing was pinned, and the main window has the focus again
+            Assert.True(Retry.WhileFalse(
+                () => context.WaitForDialog("SelectPackageNameList", TimeSpan.FromMilliseconds(200)) is null,
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200)).Result);
+            Assert.False(File.Exists(Path.Combine(context.RepoPath, ".agentcontrol.json")));
+            Assert.True(DialogInputProbe.WaitForEnabled(mainWindow, expected: true));
+            Assert.True(DialogInputProbe.WaitForForeground(mainWindow));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(sourceDirectory, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup only.
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Clicking "About" must open a modal window showing the app name, its tagline, a labeled
+    ///     version (the <c>Program.Version</c> without its build metadata, the full text in the tooltip),
+    ///     a copyright/license summary, and a non-empty third-party dependency list.
     /// </summary>
     [Fact]
     public void AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright()
@@ -150,9 +246,8 @@ public sealed class SelectPackageAndAboutTests
         Assert.NotNull(aboutButton);
         aboutButton.Invoke();
 
-        var aboutWindow = context.WaitForWindow(
-            title => title.StartsWith("About", StringComparison.Ordinal),
-            TimeSpan.FromSeconds(15));
+        // A modal dialog is found by something it contains: its title is not a dependable match target
+        var aboutWindow = context.WaitForWindowWithDescendant("AboutCloseButton", TimeSpan.FromSeconds(15));
         Assert.NotNull(aboutWindow);
 
         var taglineText = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutTaglineText"))?.AsLabel();
@@ -162,6 +257,11 @@ public sealed class SelectPackageAndAboutTests
         var versionText = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutVersionText"))?.AsLabel();
         Assert.NotNull(versionText);
         Assert.False(string.IsNullOrWhiteSpace(versionText.Text));
+
+        // The version is one short, labeled value: no build metadata, and no repeat of the product name
+        Assert.DoesNotContain("+", versionText.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("AgentControl", versionText.Text, StringComparison.Ordinal);
+        Assert.NotNull(aboutWindow.FindFirstDescendant(cf => cf.ByName("Version")));
 
         var copyrightText = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutCopyrightText"))?.AsLabel();
         Assert.NotNull(copyrightText);
@@ -178,15 +278,30 @@ public sealed class SelectPackageAndAboutTests
         Assert.NotNull(dependenciesList);
         Assert.NotEmpty(dependenciesList.FindAllChildren());
 
-        // The window must not be modal: the main window should remain usable while the About
-        // window is open (verified by locating the main window's own toolbar button still
-        // present in the automation tree without first closing the About window).
+        // The window is a modal dialog over the main window (which stays in the automation tree,
+        // behind it, until About is closed)
         Assert.NotNull(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("OpenAboutButton")));
 
         var closeButton = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutCloseButton"))?.AsButton();
         Assert.NotNull(closeButton);
         closeButton.Invoke();
     }
+
+    /// <summary>
+    ///     Tells which of the Select Package dialog's keyboard-reachable controls has the focus.
+    /// </summary>
+    /// <param name="context">The running test context.</param>
+    /// <returns>The AutomationId of the control holding the focus, or an empty string.</returns>
+    private static string FocusedPickerControl(AgentControlTestContext context) =>
+        DialogInputProbe.FocusedControlAmong(
+            context,
+            [
+                "SelectPackageSourceList",
+                "SelectPackageNameList",
+                "SelectPackageVersionList",
+                "SelectPackageCancelButton",
+                "SelectPackageConfirmButton"
+            ]);
 
     /// <summary>
     ///     Waits for a top-level window (other than the main window) containing a descendant

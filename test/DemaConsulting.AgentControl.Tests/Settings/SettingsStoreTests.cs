@@ -531,6 +531,106 @@ public class SettingsStoreTests
     }
 
     /// <summary>
+    ///     Test that a settings file written before themes existed (no theme value) loads as
+    ///     "follow the system", and so does a brand-new settings instance.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_NoThemeValue_DefaultsToSystem()
+    {
+        // Arrange: an old settings file without a Theme value
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(configDir, "settings.json"), """{ "GitExecutablePath": "git" }""");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.Equal(ThemePreference.System, loaded.Theme);
+            Assert.Equal(ThemePreference.System, new AppSettings().Theme);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that every theme choice round-trips through save and load, and is written by name.
+    /// </summary>
+    /// <param name="preferenceName">The name of the theme to save.</param>
+    [Theory]
+    [InlineData("System")]
+    [InlineData("Light")]
+    [InlineData("Dark")]
+    public void SettingsStore_SaveThenLoad_Theme_RoundTripsByName(string preferenceName)
+    {
+        // Arrange
+        var preference = Enum.Parse<ThemePreference>(preferenceName);
+        var configDir = CreateTempDirectory();
+        try
+        {
+            // Act
+            SettingsStore.Save(new AppSettings { Theme = preference }, configDir);
+            var loaded = SettingsStore.Load(configDir);
+            var json = File.ReadAllText(Path.Combine(configDir, "settings.json"));
+
+            // Assert: the value is kept, and the file is readable (the name, not a number)
+            Assert.Equal(preference, loaded.Theme);
+            Assert.Contains($"\"Theme\": \"{preference}\"", json, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a theme value this version does not know - a typo, a number out of range, a
+    ///     value of the wrong JSON type or null - falls back to "follow the system" instead of
+    ///     failing the load, while a case difference is forgiven.
+    /// </summary>
+    /// <param name="themeJson">The JSON text of the Theme value.</param>
+    /// <param name="expectedName">The name of the theme the load must report.</param>
+    [Theory]
+    [InlineData("\"Purple\"", "System")]
+    [InlineData("\"\"", "System")]
+    [InlineData("99", "System")]
+    [InlineData("-1", "System")]
+    [InlineData("null", "System")]
+    [InlineData("true", "System")]
+    [InlineData("{ \"nested\": [1, 2] }", "System")]
+    [InlineData("[ \"Dark\" ]", "System")]
+    [InlineData("\"dark\"", "Dark")]
+    [InlineData("\"LIGHT\"", "Light")]
+    [InlineData("2", "Dark")]
+    public void SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem(string themeJson, string expectedName)
+    {
+        // Arrange: a settings file whose Theme value may be anything, followed by another value
+        // that must still be read (proves the reader stays positioned correctly)
+        var expected = Enum.Parse<ThemePreference>(expectedName);
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"Theme\": " + themeJson + ", \"GitExecutablePath\": \"git-after\" }");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.Equal(expected, loaded.Theme);
+            Assert.Equal("git-after", loaded.GitExecutablePath);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Creates a unique temporary directory for test isolation.
     /// </summary>
     /// <returns>The created directory's path.</returns>

@@ -17,10 +17,12 @@ directory.
 This user guide covers:
 
 - Installing AgentControl
+- The main window: the app bar, the repo cards, and the light and dark themes
 - Adding a repository to the recent-repos list
 - Reading a repo card's chips: pinned package, upgrade, branch, and status warnings
 - Configuring package sources (zip-package folders, NuGet-package folders and NuGet-package
   servers), including testing a server's connection and signing in to it
+- Why a published package version should never be reused, and how to guard against it
 - Selecting an initial agent package for a never-pinned repo, and upgrading an
   already-pinned repo
 - Launch behavior, including ensure-synced-before-launch semantics
@@ -44,30 +46,125 @@ the .NET 10 runtime (matching the app's `net10.0` target framework and the Avalo
 framework's Windows desktop requirements), so the target machine needs no pre-installed
 runtime.
 
+# The Main Window
+
+![The AgentControl main window in the dark theme: the app bar, then repo cards in the Favorites and Client Work
+sections](images/main-window-dark.png)
+
+The top of the main window is one compact **app bar** below the window's normal title bar. From left to right it
+holds:
+
+- the AgentControl **logo** (hover for its name; the name and a short description are in the **About** dialog),
+- the **filter box**, which stretches across the bar and narrows first when the window is made narrower (it is
+  also the first stop when you press **Tab**), and
+- three icon buttons: **Add repository** (a folder with a plus), **Settings** (a gear) and **About** (an
+  information mark), each with a tooltip.
+
+Below the app bar is the list of **repo cards**, described in the next section, newest-launched first within each
+section (see *Organizing Repos with Groups*). With no repos, or when the filter matches none, a short message
+says so instead.
+
+AgentControl follows your operating system's light or dark setting by default, and every window works in both
+themes; to always use one of them, choose a **Theme** in Settings (see *Settings*).
+
+![The same main window in the light theme](images/main-window-light.png)
+
 # Adding a Repository
 
-Click the folder-plus icon button on the main window's toolbar. A folder-browse dialog opens;
-select the root folder of the git repository you want to manage. The repo is added to the
+Click the **Add repository** button (the folder-plus icon) in the main window's app bar. A folder-browse dialog
+opens; select the root folder of the git repository you want to manage. The repo is added to the
 recent-repos list as a card.
 
 Each repo card shows:
 
-- The repo's name (its folder name) and, in smaller muted text below, its full path (hover for the
-  full text if it is shortened)
-- A row of **chips** — small rounded labels, each with a hover tooltip that explains it in full
-  (see *Reading the Chips* below)
-- A favorite star toggle, letting you pin specific repos above the default
-  most-recently-launched sort order
-- A **Launch** button labelled with your agent tool (see *Launching*)
-- A **Git Pull** button (see *Pulling Changes*)
-- A "..." menu offering Refresh, **Select Package...** or **Upgrade** (mutually exclusive —
-  see below), and Remove
-- A manual **Refresh** action that re-checks the repo's git state and committed-agent-files
-  chip without waiting for the next app launch
+- A colored **status bar** on the card's left edge: **green** — an agent package is pinned and no newer
+  version is available; **amber** — an upgrade is available; **red** — something needs attention (the folder is
+  missing, the package source has a problem or needs a sign-in, or the last action you started on the card
+  failed); **grey** — no agent package is pinned (or the upgrade check is still running). Color is never the
+  only signal: hover the bar for the status and its reason, and the chips below say the same in words.
+- On the first line, the **favorite star** (click it, or press Space on it, to pin the repo above the default
+  most-recently-launched sort order, and click it again to unpin it; it is a gold filled star when favorited and an
+  outline otherwise) and
+  the repo's name (its folder name) right beside it
+- On the same line at the right, the **Launch** button, labelled with your agent tool (see *Launching*), and a
+  "..." menu
+- Below the first line, the repo's **picture tile** (see *Giving a Repo a Card Icon*) beside a row of **chips** —
+  small rounded labels, each with a hover tooltip that explains it in full (see *Reading the Chips* below) —
+  and, in smaller muted text below them, the repo's full path. When the window is narrow a long name is
+  shortened at its end and a long path in the middle, so the repo's own folder name at the end of the path stays
+  visible (hover over either for the full text)
+- The "..." menu is grouped. **Repository**: **Git Pull** (see *Pulling Changes*) and **Refresh** (re-checks
+  the repo's git state, upgrade status and committed-agent-files chip without waiting for the next app
+  launch; for a repo whose folder is missing it reads **Check again** and checks whether the folder is
+  available again). **Agent files**: **Select Package...** or **Upgrade to x.y.z** (mutually exclusive — see below;
+  the group is hidden when neither applies). **Organize**: **Move to group** and **Card color...** (see
+  *Organizing Repos with Groups* and *Choosing a Card Color*). Then **Remove from list**.
+
+![A card with the repo's own picture and an up-to-date package, a section header, and a card with an upgrade chip
+and an uncommitted-changes warning](images/repo-card-anatomy.png)
+
+![The open "..." menu of a card: Git Pull and Refresh under Repository, Move to group and Card color under
+Organize, and Remove from list](images/card-menu.png)
 
 Removing a repo from the list prompts for confirmation first, since it is a destructive
 action against AgentControl's own recent-repos state (it does not touch the repository
 itself).
+
+## Giving a Repo a Card Icon
+
+Instead of the colored tile with the repo name's first letters, a card can show your repository's own picture.
+Put a PNG file named `icon.png` (or, if there is no usable `icon.png`, `logo.png`) in the **root folder** of the
+repository - the name's letter case does not matter. AgentControl looks for it when it starts and whenever you
+choose **Refresh** in the card's "..." menu, and shows it, scaled down, inside the same rounded tile (a wide or
+transparent logo is centered on a light background so it stays tidy). A repository can be untrusted, so the
+picture is only used when it is a plain file (not a link) of at most 1 MB that really is a PNG image of a
+reasonable size; anything else is ignored and the colored tile stays. Pictures in folders below the root are never used.
+
+## Organizing Repos with Groups
+
+When you track many repos, put related ones into **groups** of your own. Groups (and the card colors below) are
+personal: they are stored only in your own AgentControl settings file and are never written to a repository or to its
+`.agentcontrol.json`, so they are not shared with anyone through git, and a repo is in at most one group.
+
+1. Open the repo card's "..." menu and choose **Organize > Move to group**.
+2. Pick one of your existing groups (the repo's current group has a check mark), or choose **New group...**. The
+   small prompt checks the name as you type: it must not be blank, may have up to 40 characters, and may not be
+   **Favorites** or **Ungrouped** (those are the built-in sections). Typing the name of an existing group in
+   another letter case simply adds the repo to that group. **Create** stays disabled until the name is usable.
+3. To take a repo out of its group, choose **Remove from group** in the same submenu.
+
+As soon as one repo is in a group the list is shown in **sections**, each with a header that shows the section's
+name and how many repos it holds:
+
+- **Favorites** comes first and holds your starred repos. A favorite is listed **only** here, not again under its
+  group, so every repo appears once; its card shows its group as a small chip, and it returns to its group when you
+  remove the star.
+- Then come **your groups**, alphabetically (letter case ignored), and finally **Ungrouped**, the repos in no group.
+  A section with no repo has no header. Within a section the most recently launched repo comes first.
+
+Click a header (its chevron, name or count) to **collapse** or **expand** the section; AgentControl remembers which
+sections you collapsed. A group's header also has a "..." menu: **Rename group...** (the same prompt; another
+group's name is refused) and **Remove group**, which asks for confirmation and leaves the group's repos in the
+list, ungrouped. Nothing on disk changes.
+
+The **filter box** always searches all repos: while it has text, every section is shown expanded and a section
+without a match disappears, so a repo is never hidden inside a collapsed group; clear the filter and your collapsed
+sections are back as you left them (the headers' toggles are disabled while filtering). While no repo is in a group
+there are no headers at all, and favorites simply come first.
+
+## Choosing a Card Color
+
+Choose **Organize > Card color...** in a card's "..." menu to color that repo's tile. A small palette opens under
+the "..." button with ten colors (blue, violet, magenta, green, amber, teal, orange, indigo, red and lime) that look
+right in both the light and the dark theme; the chosen one shows a check mark. **Automatic** goes back to the color
+AgentControl derives from the repo's path. The letters on the tile are white or near-black, whichever is easier to
+read on that color (at least 4.5:1 contrast in both themes). A repo that shows its own picture (see *Giving a Repo a
+Card Icon*) keeps the picture's light backing so the picture stays legible, and the color appears as a ring around
+it. The **status bar** on the card's left edge never changes with the color: green, amber, red and grey keep their
+meaning.
+
+![The card color palette: ten colors with a check mark on the chosen one (Teal) and an Automatic
+button](images/card-color-palette.png)
 
 ## Reading the Chips
 
@@ -76,10 +173,15 @@ itself).
   source the package came from (a folder of zips, a folder of NuGet packages, or a NuGet server) and
   the source's **alias** is shown as muted text next to it, so you can see where the package came
   from without hovering. The tooltip names the source in full: "Agent files: contoso-agents 1.0.0
-  from source 'Default' (zip folder)". If the source is not configured, the tooltip says so.
+  from source 'Default' (zip folder)". If the source is not configured, the tooltip says so. When the pinned
+  package is the newest one available, a small green **check mark** inside the chip (tooltip "Agent files are
+  up to date") says so, in addition to the green bar on the card's left edge; it is not shown while an upgrade is
+  available, while AgentControl is still checking, or when there is a problem.
 - **Upgrade chip** (amber, up arrow) — **Upgrade to** and the version an upgrade would move to, for example
-  `Upgrade to 1.1.0`. It appears only when the source the repo is pinned to has a newer version. Click
-  it, or use the card's "..." menu > **Upgrade**, to apply it. While AgentControl is still checking the
+  `Upgrade to 1.1.0`. It appears only when the source the repo is pinned to has a newer version. **Click
+  the chip** (its tooltip says "Upgrade the agent files to 1.1.0"), or use the card's "..." menu >
+  **Upgrade to 1.1.0**, to apply it: both do exactly the same thing, with the same confirmations, and both are
+  unavailable while another operation is running on the card. While AgentControl is still checking the
   source, the chip is not shown yet (the card shows "checking for updates..."); a slow or unreachable
   source never blocks the window.
 - **No agent package chip** (grey) — the repo has no pin yet. Click it, or use "..." > **Select
@@ -97,7 +199,8 @@ itself).
 - **Folder missing** (red) — the repo path no longer exists on disk (for example, a deleted
   folder or an unmounted network/removable drive). This suppresses the card's other chips and
   actions, and offers a "Remove from list" action instead (the card is never auto-removed, since
-  the path may reappear, such as a drive being remounted).
+  the path may reappear, such as a drive being remounted). When the folder is back, choose the card's "..." menu >
+  **Check again**; the badge goes away and the card's actions return, without restarting AgentControl.
 - **Package source problem** (red) — the source the repo is pinned to is not configured (for
   example it was removed or renamed in Settings). The tooltip states the problem. No upgrade is
   offered and no other source is ever used instead; restore the source with the same alias in
@@ -126,9 +229,9 @@ Each source has an **alias**, the short name shown in the app and recorded in a 
 
 ## Adding a Source
 
-1. Open Settings (the gear icon) and, in the **Package sources** list, click **Add Zip-Package
-   Folder**, **Add NuGet-Package Folder** or **Add NuGet-Package Server** (see
-   *Adding a NuGet-Package Server* for the last one).
+1. Open Settings (the gear icon) and, above the **Package sources** list, click **Add** and choose
+   **Zip-package folder**, **NuGet-package folder** or **NuGet-package server** from the menu (each item
+   shows its icon and a one-line description; see *Adding a NuGet-Package Server* for the last one).
 2. Type an **alias**. It must be unique (letters are compared ignoring case) and cannot be
    changed later, because repo pins refer to it.
 3. For a folder, enter the **location** as a full folder path, or use **Browse** to pick the
@@ -140,6 +243,9 @@ Each source has an **alias**, the short name shown in the app and recorded in a 
 5. Messages under each field say what is wrong, and **Save** stays disabled until everything is
    valid. Then save the source, and save the Settings window to keep the change.
 
+![The Settings window with the Add menu open: Zip-package folder, NuGet-package folder and NuGet-package
+server](images/settings-add-menu.png)
+
 Each row of the list shows the alias, an icon for the kind of source, the location (hover for
 the full text) and a status. For a folder the status is whether the folder can currently be
 found, checked in the background so an offline network share never freezes Settings. A server
@@ -149,7 +255,7 @@ that could mean a wait, or a sign-in, for a window you only opened to look.
 
 ## Adding a NuGet-Package Server
 
-Click **Add NuGet-Package Server**. The dialog is a stack of titled sections - **Source**, **Packages**,
+Click **Add** and choose **NuGet-package server**. The dialog is a stack of titled sections - **Source**, **Packages**,
 **Sign-in**, **Package signatures** and **Connection test** - and scrolls when the screen is short, while its
 **Cancel** and **Save** buttons stay in view at the bottom. The **Source** section asks for:
 
@@ -174,6 +280,9 @@ Click **Add NuGet-Package Server**. The dialog is a stack of titled sections - *
   *Remembering a Sign-In*).
 - **Package signatures** — see *Requiring Signed Packages*.
 - **Connection test** — see *Testing the Connection*.
+
+![The Add NuGet-Package Server dialog filled in with an alias, a feed address and one package
+ID](images/source-editor-nuget-server.png)
 
 ## Testing the Connection
 
@@ -460,6 +569,30 @@ same name, the one in the pin wins even if the other has a higher version; if th
 is missing, you see an error rather than a quiet substitution. This stops a package of the same
 name in another place from being installed under your repo's pin.
 
+## Version Immutability and Trust
+
+A pin names a package, a version and a source, but a version number is only a label: whether the content behind
+`contoso-agents 1.1.0` can change later depends on the source, and AgentControl does not compare a package with the
+one you installed earlier.
+
+- **Zip-package folders and NuGet-package folders** - anyone with write access to the folder can overwrite
+  `contoso-agents-1.1.0.zip` or `contoso-agents.1.1.0.nupkg` in place. For a NuGet folder this can also make
+  machines differ: AgentControl keeps a private package cache for each source and uses the copy it unpacked first,
+  so a machine that already has 1.1.0 keeps the old content while one that did not gets the new content.
+- **NuGet-package servers** - nuget.org, JFrog Artifactory and Azure Artifacts normally refuse to overwrite a
+  version that is already published, but some servers can be configured to allow a redeploy, or a delete followed
+  by a push of the same version.
+- **Git repositories** (a planned kind of source) - a tag can be moved to a different commit by force.
+
+To keep a version trustworthy:
+
+- Restrict write access to shared package folders to the people who publish.
+- Turn on "no overwrite" (immutable versions) wherever the server offers it.
+- Never reuse a version number: publish a new version instead, even for a small fix.
+- For NuGet sources, use **Require signed packages** with a pinned publisher fingerprint (see *Requiring Signed
+  Packages*), so a package that was not signed by your publisher is refused. A signature does not stop the
+  publisher itself from signing different content under the same version, so the rules above still apply.
+
 # Selecting and Upgrading Agent Packages
 
 A repo's card shows exactly one of **Select Package...** or **Upgrade** in its "..." menu,
@@ -484,18 +617,21 @@ shows **Select Package...**. Choosing it opens a dialog with three columns:
    beside it. Reading a server can take several seconds, and a cancelled or failed sign-in can be
    retried from here without closing the dialog.
 
+![The Select Package dialog with the source Contoso, the package contoso-agents and the version 1.1.0
+selected](images/select-package.png)
+
 On confirm, AgentControl runs the same extract-and-pin sequence as an upgrade: validate the
 package, delete the four managed folders if present, extract the new files, ensure your
 `.gitignore` covers the four managed folders, write the `.agentcontrol.json` pin (naming the
-source), show the release notes, then offer the `AGENTS.md` template if applicable (see
-*AGENTS.md Template Offer* below). While this runs the card shows
+source), offer the `AGENTS.md` template if applicable (see *AGENTS.md Template Offer* below), then show the
+release notes. While this runs the card shows
 that it is busy and offers **Cancel**.
 
 ## Upgrading an Already-Pinned Repo
 
-Once a repo has a pin, its "..." menu shows **Upgrade** instead, appearing whenever a newer
-version of the pinned package is available at the source named in the pin (shown by the
-upgrade chip). Upgrading:
+Once a repo has a pin, the "..." menu's **Agent files** group shows **Upgrade to x.y.z** instead, appearing
+whenever a newer version of the pinned package is available at the source named in the pin (shown by the
+upgrade chip, which you can also click to start the upgrade). Upgrading:
 
 1. Opens and validates the new package. If it opens without error, its contents are
    assumed good - unless the source requires signed packages (see
@@ -506,10 +642,10 @@ upgrade chip). Upgrading:
 4. Ensures your `.gitignore` covers the four managed folders (adding them if not already
    covered), so they are far less likely to be committed by accident.
 5. Rewrites the `.agentcontrol.json` pin to the new package name and version.
-6. Shows the new package's `release-notes.md` (when the package includes one) in a
-   non-modal, resizable window.
-7. Offers the package's `AGENTS.md` template if applicable (see
-   [AGENTS.md Template Offer](#agentsmd-template-offer) below).
+6. Offers the package's `AGENTS.md` template if applicable (see
+   [AGENTS.md Template Offer](#agentsmd-template-offer) below). This question comes first.
+7. Shows the new package's `release-notes.md` (when the package includes one) in a
+   non-modal, resizable window, in front, once the question (if there was one) has been answered.
 
 There is no rollback if a step fails partway through — a message box reports the error, and
 you are expected to resolve it manually. Any local customizations you may have added inside
@@ -550,8 +686,9 @@ as an informational side action:
 
 # Pulling Changes
 
-The **Git Pull** button on a repo card runs `git pull` in that repo's working directory. It stays
-visible but is disabled (with a tooltip explaining why) whenever the repo's working tree has
+**Git Pull**, in the "..." menu of a repo card (under **Repository**), runs `git pull` in that repo's working
+directory. It stays in the menu but is disabled (with a tooltip explaining why, shown even while it is
+disabled) whenever the repo's working tree has
 uncommitted changes, the repo is missing, or the repo's Git status could not be determined
 (for example, the folder is not a Git repository, or git could not be run). It also starts
 disabled, with a "Git status has not been checked yet" tooltip, briefly while a repo card is
@@ -562,15 +699,25 @@ check that simply hasn't run yet.
 
 # Settings
 
-Open Settings from the gear icon on the toolbar to configure:
+Open Settings from the **Settings** button (the gear icon) in the main window's app bar to configure:
 
-- **Package sources** — the list of configured package sources, with **Add Zip-Package Folder**,
-  **Add NuGet-Package Folder**, **Add NuGet-Package Server**, **Edit** and **Remove** (see
+![The Settings window in the dark theme: the package sources, the Appearance section and the
+Tools section](images/settings-dark.png)
+
+- **Package sources** — the list of configured package sources, with one **Add** button (a menu of
+  **Zip-package folder**, **NuGet-package folder** and **NuGet-package server**), **Edit** and **Remove** (see
   *Package Sources*).
   A NuGet source can require signed packages (see *Requiring Signed Packages*);
   a source that does not require them is not checked - no checksum or signature
   verification is performed on its packages by AgentControl, so the security and integrity of such a
   shared folder or server is the responsibility of whoever maintains it.
+- **Appearance** (its own section, above **Tools**) — the **Theme**: **System default** (the default; AgentControl
+  follows your operating system's light or dark setting, and follows it live if you change it while AgentControl is
+  running),
+  **Light** or **Dark**. The choice applies as soon as you save Settings - no restart - to every window. A
+  settings file from an older version, or with a value AgentControl does not recognize, simply means System
+  default.
+- **Tools** — the next three settings:
 - **Git executable path override** — a specific `git` executable to use instead of resolving
   `git` from the process `PATH`.
 - **Agent tool selection** — which agentic CLI tool Launch starts: **GitHub Copilot CLI**,
@@ -592,10 +739,23 @@ Open Settings from the gear icon on the toolbar to configure:
 
 # About
 
-The About dialog, reachable from an info icon on the main window's toolbar, is a simple,
-non-modal window showing the running build's application version, copyright, and license
-text, so you can identify the running build without inspecting file properties, along with a
-scrollable list of this application's direct third-party dependencies and their licenses.
+The About dialog, reachable from the **About** (information) button in the main window's app bar, is a simple
+dialog (the main window waits until you close it) showing the running build's application version
+(a labeled **Version** row; hover over it for the full build version, including the build identifier after
+a `+`), copyright, and license text, so you can identify the running build without inspecting file
+properties, along with a scrollable list of this application's direct third-party dependencies and their licenses.
+
+# Using the Keyboard in Dialogs
+
+Every dialog (Settings, the package source editors, the sign-in dialog, Select Package, confirmations, message
+boxes, the group name prompt and About) is modal: the window behind it cannot be used until you close it. When a
+dialog opens, the keyboard focus is already in it - on its first field or button (a confirmation starts on the safe
+answer, **No**) - and, when you use the keyboard, it is drawn with a focus ring. **Tab** and **Shift+Tab** move between
+the dialog's controls and wrap around inside the dialog; they never reach the window behind it. **Escape** cancels a
+dialog that can be cancelled (a confirmation answers No; a message box, About, Select Package, the group name prompt,
+the source editors and the sign-in dialog close without applying anything). Settings has no Escape, so a stray key press
+cannot throw away your changes; use **Save**, or the window's close button to leave without saving. When a dialog closes,
+the focus is back where it was in the main window.
 
 # Authoring Agent Packages
 

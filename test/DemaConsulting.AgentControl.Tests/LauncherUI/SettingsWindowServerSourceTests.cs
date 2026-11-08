@@ -162,7 +162,8 @@ public class SettingsWindowServerSourceTests
     }
 
     /// <summary>
-    ///     Test that the settings window offers all three Add buttons, and that the server editor
+    ///     Test that the settings window offers one Add button whose menu holds the three source
+    ///     types (each with its icon and a description), and that the server editor
     ///     window shows the feed-address field with examples, the insecure-HTTP checkbox, the test
     ///     button, and no Browse button.
     /// </summary>
@@ -175,15 +176,22 @@ public class SettingsWindowServerSourceTests
         settingsWindow.Show();
         try
         {
-            // Assert: all three actions are there
-            Assert.NotNull(settingsWindow.FindControl<Button>("AddZipSourceButton"));
-            Assert.NotNull(settingsWindow.FindControl<Button>("AddNuGetFolderSourceButton"));
-            Assert.NotNull(settingsWindow.FindControl<Button>("AddNuGetServerSourceButton"));
+            // Assert: one Add button with a menu of all three actions (items, not separate buttons)
+            var addButton = settingsWindow.FindControl<Button>("AddSourceButton");
+            Assert.NotNull(addButton);
+            var menu = Assert.IsType<MenuFlyout>(addButton.Flyout);
+            Assert.Equal(
+                ["AddZipSourceButton", "AddNuGetFolderSourceButton", "AddNuGetServerSourceButton"],
+                menu.Items.OfType<MenuItem>().Select(item => item.Name));
+            Assert.All(menu.Items.OfType<MenuItem>(), item => Assert.NotNull(item.Icon));
+            Assert.IsType<MenuItem>(settingsWindow.FindControl<Control>("AddZipSourceButton"));
+            Assert.IsType<MenuItem>(settingsWindow.FindControl<Control>("AddNuGetFolderSourceButton"));
+            Assert.IsType<MenuItem>(settingsWindow.FindControl<Control>("AddNuGetServerSourceButton"));
 
             // Act: ask for the server editor and show it
             SourceEditorViewModel? requested = null;
             viewModel.EditorRequested += (_, editor) => requested = editor;
-            DialogWindowTests.Click(settingsWindow, "AddNuGetServerSourceButton");
+            DialogWindowTests.ClickMenuItem(settingsWindow, "AddSourceButton", "AddNuGetServerSourceButton");
             Assert.NotNull(requested);
             var editorWindow = new SourceEditorWindow(requested);
             var result = editorWindow.ShowDialog<PackageSourceDefinition?>(settingsWindow);

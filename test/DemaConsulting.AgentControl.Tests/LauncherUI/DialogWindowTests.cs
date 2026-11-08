@@ -54,6 +54,34 @@ public class DialogWindowTests
     }
 
     /// <summary>
+    ///     Clicks the named item of a menu the way a user does: opens the menu from its button
+    ///     (so the item is in the visual tree and inherits its data context, which is what binds its
+    ///     command), then raises <see cref="MenuItem.ClickEvent"/> (which, as for a real click, runs
+    ///     the item's <see cref="MenuItem.Command"/>), and closes the menu again.
+    /// </summary>
+    /// <param name="window">The window containing the menu button.</param>
+    /// <param name="menuButtonName">The XAML name of the button that opens the menu.</param>
+    /// <param name="name">The menu item's XAML name.</param>
+    internal static void ClickMenuItem(Window window, string menuButtonName, string name)
+    {
+        var button = window.FindControl<Button>(menuButtonName);
+        Assert.NotNull(button);
+        Assert.NotNull(button.Flyout);
+        button.Flyout.ShowAt(button);
+        Dispatcher.UIThread.RunJobs();
+        try
+        {
+            var menuItem = window.FindControl<MenuItem>(name);
+            Assert.NotNull(menuItem);
+            menuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        }
+        finally
+        {
+            button.Flyout.Hide();
+        }
+    }
+
+    /// <summary>
     ///     Test that the message box shows its message and closes when OK is clicked.
     /// </summary>
     [Fact]
@@ -163,7 +191,7 @@ public class DialogWindowTests
         window.Show();
 
         // Assert: static text and dependency list are populated
-        Assert.Contains("AgentControl", window.FindControl<TextBlock>("AboutVersionText")!.Text);
+        Assert.Equal(AboutWindow.DisplayVersion(Program.Version), window.FindControl<TextBlock>("AboutVersionText")!.Text);
         Assert.Equal("Copyright (c) DEMA Consulting", window.FindControl<TextBlock>("AboutCopyrightText")!.Text);
         Assert.Contains("MIT", window.FindControl<TextBlock>("AboutLicenseText")!.Text);
         Assert.NotEmpty(window.FindControl<TextBlock>("AboutTaglineText")!.Text!);
@@ -274,7 +302,7 @@ public class DialogWindowTests
             Assert.Single(viewModel.Sources);
 
             // Act: click the add button; the editor dialog opens
-            Click(window, "AddZipSourceButton");
+            ClickMenuItem(window, "AddSourceButton", "AddZipSourceButton");
             Dispatcher.UIThread.RunJobs();
             var editorWindow = Assert.Single(window.OwnedWindows.OfType<SourceEditorWindow>());
             var editor = Assert.IsType<SourceEditorViewModel>(editorWindow.DataContext);
@@ -312,7 +340,7 @@ public class DialogWindowTests
         window.Show();
 
         // Act
-        Click(window, "AddNuGetFolderSourceButton");
+        ClickMenuItem(window, "AddSourceButton", "AddNuGetFolderSourceButton");
         Dispatcher.UIThread.RunJobs();
         var editorWindow = Assert.Single(window.OwnedWindows.OfType<SourceEditorWindow>());
 

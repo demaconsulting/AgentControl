@@ -10,7 +10,9 @@ Package/Favorite/Remove actions for that repo. All business logic (upgrade detec
 orchestration, pull-eligibility checks) is implemented here or delegated to `GitClient`,
 `PackageSourceRegistry`, `PackageContentExtractor`, `RepoPinStore`, and `AgentToolLauncher`
 rather than in any view code-behind, so this class is fully unit-testable without an Avalonia
-window. Every package-source operation is bound to the source named in the repo's pin
+window, and every change to the user's own settings entry (favorite, group, card color, launch time) is made
+through the owner (see *Changes go through the owner* below). Every package-source operation is bound to the
+source named in the repo's pin
 (`AgentControl-RepoCardViewModel-SourceAwareness`), and the card shows whether that source requires signed
 packages (`AgentControl-RepoCardViewModel-SignatureIndicator`).
 
@@ -23,16 +25,42 @@ packages (`AgentControl-RepoCardViewModel-SignatureIndicator`).
 
 **IsMissing**: `bool` — `true` when the repo path no longer exists on disk; when `true`, every
 other check/action short-circuits to its "unavailable" default rather than attempting a git/
-filesystem operation against a nonexistent path (`AgentControl-RepoCardViewModel-MissingRepo`).
+filesystem operation against a nonexistent path (`AgentControl-RepoCardViewModel-MissingRepo`). The refresh
+command is deliberately *not* disabled for a missing repo: it is the only in-app way to re-check once the folder
+(a remounted drive, a restored clone) is back, so **RefreshMenuText** reads "Check again" and **RefreshTooltip**
+"Check whether the folder is available again" while `IsMissing`, and "Refresh" / "Re-check this repo's branch,
+chips, and upgrade status" otherwise; the other commands stay disabled
+(`AgentControl-RepoCardViewModel-MissingRepoRecheck`). A refresh that finds the folder again clears `IsMissing`
+and the actions become available again (`AgentControl-RepoCardViewModel-MissingRepoCleared`).
 
 **IsFavorite**, **LastLaunchedUtc**, **PinnedPackageName**, **PinnedPackageVersion**,
 **PinnedSource**: mirror the corresponding fields on the shared `RecentRepo`/pin file
 (`AgentControl-RepoCardViewModel-Favorite`, `AgentControl-RepoCardViewModel-DisplayInfo`).
+`IsFavorite` is the *only* owner of the favorite state: the card's star is a `ToggleButton` whose `IsChecked`
+binds to it two-way and the card has no favorite command. (An earlier design also bound a command that toggled
+the property, so one click flipped the state twice - the toggle itself, then the command - and a repo could
+neither be favorited nor unfavorited.) Setting it changes the shared record and raises `FavoriteChanged` exactly
+once per change, but only after the owner saved the change (see *Changes go through the owner* below); the
+owning `MainWindowViewModel` re-sections the list.
 `PinnedSource` is the alias of the source the pin names (a pin written before sources existed
 reads as `Default`).
 
+**Changes go through the owner** (`AgentControl-RepoCardViewModel-ChangeSavedBeforeApplied`): the constructor takes
+an optional `commitChange` callback, `Func<RecentRepo, Action<RecentRepo>, bool>`. The card never assigns to its
+`RecentRepo` directly: the private `CommitChange` hands the owner the entry and the assignment to make, and the
+owner (`MainWindowViewModel.CommitRepoChange`) makes it on a candidate copy of the settings, saves the candidate,
+and only then applies it to the live entry, returning `true`; a failed save returns `false` after telling the user.
+The card then raises its change event and updates its derived properties only when the callback returned `true`. When it
+returned `false` nothing changed: `IsFavorite` keeps its value (and raises `PropertyChanged` for it so the two-way
+bound star shows the real state again), `MoveToGroup` and `SetCardColor` return `false`, and a launch is simply not
+stamped (`RecordLaunched` raises no `LaunchRecorded`). Without a callback (a card built outside the main window, as
+in tests) the change is applied to the entry directly. The assignments must be plain assignments of fixed values,
+because the owner runs them twice (candidate, then live entry).
+
 **SourceProblem** / **HasSourceProblem**: `string?`/`bool` — the card's error state for a pin whose
-source cannot be used, chiefly an alias that is not among the configured sources. When set, no
+source cannot be used: an alias that is not among the configured sources, or a source configuration that is itself
+invalid (for example a duplicated alias; "The package sources are not configured correctly: ..."), which is a
+problem and never "up to date" (`AgentControl-RepoCardViewModel-InvalidSourceConfigurationIsProblem`). When set, no
 upgrade is offered and no other source is ever consulted
 (`AgentControl-RepoCardViewModel-SourceAwareness`); the main window shows it as a warning badge
 on the card, with the reason as its tooltip. Set by the cheap refresh; cleared when
@@ -44,6 +72,10 @@ with the committed-files result consulting the per-card `CommittedAgentFilesCach
 
 **IsUpgradeAvailable**, **LatestAvailableVersion**: `bool`/`string?` — Resolved via the shared
 `PackageVersionCache` at the pin's source (`AgentControl-RepoCardViewModel-UpgradeBadge`).
+**IsCheckingUpgrade** and **IsUpgradeStatusUnknown** ("checking" and "check failed") belong to the upgrade check
+that is current: a private generation counter, `_upgradeCheckGeneration`, is incremented by every check that starts and
+by `InvalidateUpgradeCheck`, and a check publishes its answer, or its failure, only while its own number is still the
+current one (`AgentControl-RepoCardViewModel-StaleUpgradeCheckDiscarded`).
 
 **CanPull**: `bool` — Reflects working-tree cleanliness, refreshed lazily
 (`AgentControl-RepoCardViewModel-PullGating`).
@@ -67,19 +99,115 @@ confirmed dirty working tree before its first status check actually runs
 working tree, and any repo for which `GitStatusChecked` is still `false`
 (`AgentControl-RepoCardViewModel-PullDisabledExplanation`).
 
-**PullTooltip**: `string` (derived) — The `PullCommand` button's tooltip text, explaining why
+**PullTooltip**: `string` (derived) — The tooltip text of the Git Pull action, explaining why
 Pull is currently disabled (missing repo, not yet checked, an undeterminable git status, or
-dirty working tree) instead of leaving the button to silently disappear or disable with no
+dirty working tree) instead of leaving the action to silently disable with no
 explanation; when Pull is enabled, returns the original neutral "Pull the latest commits for
-this repo" text (`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The Pull button
-itself always stays visible in the view (never hidden via `IsVisible`), consistent with the
+this repo" text (`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The Git Pull item of the card's
+"..." menu is always present (never hidden via `IsVisible`), consistent with the
 "stay visible, disable, explain" pattern already used for Launch/Upgrade/Select-Package when
-the repo is missing. `MainWindow.axaml` sets `ToolTip.ShowOnDisabled="True"` on the Pull
-button so this explanatory text remains reachable while the button is disabled via
+the repo is missing. `MainWindow.axaml` sets `ToolTip.ShowOnDisabled="True"` on the item
+so this explanatory text remains reachable while the item is disabled via
 `PullCommand`'s `CanExecute` - Avalonia suppresses tooltips on disabled controls by default,
-which would otherwise hide the explanation precisely when it is most needed.
+which would otherwise hide the explanation precisely when it is most needed. The item is the first entry of the
+menu's "Repository" group and keeps its icon and the `PullButton` AutomationId.
 
 **IsPackageSelectionNeeded**: `bool` (derived) — `PinnedPackageName is null`.
+
+**Status** / **StatusText** / **StatusTooltip** / **LastActionFailed** (`AgentControl-RepoCardViewModel-StatusAccent`,
+`-StatusWords`, `-StatusProblemCleared`):
+`Status` is the card's overall `RepoCardStatus`, which the view shows as the colored accent bar on the card's
+left edge. A problem outranks everything - the folder is missing (`IsMissing`), the pinned package's source has a
+problem or needs a sign-in (`HasSourceProblem`), or the last action failed (`LastActionFailed`) - then
+`UpgradeAvailable` (`IsUpgradeAvailable`), then `NoPackage` (`IsPackageSelectionNeeded`), then `Checking` (a
+package is pinned but the upgrade check is still running, so the card never claims "up to date" early), then
+`Unknown` (`IsUpgradeStatusUnknown`: the last upgrade check failed because the package source could not be read,
+so nothing established that the card is current; kept until a later check succeeds), and otherwise `UpToDate`.
+**ShowUpToDateCue** (`HasPinnedPackage && Status == UpToDate`,
+`AgentControl-RepoCardViewModel-UpToDateCue`) tells the card to draw a small check mark - with the tooltip and
+accessible name "Agent files are up to date" - inside its package chip, so a healthy card says so in words
+without an extra chip or row; it is hidden for every other status so it never contradicts the rest of the card.
+**RepoPathParent** and **RepoPathLeaf** (`AgentControl-RepoCardViewModel-RepoPathKeepsFolderName`) split `RepoPath` at
+its last separator (the leaf keeps its separator, a
+trailing separator is ignored, and a path without a separator is all leaf): the card's `PathEllipsisText` shortens the
+parent with an end ellipsis first and the leaf with a middle ellipsis only when it still does not fit, which keeps
+the start and the end of the folder name visible.
+Green, amber, red and grey are only the view's rendering of that value: `StatusText` says
+it in words ("Up to date", "Upgrade available", "Needs attention", "No agent package", "Checking for updates",
+"Update check failed")
+and is the bar's accessible name, and `StatusTooltip` adds the reason (for a problem, the missing folder, the
+source problem or "the last action failed"). `LastActionFailed` is set whenever the card raises `ErrorOccurred`
+(the constructor subscribes to its own event, so no call site needs bookkeeping) and when a Git Pull ends with
+git's refusal, and is cleared when the next operation starts (`RunOperationAsync`). **HasAgentFileActions**
+(`IsPackageSelectionNeeded || IsUpgradeAvailable`) lets the card menu hide its "Agent files" group when it has
+nothing to offer.
+
+**Avatar tile** (`AgentControl-RepoCardViewModel-AvatarTile`, `-AvatarFolderGlyph`, `-AvatarColorStable`):
+**AvatarInitials** are the capital first letters
+of the first two words of `RepoName` (words are runs of letters and digits, so `alpha-service` gives `AS`), or
+one letter for a one-word name, and **HasAvatarInitials** is `false` when the name has none (the view then shows
+a folder glyph). **AvatarColorIndex** (and **AvatarStyleClass**, `avatar0` ... `avatar9`) picks one of
+`AvatarPaletteSize` palette entries: the color the user chose (**CardColorName**) when there is one, otherwise a
+32-bit FNV-1a hash of the repo path compared without regard to case or
+a trailing separator; `string.GetHashCode` is deliberately not used because it is randomized per process, which
+would change a repo's color on every launch. The view model carries no color: the style class selects theme-aware
+`AvatarBackgroundN`/`AvatarForegroundN` resources (letter color chosen for contrast) from `AppStyles.axaml`.
+
+**Group and card color** (user-specific; stored only on the repo's `RecentRepo` in the per-user settings, never in
+the repository or its pin file). **GroupName** reads the stored name through `RepoGroupName.Sanitize` (a blank,
+overlong or reserved stored value yields a valid name or none), **HasGroup** is `GroupName is not null`, and
+**ShowGroupChip** (`IsFavorite && HasGroup`, `AgentControl-RepoCardViewModel-GroupChipForFavorites`) tells the card to
+show its group as a chip - needed only for a favorite,
+because a favorite is listed under Favorites instead of under its group. **MoveToGroup(name)** moves the repo into a
+group or, with `null`/blank, out of every group: the name is cleaned up, refused (returns `false`, nothing changes)
+when `RepoGroupName.Validate` fails (too long, or *Favorites*/*Ungrouped*), and given the spelling of an existing
+group that matches ignoring letter case (`GetExistingGroupNames()`, from the groups of all repos in the live
+settings, `AgentControl-RepoCardViewModel-GroupNameRules`, `-GroupList`); a real change is made through the owner
+(see *Changes go through the owner*) and, once saved, raises `GroupChanged` for `MainWindowViewModel` to re-section
+(`AgentControl-RepoCardViewModel-MoveToGroup`). **NewGroupCommand** raises `NewGroupRequested` (the view shows the
+name prompt and calls `MoveToGroup`; `-NewGroupPrompt`); **RemoveFromGroupCommand** (available while `HasGroup`) calls
+`MoveToGroup(null)`. **CardColorName** is the palette color's name read through `CardColorPalette.Find` - a missing,
+blank or unknown stored name gives `null`, the automatic color (**HasCustomCardColor**, **IsCardColorAutomatic**,
+`-CardColorStoredFallback`) -
+and **SetCardColor(name)** stores a palette name (letter case ignored; refused with `false` when not in the palette,
+`-CardColorUnknownRefused`)
+or `null` for Automatic, through the owner, then raises `CardColorChanged` and changes
+`AvatarColorIndex`/`AvatarStyleClass` (`-CardColor`, `-CardColorRecorded`). Only the tile
+changes: **Status**, the accent bar and every chip are independent of the color
+(`AgentControl-RepoCardViewModel-CardColorKeepsStatus`). `CardColorPalette` is a small static helper of this unit: ten named
+entries (Blue, Violet, Magenta, Green, Amber, Teal, Orange, Indigo, Red, Lime) whose position is the index of the
+theme-aware `AvatarBackgroundN`/`AvatarForegroundN` resources, so a chosen color is the same palette the automatic
+colors come from. Where the repo shows its own picture the tile keeps its light backing (so a logo drawn for a
+white page stays legible) and a chosen color is drawn as a 3 px ring around the picture (the `customColor`
+class); with no picture the color fills the tile and the letters use the entry's foreground resource.
+
+**Repo picture** (`AgentControl-RepoCardViewModel-RepoPicture`): **RepoImage** (`Bitmap?`), **HasRepoImage**,
+**ShowAvatarInitials** and **ShowAvatarFolderGlyph** tell the tile what to show. `RefreshCheap` starts
+`RefreshRepoImageAsync` (never for a missing folder, which just clears the picture,
+`AgentControl-RepoCardViewModel-RepoPictureFallback`); on a worker thread it asks
+`RepoImageLocator` for the repo's picture, and decodes it with `RepoImageLocator.Decode` unless it is the same
+file (path, last-write time and size) as the one already decoded - a failed decode is remembered the same way
+(`-RepoPictureNotDecodedAgain`) - and
+then publishes the bitmap on the caller's context, so the UI thread never touches the disk or the decoder and
+repeated refreshes cost one probe of the repo root. A newer refresh supersedes an older one (a generation counter,
+`_imageGeneration`, taken when
+the refresh starts and also advanced by a missing folder and by `Retire`), and any
+exception from the locator, the decoder or an injected decoder - of whatever type - means "no picture", so the
+background task never faults (`-RepoPictureFailureIsolated`). Only the latest refresh may clear the picture on such a
+failure: an older refresh
+failing after a newer one published leaves the newer picture alone. Which file is acceptable, and how it is checked
+(the repo root, links, PNG header
+limits, handle verification), is the `RepoImageLocator` unit's design; this view model relies on it to return
+only a bounded, scaled bitmap and treats its result as untrusted-derived display data. The view letterboxes the
+picture (`Stretch="Uniform"`) on a
+light backing inside the same tile.
+
+**Bitmap ownership** (`AgentControl-RepoCardViewModel-RepoPictureReleased`): the card owns the bitmap it publishes in
+`RepoImage`. When the property is replaced or cleared, the superseded bitmap is disposed right after the change was
+announced (`PropertyChanged` for `RepoImage`, `HasRepoImage` and the tile properties), by which time the bound tile no
+longer references it. A bitmap that a refresh decoded but that a newer refresh overtook is never published, so the
+refresh that decoded it disposes it. `Retire` clears the property, which disposes the bitmap that was shown.
+Consumers must not keep the value beyond the moment they read it.
 
 **Source access and asynchronous operations.** The card builds a `PackageSourceRegistry` from the
 current settings' effective sources for each operation (`CreateSourceRegistry`) and awaits the
@@ -121,8 +249,12 @@ session credentials and the user's saved sign-in (read without any dialog) but c
 - *No-package chip* — `HasNoPackageChip` and its tooltip, shown instead of the package chip for a
   present repo with no pin; clicking it opens Select Package.
 - *Upgrade chip* — `IsUpgradeAvailable`, `UpgradeChipText` (the version an upgrade would move to)
-  and `UpgradeChipTooltip` (both versions); `IsCheckingUpgrade` shows that the background check is
-  still running.
+  and `UpgradeTooltip` ("Upgrade the agent files to x.y.z (pinned: a.b.c). Same as the "..." menu >
+  Upgrade.", `AgentControl-RepoCardViewModel-UpgradeChipTooltip`); the chip is a button bound to `UpgradeCommand`, the
+  same command as the menu's Upgrade item, so it has the same guards (only while an upgrade is available and no
+  operation is running, `-UpgradeChipAvailability`) and the same
+  confirmations (`AgentControl-RepoCardViewModel-UpgradeFromChip`); `IsCheckingUpgrade` shows that the
+  background check is still running.
 - *Branch chip* — the branch name with a tooltip.
 - *Status chips* — uncommitted changes, committed agent files, folder missing and package source
   problem (whose tooltip is the actual problem), each color-coded amber or red
@@ -137,7 +269,8 @@ AGENTS.md accept/decline), mirroring the logging convention already established 
 and `AgentToolLauncher`. Every call site is guarded by `_logger.IsEnabled(...)`.
 
 **LaunchCommand, PullCommand, UpgradeCommand, RefreshCommand**: `AsyncRelayCommand`;
-**SelectPackageCommand, FavoriteToggleCommand, RemoveCommand, CancelOperationCommand**:
+**SelectPackageCommand, RemoveCommand, CancelOperationCommand, NewGroupCommand,
+RemoveFromGroupCommand**:
 `RelayCommand` — see Interfaces in `docs/design/agent-control/launcher-ui.md`.
 
 #### Key Methods
@@ -146,6 +279,13 @@ and `AgentToolLauncher`. Every call site is guarded by `_logger.IsEnabled(...)`.
 naming an unconfigured source, branch, committed-files badge via `HEAD`-hash cache). It is
 synchronous and never reads a package source, so it is safe to call eagerly for every recent repo
 at app launch; upgrade availability is determined separately by `RefreshUpgradeStatusAsync`.
+A retired card returns at once. Otherwise it first calls `InvalidateUpgradeCheck`, which advances
+`_upgradeCheckGeneration` so an upgrade check still in flight never publishes its answer over what this refresh
+finds, and resets "checking" and "check failed"
+(`AgentControl-RepoCardViewModel-StaleUpgradeCheckDiscarded`, `-UpgradeStateResetOnRefresh`); the caller starts a
+new check when one is wanted. When the pin it reads (name, version or source) differs from the one before, it also
+drops `IsUpgradeAvailable` and `LatestAvailableVersion`, which described the old pin, and when the repo has become
+missing it clears the upgrade state, so a late answer cannot revive it.
 Deliberately excludes the
 working-tree dirty check, which is not cacheable and is deferred/lazy per architecture.md's
 repo-fact caching strategy (`AgentControl-RepoCardViewModel-CommittedFilesBadge`). When the repo is found to be
@@ -159,6 +299,18 @@ itself afterward to get an immediate fresh check instead of leaving the card in 
 checked" state until its next manual refresh
 (`AgentControl-RepoCardViewModel-PullDisabledExplanation`).
 
+**Retire** (internal): Stops the card for good because its repo was removed from the recent-repos list; called by
+`MainWindowViewModel.RemoveRepo` once the removal was saved (and for a card prepared by `AddRepo` whose save failed).
+It marks the card retired, advances `_upgradeCheckGeneration` and `_imageGeneration` so results still on their way are
+dropped, clears "checking", cancels the running operation (`CancelOperation`; the operation ends cancelled, which is
+never reported as an error), sets every event of the card (`ErrorOccurred`, `ReleaseNotesReady`,
+`AgentsMdTemplateOfferRequested`, `FavoriteChanged`, `GroupChanged`, `CardColorChanged`, `LaunchRecorded`,
+`NewGroupRequested`, `RemoveRequested`, `SelectPackageRequested`) to `null` so that nothing it still does can show an
+error box, release notes or a prompt, and clears the picture, which disposes it
+(`AgentControl-RepoCardViewModel-RetiredCardReportsNothing`, `-RetireCancelsRunningWork`). A retired card ignores
+`RefreshCheap` and `RefreshUpgradeStatusAsync` (`-RetiredCardChecksNothing`), is never reused, and `Retire` is
+idempotent; adding the repo again creates a new card.
+
 **RefreshDirtyStatus**: Re-checks working-tree cleanliness via `GitClient`, updating `CanPull`,
 `GitStatusUnavailable`, and `GitStatusChecked`. Not called by `RefreshCheap` or the
 constructor — computed lazily instead, on demand via `RefreshCommand` or once when a card
@@ -169,9 +321,11 @@ first becomes visible.
 immediate full refresh; `RefreshCommand` runs it asynchronously.
 
 **RefreshUpgradeStatusAsync**: Checks, in the background, whether the pin's source offers a
-newer version than the pinned one, using the shared cache. A check started later supersedes one
+newer version than the pinned one, using the shared cache. A retired card returns at once. Each check takes a new
+generation number when it starts, and a check started later supersedes one
 still waiting (`AgentControl-RepoCardViewModel-SupersededUpgradeCheck`), so a result for settings that have
-since changed is discarded; cancellation leaves
+since changed is discarded; a source configuration that is invalid is shown as a problem
+(`-InvalidSourceConfigurationIsProblem`) and cancellation leaves
 the previous state in place (`AgentControl-RepoCardViewModel-CancelOperation`). Its
 `allowPrompt` parameter defaults to `false`, which is what the background check at start-up, after a
 repo is added and after settings change uses: it reads a server through the remembered session
@@ -186,8 +340,10 @@ Select Package and Upgrade actions the user chooses use a source registry that m
 
 - *Parameters*: None (bound to `LaunchCommand`).
 - *Returns*: `void`.
-- *Postconditions*: On success, `StatusMessage` is set and `LaunchRecorded` is raised
-  (`AgentControl-RepoCardViewModel-Launch`); on failure, `ErrorOccurred` is raised.
+- *Postconditions*: On success, `StatusMessage` is set and the launch time is recorded through the owner
+  (`RecordLaunched`: the stamp is saved first, then `LastLaunchedUtc` is set and `LaunchRecorded` raised; when the
+  save fails the stamp is not recorded and the process was launched all the same,
+  `AgentControl-RepoCardViewModel-Launch`, `-ChangeSavedBeforeApplied`); on failure, `ErrorOccurred` is raised.
 
 Calls `EnsureAgentFilesSyncedBeforeLaunchAsync` purely for its best-effort sync side effect, then
 always proceeds to resolve the shell/agent command and spawn the process regardless of that
@@ -245,8 +401,12 @@ tolerated and replaced), acquires the package from its provider, extracts it
 agent folders (via `EnsureGitIgnoreCoversManagedFolders`, its own non-blocking step — see Error
 Handling), updates the loaded pin in place with the package's source alias, name and version and
 saves it (so `AgentsMdTemplateDeclined` and any unknown fields are preserved), refreshes
-pin/upgrade-status properties, raises `ReleaseNotesReady` with the new package's release notes,
-and finally calls `MaybeOfferAgentsMdTemplate`. The acquired package reader stays open until the
+pin/upgrade-status properties, calls `MaybeOfferAgentsMdTemplate` and finally raises
+`ReleaseNotesReady` with the new package's release notes. The offer is raised *before* the release notes so
+the view can show the modal question at once and hold the release notes back until it is answered
+(`MainWindow.ShowReleaseNotesAsync`): the notes window then opens in front as the completion of the upgrade
+instead of being covered by, or lost behind, the question
+(`AgentControl-RepoCardViewModel-AgentsMdOfferBeforeReleaseNotes`). The acquired package reader stays open until the
 sequence ends.
 
 **MaybeOfferAgentsMdTemplate** (private): Decides whether to offer the package's optional
@@ -347,10 +507,19 @@ throwing (it never calls `RepoPinStore`, so `InvalidOperationException` cannot o
 from `RepoPinStore.Load`/`Save` and likewise raises `ErrorOccurred` rather than throwing. The
 constructor throws `ArgumentNullException` for a null `recentRepo`, `getSettings`, or
 `packageVersionCache`. `ApplySelectedPackageAsync` throws `ArgumentNullException` for a null
-`selection`.
+`selection`. `MoveToGroup` and `SetCardColor` never throw: a name that is not valid, or not a palette color, is
+refused by returning `false` and changing nothing, and stored values that are missing, blank or unknown read as
+"no group" and the automatic color (`GroupName` is sanitized on every read). A change the owner could not save is not
+an exception either: the owner reports it to the user, the callback returns `false`, and the card stays as it was
+(`MoveToGroup` and `SetCardColor` return `false` for it, as for a refused name). The picture refresh never faults the
+background task, and a retired card raises nothing.
 
 #### Dependencies
 
+- **RepoGroupName** (`Settings` subsystem) — cleans up, validates and repairs group names, and unifies the
+  spelling of groups that differ only in letter case.
+- **RepoImageLocator** (`LauncherUI`) — finds and decodes the repo's picture, enforcing every rule about what
+  may be shown.
 - **RepoPinStore** (`RepoConfig` subsystem) — reads/writes the repo's pin.
 - **PackageSourceRegistry**, **IPackageSourceProvider**, **PackageVersionCache**,
   **DiscoveredPackage**, **PackageSourceAccessException** (`AgentPackageManagement` subsystem) — source
@@ -383,10 +552,14 @@ constructor throws `ArgumentNullException` for a null `recentRepo`, `getSettings
 
 #### Callers
 
-- **MainWindowViewModel** — constructs one `RepoCardViewModel` per `RecentRepo` and subscribes
-  to `FavoriteChanged`/`LaunchRecorded` to persist settings and re-sort the displayed list.
+- **MainWindowViewModel** — constructs one `RepoCardViewModel` per `RecentRepo`, passing its `commitChange` callback
+  (which saves each of the card's changes before applying it), subscribes to
+  `FavoriteChanged`/`GroupChanged`/`LaunchRecorded` to re-sort/re-section the displayed list (settings are already
+  saved by then; `CardColorChanged` needs no re-ordering), and retires a card when its repo is removed.
 - **MainWindow** (code-behind) — subscribes to `RemoveRequested`
-  (`AgentControl-RepoCardViewModel-RemoveRequest`), `SelectPackageRequested`,
+  (`AgentControl-RepoCardViewModel-RemoveRequest`), `SelectPackageRequested`, `NewGroupRequested`,
   `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, and `ErrorOccurred` to drive
-  dialogs/windows, calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the
-  `ConfirmationWindow` shown for the AGENTS.md template offer.
+  dialogs/windows (detaching these handlers when a card leaves the list), calling
+  `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the
+  `ConfirmationWindow` shown for the AGENTS.md template offer, `MoveToGroup` from the card menu's
+  "Move to group" entries and the name prompt, and `SetCardColor` from the color palette pop-up.

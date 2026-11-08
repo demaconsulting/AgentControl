@@ -10,17 +10,36 @@ window, the settings window, the package-source editor window and the sign-in di
 (`MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`, `SettingsWindowViewModel`,
 `SourceEditorViewModel`, `CredentialPromptViewModel`), plus their `.axaml` Views (`MainWindow`,
 `AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`, `SettingsWindow`,
-`SourceEditorWindow`, `CredentialPromptWindow`) and shared MVVM support types (`RelayCommand`,
+`SourceEditorWindow`, `CredentialPromptWindow`, `GroupNameWindow`) and shared MVVM support types (`RelayCommand`,
 `AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
-`SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`,
-`FavoriteIconConverter`, `FavoriteColorConverter`, `AgentToolKindDisplayNameConverter`,
-`ThirdPartyDependencies`), which are folded
-into this subsystem-level description rather than given separate unit files; `ThirdPartyDependencies`
-and `AsyncRelayCommand` are the exceptions with dedicated test files
-(`ThirdPartyDependenciesTests.cs`, `AsyncRelayCommandTests.cs`), since each is independent of
-any Avalonia control. The subsystem contains
-six units: `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
-`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`. It depends on the
+`SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`, `RepoCardStatus`,
+`CardColorPalette`, `ThirdPartyDependencies`), the shared theme resources and styles
+(`AppStyles.axaml`, included by `App.axaml`). The subsystem contains ten units: the six
+view-model units `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
+`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`, and four further
+independently testable classes with behavior of their own, each with its own requirements, design, verification
+document and review set: `RepoImageLocator` (finds and decodes a repo's untrusted picture; security-relevant),
+`RepoGroupHeaderViewModel` (with `RepoGroupKind`; the header row of a repo-list section), `GroupNameViewModel` (the
+validating view model of the group-name prompt) and `DialogBehavior` (the keyboard behavior every dialog shares).
+
+**Supporting types.** The remaining types are documented here, as supporting types of the subsystem, rather than as
+units: the `RelayCommand`/`ViewModelBase`/`PackageSourceItemViewModel`-style MVVM plumbing and the `.axaml` Views are
+declared glue with no logic of their own to verify apart from the units that bind them; `RepoCardStatus`,
+`ConnectionTestResultKind` and `CardColorPalette` are small enumerations and static tables belonging to the card view
+model; `AsyncRelayCommand` and `ThirdPartyDependencies` have dedicated test files
+(`AsyncRelayCommandTests.cs`, `ThirdPartyDependenciesTests.cs`) because each is independent of any Avalonia control;
+and the pure display helpers - the value converters `FavoriteIconConverter`, `AgentToolKindDisplayNameConverter` and
+`ThemePreferenceDisplayNameConverter` (each maps one value to its display text or glyph; the last two have their own
+test files) and the `PathEllipsisText` control (a presentational control that only shortens text to the width it is
+given, with its own `PathEllipsisTextTests.cs`) - are exercised through the subsystem requirements that name their
+tests (`AgentControl-LauncherUI-UpToDateCue`, `AgentControl-LauncherUI-Appearance`,
+`AgentControl-LauncherUI-FavoriteStar`) and are reviewed with the subsystem. `PathEllipsisText` and
+`ThemePreferenceDisplayNameConverter` are thus deliberately documented supporting types, not units: the SysML2
+model points their design, verification and requirements at this subsystem's documents (the convention for units
+without a dedicated companion document) and the subsystem requirements link their tests. `RepoGroupName` is
+different: it is a unit of the `Settings` subsystem with its own requirements, design
+(`docs/design/agent-control/settings/repo-group-name.md`), verification and review set, which this subsystem only
+uses. The subsystem depends on the
 `AgentPackageManagement` subsystem (sources, providers, failure causes) and on the `PackageCredentials`
 subsystem (`PackageCredentialContext`, and the `ICredentialPrompt` that `AvaloniaCredentialPrompt` implements) and
 on `SignatureVerificationSupport` (whether the signature requirement can be offered). The repo card's package chip
@@ -30,19 +49,34 @@ requires signed packages, with an automation identifier `PackageSignatureIcon`
 
 ### Interfaces
 
-**MainWindowViewModel.DisplayedRepoCards**: The filtered, sorted collection of repo cards
-shown in the main window.
+**MainWindowViewModel.DisplayedItems**: The filtered, sectioned collection of rows shown in the main
+window: the repo cards interleaved with the `RepoGroupHeaderViewModel` that starts each section.
+(`MainWindowViewModel.DisplayedRepoCards` is the same cards without the headers and without the cards of
+collapsed sections.)
 
-- *Type*: In-process .NET observable collection (data-bound to `MainWindow`'s `ItemsControl`).
+- *Type*: In-process .NET observable collection (data-bound to `MainWindow`'s `ListBox`, which picks the
+  header or the card template by row type).
 - *Role*: Provider.
-- *Contract*: Reflects `AddRepo`/`RemoveRepo` mutations, `FilterText` changes, and sort order
-  (favorites first, then most-recently-launched descending with never-launched last)
-  (`AgentControl-LauncherUI-RecentReposDisplay`, `AgentControl-LauncherUI-SearchFilter`,
-  `AgentControl-LauncherUI-SortOrder`).
-- *Constraints*: Recomputed synchronously on the UI thread whenever a dependency changes.
+- *Contract*: Reflects `AddRepo`/`RemoveRepo` mutations, `FilterText` changes, grouping changes and sort
+  order. With no repo in a group it is flat: favorites first, then most-recently-launched descending
+  with never-launched last. Once a repo is in a group it is sectioned - Favorites (a favorite only
+  there), the user's groups alphabetically, Ungrouped - with collapsible sections that a filter shows in
+  full (`AgentControl-LauncherUI-RecentReposDisplay`, `AgentControl-LauncherUI-SearchFilter`,
+  `AgentControl-LauncherUI-SortOrder`, `AgentControl-LauncherUI-RepoGroups`).
+- *Constraints*: Recomputed synchronously on the UI thread whenever a dependency changes, updating the
+  collection in place so unchanged rows keep their controls.
 
 **RepoCardViewModel's action commands**: `LaunchCommand`, `PullCommand`,
-`SelectPackageCommand`, `UpgradeCommand`, `FavoriteToggleCommand`, `RemoveCommand`.
+`SelectPackageCommand`, `UpgradeCommand`, `RemoveCommand`,
+`NewGroupCommand`, `RemoveFromGroupCommand`. (The favorite star has no command: its checked state is bound
+two-way to `RepoCardViewModel.IsFavorite`, the only owner of that state, `AgentControl-LauncherUI-FavoriteStar`.
+Because favoriting moves the card to or from the Favorites section, which re-creates its controls, `MainWindow` keeps
+the focus: it records which card's star last took the focus (and by what navigation method, keyboard or pointer;
+forgotten when the focus goes to any other control or the window is deactivated), and when that card's
+`FavoriteChanged` is raised - after the view model has regrouped the list - it posts, at `Loaded` priority, a
+request that focuses the new star of the same repo the same way (once more at `Background` priority if the row is
+not created yet). A star that did not have the focus is never given it, and a card that is no longer shown (its
+new section is collapsed) has no star to focus.)
 
 - *Type*: In-process .NET `ICommand` (`AsyncRelayCommand` for the operations that read a
   package source or the file system - Launch, Pull, Upgrade, Refresh - and `RelayCommand` for the
@@ -125,8 +159,9 @@ a NuGet source's editor and the "Forget saved sign-in" action of a server source
 
 `MainWindowViewModel` owns the `ObservableCollection<RepoCardViewModel>` backing the
 recent-repos list; on construction it creates one `RepoCardViewModel` per `RecentRepo` in the
-loaded `AppSettings`. It exposes `AddRepo`/`RemoveRepo` (persisting via `SettingsStore` after
-each mutation), a `FilterText` property driving `DisplayedRepoCards`, and `ApplySettings`
+loaded `AppSettings`. It exposes `AddRepo`/`RemoveRepo` (each saved through `SettingsStore` before it takes effect, see
+*Transactional persistence* below), a `FilterText` property driving `DisplayedRepoCards`/`DisplayedItems`, and
+`ApplySettings`
 (invoked when `SettingsWindowViewModel` reports `Saved`), which persists the new settings
 while preserving the existing recent-repos list and invalidates the shared
 `PackageVersionCache` for each package source that was edited or removed.
@@ -146,7 +181,7 @@ its tooltip - "Sign-in needed" when the pinned server needs a sign-in, otherwise
 (`SourceProblemChipText`)); the outcome of the last Launch/Pull/Upgrade action (`StatusMessage`) is shown
 under the repo path; a repo whose folder is missing offers no upgrade; the Launch button is labelled with a
 short name of the configured agent tool
-(falling back to plain "Launch" for a long or unknown name) and the pull button reads "Git Pull"
+(falling back to plain "Launch" for a long or unknown name) and Git Pull is an item of the card's "..." menu
 (`AgentControl-LauncherUI-RepoCardChips`). A lightweight `RefreshCheap` path (branch
 resolution, cached committed-files badge, pin and source problem - it never reads a package
 source) is kept separate from the full `Refresh` path (which also
@@ -154,6 +189,64 @@ checks working-tree cleanliness) so the main window's frequent UI refresh does n
 git subprocess for every card. Removal never mutates state directly: `RemoveCommand` raises
 `RemoveRequested` and `MainWindowViewModel` shows a `ConfirmationWindow`, removing the card only if
 the user confirms (`AgentControl-LauncherUI-RemoveRepo`).
+
+**How the units collaborate.** `MainWindowViewModel` is the owner and the hub. It creates one `RepoCardViewModel` per
+`RecentRepo` (giving each the shared package-version cache, the credentials and a *commit* callback that is how the
+card's own changes are saved, see below), subscribes to the card events that change the list (`FavoriteChanged`,
+`GroupChanged`, `LaunchRecorded`) and rebuilds `DisplayedItems` when they fire; the window's code-behind subscribes to
+the events that need a dialog.
+
+- *`RepoCardViewModel` and `RepoImageLocator`*: the card is the only caller. `RefreshCheap` starts the picture
+  refresh on a worker thread, which calls `RepoImageLocator.Find` for the repo's root and, when the returned
+  `RepoImageFile` differs from the one already shown, decodes it (`RepoImageLocator.Decode` by default; the decoder is
+  an injectable delegate so tests need no Avalonia platform). The `RepoImageFile` is the cache key, the card owns and
+  disposes the `Bitmap` it publishes in `RepoImage`, and `Retire` clears it. The locator knows nothing of cards;
+  any failure reaches the card as "no picture".
+- *`MainWindowViewModel` and `RepoGroupHeaderViewModel`*: the main view-model creates, and keeps one instance per
+  section (Favorites, each group, Ungrouped), and updates its `Count`, collapsed state and toggle availability in place
+  so the header keeps keyboard focus. It subscribes to the header's three request events: `ToggleRequested` it handles
+  itself (`ToggleGroupCollapsed`, saved before applied); `RenameRequested` and `RemoveGroupRequested` it forwards,
+  with the group's name, as its own `GroupRenameRequested` and `GroupRemoveRequested` events, to which `MainWindow`
+  responds with a prompt or a confirmation and then calls `RenameGroup`/`RemoveGroup`. The header holds no settings
+  and no reference to the main view-model.
+- *`GroupNameViewModel` and `GroupNameWindow`*: neither the card nor the main view-model creates the prompt; the
+  window's code-behind does, when `RepoCardViewModel` raises `NewGroupRequested` (with the card's existing group
+  names) or the header's rename is forwarded (with the group's name as the name being renamed), and shows
+  `GroupNameWindow` modally. `GroupNameViewModel` validates through `RepoGroupName` (the `Settings` unit that also
+  validates the card's `MoveToGroup` and repairs stored names, so the prompt, the card and the settings file agree on
+  what a group name is) and raises `Completed` exactly once - with the accepted name, or `null` for Cancel - which
+  closes the window; the code-behind then calls `RepoCardViewModel.MoveToGroup` or `MainWindowViewModel.RenameGroup`.
+- *`DialogBehavior`*: a stateless helper that every dialog window's code-behind calls once from its constructor
+  (`DialogBehavior.Apply(window, initial-focus control, cancel action)`): `SettingsWindow`, `SourceEditorWindow`,
+  `CredentialPromptWindow`, `SelectPackageWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `AboutWindow` and
+  `GroupNameWindow`. It knows no view-model; a window that has a view-model passes its `Cancel` as the cancel
+  action. The release-notes window is the only window that does not apply it.
+- *Supporting types*: `CardColorPalette` is a static table built from `RecentRepo.CardColorNames` (the single list of
+  valid names, owned by `Settings`); the card uses it to accept a color name and to find the tile's palette index, and
+  the main window's palette pop-up draws one swatch per entry. `PathEllipsisText` is a control in the card's template
+  that draws the card's `RepoPathParent` and `RepoPathLeaf` and collaborates with no other unit.
+  `ThemePreferenceDisplayNameConverter` is used by the Settings window's theme picker to show a `ThemePreference`
+  under a friendly name; the persisted value stays the enum member.
+
+**Transactional persistence.** Every change the user makes in the main window is saved before it takes effect, so
+memory, the list and the settings file never disagree. `MainWindowViewModel.CommitSettingsChange` tries the change on
+a candidate copy of the settings (`CreatePersistedCopy`, with the repos cloned by `RecentRepo.Clone` and the collapsed
+list copied), saves the candidate with `SettingsStore.Save`, and only when that succeeded applies the same change to
+the live settings; then the list is refreshed (candidate copy, save, commit, refresh). A change made on a card -
+`IsFavorite`, `MoveToGroup`, `SetCardColor`, and the launch timestamp - reaches this through the card's
+`commitChange` callback (`MainWindowViewModel.CommitRepoChange`), which returns whether the change was saved: when it
+was not, the card property keeps its value (the two-way bound star is told to read it again),
+`MoveToGroup`/`SetCardColor` return `false`, and the main view-model raises `SettingsSaveFailed` with the message
+for the user, which `MainWindow` shows in a message box. A collapse toggle from a header is reported the same way.
+`AddRepo`, `RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and `RemoveGroup` instead throw
+`InvalidOperationException` when the save fails, having changed nothing, and the window's code-behind shows it in a
+message box. A failed save therefore leaves the live settings, the cards, the displayed list and the file as they
+were, and a later unrelated save can never write the failed change. `ApplySettings` follows the same rule for the
+Settings window's values: it saves them and adopts them only after that. When a repo is removed, `RemoveRepo` saves
+the removal and then calls `RepoCardViewModel.Retire`: the card cancels its running operation, ignores the results of
+upgrade checks and picture loads still in flight, clears all its events (so nothing it still does can show an error
+box, release notes or a prompt), and disposes its picture; `MainWindow` detaches its per-card handlers when a card
+leaves `RepoCards` and forgets its bookkeeping for it.
 
 `SelectPackageWindowViewModel` backs the package-selection dialog opened from a card with no
 existing pin. It shows three columns - source, package, version. Selecting a source loads that
@@ -174,9 +267,10 @@ construction and exposes `IsCustomAgentToolSelected` to drive the settings windo
 custom-command entry field visibility. It lists the configured package sources as
 `PackageSourceItemViewModel` rows (alias, kind icon from `PackageSourceIcons`, shortened
 location, and a folder-exists status computed on a background thread; a server source shows "Not checked"
-because it is never contacted merely to draw the list), offers Add Zip-Package Folder, Add NuGet-Package
-Folder and **Add NuGet-Package Server** beneath the list, with Edit and Remove (which act on the selected row) on
-the list's header line, and asks the window to open a
+because it is never contacted merely to draw the list), offers one **Add** button whose menu lists the
+source types (zip-package folder, NuGet-package folder, NuGet-package server), with Edit and Remove (which act
+on the selected row) beside it on the list's header line, and also exposes the **Theme** choice (system
+default, light or dark) saved with the other settings, and asks the window to open a
 `SourceEditorViewModel` dialog for adding and editing; removal asks for confirmation and warns
 that repos pinned to the source will show a source problem. `SourceEditorViewModel` validates the alias
 (required, unique ignoring case, fixed once the source exists), the location (absolute folder
@@ -252,20 +346,101 @@ back into `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` depending on the us
 (`AgentControl-LauncherUI-AgentsMdTemplateOffer`). This mirrors the non-modal
 `ReleaseNotesViewer` pattern's event-raise/subscribe structure but intentionally uses a
 *modal* dialog instead, since this prompt requires an explicit yes/no decision before
-proceeding, unlike release notes which are purely informational.
+proceeding, unlike release notes which are purely informational. The two are sequenced: the view
+model raises the offer before `ReleaseNotesReady`, `MainWindow` remembers the open question per card and
+`ShowReleaseNotesAsync` waits for it to be answered before opening the release-notes window and activating
+it, so the question never covers the notes and the notes window - which has no owner - is not lost behind the
+modal question; the notes are not opened at all when the main window has closed meanwhile.
 
 `ViewModelBase` supplies a minimal hand-rolled `INotifyPropertyChanged` implementation (not a
 source-generator package, to keep the dependency surface minimal) used by every view model in
 this subsystem. `RelayCommand` is a minimal hand-rolled `ICommand` used for every command
 property. `FavoriteIconConverter` binds `RepoCardViewModel.IsFavorite` to a filled or outlined
 star `MaterialIconKind` on the repo card's favorite toggle, per architecture.md's "UI icon
-convention" decision. `FavoriteColorConverter` complements it, binding the same `IsFavorite`
-value to the star glyph's color (gold when favorited, otherwise the icon's default theme
-foreground via `AvaloniaProperty.UnsetValue`), so a favorited repo's star also reads as
-"activated" through color rather than relying solely on the filled-vs-outline glyph shape.
+convention" decision; the toggle's checked style (`AppStyles.axaml`) colors the glyph gold from a theme
+resource, so a favorited repo's star also reads as "activated" through color rather than relying solely on
+the filled-vs-outline glyph shape.
 `AgentToolKindDisplayNameConverter` shows each `AgentToolKind` in the Settings window's agent tool picker
 under a friendly name (`GitHub Copilot CLI`, `Cursor`, `Claude Code`, `Custom command`) while the picker's
 selected value, and therefore the persisted setting, stays the enum value.
+`ThemePreferenceDisplayNameConverter` does the same for the Appearance picker (`System default`, `Light`,
+`Dark`).
+
+**Appearance and theme resources.** The user's theme choice (`ThemePreference`: system default, light or
+dark) is a setting edited in the Settings window's Appearance picker (`ThemeComboBox`) and persisted by
+`SettingsStore`. `App` maps it to an Avalonia theme variant (`ToThemeVariant`: `ThemeVariant.Default` for the
+system default, which makes Avalonia follow the operating system's light/dark setting live, otherwise
+`Light` or `Dark`) and applies it to the running application (`ApplyTheme`) before the main window is shown and
+again whenever `MainWindowViewModel.ApplySettings` has saved new settings (through an injected
+`Action<ThemePreference>`, so the view model stays free of the UI framework), so every open window changes
+at once without a restart (`AgentControl-LauncherUI-Appearance`). Every color the application's own XAML uses
+lives in `AppStyles.axaml` as a resource in a `Light` and a `Dark` theme dictionary (surfaces, borders,
+shadows, the status accent colors, chip fills and text, button states, the avatar palette, validation,
+caution and success text, the page background) consumed with `DynamicResource`; no template or setter holds a
+hard-coded color. Text colors were chosen for at least 4.5:1 contrast against the fill and surface they are
+drawn on, status accents and icons for 3:1, and `ThemeResourceTests` checks both dictionaries define the same
+keys and meet those ratios in every control state it covers. Defining every color for both themes is the design
+rule that makes the "legible in both themes" requirement (`AgentControl-LauncherUI-Appearance`) hold: no window can
+be left with a color that exists in one theme only. The same file defines the shared styles: the repo card
+(surface, soft shadow,
+hover lift with 140 ms transitions, selection and keyboard-focus ring), the status accent bar, the avatar
+tile, the chips (one height, padding and font, tinted fill with a matching foreground, a flat button wrapper
+for clickable chips), the action buttons (primary accent with hover, pressed and disabled states, and a
+tinted secondary), the ghost icon buttons without a border (favorite star, "more actions"), the group headers of the
+card menu, and the empty state. Per-control color setters are avoided on purpose.
+
+**Repo card layout.** Each card has a colored status accent bar on its left edge (`RepoCardViewModel.Status`:
+green up to date, amber upgrade available, red a problem, grey no agent package; the bar has an accessible
+name and a tooltip, and the chips state the same facts in words). The first line holds the favorite star (a
+name, ghost toggle (no border, gold and filled when favorited) and the repo name a few pixels to its right, with the
+actions - **Launch** (primary) and the **...** menu - on the right of the same line. Below it sit the avatar
+tile, left-aligned under the star and as tall as the chip row plus the path row, beside the chips and the
+path. The tile shows the repo's own `icon.png`/`logo.png` when it has one (see `RepoCardViewModel`), otherwise
+the repo name's initials on a color chosen by a deterministic hash of the repo path, otherwise a folder glyph.
+The **...** menu is grouped: *Repository* (**Git Pull**, with its enablement rules and its explanatory tooltip
+shown even while it is disabled, and **Refresh**), *Agent files* (**Select Package...** or **Upgrade to
+x.y.z**, whichever applies; the group is hidden when neither does), *Organize* (**Move to group** and
+**Card color...**) and **Remove from list**. The upgrade
+chip is a button that runs the same `UpgradeCommand` as the menu's Upgrade item
+(`AgentControl-RepoCardViewModel-UpgradeFromChip`).
+
+**Repo groups and card colors (user-specific).** Both are personal organizing choices stored only in the user's
+own settings file (on the repo's `RecentRepo`, and the collapsed section names in `AppSettings`), never in the
+repository or its `.agentcontrol.json` (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`).
+*Sections.* The list is a single `ListBox` over `MainWindowViewModel.DisplayedItems` with two row templates: a
+repo card, and a section header - one flat button (chevron, icon, name, count chip) that collapses or expands the
+section, plus, for the user's own groups, a "..." menu with **Rename group...** and **Remove group**. The header
+button's accessible name says the section, its count and its state (`Work, 2 repos, collapsed`). A decision
+made here: a favorite repo is listed **only** under *Favorites* (not a second time under its group), so every
+repo appears once and the counts add up; its card shows its group as a chip so the user can still see where it
+belongs, and it returns to its group when it stops being a favorite. When no repo is in a group the list has no
+headers at all and looks as it did before groups existed. While the filter box has text every section is shown
+expanded and sections without a match disappear, so a match can never be hidden by a collapsed group; the
+headers' toggles are disabled then, with a tooltip that says why.
+*Move to group.* The submenu depends on the groups that exist when the menu opens, which a XAML template cannot
+express as one list mixing groups and commands, so `MainWindow`'s code-behind fills it in the flyout's `Opening`
+event (a check mark on the repo's own group, a separator, **New group...**, and **Remove from group** for a
+grouped repo); the choices run `RepoCardViewModel.MoveToGroup` and its commands. Group names are shown in
+text blocks, so an underscore is not taken as an access key. **New group...** and **Rename group...** show the
+small `GroupNameWindow`, whose `GroupNameViewModel` validates while the user types (blank, longer than 40
+characters, and the built-in names *Favorites* and *Ungrouped* are refused; a duplicate is refused when renaming and
+joins the existing group, with a note, when creating); **Remove group** asks for a confirmation that says
+nothing on disk or in any repository changes.
+*Card color.* **Card color...** opens a small palette pop-up (an attached `Flyout` on the "..." button) with one
+round swatch per `CardColorPalette` entry - the same ten theme-aware avatar colors the automatic color is drawn
+from - plus **Automatic**. Each swatch has an AutomationId (`CardColorSwatch_<Name>`), its name as tooltip and
+accessible name,
+and the chosen one shows a check mark and a ring, so the choice is not carried by color alone. The color goes only to
+the avatar tile (palette style classes `avatar0` ... `avatar9`, driven by bindings on the card's `AvatarStyleClass`);
+the status accent bar and chips are unaffected. A repo that shows its own picture keeps the tile's light backing
+so a logo drawn for a white page stays legible, and the chosen color is drawn as a ring around the picture. The
+letters on every palette color use whichever of white and near-black reads better on that fill in each theme,
+at least 4.5:1 (`ThemeResourceTests` checks every entry in both themes).
+
+**Settings window package-source actions.** One **Add** button opens a menu with the source types that can be
+added (zip-package folder, NuGet-package folder, NuGet-package server), each with its type's icon (the one
+the sources list uses) and a one-line description; another source type is added as one more menu item
+(`AgentControl-LauncherUI-AddSourceMenu`).
 The `.axaml` Views other than `MainWindow`
 (`AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`,
 `SettingsWindow`, `SourceEditorWindow`, `CredentialPromptWindow`) contain no logic beyond Avalonia's XAML-loading boilerplate,
@@ -279,10 +454,12 @@ to each `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`,
 dialog/window to show and how to route the user's response back into the view model (e.g.
 calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the `ConfirmationWindow` shown
 for the AGENTS.md template offer). `AboutWindow` (opened via a
-toolbar command with no dedicated view model) shows the application logo (reused from
+toolbar command with no dedicated view model, as a modal dialog over the main window) shows the application
+logo (reused from
 `Assets/AppIcon.ico`, the same icon already used for the main window/taskbar - no new binary
-image asset was added), a short mission tagline, the running version and copyright read
-from `Program.Version`, and a scrollable list of this application's direct runtime third-party
+image asset was added), a short mission tagline, a labeled "Version" row with the running version
+(`Program.Version` without its `+` build metadata, via `AboutWindow.DisplayVersion`; the full build version is
+the row's tooltip) and the copyright, and a scrollable list of this application's direct runtime third-party
 dependencies and their SPDX license identifiers (package versions are intentionally omitted so
 dependency updates do not require edits here), sourced from a static
 `ThirdPartyDependencies` list rather than parsed at runtime from the project file
@@ -291,8 +468,57 @@ dependency updates do not require edits here), sourced from a static
 rather than a dedicated unit, since its logic (path-existence and duplicate-path validation)
 is simple enough not to warrant a separate class.
 
-`MainWindow` explicitly tracks every non-modal child window it opens (`ReleaseNotesViewer`,
-`AboutWindow`) in an `_openChildWindows` list via a `ShowTrackedChildWindow(Window)` helper,
+**Dialog keyboard behavior.** Every dialog (Settings, the source editors, the sign-in prompt, the package
+picker, the confirmations, the message boxes, the group-name prompt and About) is shown with
+`ShowDialog(owner)`, so the window behind is disabled by the operating system, and applies the shared
+`DialogBehavior.Apply` from its code-behind (`AgentControl-LauncherUI-DialogKeyboard`; the behavior itself is the
+`DialogBehavior` unit's, see its design): Tab navigation on the
+window is `Cycle`, so Tab from the last control wraps to the first and Shift+Tab back, never leaving the
+dialog; the first sensible control takes the focus when the dialog opens (Settings: Add; the confirmation: the
+safe answer No; the message box and About: their button; the editors and prompts: their first field), taken
+with the Tab navigation method so the keyboard focus ring shows while the keyboard is in use (the ring is the
+`:focus-visible` style of each control; with the mouse in use Avalonia shows none, as in every Windows
+application); and Escape - handled on the way back up from the focused control, so an open drop-down keeps its
+own Escape - cancels any dialog that has a way to cancel (the confirmation answers No, the message box, About
+and the package picker close, the prompts and the source editor cancel). Settings has no Escape: its edits are
+kept in memory until Save and would be dropped silently. Focus returns to the control that had it in the main
+window when the dialog closes, because that window's focus is not changed while it is disabled. The release-notes
+window is the only non-modal window left.
+
+**Main window app bar.** The top of the main window is one compact bar (`AppBar`, inside the normal OS title bar -
+the window does not extend into it): the application logo (`AppLogo`, reused `Assets/AppIcon.ico` on the same white
+backing as in the About window, with the accessible name and tooltip "AgentControl" - the name and tagline are in
+the window title and the About window, not repeated here), the filter box (`FilterTextBox`, the star-width column,
+so it is what shrinks at narrow widths) and the `AddRepoButton`, `OpenSettingsButton` and `OpenAboutButton` icon
+buttons, which are auto-width and never clip. It is drawn on the `AppBarBackground` theme brush (a little off the
+page color in the dark theme, white in the light one) with a one-pixel `SurfaceDivider` line below it, instead of
+a branded header and a blue rule above a separate toolbar. The keyboard focus order is the visual order (the logo is
+not a stop): filter, Add, Settings, About (`AgentControl-LauncherUI-AppBar`).
+
+**Card presentation at narrow widths.** The repo name is one `TextBlock` with an end ellipsis and the whole name
+as its tooltip, in a star-width column beside the auto-width Launch and "..." buttons, so it never runs under
+them. The path is a `PathEllipsisText`, a small `Decorator` that draws one `TextBlock` from
+`RepoPathParent` and `RepoPathLeaf` (the folder name with its separator). It measures the real text, so the result
+follows the font and the width the layout gives it: a path that fits is drawn whole; otherwise the folder part
+gives way first (an end ellipsis, down to 35 % of the width) and the folder name is shown whole while it fits. A
+folder name that is still too long gets a *middle* ellipsis that keeps its start and its end (binary search over
+the number of kept characters, never splitting a surrogate pair), so a narrow card reads
+`C:\work\cl...\05-very-long-na...-alpha` and similar repos stay apart. The control carries the whole path as its
+tooltip and accessible name, and the text it draws is hidden from automation so the path is not read twice. The
+package chip's up-to-date check mark
+(`UpToDateCue`) and its tooltip live inside the existing chip (`AgentControl-LauncherUI-UpToDateCue`).
+The card color palette's heading names the chosen color (`Card color: Teal`), in addition to each swatch's
+tooltip, accessible name and check mark. The icon-only toolbar buttons and the card's "..." button have
+accessible names matching their tooltips.
+
+**Settings sections and the source editor.** Settings lists Package sources, then an Appearance section (the
+Theme picker, a labeled row) and a Tools section (git executable, agent tool, shell)
+(`AgentControl-LauncherUI-Appearance`). The source editor's location box wraps a long folder or feed address
+over several lines (up to a maximum height, then it scrolls), has a tooltip with the whole value
+(`SourceEditorViewModel.LocationTooltip`, absent while the box is empty), and the editor is 640 px wide.
+
+`MainWindow` explicitly tracks every non-modal child window it opens (the `ReleaseNotesViewer`)
+in an `_openChildWindows` list via a `ShowTrackedChildWindow(Window)` helper,
 which also subscribes to each window's `Closed` event to remove it from the list, and force-
 closes any still-open entries from a `MainWindow_Closing` handler before the main window
 itself finishes closing. This deliberately does *not* use Avalonia/Win32 window ownership

@@ -21,6 +21,10 @@ flowchart TD
         SettingsWindowViewModel
         SourceEditorViewModel
         CredentialPromptViewModel
+        RepoImageLocator
+        RepoGroupHeaderViewModel
+        GroupNameViewModel
+        DialogBehavior
     end
     subgraph AgentPackageManagement
         PackageSource
@@ -56,6 +60,7 @@ flowchart TD
     end
     subgraph Settings
         SettingsStore
+        RepoGroupName
     end
     subgraph Logging
         LoggingSetup
@@ -71,6 +76,19 @@ flowchart TD
     Program --> MainWindowViewModel
     MainWindowViewModel --> RepoCardViewModel
     MainWindowViewModel --> SettingsStore
+    MainWindowViewModel --> RepoGroupHeaderViewModel
+    MainWindowViewModel --> RepoGroupName
+    MainWindowViewModel -.->|MainWindow view shows| GroupNameViewModel
+    RepoCardViewModel --> RepoImageLocator
+    RepoCardViewModel --> RepoGroupName
+    GroupNameViewModel --> RepoGroupName
+    SettingsStore --> RepoGroupName
+    MainWindowViewModel -.->|dialog windows apply| DialogBehavior
+    SettingsWindowViewModel -.->|dialog windows apply| DialogBehavior
+    SourceEditorViewModel -.->|dialog windows apply| DialogBehavior
+    SelectPackageWindowViewModel -.->|dialog windows apply| DialogBehavior
+    CredentialPromptViewModel -.->|dialog windows apply| DialogBehavior
+    GroupNameViewModel -.->|dialog windows apply| DialogBehavior
     RepoCardViewModel --> PackageSourceRegistry
     RepoCardViewModel --> PackageVersionCache
     PackageSourceRegistry --> ZipFolderSourceProvider
@@ -118,6 +136,76 @@ user is not re-prompted for that repo again (`AgentControl-System-AgentsMdTempla
 bootstrap responsibility, per program.sysml's documented exception for units without a dedicated
 companion test file).
 
+**How the card and list requirements are satisfied.** Every item below is delivered inside `LauncherUI`, by the
+view-model that owns the state, the main window's view (`MainWindow`, the `.axaml` views and their code-behind) that
+draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
+
+- *Card identity and status* (`AgentControl-System-RecentRepos`): `RepoCardViewModel` combines the repo's pin
+  (`RepoConfig`), its upgrade check (`AgentPackageManagement`), its git facts (`GitIntegration`) and whether its
+  folder exists into one status - up to date, upgrade available, a problem, or no agent package - which the view
+  draws as the accent bar on the card's left edge and states in words through the chips and tooltips, so color is
+  never the only carrier. A check mark inside the package chip says a pinned package is the newest one.
+- *Repo picture* (`AgentControl-System-RecentRepos`): on every cheap refresh `RepoCardViewModel` asks
+  `RepoImageLocator` on a worker thread for the repo's root `icon.png` (else `logo.png`) and decodes it to the tile's
+  size; the file's identity (path, last-write time, size) is remembered so an unchanged file is not decoded again.
+  Without an acceptable picture the tile shows generated initials (or a folder glyph) on a color derived from the
+  repo's path. The card owns the bitmap it shows and disposes a replaced or cleared one. The repo is untrusted input;
+  see *Risk Control Measures* for the lookup's safety.
+- *Favorites* (`AgentControl-System-Favorites`): the star is bound two-way to the card's `IsFavorite`, the only owner
+  of that state; changing it is recorded on the repo's settings entry and `MainWindowViewModel` regroups the list, so
+  a favorite is listed first (under the Favorites section while repos are grouped, once only) and returns to its own
+  section when unfavorited.
+- *Groups* (`AgentControl-System-RepoGroups`): "Move to group" in a card's menu runs `RepoCardViewModel.MoveToGroup`,
+  which validates the name with `RepoGroupName` (the same rules the stored names are repaired by on load); "New
+  group..." raises `NewGroupRequested`, which the main window answers by showing the group-name prompt, a modal dialog
+  backed by `GroupNameViewModel` that validates while the user types. `MainWindowViewModel` builds
+  `DisplayedItems`, the one list the window shows: the cards interleaved with one `RepoGroupHeaderViewModel` per
+  section - Favorites, the user's groups alphabetically, then Ungrouped - or no headers at all while no repo is in a
+  group. A header's collapse toggle, rename and remove requests are events the main view-model handles or forwards to
+  the window (which shows the prompt or a confirmation and then calls `RenameGroup`/`RemoveGroup`). Which sections
+  are collapsed is kept in the user's settings; while the filter has text every section is shown expanded so a
+  match is never hidden, without changing the remembered state.
+- *Card colors* (`AgentControl-System-CardColor`): the palette pop-up offers one swatch per entry of
+  `CardColorPalette` (built from the single list of valid names, `RecentRepo.CardColorNames`) plus Automatic;
+  `RepoCardViewModel.SetCardColor` records the name, or clears it for Automatic, and the tile - and only the tile -
+  takes the color through a style class, so the status accent and chips keep their fixed meaning.
+- *Missing folder re-check* (`AgentControl-System-MissingRepoRecheck`): a card whose folder does not exist is marked
+  missing and the actions that need the folder are disabled, but its refresh command stays enabled, labeled
+  "Check again"; running it re-reads the folder, so the card is usable again once the folder is back without a restart.
+- *Upgrade from the chip* (`AgentControl-System-UpgradeFromChip`): the upgrade chip is bound to the same
+  `UpgradeCommand` as the menu's Upgrade item, so both run one flow (extract through `RepoSync`, pin through
+  `RepoConfig`, the AGENTS.md offer, then the release notes).
+- *AGENTS.md offer before the release notes* (`AgentControl-System-AgentsMdTemplate`): the card raises the offer
+  request before `ReleaseNotesReady`; the main window keeps the open question per card and opens the release notes
+  only after it is answered, so the notes never cover the question.
+- *Appearance* (`AgentControl-System-Appearance`): the theme (system default, light or dark) is chosen in Settings
+  and saved with the other settings; after the save succeeded, `MainWindowViewModel.ApplySettings` hands it to the
+  application through an injected callback (so the view-model does not depend on the UI framework), which sets
+  Avalonia's theme variant for every open window at once; the system default follows the operating system. The
+  persisted choice is applied before the first window is shown. Every color of the application's own XAML is a
+  resource defined for both themes, so no window can have a color in one theme only.
+- *Modal dialogs and keyboard* (`AgentControl-System-DialogKeyboard`, `AgentControl-System-About`): every dialog
+  (Settings, the source editors, the sign-in prompt, the package picker, confirmations, message boxes, the
+  group-name prompt and About) is shown with its owner window, so the operating system disables the window behind it,
+  and applies the shared `DialogBehavior` from its code-behind: Tab and Shift+Tab stay inside the dialog, the first
+  sensible control takes the focus when it opens, and Escape cancels a dialog that can be cancelled.
+
+**Where the user's choices live, and what a failed save does.** Favorites, last-launch times, groups, card colors,
+which sections are collapsed and the theme are the user's own: they are stored only in the per-user settings file
+(`Settings`), never in a repo and not in its `.agentcontrol.json`, which holds nothing but the package pin. A change
+the user makes in the main window is made as one transaction by `MainWindowViewModel`: it is tried on a candidate copy of
+the settings, the candidate is saved, and only when the save succeeded is the same change applied to the live
+settings and the list refreshed (candidate copy, save, commit, refresh). A change that comes from a card goes through
+a callback the owner supplies to `RepoCardViewModel`. When the save fails nothing changes: the live settings, the
+cards, the displayed list and the file stay as they were, so a later unrelated save can never write the failed
+change, and the user is told. Card and header changes (including collapsing a section) are reported through the
+view-model's `SettingsSaveFailed` event, which the main window shows in a message box; adding or removing a repo and
+renaming or removing a group fail with an `InvalidOperationException` that the window reports. Settings edited in the
+Settings window are likewise saved before they are adopted, and the theme is applied only after that. A repo removed
+from the list is saved first and then its card is retired (`RepoCardViewModel.Retire`): its running operation is
+cancelled, its in-flight checks and picture loads are ignored, and its events are cleared, so a removed repo can no
+longer raise an error box, release notes or a prompt, and the window releases its handlers for it.
+
 ## External Interfaces
 
 **Desktop UI**: The primary interface, presented via Avalonia windows.
@@ -126,10 +214,15 @@ companion test file).
 - *Role*: Provider (the application presents windows; the developer interacts via mouse/
   keyboard).
 - *Contract*: The main window shows the recent-repos list with per-repo cards exposing
-  Launch, Pull, Upgrade/Select Package, Favorite, and Remove actions, plus toolbar-level
-  Settings and About commands (`AgentControl-System-RecentRepos`,
-  `AgentControl-System-AddRemoveRepo`, `AgentControl-System-SearchAndSort`,
-  `AgentControl-System-About`). Every interactive control exposes an
+  Launch as a button and, in the card's "..." menu, Git Pull, Refresh (labeled "Check again" for a repo whose
+  folder is missing), Select Package/Upgrade, Move to group, Card color and Remove, plus the favorite star and
+  the upgrade chip; the list is flat, or sectioned (Favorites, the user's groups, Ungrouped) once a repo is in a
+  group; the toolbar-level app bar holds the filter, Add, Settings and About
+  (`AgentControl-System-RecentRepos`, `AgentControl-System-AddRemoveRepo`, `AgentControl-System-SearchAndSort`,
+  `AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
+  `AgentControl-System-MissingRepoRecheck`, `AgentControl-System-UpgradeFromChip`,
+  `AgentControl-System-About`). Settings offers the color theme (`AgentControl-System-Appearance`). Every dialog is
+  modal and operable from the keyboard (`AgentControl-System-DialogKeyboard`). Every interactive control exposes an
   `AutomationProperties.AutomationId` so FlaUI-driven end-to-end tests can locate it
   reliably (see `AgentControl-Platform-Windows`, `AgentControl-OTS-Avalonia-RenderUi`,
   `AgentControl-System-UiFramework`).
@@ -230,10 +323,16 @@ override for hermetic testing).
 - *Type*: File.
 - *Role*: Provider/Consumer (`Settings` reads and writes it).
 - *Contract*: Records the package sources, git/agent-tool overrides, agent-tool selection, shell
-  preference, and the recent-repos list (`AgentControl-System-Settings`,
-  `AgentControl-System-MultipleSources`); a legacy single package-folder path is carried forward
+  preference, the color theme, and the recent-repos list with, per repo, its favorite flag, last-launch time and the
+  user's own organizing choices (its group and its card color), plus the names of the collapsed list sections
+  (`AgentControl-System-Settings`, `AgentControl-System-MultipleSources`, `AgentControl-System-Appearance`,
+  `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`);
+  a legacy single package-folder path is carried forward
   as the source named `Default`. Contains no password, token or other secret. Returns default
-  settings when no file exists yet (first-ever run).
+  settings when no file exists yet (first-ever run); a value that is unusable is repaired as the file is read and
+  never keeps the application from starting: an unknown theme reads as the system default, an unknown card color as
+  automatic, an unusable group name as no group. The choices in it exist only here, never in a repo, and a change
+  is written before it is applied (see *Architecture*).
 - *Constraints*: Location can be overridden by a startup argument to isolate FlaUI end-to-end
   tests (see `docs/design/agent-control/startup.md`).
 
@@ -297,7 +396,19 @@ stated honestly:** the origin scoping is a guarantee about what AgentControl its
 has authenticated, the NuGet client answers HTTP 401 challenges from *other* hosts that the server's own
 service index advertises for package resources with the same credential - observed in testing, where a
 second server named by a feed's index received an `Authorization` header. The index of a feed controls where
-its package resources are, so a user must only add servers they trust; the user guide says so. The AGENTS.md
+its package resources are, so a user must only add servers they trust; the user guide says so. **A repo's picture**
+(`AgentControl-System-RecentRepos`) is the other untrusted input the card reads from a repo, and `RepoImageLocator`
+treats the repo as hostile: it never lists the repo's folder (it looks up the two candidate names only, so a root with
+huge numbers of files costs nothing extra); it refuses a root that is itself a link; it accepts only a plain file of
+the root (never a link, never a file in a subfolder) of at most 1 MB that starts with a genuine PNG header whose
+declared dimensions are within a limit, checked before any decoder allocates memory; and, because a checked path can
+be swapped for a link before it is opened, it asks the operating system which file the open handle really is - on
+every platform, on macOS through the file-control call with its get-path command - and accepts the file only when that
+final path is a file of
+the same name directly in the root's own final path. Where the platform cannot answer that question, or the answer
+fails, the picture cannot be verified and there is no picture; the path is never resolved again after the open. Any
+failure at all means the card keeps its generated tile, and file contents are never logged (see
+`docs/design/agent-control/launcher-ui/repo-image-locator.md`). The AGENTS.md
 template-offer feature (`AgentControl-System-AgentsMdTemplate`) is gated by an explicit modal
 yes/no confirmation before any write to a repo's working directory, never overwrites a
 pre-existing `AGENTS.md`, and the decline is permanent (never reset) — mitigating the risk of
@@ -322,7 +433,9 @@ an unwanted or repeated file write.
    never opens the sign-in dialog: for a server that needs credentials it uses a credential already
    typed this session or saved with the user's Git credential helper, or sets the card's source problem to say a
    sign-in is needed
-   (`AgentControl-System-ResponsiveOperations`).
+   (`AgentControl-System-ResponsiveOperations`). In the same refresh it asks `RepoImageLocator` on a worker thread for
+   the repo's picture (an untrusted file; see *Risk Control Measures*), and a repo whose folder is missing is marked
+   so, keeping only the "Check again" refresh available (`AgentControl-System-MissingRepoRecheck`).
 4. User actions on a card dispatch to the relevant subsystem: Pull to `GitClient.Pull`
    (gated on a clean working tree, `AgentControl-System-Pull`); Launch to
    `RepoCardViewModel`'s ensure-synced check (re-extracting via `PackageZipExtractor` only if
@@ -346,7 +459,16 @@ an unwanted or repeated file write.
    optional root-level `AGENTS.md` template (`PackageContentExtractor.ReadAgentsMdTemplate`),
    writes it via `AcceptAgentsMdTemplate`, or persists a decline via `RepoPinStore.Save`
    (`AgentControl-System-AgentsMdTemplate`).
-5. Throughout, `Utilities.PathHelpers.SafePathCombine` validates any caller-supplied path
+5. The user's own choices - favorite, group, card color, collapsed section, renaming or removing a group, adding or
+   removing a repo, and a launch being recorded - flow from the card or the group header through
+   `MainWindowViewModel`'s transactional change: a candidate copy of the settings is changed and
+   `SettingsStore.Save` writes it; only when that succeeded is the live state changed and `DisplayedItems` rebuilt
+   (sections built from the repos' groups with `RepoGroupName`, the collapsed ones leaving out their cards). A failed
+   save changes nothing and is reported to the user; a removed repo's card is retired after its removal was saved
+   (`AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
+   `AgentControl-System-AddRemoveRepo`). A saved theme is applied to the running application after the save
+   (`AgentControl-System-Appearance`).
+6. Throughout, `Utilities.PathHelpers.SafePathCombine` validates any caller-supplied path
    component before file-system use, and `Logging` records process-launch and
    git-integration detail to the diagnostic log file.
 
@@ -372,3 +494,10 @@ an unwanted or repeated file write.
 - Package authenticity: a source that requires signed packages never supplies one that fails the check, never
   skips the check, and decides trusted signers from its own description alone
   (`AgentControl-System-PackageAuthenticity`). Signature verification is supported on Windows, Linux and macOS.
+- Personal choices stay personal: favorites, groups, card colors, collapsed sections and the theme are written only
+  to the per-user settings file, never to a repo; a change is saved before it is applied, so memory, the list and the
+  file never disagree (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`).
+- Untrusted repo content: a repo's picture is shown only when it can be verified to be a small, genuine PNG that is a
+  plain file of the repo's root; otherwise there is no picture (`AgentControl-System-RecentRepos`).
+- Modal dialogs: every dialog is modal and keyboard-operable through one shared behavior, so the window behind a
+  dialog can neither be used nor reached with the keyboard (`AgentControl-System-DialogKeyboard`).

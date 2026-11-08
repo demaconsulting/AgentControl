@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Globalization;
+using Avalonia.Media.Imaging;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Logging;
@@ -142,6 +144,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     private int _upgradeCheckGeneration;
 
+    /// <summary>
+    ///     Applies a change to this repo's settings entry on behalf of the card, saving it first; see
+    ///     the constructor. <see langword="null"/> applies the change directly, without saving.
+    /// </summary>
+    private readonly Func<RecentRepo, Action<RecentRepo>, bool>? _commitChange;
+
+    /// <summary>
+    ///     Whether <see cref="Retire"/> was called: the card was removed from the list, so nothing it
+    ///     still has running may report back or publish a result.
+    /// </summary>
+    private bool _isRetired;
+
     private bool _isMissing;
     private bool _isUpgradeAvailable;
     private string? _latestAvailableVersion;
@@ -165,6 +179,33 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <summary>Backing field for <see cref="IsCheckingUpgrade"/>.</summary>
     private bool _isCheckingUpgrade;
 
+    /// <summary>Backing field for <see cref="IsUpgradeStatusUnknown"/>.</summary>
+    private bool _isUpgradeStatusUnknown;
+
+    /// <summary>Backing field for <see cref="LastActionFailed"/>.</summary>
+    private bool _lastActionFailed;
+
+    /// <summary>
+    ///     Decodes the repo's picture file for the avatar tile; see the constructor.
+    /// </summary>
+    private readonly Func<RepoImageFile, Bitmap?> _decodeImage;
+
+    /// <summary>
+    ///     The picture file whose decode result (a bitmap, or a failure) <see cref="RepoImage"/>
+    ///     currently reflects, so a refresh that finds the same file (path, last-write time and
+    ///     size) does not decode it again; <see langword="null"/> when there is no picture file.
+    /// </summary>
+    private RepoImageFile? _loadedImageFile;
+
+    /// <summary>
+    ///     Identifies the most recent picture refresh, so a slower, older one cannot overwrite the
+    ///     result of a newer one.
+    /// </summary>
+    private int _imageGeneration;
+
+    /// <summary>Backing field for <see cref="RepoImage"/>.</summary>
+    private Bitmap? _repoImage;
+
     /// <summary>
     ///     Logs the actual work this card performs on behalf of the user - fetching/applying
     ///     packages, pulling the repo, and launching the agent tool - so an operator can audit
@@ -184,6 +225,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     in-memory sources whose timing they control.</param>
     /// <param name="credentials">The credential facilities NuGet server sources use to sign in,
     ///     or <see langword="null"/> for none.</param>
+    /// <param name="decodeImage">Decodes the repo's picture file for the avatar tile;
+    ///     <see langword="null"/> uses <see cref="RepoImageLocator.Decode"/>. Supplied so tests can
+    ///     count decodes or avoid needing a graphics platform.</param>
+    /// <param name="commitChange">Applies a change to this repo's settings entry and saves it,
+    ///     returning whether that succeeded (the owning <see cref="MainWindowViewModel"/> saves a
+    ///     candidate first and changes the live entry only then); <see langword="null"/> applies the
+    ///     change to the entry directly and saves nothing.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="recentRepo"/>,
     ///     <paramref name="getSettings"/>, or <paramref name="packageVersionCache"/> is
     ///     <see langword="null"/>.</exception>
@@ -193,7 +241,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
         PackageVersionCache packageVersionCache,
         Startup.StartupOptions? startupOptions = null,
         Func<AppSettings, PackageSourceRegistry>? registryFactory = null,
-        PackageCredentialContext? credentials = null)
+        PackageCredentialContext? credentials = null,
+        Func<RepoImageFile, Bitmap?>? decodeImage = null,
+        Func<RecentRepo, Action<RecentRepo>, bool>? commitChange = null)
     {
         ArgumentNullException.ThrowIfNull(recentRepo);
         ArgumentNullException.ThrowIfNull(getSettings);
@@ -205,6 +255,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         _startupOptions = startupOptions;
         _registryFactory = registryFactory;
         _credentials = credentials;
+        _decodeImage = decodeImage ?? (file => RepoImageLocator.Decode(file));
+        _commitChange = commitChange;
 
         LaunchCommand = new AsyncRelayCommand(LaunchAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
         PullCommand = new AsyncRelayCommand(PullAsync, ReportUnexpectedFailure, () => CanPull && !IsMissing && !IsBusy);
@@ -212,10 +264,17 @@ internal sealed class RepoCardViewModel : ViewModelBase
             UpgradeAsync, ReportUnexpectedFailure, () => IsUpgradeAvailable && !IsMissing && !IsBusy);
         SelectPackageCommand = new RelayCommand(
             SelectPackage, () => IsPackageSelectionNeeded && !IsMissing && !IsBusy);
-        RefreshCommand = new AsyncRelayCommand(RefreshAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
-        FavoriteToggleCommand = new RelayCommand(() => IsFavorite = !IsFavorite);
+        // Refresh stays available for a repo whose folder is missing: it is the only in-app way to
+        // re-check once the folder (a remounted drive, a restored clone) is back
+        RefreshCommand = new AsyncRelayCommand(RefreshAsync, ReportUnexpectedFailure, () => !IsBusy);
+        NewGroupCommand = new RelayCommand(() => NewGroupRequested?.Invoke(this, EventArgs.Empty));
+        RemoveFromGroupCommand = new RelayCommand(() => MoveToGroup(null), () => HasGroup);
         RemoveCommand = new RelayCommand(() => RemoveRequested?.Invoke(this, EventArgs.Empty));
         CancelOperationCommand = new RelayCommand(CancelOperation, () => CanCancelOperation);
+
+        // Every error the card reports to the user also marks the card's status as a problem, so
+        // the status accent needs no bookkeeping at the dozens of places that raise an error
+        ErrorOccurred += (_, _) => LastActionFailed = true;
     }
 
     /// <summary>
@@ -254,11 +313,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 PullCommand.RaiseCanExecuteChanged();
                 UpgradeCommand.RaiseCanExecuteChanged();
                 SelectPackageCommand.RaiseCanExecuteChanged();
-                RefreshCommand.RaiseCanExecuteChanged();
+                OnPropertyChanged(nameof(RefreshMenuText));
+                OnPropertyChanged(nameof(RefreshTooltip));
                 OnPropertyChanged(nameof(IsWorkingTreeDirty));
                 OnPropertyChanged(nameof(PullTooltip));
                 OnPropertyChanged(nameof(HasPinnedPackage));
                 OnPropertyChanged(nameof(ShowNoPackageChip));
+                RaiseStatusChanged();
             }
         }
     }
@@ -267,9 +328,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Gets or sets whether the user has pinned/favorited this repo.
     /// </summary>
     /// <remarks>
-    ///     Mutates the shared <see cref="RecentRepo"/> in place and raises
-    ///     <see cref="FavoriteChanged"/> so the owning <see cref="MainWindowViewModel"/> can
-    ///     persist settings and re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     Saved through the owning <see cref="MainWindowViewModel"/> (see the constructor's
+    ///     <c>commitChange</c>) <em>before</em> the shared <see cref="RecentRepo"/> is changed, and
+    ///     only then does the card raise <see cref="FavoriteChanged"/> so the owner can re-sort
+    ///     <see cref="MainWindowViewModel.DisplayedRepoCards"/>. When the save fails the value is not
+    ///     changed (the owner tells the user) and the star is told to show the real state again.
+    ///     This property is the <b>only</b> owner of the toggle state: the card's star is a
+    ///     <c>ToggleButton</c> whose <c>IsChecked</c> binds here two-way, and it has no command.
+    ///     An earlier design also bound a toggling command, so one click flipped the state twice
+    ///     (the toggle itself, then the command) and a repo could not be favorited or unfavorited.
     /// </remarks>
     public bool IsFavorite
     {
@@ -281,10 +348,199 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return;
             }
 
-            _recentRepo.IsFavorite = value;
+            if (!CommitChange(repo => repo.IsFavorite = value))
+            {
+                // Not saved, so not changed: make the two-way bound star show the real state
+                OnPropertyChanged();
+                return;
+            }
+
             OnPropertyChanged();
+            OnPropertyChanged(nameof(ShowGroupChip));
             FavoriteChanged?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    /// <summary>
+    ///     Applies a change to this repo's settings entry through the owner (which saves it first),
+    ///     or directly when the card has no owner.
+    /// </summary>
+    /// <param name="change">The change to the entry; it may run more than once (on a candidate copy,
+    ///     then on the live entry), so it must be a plain assignment of fixed values.</param>
+    /// <returns><see langword="true"/> when the change was applied; <see langword="false"/> when it
+    ///     could not be saved and so was not applied.</returns>
+    private bool CommitChange(Action<RecentRepo> change)
+    {
+        if (_commitChange is null)
+        {
+            change(_recentRepo);
+            return true;
+        }
+
+        return _commitChange(_recentRepo, change);
+    }
+
+    /// <summary>
+    ///     Gets the name of the user's own group this repo is listed under, or
+    ///     <see langword="null"/> when it is in no group.
+    /// </summary>
+    /// <remarks>
+    ///     Read through <see cref="RepoGroupName.Sanitize"/>, so whatever the settings hold (even
+    ///     text that was not repaired at load, as in a test that builds settings directly) yields a
+    ///     valid name or no group, never a failure. Change it with <see cref="MoveToGroup"/>.
+    /// </remarks>
+    public string? GroupName => RepoGroupName.Sanitize(_recentRepo.GroupName);
+
+    /// <summary>
+    ///     Gets a value indicating whether this repo is in one of the user's own groups.
+    /// </summary>
+    public bool HasGroup => GroupName is not null;
+
+    /// <summary>
+    ///     Gets a value indicating whether the card shows its group's name as a chip. A favorite repo
+    ///     is listed under Favorites rather than under its group, so the chip is what tells the user
+    ///     which group it belongs to; for any other repo the section header already says so.
+    /// </summary>
+    public bool ShowGroupChip => IsFavorite && HasGroup;
+
+    /// <summary>
+    ///     Gets the names of the groups that exist now (the groups of all repos in the settings),
+    ///     sorted, for the "Move to group" submenu.
+    /// </summary>
+    /// <returns>The distinct group names, alphabetically.</returns>
+    public IReadOnlyList<string> GetExistingGroupNames() =>
+        RepoGroupName.DistinctNames(_getSettings().RecentRepos.Select(repo => repo.GroupName));
+
+    /// <summary>
+    ///     Moves this repo into a group, or out of every group.
+    /// </summary>
+    /// <remarks>
+    ///     A name that matches an existing group ignoring letter case joins that group under its own
+    ///     spelling, so look-alike groups cannot arise. The choice is stored only in the per-user
+    ///     settings (on the shared <see cref="RecentRepo"/>), never in the repository, and is saved
+    ///     before it is applied (see <see cref="IsFavorite"/>). Raises
+    ///     <see cref="GroupChanged"/> when the group actually changed, so the owning
+    ///     <see cref="MainWindowViewModel"/> rebuilds the list.
+    /// </remarks>
+    /// <param name="groupName">The group's name, or <see langword="null"/> (or blank) to take the
+    ///     repo out of its group.</param>
+    /// <returns><see langword="true"/> when the repo is now in the requested place (including when
+    ///     it already was); <see langword="false"/> when <paramref name="groupName"/> is not a valid
+    ///     group name (too long, or a built-in section's name), or the choice could not be saved,
+    ///     and nothing changed.</returns>
+    public bool MoveToGroup(string? groupName)
+    {
+        // Blank means "no group"; anything else must be a name the rules accept
+        var requested = RepoGroupName.Normalize(groupName);
+        if (requested is not null && RepoGroupName.Validate(requested) != RepoGroupNameProblem.None)
+        {
+            return false;
+        }
+
+        var target = requested is null ? null : RepoGroupName.Canonicalize(requested, GetExistingGroupNames());
+        if (string.Equals(_recentRepo.GroupName, target, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!CommitChange(repo => repo.GroupName = target))
+        {
+            return false;
+        }
+
+        RaiseGroupPropertiesChanged();
+        GroupChanged?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
+    /// <summary>
+    ///     Tells the view that this card's group properties may have changed because the group was
+    ///     renamed or removed from outside the card (by the owning view model).
+    /// </summary>
+    internal void RaiseGroupPropertiesChanged()
+    {
+        OnPropertyChanged(nameof(GroupName));
+        OnPropertyChanged(nameof(HasGroup));
+        OnPropertyChanged(nameof(ShowGroupChip));
+        RemoveFromGroupCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>
+    ///     Gets the command that asks for a new group to move this repo into; it raises
+    ///     <see cref="NewGroupRequested"/> (the window shows the name prompt).
+    /// </summary>
+    public RelayCommand NewGroupCommand { get; }
+
+    /// <summary>
+    ///     Gets the command that takes this repo out of its group; available while the repo is in one.
+    /// </summary>
+    public RelayCommand RemoveFromGroupCommand { get; }
+
+    /// <summary>
+    ///     Gets the name of the palette color the user chose for this repo's tile, or
+    ///     <see langword="null"/> for the automatic color (including when the stored name is not a
+    ///     color this version knows).
+    /// </summary>
+    public string? CardColorName => CardColorPalette.Find(_recentRepo.CardColor)?.Name;
+
+    /// <summary>
+    ///     Gets a value indicating whether the user chose a color for this repo's tile.
+    /// </summary>
+    public bool HasCustomCardColor => CardColorName is not null;
+
+    /// <summary>
+    ///     Gets a value indicating whether the tile uses the automatic color (the opposite of
+    ///     <see cref="HasCustomCardColor"/>), for the palette popup's "Automatic" entry.
+    /// </summary>
+    public bool IsCardColorAutomatic => !HasCustomCardColor;
+
+    /// <summary>
+    ///     Gets the palette heading's text: <c>Card color: Teal</c>, or <c>Card color: Automatic</c>,
+    ///     so the chosen color is named in words in the palette itself and not only by a swatch's
+    ///     tooltip, accessible name and check mark.
+    /// </summary>
+    public string CardColorHeading => $"Card color: {CardColorName ?? "Automatic"}";
+
+    /// <summary>
+    ///     Chooses the color of this repo's tile.
+    /// </summary>
+    /// <remarks>
+    ///     Only the tile changes: the status accent bar keeps its fixed, meaningful colors. The choice
+    ///     is stored by name in the per-user settings only, saved before it is applied (see
+    ///     <see cref="IsFavorite"/>), and raises <see cref="CardColorChanged"/> once applied.
+    /// </remarks>
+    /// <param name="colorName">A palette color's name (letter case ignored), or
+    ///     <see langword="null"/> (or blank) for the automatic color.</param>
+    /// <returns><see langword="true"/> when the card now has the requested color (including when it
+    ///     already had); <see langword="false"/> when <paramref name="colorName"/> names no palette
+    ///     color or the choice could not be saved, and nothing changed.</returns>
+    public bool SetCardColor(string? colorName)
+    {
+        var requested = string.IsNullOrWhiteSpace(colorName) ? null : CardColorPalette.Find(colorName);
+        if (requested is null && !string.IsNullOrWhiteSpace(colorName))
+        {
+            return false;
+        }
+
+        if (string.Equals(_recentRepo.CardColor, requested?.Name, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var name = requested?.Name;
+        if (!CommitChange(repo => repo.CardColor = name))
+        {
+            return false;
+        }
+
+        OnPropertyChanged(nameof(CardColorName));
+        OnPropertyChanged(nameof(HasCustomCardColor));
+        OnPropertyChanged(nameof(IsCardColorAutomatic));
+        OnPropertyChanged(nameof(CardColorHeading));
+        OnPropertyChanged(nameof(AvatarColorIndex));
+        OnPropertyChanged(nameof(AvatarStyleClass));
+        CardColorChanged?.Invoke(this, EventArgs.Empty);
+        return true;
     }
 
     /// <summary>
@@ -375,6 +631,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(HasSourceProblem));
                 OnPropertyChanged(nameof(SourceProblemChipText));
+                RaiseStatusChanged();
             }
         }
     }
@@ -472,18 +729,337 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(UpgradeTooltip));
                 UpgradeCommand.RaiseCanExecuteChanged();
+                RaiseStatusChanged();
             }
         }
     }
 
     /// <summary>
-    ///     Gets the tooltip text shown on the upgrade chip, naming both versions and how to
-    ///     upgrade, or <see langword="null"/> when no upgrade is available.
+    ///     Gets the tooltip text shown on the upgrade chip and the "Upgrade" menu item: what
+    ///     clicking does (upgrade the agent files to the newer version), the version it replaces
+    ///     and that the chip and the "..." menu start the same upgrade, or <see langword="null"/>
+    ///     when no upgrade is available.
     /// </summary>
     public string? UpgradeTooltip => IsUpgradeAvailable
-        ? $"Agent package update available: {PinnedPackageVersion} -> {LatestAvailableVersion} " +
-          "(click this chip, or use the \"...\" menu > Upgrade)."
+        ? $"Upgrade the agent files to {LatestAvailableVersion} (pinned: {PinnedPackageVersion}). " +
+          "Same as the \"...\" menu > Upgrade."
         : null;
+
+    /// <summary>
+    ///     Gets a value indicating whether the last action the user started on this card (launch,
+    ///     pull, upgrade, package selection or refresh) reported an error.
+    /// </summary>
+    /// <remarks>
+    ///     Set whenever <see cref="ErrorOccurred"/> is raised or a Git Pull ends with git's
+    ///     refusal, and cleared when the next operation starts, so a problem stays visible on the
+    ///     card (as <see cref="RepoCardStatus.Problem"/>) until the user tries again.
+    /// </remarks>
+    public bool LastActionFailed
+    {
+        get => _lastActionFailed;
+        private set
+        {
+            if (SetField(ref _lastActionFailed, value))
+            {
+                RaiseStatusChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets the overall status of the card, which drives the colored accent bar on its left
+    ///     edge.
+    /// </summary>
+    /// <remarks>
+    ///     A problem (missing folder, package source problem or sign-in needed, failed last action)
+    ///     outranks everything else, then an available upgrade, then the absence of a package;
+    ///     a pinned package whose upgrade check is still running (or whose last check failed) is
+    ///     neutral, and only a pinned package whose check succeeded with no newer version reports
+    ///     <see cref="RepoCardStatus.UpToDate"/>.
+    /// </remarks>
+    public RepoCardStatus Status => this switch
+    {
+        { IsMissing: true } or { HasSourceProblem: true } or { LastActionFailed: true } => RepoCardStatus.Problem,
+        { IsUpgradeAvailable: true } => RepoCardStatus.UpgradeAvailable,
+        { IsPackageSelectionNeeded: true } => RepoCardStatus.NoPackage,
+        { IsCheckingUpgrade: true } => RepoCardStatus.Checking,
+        { IsUpgradeStatusUnknown: true } => RepoCardStatus.Unknown,
+        _ => RepoCardStatus.UpToDate
+    };
+
+    /// <summary>
+    ///     Gets a value indicating whether the card menu's "Agent files" group has anything to offer:
+    ///     "Select Package..." (no package pinned yet) or "Upgrade to ..." (a newer version exists).
+    ///     When neither applies the group, its header and its separator are hidden rather than shown
+    ///     empty.
+    /// </summary>
+    public bool HasAgentFileActions => IsPackageSelectionNeeded || IsUpgradeAvailable;
+
+    /// <summary>
+    ///     Gets the status in words, for the accent bar's accessible name so the status is never
+    ///     conveyed by color alone.
+    /// </summary>
+    public string StatusText => Status switch
+    {
+        RepoCardStatus.UpToDate => "Up to date",
+        RepoCardStatus.UpgradeAvailable => "Upgrade available",
+        RepoCardStatus.Problem => "Needs attention",
+        RepoCardStatus.NoPackage => "No agent package",
+        RepoCardStatus.Unknown => "Update check failed",
+        _ => "Checking for updates"
+    };
+
+    /// <summary>
+    ///     Gets the tooltip of the accent bar: the status and, for a problem, the reason.
+    /// </summary>
+    public string StatusTooltip => Status switch
+    {
+        RepoCardStatus.UpToDate => "Up to date: the pinned agent package is the newest one available.",
+        RepoCardStatus.UpgradeAvailable => $"Upgrade available: {PinnedPackageVersion} -> {LatestAvailableVersion}.",
+        RepoCardStatus.NoPackage => "No agent package is pinned for this repo.",
+        RepoCardStatus.Checking => "Checking whether a newer agent package version is available...",
+        RepoCardStatus.Unknown => "Update check failed: the package source could not be read, so it is not known whether a newer agent package version is available. Use Refresh in the card menu to try again.",
+        _ when IsMissing => "Needs attention: this repo's folder could not be found on disk. Use Check again in the card menu once it is back.",
+        _ when HasSourceProblem => $"Needs attention: {SourceProblem}",
+        _ => "Needs attention: the last action failed."
+    };
+
+    /// <summary>
+    ///     The number of colors in the avatar palette. The view defines one background and one
+    ///     foreground resource per index (<c>AvatarBackground0</c>, <c>AvatarForeground0</c>, ...)
+    ///     for each theme variant.
+    /// </summary>
+    internal const int AvatarPaletteSize = 10;
+
+    /// <summary>
+    ///     Gets the one or two capital letters shown in the card's avatar tile: the first letters of
+    ///     the first two words of the repo name (words are separated by anything that is not a
+    ///     letter or digit, so <c>alpha-service</c> gives <c>AS</c>), or the first letter of a
+    ///     single-word name. Empty when the name has no letter or digit.
+    /// </summary>
+    public string AvatarInitials => GetAvatarInitials(RepoName);
+
+    /// <summary>
+    ///     Gets a value indicating whether <see cref="AvatarInitials"/> has text; when not, the
+    ///     avatar shows a folder glyph instead.
+    /// </summary>
+    public bool HasAvatarInitials => AvatarInitials.Length > 0;
+
+    /// <summary>
+    ///     Gets the repo's own picture (its root <c>icon.png</c>, else <c>logo.png</c>) decoded at the
+    ///     tile's size, or <see langword="null"/> when the repo has none, it is not acceptable, or
+    ///     it has not finished loading; the tile then shows the generated initials instead.
+    /// </summary>
+    /// <remarks>
+    ///     Loaded in the background by <see cref="RefreshCheap"/> (so at startup and on every
+    ///     Refresh) and never on the UI thread; see <see cref="RepoImageLocator"/> for what is
+    ///     accepted. <b>Ownership:</b> the card owns the bitmap it publishes here. When the value is
+    ///     replaced or cleared the superseded bitmap is disposed - right after the change was
+    ///     announced, so the tile (bound to this property) no longer shows it - and a bitmap that
+    ///     never gets published (a newer refresh took over) is disposed by the refresh that decoded
+    ///     it. Consumers must therefore not keep the value beyond the moment they read it.
+    /// </remarks>
+    public Bitmap? RepoImage
+    {
+        get => _repoImage;
+        private set
+        {
+            var superseded = _repoImage;
+            if (SetField(ref _repoImage, value))
+            {
+                OnPropertyChanged(nameof(HasRepoImage));
+                OnPropertyChanged(nameof(ShowAvatarInitials));
+                OnPropertyChanged(nameof(ShowAvatarFolderGlyph));
+
+                // The view has dropped the old bitmap by now (its binding was updated by the
+                // notifications above), so the native image can be released
+                superseded?.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether the tile shows the repo's own picture.
+    /// </summary>
+    public bool HasRepoImage => _repoImage is not null;
+
+    /// <summary>
+    ///     Gets a value indicating whether the tile shows the generated initials: the repo has no
+    ///     picture and its name has initials.
+    /// </summary>
+    public bool ShowAvatarInitials => !HasRepoImage && HasAvatarInitials;
+
+    /// <summary>
+    ///     Gets a value indicating whether the tile shows the folder glyph: the repo has no picture
+    ///     and its name has no letter or digit to make initials from.
+    /// </summary>
+    public bool ShowAvatarFolderGlyph => !HasRepoImage && !HasAvatarInitials;
+
+    /// <summary>
+    ///     Gets the task of the most recent picture refresh, so a caller (a test) can wait for it.
+    ///     Completes without throwing: every failure means "no picture".
+    /// </summary>
+    internal Task RepoImageRefreshTask { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    ///     Looks for the repo's picture and decodes it on a worker thread, then publishes it (or
+    ///     its absence) to <see cref="RepoImage"/>.
+    /// </summary>
+    /// <remarks>
+    ///     A file already decoded (same path, last-write time and size) is not decoded again, so
+    ///     repeated refreshes cost one folder listing. A decode that failed is remembered the same
+    ///     way, so an unusable file is not retried until it changes. The publish step runs on the
+    ///     caller's context (the UI thread in the application), after the work on the pool.
+    /// </remarks>
+    /// <returns>A task that completes when the picture state is current.</returns>
+    private async Task RefreshRepoImageAsync()
+    {
+        // Numbered here, synchronously when the refresh starts, so a failure can tell whether a
+        // newer refresh has taken over since
+        var generation = ++_imageGeneration;
+        try
+        {
+            await LoadRepoImageAsync(generation);
+        }
+        catch (Exception)
+        {
+            // Whatever went wrong with a repo's picture file - the locator, the decoder or an
+            // injected decoder - the card just keeps its generated tile, and the background task
+            // never faults. Only the latest refresh may say so: an older one failing late must
+            // not erase the picture a newer refresh has already published.
+            if (generation == _imageGeneration)
+            {
+                _loadedImageFile = null;
+                RepoImage = null;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     The body of <see cref="RefreshRepoImageAsync"/>, which only adds the "any failure means
+    ///     no picture" guard around it.
+    /// </summary>
+    /// <param name="generation">The number of this refresh; a newer refresh supersedes it.</param>
+    /// <returns>A task that completes when the picture state is current.</returns>
+    private async Task LoadRepoImageAsync(int generation)
+    {
+        var previous = _loadedImageFile;
+        var path = RepoPath;
+
+        // Off the UI thread: the folder listing, the file read and the decode
+        var (file, bitmap, decoded) = await Task.Run(() =>
+        {
+            var found = RepoImageLocator.Find(path);
+            return found is { } candidate && candidate != previous
+                ? (found, _decodeImage(candidate), true)
+                : (found, null, false);
+        }, CancellationToken.None);
+
+        // A newer refresh started meanwhile (or the card was removed): let it have the last word.
+        // The bitmap this refresh decoded will never be shown, so release it here.
+        if (generation != _imageGeneration)
+        {
+            bitmap?.Dispose();
+            return;
+        }
+
+        // Same file as before: nothing to do; no file at all: back to the generated tile
+        if (!decoded)
+        {
+            if (file is null)
+            {
+                _loadedImageFile = null;
+                RepoImage = null;
+            }
+
+            return;
+        }
+
+        _loadedImageFile = file;
+        RepoImage = bitmap;
+    }
+
+    /// <summary>
+    ///     Gets the index (0 up to <see cref="AvatarPaletteSize"/> - 1) of the palette color of this
+    ///     repo's tile: the color the user chose (<see cref="CardColorName"/>), otherwise the
+    ///     automatic color, derived from a stable hash of the repo path so the same repo always has
+    ///     the same color in every session and on every machine.
+    /// </summary>
+    public int AvatarColorIndex => CardColorPalette.Find(_recentRepo.CardColor)?.Index ?? GetAvatarColorIndex(RepoPath);
+
+    /// <summary>
+    ///     Gets the style class (<c>avatar0</c>, <c>avatar1</c>, ...) that selects this repo's avatar
+    ///     colors from the theme-aware palette resources, so no color value lives in the view model
+    ///     or the card template.
+    /// </summary>
+    public string AvatarStyleClass => $"avatar{AvatarColorIndex}";
+
+    /// <summary>
+    ///     Derives the avatar's initials from a repo name.
+    /// </summary>
+    /// <param name="repoName">The repo's folder name; may be empty.</param>
+    /// <returns>One or two upper-case letters or digits; an empty string when
+    ///     <paramref name="repoName"/> has none.</returns>
+    internal static string GetAvatarInitials(string repoName)
+    {
+        // Split into the runs of letters and digits (so '-', '_', '.' and spaces all separate
+        // words), then take the first text element of up to two words
+        var words = SplitOnNonAlphanumeric(repoName).Take(2);
+        return string.Concat(words.Select(word => StringInfo.GetNextTextElement(word))).ToUpperInvariant();
+    }
+
+    /// <summary>
+    ///     Splits text into the runs of letters and digits it contains.
+    /// </summary>
+    /// <param name="text">The text to split.</param>
+    /// <returns>The non-empty runs of letters and digits, in order.</returns>
+    private static IEnumerable<string> SplitOnNonAlphanumeric(string text)
+    {
+        var start = -1;
+        for (var i = 0; i <= text.Length; i++)
+        {
+            var isNameChar = i < text.Length && char.IsLetterOrDigit(text[i]);
+            if (isNameChar && start < 0)
+            {
+                start = i;
+            }
+            else if (!isNameChar && start >= 0)
+            {
+                yield return text[start..i];
+                start = -1;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Maps a repo path to an avatar palette index with a deterministic 32-bit FNV-1a hash.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="string.GetHashCode()"/> is deliberately not used: it is randomized per process,
+    ///     which would give a repo a different color on every launch. The path is compared
+    ///     without regard to case and trailing separators, as Windows paths are, so the same
+    ///     folder never changes color because of how it was typed.
+    /// </remarks>
+    /// <param name="repoPath">The repo path (or any name); may be empty.</param>
+    /// <returns>An index from 0 up to <see cref="AvatarPaletteSize"/> - 1.</returns>
+    internal static int GetAvatarColorIndex(string repoPath)
+    {
+        const uint offsetBasis = 2166136261;
+        const uint prime = 16777619;
+
+        // Both separators are trimmed on every OS (not Path.DirectorySeparatorChar) so a repo
+        // keeps the same color on every machine, however its path was typed
+        var normalized = repoPath
+            .TrimEnd('\\', '/')
+            .ToUpperInvariant();
+        var hash = offsetBasis;
+        foreach (var character in normalized)
+        {
+            hash = (hash ^ character) * prime;
+        }
+
+        return (int)(hash % AvatarPaletteSize);
+    }
 
     /// <summary>
     ///     Gets a value indicating whether this repo has never had an agent package pinned (its
@@ -505,6 +1081,47 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     public bool HasPinnedPackage => !IsPackageSelectionNeeded && !IsMissing;
 
+    /// <summary>
+    ///     Gets a value indicating whether the agent package chip shows its small "Agent files are up
+    ///     to date" check mark: the package is pinned and the card's overall status is
+    ///     <see cref="RepoCardStatus.UpToDate"/>.
+    /// </summary>
+    /// <remarks>
+    ///     A healthy card would otherwise be told apart only by the green accent bar and the
+    ///     absence of an upgrade chip. The cue sits inside the existing chip (no extra chip or
+    ///     row, so no new clutter) and is hidden for every other status - an available upgrade, a
+    ///     problem, a running check or no package - so it never contradicts the rest of the card.
+    /// </remarks>
+    public bool ShowUpToDateCue => HasPinnedPackage && Status == RepoCardStatus.UpToDate;
+
+    /// <summary>
+    ///     Gets the part of <see cref="RepoPath"/> before its last directory separator (for example
+    ///     <c>C:\work\clients</c>), or an empty string when the path has no separator. The card
+    ///     shows it with an end ellipsis next to <see cref="RepoPathLeaf"/>, which is never
+    ///     trimmed, so a narrow card reads <c>C:\work\cl…\repo</c>: a middle ellipsis that keeps the
+    ///     folder name - the part that tells similar repos apart - visible.
+    /// </summary>
+    public string RepoPathParent => SplitRepoPath().Parent;
+
+    /// <summary>
+    ///     Gets the last segment of <see cref="RepoPath"/> (the repo's folder name) with the
+    ///     separator before it (for example <c>\repo</c>): the part of the path the card never trims.
+    ///     The whole path when it has no separator to split at.
+    /// </summary>
+    public string RepoPathLeaf => SplitRepoPath().Leaf;
+
+    /// <summary>
+    ///     Splits <see cref="RepoPath"/> at its last directory separator, ignoring a trailing one.
+    /// </summary>
+    /// <returns>The parent (without the separator, possibly empty) and the leaf (with it).</returns>
+    private (string Parent, string Leaf) SplitRepoPath()
+    {
+        // A trailing separator belongs to the last segment's folder, not to a further empty segment
+        var path = RepoPath;
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var split = trimmed.LastIndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
+        return split < 0 ? (string.Empty, path) : (trimmed[..split], trimmed[split..]);
+    }
     /// <summary>
     ///     Gets a value indicating whether the grey "No agent package" chip is shown: the repo
     ///     exists but has never had an agent package pinned.
@@ -667,7 +1284,34 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public bool IsCheckingUpgrade
     {
         get => _isCheckingUpgrade;
-        private set => SetField(ref _isCheckingUpgrade, value);
+        private set
+        {
+            if (SetField(ref _isCheckingUpgrade, value))
+            {
+                RaiseStatusChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether the last completed upgrade check failed (the pinned
+    ///     package's source could not be read), so nothing is known about whether a newer version
+    ///     exists.
+    /// </summary>
+    /// <remarks>
+    ///     Kept until a later check succeeds or the card no longer has anything to check (no pin,
+    ///     missing folder, unusable source), so a failed check is never shown as "up to date".
+    /// </remarks>
+    public bool IsUpgradeStatusUnknown
+    {
+        get => _isUpgradeStatusUnknown;
+        private set
+        {
+            if (SetField(ref _isUpgradeStatusUnknown, value))
+            {
+                RaiseStatusChanged();
+            }
+        }
     }
 
     /// <summary>
@@ -777,6 +1421,20 @@ internal sealed class RepoCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(UpgradeTooltip));
         OnPropertyChanged(nameof(LaunchButtonText));
         OnPropertyChanged(nameof(LaunchTooltip));
+        RaiseStatusChanged();
+    }
+
+    /// <summary>
+    ///     Raises the change notifications for the card's overall status after any fact it
+    ///     is derived from changed.
+    /// </summary>
+    private void RaiseStatusChanged()
+    {
+        OnPropertyChanged(nameof(Status));
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(StatusTooltip));
+        OnPropertyChanged(nameof(HasAgentFileActions));
+        OnPropertyChanged(nameof(ShowUpToDateCue));
     }
 
     /// <summary>
@@ -950,9 +1608,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public AsyncRelayCommand RefreshCommand { get; }
 
     /// <summary>
-    ///     Gets the command bound to the card's favorite/pin toggle button.
+    ///     Gets the label of the card menu's refresh item: <c>Refresh</c> normally, <c>Check again</c>
+    ///     while the repo's folder is missing, because then there is nothing to refresh - the user is
+    ///     waiting for the folder (a remounted drive, a restored clone) to come back and wants to
+    ///     re-check.
     /// </summary>
-    public RelayCommand FavoriteToggleCommand { get; }
+    public string RefreshMenuText => IsMissing ? "Check again" : "Refresh";
+
+    /// <summary>
+    ///     Gets the tooltip of the card menu's refresh item, saying what it does in the current state.
+    /// </summary>
+    public string RefreshTooltip => IsMissing
+        ? "Check whether the folder is available again"
+        : "Re-check this repo's branch, chips, and upgrade status";
 
     /// <summary>
     ///     Gets the command bound to the card's "Remove from list" menu item.
@@ -987,15 +1655,31 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public event EventHandler<string>? ErrorOccurred;
 
     /// <summary>
-    ///     Raised when <see cref="IsFavorite"/> changes, so the owning
-    ///     <see cref="MainWindowViewModel"/> can persist settings and re-sort
-    ///     <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     Raised after <see cref="IsFavorite"/> changed (and was saved), so the owning
+    ///     <see cref="MainWindowViewModel"/> can re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
     /// </summary>
     public event EventHandler? FavoriteChanged;
 
     /// <summary>
-    ///     Raised when a launch is recorded, so the owning <see cref="MainWindowViewModel"/> can
-    ///     persist settings and re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     Raised after <see cref="MoveToGroup"/> changed the repo's group (and it was saved), so the
+    ///     owning <see cref="MainWindowViewModel"/> can rebuild the sectioned list.
+    /// </summary>
+    public event EventHandler? GroupChanged;
+
+    /// <summary>
+    ///     Raised by <see cref="NewGroupCommand"/> to request the "New group" name prompt; the view
+    ///     shows it and, if a name is chosen, calls <see cref="MoveToGroup"/>.
+    /// </summary>
+    public event EventHandler? NewGroupRequested;
+
+    /// <summary>
+    ///     Raised after <see cref="SetCardColor"/> changed the tile color (and it was saved).
+    /// </summary>
+    public event EventHandler? CardColorChanged;
+
+    /// <summary>
+    ///     Raised after a launch was recorded (and saved), so the owning
+    ///     <see cref="MainWindowViewModel"/> can re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
     /// </summary>
     public event EventHandler? LaunchRecorded;
 
@@ -1006,6 +1690,46 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see cref="MainWindowViewModel.RemoveRepo"/>.
     /// </summary>
     public event EventHandler? RemoveRequested;
+
+    /// <summary>
+    ///     Stops this card for good because it was removed from the recent-repos list: whatever it
+    ///     still has running is cancelled or its result ignored, nothing it does afterwards can
+    ///     report to the user (no error box, no release notes, no prompt), and the picture it holds is
+    ///     released.
+    /// </summary>
+    /// <remarks>
+    ///     Called by <see cref="MainWindowViewModel"/> once the removal was saved. Without it a card
+    ///     the user removed - kept alive by handlers the window attached, or by an operation that is
+    ///     still running - could still raise <see cref="ErrorOccurred"/> or
+    ///     <see cref="ReleaseNotesReady"/> for a repo that is no longer listed. A retired card is never
+    ///     reused; adding the repo again creates a new card. Idempotent.
+    /// </remarks>
+    internal void Retire()
+    {
+        _isRetired = true;
+
+        // Results of checks and picture loads that are still on their way are dropped
+        _upgradeCheckGeneration++;
+        _imageGeneration++;
+        _loadedImageFile = null;
+        IsCheckingUpgrade = false;
+        CancelOperation();
+
+        // Nobody is listening any more: release the window's handlers and anything they reference
+        ReleaseNotesReady = null;
+        ErrorOccurred = null;
+        FavoriteChanged = null;
+        GroupChanged = null;
+        NewGroupRequested = null;
+        CardColorChanged = null;
+        LaunchRecorded = null;
+        RemoveRequested = null;
+        SelectPackageRequested = null;
+        AgentsMdTemplateOfferRequested = null;
+
+        // The picture is disposed here, once the view has been told it is gone
+        RepoImage = null;
+    }
 
     /// <summary>
     ///     Raised by <see cref="SelectPackageCommand"/> to request the "Select Package..." dialog
@@ -1071,6 +1795,17 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </remarks>
     public void RefreshCheap()
     {
+        // A card that was removed from the list checks nothing any more
+        if (_isRetired)
+        {
+            return;
+        }
+
+        // Whatever upgrade check is still in flight was started against the repo, pin and sources as
+        // they were: its result must not be published over what this refresh finds (the caller starts
+        // a new check when one is wanted)
+        InvalidateUpgradeCheck();
+
         IsMissing = !Directory.Exists(RepoPath);
         if (IsMissing)
         {
@@ -1090,6 +1825,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
             GitStatusChecked = false;
             GitStatusUnavailable = false;
             RaisePackageChipChanged();
+
+            // A folder that does not exist has no picture: no lookup, just the generated tile
+            _imageGeneration++;
+            _loadedImageFile = null;
+            RepoImage = null;
             return;
         }
 
@@ -1097,6 +1837,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RefreshBranchAndCommittedFiles();
         EvaluatePinnedSource();
         RaisePackageChipChanged();
+
+        // The picture is looked for in the background, so the UI never waits for the disk or the
+        // decoder; the tile shows the generated initials until (and unless) it arrives
+        RepoImageRefreshTask = RefreshRepoImageAsync();
     }
 
     /// <summary>
@@ -1124,13 +1868,20 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Records that this repo was just successfully launched, stamping
-    ///     <see cref="LastLaunchedUtc"/> with the current UTC time and raising
-    ///     <see cref="LaunchRecorded"/> so the owning <see cref="MainWindowViewModel"/> can
-    ///     persist settings and re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     <see cref="LastLaunchedUtc"/> with the current UTC time (saved before it is applied, see
+    ///     <see cref="IsFavorite"/>) and raising <see cref="LaunchRecorded"/> so the owning
+    ///     <see cref="MainWindowViewModel"/> can re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     The launch itself has already happened; when the stamp cannot be saved it is simply not
+    ///     recorded (the owner tells the user).
     /// </summary>
     private void RecordLaunched()
     {
-        _recentRepo.LastLaunchedUtc = DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow;
+        if (!CommitChange(repo => repo.LastLaunchedUtc = now))
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(LastLaunchedUtc));
         LaunchRecorded?.Invoke(this, EventArgs.Empty);
     }
@@ -1383,6 +2134,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             StatusMessage = result.Succeeded
                 ? "Pull succeeded."
                 : $"Pull failed: {result.StandardError.Trim()}";
+            LastActionFailed = !result.Succeeded;
 
             if (result.Succeeded)
             {
@@ -1621,8 +2373,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     (blind-delete-and-replace), proactively ensures the repo's <c>.gitignore</c> covers the
     ///     managed agent folders, rewrites the pin file (recording the package's source alias and
     ///     keeping any existing pin's other fields), refreshes this card's pin/upgrade-status
-    ///     properties, and raises <see cref="ReleaseNotesReady"/> with the new package's release
-    ///     notes.
+    ///     properties, offers the package's AGENTS.md template when it applies (see
+    ///     <see cref="AgentsMdTemplateOfferRequested"/>) and then raises <see cref="ReleaseNotesReady"/>
+    ///     with the new package's release notes.
     /// </summary>
     /// <remarks>
     ///     The existing pin file is read <em>before</em> anything is changed so a pin written by a
@@ -1705,8 +2458,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     package.PackageName, package.Version, RepoName);
             }
 
-            ReleaseNotesReady?.Invoke(this, releaseNotes);
+            // The AGENTS.md offer comes first, then the release notes: the view shows the offer (a
+            // modal question) at once and holds the release notes back until it is answered, so the
+            // question never covers the notes (and the notes window, being non-modal, is not lost
+            // behind it); the notes then appear in front as the completion of the upgrade.
             MaybeOfferAgentsMdTemplate(reader);
+            ReleaseNotesReady?.Invoke(this, releaseNotes);
         }
         catch (InvalidOperationException ex)
         {
@@ -1984,6 +2741,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     private void RefreshPin()
     {
+        var previous = (PinnedPackageName, PinnedPackageVersion, PinnedSource);
         try
         {
             var pin = RepoPinStore.Load(RepoPath);
@@ -2003,6 +2761,26 @@ internal sealed class RepoCardViewModel : ViewModelBase
             PinnedSource = null;
             StatusMessage = $"Failed to read pin file: {ex.Message}";
         }
+
+        // A different pin makes everything learned about upgrades for the old one meaningless: drop
+        // it and ignore any check still running for it (the caller starts a new one)
+        if ((PinnedPackageName, PinnedPackageVersion, PinnedSource) != previous)
+        {
+            InvalidateUpgradeCheck();
+            IsUpgradeAvailable = false;
+            LatestAvailableVersion = null;
+        }
+    }
+
+    /// <summary>
+    ///     Makes any upgrade check that is still in flight irrelevant: its result will not be
+    ///     published, and the card stops showing "checking" and "check failed" for it.
+    /// </summary>
+    private void InvalidateUpgradeCheck()
+    {
+        _upgradeCheckGeneration++;
+        IsCheckingUpgrade = false;
+        IsUpgradeStatusUnknown = false;
     }
 
     /// <summary>
@@ -2092,6 +2870,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     is cancelled; the card keeps its previous upgrade state.</exception>
     public async Task RefreshUpgradeStatusAsync(CancellationToken cancellationToken = default, bool allowPrompt = false)
     {
+        // A card that was removed from the list checks nothing any more
+        if (_isRetired)
+        {
+            return;
+        }
+
         var generation = ++_upgradeCheckGeneration;
 
         // A repo whose folder is gone offers no upgrade: its package chip is hidden, so an upgrade
@@ -2099,6 +2883,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         if (IsMissing)
         {
             IsUpgradeAvailable = false;
+            IsUpgradeStatusUnknown = false;
             LatestAvailableVersion = null;
             IsCheckingUpgrade = false;
             return;
@@ -2106,6 +2891,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         if (!EvaluatePinnedSource())
         {
+            IsUpgradeStatusUnknown = false;
             IsCheckingUpgrade = false;
             return;
         }
@@ -2123,16 +2909,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 LatestAvailableVersion = check.Latest?.Version.ToString();
                 IsUpgradeAvailable = check.IsNewerAvailable;
+                IsUpgradeStatusUnknown = false;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             // An unreachable or failing source (or invalid source configuration) means "no
             // upgrade can be offered", not a crash; the specific failure is surfaced by the
-            // actions that need the source
+            // actions that need the source. It is also not "up to date": the card says the
+            // check failed (a neutral status) rather than claiming currency nothing established.
             if (generation == _upgradeCheckGeneration)
             {
                 IsUpgradeAvailable = false;
+                IsUpgradeStatusUnknown = true;
                 LatestAvailableVersion = null;
 
                 // A server that needs a sign-in is worth telling the user about, because the
@@ -2183,12 +2972,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return false;
             }
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
-            // Invalid source configuration (for example a duplicated alias): nothing can be
-            // offered; the actions that need the source report the specific reason
+            // Invalid source configuration (for example a duplicated alias): no upgrade can be
+            // offered and the card must not claim it is up to date, so it is a problem the card
+            // shows; the actions that need the source report the specific reason again
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
+            SetSourceProblem(
+                $"The package sources are not configured correctly: {SecretRedactor.SafeMessage(ex)}",
+                needsSignIn: false);
             return false;
         }
 
@@ -2237,6 +3030,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return;
         }
 
+        // A new operation starts from a clean slate: the previous failure (if any) no longer
+        // describes the card once the user tries again
+        LastActionFailed = false;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _operationCancellation = cancellation;
         BusyMessage = busyMessage;

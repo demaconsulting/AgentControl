@@ -21,6 +21,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Styling;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.PackageCredentials;
@@ -72,6 +73,10 @@ internal sealed class App : Application
             // populated.
             var settings = SettingsStore.Load(Options?.ConfigDirectory);
 
+            // Apply the saved theme before any window exists, so the first frame is already in
+            // the user's theme (the system default follows the operating system, live)
+            ApplyTheme(settings.Theme);
+
             // The session credential store holds what the user types into the sign-in dialog, in
             // memory only; it is emptied when the application exits. A sign-in can only outlive
             // the session in the user's own Git credential helper, reached through the git
@@ -82,7 +87,8 @@ internal sealed class App : Application
                 () => ResolveGitExecutablePath(viewModel?.Settings ?? settings, Options));
             var credentials = new PackageCredentialContext(
                 credentialStore, new AvaloniaCredentialPrompt(), rememberedCredentials);
-            viewModel = new MainWindowViewModel(settings, Options, Options?.ConfigDirectory, credentials);
+            viewModel = new MainWindowViewModel(
+                settings, Options, Options?.ConfigDirectory, credentials, applyTheme: ApplyTheme);
             desktop.Exit += (_, _) => credentialStore.Clear();
 
             desktop.MainWindow = new MainWindow
@@ -92,6 +98,38 @@ internal sealed class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    ///     Maps the user's theme choice to the Avalonia theme variant that implements it.
+    /// </summary>
+    /// <param name="preference">The user's choice.</param>
+    /// <returns><see cref="ThemeVariant.Default"/> for <see cref="ThemePreference.System"/> (Avalonia
+    ///     then follows the operating system's setting, including while the application runs),
+    ///     <see cref="ThemeVariant.Light"/> or <see cref="ThemeVariant.Dark"/> otherwise; the system
+    ///     default for a value this method does not know.</returns>
+    internal static ThemeVariant ToThemeVariant(ThemePreference preference) => preference switch
+    {
+        ThemePreference.Light => ThemeVariant.Light,
+        ThemePreference.Dark => ThemeVariant.Dark,
+        _ => ThemeVariant.Default
+    };
+
+    /// <summary>
+    ///     Applies the user's theme choice to the running application, so every open and future
+    ///     window changes at once without a restart.
+    /// </summary>
+    /// <param name="preference">The user's choice.</param>
+    /// <remarks>
+    ///     Does nothing when there is no current application (for example in a unit test that
+    ///     never created one). Must be called on the UI thread.
+    /// </remarks>
+    internal static void ApplyTheme(ThemePreference preference)
+    {
+        if (Current is { } application)
+        {
+            application.RequestedThemeVariant = ToThemeVariant(preference);
+        }
     }
 
     /// <summary>

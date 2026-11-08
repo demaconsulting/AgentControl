@@ -39,7 +39,23 @@ path.
   yet — first run is expected, not an error (`AgentControl-SettingsStore-Load`). An explicit JSON
   `null` for the source list, the recent-repos list or a source's package IDs (which bypasses the
   property initializers) is normalized to an empty collection by `AppSettings.NormalizeNulls`
-  before migration runs, so it can never crash migration, startup or a source provider.
+  before migration runs, so it can never crash migration, startup or a source provider. A missing
+  `Theme` value loads as `ThemePreference.System` (`AgentControl-SettingsStore-ThemeDefaultsToSystem`), and an
+  unknown or invalid one does too instead of failing the load (`AgentControl-SettingsStore-ThemeInvalidReadsAsSystem`);
+  `Save` writes the theme by name and `Load` reads it back (`AgentControl-SettingsStore-Theme`). A repo's `GroupName`
+  and `CardColor` and the `CollapsedGroups` list are written to the settings file only and read back
+  (`AgentControl-SettingsStore-RepoOrganization`); `Save` omits a group or color that is `null`
+  (`AgentControl-SettingsStore-RepoOrganizationOmitsUnset`). They are read tolerantly: a file without them loads as no
+  group, the automatic color and an empty list (`AgentControl-SettingsStore-RepoOrganizationDefaults`), a group or
+  color that is null or of the wrong type reads as `null` and the values after it are still read
+  (`AgentControl-SettingsStore-InvalidGroupOrColorReadsAsNone`), and a collapsed list that is not an array of strings
+  reads as empty while a damaged array keeps its clean, distinct string entries
+  (`AgentControl-SettingsStore-InvalidCollapsedGroupsRepaired`). `AppSettings.NormalizeNulls` (run by `Load`) then
+  repairs what was read: every group name goes through the `RepoGroupName` rules - the store only applies them, the
+  rules are the `RepoGroupName` unit's (`AgentControl-SettingsStore-GroupNamesRepaired`) - and a card color name
+  that is not one of the known colors (`RecentRepo.CardColorNames`) is read as `null`, the automatic color, so a later
+  `Save` does not write it back, while a known name in any letter case or with surrounding white space is kept in its
+  canonical spelling (`RecentRepo.NormalizeCardColor`) (`AgentControl-SettingsStore-UnknownCardColorIsAutomatic`).
 
 **Save**: Saves `AppSettings` to a configuration directory, creating the directory if needed.
 
@@ -69,6 +85,8 @@ when the configuration directory cannot be created or the file cannot be written
 
 - **AppSettings** (data type, same subsystem) — the data type read/written, including its
   legacy-migration and persisted-copy members.
+- **RecentRepo** (same subsystem) — the per-repo group and card-color values, and the list of known card colors.
+- **RepoGroupName** (same subsystem, its own unit) — the rules that repair stored group names.
 - **PackageSourceDefinition** (`AgentPackageManagement` subsystem) — the source data type held in
   `AppSettings.Sources`.
 - **.NET BCL** — `System.Text.Json`, `Environment.GetFolderPath`.

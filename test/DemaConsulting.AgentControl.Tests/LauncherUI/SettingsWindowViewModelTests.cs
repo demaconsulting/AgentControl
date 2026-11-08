@@ -450,6 +450,34 @@ public class SettingsWindowViewModelTests
     }
 
     /// <summary>
+    ///     Test that the Appearance choice starts from the saved setting (the system default when
+    ///     none was saved), offers system, light and dark in that order, and is saved with the
+    ///     other settings.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_Theme_DefaultsToSystemAndIsSavedWithSettings()
+    {
+        // Arrange
+        AppSettings? savedSettings = null;
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), settings => savedSettings = settings);
+        Assert.Equal(ThemePreference.System, viewModel.Theme);
+        Assert.Equal(
+            [ThemePreference.System, ThemePreference.Light, ThemePreference.Dark],
+            SettingsWindowViewModel.AvailableThemes);
+
+        // Act: choose dark and save
+        viewModel.Theme = ThemePreference.Dark;
+        viewModel.SaveCommand.Execute(null);
+
+        // Assert
+        Assert.NotNull(savedSettings);
+        Assert.Equal(ThemePreference.Dark, savedSettings.Theme);
+        Assert.Equal(
+            ThemePreference.Light,
+            new SettingsWindowViewModel(new AppSettings { Theme = ThemePreference.Light }, _ => { }).Theme);
+    }
+
+    /// <summary>
     ///     Test that a settings callback that rejects the save keeps the window open with the
     ///     reason shown, and does not report the settings as saved.
     /// </summary>

@@ -17,16 +17,41 @@ makes sure the repo's `.github/agents`, `.github/standards`, `.github/templates`
 then launches the developer's preferred agentic CLI tool (for example, GitHub Copilot CLI)
 in that repo's working directory.
 
+## Screenshots
+
+![AgentControl main window, dark theme: app bar, then repo cards in sections with status bars][shot-main-dark]
+
+![AgentControl main window, light theme: the same repo cards][shot-main-light]
+
+The cards, the card menu, Settings and the package-source editor are shown in the
+[User Guide][link-guide].
+
 ## Features
 
+- **Compact app bar and themes**: one slim bar at the top of the main window holds the logo, a filter box and the
+  **Add repository**, **Settings** and **About** buttons; the whole application follows the **System default**,
+  **Light** or **Dark** theme, with legible text in both
 - **Recent-repos list**: add repos via a folder-browse button; each repo is shown as a card
-  with its display name, path, and labeled chips for the pinned agent package (name, version
-  and source), an available upgrade, and the current git branch
+  with a colored **status bar** (green up to date, amber upgrade available, red a problem, grey no
+  agent package - always backed by words and tooltips), a favorite star, its display name, a tile with its
+  initials (or the repo's own root `icon.png`/`logo.png`), its path, and labeled chips for the pinned agent
+  package (name, version and source, with a small check mark when it is the newest), an available upgrade, and
+  the current git branch; **Launch** sits on the card and everything else (Git Pull, Refresh - **Check again**
+  for a repo whose folder is missing - Select Package/Upgrade, Move to group, Card color, Remove) in its grouped
+  "..." menu; a long path is shortened to fit - the folder part first, then the middle of a very long folder
+  name - so the start and the end of the repo's folder name stay visible
+- **Repo groups and card colors (just for you)**: put repos into groups of your own (**Move to group** in a
+  card's "..." menu, then an existing group or **New group...**) and the list becomes collapsible sections -
+  **Favorites** first, your groups alphabetically, **Ungrouped** last - with the number of repos in each; the
+  collapsed state is remembered, rename or remove a group from its header's "..." menu, and the filter box still
+  finds a repo inside a collapsed group. **Card color...** gives a repo's tile a color of your choice from a
+  palette (or **Automatic**); the status bar keeps its fixed colors. Both are stored only in your own AgentControl
+  settings - never in the repository or its `.agentcontrol.json` - so they are never shared through git
 - **Version-pinned agent packages**: every repo names an exact agent package name and
   semantic version, and the source it came from, in its `.agentcontrol.json` pin file — there
   is no floating "latest" mode, so upgrades are always a deliberate, visible action
 - **Status chips**: each repo card shows an amber upgrade chip ("Upgrade to" and the version an upgrade
-  would move to), an uncommitted-changes warning, a committed-agent-files
+  would move to; click it to upgrade), an uncommitted-changes warning, a committed-agent-files
   warning (advisory only — flags when the managed folders were accidentally committed to
   git), a missing-folder indicator when the path no longer exists on disk, a
   package-source-problem indicator when the pinned source is not configured, and a sign-in-needed indicator
@@ -40,7 +65,7 @@ in that repo's working directory.
   auto-upgrades to a newer version on your behalf. This sync attempt is purely informational
   and never blocks the launch: repos with committed agent files skip it entirely, repos with
   no pin launch anyway, and a failed re-extraction only surfaces a warning
-- **Git integration**: pull the latest commits for a repo directly from its card (offered
+- **Git integration**: pull the latest commits for a repo with **Git Pull** in its card's "..." menu (enabled
   only when the working tree is clean), with a configurable git executable override
 - **Configurable agent tool**: choose GitHub Copilot CLI, Cursor, Claude Code, or a custom
   command line, plus a shell/terminal preference
@@ -103,6 +128,9 @@ in that repo's working directory.
   server's own address, but cannot stop the NuGet client from doing that.
 - A repo's pin names its source by alias, and a package is only ever taken from that source; a
   missing source is an error, never a fallback to another source with a package of the same name.
+- A version number is only a label: depending on the source, a published version can be overwritten with different
+  content (a shared folder by anyone who can write to it, some servers when redeploy is allowed). See the User
+  Guide's section "Version Immutability and Trust" for how to guard against it.
 - AgentControl never reads or writes the target repo's `nuget.config`, and keeps its NuGet
   caches in its own folder under the user profile.
 
@@ -125,7 +153,8 @@ the .NET 10 runtime, so the target machine needs no pre-installed runtime.
 
 ### Adding a repo
 
-Click the folder-plus icon button on the toolbar and browse to a repository's root folder.
+Click the folder-plus icon button in the app bar at the top of the main window and browse to a repository's root
+folder.
 The repo is added to the recent-repos list as a card showing its display name, path, and chips
 for the pinned package (name, version and source), an available upgrade, and the current git
 branch.
@@ -142,10 +171,10 @@ when you choose it; if reading a source fails, a **Retry** button appears beside
 ### Upgrading
 
 Once a repo is pinned, its card shows an amber upgrade chip (for example **Upgrade to 1.1.0**) whenever a
-newer version of the pinned package is available at the source the pin names, and its card's
-"..." menu offers **Upgrade**. Upgrading re-runs the
-same validate → delete → extract → pin sequence and then shows the new package's
-`release-notes.md` (when present) in a non-modal window.
+newer version of the pinned package is available at the source the pin names; click the chip, or use
+**Upgrade to 1.1.0** in the card's "..." menu, to upgrade. Upgrading re-runs the
+same validate → delete → extract → pin sequence, offers the package's `AGENTS.md` template when it applies
+(below) and then shows the new package's `release-notes.md` (when present) in a non-modal window, in front.
 
 ### AGENTS.md template offer
 
@@ -174,9 +203,34 @@ with migrating away from committed agent files.
 
 ### Pulling changes
 
-The **Git Pull** button on a repo card runs `git pull` in that repo. The button is always visible, and is
-enabled only when the working tree is clean (it is disabled while the status is dirty or cannot be
-determined).
+**Git Pull**, in the "..." menu of a repo card (under *Repository*), runs `git pull` in that repo. The item is
+always present, and is enabled only when the working tree is clean (it is disabled, with a tooltip that says
+why, while the status is dirty or cannot be determined).
+
+### Card icon
+
+A repo card shows the repository's own picture instead of the generated initials tile when the repo's **root
+folder** has an `icon.png` (or else a `logo.png`; the name's case does not matter). Only a plain PNG file of
+at most 1 MB is used - never a link, and never a file in a subfolder - and anything else is ignored, so a
+repository you do not trust cannot make AgentControl read other files or load huge images. Choose **Refresh** in
+the card's "..." menu after adding or changing the file.
+
+### Groups and card colors
+
+Both are personal ways to organize the list and are stored **only in your own AgentControl settings file**
+(`%APPDATA%\AgentControl\settings.json`); nothing is written to a repository or its `.agentcontrol.json`.
+
+- **Groups.** In a card's "..." menu choose **Organize > Move to group**, then one of your groups, **New group...**
+  (a small prompt: up to 40 characters; *Favorites* and *Ungrouped* are built-in names; letter case does not make a
+  new group) or **Remove from group**. As soon as one repo is in a group the list shows sections with a header
+  each - **Favorites** (a favorite is listed only there, and its card shows its group as a chip), then your groups
+  alphabetically, then **Ungrouped** - with the number of repos; click a header to collapse or expand it (the choice
+  is remembered). A group's header has a "..." menu with **Rename group...** and **Remove group** (its repos stay
+  in the list, ungrouped). With no groups at all there are no headers and the list looks as it always did.
+  Typing in the filter box shows every match, expanding collapsed groups while you filter.
+- **Card color.** **Organize > Card color...** opens a palette of ten colors that work in the light and dark
+  themes, plus **Automatic** (the color AgentControl derives from the repo's path). The color goes on the card's
+  tile (as a ring around a repo's own picture); the status bar on the card's left edge keeps its meaning.
 
 ### Settings
 
@@ -184,13 +238,15 @@ The Settings window lets you configure:
 
 - **Package sources** — a list of the configured sources (alias, kind, location and whether the
   folder can be found; a server shows **Not checked** because AgentControl contacts it only when it is
-  needed). Use **Add Zip-Package Folder**, **Add NuGet-Package Folder** or **Add NuGet-Package Server**
+  needed). Use **Add** (a menu of **Zip-package folder**, **NuGet-package folder** and **NuGet-package server**)
   to add a source, and **Edit** or **Remove** to change one; a NuGet source also lists the package
   IDs it offers, a server can be checked with **Test connection** before it is saved, and a NuGet source can
   **Require signed packages** (optionally pinned to a publisher's certificate fingerprint). An alias cannot
   be changed once created, because repo pins refer to it. A single
   package source folder configured in an earlier version appears as a zip source named `Default`.
   See the [User Guide][link-guide] chapter "Package Sources".
+- **Appearance** (its own section) — the **Theme**: **System default** (follow the operating system's light/dark
+  setting, live), **Light** or **Dark**; applied as soon as you save, without a restart
 - **Git executable override** — a specific `git` executable to use instead of resolving it
   from `PATH`
 - **Agent tool selection** — GitHub Copilot CLI, Cursor, Claude Code, or a custom command
@@ -201,7 +257,7 @@ The Settings window lets you configure:
 
 ### About
 
-The About dialog (reachable from the main window) shows the application logo, a short mission
+The About dialog (the info button in the main window's app bar) shows the application logo, a short mission
 tagline, and the running build's version, copyright, and license, so it can be identified
 without inspecting file properties, along with a scrollable list of this application's direct
 third-party dependencies and their licenses.
@@ -234,6 +290,10 @@ By contributing to this project, you agree that your contributions will be licen
 [badge-build]: https://img.shields.io/github/actions/workflow/status/demaconsulting/AgentControl/build_on_push.yaml?style=plastic
 [badge-quality]: https://sonarcloud.io/api/project_badges/measure?project=demaconsulting_AgentControl&metric=alert_status
 [badge-security]: https://sonarcloud.io/api/project_badges/measure?project=demaconsulting_AgentControl&metric=security_rating
+
+<!-- Screenshot References -->
+[shot-main-dark]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/user_guide/images/main-window-dark.png
+[shot-main-light]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/user_guide/images/main-window-light.png
 
 <!-- Link References -->
 [link-forks]: https://github.com/demaconsulting/AgentControl/network/members

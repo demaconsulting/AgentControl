@@ -23,7 +23,8 @@ This document covers the verification design for the following software items:
     bootstrap responsibility, which has no dedicated unit test file)
   - **LauncherUI** subsystem
     - **MainWindowViewModel**, **RepoCardViewModel**, **SelectPackageWindowViewModel**,
-      **SettingsWindowViewModel**, **SourceEditorViewModel**, **CredentialPromptViewModel**
+      **SettingsWindowViewModel**, **SourceEditorViewModel**, **CredentialPromptViewModel**,
+      **RepoImageLocator**, **RepoGroupHeaderViewModel**, **GroupNameViewModel**, **DialogBehavior**
   - **AgentPackageManagement** subsystem
     - **PackageSource**, **PackageVersion**, **PackageVersionCache**, **PackageSourceRegistry**,
       **ZipFolderSourceProvider**, **NuGetSourceProvider**, **SignatureVerificationSupport**

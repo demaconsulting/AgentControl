@@ -6,5 +6,6 @@
     <Application.Styles>
         <FluentTheme />
         <materialIcons:MaterialIconStyles />
+        <StyleInclude Source="avares://DemaConsulting.AgentControl/LauncherUI/AppStyles.axaml" />
     </Application.Styles>
 </Application>

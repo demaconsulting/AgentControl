@@ -1,0 +1,63 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:DemaConsulting.AgentControl.LauncherUI"
+        mc:Ignorable="d"
+        d:DesignWidth="420" d:DesignHeight="190"
+        x:Class="DemaConsulting.AgentControl.LauncherUI.GroupNameWindow"
+        x:DataType="vm:GroupNameViewModel"
+        Name="GroupNameRoot"
+        Title="{Binding Title}"
+        Width="420" SizeToContent="Height"
+        MinWidth="340"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+    <!-- A small prompt for a group name (new group, or rename): the rules and messages come from the
+         view model, so the box validates as the user types and Create/Rename stays disabled until the
+         name can be used. Enter accepts and Escape cancels. -->
+    <StackPanel Margin="16" Spacing="8">
+        <TextBlock Name="GroupNamePromptText"
+                    AutomationProperties.AutomationId="GroupNamePromptText"
+                    Text="{Binding Prompt}"
+                    TextWrapping="Wrap" />
+
+        <TextBox Name="GroupNameTextBox"
+                  AutomationProperties.AutomationId="GroupNameTextBox"
+                  ToolTip.Tip="The group's name (up to 40 characters; letter case does not make a new group)"
+                  PlaceholderText="Group name"
+                  Text="{Binding Text, Mode=TwoWay}">
+            <TextBox.KeyBindings>
+                <KeyBinding Gesture="Enter" Command="{Binding AcceptCommand}" />
+            </TextBox.KeyBindings>
+        </TextBox>
+
+        <TextBlock Name="GroupNameErrorText"
+                    AutomationProperties.AutomationId="GroupNameErrorText"
+                    IsVisible="{Binding HasError}"
+                    Text="{Binding ErrorText}"
+                    Foreground="{DynamicResource ErrorForeground}"
+                    TextWrapping="Wrap" />
+        <TextBlock Name="GroupNameHintText"
+                    AutomationProperties.AutomationId="GroupNameHintText"
+                    IsVisible="{Binding HasHint}"
+                    Text="{Binding HintText}"
+                    FontSize="12" Opacity="0.8"
+                    TextWrapping="Wrap" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+            <Button Name="GroupNameCancelButton"
+                     AutomationProperties.AutomationId="GroupNameCancelButton"
+                     ToolTip.Tip="Close without changing any group"
+                     Content="Cancel"
+                     Command="{Binding CancelCommand}" />
+            <Button Name="GroupNameAcceptButton"
+                     AutomationProperties.AutomationId="GroupNameAcceptButton"
+                     ToolTip.Tip="Use this name (available once the name is valid)"
+                     ToolTip.ShowOnDisabled="True"
+                     Classes="accent"
+                     Content="{Binding AcceptText}"
+                     Command="{Binding AcceptCommand}" />
+        </StackPanel>
+    </StackPanel>
+</Window>

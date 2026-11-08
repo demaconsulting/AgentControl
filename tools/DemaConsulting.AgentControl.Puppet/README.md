@@ -133,7 +133,7 @@ agentcontrol-puppet place (--x <px> --y <px> --width <px> --height <px> | --work
 
 ### Scoping repeated ids
 
-A repo card repeats its AutomationIds (`RepoNameText`, `LaunchButton`, `PullButton`, ...) once per card in the list, and
+A repo card repeats its AutomationIds (`RepoNameText`, `LaunchButton`, `RepoStatusAccent`, ...) once per card, and
 dialogs can repeat the main window's ids, so every element command accepts two scopes:
 
 - `--item <repo name | index>` limits the lookup to one item of `RepoListBox`: the card whose `RepoNameText` is the
@@ -150,16 +150,38 @@ without it.
 
 ### AutomationIds
 
-- **Main** (`AgentControl`): `FilterTextBox`, `AddRepoButton`, `OpenSettingsButton`, `OpenAboutButton`,
+- **Main** (`AgentControl`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`, `AddRepoButton`,
+  `OpenSettingsButton`, `OpenAboutButton`,
   `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`.
-- **Repo card** (repeated, one per list item): `RepoNameText`, `UpgradeAvailableBadge`, `CommittedAgentFilesBadge`,
-  `DirtyWorkingTreeBadge`, `MissingRepoBadge`, `RepoPathText`, `RepoPinnedVersionText`, `CurrentBranchText`,
-  `FavoriteToggleButton`, `LaunchButton`, `PullButton`, `MoreActionsButton`.
-- **Card menu** (pop-up of `MoreActionsButton`): `RefreshMenuItem`, `SelectPackageMenuItem` (only for a repo that has
-  no package yet), `UpgradeMenuItem`, `RemoveMenuItem`.
+- **Group header** (repeated, one per section, in `RepoListBox`; only present once a repo is in a group):
+  `GroupHeaderToggleButton` (collapses or expands; its name says the section, count and state, for example
+  `Work, 2 repos, collapsed`, and so does its list item), `GroupHeaderNameText`, `GroupHeaderCountText`, and, for
+  the user's own groups, `GroupHeaderMenuButton` with the menu items `RenameGroupMenuItem` and `RemoveGroupMenuItem`.
+  `--item` matches repo cards only, so a header command acts on the first header (the one at the top of the list);
+  to start with a particular group collapsed, list it in `CollapsedGroups` in the settings file before `launch`.
+- **Repo card** (repeated, one per list item): `RepoNameText`, `RepoStatusAccent` (the status bar; its name is the
+  status in words), `RepoAvatarText`, `RepoAvatarImage`, `UpgradeAvailableBadge` (a button: click it to upgrade),
+  CommittedAgentFilesBadge, DirtyWorkingTreeBadge, MissingRepoBadge, RepoPathText (a text control whose name is the
+  full path; the path is shortened to fit, a long folder name in the middle), RepoPinnedVersionText,
+  `CurrentBranchText`, `GroupChipText` (a favorite's group), `FavoriteToggleButton` (accessible name `Favorite`; a
+  toggle: `read` shows `toggle=On|Off`), `UpToDateCue` (the check mark in the package chip of an up-to-date card),
+  `LaunchButton`,
+  `MoreActionsButton`.
+- **Card menu** (pop-up of `MoreActionsButton`): `PullButton` (Git Pull), `RefreshMenuItem`, `SelectPackageMenuItem`
+  (only for a repo that has no package yet), `UpgradeMenuItem` (only while an upgrade is available),
+  `MoveToGroupMenuItem` (its submenu, built when the menu opens: one `MoveToGroupItem` per group - find it by
+  name, for example `menu MoveToGroupMenuItem/Work` - then `NewGroupMenuItem`, and `RemoveFromGroupMenuItem` for a
+  grouped repo), `CardColorMenuItem`, `RemoveMenuItem`.
+- **Card color palette** (pop-up under `MoreActionsButton`, opened by `CardColorMenuItem`): `CardColorPalette`,
+  one `CardColorSwatch_<Name>` per color (`CardColorSwatch_Teal`, ...; the name is also the accessible name) and
+  `CardColorAutomaticButton`.
+- **New group / Rename group** (`New group`, `Rename group`): `GroupNamePromptText`, `GroupNameTextBox`,
+  `GroupNameErrorText`, `GroupNameHintText`, `GroupNameCancelButton`, `GroupNameAcceptButton`.
 - **Settings** (`AgentControl Settings`): the package sources `SourcesList` (rows with `SourceAliasText`,
-  `SourceLocationText`, `SourceStatusText`), `AddZipSourceButton`, `AddNuGetFolderSourceButton`,
-  `AddNuGetServerSourceButton`, `EditSourceButton`, `RemoveSourceButton`, `SourcesEmptyText`; and
+  `SourceLocationText`, `SourceStatusText`), `AddSourceButton` (opens the Add menu), its items
+  `AddZipSourceButton`, `AddNuGetFolderSourceButton`, `AddNuGetServerSourceButton`, `EditSourceButton`,
+  `RemoveSourceButton`, `SourcesEmptyText`; the Appearance section (`AppearanceHeadingText`, `ThemeComboBox`, named
+  `Theme`) and the Tools section (`ToolsHeadingText`),
   `GitExecutablePathTextBox`, `AgentToolComboBox`, `CustomAgentCommandTextBox`, `ShellPreferenceComboBox`,
   `SettingsErrorTextBlock`, `SaveSettingsButton`. The **source editor** has `SourceAliasTextBox`,
   `SourceLocationTextBox`, `SourceBrowseButton`, `SourceEditorSaveButton`, `SourceEditorCancelButton` (and, for NuGet
@@ -188,7 +210,12 @@ agentcontrol-puppet drag-element <automationId> <dx> <dy>
 agentcontrol-puppet wheel <notches> [--ctrl] [--on <automationId> | --at <x>,<y>]
 ```
 
-- `key` sends **real** key presses to the focused element of the instance (or to `--to <id>` after focusing it). A
+- `key` sends **real** key presses to the focused element of the instance (or to `--to <id>` after focusing it); the
+  window that is raised for it is the innermost open **modal** dialog when there is one (the topmost titled dialog
+  window by z-order, a dialog opened from a dialog sitting above its owner, whatever order UI Automation lists them
+  in; a modal dialog keeps the keyboard, and the disabled main window behind it must not be pushed in front of it;
+  a non-modal window such as the release-notes or About window leaves the main window usable, so it does not take
+  the keys), else the main window. A
   chord is modifiers joined with `+`: `Ctrl+C`, `Ctrl+Shift+Z`, `Delete`, `F2`, `Escape`, `Enter`, `Ctrl+Enter`,
   letters, digits, `F1`-`F12`, `Tab`, `Space`, `Backspace`, arrows, `Home`/`End`/`PageUp`/`PageDown`, `Plus`, `Minus`.
 - `hover <id>` rests the real cursor on the centre of the element so its tooltip opens. It only reads the element's
@@ -308,8 +335,9 @@ $box = "$env:TEMP\acp-demo"
 & $puppet click Close --window "Release Notes"
 & $puppet read RepoPinnedVersionText --item repo --raw  # Pinned version: 1.0.0
 
-# Pull (the sample repo has no remote, so git reports a problem in a message box)
-& $puppet click PullButton --item repo
+# Pull (the sample repo has no remote, so git reports a problem in a message box); Git Pull is in the card menu
+& $puppet click MoreActionsButton --item repo
+& $puppet click PullButton
 & $puppet dialogs
 
 # Tooltips and disabled controls (real cursor)

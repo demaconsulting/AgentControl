@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 
@@ -82,7 +83,8 @@ internal sealed class AppSettings
 
     /// <summary>
     ///     Replaces every collection (and source text field) that an explicit JSON <c>null</c> may
-    ///     have left <see langword="null"/> with an empty value, and drops null list entries.
+    ///     have left <see langword="null"/> with an empty value, drops null list entries, and
+    ///     repairs the repos' organizing values (group names and unknown card colors).
     /// </summary>
     /// <remarks>
     ///     <see cref="System.Text.Json.JsonSerializer"/> bypasses a property's initializer when the
@@ -106,7 +108,47 @@ internal sealed class AppSettings
         foreach (var repo in RecentRepos)
         {
             repo.Path ??= string.Empty;
+
+            // A card color this version does not know reads as the automatic color and is not
+            // kept, so it is never written back either
+            repo.CardColor = RecentRepo.NormalizeCardColor(repo.CardColor);
         }
+
+        NormalizeGroups();
+    }
+
+    /// <summary>
+    ///     Repairs the organizing values the user may have edited by hand or an older/newer version
+    ///     may have written: group names are cleaned up and unified, and the collapsed list is made
+    ///     a list of distinct clean names.
+    /// </summary>
+    /// <remarks>
+    ///     Each repo's group name is sanitized (see <see cref="RepoGroupName.Sanitize"/>), and
+    ///     repos whose names differ only in letter case are given the spelling of the first of them
+    ///     in the list, so a group has exactly one display name. Idempotent.
+    /// </remarks>
+    private void NormalizeGroups()
+    {
+        // Spell each group the way its first member does
+        var spellings = new Dictionary<string, string>(RepoGroupName.Comparer);
+        foreach (var repo in RecentRepos)
+        {
+            var name = RepoGroupName.Sanitize(repo.GroupName);
+            if (name is not null && !spellings.TryAdd(name, name))
+            {
+                name = spellings[name];
+            }
+
+            repo.GroupName = name;
+        }
+
+        // The collapsed list: clean, distinct, no blanks
+        CollapsedGroups = CollapsedGroups is null
+            ? []
+            : [.. CollapsedGroups
+                .Select(RepoGroupName.Normalize)
+                .OfType<string>()
+                .Distinct(RepoGroupName.Comparer)];
     }
 
     /// <summary>
@@ -174,7 +216,163 @@ internal sealed class AppSettings
     public string? ShellPreference { get; set; }
 
     /// <summary>
+    ///     Gets or sets the color theme the user chose; <see cref="ThemePreference.System"/> (follow
+    ///     the operating system) by default.
+    /// </summary>
+    /// <remarks>
+    ///     Persisted as the member's name. A settings file without the value (written by an older
+    ///     version), or with one this version does not know (a typo, or a value from a newer
+    ///     version), reads as <see cref="ThemePreference.System"/> instead of failing the load, so
+    ///     the appearance can never keep the application from starting.
+    /// </remarks>
+    [JsonConverter(typeof(ThemePreferenceJsonConverter))]
+    public ThemePreference Theme { get; set; } = ThemePreference.System;
+
+    /// <summary>
+    ///     Reads and writes <see cref="ThemePreference"/> by name and falls back to
+    ///     <see cref="ThemePreference.System"/> for anything it does not recognize.
+    /// </summary>
+    /// <remarks>
+    ///     A custom converter is needed because the built-in enum handling throws on an unknown
+    ///     name, which <see cref="SettingsStore.Load"/> would report as a corrupt settings file.
+    ///     Stateless and thread-safe.
+    /// </remarks>
+    private sealed class ThemePreferenceJsonConverter : JsonConverter<ThemePreference>
+    {
+        /// <inheritdoc />
+        public override bool HandleNull => true;
+
+        /// <summary>
+        ///     Reads a theme preference from a JSON string (a member name, case-insensitive) or
+        ///     number (a member's value).
+        /// </summary>
+        /// <param name="reader">The reader positioned on the value.</param>
+        /// <param name="typeToConvert">The target type (unused).</param>
+        /// <param name="options">The serializer options (unused).</param>
+        /// <returns>The preference the JSON names, or <see cref="ThemePreference.System"/> when
+        ///     the value is not a known member (including null, booleans, objects and arrays).</returns>
+        public override ThemePreference Read(
+            ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.String
+                    when Enum.TryParse<ThemePreference>(reader.GetString(), ignoreCase: true, out var named)
+                         && Enum.IsDefined(named):
+                    return named;
+
+                case JsonTokenType.Number
+                    when reader.TryGetInt32(out var number) && Enum.IsDefined(typeof(ThemePreference), number):
+                    return (ThemePreference)number;
+
+                case JsonTokenType.StartObject or JsonTokenType.StartArray:
+                    // Consume the whole nested value so the reader stays positioned correctly
+                    reader.Skip();
+                    return ThemePreference.System;
+
+                default:
+                    return ThemePreference.System;
+            }
+        }
+
+        /// <summary>
+        ///     Writes a theme preference as its member name.
+        /// </summary>
+        /// <param name="writer">The writer.</param>
+        /// <param name="value">The preference to write.</param>
+        /// <param name="options">The serializer options (unused).</param>
+        public override void Write(Utf8JsonWriter writer, ThemePreference value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(value.ToString());
+    }
+
+    /// <summary>
     ///     Gets or sets the recent-repos list, most-recently-used first.
     /// </summary>
     public List<RecentRepo> RecentRepos { get; set; } = [];
+
+    /// <summary>
+    ///     Gets or sets the names of the main-window sections (the user's own groups and the
+    ///     built-in <see cref="RepoGroupName.FavoritesName"/> and <see cref="RepoGroupName.UngroupedName"/>
+    ///     sections) that the user has collapsed.
+    /// </summary>
+    /// <remarks>
+    ///     Per-user view state, remembered between sessions; compared ignoring letter case. A
+    ///     name here that no longer matches any section is harmless (and forgotten when the group is
+    ///     renamed or removed). Anything in the file that is not a list of strings reads as an
+    ///     empty list or loses the offending entries, and <see cref="NormalizeNulls"/> repairs the
+    ///     rest, so the value can never keep the application from starting.
+    /// </remarks>
+    [JsonConverter(typeof(StringListJsonConverter))]
+    public List<string> CollapsedGroups { get; set; } = [];
+
+    /// <summary>
+    ///     Reads a list of strings and skips the entries that are not strings, treating a value that
+    ///     is not a list as empty, instead of failing.
+    /// </summary>
+    /// <remarks>
+    ///     A custom converter is needed because the built-in list handling throws when an entry has
+    ///     the wrong type, which <see cref="SettingsStore.Load"/> would report as a corrupt settings
+    ///     file. Stateless and thread-safe.
+    /// </remarks>
+    private sealed class StringListJsonConverter : JsonConverter<List<string>>
+    {
+        /// <inheritdoc />
+        public override bool HandleNull => true;
+
+        /// <summary>
+        ///     Reads the list.
+        /// </summary>
+        /// <param name="reader">The reader positioned on the value.</param>
+        /// <param name="typeToConvert">The target type (unused).</param>
+        /// <param name="options">The serializer options (unused).</param>
+        /// <returns>The strings of a JSON array in order; an empty list for any other value.</returns>
+        public override List<string> Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var result = new List<string>();
+
+            // A scalar is a damaged value: ignore it. An object is skipped as a whole.
+            if (reader.TokenType != JsonTokenType.StartArray)
+            {
+                if (reader.TokenType == JsonTokenType.StartObject)
+                {
+                    reader.Skip();
+                }
+
+                return result;
+            }
+
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+            {
+                switch (reader.TokenType)
+                {
+                    case JsonTokenType.String:
+                        result.Add(reader.GetString() ?? string.Empty);
+                        break;
+
+                    case JsonTokenType.StartObject or JsonTokenType.StartArray:
+                        reader.Skip();
+                        break;
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        ///     Writes the list as a JSON array of strings.
+        /// </summary>
+        /// <param name="writer">The writer.</param>
+        /// <param name="value">The list to write.</param>
+        /// <param name="options">The serializer options (unused).</param>
+        public override void Write(Utf8JsonWriter writer, List<string> value, JsonSerializerOptions options)
+        {
+            writer.WriteStartArray();
+            foreach (var name in value ?? [])
+            {
+                writer.WriteStringValue(name);
+            }
+
+            writer.WriteEndArray();
+        }
+    }
 }

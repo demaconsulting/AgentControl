@@ -57,6 +57,7 @@ internal sealed partial class SourceEditorWindow : Window
     public SourceEditorWindow()
     {
         AvaloniaXamlLoader.Load(this);
+        DialogBehavior.Apply(this, "SourceAliasTextBox", () => Close(null));
     }
 
     /// <summary>

@@ -46,6 +46,10 @@ internal sealed partial class SettingsWindow : Window
     public SettingsWindow()
     {
         AvaloniaXamlLoader.Load(this);
+
+        // Tab stays in this dialog and the first control (Add) has the focus when it opens. There is no
+        // Escape-to-cancel: edits are kept in memory until Save, and closing would discard them silently.
+        DialogBehavior.Apply(this, "AddSourceButton");
     }
 
     /// <summary>
