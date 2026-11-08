@@ -256,9 +256,9 @@ internal static partial class RepoImageLocator
             return null;
         }
 
-        // The length was checked against the cap just above, so this never reads more than the cap;
-        // a file that shrank meanwhile fails the length comparison below
-        var buffer = new byte[stream.Length];
+        // The length was checked against the cap just above (so it fits an int), so this never reads
+        // more than the cap; a file that shrank meanwhile fails the length comparison below
+        var buffer = new byte[checked((int)stream.Length)];
         var read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
         return read == buffer.Length && read >= HeaderLength && HasPngHeader(buffer.AsSpan(0, HeaderLength))
             ? buffer

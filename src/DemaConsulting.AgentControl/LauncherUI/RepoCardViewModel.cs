@@ -849,17 +849,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <returns>A task that completes when the picture state is current.</returns>
     private async Task RefreshRepoImageAsync()
     {
+        // Numbered here, synchronously when the refresh starts, so a failure can tell whether a
+        // newer refresh has taken over since
+        var generation = ++_imageGeneration;
         try
         {
-            await LoadRepoImageAsync();
+            await LoadRepoImageAsync(generation);
         }
         catch (Exception)
         {
             // Whatever went wrong with a repo's picture file - the locator, the decoder or an
             // injected decoder - the card just keeps its generated tile, and the background task
-            // never faults
-            _loadedImageFile = null;
-            RepoImage = null;
+            // never faults. Only the latest refresh may say so: an older one failing late must
+            // not erase the picture a newer refresh has already published.
+            if (generation == _imageGeneration)
+            {
+                _loadedImageFile = null;
+                RepoImage = null;
+            }
         }
     }
 
@@ -867,10 +874,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     The body of <see cref="RefreshRepoImageAsync"/>, which only adds the "any failure means
     ///     no picture" guard around it.
     /// </summary>
+    /// <param name="generation">The number of this refresh; a newer refresh supersedes it.</param>
     /// <returns>A task that completes when the picture state is current.</returns>
-    private async Task LoadRepoImageAsync()
+    private async Task LoadRepoImageAsync(int generation)
     {
-        var generation = ++_imageGeneration;
         var previous = _loadedImageFile;
         var path = RepoPath;
 

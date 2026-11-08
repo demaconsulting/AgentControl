@@ -156,9 +156,12 @@ class); with no picture the color fills the tile and the letters use the entry's
 `RepoImageLocator` for the repo's picture, and decodes it with `RepoImageLocator.Decode` unless it is the same
 file (path, last-write time and size) as the one already decoded - a failed decode is remembered the same way - and
 then publishes the bitmap on the caller's context, so the UI thread never touches the disk or the decoder and
-repeated refreshes cost one folder listing. A newer refresh supersedes an older one (a generation counter), and any
+repeated refreshes cost one folder listing. A newer refresh supersedes an older one (a generation counter taken when
+the refresh starts), and any
 exception from the locator, the decoder or an injected decoder - of whatever type - means "no picture", so the
-background task never faults. Which file is acceptable, and how it is checked (the repo root, links, PNG header
+background task never faults. Only the latest refresh may clear the picture on such a failure: an older refresh
+failing after a newer one published leaves the newer picture alone. Which file is acceptable, and how it is checked
+(the repo root, links, PNG header
 limits, handle verification), is the `RepoImageLocator` unit's design; this view model relies on it to return
 only a bounded, scaled bitmap and treats its result as untrusted-derived display data. The view letterboxes the
 picture (`Stretch="Uniform"`) on a

@@ -132,9 +132,9 @@ public sealed class RepoImageLocatorTests : IDisposable
     {
         // Arrange: valid PNG headers, padded to just over and exactly at the cap
         var valid = TestPng.Create(8, 8);
-        var over = new byte[RepoImageLocator.MaxFileBytes + 1];
+        var over = new byte[(int)RepoImageLocator.MaxFileBytes + 1];
         valid.CopyTo(over, 0);
-        var atCap = new byte[RepoImageLocator.MaxFileBytes];
+        var atCap = new byte[(int)RepoImageLocator.MaxFileBytes];
         valid.CopyTo(atCap, 0);
         var overRoot = CreateRepo(("icon.png", over));
         var capRoot = CreateRepo(("icon.png", atCap));

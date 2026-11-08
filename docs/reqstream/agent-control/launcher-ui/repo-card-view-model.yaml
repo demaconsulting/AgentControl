@@ -506,6 +506,7 @@ sections:
           - RepoCardViewModel_RepoImage_FileRemoved_FallsBackToInitials
           - RepoCardViewModel_RepoImage_MissingFolder_NeverLooksForAnImage
           - RepoCardViewModel_RepoImage_DecodeFailsOrThrows_KeepsTileAndDoesNotRetry
+          - RepoCardViewModel_RepoImage_OlderRefreshFailsAfterNewerPublished_KeepsNewerImage
 
       - id: AgentControl-RepoCardViewModel-MoveToGroup
         title: >-

@@ -192,6 +192,48 @@ public sealed class RepoCardImageTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that an older background refresh that fails after a newer one has published the
+    ///     picture does not erase it: only the latest refresh may clear the picture on failure.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_RepoImage_OlderRefreshFailsAfterNewerPublished_KeepsNewerImage() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: the first decode waits to be released and then throws; the second succeeds at once
+        var repo = CreateRepo(("icon.png", TestPng.Create(64, 64)));
+        using var release = new ManualResetEventSlim(false);
+        var calls = 0;
+        var card = CreateCard(repo, file =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                Assert.True(release.Wait(TimeSpan.FromSeconds(30)), "the older decode was never released");
+                throw new InvalidOperationException("stale decoder failure");
+            }
+
+            return RepoImageLocator.Decode(file);
+        });
+
+        // Act: start the older refresh (blocked in its decoder), then a newer one that publishes
+        card.RefreshCheap();
+        var older = card.RepoImageRefreshTask;
+        card.RefreshCheap();
+        var newer = card.RepoImageRefreshTask;
+        await newer;
+        Assert.True(card.HasRepoImage);
+        var published = card.RepoImage;
+
+        // Act: the older refresh now fails
+        release.Set();
+        await older;
+
+        // Assert: it completed without faulting and left the newer picture alone
+        Assert.True(older.IsCompletedSuccessfully);
+        Assert.True(card.HasRepoImage);
+        Assert.Same(published, card.RepoImage);
+        Assert.Equal(2, calls);
+    });
+
+    /// <summary>
     ///     Test that the main window's avatar tile shows the repo's picture when it has one - the
     ///     image visible, the initials hidden - and the initials when it has none.
     /// </summary>

@@ -374,7 +374,8 @@ many paths. This scenario is tested by `RepoCardViewModel_AvatarInitials_RepoNam
 in the background, does not decode an unchanged file again on a second refresh but does after the file changes,
 falls back to the initials when the file is removed, never looks for a picture for a missing folder, and keeps the
 tile - without retrying - when the decoder fails or throws (a decoder that throws several kinds of exception,
-resource exhaustion included, never faults the background refresh task). A headless main window shows the picture
+resource exhaustion included, never faults the background refresh task); an older refresh that fails after a newer
+one has published leaves the newer picture in place. A headless main window shows the picture
 (image visible, initials hidden, light backing) for the repo that has one and the initials for the one that does not.
 Which files are acceptable, and the security checks on them (genuine PNG, size and dimension limits, links, the
 repo root), are verified by the `RepoImageLocator` unit with the `RepoImageLocatorTests.cs` tests; the picture
