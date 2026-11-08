@@ -86,6 +86,7 @@ public sealed class UsabilityWindowTests : IDisposable
                 HeaderNames(window));
             Assert.Equal(repoName, SectionOf(window, "Favorites").Single());
             Assert.True(viewModel.Settings.RecentRepos[1].IsFavorite);
+            Assert.Same(FindStar(window, repoName), window.FocusManager.GetFocusedElement());
 
             // Act: click the star again
             ClickWithMouse(window, FindStar(window, repoName));
@@ -98,6 +99,7 @@ public sealed class UsabilityWindowTests : IDisposable
                 HeaderNames(window));
             Assert.Contains(repoName, SectionOf(window, "Ungrouped"));
             Assert.False(viewModel.Settings.RecentRepos[1].IsFavorite);
+            Assert.Same(FindStar(window, repoName), window.FocusManager.GetFocusedElement());
         }
         finally
         {
@@ -107,7 +109,8 @@ public sealed class UsabilityWindowTests : IDisposable
 
     /// <summary>
     ///     Test that the star also toggles exactly once from the keyboard (Space), off to on and on to off,
-    ///     and that its accessible name says what it is.
+    ///     that the keyboard focus stays on that repo's star after each press even though the card moves
+    ///     between sections (and its controls are re-created), and that its accessible name says what it is.
     /// </summary>
     [Fact]
     public void MainWindow_FavoriteStar_SpaceKey_TogglesOncePerPress() => HeadlessTestApp.Run(() =>
@@ -117,22 +120,30 @@ public sealed class UsabilityWindowTests : IDisposable
 
         try
         {
-            var repoName = viewModel.RepoCards[1].RepoName;
+            var card = viewModel.RepoCards[1];
+            var repoName = card.RepoName;
+            var changes = 0;
+            card.FavoriteChanged += (_, _) => changes++;
             Assert.Equal("Favorite", AutomationProperties.GetName(FindStar(window, repoName)));
 
             // Act: Space on the focused star
             FindStar(window, repoName).Focus(NavigationMethod.Tab);
             PressKey(window, PhysicalKey.Space);
 
-            // Assert: favorite (the card moved to the Favorites section, so its star is a new control)
-            Assert.True(viewModel.RepoCards[1].IsFavorite);
+            // Assert: favorite once, the card moved to Favorites, and the focus is on its (new) star
+            Assert.True(card.IsFavorite);
+            Assert.Equal(1, changes);
+            Assert.Equal(repoName, SectionOf(window, "Favorites").Single());
+            Assert.Same(FindStar(window, repoName), window.FocusManager.GetFocusedElement());
 
-            // Act: Space again, on the card's star in its new place
-            FindStar(window, repoName).Focus(NavigationMethod.Tab);
+            // Act: Space again, without touching the focus
             PressKey(window, PhysicalKey.Space);
 
-            // Assert
-            Assert.False(viewModel.RepoCards[1].IsFavorite);
+            // Assert: unfavorite once, back in its own section, the focus still on its star
+            Assert.False(card.IsFavorite);
+            Assert.Equal(2, changes);
+            Assert.Contains(repoName, SectionOf(window, "Ungrouped"));
+            Assert.Same(FindStar(window, repoName), window.FocusManager.GetFocusedElement());
         }
         finally
         {

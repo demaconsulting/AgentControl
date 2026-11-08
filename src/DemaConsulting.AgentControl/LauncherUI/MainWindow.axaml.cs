@@ -25,6 +25,7 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
@@ -94,6 +95,85 @@ internal sealed partial class MainWindow : Window
         AvaloniaXamlLoader.Load(this);
         DataContextChanged += OnDataContextChanged;
         Closing += MainWindow_Closing;
+
+        // Remember which card's favorite star has the keyboard focus (see RestoreStarFocus)
+        AddHandler(GotFocusEvent, OnAnyGotFocus, RoutingStrategies.Bubble);
+        Deactivated += (_, _) => _focusedStarCard = null;
+    }
+
+    /// <summary>
+    ///     The card whose favorite star had the focus most recently, or <see langword="null"/> when the
+    ///     focus went anywhere else since (or the window was deactivated).
+    /// </summary>
+    private RepoCardViewModel? _focusedStarCard;
+
+    /// <summary>
+    ///     How that star got the focus (keyboard or pointer), so it is given back the same way.
+    /// </summary>
+    private NavigationMethod _focusedStarMethod;
+
+    /// <summary>
+    ///     Records which card's favorite star takes the focus, and forgets it when the focus goes to
+    ///     any other control.
+    /// </summary>
+    /// <param name="sender">This window (unused).</param>
+    /// <param name="e">The focus event; its source is the control that took the focus.</param>
+    private void OnAnyGotFocus(object? sender, FocusChangedEventArgs e)
+    {
+        if (e.Source is ToggleButton { Name: "FavoriteToggleButton", DataContext: RepoCardViewModel card })
+        {
+            _focusedStarCard = card;
+            _focusedStarMethod = e.NavigationMethod;
+        }
+        else
+        {
+            _focusedStarCard = null;
+        }
+    }
+
+    /// <summary>
+    ///     Gives the keyboard focus back to a card's favorite star after the list has been regrouped.
+    /// </summary>
+    /// <remarks>
+    ///     Favoriting (or unfavoriting) moves the card to another section, which re-creates its
+    ///     controls, so the star that had the focus is gone and the focus would be lost - a keyboard
+    ///     user would have to Tab from the top again. When the star of that repo had the focus
+    ///     (reached by keyboard or by the pointer; it is returned the same way, so the focus ring
+    ///     shows only for the keyboard), the new star of the same repo takes it once the list has been
+    ///     laid out. A card that is not shown afterwards (its new section is collapsed) simply has no
+    ///     star to focus; the focus is never moved when the star did not have it.
+    /// </remarks>
+    /// <param name="card">The card whose favorite state changed.</param>
+    private void RestoreStarFocus(RepoCardViewModel card)
+    {
+        if (_focusedStarCard != card)
+        {
+            return;
+        }
+
+        var method = _focusedStarMethod;
+        Dispatcher.UIThread.Post(() => FocusStar(card, method, retry: true), DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    ///     Focuses the favorite star of the card's current row, trying once more later when the row's
+    ///     controls are not created yet.
+    /// </summary>
+    /// <param name="card">The card.</param>
+    /// <param name="method">How to give the focus.</param>
+    /// <param name="retry">Whether to try once more when the star is not there yet.</param>
+    private void FocusStar(RepoCardViewModel card, NavigationMethod method, bool retry)
+    {
+        var star = this.GetVisualDescendants().OfType<ToggleButton>()
+            .FirstOrDefault(button => button.Name == "FavoriteToggleButton" && ReferenceEquals(button.DataContext, card));
+        if (star is not null)
+        {
+            star.Focus(method);
+        }
+        else if (retry)
+        {
+            Dispatcher.UIThread.Post(() => FocusStar(card, method, retry: false), DispatcherPriority.Background);
+        }
     }
 
     /// <summary>
@@ -209,6 +289,8 @@ internal sealed partial class MainWindow : Window
     /// <param name="card">The card to subscribe to.</param>
     private void AttachCardHandlers(RepoCardViewModel card)
     {
+        // Runs after the view model has regrouped the list (its handler was attached when the card was created)
+        card.FavoriteChanged += (_, _) => RestoreStarFocus(card);
         card.ErrorOccurred += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
         card.ReleaseNotesReady += async (_, releaseNotes) => await ShowReleaseNotesAsync(card, releaseNotes);
         card.RemoveRequested += async (_, _) => await ConfirmAndRemoveCard(card);

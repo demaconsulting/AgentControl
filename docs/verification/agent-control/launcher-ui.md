@@ -521,7 +521,8 @@ real mouse click (a button press and release at the star's center) on an unfavor
 
 - the star is on, the repo is listed under a Favorites section (which appears) and the choice is stored - and a
 second click unfavorites it again (back in its own section); the Space key toggles once per press, off to on and
-on to off, and the keyboard focus stays on the star although the card moves between sections; the star has no
+on to off, and the keyboard focus stays on the star although the card moves between sections (after the mouse
+click too: the star gets the focus back the way it had it); the star has no
 command (a command that also toggled flipped the state twice per click) and the accessible name "Favorite". In the
 real application the same moves happen through the UI Automation toggle pattern, and the choice is stored in the
 settings file. This scenario is tested by `MainWindow_FavoriteStar_MouseClick_FavoritesThenUnfavoritesMovingBetweenSections`,

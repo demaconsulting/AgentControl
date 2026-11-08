@@ -197,12 +197,16 @@ sections:
           The LauncherUI subsystem shall let the user favorite an unfavorited repo, and unfavorite
           a favorite, with the star on its card (by pointer or keyboard, one change per click or
           key press), shall list a favorite under the Favorites section and return it to its
-          own section when unfavorited, and shall give the star an accessible name.
+          own section when unfavorited, shall give the star an accessible name, and shall keep the
+          keyboard focus on that repo's star when the star had it and the card moves to or from
+          the Favorites section.
         justification: |
           The star is the only way to promote a repo. A click that toggled twice (the star's own
           toggle and a command bound to it) left the star off and the repo where it was, so the
           control appeared broken; one owner of the state and a test with real pointer and key
-          input keep it working in both directions, including the move between sections.
+          input keep it working in both directions, including the move between sections. The move
+          re-creates the card's controls, which would otherwise drop the keyboard focus and send a
+          keyboard user back to the top of the list after every press.
         children:
           - AgentControl-RepoCardViewModel-Favorite
         tests:

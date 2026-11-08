@@ -64,7 +64,14 @@ collapsed sections.)
 **RepoCardViewModel's action commands**: `LaunchCommand`, `PullCommand`,
 `SelectPackageCommand`, `UpgradeCommand`, `RemoveCommand`,
 `NewGroupCommand`, `RemoveFromGroupCommand`. (The favorite star has no command: its checked state is bound
-two-way to `RepoCardViewModel.IsFavorite`, the only owner of that state, `AgentControl-LauncherUI-FavoriteStar`.)
+two-way to `RepoCardViewModel.IsFavorite`, the only owner of that state, `AgentControl-LauncherUI-FavoriteStar`.
+Because favoriting moves the card to or from the Favorites section, which re-creates its controls, `MainWindow` keeps
+the focus: it records which card's star last took the focus (and by what navigation method, keyboard or pointer;
+forgotten when the focus goes to any other control or the window is deactivated), and when that card's
+`FavoriteChanged` is raised - after the view model has regrouped the list - it posts, at `Loaded` priority, a
+request that focuses the new star of the same repo the same way (once more at `Background` priority if the row is
+not created yet). A star that did not have the focus is never given it, and a card that is no longer shown (its
+new section is collapsed) has no star to focus.)
 
 - *Type*: In-process .NET `ICommand` (`AsyncRelayCommand` for the operations that read a
   package source or the file system - Launch, Pull, Upgrade, Refresh - and `RelayCommand` for the
