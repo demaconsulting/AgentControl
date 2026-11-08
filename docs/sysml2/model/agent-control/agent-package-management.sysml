@@ -1,6 +1,6 @@
 package AgentControl {
     part def AgentPackageManagementSubsystem {
-        doc /* Package discovery, version parsing/comparison, and per-source scan caching. */
+        doc /* Package source configuration model, per-source providers (zip folder, NuGet folder and server), alias-to-provider resolution, version parsing/comparison, per-source version caching, per-source signed-package enforcement with an optional publisher pin, and the platform check for signature verification. */
 
         comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/AgentPackageManagement/ */
         comment designRef /* Design: docs/design/agent-control/agent-package-management.md */
@@ -10,5 +10,10 @@ package AgentControl {
         part packageSource : PackageSource;
         part packageVersion : PackageVersion;
         part packageVersionCache : PackageVersionCache;
+        part packageSourceRegistry : PackageSourceRegistry;
+        part zipFolderSourceProvider : ZipFolderSourceProvider;
+        part nuGetSourceProvider : NuGetSourceProvider;
+        part signatureVerificationSupport : SignatureVerificationSupport;
+        part nuGetCaching : NuGetCaching;
     }
 }

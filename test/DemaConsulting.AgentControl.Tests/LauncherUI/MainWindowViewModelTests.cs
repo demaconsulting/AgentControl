@@ -153,10 +153,11 @@ public sealed class MainWindowViewModelTests : IDisposable
         // persisted to disk
         var card = Assert.Single(viewModel.RepoCards);
         Assert.Equal(repoPath, card.RepoPath);
-        Assert.Equal(@"\\share\packages", viewModel.Settings.PackageSourcePath);
+        Assert.Equal(@"\\share\packages", Assert.Single(viewModel.Settings.GetEffectiveSources()).Location);
 
         var reloaded = SettingsStore.Load(configDir);
-        Assert.Equal(@"\\share\packages", reloaded.PackageSourcePath);
+        Assert.Equal(@"\\share\packages", Assert.Single(reloaded.Sources).Location);
+        Assert.Null(reloaded.PackageSourcePath);
         var recentRepo = Assert.Single(reloaded.RecentRepos);
         Assert.Equal(repoPath, recentRepo.Path);
     }
@@ -380,15 +381,66 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that ApplySettings refuses a source location embedding a credential: it throws
+    ///     without leaking the secret, keeps the current settings, and writes nothing.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        var settings = new AppSettings { PackageSourcePath = CreateTempDirectory() };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: configDir);
+        var updated = new AppSettings { PackageSourcePath = "https://user:SentinelSecretValue@feeds.example.com/nuget" };
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => viewModel.ApplySettings(updated));
+
+        // Assert: refused, the live settings are unchanged, and nothing was written
+        Assert.DoesNotContain("SentinelSecretValue", ex.Message, StringComparison.Ordinal);
+        Assert.Same(settings, viewModel.Settings);
+        Assert.False(File.Exists(Path.Combine(configDir, "settings.json")));
+    }
+
+    /// <summary>
+    ///     Test that a failed settings write leaves the previous settings live, so a later save
+    ///     (for example when a repo is marked as a favorite) can never persist the rejected candidate.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive()
+    {
+        // Arrange: a configuration "directory" that is really a file, so every write fails; a later
+        // save (such as toggling a favorite) would otherwise persist the rejected candidate
+        var repoPath = CreateTempDirectory();
+        var blockingFile = Path.Combine(CreateTempDirectory(), "not-a-directory");
+        File.WriteAllText(blockingFile, "blocker");
+        var settings = new AppSettings
+        {
+            GitExecutablePath = "previous-git",
+            RecentRepos = [new RecentRepo { Path = repoPath }]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: blockingFile);
+        var rejected = new AppSettings { GitExecutablePath = "rejected-git" };
+
+        // Act
+        Assert.Throws<InvalidOperationException>(() => viewModel.ApplySettings(rejected));
+
+        // Assert: the previous instance is still live and keeps its values
+        Assert.Same(settings, viewModel.Settings);
+        Assert.Equal("previous-git", viewModel.Settings.GitExecutablePath);
+        Assert.Single(viewModel.Settings.RecentRepos);
+    }
+
+    /// <summary>
     ///     Test that ApplySettings invalidates the shared PackageVersionCache, so a changed
     ///     package-source path is reflected immediately rather than served from a stale cache.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache()
+    public async Task MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache()
     {
         // Arrange: a repo pinned to 1.0.0, and an initial (empty) package source directory
         var repoPath = CreateTempDirectory();
-        RepoPinStore.Save(repoPath, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
         var initialSourceDir = CreateTempDirectory();
         var settings = new AppSettings
         {
@@ -396,6 +448,7 @@ public sealed class MainWindowViewModelTests : IDisposable
             RecentRepos = [new RecentRepo { Path = repoPath }]
         };
         var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        await viewModel.BeginUpgradeRefresh();
         Assert.False(viewModel.RepoCards[0].IsUpgradeAvailable);
 
         // Act: apply settings pointing at a new package source containing a newer version
@@ -403,6 +456,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         CreatePackageZip(newSourceDir, "contoso-agents", "2.0.0");
         var updated = new AppSettings { PackageSourcePath = newSourceDir };
         viewModel.ApplySettings(updated);
+        await viewModel.PendingRefresh;
 
         // Assert: the new source's package is observed immediately, not masked by a cache entry
         // for the old (empty) source directory
@@ -411,8 +465,53 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that ApplySettings requests a fresh Git status check specifically for a card that
-    ///     reappeared (was missing, now present) since it was last checked, so it is not left
+    ///     Test that ApplySettings only drops cached results for sources that were edited or
+    ///     removed: a card pinned to an unchanged source keeps its cached upgrade answer even
+    ///     after that source's folder disappears, because settings for a different source changed.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_ApplySettings_OnlyEditedSourceIsInvalidated()
+    {
+        // Arrange: a repo pinned (via the Default source) to 1.0.0, source "Default" offering 2.0.0,
+        // and a second, unrelated source
+        var repoPath = CreateTempDirectory();
+        RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        var defaultDir = CreateTempDirectory();
+        CreatePackageZip(defaultDir, "contoso-agents", "2.0.0");
+        var otherDir = CreateTempDirectory();
+        var settings = new AppSettings
+        {
+            Sources =
+            [
+                PackageSourceDefinition.CreateDefaultZip(defaultDir),
+                new PackageSourceDefinition { Alias = "Other", Type = PackageSourceType.Zip, Location = otherDir }
+            ],
+            RecentRepos = [new RecentRepo { Path = repoPath }]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        await viewModel.BeginUpgradeRefresh();
+        Assert.True(viewModel.RepoCards[0].IsUpgradeAvailable);
+
+        // Act: the Default source's folder vanishes, and only the Other source is edited
+        Directory.Delete(defaultDir, recursive: true);
+        var updated = new AppSettings
+        {
+            Sources =
+            [
+                PackageSourceDefinition.CreateDefaultZip(defaultDir),
+                new PackageSourceDefinition { Alias = "Other", Type = PackageSourceType.Zip, Location = CreateTempDirectory() }
+            ]
+        };
+        viewModel.ApplySettings(updated);
+        await viewModel.PendingRefresh;
+
+        // Assert: Default's cached answer survived (an invalidated cache would now fail to read
+        // the missing folder and report no upgrade)
+        Assert.True(viewModel.RepoCards[0].IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that ApplySettings requests a fresh Git status check specifically for a card that    ///     reappeared (was missing, now present) since it was last checked, so it is not left
     ///     showing a stale or indefinitely "not yet checked" Pull-disabled state - an
     ///     already-realized card's one-time lazy Git-status-check trigger will not fire again for
     ///     it. Cards that were already present only get the cheap refresh, avoiding a redundant
@@ -514,6 +613,102 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.True(viewModel.RepoCards[0].GitStatusChecked);
         Assert.False(viewModel.RepoCards[0].CanPull);
         Assert.True(viewModel.RepoCards[0].IsWorkingTreeDirty);
+    }
+
+    /// <summary>
+    ///     Test that building the view model does not read any package source (upgrade checks are
+    ///     started separately, in the background), and that the background check then updates the
+    ///     card.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins()
+    {
+        // Arrange: a repo pinned to 1.0.0 whose source offers 2.0.0
+        var repoPath = CreateTempDirectory();
+        RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var settings = new AppSettings
+        {
+            PackageSourcePath = sourceDir,
+            RecentRepos = [new RecentRepo { Path = repoPath }]
+        };
+
+        // Act: construct
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+
+        // Assert: the pin is known but no upgrade has been determined yet
+        Assert.Equal("1.0.0", viewModel.RepoCards[0].PinnedPackageVersion);
+        Assert.False(viewModel.RepoCards[0].IsUpgradeAvailable);
+
+        // Act: begin the background check and wait for it
+        var pending = viewModel.BeginUpgradeRefresh();
+        await pending;
+
+        // Assert
+        Assert.True(viewModel.RepoCards[0].IsUpgradeAvailable);
+        Assert.Equal("2.0.0", viewModel.RepoCards[0].LatestAvailableVersion);
+        Assert.Same(pending, viewModel.PendingRefresh);
+    }
+
+    /// <summary>
+    ///     Test that one card's unreachable source does not stop the other cards' upgrade checks.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked()
+    {
+        // Arrange: repo 1 is pinned to a source whose folder does not exist, repo 2 to a working one
+        var downRepo = CreateTempDirectory();
+        var upRepo = CreateTempDirectory();
+        RepoPinStore.Save(downRepo, new RepoPin { Source = "Down", PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(upRepo, new RepoPin { Source = "Up", PackageName = "contoso-agents", Version = "1.0.0" });
+        var upDir = CreateTempDirectory();
+        CreatePackageZip(upDir, "contoso-agents", "2.0.0");
+        var settings = new AppSettings
+        {
+            Sources =
+            [
+                new PackageSourceDefinition
+                {
+                    Alias = "Down",
+                    Type = PackageSourceType.Zip,
+                    Location = Path.Combine(Path.GetTempPath(), "agentcontrol_missing_" + Guid.NewGuid())
+                },
+                new PackageSourceDefinition { Alias = "Up", Type = PackageSourceType.Zip, Location = upDir }
+            ],
+            RecentRepos = [new RecentRepo { Path = downRepo }, new RecentRepo { Path = upRepo }]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+
+        // Act
+        await viewModel.BeginUpgradeRefresh();
+
+        // Assert: the failing source only affects its own card
+        Assert.False(viewModel.RepoCards[0].IsUpgradeAvailable);
+        Assert.True(viewModel.RepoCards[1].IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that a repo added while a package source offers a newer version gets its upgrade
+    ///     check in the background without delaying AddRepo.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground()
+    {
+        // Arrange: a pinned repo that is not yet in the list, and a source with a newer version
+        var repoPath = CreateTempDirectory();
+        RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { PackageSourcePath = sourceDir }, configDirectory: CreateTempDirectory());
+
+        // Act
+        Assert.True(viewModel.AddRepo(repoPath));
+        await viewModel.PendingRefresh;
+
+        // Assert
+        Assert.True(viewModel.RepoCards[0].IsUpgradeAvailable);
     }
 
     /// <summary>

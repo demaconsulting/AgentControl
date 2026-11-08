@@ -1,8 +1,9 @@
 ---
 # Software Unit Requirements for the PackageVersion Class
 #
-# PackageVersion parses a version string (release or prerelease) into comparable components
-# and implements ordering so releases and prereleases compare correctly against each other.
+# PackageVersion parses a version string (release or prerelease, optionally with a fourth
+# numeric segment and build metadata) into comparable components and implements ordering so
+# releases and prereleases compare correctly against each other.
 
 sections:
   - title: PackageVersion Unit Requirements
@@ -16,13 +17,16 @@ sections:
         justification: |
           Version strings are derived from zip filenames, which are not guaranteed to be
           well-formed; parsing must fail gracefully so a single bad file cannot crash package
-          discovery.
+          discovery. A strict three-part form is kept for zip file names so their name/version
+          splitting is unaffected by the wider grammar used for NuGet versions.
         tests:
           - PackageVersion_TryParse_ReleaseVersion_ParsesComponents
           - PackageVersion_TryParse_PrereleaseVersion_ParsesPrereleaseIdentifier
           - PackageVersion_TryParse_MalformedInput_ReturnsFalse
           - PackageVersion_Constructor_NegativeMajor_ThrowsArgumentOutOfRangeException
           - PackageVersion_TryParse_InvalidPrereleaseIdentifiers_ReturnsFalse
+          - PackageVersion_TryParseStrict_ExtendedOrMalformedForms_ReturnsFalse
+          - PackageVersion_TryParseStrict_ThreePartForms_ReturnsTrue
 
       - id: AgentControl-PackageVersion-Compare
         title: >-
@@ -30,8 +34,9 @@ sections:
           precedence: numerically by major, minor, and patch; a release greater than a
           prerelease with the same numeric components; and prerelease identifiers compared
           left to right, with numeric identifiers compared numerically (so beta.2 precedes
-          beta.10), numeric identifiers ranking below alphanumeric ones, and a longer
-          identifier list ranking above its shorter prefix. It shall also consider two
+          beta.10), numeric identifiers ranking below alphanumeric ones, prerelease labels
+          compared without regard to letter case (as NuGet does), and a longer identifier
+          list ranking above its shorter prefix. It shall also consider two
           versions with the same version string equal, and round-trip through its string
           representation.
         justification: |
@@ -43,5 +48,34 @@ sections:
           - PackageVersion_CompareTo_ReleaseVsPrereleaseSameNumeric_ReleaseIsGreater
           - PackageVersion_CompareTo_PrereleaseIdentifiers_FollowSemverPrecedence
           - PackageVersion_CompareTo_HugeNumericIdentifiers_ComparesNumerically
+          - PackageVersion_CompareTo_PrereleaseLabelsDifferingOnlyByCase_AreEqualWithSameHashCode
+          - PackageVersion_CompareTo_VersionsAgreeWithNuGetVersionOrdering
           - PackageVersion_Equals_SameVersionString_ReturnsTrue
           - PackageVersion_ToString_ParsedVersion_RoundTripsThroughParse
+
+      - id: AgentControl-PackageVersion-ExtendedVersions
+        title: >-
+          The PackageVersion class shall parse, in addition to the three-part forms, versions
+          with an optional fourth numeric segment and optional build metadata, preserving the
+          original text, treating an absent fourth segment as zero, and ordering a four-part
+          version after its three-part base.
+        justification: |
+          NuGet package versions may carry a fourth segment and build metadata, and a repo pin
+          must be able to record exactly the version a source reported, so the version type must
+          understand them and agree with NuGet about which version is newest.
+        tests:
+          - PackageVersion_TryParse_FourPartVersion_ParsesRevisionAndOrdersAfterThreePart
+          - PackageVersion_Equals_ZeroRevisionAndThreePart_AreEqualWithSameHashCode
+          - PackageVersion_TryParse_PrereleaseRevisionAndMetadata_AllParsed
+          - PackageVersion_CompareTo_VersionsAgreeWithNuGetVersionOrdering
+
+      - id: AgentControl-PackageVersion-MetadataIgnoredInComparison
+        title: >-
+          The PackageVersion class shall ignore build metadata when comparing, testing equality
+          and hashing versions, while keeping it in the version's text.
+        justification: |
+          Semantic versioning defines build metadata as having no precedence, so two versions
+          that differ only in metadata are the same release and must not be offered as an
+          upgrade of each other.
+        tests:
+          - PackageVersion_TryParse_BuildMetadata_PreservedButIgnoredInComparison

@@ -26,7 +26,9 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Logging;
+using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoSync;
 using Microsoft.Extensions.Logging;
 
@@ -150,6 +152,10 @@ internal sealed partial class MainWindow : Window
         }
 
         viewModel.RepoCards.CollectionChanged += OnRepoCardsChanged;
+
+        // The upgrade check reads package sources, which may be slow or unreachable, so it starts
+        // in the background now that the window has its data rather than delaying the window
+        _ = viewModel.BeginUpgradeRefresh();
     }
 
     /// <summary>
@@ -192,24 +198,35 @@ internal sealed partial class MainWindow : Window
         card.ReleaseNotesReady += (_, releaseNotes) =>
             ShowTrackedChildWindow(new ReleaseNotesViewer(new ReleaseNotesViewerViewModel(card.RepoName, releaseNotes)));
         card.RemoveRequested += async (_, _) => await ConfirmAndRemoveCard(card);
-        card.SelectPackageRequested += async (_, sourceDirectory) => await ShowSelectPackageDialog(card, sourceDirectory);
+        card.SelectPackageRequested += async (_, _) => await ShowSelectPackageDialog(card);
         card.AgentsMdTemplateOfferRequested += async (_, templateContent) => await ShowAgentsMdTemplateOfferDialog(card, templateContent);
     }
 
     /// <summary>
     ///     Shows the modal <see cref="SelectPackageWindow"/> for <paramref name="card"/>, and, if
-    ///     the user confirmed a package name/version, applies it via
-    ///     <see cref="RepoCardViewModel.ApplySelectedPackage"/>.
+    ///     the user confirmed a package, applies it via
+    ///     <see cref="RepoCardViewModel.ApplySelectedPackageAsync"/>.
     /// </summary>
     /// <param name="card">The card that requested package selection.</param>
-    /// <param name="sourceDirectory">The resolved package-source directory to enumerate.</param>
-    private async Task ShowSelectPackageDialog(RepoCardViewModel card, string sourceDirectory)
+    private async Task ShowSelectPackageDialog(RepoCardViewModel card)
     {
-        var viewModel = new SelectPackageWindowViewModel(sourceDirectory, card.PackageVersionCache);
-        var result = await new SelectPackageWindow(viewModel).ShowDialog<(string Name, string Version)?>(this);
+        SelectPackageWindowViewModel viewModel;
+        try
+        {
+            viewModel = new SelectPackageWindowViewModel(card.CreateSourceRegistry(), card.PackageVersionCache);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Invalid source configuration must be reported to the user, not crash the
+            // application from this fire-and-forget event handler
+            await new MessageBoxWindow($"Package sources are unavailable: {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
+            return;
+        }
+
+        var result = await new SelectPackageWindow(viewModel).ShowDialog<PackageReference?>(this);
         if (result is not null)
         {
-            card.ApplySelectedPackage(result.Value.Name, result.Value.Version);
+            await card.ApplySelectedPackageAsync(result);
         }
     }
 
@@ -390,7 +407,11 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        var settingsViewModel = new SettingsWindowViewModel(viewModel.Settings, viewModel.ApplySettings);
+        var settingsViewModel = new SettingsWindowViewModel(
+            viewModel.Settings,
+            viewModel.ApplySettings,
+            providerFactory: viewModel.CreateConnectionTestProvider,
+            credentials: viewModel.Credentials);
         var settingsWindow = new SettingsWindow(settingsViewModel);
         await settingsWindow.ShowDialog(this);
     }

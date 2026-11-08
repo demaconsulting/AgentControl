@@ -7,7 +7,7 @@
 #   AppSettings.cs/RecentRepo.cs/AgentToolKind.cs data types, which are folded into this
 #   subsystem-level description as they have no dedicated test file
 # - Subsystem requirements describe the observable behavior of persisting application-wide
-#   preferences (package source, git/agent tool overrides, recent repos, shell preference)
+#   preferences (package sources, git/agent tool overrides, recent repos, shell preference)
 
 sections:
   - title: Settings Subsystem Requirements
@@ -28,3 +28,23 @@ sections:
         tests:
           - SettingsStore_SaveThenLoad_RoundTripsAllFields
           - SettingsStore_Load_NoSettingsFile_ReturnsDefaults
+
+      - id: AgentControl-Settings-PackageSources
+        title: >-
+          The Settings subsystem shall persist the list of configured package sources,
+          shall migrate a legacy single package-source folder to a source named Default
+          when no sources are configured, and shall never persist a password, token or other
+          secret.
+        justification: |
+          Users configure several package sources side by side and expect the single folder
+          they already configured to keep working; the settings file is plain text in the
+          user's profile, so it must not be able to hold credentials.
+        children:
+          - AgentControl-SettingsStore-SourcesRoundTrip
+          - AgentControl-SettingsStore-LegacySourceMigration
+          - AgentControl-SettingsStore-NoSecretsPersisted
+          - AgentControl-SettingsStore-AtomicSave
+        tests:
+          - SettingsStore_SaveThenLoad_RoundTripsAllFields
+          - SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource
+          - SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties

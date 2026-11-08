@@ -21,6 +21,7 @@
 using System.Reflection;
 using Avalonia;
 using DemaConsulting.AgentControl.Logging;
+using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.Startup;
 using Microsoft.Extensions.Logging;
 using Serilog;
@@ -79,7 +80,8 @@ internal static class Program
     ///     <see cref="App.Options"/> is set and the Avalonia classic desktop lifetime runs the UI
     ///     for the remainder of the process's life; the returned exit code reflects the parsing
     ///     step only, since the desktop lifetime itself does not surface a separate exit code. Any
-    ///     unhandled exception escaping the desktop lifetime is logged at Critical before being
+    ///     unhandled exception escaping the desktop lifetime is logged at Critical - with every
+    ///     secret removed from it first, see <see cref="ReportStartupFailure"/> - before being
     ///     rethrown, and the Serilog pipeline is always flushed on the way out so no buffered log
     ///     entries are lost. Marked <see cref="STAThreadAttribute"/> because Windows OLE
     ///     clipboard operations (cut/copy/paste in any <c>TextBox</c>) require the UI thread to
@@ -133,20 +135,45 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            // Log the full detail of any unhandled startup/runtime exception before rethrowing,
-            // since this is the last point the app-specific Serilog pipeline is guaranteed to
-            // still be flushable. Wrapped (rather than a bare `throw;`) so the rethrown exception
-            // carries explicit contextual information about where it was caught, satisfying
-            // static-analysis guidance against silently rethrowing an already-logged exception
-            // unchanged.
-            logger.LogCritical(ex, "Unhandled exception during application startup or execution");
-            throw new InvalidOperationException("Unhandled exception during application startup or execution.", ex);
+            // Log any unhandled startup/runtime exception, with every secret removed from it,
+            // before rethrowing, since this is the last point the app-specific Serilog pipeline
+            // is guaranteed to still be flushable. The rethrown wrapper carries explicit
+            // contextual information about where it was caught (rather than a bare `throw;`),
+            // satisfying static-analysis guidance against silently rethrowing an already-logged
+            // exception unchanged.
+            throw ReportStartupFailure(logger, ex);
         }
         finally
         {
             // Ensure buffered log entries are written to disk regardless of how Main exits.
             Log.CloseAndFlush();
         }
+    }
+
+    /// <summary>
+    ///     Logs an exception that escaped startup or the desktop lifetime at Critical, with every
+    ///     secret removed from it first, and returns the exception to rethrow.
+    /// </summary>
+    /// <remarks>
+    ///     The exception may carry a credential, an <c>Authorization</c> value or an address with
+    ///     user information (for example a failure inside a package-server call), and the log is a
+    ///     plain file users attach to reports, so the exception is never given to the log as it is:
+    ///     it passes through <see cref="SecretRedactingLogger"/>, which logs only a sanitized
+    ///     stand-in. The returned wrapper carries the same sanitized stand-in as its inner
+    ///     exception, so the unhandled-exception handlers and the runtime's own crash output see no
+    ///     raw secret either.
+    /// </remarks>
+    /// <param name="logger">The logger to write to.</param>
+    /// <param name="exception">The exception that escaped.</param>
+    /// <returns>The wrapper exception for <see cref="Main"/> to throw.</returns>
+    internal static InvalidOperationException ReportStartupFailure(
+        Microsoft.Extensions.Logging.ILogger logger, Exception exception)
+    {
+        var safeLogger = new SecretRedactingLogger(logger);
+        safeLogger.LogCritical(exception, "Unhandled exception during application startup or execution");
+        return new InvalidOperationException(
+            "Unhandled exception during application startup or execution.",
+            SecretRedactor.Sanitize(exception));
     }
 
     /// <summary>

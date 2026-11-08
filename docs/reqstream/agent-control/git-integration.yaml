@@ -4,10 +4,11 @@
 # PURPOSE:
 # - Define requirements for the AgentControl GitIntegration subsystem
 # - GitIntegration spans GitClient.cs (invokes the configured git executable for status,
-#   pull, branch, and committed-files queries) and CommittedAgentFilesCache.cs (caches the
-#   committed-agent-files-changed check keyed by HEAD commit hash)
+#   pull, branch, and committed-files queries), CommittedAgentFilesCache.cs (caches the
+#   committed-agent-files-changed check keyed by HEAD commit hash) and GitCredentialClient.cs
+#   (keeps, finds and removes a package feed's sign-in in the user's own Git credential helper)
 # - Subsystem requirements describe the observable git-derived status/actions surfaced on
-#   each repo card
+#   each repo card, and the use of the user's Git credential helper for saved sign-ins
 
 sections:
   - title: GitIntegration Subsystem Requirements
@@ -66,3 +67,32 @@ sections:
           - AgentControl-GitClient-CurrentBranch
         tests:
           - GitClient_GetCurrentBranch_FastPathNormalBranch_ReturnsBranchNameWithoutInvokingGit
+
+      - id: AgentControl-GitIntegration-SavedSignIns
+        title: >-
+          The GitIntegration subsystem shall, on request, find, keep and remove a package feed's
+          sign-in using the user's own Git credential helper - so that the application never
+          stores a secret itself - without ever letting Git or the helper ask the user anything,
+          within a bounded time, without writing a secret to the log, and treating a missing Git
+          or helper as "nothing saved" rather than as an error.
+        justification: |
+          A user who chooses to remember a sign-in expects it to be kept in the place their
+          operating system protects secrets, which their Git credential helper already is;
+          reusing it keeps secret storage out of the application, and the safeguards (never
+          interactive, bounded, never logged) keep a stuck or chatty helper from hanging an
+          operation or leaking what it is given.
+        children:
+          - AgentControl-GitCredentialClient-FillApproveReject
+          - AgentControl-GitCredentialClient-HelperAvailability
+          - AgentControl-GitCredentialClient-NeverInteractive
+          - AgentControl-GitCredentialClient-BoundedTime
+          - AgentControl-GitCredentialClient-UnavailableIsNotAnError
+          - AgentControl-GitCredentialClient-SecretsNeverLogged
+        tests:
+          # Subsystem tests with the real git executable and an isolated credential store; they
+          # are skipped only where git is not installed. The stub-git evidence (exact requests,
+          # environment, time limit, log content) is in the GitCredentialClient unit tests and
+          # covers the child requirements.
+          - GitIntegrationSubsystem_SavedSignIn_KeptInOneSessionFoundInAnotherAndRemovedOnRequest
+          - GitIntegrationSubsystem_SavedSignIn_ValueWithLineBreakIsNeverStoredButEqualsIs
+          - GitIntegrationSubsystem_SavedSignIn_NoHelperConfigured_ReportsUnavailableAndNothingSaved

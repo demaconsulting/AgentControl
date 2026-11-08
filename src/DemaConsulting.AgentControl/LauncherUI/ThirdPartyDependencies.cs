@@ -46,7 +46,8 @@ internal sealed record DependencyInfo(string Name, string License)
 /// <remarks>
 ///     This list is hand-maintained to mirror the direct (non-build/analyzer-only)
 ///     <c>PackageReference</c> items in <c>DemaConsulting.AgentControl.csproj</c>'s "Logging
-///     Dependencies" and "Avalonia UI Dependencies" item groups, in the same order as they
+///     Dependencies", "Agent Package Source Dependencies" and "Avalonia UI Dependencies" item
+///     groups, in the same order as they
 ///     appear there. It is not parsed from the project file at runtime, so it must be reviewed
 ///     and updated whenever those dependencies change. Package versions are deliberately
 ///     omitted so dependency-update tooling can bump them without touching this list.
@@ -55,8 +56,8 @@ internal static class ThirdPartyDependencies
 {
     /// <summary>
     ///     This application's direct runtime NuGet dependencies, in the same order as the
-    ///     "Logging Dependencies" and "Avalonia UI Dependencies" item groups in
-    ///     <c>DemaConsulting.AgentControl.csproj</c>.
+    ///     "Logging Dependencies", "Agent Package Source Dependencies" and "Avalonia UI
+    ///     Dependencies" item groups in <c>DemaConsulting.AgentControl.csproj</c>.
     /// </summary>
     public static IReadOnlyList<DependencyInfo> All { get; } =
     [
@@ -64,6 +65,7 @@ internal static class ThirdPartyDependencies
         new DependencyInfo("Serilog", "Apache-2.0"),
         new DependencyInfo("Serilog.Extensions.Logging", "Apache-2.0"),
         new DependencyInfo("Serilog.Sinks.File", "Apache-2.0"),
+        new DependencyInfo("DemaConsulting.NuGet.Caching", "MIT"),
         new DependencyInfo("Avalonia", "MIT"),
         new DependencyInfo("Avalonia.Desktop", "MIT"),
         new DependencyInfo("Avalonia.Themes.Fluent", "MIT"),

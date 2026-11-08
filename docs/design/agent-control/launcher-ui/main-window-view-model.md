@@ -41,20 +41,36 @@ code-behind.
 **_packageVersionCache**: `PackageVersionCache` — The shared, session-scoped package-version
 cache passed to every `RepoCardViewModel`, per architecture.md's repo-fact caching strategy.
 
+**Credentials**: `PackageCredentialContext?` — The session credential store and sign-in prompt created by
+`App`, passed to every `RepoCardViewModel` and to the connection-test provider so that a sign-in made in one
+place is remembered for all of them; `null` (tests, or no sign-in facilities) leaves server sources with only
+what NuGet itself supplies.
+
 #### Key Methods
 
 **Constructor**: Populates `RepoCards` from the loaded settings.
 
 - *Parameters*: `AppSettings settings`, `StartupOptions? startupOptions = null`,
-  `string? configDirectory = null`.
+  `string? configDirectory = null`, `PackageCredentialContext? credentials = null`.
 - *Preconditions*: `settings` is not null.
 - *Postconditions*: One `RepoCardViewModel` exists per `RecentRepo` in `settings.RecentRepos`;
   each card's cheap refresh (`RefreshCheap`) has run; `DisplayedRepoCards` reflects the
-  initial sort/filter (`AgentControl-MainWindowViewModel-PopulateRecentRepos`).
+  initial sort/filter (`AgentControl-MainWindowViewModel-PopulateRecentRepos`). No package source
+  has been read (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`).
 
 Only the cheap per-card checks run eagerly at construction — the working-tree dirty check is
 deferred/lazy, per architecture.md's repo-fact caching strategy, so startup stays fast even
 with many tracked repos.
+
+**BeginUpgradeRefresh**: Starts checking every card's upgrade availability in the background.
+
+- *Returns*: A task that completes when the checks have finished (the window ignores it; tests
+  await it).
+- *Postconditions*: Each card's `RefreshUpgradeStatusAsync` runs a few cards at a time, so a slow or
+  unreachable source delays only the cards pinned to it, and a check still running for earlier
+  settings is cancelled. The window calls it once it is shown; `AddRepo` checks the new card's
+  upgrade status the same way, and `ApplySettings` starts a new round against the new sources
+  (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`).
 
 **AddRepo**: Adds a repository to the recent-repos list.
 
@@ -87,8 +103,15 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
 - *Returns*: `void`.
 - *Preconditions*: `updated` is not null.
 - *Postconditions*: The live settings instance is replaced (preserving the existing recent-
-  repos list, since `SettingsWindowViewModel` never owns it), persisted, the shared
-  `PackageVersionCache` is invalidated, and every card's cheap refresh re-runs. A present card
+  repos list, since `SettingsWindowViewModel` never owns it) only after the candidate has been
+  persisted successfully — if the write fails, the previous instance stays live, so a later save
+  (favorite, launch) can never persist a rejected candidate and the exception reaches the caller to
+  show; the shared
+  `PackageVersionCache` is invalidated for each package source that was edited or removed (the
+  sources before and after are compared by alias and by `PackageSourceDefinition.IsEquivalentTo`;
+  unchanged sources keep their cached results)
+  (`AgentControl-MainWindowViewModel-InvalidateChangedSources`), and every card's cheap refresh
+  re-runs. A present card
   is additionally given a fresh Git status check (via `RefreshDirtyStatus`) when either it
   reappeared (was missing, now present) during this call, so it is not left showing a "not yet
   checked" state indefinitely, or `GitExecutablePath` itself changed, so a clean/dirty result
@@ -97,6 +120,12 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
   did not change only gets the cheap refresh, avoiding a synchronous `git status` call — which
   `GitClient` runs with no timeout — for every tracked repo on every settings save
   (`AgentControl-MainWindowViewModel-ApplySettings`).
+
+**CreateConnectionTestProvider**: Creates the `NuGetSourceProvider` that the settings window's
+**Test connection** lists versions through for a source being edited, with the same credential facilities
+and cache location the cards use, so a sign-in made during a test is remembered for the session and not
+asked for again when a package is selected (`AgentControl-MainWindowViewModel-ConnectionTestProvider`).
+`MainWindow` passes it to `SettingsWindowViewModel` as the provider factory.
 
 **UpdateDisplayedRepoCards** (private): Recomputes `DisplayedRepoCards` from `RepoCards` — a
 case-insensitive substring match against `FilterText` on repo name or path
@@ -109,7 +138,9 @@ by `LastLaunchedUtc` descending with nulls last, stable otherwise
 #### Error Handling
 
 `AddRepo` throws `ArgumentException` for a null, empty, or whitespace `repoPath`.
-`RemoveRepo`/`ApplySettings` throw `ArgumentNullException` for a null argument. `SaveSettings`
+`RemoveRepo`/`ApplySettings` throw `ArgumentNullException` for a null argument, and `ApplySettings`
+throws `InvalidOperationException` before adopting anything when a source location embeds a
+credential or when the settings file cannot be written, leaving the current settings in place. `SaveSettings`
 propagates `InvalidOperationException` from `SettingsStore.Save` if the settings file cannot
 be written. `TryLoadPin` (private) catches `InvalidOperationException` from `RepoPinStore.Load`
 and returns `null`, so a corrupt or unreadable pin file never prevents `AddRepo` from
@@ -123,11 +154,14 @@ succeeding.
   newly-added repo.
 - **SettingsStore** (`Settings` subsystem) — `SaveSettings` persists the live `AppSettings`.
 - **PackageVersionCache** (`AgentPackageManagement` subsystem) — shared across all cards;
-  invalidated by `ApplySettings` when the package source may have changed.
+  invalidated per source by `ApplySettings` when a package source was edited or removed.
+- **PackageCredentialContext** (`PackageCredentials` subsystem) — the session credentials and sign-in
+  prompt it holds and passes on; **NuGetSourceProvider** (`AgentPackageManagement`) — created by
+  `CreateConnectionTestProvider`.
 
 #### Callers
 
-- **App** — constructs `MainWindowViewModel` in `OnFrameworkInitializationCompleted` and
-  assigns it as `MainWindow.DataContext`.
+- **App** — constructs `MainWindowViewModel` in `OnFrameworkInitializationCompleted`, passing the
+  process-wide `PackageCredentialContext`, and assigns it as `MainWindow.DataContext`.
 - **MainWindow** (code-behind) — calls `AddRepo`, `RemoveRepo`, and reads `Settings` to open
-  `SettingsWindow`.
+  `SettingsWindow`, passing `CreateConnectionTestProvider` as its provider factory.

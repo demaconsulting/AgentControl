@@ -2,7 +2,7 @@
 # Software Unit Requirements for the RepoPinStore Class
 #
 # RepoPinStore loads and saves a repo's `.agentcontrol.json` pin file, recording the pinned
-# agent package name and version for that repo.
+# agent package name, version and source alias for that repo.
 
 sections:
   - title: RepoPinStore Unit Requirements
@@ -30,3 +30,60 @@ sections:
         tests:
           - RepoPinStore_Save_ExistingPinFile_OverwritesWithNewValues
           - RepoPinStore_Save_NullPin_ThrowsArgumentNullException
+
+      - id: AgentControl-RepoPinStore-SourceAlias
+        title: >-
+          The RepoPinStore class shall write the pin file with a schema version and the alias
+          of the pinned package's source, replacing the file atomically, and shall read the
+          alias back.
+        justification: |
+          A pin is only meaningful together with the source it came from, and a failed write
+          must never leave a half-written pin file that loses the repo's pin.
+        tests:
+          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion2AndRoundTripsSource
+          - RepoPinStore_Load_CamelCasePropertyNames_AreRead
+          - RepoPinStore_Save_CorruptExistingFile_IsReplacedAndLeavesNoTemporaryFile
+
+      - id: AgentControl-RepoPinStore-LegacyV1
+        title: >-
+          The RepoPinStore class shall read a pin file that has no schema version and no source
+          as a pin to the source named Default, keeping its other values.
+        justification: |
+          Repos pinned before sources existed must keep working without a migration step; they
+          were all pinned from the single package folder, which becomes the Default source.
+        tests:
+          - RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource
+          - RepoPinStore_Load_LegacyPinFileMissingAgentsMdTemplateDeclinedField_DefaultsToFalse
+
+      - id: AgentControl-RepoPinStore-RejectUnnamedSource
+        title: >-
+          The RepoPinStore class shall reject a pin file of the current schema version that
+          names no source, instead of reading it as a pin to the source named Default.
+        justification: |
+          Only a pin written before sources existed may fall back to the Default source; a
+          current-schema pin that names none is malformed, and resolving it against a source the
+          pin never named could supply a same-named package from a different source.
+        tests:
+          - RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault
+
+      - id: AgentControl-RepoPinStore-PreserveUnknownFields
+        title: >-
+          The RepoPinStore class shall keep, when it rewrites a pin file, any properties of the
+          existing file that it does not model, whether or not the caller loaded the pin first.
+        justification: |
+          A pin file may be shared with other versions of the tool that add fields; rewriting it
+          must not silently strip them.
+        tests:
+          - RepoPinStore_Save_UnknownProperties_ArePreserved
+
+      - id: AgentControl-RepoPinStore-RejectNewerSchema
+        title: >-
+          The RepoPinStore class shall reject a pin file that declares a newer schema version
+          than it supports, with a message telling the user to update, and shall leave such a
+          file unchanged instead of overwriting it.
+        justification: |
+          Fields of a newer schema may mean something different; interpreting them, or
+          overwriting the file, could lose or corrupt a pin written by a newer tool version.
+        tests:
+          - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage
+          - RepoPinStore_Save_ExistingNewerSchemaFile_ThrowsAndLeavesFileUnchanged

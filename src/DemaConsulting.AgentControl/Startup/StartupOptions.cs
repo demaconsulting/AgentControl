@@ -36,7 +36,8 @@ namespace DemaConsulting.AgentControl.Startup;
 internal sealed class StartupOptions
 {
     /// <summary>
-    ///     Gets the configuration directory override, or <see langword="null"/> if the default
+    ///     Gets the configuration directory override as a full (absolute) path, resolved at parse
+    ///     time against the launch-time current directory, or <see langword="null"/> if the default
     ///     <c>%APPDATA%\AgentControl\</c> (via <see cref="Environment.SpecialFolder.ApplicationData"/>)
     ///     should be used.
     /// </summary>
@@ -95,7 +96,10 @@ internal sealed class StartupOptions
             switch (arg)
             {
                 case "--config-dir":
-                    configDirectory = GetRequiredValue(arg, args, ref index);
+                    // Resolve once, against the launch-time current directory, so no later code
+                    // can ever interpret the override relative to a different directory (such as
+                    // a target repo). Path.GetFullPath performs no I/O.
+                    configDirectory = Path.GetFullPath(GetRequiredValue(arg, args, ref index));
                     break;
 
                 case "--git-path":

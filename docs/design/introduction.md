@@ -27,6 +27,7 @@ OTS items:
 - **BuildMark**: integration and usage design.
 - **FileAssert**: integration and usage design.
 - **FlaUI**: integration and usage design.
+- **NuGetCaching**: integration and usage design.
 - **Pandoc**: integration and usage design.
 - **ReqStream**: integration and usage design.
 - **ReviewMark**: integration and usage design.
@@ -50,8 +51,14 @@ The software structure is modeled in SysML2 under `docs/sysml2/` and rendered to
 below by SysML2Tools as part of the build pipeline. AI agents should query the SysML2 model
 directly (see the `sysml2tools-query` skill) rather than parsing this diagram or the prose
 elsewhere in this document. The model captures the shipped system's runtime composition only;
-the OTS items listed in Scope above are build-time/pipeline tooling, documented separately
-(see `docs/design/ots.md`) rather than modeled as SysML2 parts.
+the OTS items that ship inside the application (Avalonia, Serilog, and NuGetCaching) are modeled
+as OTS parts in `docs/sysml2/model/ots.sysml`, while the remaining OTS items in Scope above are
+build-time/pipeline tooling, documented separately (see `docs/design/ots.md`) without SysML2
+parts. The system has eleven subsystems: `LauncherUI`, `AgentPackageManagement`,
+`PackageCredentials` (credentials for package servers), `RepoSync`, `RepoConfig`, `AgentToolLauncher`,
+`GitIntegration`, `Settings`, `Logging`, `Startup` and `Utilities`, plus the top-level `Program` unit. Of
+the units, `GitCredentialClient` (in `GitIntegration`) and `SignatureVerificationSupport` (in
+`AgentPackageManagement`) belong to the package-authenticity and saved-sign-in features.
 
 ![Software Structure](SoftwareStructureView.svg)
 
@@ -59,18 +66,29 @@ the OTS items listed in Scope above are build-time/pipeline tooling, documented 
 
 - **src/** - source files and projects
   - **DemaConsulting.AgentControl/** - main Avalonia desktop application source
-    - **LauncherUI/** - main window, repo cards, package-selection and settings windows
-    - **AgentPackageManagement/** - package discovery and version comparison
-    - **RepoSync/** - package zip extraction and release-notes viewing
-    - **RepoConfig/** - per-repo pin file persistence
+    - **LauncherUI/** - main window, repo cards, package-selection, settings, package-source editor
+      (including the signature options and "Forget saved sign-in") and sign-in windows
+    - **AgentPackageManagement/** - package source model, source providers (zip folder, NuGet
+      folder and server) and registry, package discovery, version comparison, and the platform
+      check for package-signature verification
+    - **PackageCredentials/** - credentials for package servers: server origin, in-memory session
+      store, per-operation credential callback, the contract of the user's own credential store,
+      and log redaction
+    - **RepoSync/** - package extraction (zip or unpacked NuGet package folder) and
+      release-notes viewing
+    - **RepoConfig/** - per-repo pin file persistence (package, version and source alias)
     - **AgentToolLauncher/** - shell detection and agent-tool process launching
-    - **GitIntegration/** - git status/pull/branch queries
-    - **Settings/** - application-wide settings persistence
+    - **GitIntegration/** - git status/pull/branch queries and the user's Git credential helper
+      (saved package-feed sign-ins)
+    - **Settings/** - application-wide settings persistence (including the package sources)
     - **Logging/** - diagnostic file logging setup
     - **Startup/** - startup-argument parsing
     - **Utilities/** - shared utilities subsystem
   - **DemaConsulting.AgentControl.Msi/** - WiX Toolset MSI installer project
 - **test/** - test projects
+  - **DemaConsulting.AgentControl.Tests/** - unit, subsystem and headless-window tests, plus test support
+    (an in-process NuGet V3 mock feed, a real signed-package fixture, stub and real git credential
+    helpers, fake credential prompt and remembered-credential store, list logger)
   - **DemaConsulting.AgentControl.UiTests/** - FlaUI end-to-end UI test project
 
 ## Document Conventions

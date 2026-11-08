@@ -38,24 +38,21 @@ namespace DemaConsulting.AgentControl.UiTests;
 ///     <c>try</c>/<c>finally</c>) to guarantee the spawned AgentControl process, any shell process
 ///     it in turn launches for the agent-tool command (see <c>AgentToolLauncher</c>'s
 ///     <c>-NoExit</c>/<c>/K</c> "leave the window open" behavior, which this context must
-///     specifically hunt down and kill since the shell is not a direct child FlaUI tracks), and
-///     every temp directory are cleaned up even if the test fails an assertion or throws.
+///     clean up since the shell is not a child FlaUI tracks), and every temp directory are
+///     cleaned up even if the test fails an assertion or throws. Shell cleanup is strictly
+///     scoped to this context's own launch (see <see cref="LaunchedShellCleaner"/>): unrelated
+///     shells and terminal tabs are never touched.
 /// </remarks>
 internal sealed class AgentControlTestContext : IDisposable
 {
-    /// <summary>
-    ///     Candidate process names for the shell <c>AgentToolLauncher</c> may launch to run the
-    ///     configured agent-tool command; used to hunt down and kill leftover windows this
-    ///     context's own launch is responsible for.
-    /// </summary>
-    private static readonly string[] ShellProcessNames = ["pwsh", "powershell", "cmd"];
-
-    private readonly HashSet<int> _preExistingShellProcessIds;
+    private readonly LaunchedShellCleaner _shellCleaner;
+    private int? _appProcessId;
+    private DateTime _appStartTime;
     private bool _disposed;
 
     /// <summary>
     ///     Initializes a new isolated test context: creates temp directories, writes
-    ///     <c>settings.json</c>, and records a baseline of already-running shell processes.
+    ///     <c>settings.json</c>, and prepares the scoped shell cleaner.
     /// </summary>
     /// <param name="packageSourcePath">The package source directory to configure, or
     ///     <see langword="null"/> to leave it unconfigured.</param>
@@ -66,10 +63,24 @@ internal sealed class AgentControlTestContext : IDisposable
     ///     pin file when <paramref name="pinnedPackageName"/> is supplied, since
     ///     <c>RepoCardViewModel.Refresh()</c> always re-reads the pin from disk), or
     ///     <see langword="null"/>.</param>
+    /// <param name="nuGetFeedPath">A NuGet package folder to configure as the additional
+    ///     <c>Feed</c> source, or <see langword="null"/> for none.</param>
+    /// <param name="nuGetPackageIds">The package IDs offered by the <c>Feed</c> source.</param>
+    /// <param name="pinnedSource">The source alias to record in the repo's pin file, or
+    ///     <see langword="null"/> to write a pin that names no source.</param>
+    /// <param name="nuGetRequireSigned">Whether the <c>Feed</c> source requires signed
+    ///     packages.</param>
+    /// <param name="nuGetServerIndexUrl">The service-index address of a NuGet package server to
+    ///     configure as the additional <c>Server</c> source, or <see langword="null"/> for none.</param>
     public AgentControlTestContext(
         string? packageSourcePath = null,
         string? pinnedPackageName = null,
-        string? pinnedPackageVersion = null)
+        string? pinnedPackageVersion = null,
+        string? nuGetFeedPath = null,
+        IReadOnlyList<string>? nuGetPackageIds = null,
+        string? pinnedSource = null,
+        bool nuGetRequireSigned = false,
+        string? nuGetServerIndexUrl = null)
     {
         var root = Directory.CreateTempSubdirectory("AgentControlUiTests-");
         RootDirectory = root.FullName;
@@ -87,14 +98,18 @@ internal sealed class AgentControlTestContext : IDisposable
             packageSourcePath,
             RepoPath,
             pinnedPackageName,
-            pinnedPackageVersion);
+            pinnedPackageVersion,
+            nuGetFeedPath,
+            nuGetPackageIds,
+            nuGetRequireSigned,
+            nuGetServerIndexUrl);
 
         if (pinnedPackageName is not null && pinnedPackageVersion is not null)
         {
-            TestRepoPinWriter.Write(RepoPath, pinnedPackageName, pinnedPackageVersion);
+            TestRepoPinWriter.Write(RepoPath, pinnedPackageName, pinnedPackageVersion, pinnedSource);
         }
 
-        _preExistingShellProcessIds = SnapshotShellProcessIds();
+        _shellCleaner = new LaunchedShellCleaner(argLoggerStubExe, LogCleanup);
     }
 
     /// <summary>
@@ -116,6 +131,13 @@ internal sealed class AgentControlTestContext : IDisposable
     ///     Gets the file the arg-logger stub appends its invocation records to.
     /// </summary>
     public string ArgLoggerOutputFile { get; }
+
+    /// <summary>
+    ///     Gets or sets the file backing the arg-logger stub's emulated Git credential helper, or
+    ///     <see langword="null"/> (the default) for a stub that reports no helper. Set before
+    ///     <see cref="Launch"/>; a pre-existing file acts as sign-ins saved in an earlier session.
+    /// </summary>
+    public string? CredentialStoreFile { get; set; }
 
     /// <summary>
     ///     Gets the launched FlaUI <see cref="Application"/>, or <see langword="null"/> before
@@ -147,9 +169,27 @@ internal sealed class AgentControlTestContext : IDisposable
         startInfo.ArgumentList.Add("--config-dir");
         startInfo.ArgumentList.Add(ConfigDirectory);
         startInfo.EnvironmentVariables["ARGLOGGER_OUTPUT_FILE"] = ArgLoggerOutputFile;
+        if (CredentialStoreFile is not null)
+        {
+            // Opt in to the arg-logger stub's emulation of the user's Git credential helper
+            startInfo.EnvironmentVariables["ARGLOGGER_CREDENTIAL_STORE"] = CredentialStoreFile;
+        }
+
+        // NuGet caches service indexes on disk by URL; a private cache per launch keeps a feed that
+        // a test starts on a reused port from being answered with a previous run's responses
+        startInfo.EnvironmentVariables["NUGET_HTTP_CACHE_PATH"] = Path.Combine(RootDirectory, "nuget-http-cache");
+
+        // Record which terminal windows already exist so only windows created by this launch
+        // can ever be considered for cleanup.
+        Automation = new UIA3Automation();
+        _shellCleaner.CaptureBaseline(Automation);
 
         App = Application.Launch(startInfo);
-        Automation = new UIA3Automation();
+        _appProcessId = App.ProcessId;
+        using (var appProcess = Process.GetProcessById(App.ProcessId))
+        {
+            _appStartTime = appProcess.StartTime;
+        }
 
         var mainWindow = Retry.WhileNull(
             () => App.GetMainWindow(Automation),
@@ -192,9 +232,33 @@ internal sealed class AgentControlTestContext : IDisposable
     }
 
     /// <summary>
+    ///     Finds a currently-open top-level window that contains an element with the given
+    ///     AutomationId, polling until found or the timeout elapses. Searching by a descendant
+    ///     rather than by title is reliable for modal dialogs, whose title is not always a
+    ///     dependable match target through UI Automation.
+    /// </summary>
+    /// <param name="automationId">The AutomationId of an element the wanted window contains.</param>
+    /// <param name="timeout">Maximum time to wait.</param>
+    /// <returns>The matching window, or <see langword="null"/> if none appeared in time.</returns>
+    public Window? WaitForWindowWithDescendant(string automationId, TimeSpan timeout)
+    {
+        if (App is null || Automation is null)
+        {
+            return null;
+        }
+
+        return Retry.WhileNull(
+            () => App.GetAllTopLevelWindows(Automation)
+                .FirstOrDefault(window => window.FindFirstDescendant(cf => cf.ByAutomationId(automationId)) is not null),
+            timeout: timeout,
+            interval: TimeSpan.FromMilliseconds(200)).Result;
+    }
+
+    /// <summary>
     ///     Closes/kills the launched AgentControl process, disposes the automation instance,
-    ///     kills any new shell process spawned by the agent-tool launch, and best-effort deletes
-    ///     this context's temp directory tree.
+    ///     terminates only the shell (and stub) spawned by this context's agent-tool launch,
+    ///     closes the terminal window that launch left behind, and best-effort deletes this
+    ///     context's temp directory tree.
     /// </summary>
     public void Dispose()
     {
@@ -226,7 +290,12 @@ internal sealed class AgentControlTestContext : IDisposable
         App?.Dispose();
         Automation?.Dispose();
 
-        KillNewShellProcesses();
+        // Only after the app is gone: terminate exactly the shell (and stub) it launched and
+        // close the terminal window left behind - see LaunchedShellCleaner for the rationale.
+        if (_appProcessId is { } appProcessId)
+        {
+            _shellCleaner.Cleanup(appProcessId, _appStartTime);
+        }
 
         try
         {
@@ -239,48 +308,19 @@ internal sealed class AgentControlTestContext : IDisposable
     }
 
     /// <summary>
-    ///     Kills any shell process (see <see cref="ShellProcessNames"/>) that started after this
-    ///     context's construction, i.e. one this context's AgentControl launch is responsible for
-    ///     spawning via the agent-tool "Launch" action.
+    ///     Forwards a cleanup diagnostic to the xUnit test output (visible with diagnostic
+    ///     messages enabled), never failing the test if no test context is available.
     /// </summary>
-    private void KillNewShellProcesses()
+    /// <param name="message">The diagnostic message.</param>
+    private static void LogCleanup(string message)
     {
-        foreach (var processId in SnapshotShellProcessIds())
+        try
         {
-            if (_preExistingShellProcessIds.Contains(processId))
-            {
-                continue;
-            }
-
-            try
-            {
-                using var process = Process.GetProcessById(processId);
-                process.Kill(entireProcessTree: true);
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or ArgumentException)
-            {
-                // Process may have already exited on its own, or we may lack permission to kill
-                // a process owned by another session - either way, best-effort only.
-            }
+            TestContext.Current.SendDiagnosticMessage(message);
         }
-    }
-
-    /// <summary>
-    ///     Snapshots the process IDs of every currently-running candidate shell process.
-    /// </summary>
-    /// <returns>The set of matching process IDs.</returns>
-    private static HashSet<int> SnapshotShellProcessIds()
-    {
-        var ids = new HashSet<int>();
-        foreach (var name in ShellProcessNames)
+        catch (Exception ex) when (ex is InvalidOperationException or NullReferenceException)
         {
-            foreach (var process in Process.GetProcessesByName(name))
-            {
-                ids.Add(process.Id);
-                process.Dispose();
-            }
+            // Diagnostics are a convenience only; swallow if the xUnit context is unavailable.
         }
-
-        return ids;
     }
 }

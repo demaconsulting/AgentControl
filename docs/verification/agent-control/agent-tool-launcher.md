@@ -37,4 +37,8 @@ launch path is additionally verified end-to-end by the FlaUI test
 `windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory`, cited directly
 at the subsystem level, covering `AgentControl-AgentToolLauncherSubsystem-Launch` (children:
 `AgentControl-ShellDetector-DetectWindows`, `AgentControl-ShellDetector-DetectPosix`,
-`AgentControl-AgentToolLauncher-BuildCommand`, `AgentControl-AgentToolLauncher-Validation`).
+`AgentControl-AgentToolLauncher-BuildCommand`, `AgentControl-AgentToolLauncher-QuotedPathInvocation`,
+`AgentControl-AgentToolLauncher-Validation`). The FlaUI test configures a custom command made
+of the quoted arg-logger stub path plus a marker argument and asserts that the stub recorded
+an invocation with exactly that marker (which git invocations never carry) in the repo
+working directory, proving the quoted command was executed by the shell rather than echoed.

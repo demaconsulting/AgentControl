@@ -24,7 +24,10 @@ using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
+using DemaConsulting.AgentControl.Startup;
+using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 using DemaConsulting.AgentControl.Tests.GitIntegration;
+using Material.Icons;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
@@ -51,7 +54,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     {
         // Arrange: a repo with a pin file already written
         var repoRoot = CreateTempDirectory();
-        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
         var card = CreateCard(repoRoot, null, null, new AppSettings());
 
         // Act: refresh
@@ -300,7 +303,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     afterward.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage()
+    public async Task RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage()
     {
         // Arrange: a git stub reporting a clean tree and a successful pull
         var stub = GitStub.Create(statusOutput: "", pullOutput: "Already up to date.", pullExitCode: 0);
@@ -308,10 +311,10 @@ public sealed class RepoCardViewModelTests : IDisposable
         var repoRoot = CreateTempDirectory();
         var settings = new AppSettings { GitExecutablePath = stub.Path };
         var card = CreateCard(repoRoot, null, null, settings);
-        card.Refresh();
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
 
         // Act: pull
-        card.PullCommand.Execute(null);
+        await card.PullCommand.ExecuteAsync();
 
         // Assert: the status message reflects success
         Assert.Equal("Pull succeeded.", card.StatusMessage);
@@ -321,7 +324,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     Test that Pull surfaces a failed pull via the status message rather than throwing.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_PullCommand_FailedPull_SetsFailureStatusMessage()
+    public async Task RepoCardViewModel_PullCommand_FailedPull_SetsFailureStatusMessage()
     {
         // Arrange: a git stub reporting a failed pull
         var stub = GitStub.Create(pullExitCode: 1, pullError: "CONFLICT: merge conflict");
@@ -331,11 +334,12 @@ public sealed class RepoCardViewModelTests : IDisposable
         var card = CreateCard(repoRoot, null, null, settings);
 
         // Act: pull
-        card.PullCommand.Execute(null);
+        await card.PullCommand.ExecuteAsync();
 
         // Assert: the failure is surfaced via the status message
         Assert.Contains("Pull failed", card.StatusMessage, StringComparison.Ordinal);
         Assert.Contains("CONFLICT", card.StatusMessage, StringComparison.Ordinal);
+        Assert.True(card.HasStatusMessage);
     }
 
     /// <summary>
@@ -343,7 +347,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     (Custom selected with no command configured).
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred()
+    public async Task RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred()
     {
         // Arrange: Custom agent tool with no command configured, but pinned/synced so the
         // ensure-synced-before-launch check passes and the agent-command check is reached.
@@ -355,7 +359,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         card.ErrorOccurred += (_, message) => capturedError = message;
 
         // Act: launch
-        card.LaunchCommand.Execute(null);
+        await card.LaunchCommand.ExecuteAsync();
 
         // Assert: an error was raised rather than attempting to launch an empty command
         Assert.NotNull(capturedError);
@@ -367,7 +371,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     ReleaseNotesReady with the new package's release notes.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesPinAndRaisesReleaseNotesReady()
+    public async Task RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesPinAndRaisesReleaseNotesReady()
     {
         // Arrange: a repo pinned to 1.0.0 and a source with a 2.0.0 package containing release notes
         var repoRoot = CreateTempDirectory();
@@ -375,12 +379,12 @@ public sealed class RepoCardViewModelTests : IDisposable
         CreatePackageZip(sourceDir, "contoso-agents", "2.0.0", "## 2.0.0\n\nNew features.");
         var settings = new AppSettings { PackageSourcePath = sourceDir };
         var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings);
-        card.Refresh();
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
         string? capturedReleaseNotes = null;
         card.ReleaseNotesReady += (_, notes) => capturedReleaseNotes = notes;
 
         // Act: upgrade
-        card.UpgradeCommand.Execute(null);
+        await card.UpgradeCommand.ExecuteAsync();
 
         // Assert: the pin file was rewritten and release notes were surfaced
         var pin = RepoPinStore.Load(repoRoot);
@@ -396,7 +400,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     agent folders immediately after a successful extraction.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesGitIgnoreWithManagedFoldersBlock()
+    public async Task RepoCardViewModel_UpgradeCommand_NewerVersionAvailable_UpdatesGitIgnoreWithManagedFoldersBlock()
     {
         // Arrange: a repo pinned to 1.0.0, no pre-existing .gitignore, and a source with a
         // newer package
@@ -405,15 +409,15 @@ public sealed class RepoCardViewModelTests : IDisposable
         CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
         var settings = new AppSettings { PackageSourcePath = sourceDir };
         var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings);
-        card.Refresh();
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
 
         // Act: upgrade
-        card.UpgradeCommand.Execute(null);
+        await card.UpgradeCommand.ExecuteAsync();
 
         // Assert: the repo's .gitignore now covers the four managed agent folders
         var gitIgnorePath = Path.Combine(repoRoot, ".gitignore");
         Assert.True(File.Exists(gitIgnorePath));
-        var content = File.ReadAllText(gitIgnorePath);
+        var content = await File.ReadAllTextAsync(gitIgnorePath, TestContext.Current.CancellationToken);
         Assert.Contains("# Added by AgentControl - agent package folders", content, StringComparison.Ordinal);
         Assert.Contains(".github/agents/", content, StringComparison.Ordinal);
         Assert.Contains(".github/standards/", content, StringComparison.Ordinal);
@@ -426,7 +430,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     configured.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_UpgradeCommand_NoPackageSourceConfigured_RaisesErrorOccurred()
+    public async Task RepoCardViewModel_UpgradeCommand_NoPackageSourceConfigured_RaisesErrorOccurred()
     {
         // Arrange: a pinned repo with no package source configured
         var repoRoot = CreateTempDirectory();
@@ -435,7 +439,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         card.ErrorOccurred += (_, message) => capturedError = message;
 
         // Act: upgrade
-        card.UpgradeCommand.Execute(null);
+        await card.UpgradeCommand.ExecuteAsync();
 
         // Assert: an error was raised rather than an unhandled exception
         Assert.NotNull(capturedError);
@@ -609,7 +613,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     LastLaunchedUtc and raises LaunchRecorded.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded()
+    public async Task RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded()
     {
         // Arrange: a resolvable custom agent-tool command using a real executable (cmd/sh), and a
         // pinned/synced repo so the ensure-synced-before-launch check passes.
@@ -626,7 +630,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.Null(card.LastLaunchedUtc);
 
         // Act
-        card.LaunchCommand.Execute(null);
+        await card.LaunchCommand.ExecuteAsync();
 
         // Assert
         Assert.True(raised);
@@ -736,25 +740,25 @@ public sealed class RepoCardViewModelTests : IDisposable
 
     /// <summary>
     ///     Test that executing SelectPackageCommand with a source configured raises
-    ///     SelectPackageRequested exactly once, carrying the configured source path.
+    ///     SelectPackageRequested exactly once, carrying the alias of the configured source (the
+    ///     legacy single path migrates to the Default source).
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourcePath()
+    public void RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias()
     {
         // Arrange
         var repoRoot = CreateTempDirectory();
         var sourceDir = CreateTempDirectory();
         var settings = new AppSettings { PackageSourcePath = sourceDir };
         var card = CreateCard(repoRoot, null, null, settings);
-        var raisedWith = new List<string>();
-        card.SelectPackageRequested += (_, source) => raisedWith.Add(source);
+        var raisedCount = 0;
+        card.SelectPackageRequested += (_, _) => raisedCount++;
 
         // Act
         card.SelectPackageCommand.Execute(null);
 
         // Assert
-        var raisedSource = Assert.Single(raisedWith);
-        Assert.Equal(sourceDir, raisedSource);
+        Assert.Equal(1, raisedCount);
     }
 
     /// <summary>
@@ -1005,7 +1009,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Arrange: a never-pinned repo with no AGENTS.md but a pre-existing pin file recording a
         // prior decline, and a package with an AGENTS.md template
         var repoRoot = CreateTempDirectory();
-        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = string.Empty, Version = string.Empty, AgentsMdTemplateDeclined = true });
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Default", PackageName = string.Empty, Version = string.Empty, AgentsMdTemplateDeclined = true });
         var sourceDir = CreateTempDirectory();
         CreatePackageZip(sourceDir, "contoso-agents", "1.0.0", agentsMdTemplate: "# AGENTS\n\nCustomize me.");
         var settings = new AppSettings { PackageSourcePath = sourceDir };
@@ -1026,7 +1030,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     ApplySelectedPackage.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_UpgradeCommand_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent()
+    public async Task RepoCardViewModel_UpgradeCommand_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent()
     {
         // Arrange: a repo pinned to an older version, with no AGENTS.md, and a newer package at
         // the source that includes an AGENTS.md template
@@ -1039,7 +1043,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         card.AgentsMdTemplateOfferRequested += (_, template) => capturedTemplate = template;
 
         // Act
-        card.UpgradeCommand.Execute(null);
+        await card.UpgradeCommand.ExecuteAsync();
 
         // Assert: the offer is raised with the template's content
         Assert.Equal("# AGENTS\n\nCustomize me.", capturedTemplate);
@@ -1387,7 +1391,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, true)]
-    public void RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches(bool withPin, bool withUnreachableSource)
+    public async Task RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches(bool withPin, bool withUnreachableSource)
     {
         // Arrange: a resolvable custom agent-tool command using a real executable (cmd/sh), and a
         // repo whose ensure-synced-before-launch check will either find no pin at all, or a pin
@@ -1407,13 +1411,979 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.Null(card.LastLaunchedUtc);
 
         // Act
-        card.LaunchCommand.Execute(null);
+        await card.LaunchCommand.ExecuteAsync();
 
         // Assert: the process was still spawned and the launch recorded, despite the sync attempt
         // finding nothing to do (no pin) or failing outright (pinned package missing from source)
         Assert.True(raised);
         Assert.NotNull(card.LastLaunchedUtc);
     }
+
+    /// <summary>
+    ///     Test that applying a package records the alias of the source it came from in the repo's
+    ///     pin (schema version 2) and on the card; a legacy single path is the Default source.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_LegacySinglePath_PinRecordsDefaultSourceAlias()
+    {
+        // Arrange: a never-pinned repo and a legacy single-folder configuration
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        var card = CreateCard(repoRoot, null, null, new AppSettings { PackageSourcePath = sourceDir });
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert
+        var pin = RepoPinStore.Load(repoRoot);
+        Assert.NotNull(pin);
+        Assert.Equal(RepoPin.CurrentSchemaVersion, pin.SchemaVersion);
+        Assert.Equal("Default", pin.Source);
+        Assert.Equal("Default", card.PinnedSource);
+    }
+
+    /// <summary>
+    ///     Test that a selection made from a named source records that alias and extracts that
+    ///     source's content, not another source's package of the same name and version.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent()
+    {
+        // Arrange: two sources offering the same package name and version with different content
+        var repoRoot = CreateTempDirectory();
+        var dirA = CreateTempDirectory();
+        var dirB = CreateTempDirectory();
+        CreatePackageZip(dirA, "contoso-agents", "1.0.0", marker: "content from A");
+        CreatePackageZip(dirB, "contoso-agents", "1.0.0", marker: "content from B");
+        var settings = new AppSettings { Sources = [ZipSource("A", dirA), ZipSource("B", dirB)] };
+        var card = CreateCard(repoRoot, null, null, settings);
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0", "B");
+
+        // Assert
+        Assert.Equal("B", RepoPinStore.Load(repoRoot)?.Source);
+        Assert.Equal("content from B", File.ReadAllText(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
+    }
+
+    /// <summary>
+    ///     Test that a pin naming a source that is not configured puts the card in an error state
+    ///     - no upgrade is offered and the problem names the source - even though another
+    ///     configured source offers a higher version of the same package.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade()
+    {
+        // Arrange: pinned to source "Gone", which is not configured; "Other" has a newer version
+        var repoRoot = CreateTempDirectory();
+        var otherDir = CreateTempDirectory();
+        CreatePackageZip(otherDir, "contoso-agents", "9.0.0");
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Gone", PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [ZipSource("Other", otherDir)] };
+        var recentRepo = new RecentRepo { Path = repoRoot };
+        var card = new RepoCardViewModel(recentRepo, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert: error state, no fallback to "Other"
+        Assert.True(card.HasSourceProblem);
+        Assert.Contains("'Gone'", card.SourceProblem, StringComparison.Ordinal);
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.Equal("Package source problem", card.SourceProblemChipText);
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Null(card.LatestAvailableVersion);
+        Assert.Equal("Gone", card.PinnedSource);
+    }
+
+    /// <summary>
+    ///     Test that a repo whose folder is gone offers no upgrade, even when an upgrade check runs
+    ///     (the package chip is hidden for a missing repo, so an upgrade chip alone would mean
+    ///     nothing).
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshUpgradeStatusAsync_RepoFolderMissing_OffersNoUpgrade()
+    {
+        // Arrange: a pinned repo whose folder does not exist, with a newer version available
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var missingRoot = Path.Combine(CreateTempDirectory(), "gone");
+        var recentRepo = new RecentRepo
+        {
+            Path = missingRoot,
+            PinnedPackageName = "contoso-agents",
+            PinnedPackageVersion = "1.0.0",
+            PinnedSource = "Default"
+        };
+        var settings = new AppSettings { Sources = [ZipSource("Default", sourceDir)] };
+        var card = new RepoCardViewModel(recentRepo, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+
+        // Act
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.True(card.IsMissing);
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Null(card.LatestAvailableVersion);
+        Assert.False(card.HasPinnedPackage);
+    }
+
+    /// <summary>
+    ///     Test that an action's outcome is exposed for the card to show, and that there is no
+    ///     message to show before any action ran.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_StatusMessage_NoActionYet_HasNoStatusMessage()
+    {
+        // Arrange / Act
+        var card = CreateCard(CreateTempDirectory(), null, null, new AppSettings());
+
+        // Assert
+        Assert.Null(card.StatusMessage);
+        Assert.False(card.HasStatusMessage);
+    }
+
+    /// <summary>
+    ///     Test that applying a package from a source alias that is not configured reports the
+    ///     problem and changes nothing in the repo (no extraction, pin untouched), even though
+    ///     another configured source has the package.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_UnconfiguredSourceAlias_RaisesErrorAndChangesNothing()
+    {
+        // Arrange: pinned to unconfigured "Gone", while "Other" offers a newer version
+        var repoRoot = CreateTempDirectory();
+        var otherDir = CreateTempDirectory();
+        CreatePackageZip(otherDir, "contoso-agents", "9.0.0");
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Gone", PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [ZipSource("Other", otherDir)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+        string? error = null;
+        card.ErrorOccurred += (_, message) => error = message;
+
+        // Act: try to apply the newer package naming the unconfigured source
+        card.ApplySelectedPackage("contoso-agents", "9.0.0", "Gone");
+
+        // Assert: refused with a message naming the missing source; nothing was extracted or re-pinned
+        Assert.NotNull(error);
+        Assert.Contains("'Gone'", error, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(repoRoot, ".github")));
+        Assert.Equal("1.0.0", RepoPinStore.Load(repoRoot)?.Version);
+        Assert.Equal("Gone", RepoPinStore.Load(repoRoot)?.Source);
+    }
+
+    /// <summary>
+    ///     Test that the ensure-synced-before-launch repair fails (without extracting anything)
+    ///     for a pin naming an unconfigured source, instead of repairing from another source.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_EnsureAgentFilesSynced_PinNamesUnconfiguredSource_ReturnsFalseWithoutExtracting()
+    {
+        // Arrange: managed folders missing, pinned to unconfigured "Gone"; "Other" has the package
+        var repoRoot = CreateTempDirectory();
+        var otherDir = CreateTempDirectory();
+        CreatePackageZip(otherDir, "contoso-agents", "1.0.0");
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Gone", PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [ZipSource("Other", otherDir)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+        string? error = null;
+        card.ErrorOccurred += (_, message) => error = message;
+
+        // Act
+        var synced = card.EnsureAgentFilesSyncedBeforeLaunch();
+
+        // Assert
+        Assert.False(synced);
+        Assert.Contains("'Gone'", error, StringComparison.Ordinal);
+        Assert.False(PackageZipExtractor.AllManagedFoldersExist(repoRoot));
+    }
+
+    /// <summary>
+    ///     Test that a pin to the source with the lower version is compared only against that
+    ///     source: another source offering a higher version of the same package name does not make
+    ///     an upgrade appear.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_SamePackageNameInTwoSources_ComparesOnlyAgainstPinnedSource()
+    {
+        // Arrange: A offers 9.0.0, B offers 1.0.0; the repo is pinned to B at 1.0.0
+        var repoRoot = CreateTempDirectory();
+        var dirA = CreateTempDirectory();
+        var dirB = CreateTempDirectory();
+        CreatePackageZip(dirA, "contoso-agents", "9.0.0");
+        CreatePackageZip(dirB, "contoso-agents", "1.0.0");
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "B", PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [ZipSource("A", dirA), ZipSource("B", dirB)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: B's latest is 1.0.0, so no upgrade, and no source problem
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Equal("1.0.0", card.LatestAvailableVersion);
+        Assert.False(card.HasSourceProblem);
+    }
+
+    /// <summary>
+    ///     Test that a version 1 pin file (no source) is resolved against the Default source.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_LegacyV1PinFile_ResolvesAgainstDefaultSource()
+    {
+        // Arrange: a hand-written v1 pin and a legacy-configured source with a newer version
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        await File.WriteAllTextAsync(
+            Path.Combine(repoRoot, ".agentcontrol.json"),
+            """{ "PackageName": "contoso-agents", "Version": "1.0.0" }""",
+            TestContext.Current.CancellationToken);
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot }, () => new AppSettings { PackageSourcePath = sourceDir }, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal("Default", card.PinnedSource);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("2.0.0", card.LatestAvailableVersion);
+    }
+
+    /// <summary>
+    ///     Test that a version 1 pin with no Default source configured is an error state rather
+    ///     than silently using some other source.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Refresh_LegacyV1PinFileAndNoDefaultSource_ShowsSourceProblem()
+    {
+        // Arrange: a v1 pin, but the only configured source is not called Default
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        File.WriteAllText(
+            Path.Combine(repoRoot, ".agentcontrol.json"),
+            """{ "PackageName": "contoso-agents", "Version": "1.0.0" }""");
+        var settings = new AppSettings { Sources = [ZipSource("Mine", sourceDir)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert
+        Assert.True(card.HasSourceProblem);
+        Assert.Contains("'Default'", card.SourceProblem, StringComparison.Ordinal);
+        Assert.False(card.IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that applying a package to a repo whose pin file has unknown fields keeps them, and
+    ///     keeps the AGENTS.md decline flag.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_PinWithUnknownFieldAndDecline_PreservesBoth()
+    {
+        // Arrange: a v2 pin with an unknown field and a recorded decline
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var pinPath = Path.Combine(repoRoot, ".agentcontrol.json");
+        File.WriteAllText(
+            pinPath,
+            """{ "SchemaVersion": 2, "Source": "Default", "PackageName": "contoso-agents", "Version": "1.0.0", "AgentsMdTemplateDeclined": true, "Extra": "kept" }""");
+        var card = CreateCard(repoRoot, null, null, new AppSettings { PackageSourcePath = sourceDir });
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "2.0.0");
+
+        // Assert
+        var json = File.ReadAllText(pinPath);
+        Assert.Contains("\"Extra\": \"kept\"", json, StringComparison.Ordinal);
+        Assert.True(RepoPinStore.Load(repoRoot)?.AgentsMdTemplateDeclined);
+        Assert.Equal("2.0.0", RepoPinStore.Load(repoRoot)?.Version);
+    }
+
+    /// <summary>
+    ///     Test that applying a package to a repo whose pin file was written by a newer AgentControl
+    ///     is refused up front: an error is raised, the pin file is unchanged, and the managed
+    ///     folders are not touched.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_NewerSchemaPinFile_RaisesErrorAndChangesNothing()
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var pinPath = Path.Combine(repoRoot, ".agentcontrol.json");
+        const string newerPin = """{ "SchemaVersion": 7, "PackageName": "contoso-agents", "Version": "1.0.0" }""";
+        File.WriteAllText(pinPath, newerPin);
+        var card = CreateCard(repoRoot, null, null, new AppSettings { PackageSourcePath = sourceDir });
+        string? error = null;
+        card.ErrorOccurred += (_, message) => error = message;
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "2.0.0");
+
+        // Assert
+        Assert.NotNull(error);
+        Assert.Contains("newer", error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(newerPin, File.ReadAllText(pinPath));
+        Assert.False(Directory.Exists(Path.Combine(repoRoot, ".github")));
+    }
+
+    /// <summary>
+    ///     Test that a package selected from a NuGet folder source is extracted into the repo, the
+    ///     pin records the NuGet source's alias, and release notes are raised.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes()
+    {
+        // Arrange: a NuGet folder feed holding an agent package, and a card with isolated NuGet cache
+        var repoRoot = CreateTempDirectory();
+        var feed = CreateTempDirectory();
+        var id = "agentcontrol.test." + Guid.NewGuid().ToString("N");
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "from feed", releaseNotes: "feed notes");
+        var settings = new AppSettings { Sources = [NuGetFolderSource("Feed", feed)] };
+        var card = CreateCardWithIsolatedNuGetCache(repoRoot, settings);
+        string? notes = null;
+        card.ReleaseNotesReady += (_, text) => notes = text;
+
+        // Act
+        card.ApplySelectedPackage(id, "1.0.0", "Feed");
+
+        // Assert
+        var pin = RepoPinStore.Load(repoRoot);
+        Assert.NotNull(pin);
+        Assert.Equal("Feed", pin.Source);
+        Assert.Equal(id, pin.PackageName);
+        Assert.Equal("1.0.0", pin.Version);
+        Assert.Equal("from feed", File.ReadAllText(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
+        Assert.Equal("feed notes", notes);
+    }
+
+    /// <summary>
+    ///     Test that Upgrade for a repo pinned to a NuGet source upgrades to that source's highest
+    ///     version and ensure-synced re-extracts the pinned version when managed folders are missing.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_UpgradeCommand_NuGetFolderSource_UpgradesToHighestVersion()
+    {
+        // Arrange: a repo pinned to 1.0.0 of a NuGet package whose feed also holds 2.0.0
+        var repoRoot = CreateTempDirectory();
+        var feed = CreateTempDirectory();
+        var id = "agentcontrol.test." + Guid.NewGuid().ToString("N");
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "v1");
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "2.0.0", marker: "v2");
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = id, Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [NuGetFolderSource("Feed", feed)] };
+        var card = CreateCardWithIsolatedNuGetCache(repoRoot, settings);
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.IsUpgradeAvailable);
+
+        // Act
+        await card.UpgradeCommand.ExecuteAsync();
+
+        // Assert
+        Assert.Equal("2.0.0", RepoPinStore.Load(repoRoot)?.Version);
+        Assert.Equal(
+            "v2",
+            await File.ReadAllTextAsync(
+                Path.Combine(repoRoot, ".github", "agents", "copilot.md"), TestContext.Current.CancellationToken));
+        Assert.False(card.IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that the agent package chip names the pinned package and version and its tooltip
+    ///     names the source's alias and kind (zip folder), with the source icon of that kind.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip()
+    {
+        // Arrange: a repo pinned to a package from a zip folder source
+        var repoRoot = CreateTempDirectory();
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Contoso", PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [ZipSource("Contoso", CreateTempDirectory())] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert
+        Assert.True(card.HasPinnedPackage);
+        Assert.False(card.ShowNoPackageChip);
+        Assert.Equal("contoso-agents 1.0.0", card.PackageChipText);
+        Assert.Equal(
+            "Agent files: contoso-agents 1.0.0 from source 'Contoso' (zip folder).", card.PackageChipTooltip);
+        Assert.Equal(MaterialIconKind.FolderZip, card.PinnedSourceIcon);
+    }
+
+    /// <summary>
+    ///     Test that a package pinned to a NuGet folder source shows the NuGet folder icon and kind.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_PackageChip_PinnedToNuGetFolderSource_ShowsNuGetFolderIconAndKind()
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "contoso-agents", Version = "2.0.0" });
+        var settings = new AppSettings { Sources = [NuGetFolderSource("Feed", CreateTempDirectory())] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert
+        Assert.Equal(MaterialIconKind.PackageVariant, card.PinnedSourceIcon);
+        Assert.Contains("from source 'Feed' (NuGet folder)", card.PackageChipTooltip, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a package pinned to a source that is not configured shows a question-mark
+    ///     icon and says so in the tooltip, rather than naming another source.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_PackageChip_PinnedSourceNotConfigured_ShowsUnknownSource()
+    {
+        // Arrange: the pin names "Gone", which is not configured
+        var repoRoot = CreateTempDirectory();
+        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Gone", PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [ZipSource("Other", CreateTempDirectory())] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert
+        Assert.Equal(MaterialIconKind.HelpCircleOutline, card.PinnedSourceIcon);
+        Assert.Contains("from source 'Gone' (source not configured)", card.PackageChipTooltip, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a repo with no pin shows the "No agent package" chip and no package chip.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_NoPackageChip_NeverPinnedRepo_ShowsNoPackageChipOnly()
+    {
+        // Arrange
+        var card = CreateCard(CreateTempDirectory(), null, null, new AppSettings());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert
+        Assert.True(card.ShowNoPackageChip);
+        Assert.False(card.HasPinnedPackage);
+        Assert.True(card.SelectPackageCommand.CanExecute(null));
+    }
+
+    /// <summary>
+    ///     Test that a missing repo shows neither the package chip nor the "No agent package" chip,
+    ///     only its folder-missing state.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Chips_MissingRepo_ShowNeitherPackageChip()
+    {
+        // Arrange
+        var missingPath = Path.Combine(Path.GetTempPath(), "agentcontrol_missing_repo_" + Guid.NewGuid());
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = missingPath, PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0" },
+            () => new AppSettings(),
+            new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert
+        Assert.True(card.IsMissing);
+        Assert.False(card.HasPinnedPackage);
+        Assert.False(card.ShowNoPackageChip);
+    }
+
+    /// <summary>
+    ///     Test that the upgrade chip names the version an upgrade would move to, and its tooltip
+    ///     names both versions, once the (asynchronous) upgrade check has run.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions()
+    {
+        // Arrange: pinned to 1.0.0 with 1.1.0 at the source
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.1.0");
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", new AppSettings { PackageSourcePath = sourceDir });
+        card.RefreshCheap();
+        Assert.False(card.IsUpgradeAvailable);
+
+        // Act
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", card.UpgradeChipText);
+        Assert.Contains("1.0.0 -> 1.1.0", card.UpgradeTooltip, StringComparison.Ordinal);
+        Assert.Contains("Upgrade", card.UpgradeTooltip, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that the branch chip is shown with a descriptive tooltip when the branch is known
+    ///     and hidden when it is not.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_BranchChip_BranchKnown_ShowsBranchWithTooltip()
+    {
+        // Arrange: a git stub that reports a branch
+        var stub = GitStub.Create(abbrevRefOutput: "feature/x");
+        _tempPaths.Add(stub.Path);
+        var card = CreateCard(
+            CreateTempDirectory(), null, null, new AppSettings { GitExecutablePath = stub.Path });
+        Assert.False(card.HasBranch);
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert
+        Assert.True(card.HasBranch);
+        Assert.Equal("feature/x", card.CurrentBranch);
+        Assert.Equal("Current git branch: feature/x", card.BranchTooltip);
+    }
+
+    /// <summary>
+    ///     Test that the Launch button label names the configured agent tool, falling back to a
+    ///     plain "Launch" when the tool has no short name or its name is too long.
+    /// </summary>
+    [Theory]
+    [InlineData((int)AgentToolKind.CopilotCli, null, "Launch Copilot")]
+    [InlineData((int)AgentToolKind.Cursor, null, "Launch Cursor")]
+    [InlineData((int)AgentToolKind.ClaudeCode, null, "Launch Claude")]
+    [InlineData((int)AgentToolKind.Custom, "/opt/tools/tool.exe --flag", "Launch tool")]
+    [InlineData((int)AgentToolKind.Custom, "\"/opt/my tools/helper.exe\" --flag", "Launch helper")]
+    [InlineData((int)AgentToolKind.Custom, "a-very-long-tool-name --flag", "Launch")]
+    [InlineData((int)AgentToolKind.Custom, "", "Launch")]
+    [InlineData((int)AgentToolKind.Custom, null, "Launch")]
+    public void RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack(
+        int tool, string? customCommand, string expected)
+    {
+        // Arrange
+        var settings = new AppSettings { AgentTool = (AgentToolKind)tool, CustomAgentCommand = customCommand };
+        var card = CreateCard(CreateTempDirectory(), null, null, settings);
+
+        // Assert: label and tooltip agree
+        Assert.Equal(expected, card.LaunchButtonText);
+        Assert.StartsWith("Launch", card.LaunchTooltip, StringComparison.Ordinal);
+        Assert.True(card.LaunchButtonText.Length <= 16);
+    }
+
+    /// <summary>
+    ///     Test that a change of the configured agent tool is reflected in the Launch label (and
+    ///     announced) after the next cheap refresh, as happens when settings are applied.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_LaunchButtonText_AgentToolChanged_UpdatesAfterRefreshCheap()
+    {
+        // Arrange
+        var settings = new AppSettings { AgentTool = AgentToolKind.CopilotCli };
+        var card = CreateCard(CreateTempDirectory(), null, null, settings);
+        var changed = new List<string>();
+        card.PropertyChanged += (_, e) => changed.Add(e.PropertyName ?? string.Empty);
+        Assert.Equal("Launch Copilot", card.LaunchButtonText);
+
+        // Act
+        settings.AgentTool = AgentToolKind.Cursor;
+        card.RefreshCheap();
+
+        // Assert
+        Assert.Contains(nameof(RepoCardViewModel.LaunchButtonText), changed);
+        Assert.Equal("Launch Cursor", card.LaunchButtonText);
+    }
+
+    /// <summary>
+    ///     Test that while a package is being applied the card is busy, its other actions are
+    ///     disabled, a second apply is ignored, and cancelling stops the operation without raising
+    ///     an error or changing the pin.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged()
+    {
+        // Arrange: a source whose version listing never answers unless cancelled
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
+        string? error = null;
+        card.ErrorOccurred += (_, message) => error = message;
+        var selection = new PackageReference("Default", "contoso-agents", "1.1.0");
+
+        // Act: start applying; the call returns while the source is still being read
+        var running = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+
+        // Assert: busy with a cancellable operation, other actions disabled
+        Assert.False(running.IsCompleted);
+        Assert.True(card.IsBusy);
+        Assert.True(card.CanCancelOperation);
+        Assert.Equal("Applying agent package...", card.BusyMessage);
+        Assert.False(card.LaunchCommand.CanExecute(null));
+        Assert.False(card.RefreshCommand.CanExecute(null));
+        Assert.False(card.SelectPackageCommand.CanExecute(null));
+        Assert.True(card.CancelOperationCommand.CanExecute(null));
+
+        // Act: a second apply while busy, then cancel
+        await card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+        Assert.Equal(1, provider.ListVersionsCalls);
+        card.CancelOperationCommand.Execute(null);
+        await running;
+
+        // Assert: idle again, cancelled quietly, nothing pinned
+        Assert.False(card.IsBusy);
+        Assert.Null(card.BusyMessage);
+        Assert.False(card.CanCancelOperation);
+        Assert.Equal("The operation was canceled.", card.StatusMessage);
+        Assert.Null(error);
+        Assert.True(card.IsPackageSelectionNeeded);
+        Assert.Null(RepoPinStore.Load(card.RepoPath));
+    }
+
+    /// <summary>
+    ///     Test that applying a package returns control to the caller while the source is still
+    ///     being read.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackageAsync_SourceSlow_ReturnsToCallerBeforeSourceAnswers()
+    {
+        // Arrange: a source whose version listing never answers unless cancelled
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
+        var selection = new PackageReference("Default", "contoso-agents", "1.1.0");
+
+        // Act: start applying
+        var running = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+
+        // Assert: the caller has its control back although the source has not answered
+        Assert.False(running.IsCompleted);
+
+        // Cleanup
+        card.CancelOperationCommand.Execute(null);
+        await running;
+    }
+
+    /// <summary>
+    ///     Test that while a package is being applied the card reports that it is busy, with a
+    ///     message, and disables its other actions.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackageAsync_Running_ReportsBusyAndDisablesOtherActions()
+    {
+        // Arrange
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
+        var selection = new PackageReference("Default", "contoso-agents", "1.1.0");
+
+        // Act
+        var running = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+
+        // Assert: busy, and no other action can start
+        Assert.True(card.IsBusy);
+        Assert.Equal("Applying agent package...", card.BusyMessage);
+        Assert.False(card.LaunchCommand.CanExecute(null));
+        Assert.False(card.RefreshCommand.CanExecute(null));
+        Assert.False(card.SelectPackageCommand.CanExecute(null));
+
+        // Act: finish the operation
+        card.CancelOperationCommand.Execute(null);
+        await running;
+
+        // Assert: idle again, actions available again
+        Assert.False(card.IsBusy);
+        Assert.Null(card.BusyMessage);
+        Assert.True(card.LaunchCommand.CanExecute(null));
+    }
+
+    /// <summary>
+    ///     Test that a second apply while one is running is ignored and does not read the source
+    ///     again.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored()
+    {
+        // Arrange
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
+        var selection = new PackageReference("Default", "contoso-agents", "1.1.0");
+        var running = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+
+        // Act: a second request while the first is still running
+        await card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+
+        // Assert: the source was read only once
+        Assert.Equal(1, provider.ListVersionsCalls);
+
+        // Cleanup
+        card.CancelOperationCommand.Execute(null);
+        await running;
+    }
+
+    /// <summary>
+    ///     Test that cancelling a running package apply stops it without raising an error and
+    ///     without changing the repo's pin.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackageAsync_CancelledWhileRunning_ReportsNoErrorAndKeepsPinUnchanged()
+    {
+        // Arrange
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
+        string? error = null;
+        card.ErrorOccurred += (_, message) => error = message;
+        var selection = new PackageReference("Default", "contoso-agents", "1.1.0");
+        var running = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+        Assert.True(card.CanCancelOperation);
+
+        // Act
+        card.CancelOperationCommand.Execute(null);
+        await running;
+
+        // Assert: cancelled quietly, nothing pinned
+        Assert.Equal("The operation was canceled.", card.StatusMessage);
+        Assert.Null(error);
+        Assert.True(card.IsPackageSelectionNeeded);
+        Assert.Null(RepoPinStore.Load(card.RepoPath));
+    }
+
+    /// <summary>
+    ///     Test that cancelling the wait for the pre-launch sync still launches the agent tool, per
+    ///     the rule that sync state never blocks a launch.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_LaunchCommand_PreLaunchSyncCancelledByUser_StillLaunches()
+    {
+        // Arrange: a pinned repo with missing managed folders, whose source never answers
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var settings = new AppSettings
+        {
+            Sources = [ZipSource("Default", "unused")],
+            AgentTool = AgentToolKind.Custom,
+            CustomAgentCommand = OperatingSystem.IsWindows() ? "cmd /c exit 0" : "true"
+        };
+        var card = CreateCardWithProvider(CreateTempDirectory(), "contoso-agents", "1.0.0", provider, settings);
+        var recorded = false;
+        card.LaunchRecorded += (_, _) => recorded = true;
+
+        // Act: start the launch, which waits on the sync, then cancel the wait
+        var launching = card.LaunchCommand.ExecuteAsync();
+        Assert.True(card.IsBusy);
+        Assert.Equal("Preparing agent files...", card.BusyMessage);
+        Assert.False(card.LaunchCommand.CanExecute(null));
+        card.CancelOperationCommand.Execute(null);
+        await launching;
+
+        // Assert: the tool was launched regardless
+        Assert.True(recorded);
+        Assert.Equal("Launched.", card.StatusMessage);
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
+    ///     Test that the upgrade check returns to its caller while the source is slow, shows a
+    ///     checking state, and applies the result when the source answers.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshUpgradeStatusAsync_SourceSlow_DoesNotBlockAndShowsChecking()
+    {
+        // Arrange: a source that answers only when released
+        var release = new TaskCompletionSource();
+        var provider = new DelegatePackageSourceProvider(async (_, _) =>
+        {
+            await release.Task;
+            return [Package("contoso-agents", "1.1.0")];
+        });
+        var card = CreateCardWithProvider(CreateTempDirectory(), "contoso-agents", "1.0.0", provider);
+
+        // Act: start the check
+        var check = card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the caller got control back, with the checking state shown and no result yet
+        Assert.False(check.IsCompleted);
+        Assert.True(card.IsCheckingUpgrade);
+        Assert.False(card.IsUpgradeAvailable);
+
+        // Act: the source answers
+        release.SetResult();
+        await check;
+
+        // Assert
+        Assert.False(card.IsCheckingUpgrade);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", card.LatestAvailableVersion);
+    }
+
+    /// <summary>
+    ///     Test that cancelling an upgrade check surfaces the cancellation and keeps the card's
+    ///     previous upgrade state.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshUpgradeStatusAsync_Cancelled_ThrowsAndKeepsPreviousState()
+    {
+        // Arrange
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var card = CreateCardWithProvider(CreateTempDirectory(), "contoso-agents", "1.0.0", provider);
+        using var cancellation = new CancellationTokenSource();
+
+        // Act
+        var check = card.RefreshUpgradeStatusAsync(cancellation.Token);
+        await cancellation.CancelAsync();
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => check);
+        Assert.False(card.IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that when a newer upgrade check starts while an older one is still waiting, the
+    ///     older check's late answer is discarded.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded()
+    {
+        // Arrange: the first call is held and would answer 9.0.0; later calls answer 1.0.0
+        var release = new TaskCompletionSource();
+        var provider = new DelegatePackageSourceProvider(async (call, _) =>
+        {
+            if (call == 1)
+            {
+                await release.Task;
+                return [Package("contoso-agents", "9.0.0")];
+            }
+
+            return [Package("contoso-agents", "1.0.0")];
+        });
+        var card = CreateCardWithProvider(CreateTempDirectory(), "contoso-agents", "1.0.0", provider);
+
+        // Act: start an older check, then a newer one that finishes first, then release the older
+        var older = card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        release.SetResult();
+        await older;
+
+        // Assert: the late 9.0.0 answer did not overwrite the newer result
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Equal("1.0.0", card.LatestAvailableVersion);
+        Assert.False(card.IsCheckingUpgrade);
+    }
+
+    /// <summary>
+    ///     Waits until the token is cancelled, then ends with cancellation; models a source that
+    ///     never answers.
+    /// </summary>
+    private static async Task<IReadOnlyList<DiscoveredPackage>> WaitForCancellationAsync(CancellationToken token)
+    {
+        await Task.Delay(Timeout.Infinite, token);
+        return [];
+    }
+
+    /// <summary>
+    ///     Creates a discovered package of the default source for a fake provider to return.
+    /// </summary>
+    private static DiscoveredPackage Package(string name, string version) =>
+        new(name, PackageVersion.TryParse(version, out var parsed) && parsed is not null
+            ? parsed
+            : throw new ArgumentException("Invalid test version.", nameof(version)), version, "Default");
+
+    /// <summary>
+    ///     Creates a card whose single source ("Default") is served by the given provider, so a
+    ///     test controls exactly when the source answers.
+    /// </summary>
+    private RepoCardViewModel CreateCardWithProvider(
+        string repoRoot, string? pinnedPackageName, string? pinnedVersion, IPackageSourceProvider provider,
+        AppSettings? settings = null)
+    {
+        settings ??= new AppSettings { Sources = [ZipSource("Default", "unused")] };
+        if (pinnedPackageName is not null)
+        {
+            RepoPinStore.Save(
+                repoRoot,
+                new RepoPin { Source = "Default", PackageName = pinnedPackageName, Version = pinnedVersion ?? "0.0.0" });
+        }
+
+        var registry = new PackageSourceRegistry(settings.Sources, _ => provider);
+        var recentRepo = new RecentRepo
+        {
+            Path = repoRoot,
+            PinnedPackageName = pinnedPackageName,
+            PinnedPackageVersion = pinnedVersion,
+            PinnedSource = pinnedPackageName is null ? null : "Default"
+        };
+        return new RepoCardViewModel(recentRepo, () => settings, new PackageVersionCache(), null, _ => registry);
+    }
+
+    /// <summary>
+    ///     A source whose version listing is supplied by a delegate that receives the call number
+    ///     and the cancellation token, so a test controls timing and answers exactly.
+    /// </summary>
+    private sealed class DelegatePackageSourceProvider : IPackageSourceProvider
+    {
+        private readonly Func<int, CancellationToken, Task<IReadOnlyList<DiscoveredPackage>>> _listVersions;
+        private int _listVersionsCalls;
+
+        /// <summary>
+        ///     Initializes the provider.
+        /// </summary>
+        /// <param name="listVersions">Produces the answer of each version listing from its call
+        ///     number (starting at one) and token.</param>
+        public DelegatePackageSourceProvider(
+            Func<int, CancellationToken, Task<IReadOnlyList<DiscoveredPackage>>> listVersions) =>
+            _listVersions = listVersions;
+
+        /// <inheritdoc />
+        public string Alias => "Default";
+
+        /// <summary>
+        ///     Gets how many version listings were requested.
+        /// </summary>
+        public int ListVersionsCalls => Volatile.Read(ref _listVersionsCalls);
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<string>>(["contoso-agents"]);
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<DiscoveredPackage>> ListVersionsAsync(
+            string packageId, CancellationToken cancellationToken) =>
+            _listVersions(Interlocked.Increment(ref _listVersionsCalls), cancellationToken);
+
+        /// <inheritdoc />
+        public Task<IPackageContentReader> AcquireAsync(DiscoveredPackage package, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+    }
+
+    /// <summary>
+    ///     Creates a card whose NuGet package caches live in an isolated folder (via the startup
+    ///     configuration-directory override), so tests never touch the real user profile.
+    /// </summary>
+    private RepoCardViewModel CreateCardWithIsolatedNuGetCache(string repoRoot, AppSettings settings)
+    {
+        var startupOptions = StartupOptions.Parse(["--config-dir", CreateTempDirectory()]);
+        return new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache(), startupOptions);
+    }
+
+    /// <summary>
+    ///     Creates a zip-folder source definition.
+    /// </summary>
+    private static PackageSourceDefinition ZipSource(string alias, string folder) =>
+        new() { Alias = alias, Type = PackageSourceType.Zip, Location = folder };
+
+    /// <summary>
+    ///     Creates a NuGet folder-feed source definition.
+    /// </summary>
+    private static PackageSourceDefinition NuGetFolderSource(string alias, string folder) =>
+        new() { Alias = alias, Type = PackageSourceType.NuGet, Location = folder };
 
     /// <summary>
     ///     Creates a <see cref="RepoCardViewModel"/> for the given repo path, cached pin fields,
@@ -1428,7 +2398,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     {
         if (pinnedPackageName is not null)
         {
-            RepoPinStore.Save(repoPath, new RepoPin { PackageName = pinnedPackageName, Version = pinnedPackageVersion ?? "0.0.0" });
+            RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = pinnedPackageName, Version = pinnedPackageVersion ?? "0.0.0" });
         }
 
         var recentRepo = new RecentRepo

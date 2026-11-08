@@ -20,6 +20,10 @@ package AgentControl {
         expose AgentPackageManagementSubsystem;
     }
 
+    view PackageCredentialsView {
+        expose PackageCredentialsSubsystem;
+    }
+
     view RepoSyncView {
         expose RepoSyncSubsystem;
     }

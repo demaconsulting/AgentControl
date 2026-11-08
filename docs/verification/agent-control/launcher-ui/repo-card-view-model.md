@@ -2,12 +2,15 @@
 
 #### Verification Approach
 
-`RepoCardViewModel` is verified with unit tests defined in `RepoCardViewModelTests.cs`. Every
+`RepoCardViewModel` is verified with unit tests defined in `RepoCardViewModelTests.cs`, for NuGet server
+sources, `RepoCardServerSourceTests.cs` and, for the signature indicator, `RepoCardSignatureTests.cs`. Every
 test substitutes a stub script for the git executable (via `GitStub`, mirroring
 `GitClientTests`) and uses real temporary directories/zip fixtures for package-source and
 pin-file checks, so these tests never depend on a real git installation, a real repository,
-or a real package source. No Avalonia `Window` is ever constructed; only the view-model class
-itself is under test.
+or a real package source. The server-source tests start the in-process `MockNuGetFeed` (Kestrel, plain HTTP on
+a fresh loopback port, optionally requiring a Basic sign-in) and a `FakeCredentialPrompt`, with the NuGet HTTP
+cache isolated per test process (`HttpCacheIsolation`). No Avalonia `Window` is ever constructed; only the
+view-model class itself is under test.
 
 #### Test Environment
 
@@ -26,23 +29,87 @@ invocations are not parallelized with other tests using real process launches).
   package genuinely has a template to offer, never re-fires after a decline is persisted, and
   never fires when the ensure-synced-before-launch check found the managed folders already
   present.
+- Every package-source operation is bound to the source named in the pin, with a pin lacking a source
+  read as a pin to Default; the pin records the source alias and keeps its other fields; a pin naming
+  an unconfigured source gives an error state and no upgrade, and nothing is extracted from any other
+  source; a pin from a newer schema stops an apply before the repo is touched.
+- A NuGet folder source can be selected from, upgraded from, and applied to a repo.
+- A background upgrade check never opens the sign-in dialog and explains on the card what to do; a check the
+  user starts may ask once, and the credential is then remembered for the session.
+- The signature shield and its tooltip appear only for a pinned NuGet source that requires signed packages and follow
+  a change of that requirement.
 
 #### Test Scenarios
 
-**RepoCardViewModel_DisplayInfo_ExposesFolderNameAndPin**: The card's display name resolves to
-the repo's leaf folder name, and a `Refresh` after a pin file is written populates the pinned
-package name/version fields. This scenario is tested by
-`RepoCardViewModel_RepoName_ReturnsLeafFolderName` and
-`RepoCardViewModel_Refresh_PinFileExists_PopulatesPinnedFields`, covering
+**RepoCardViewModel_DisplayInfo_ExposesFolderNameAndPackageChip**: The card's display name
+resolves to the repo's leaf folder name, a `Refresh` after a pin file is written populates the
+pinned package name/version fields, and the package chip text and tooltip name the package, its
+version and the source - with the source kind's icon for a zip folder, a NuGet folder and a NuGet server
+(the server's icon differs from the other two, and the source's alias is shown as text beside it), and an
+explicit "not configured" description when the pinned source does not exist. A repo with no pin
+shows only the "no agent package" chip, and a missing repo shows neither package chip. This
+scenario is tested by
+`RepoCardViewModel_RepoName_ReturnsLeafFolderName`,
+`RepoCardViewModel_Refresh_PinFileExists_PopulatesPinnedFields`,
+`RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip`,
+`RepoCardViewModel_PackageChip_PinnedToNuGetFolderSource_ShowsNuGetFolderIconAndKind`,
+`RepoCardViewModel_PinnedToServerSource_ChipShowsAliasAndServerIcon`,
+`RepoCardViewModel_PackageChip_PinnedSourceNotConfigured_ShowsUnknownSource`,
+`RepoCardViewModel_NoPackageChip_NeverPinnedRepo_ShowsNoPackageChipOnly`, and
+`RepoCardViewModel_Chips_MissingRepo_ShowNeitherPackageChip`, covering
 `AgentControl-RepoCardViewModel-DisplayInfo`.
 
-**RepoCardViewModel_UpgradeBadge_ReflectsSourceComparisonOnly**: The upgrade-available badge
-is set true only when a newer version exists at a configured source, and false both when the
-repo is already on the latest version and when no source is configured. This scenario is
+**RepoCardViewModel_UpgradeBadge_ReflectsSourceComparisonOnly**: The upgrade chip is shown
+only when a newer version exists at the pin's source, and not when the repo is already on the
+latest version or when no source is configured; when shown it states the target version and its
+tooltip both versions. This scenario is
 tested by `RepoCardViewModel_Refresh_NewerVersionAtSource_SetsUpgradeAvailableTrue`,
-`RepoCardViewModel_Refresh_AlreadyOnLatestVersion_SetsUpgradeAvailableFalse`, and
-`RepoCardViewModel_Refresh_NoPackageSourceConfigured_SetsUpgradeAvailableFalse`, covering
-`AgentControl-RepoCardViewModel-UpgradeBadge`.
+`RepoCardViewModel_Refresh_AlreadyOnLatestVersion_SetsUpgradeAvailableFalse`,
+`RepoCardViewModel_Refresh_NoPackageSourceConfigured_SetsUpgradeAvailableFalse`, and
+`RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions`,
+covering `AgentControl-RepoCardViewModel-UpgradeBadge`.
+
+**RepoCardViewModel_LaunchLabel_NamesToolOrFallsBack**: The Launch label names the configured
+agent tool when it has a short display name, falls back to "Launch" for an unknown or long
+name, and follows a change of the configured tool after a cheap refresh. This scenario is tested
+by `RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack` and
+`RepoCardViewModel_LaunchButtonText_AgentToolChanged_UpdatesAfterRefreshCheap`, covering
+`AgentControl-RepoCardViewModel-LaunchLabel`.
+
+**RepoCardViewModel_ResponsiveOperations_ReadAndApplyDoNotBlockTheCaller**: Applying a package against a
+source that never answers returns control to the caller while the source is still being read, and an upgrade
+check against a slow source does not block the caller either and shows a "checking" state. This scenario is
+tested by `RepoCardViewModel_RefreshUpgradeStatusAsync_SourceSlow_DoesNotBlockAndShowsChecking` and
+`RepoCardViewModel_ApplySelectedPackageAsync_SourceSlow_ReturnsToCallerBeforeSourceAnswers`, covering
+`AgentControl-RepoCardViewModel-ResponsiveOperations`. Pull is routed through the same busy-operation wrapper
+but is not exercised against a slow git process, so it is not claimed by this requirement.
+
+**RepoCardViewModel_OperationBusyState_ReportsBusyAndDisablesOtherActions**: While a package apply is waiting
+on a slow source the card is busy, shows the "Applying agent package..." message, and the Launch, Refresh and
+Select Package commands cannot execute; when the operation ends the card is idle and the actions are available
+again. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackageAsync_Running_ReportsBusyAndDisablesOtherActions`, covering
+`AgentControl-RepoCardViewModel-OperationBusyState`.
+
+**RepoCardViewModel_OneOperationAtATime_SecondRequestIsIgnored**: A second apply requested while one is
+running returns without reading the source again. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored`, covering
+`AgentControl-RepoCardViewModel-OneOperationAtATime`.
+
+**RepoCardViewModel_CancelOperation_NoErrorAndPinUnchanged**: Cancelling a running package apply ends it with
+the "canceled" status, raises no `ErrorOccurred` and leaves the repo unpinned, and cancelling an upgrade check
+throws the cancellation and keeps the previous upgrade state. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackageAsync_CancelledWhileRunning_ReportsNoErrorAndKeepsPinUnchanged` and
+`RepoCardViewModel_RefreshUpgradeStatusAsync_Cancelled_ThrowsAndKeepsPreviousState`, covering
+`AgentControl-RepoCardViewModel-CancelOperation`. The combined
+`RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged`
+test asserts the busy, repeat and cancel outcomes together and remains as supporting evidence for the three
+requirements above.
+
+**RepoCardViewModel_SupersededUpgradeCheck_OlderResultIsDiscarded**: When a newer upgrade check starts while an
+older one is still waiting, the older check's late answer does not overwrite the newer result. This scenario is
+tested by `RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded`, covering
+`AgentControl-RepoCardViewModel-SupersededUpgradeCheck`.
 
 **RepoCardViewModel_PullGating_CleanTreeEnablesDirtyOrFailureDisables**: A clean working tree
 sets `CanPull` true, a dirty working tree sets it false, and a git status failure also sets it
@@ -79,10 +146,12 @@ failure status message is set instead). This scenario is tested by
 
 **RepoCardViewModel_Launch_RecordsTimestampOrRaisesErrorWhenUnconfigured**: `LaunchCommand`
 succeeds and records the launch timestamp (raising `LaunchRecorded`) when a command is
-configured, and raises `ErrorOccurred` instead when no agent-tool command is configured. This
+configured, raises `ErrorOccurred` instead when no agent-tool command is configured, and still
+launches when the user cancels the wait for the pre-launch sync. This
 scenario is tested by
-`RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded` and
-`RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred`, covering
+`RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded`,
+`RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred`, and
+`RepoCardViewModel_LaunchCommand_PreLaunchSyncCancelledByUser_StillLaunches`, covering
 `AgentControl-RepoCardViewModel-Launch`.
 
 **RepoCardViewModel_EnsureSyncedBeforeLaunch_NeverBlocksLaunchOnBestEffortSyncOutcome**: The
@@ -118,7 +187,7 @@ scenario is tested by `RepoCardViewModel_IsPackageSelectionNeeded_ReflectsPinSta
 `RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CannotExecute`,
 `RepoCardViewModel_SelectPackageCommand_RepoIsMissing_CannotExecute`,
 `RepoCardViewModel_SelectPackageCommand_NoPackageSourceConfigured_RaisesErrorOccurredOnly`, and
-`RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourcePath`,
+`RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias`,
 covering `AgentControl-RepoCardViewModel-SelectPackage`.
 
 **RepoCardViewModel_ApplySelectedPackage_RejectsStaleVersionWithoutMutatingPin**: Applying a
@@ -196,3 +265,54 @@ toggles `IsFavorite` and raises `FavoriteChanged`. This scenario is tested by
 to its owner. This scenario is tested by
 `RepoCardViewModel_RemoveCommand_RaisesRemoveRequestedWithoutMutatingState`, covering
 `AgentControl-RepoCardViewModel-RemoveRequest`.
+
+**RepoCardViewModel_SourceAwareness_BindsEveryOperationToThePinsSource**: Applying a package from a
+legacy single path records source `Default` in a current-schema pin; selecting from the second of
+two sources offering the same package and version records that alias and extracts that source's
+content; a pin to a source that is not configured sets the card's source problem (naming the
+alias), offers no upgrade and no latest version even though another source offers a higher
+version; applying a package for an unconfigured alias raises an error naming it and leaves the
+repo and pin unchanged; the ensure-synced repair for such a pin fails without extracting; with the
+same package at two sources a pin to the lower-version source is compared only against that source;
+a legacy pin file with no source resolves against `Default` and, when no `Default` source exists,
+shows a source problem; applying over a pin with an unknown field and a recorded decline keeps both;
+applying over a pin from a newer schema raises an error and leaves the pin and repo untouched.
+This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackage_LegacySinglePath_PinRecordsDefaultSourceAlias`,
+`RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent`,
+`RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
+`RepoCardViewModel_ApplySelectedPackage_UnconfiguredSourceAlias_RaisesErrorAndChangesNothing`,
+`RepoCardViewModel_EnsureAgentFilesSynced_PinNamesUnconfiguredSource_ReturnsFalseWithoutExtracting`,
+`RepoCardViewModel_Refresh_SamePackageNameInTwoSources_ComparesOnlyAgainstPinnedSource`,
+`RepoCardViewModel_Refresh_LegacyV1PinFile_ResolvesAgainstDefaultSource`,
+`RepoCardViewModel_Refresh_LegacyV1PinFileAndNoDefaultSource_ShowsSourceProblem`,
+`RepoCardViewModel_ApplySelectedPackage_PinWithUnknownFieldAndDecline_PreservesBoth`, and
+`RepoCardViewModel_ApplySelectedPackage_NewerSchemaPinFile_RaisesErrorAndChangesNothing`; and, for
+a NuGet folder source (a real folder feed, with the NuGet cache isolated through the startup
+configuration-directory override), by
+`RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes`
+and `RepoCardViewModel_UpgradeCommand_NuGetFolderSource_UpgradesToHighestVersion`, covering
+`AgentControl-RepoCardViewModel-SourceAwareness`.
+
+**RepoCardViewModel_BackgroundChecksNeverPrompt_UserStartedChecksMay**: Against an in-process mock NuGet
+server (see the `NuGetSourceProvider` verification; plain HTTP with the source's explicit opt-in), an
+anonymous server answers the upgrade check with the newer version; a background check (the default,
+`allowPrompt` false) against a server that requires a sign-in never calls the scripted prompt and sets the
+card's source problem to say a sign-in is needed and to use the card's menu > Refresh; a check the user
+requested (`allowPrompt` true) asks once, finds the upgrade, and a later background check - even by another
+card - reuses the remembered credential without asking. This scenario is tested by
+`RepoCardViewModel_RefreshUpgradeStatusAsync_AnonymousServer_OffersNewerVersion`,
+`RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains` and
+`RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential`,
+in `RepoCardServerSourceTests.cs`, covering `AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`.
+
+**RepoCardViewModel_SignatureIndicator_ShieldOnlyForNuGetSourcesThatRequireSignatures**: A card pinned to a NuGet
+source that requires signed packages reports `RequiresSignature` and a tooltip that says signatures are required and
+either that any trusted signer is accepted or - for a source that pins a publisher - the start and end of the
+fingerprint only; a source without the requirement, a zip source and a pinned source that is not configured report
+no shield; when the source's requirement changes and the card refreshes, the card raises change notifications for
+the shield and its tooltip. This scenario is tested by
+`RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip`,
+`RepoCardViewModel_NoSignatureRequirement_ShowsNoShield` and
+`RepoCardViewModel_SourceRequirementChanges_RaisesChangeNotificationsForTheShield`, in
+`RepoCardSignatureTests.cs`, covering `AgentControl-RepoCardViewModel-SignatureIndicator`.

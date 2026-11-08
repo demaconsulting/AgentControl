@@ -303,6 +303,218 @@ public class PackageZipExtractorTests
     }
 
     /// <summary>
+    ///     Test that Extract refuses a repo whose <c>.github</c> folder is a directory junction,
+    ///     deleting and writing nothing at the junction's target.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched() =>
+        AssertGitHubFolderLinkRefused(CreateJunctionOrSkip);
+
+    /// <summary>
+    ///     Test that Extract refuses a repo whose <c>.github</c> folder is a symbolic link,
+    ///     deleting and writing nothing at the link's target.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched() =>
+        AssertGitHubFolderLinkRefused(CreateSymlinkOrSkip);
+
+    /// <summary>
+    ///     Test that Extract refuses a repo with a managed folder that is a directory junction,
+    ///     before any other managed folder is deleted.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched() =>
+        AssertManagedFolderLinkRefused(CreateJunctionOrSkip);
+
+    /// <summary>
+    ///     Test that Extract refuses a repo with a managed folder that is a symbolic link,
+    ///     before any other managed folder is deleted.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched() =>
+        AssertManagedFolderLinkRefused(CreateSymlinkOrSkip);
+
+    /// <summary>
+    ///     Test that the subsystem's zip extraction path refuses a repo whose <c>.github</c>
+    ///     folder is a directory junction, deleting and writing nothing at the junction's target.
+    /// </summary>
+    [Fact]
+    public void RepoSync_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched() =>
+        AssertGitHubFolderLinkRefused(CreateJunctionOrSkip);
+
+    /// <summary>
+    ///     Test that the subsystem's zip extraction path refuses a repo whose <c>.github</c>
+    ///     folder is a symbolic link, deleting and writing nothing at the link's target.
+    /// </summary>
+    [Fact]
+    public void RepoSync_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched() =>
+        AssertGitHubFolderLinkRefused(CreateSymlinkOrSkip);
+
+    /// <summary>
+    ///     Test that the subsystem's zip extraction path refuses a repo with a managed folder that
+    ///     is a directory junction, before any other managed folder is deleted, and that the
+    ///     folder is not reported as an existing managed folder.
+    /// </summary>
+    [Fact]
+    public void RepoSync_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched() =>
+        AssertManagedFolderLinkRefused(CreateJunctionOrSkip);
+
+    /// <summary>
+    ///     Test that the subsystem's zip extraction path refuses a repo with a managed folder that
+    ///     is a symbolic link, before any other managed folder is deleted, and that the folder is
+    ///     not reported as an existing managed folder.
+    /// </summary>
+    [Fact]
+    public void RepoSync_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched() =>
+        AssertManagedFolderLinkRefused(CreateSymlinkOrSkip);
+
+    /// <summary>
+    ///     Scenario: <c>&lt;repo&gt;/.github</c> is a link to an outside folder holding content;
+    ///     extraction through the zip entry point must be refused and the outside folder unchanged.
+    /// </summary>
+    /// <param name="createLink">Creates the directory link (link path, target).</param>
+    private static void AssertGitHubFolderLinkRefused(Action<string, string> createLink)
+    {
+        // Arrange: .github is a link to an outside folder that holds managed-looking content
+        var zipPath = CreatePackageZip(("agents/new.md", "new"));
+        var outside = CreateTempDirectory();
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(outside, "agents"));
+            File.WriteAllText(Path.Combine(outside, "agents", "precious.md"), "precious");
+            createLink(Path.Combine(repoRoot, ".github"), outside);
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+
+            // Assert: refused with a message naming a link, and nothing at the target changed
+            Assert.Contains("link", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("precious", File.ReadAllText(Path.Combine(outside, "agents", "precious.md")));
+            Assert.False(File.Exists(Path.Combine(outside, "agents", "new.md")));
+            Assert.Single(Directory.GetFileSystemEntries(outside));
+            Assert.False(PackageZipExtractor.AllManagedFoldersExist(repoRoot));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            DeleteWithLink(repoRoot, Path.Combine(repoRoot, ".github"), outside);
+        }
+    }
+
+    /// <summary>
+    ///     Scenario: a managed folder is a link to an outside folder; extraction through the zip
+    ///     entry point must be refused before another (ordinary) managed folder is deleted, and
+    ///     the outside folder must be unchanged.
+    /// </summary>
+    /// <param name="createLink">Creates the directory link (link path, target).</param>
+    private static void AssertManagedFolderLinkRefused(Action<string, string> createLink)
+    {
+        // Arrange: .github/agents is a link to an outside folder; .github/standards is ordinary
+        var zipPath = CreatePackageZip(("agents/new.md", "new"), ("standards/new.md", "new"));
+        var outside = CreateTempDirectory();
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(outside, "precious.md"), "precious");
+            var standards = Path.Combine(repoRoot, ".github", "standards");
+            Directory.CreateDirectory(standards);
+            File.WriteAllText(Path.Combine(standards, "keep.md"), "keep me");
+            createLink(Path.Combine(repoRoot, ".github", "agents"), outside);
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() => PackageZipExtractor.Extract(zipPath, repoRoot));
+
+            // Assert: refused, the target is unchanged, and the ordinary folder was not deleted
+            Assert.Contains("link", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(["precious.md"], Directory.GetFileSystemEntries(outside).Select(Path.GetFileName));
+            Assert.Equal("keep me", File.ReadAllText(Path.Combine(standards, "keep.md")));
+            Assert.False(File.Exists(Path.Combine(standards, "new.md")));
+        }
+        finally
+        {
+            File.Delete(zipPath);
+            DeleteWithLink(repoRoot, Path.Combine(repoRoot, ".github", "agents"), outside);
+        }
+    }
+
+    /// <summary>
+    ///     Cleans up a scenario's folders, removing the link itself first (non-recursively, so the
+    ///     link's target is not traversed) and then the repo and outside folders.
+    /// </summary>
+    /// <param name="repoRoot">The scenario's repo folder.</param>
+    /// <param name="linkPath">The link inside the repo, which may not exist if creation was skipped.</param>
+    /// <param name="outside">The folder the link points at.</param>
+    private static void DeleteWithLink(string repoRoot, string linkPath, string outside)
+    {
+        if (new DirectoryInfo(linkPath).LinkTarget is not null)
+        {
+            Directory.Delete(linkPath, recursive: false);
+        }
+
+        Directory.Delete(repoRoot, recursive: true);
+        Directory.Delete(outside, recursive: true);
+    }
+
+    /// <summary>
+    ///     Creates a directory junction (needs no privilege on Windows), or skips the test on
+    ///     platforms that do not have junctions.
+    /// </summary>
+    /// <param name="linkPath">The junction to create.</param>
+    /// <param name="target">The existing directory it points at.</param>
+    /// <exception cref="InvalidOperationException">Thrown on Windows when the junction cannot be
+    ///     created, which would indicate a broken test environment rather than a skip.</exception>
+    private static void CreateJunctionOrSkip(string linkPath, string target)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Directory junctions exist only on Windows.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
+        var startInfo = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add("/c");
+        // cspell:disable-next-line
+        startInfo.ArgumentList.Add("mklink");
+        startInfo.ArgumentList.Add("/J");
+        startInfo.ArgumentList.Add(linkPath);
+        startInfo.ArgumentList.Add(target);
+        using var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start cmd.exe to create a junction.");
+        var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Creating the junction failed ({process.ExitCode}): {output}");
+        }
+    }
+
+    /// <summary>
+    ///     Creates a directory symbolic link, or skips the test when the platform or privileges do
+    ///     not permit creating one.
+    /// </summary>
+    /// <param name="linkPath">The link to create.</param>
+    /// <param name="target">The existing directory it points at.</param>
+    private static void CreateSymlinkOrSkip(string linkPath, string target)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
+            Directory.CreateSymbolicLink(linkPath, target);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            Assert.Skip($"Cannot create symbolic links in this environment: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     ///     Test that ReadAgentsMdTemplate returns the root-level AGENTS.md template content
     ///     without extracting anything to disk.
     /// </summary>

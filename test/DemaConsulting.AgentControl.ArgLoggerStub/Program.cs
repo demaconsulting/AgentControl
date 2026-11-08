@@ -68,15 +68,21 @@ internal static class Program
     /// <returns>Always <c>0</c> - per this stub's contract, it never fails, since a spurious
     ///     non-zero exit code would make real production code paths (e.g. <c>GitClient</c>
     ///     treating a non-zero exit as a git failure) behave differently under test than in
-    ///     production for reasons unrelated to what is being tested.</returns>
+    ///     production for reasons unrelated to what is being tested - except when a test opted in
+    ///     to the credential-helper emulation (see <see cref="CredentialHelperEmulator"/>), where
+    ///     a <c>credential fill</c> that finds nothing fails as git does.</returns>
     public static int Main(string[] args)
     {
         var outputFile = Environment.GetEnvironmentVariable(OutputFileEnvironmentVariable);
+        var credentialStore = Environment.GetEnvironmentVariable(CredentialHelperEmulator.StoreEnvironmentVariable);
+        var emulatedExitCode = string.IsNullOrWhiteSpace(credentialStore)
+            ? 0
+            : CredentialHelperEmulator.Run(args, credentialStore);
         if (string.IsNullOrWhiteSpace(outputFile))
         {
             // No output file configured: nothing to record, but still succeed - a misconfigured
             // test harness should fail its own assertions (missing log entries), not this stub.
-            return 0;
+            return emulatedExitCode;
         }
 
         var record = new InvocationRecord(
@@ -112,7 +118,7 @@ internal static class Program
             // See the IOException remarks above.
         }
 
-        return 0;
+        return emulatedExitCode;
     }
 }
 

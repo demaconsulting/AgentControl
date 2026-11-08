@@ -4,12 +4,15 @@
 # PURPOSE:
 # - Define requirements for the AgentControl LauncherUI subsystem
 # - LauncherUI spans the recent-repos main window, per-repo cards, the package-selection
-#   window, and the settings window (MainWindowViewModel, RepoCardViewModel,
-#   SelectPackageWindowViewModel, SettingsWindowViewModel), plus their Avalonia .axaml Views
-#   and shared MVVM support types (RelayCommand, ViewModelBase, FavoriteIconConverter,
-#   FavoriteColorConverter, ThirdPartyDependencies), which are folded into this
-#   subsystem-level description rather than given separate unit files (ThirdPartyDependencies
-#   is the one exception with a dedicated test file, ThirdPartyDependenciesTests.cs)
+#   window, the settings window, the package-source editor and the sign-in dialog
+#   (MainWindowViewModel, RepoCardViewModel, SelectPackageWindowViewModel,
+#   SettingsWindowViewModel, SourceEditorViewModel, CredentialPromptViewModel), plus their
+#   Avalonia .axaml Views (including CredentialPromptWindow and the AvaloniaCredentialPrompt
+#   that shows it) and shared MVVM support types (RelayCommand, ViewModelBase,
+#   FavoriteIconConverter, FavoriteColorConverter, ThirdPartyDependencies), which are folded
+#   into this subsystem-level description rather than given separate unit files
+#   (ThirdPartyDependencies is the one exception with a dedicated test file,
+#   ThirdPartyDependenciesTests.cs)
 # - Subsystem requirements describe the aggregate UI behavior a user experiences
 
 sections:
@@ -134,12 +137,14 @@ sections:
 
       - id: AgentControl-LauncherUI-SelectPackage
         title: >-
-          The LauncherUI subsystem shall let the user browse available package name/version
-          pairs from the configured package source and apply one to a repo with no existing
-          pin.
+          The LauncherUI subsystem shall let the user choose a configured package source, then
+          browse the package name/version pairs it offers and apply one to a repo with no
+          existing pin, recording the source in the pin.
         justification: |
           A repo with no pin has no prior version to upgrade from, so an explicit
-          package/version selection window is the only way to establish the initial pin.
+          source/package/version selection window is the only way to establish the initial pin;
+          the source is part of the choice because the same package name may exist in several
+          sources.
         children:
           - AgentControl-RepoCardViewModel-SelectPackage
           - AgentControl-SelectPackageWindowViewModel-ListPackages
@@ -148,9 +153,9 @@ sections:
           - AgentControl-SelectPackageWindowViewModel-Confirm
           - AgentControl-RepoCardViewModel-ApplySelectedPackage
         tests:
-          - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourcePath
+          - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias
           - SelectPackageWindowViewModel_SelectPackageName_PopulatesVersionsDescendingAndDefaultsToLatest
-          - SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithSelectedPair
+          - SelectPackageWindowViewModel_ConfirmCommand_RaisesConfirmedWithFullPackageReference
           - RepoCardViewModel_ApplySelectedPackage_ValidNameAndVersion_UpdatesPinAndExtractsAndRaisesReleaseNotesReady
 
       - id: AgentControl-LauncherUI-Upgrade
@@ -191,9 +196,8 @@ sections:
 
       - id: AgentControl-LauncherUI-Settings
         title: >-
-          The LauncherUI subsystem shall let the user view and edit the package source path,
-          git executable override, agent tool selection, and shell preference, and persist
-          changes on save.
+          The LauncherUI subsystem shall let the user view and edit the git executable
+          override, agent tool selection, and shell preference, and persist changes on save.
         justification: |
           These preferences vary per developer/company and must be editable through the UI
           rather than requiring manual configuration-file edits.
@@ -207,6 +211,514 @@ sections:
           - SettingsWindowViewModel_Constructor_SeedsPropertiesFromInitialSettings
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
           - MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields
+
+      - id: AgentControl-LauncherUI-PackageSources
+        title: >-
+          The LauncherUI subsystem shall let the user see the configured package sources with
+          their kind and location and whether their folder can be found, listing a server
+          source as not checked rather than contacting it merely to show the list.
+        justification: |
+          The developer must see what is configured and whether it is usable at a glance, and a
+          server that may need a sign-in must never be contacted just to draw the list.
+        children:
+          - AgentControl-SettingsWindowViewModel-SourceList
+          - AgentControl-SettingsWindowViewModel-SaveResultingSources
+        tests:
+          - SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder
+          - SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt
+
+      - id: AgentControl-LauncherUI-AddPackageSource
+        title: >-
+          The LauncherUI subsystem shall let the user add a zip-package folder source, a
+          NuGet-package folder source or a NuGet-package server source through a dialog.
+        justification: |
+          Several sources are only usable if the developer can add them in the application
+          rather than in a settings file.
+        children:
+          - AgentControl-SettingsWindowViewModel-AddSource
+          - AgentControl-SourceEditorViewModel-Save
+        tests:
+          - SettingsWindowViewModel_AddCommands_RaiseEditorRequestedForNewSourceOfEachKind
+          - SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource
+          - SettingsWindowViewModel_AddNuGetFolderSource_EditorSaved_KeepsPackageIds
+          - SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor
+          - SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls
+          - SourceEditorViewModel_SaveCommand_ValidZipSource_RaisesSavedWithDefinition
+
+      - id: AgentControl-LauncherUI-PackageSourceValidation
+        title: >-
+          The LauncherUI subsystem shall let the user save a package source from its dialog only
+          when what was entered is valid, and shall explain what is wrong otherwise.
+        justification: |
+          A source the application would later refuse to use or save, or whose alias would make a
+          repo's pin ambiguous, must not be acceptable in the dialog, and a credential typed into
+          a location must be stopped where the user can correct it.
+        children:
+          - AgentControl-SettingsWindowViewModel-AliasUnique
+          - AgentControl-SourceEditorViewModel-Validation
+          - AgentControl-SourceEditorViewModel-AliasRules
+          - AgentControl-SourceEditorViewModel-FolderLocation
+          - AgentControl-SourceEditorViewModel-NoEmbeddedCredential
+          - AgentControl-SourceEditorViewModel-CredentialNeverEchoed
+          - AgentControl-SourceEditorViewModel-ServerAddressIndexJson
+          - AgentControl-SourceEditorViewModel-InsecureHttpAddress
+          - AgentControl-SourceEditorViewModel-PackageIdRequired
+          - AgentControl-SourceEditorViewModel-PackageIdRequiredServerMessage
+          - AgentControl-SourceEditorViewModel-NoErrorsUntilTouched
+          - AgentControl-SourceEditorViewModel-SaveBlockedWhenInvalid
+        tests:
+          - SettingsWindowViewModel_AddSource_AliasAlreadyConfiguredIgnoringCase_EditorCannotSave
+          - SourceEditorViewModel_Alias_Invalid_ReportsProblemAndBlocksSave
+          - SourceEditorViewModel_Location_Invalid_ReportsProblemAndBlocksSave
+          - SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave
+          - SourceEditorViewModel_NuGetSource_NoPackageIds_CannotSaveUntilOneIsAdded
+          - SourceEditorViewModel_SaveCommand_InvalidEditor_DoesNotRaiseSaved
+
+      - id: AgentControl-LauncherUI-PackageSourcePackageIds
+        title: >-
+          The LauncherUI subsystem shall let the user list, in the editor of a NuGet-package
+          folder or server source, the package IDs the source offers by adding and removing them,
+          refusing an ID that is malformed or already listed.
+        justification: |
+          A NuGet folder or server is not scanned for packages, so the listed IDs define what it
+          offers; a mistyped ID must be correctable without recreating the source, and a
+          malformed or duplicate ID would only cause a failure or a double listing later.
+        children:
+          - AgentControl-SourceEditorViewModel-PackageIds
+          - AgentControl-SourceEditorViewModel-PackageIdRemove
+          - AgentControl-SourceEditorViewModel-PackageIdMalformed
+          - AgentControl-SourceEditorViewModel-PackageIdDuplicate
+        tests:
+          - SourceEditorViewModel_SaveCommand_ValidNuGetSource_SavesPackageIds
+          - SourceEditorViewModel_RemovePackageId_RemovesSelectedId
+          - SourceEditorViewModel_AddPackageId_InvalidOrDuplicate_IsRefused
+
+      - id: AgentControl-LauncherUI-ServerSourceEditor
+        title: >-
+          The LauncherUI subsystem shall present a NuGet-package server source in its own editor
+          dialog that asks for the feed address and shows example addresses.
+        justification: |
+          A server is reached through an address rather than a folder, and the exact form of a
+          feed address differs between products, so the dialog must ask for the one and show
+          examples of it.
+        children:
+          - AgentControl-SourceEditorViewModel-ServerSource
+          - AgentControl-SourceEditorViewModel-ServerExamples
+        tests:
+          - SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls
+          - SourceEditorViewModel_Constructor_NewServer_HasServerTitleLabelAndExamples
+
+      - id: AgentControl-LauncherUI-InsecureHttpChoice
+        title: >-
+          The LauncherUI subsystem shall offer, in the editor of a NuGet-package server source,
+          an "Allow insecure HTTP" choice that is off by default and warns when it is ticked.
+        justification: |
+          Choosing plain http must be a deliberate, informed decision because a sign-in would
+          then cross the network unprotected.
+        children:
+          - AgentControl-SourceEditorViewModel-InsecureHttpChoice
+          - AgentControl-SourceEditorViewModel-InsecureHttpWarning
+        tests:
+          - SourceEditorViewModel_Constructor_NewServer_HasServerTitleLabelAndExamples
+          - SourceEditorViewModel_AllowInsecureHttp_Toggled_AcceptsHttpAndShowsWarning
+
+      - id: AgentControl-LauncherUI-ServerSourceSettingsKept
+        title: >-
+          The LauncherUI subsystem shall keep the address, package IDs and insecure-HTTP choice
+          of a NuGet-package server source when it is saved and when it is edited.
+        justification: |
+          A server source that lost its package IDs or its insecure choice on save or on edit
+          would not work as the user configured it.
+        children:
+          - AgentControl-SourceEditorViewModel-ServerSettingsSaved
+          - AgentControl-SourceEditorViewModel-ServerSettingsEdited
+        tests:
+          - SourceEditorViewModel_SaveCommand_ValidServer_SavesAddressPackageIdsAndInsecureChoice
+          - SourceEditorViewModel_EditExistingServer_StaysAServerWithItsSettings
+
+      - id: AgentControl-LauncherUI-EditPackageSource
+        title: >-
+          The LauncherUI subsystem shall let the user edit a configured package source in place
+          without renaming it, carrying the settings the dialog does not show through unchanged.
+        justification: |
+          Sources are corrected over time, but repos pin to a source by alias, so an edit must
+          never rename it or lose settings that are managed elsewhere.
+        children:
+          - AgentControl-SettingsWindowViewModel-EditSource
+          - AgentControl-SourceEditorViewModel-EditKeepsAlias
+          - AgentControl-SourceEditorViewModel-EditKeepsHiddenSettings
+          - AgentControl-SourceEditorViewModel-SourceNotModified
+        tests:
+          - SettingsWindowViewModel_EditSource_EditorSaved_ReplacesSourceInPlaceKeepingAlias
+          - SettingsWindowViewModel_EditServerSource_OpensServerEditorThatTestsThroughTheFactory
+          - SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved
+
+      - id: AgentControl-LauncherUI-RemovePackageSource
+        title: >-
+          The LauncherUI subsystem shall let the user remove a configured package source after
+          being told how many repos are pinned to it and that they will show a package source
+          problem.
+        justification: |
+          Removing a source that repos are pinned to is allowed, because the pin is the repos'
+          own record, but the developer must be told what will happen to those repos first.
+        children:
+          - AgentControl-SettingsWindowViewModel-RemoveSource
+        tests:
+          - SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource
+          - SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves
+
+      - id: AgentControl-LauncherUI-TestConnection
+        title: >-
+          The LauncherUI subsystem shall let the user test a NuGet-package server source from its
+          editor dialog before saving it, showing progress and a Cancel action while the test
+          runs and then a plain-language result that says whether the connection works and, when
+          it does not, whether the sign-in failed or was canceled, the package was not found, the
+          server timed out or the server could not be reached.
+        justification: |
+          A server source depends on an address, a package ID and often a sign-in; letting the
+          developer find out which of them is wrong while the dialog is still open is far
+          friendlier than discovering it later in a window that cannot say what failed, and a
+          test against a slow or unreachable server must not freeze the dialog.
+        children:
+          - AgentControl-SourceEditorViewModel-TestConnectionAvailability
+          - AgentControl-SourceEditorViewModel-TestConnection
+          - AgentControl-SourceEditorViewModel-TestConnectionProgress
+          - AgentControl-SourceEditorViewModel-TestConnectionCancel
+          - AgentControl-SourceEditorViewModel-TestConnectionSuccess
+          - AgentControl-SourceEditorViewModel-TestConnectionPackageNotFound
+          - AgentControl-SourceEditorViewModel-TestConnectionFailureReasons
+          - AgentControl-SourceEditorViewModel-TestConnectionOtherFailures
+          - AgentControl-SourceEditorViewModel-TestConnectionResultDropped
+          - AgentControl-SourceEditorViewModel-TestConnectionStaleResult
+          - AgentControl-MainWindowViewModel-ConnectionTestProvider
+        tests:
+          - SourceEditorWindow_TestConnection_ShowsProgressCancelAndResult
+          - SourceEditorWindow_ClosedWhileTesting_CancelsTheTest
+          - SourceEditorViewModel_TestConnection_ServerAnswers_ReportsVersionCountAndLatest
+          - SourceEditorViewModel_TestConnection_PackageMissing_ReportsPackageNotFound
+          - SourceEditorViewModel_TestConnection_ProviderFails_ReportsHeadlineAndMessage
+          - SourceEditorViewModel_TestConnection_CancelWhileRunning_StopsWithCanceledResult
+          - MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials
+
+      - id: AgentControl-LauncherUI-SignIn
+        title: >-
+          The LauncherUI subsystem shall ask the user to sign in, in a dialog, when a package
+          server needs credentials for something the user started, and shall return the
+          credential the user typed, or no credential when the user cancels, answering each
+          question exactly once.
+        justification: |
+          A package server's credential has to come from the user, and the dialog is the one
+          place it is typed; every way out of it must be an answer so the operation that asked is
+          never left waiting.
+        children:
+          - AgentControl-CredentialPromptViewModel-SignInRequiresBoth
+          - AgentControl-CredentialPromptViewModel-SignIn
+          - AgentControl-CredentialPromptViewModel-PasswordVerbatim
+          - AgentControl-CredentialPromptViewModel-Cancel
+          - AgentControl-CredentialPromptViewModel-AnswerOnce
+        tests:
+          # The dialog itself and the object that shows it are views with no separate unit
+          # document, so their behavior is verified by headless window tests at this level.
+          - CredentialPromptWindow_SignInClicked_ReturnsTheTypedCredential
+          - CredentialPromptWindow_CancelEscapeOrClose_ReturnNoCredential
+          - AvaloniaCredentialPrompt_PromptAsync_FromWorkerThread_ShowsDialogAndReturnsCredential
+          - AvaloniaCredentialPrompt_PromptAsync_UserCancels_ReturnsNull
+
+      - id: AgentControl-LauncherUI-SignInDestination
+        title: >-
+          The LauncherUI subsystem shall show in the sign-in dialog which server will receive the
+          credential.
+        justification: |
+          Showing where the credential goes protects against typing it into a look-alike request.
+        children:
+          - AgentControl-CredentialPromptViewModel-ShowsDestination
+        tests:
+          - CredentialPromptWindow_Shown_ShowsOriginSessionNoteAndMaskedPassword
+
+      - id: AgentControl-LauncherUI-SignInWarnings
+        title: >-
+          The LauncherUI subsystem shall warn in the sign-in dialog when the server uses plain
+          http and when a credential entered earlier for the server was just rejected.
+        justification: |
+          A password typed for a plain http server crosses the network unprotected, and being
+          asked again without explanation looks like a fault; each warning must appear only when
+          it is true.
+        children:
+          - AgentControl-CredentialPromptViewModel-InsecureHttpFlag
+          - AgentControl-CredentialPromptViewModel-PreviousCredentialRejected
+        tests:
+          - CredentialPromptWindow_InsecureAndRejected_ShowWarningAndRejectedNotice
+
+      - id: AgentControl-LauncherUI-SignInPasswordMasked
+        title: >-
+          The LauncherUI subsystem shall mask the password in the sign-in dialog as it is typed.
+        justification: |
+          A password shown on screen could be read over the user's shoulder or captured in a
+          screenshot.
+        tests:
+          - CredentialPromptWindow_Shown_ShowsOriginSessionNoteAndMaskedPassword
+
+      - id: AgentControl-LauncherUI-SignInSessionOnlyNote
+        title: >-
+          The LauncherUI subsystem shall state in the sign-in dialog that the credential is used
+          for this session only and is not saved, unless the user chooses to remember it (see the
+          requirement for remembering a sign-in).
+        justification: |
+          The user must know that AgentControl itself does not keep the secret beyond the
+          session, so they can judge whether to type it.
+        children:
+          - AgentControl-CredentialPromptViewModel-SessionOnlyNote
+        tests:
+          - CredentialPromptWindow_Shown_ShowsOriginSessionNoteAndMaskedPassword
+
+      - id: AgentControl-LauncherUI-SignInPlacement
+        title: >-
+          The LauncherUI subsystem shall show the sign-in dialog in front of the window that
+          started the action, whichever thread asked, and shall show one such dialog at a time.
+        justification: |
+          Showing the dialog in front of the right window, one at a time, keeps two concurrent
+          operations from leaving the user with a hidden or stacked dialog.
+        tests:
+          - AvaloniaCredentialPrompt_PromptAsync_FromWorkerThread_ShowsDialogAndReturnsCredential
+          - AvaloniaCredentialPrompt_PromptAsync_TwoQuestionsAtOnce_AreShownOneAtATime
+
+      - id: AgentControl-LauncherUI-SignInCancelsWithOperation
+        title: >-
+          The LauncherUI subsystem shall close the sign-in dialog, as if canceled, when the
+          operation that asked for it is canceled.
+        justification: |
+          A dialog left open for an operation that no longer exists would ask the user for a
+          credential nobody needs.
+        tests:
+          - AvaloniaCredentialPrompt_PromptAsync_TokenCancelled_ClosesDialogAndThrows
+
+      - id: AgentControl-LauncherUI-RememberSignIn
+        title: >-
+          The LauncherUI subsystem shall let the user choose, in the sign-in dialog, to remember
+          the sign-in on this computer in their Git credential helper - an option that is off by
+          default, that says the helper and not AgentControl keeps the secret, and that is
+          disabled with an explanation, and never acted on, when no credential helper can keep it
+          - and shall return that choice with the credential.
+        justification: |
+          Retyping a token every session is a burden, but keeping a secret is the user's decision
+          to make knowingly; the dialog is where they make it, so it must say who keeps the secret
+          and must not offer a choice the application cannot honor.
+        children:
+          - AgentControl-CredentialPromptViewModel-RememberOption
+          - AgentControl-CredentialPromptViewModel-RememberUnavailable
+          - AgentControl-CredentialPromptViewModel-RememberNeverWithoutHelper
+          - AgentControl-CredentialPromptViewModel-RememberAnswer
+          - AgentControl-CredentialPromptViewModel-RememberNote
+        tests:
+          - CredentialPromptWindow_CanRemember_CheckboxEnabledUncheckedAndAnswersRemember
+          - CredentialPromptWindow_CannotRemember_CheckboxDisabledWithExplanatoryTooltip
+          - CredentialPromptViewModel_Remember_TickedWhenAvailable_AnswersWithRememberAndChangesTheNote
+
+      - id: AgentControl-LauncherUI-ForgetSavedSignIn
+        title: >-
+          The LauncherUI subsystem shall let the user forget a server's saved sign-in from the
+          editor of that server source - after a confirmation that names the server and says what
+          is removed, with the result shown in words, and with the action disabled and explained
+          where no Git credential helper is configured for the server (nothing can have been saved then) or can be
+          reached.
+        justification: |
+          A sign-in the user chose to keep must be revocable from the place where they see the
+          server, with no surprise and with an honest result.
+        children:
+          - AgentControl-SourceEditorViewModel-ForgetSavedSignIn
+          - AgentControl-SourceEditorViewModel-ForgetAcceptableAddressOnly
+          - AgentControl-SourceEditorViewModel-ForgetUnavailableExplained
+          - AgentControl-SourceEditorViewModel-ForgetChecking
+          - AgentControl-SourceEditorViewModel-ForgetConfirmation
+          - AgentControl-SourceEditorViewModel-ForgetResultForgotten
+          - AgentControl-SourceEditorViewModel-ForgetResultNothingSaved
+          - AgentControl-SourceEditorViewModel-ForgetResultNotRemoved
+        tests:
+          - SourceEditorWindow_ForgetSavedSignIn_ConfirmationDecidesAndResultIsShown
+          - SourceEditorWindow_ForgetSavedSignIn_NoCredentialStore_ButtonDisabledWithTooltip
+          - SourceEditorWindow_ForgetSavedSignIn_NoCredentialHelper_ButtonDisabledWithTooltip
+          - SourceEditorWindow_Sections_ServerEditorHasTitledSectionsAndForgetBelongsToSignIn
+
+      - id: AgentControl-LauncherUI-SignatureOptions
+        title: >-
+          The LauncherUI subsystem shall let the user, in the editor of a NuGet-package folder or
+          server source, require signed packages and pin the publisher's certificate fingerprint -
+          explaining the limit of requiring signatures without a pinned publisher and how to find
+          the fingerprint, accepting the fingerprint as typed or pasted, and, where the platform
+          cannot verify signatures, showing the option disabled with the reason - and shall offer
+          no such options for a zip-package source.
+        justification: |
+          The signature requirement is a per-source security control; the people who set it need
+          to understand what it does and does not guarantee and be given the means to pin a
+          publisher, and a platform that cannot honor it must say so instead of hiding the option
+          or pretending.
+        children:
+          - AgentControl-SourceEditorViewModel-SignatureOptions
+          - AgentControl-SourceEditorViewModel-SignatureExplanation
+          - AgentControl-SourceEditorViewModel-SignatureUnsupportedPlatform
+          - AgentControl-SourceEditorViewModel-SignatureSettingsKept
+          - AgentControl-SourceEditorViewModel-SignatureChoiceSaved
+          - AgentControl-SourceEditorViewModel-ZipNeverRequiresSignatures
+          - AgentControl-SourceEditorViewModel-SignerFingerprint
+          - AgentControl-SourceEditorViewModel-FingerprintOptional
+          - AgentControl-SourceEditorViewModel-FingerprintSpellings
+          - AgentControl-SourceEditorViewModel-FingerprintHelp
+          - AgentControl-SourceEditorViewModel-FingerprintError
+          - AgentControl-SourceEditorViewModel-FingerprintNormalized
+          - AgentControl-SourceEditorViewModel-FingerprintNotSavedWhenUnused
+        tests:
+          - SourceEditorWindow_SignatureOptions_TickingEnablesTheFingerprintAndValidatesIt
+          - SourceEditorWindow_SignatureOptions_UnsupportedPlatform_CheckboxDisabledWithTooltip
+          - SourceEditorWindow_ZipSource_HasNoSignatureSection
+          - SourceEditorViewModel_Fingerprint_ValidationFollowsTheRules
+
+      - id: AgentControl-LauncherUI-SignatureIndicator
+        title: >-
+          The LauncherUI subsystem shall show, in the agent package chip of a repo card whose
+          pinned package comes from a NuGet source that requires signed packages, a shield with a
+          tooltip that says signatures are required and whether any trusted signer is accepted or
+          the publisher is pinned, and no shield otherwise.
+        justification: |
+          A glance at the repo list should show which repos receive checked packages and how
+          strictly, without opening the settings.
+        children:
+          - AgentControl-RepoCardViewModel-SignatureIndicator
+        tests:
+          - MainWindow_PackageChip_ShowsShieldOnlyWhenSignaturesAreRequired
+          - RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip
+
+      - id: AgentControl-LauncherUI-BackgroundChecksDoNotPrompt
+        title: >-
+          The LauncherUI subsystem shall not open a sign-in dialog for work the user did not
+          start - the background upgrade check at start-up and after settings change - but use the
+          credentials already entered during the session or saved by the user's credential store
+          and otherwise explain on the card that a
+          sign-in is needed and how to give it, while a check the user starts may ask.
+        justification: |
+          A dialog that appears unprompted while the user is doing something else is disruptive
+          and hard to trust as a sign-in request; the user should sign in only for an action they
+          chose to take, with the card saying which one.
+        children:
+          - AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential
+
+      - id: AgentControl-LauncherUI-RepoCardChips
+        title: >-
+          The LauncherUI subsystem shall describe each repo card with labeled chips - the
+          pinned agent package with its version and source (the source's alias beside an icon
+          for its kind), the version an available upgrade would move to, the current branch, and
+          status warnings - and shall name the configured agent tool on the card's Launch action.
+        justification: |
+          Unlabeled version numbers and icons leave a developer guessing what a card is telling
+          them; each fact is stated in words with a tooltip that explains it in full.
+        children:
+          - AgentControl-RepoCardViewModel-DisplayInfo
+          - AgentControl-RepoCardViewModel-UpgradeBadge
+          - AgentControl-RepoCardViewModel-LaunchLabel
+        tests:
+          - RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip
+          - RepoCardViewModel_PinnedToServerSource_ChipShowsAliasAndServerIcon
+          - RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions
+          - RepoCardViewModel_BranchChip_BranchKnown_ShowsBranchWithTooltip
+          - RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack
+
+      - id: AgentControl-LauncherUI-ResponsiveOperations
+        title: >-
+          The LauncherUI subsystem shall keep the window responsive while package sources are
+          read or packages are applied, so that a slow source never freezes it.
+        justification: |
+          Package sources are often network shares or servers that can be slow or offline; a
+          frozen window would be mistaken for a crash.
+        children:
+          - AgentControl-RepoCardViewModel-ResponsiveOperations
+          - AgentControl-MainWindowViewModel-BackgroundUpgradeCheck
+          - AgentControl-SelectPackageWindowViewModel-AsyncLoading
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_SourceSlow_DoesNotBlockAndShowsChecking
+          - RepoCardViewModel_ApplySelectedPackageAsync_SourceSlow_ReturnsToCallerBeforeSourceAnswers
+          - SelectPackageWindowViewModel_SelectPackageName_VersionsSlow_ShowsProgressWithoutBlocking
+          - MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins
+
+      - id: AgentControl-LauncherUI-OperationProgress
+        title: >-
+          The LauncherUI subsystem shall show that a package operation is running and disable
+          the repo card's other actions until it ends.
+        justification: |
+          The user must be able to tell that the application is working and not start a second,
+          conflicting action on the same repo meanwhile.
+        children:
+          - AgentControl-RepoCardViewModel-OperationBusyState
+        tests:
+          - RepoCardViewModel_ApplySelectedPackageAsync_Running_ReportsBusyAndDisablesOtherActions
+          - SelectPackageWindowViewModel_SelectPackageName_VersionsSlow_ShowsProgressWithoutBlocking
+
+      - id: AgentControl-LauncherUI-OneOperationPerRepo
+        title: >-
+          The LauncherUI subsystem shall run only one package operation per repo at a time,
+          ignoring a repeated request while one is running.
+        justification: |
+          A repeated click must not apply a package twice.
+        children:
+          - AgentControl-RepoCardViewModel-OneOperationAtATime
+        tests:
+          - AsyncRelayCommand_ExecuteAsync_WhileRunning_DoesNotRunOperationTwice
+          - RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored
+
+      - id: AgentControl-LauncherUI-CancelOperation
+        title: >-
+          The LauncherUI subsystem shall let the user cancel a running package operation without
+          the cancellation being reported as an error and without changing the repo's pin.
+        justification: |
+          A source that never answers must not trap the user in a wait they cannot leave, and
+          giving up must leave the repo exactly as it was.
+        children:
+          - AgentControl-RepoCardViewModel-CancelOperation
+        tests:
+          - AsyncRelayCommand_Cancel_Running_SignalsTokenAndIsNotAnError
+          - RepoCardViewModel_ApplySelectedPackageAsync_CancelledWhileRunning_ReportsNoErrorAndKeepsPinUnchanged
+
+      - id: AgentControl-LauncherUI-SourceFailureIsolation
+        title: >-
+          The LauncherUI subsystem shall show a package source that cannot be read as an inline
+          problem without affecting other sources or repos.
+        justification: |
+          With several sources configured, one share or server being offline is expected; it must
+          not stop the developer from using a source that works or hide the state of repos
+          pinned to other sources.
+        children:
+          - AgentControl-SelectPackageWindowViewModel-SourceFailureIsolation
+        tests:
+          - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked
+          - SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline
+
+      - id: AgentControl-LauncherUI-RetryFailedRead
+        title: >-
+          The LauncherUI subsystem shall let the user retry just the package-source read that
+          failed.
+        justification: |
+          A transient failure, such as a server that was briefly unreachable or a sign-in that was
+          canceled, should be recoverable without closing the dialog or rereading sources that
+          already answered.
+        children:
+          - AgentControl-SelectPackageWindowViewModel-Retry
+        tests:
+          - SelectPackageWindowViewModel_Retry_SourceFailedThenAnswers_LoadsOnlyThatSource
+          - SelectPackageWindowViewModel_Retry_StillFailing_KeepsErrorAndRetryAvailable
+
+      - id: AgentControl-LauncherUI-StaleResultsDiscarded
+        title: >-
+          The LauncherUI subsystem shall discard the late answer of a package-source read that a
+          newer request has superseded, so that it never overwrites the newer state.
+        justification: |
+          An answer that arrives after the sources or the user's selection have changed must not
+          overwrite what the user is now looking at.
+        children:
+          - AgentControl-RepoCardViewModel-SupersededUpgradeCheck
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded
+          - SelectPackageWindowViewModel_ChangeSelectedPackageName_SupersedesSlowerEarlierLoad
 
       - id: AgentControl-LauncherUI-About
         title: >-
@@ -227,3 +739,22 @@ sections:
           - ThirdPartyDependencies_All_NoDuplicateNames
           - ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense
           - DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat
+
+      - id: AgentControl-LauncherUI-SourceAwareActions
+        title: >-
+          The LauncherUI subsystem shall perform select-package, upgrade, launch-time sync and
+          upgrade-available checks for a repo only at the package source named in the repo's
+          pin, shall record that source in the pin when a package is applied, shall show an
+          error state instead of offering anything when the pinned source is not configured, and
+          shall keep cached source results only for sources that have not changed.
+        justification: |
+          A repo's pin binds it to one source; quietly using a different source because the
+          pinned one is missing or renamed would install content the pin never named, and the
+          user needs to see that the source is missing so they can restore it.
+        children:
+          - AgentControl-RepoCardViewModel-SourceAwareness
+          - AgentControl-MainWindowViewModel-InvalidateChangedSources
+          - AgentControl-SelectPackageWindowViewModel-SourceScoped
+        tests:
+          - RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
+          - RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent

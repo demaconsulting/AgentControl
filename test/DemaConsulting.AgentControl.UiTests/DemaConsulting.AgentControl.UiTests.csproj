@@ -74,6 +74,21 @@
     <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
   </ItemGroup>
 
+  <!-- ASP.NET Core shared framework (part of the .NET runtime, not a NuGet package): hosts the
+       in-process mock NuGet V3 feed (shared with the unit tests as a linked source file) that the
+       application under test talks to over plain HTTP, so no TLS certificate has to be trusted. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Compile Include="..\DemaConsulting.AgentControl.Tests\AgentPackageManagement\MockNuGetFeed.cs"
+             Link="MockNuGetFeed.cs" />
+  </ItemGroup>
+
+  <!-- WMI (Win32_Process) access: lets LaunchedShellCleaner read process command lines/parent
+       ids so it only ever terminates the shell this test's own launch spawned. -->
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="10.0.0" />
+  </ItemGroup>
+
   <!-- Code Analysis Dependencies -->
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.403">

@@ -45,3 +45,20 @@ sections:
           # LoggingSetup.Initialize completed without throwing, since TestLoggingFixture runs
           # it once before any test executes.
           - GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue
+
+      - id: AgentControl-Logging-UnhandledExceptionsRedacted
+        title: >-
+          The Logging subsystem shall write an exception that reaches the process-wide handlers
+          for unhandled and unobserved exceptions to the log only after removing every secret from
+          it - a registered credential, an authorization header value, web-address user
+          information, query string or fragment - keeping the exception's type, message and stack
+          trace otherwise readable for troubleshooting, and shall tolerate an unhandled object that
+          is not an exception.
+        justification: |
+          These handlers are the last line of defense and see every failure in the process,
+          including ones whose messages quote an address or a header from a package server; the log
+          is a plain file users attach to reports, so nothing written there may carry a secret even
+          when the failure was not foreseen anywhere else.
+        tests:
+          - LoggingSetup_ReportUnhandledException_ExceptionCarryingSecrets_LogsOnlyASanitizedDescription
+          - LoggingSetup_ReportUnobservedAndNonExceptionObjects_AreRedactedAndTolerated

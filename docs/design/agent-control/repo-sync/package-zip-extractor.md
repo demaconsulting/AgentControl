@@ -4,9 +4,12 @@
 
 #### Purpose
 
-`PackageZipExtractor` implements the blind-delete-and-replace upgrade sequence for a repo's
-four managed agent folders (`.github/agents`, `.github/standards`, `.github/templates`,
-`.github/skills`) from a package zip file. Per architecture.md's "Blind delete of the four
+`PackageZipExtractor` is the zip-file entry point to the blind-delete-and-replace upgrade
+sequence for a repo's four managed agent folders (`.github/agents`, `.github/standards`,
+`.github/templates`, `.github/skills`) from a package zip file. It is a thin facade: each method
+opens the zip with `ZipPackageContentReader` and delegates to `PackageContentExtractor`, which
+holds every rule and is shared with unpacked-folder (NuGet) packages (see its own design); the
+facade keeps the zip API and its requirements stable. Per architecture.md's "Blind delete of the four
 known folders" decision (see `docs/design/agent-control/repo-sync.md`), it performs: (1) open/
 validate the zip; (2) validate every entry's destination path up front, before anything is
 deleted; (3) delete the four known folders if present; (4) extract only the already-validated
@@ -18,11 +21,10 @@ existing managed folders. Rewriting the `.agentcontrol.json` pin is the caller's
 
 #### Data Model
 
-`PackageZipExtractor` holds no instance state; it is a static class.
-
-**ManagedFolders**: `static readonly string[]` — the four folder paths (relative to a repo
-root) that are blind-deleted and replaced on every sync/upgrade; the single source of truth
-consulted by both `Extract` and `AllManagedFoldersExist`.
+`PackageZipExtractor` holds no instance state and no data of its own; it is a static class. The
+four managed folder paths (relative to a repo root) that are blind-deleted and replaced on every
+sync/upgrade live in `PackageContentExtractor`, the single source of truth consulted by both
+`Extract` and `AllManagedFoldersExist`.
 
 #### Key Methods
 
@@ -39,9 +41,14 @@ four managed folders if present, and extracts the already-validated entries into
   (`AgentControl-PackageZipExtractor-Extract`). An entry that resolves inside the repo but
   outside the four managed folders is skipped, not extracted. An entry that resolves outside
   `repoRoot` is rejected before any managed folder is deleted, so that failure mode never
-  leaves the repo partially upgraded. Symbolic links and junctions already present in the
-  repo's folder layout are the repo owner's concern and are deliberately not inspected; only
-  archive-supplied paths are validated, and this class never creates links. A delete or
+  leaves the repo partially upgraded. The same path-safety contract as for every package format
+  applies, because `Extract` delegates to `PackageContentExtractor`: before anything is deleted,
+  the repo's real folder layout below the repo root is checked, and a symbolic link, junction or
+  other reparse point in the `.github` folder, a managed folder or a destination folder refuses
+  the whole extraction with a clear error, changing nothing inside or outside the repo
+  (`AgentControl-PackageZipExtractor-RefuseLinkedRepoFolders`; see `PackageContentExtractor` for
+  the checks, including the repo root itself being allowed to sit under a link). Archive entries
+  are validated the same way, and this class never creates links. A delete or
   extraction I/O failure can still leave the repo partially upgraded — there is
   intentionally no rollback for that case, and it must be resolved manually by the caller, per
   architecture.md's "Upgrade sequence and failure handling" decision. Logs at `Debug` before
@@ -89,14 +96,11 @@ read.
 
 #### Dependencies
 
-- **PathHelpers** (`Utilities` subsystem) — `SafePathCombine` resolves every managed-folder
-  and zip-entry destination path safely relative to the repo root.
-- **AppLogging**, **ILogger** (`Logging` subsystem) — `Extract` logs its own extraction/delete
-  operations for operational diagnostics, using a string logger category name (rather than the
-  generic `ILogger<PackageZipExtractor>` form used by non-static classes) because a static
-  class cannot be used as a generic type argument — the same convention already established
-  by `AgentToolLauncher`.
-- **.NET BCL** — `System.IO.Compression.ZipFile`/`ZipArchive`.
+- **PackageContentExtractor** — the shared implementation every method delegates to; it uses
+  `PathHelpers.SafePathCombine` for destination-path containment and logs its extraction/delete
+  operations (with a string logger category name, because a static class cannot be used as a
+  generic type argument).
+- **ZipPackageContentReader** — opens the zip and presents it as package content.
 
 #### Callers
 

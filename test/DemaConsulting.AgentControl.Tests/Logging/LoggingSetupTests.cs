@@ -19,6 +19,9 @@
 // SOFTWARE.
 
 using DemaConsulting.AgentControl.Logging;
+using DemaConsulting.AgentControl.PackageCredentials;
+using DemaConsulting.AgentControl.Tests.PackageCredentials;
+using DemaConsulting.NuGet.Caching;
 using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.Tests.Logging;
@@ -74,6 +77,61 @@ public sealed class LoggingSetupTests
         // Act / Assert: the documented InvalidOperationException contract is honored instead of
         // the raw ArgumentException escaping uncaught
         Assert.Throws<InvalidOperationException>(() => LoggingSetup.Initialize(invalidConfigDirectory));
+    }
+
+    /// <summary>
+    ///     Test that the process-wide unhandled-exception handler writes the exception only after
+    ///     removing secrets from it: an <c>Authorization</c> value, a URL's user information and
+    ///     query, and a secret that is registered for redaction never reach the log raw - not in the
+    ///     message, not in an inner exception - while the entry still says what happened.
+    /// </summary>
+    [Fact]
+    public void LoggingSetup_ReportUnhandledException_ExceptionCarryingSecrets_LogsOnlyASanitizedDescription()
+    {
+        // Arrange: an exception chain whose texts carry every kind of secret
+        var registered = "registered-secret-" + Guid.NewGuid().ToString("N");
+        using var lease = SecretRedactor.Lease(new NuGetCredential("svc", registered));
+        var inner = new InvalidOperationException($"GET https://user:inner-password-4423@feeds.example.com/v3/index.json?token=inner-token-4423 failed for {registered}");
+        var exception = new InvalidOperationException(
+            "request failed. Authorization: Bearer outer-bearer-token-4423", inner);
+        var logger = new ListLogger();
+
+        // Act
+        LoggingSetup.ReportUnhandledException(logger, exception, isTerminating: true);
+
+        // Assert
+        var line = Assert.Single(logger.Snapshot());
+        Assert.Contains("Unhandled exception reached AppDomain.UnhandledException", line, StringComparison.Ordinal);
+        Assert.Contains("IsTerminating=True", line, StringComparison.Ordinal);
+        Assert.Contains(nameof(InvalidOperationException), line, StringComparison.Ordinal);
+        Assert.DoesNotContain("outer-bearer-token-4423", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("inner-password-4423", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("inner-token-4423", line, StringComparison.Ordinal);
+        Assert.DoesNotContain(registered, line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that the same protection applies to an unobserved task exception, and that an
+    ///     unhandled object that is not an exception is logged without failing.
+    /// </summary>
+    [Fact]
+    public void LoggingSetup_ReportUnobservedAndNonExceptionObjects_AreRedactedAndTolerated()
+    {
+        // Arrange
+        var logger = new ListLogger();
+        var basicValue = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("user:password-4424"));
+        var aggregate = new AggregateException(new InvalidOperationException($"Authorization: Basic {basicValue}"));
+
+        // Act
+        LoggingSetup.ReportUnobservedTaskException(logger, aggregate);
+        LoggingSetup.ReportUnhandledException(logger, "just text", isTerminating: false);
+
+        // Assert
+        var lines = logger.Snapshot();
+        Assert.Equal(2, lines.Count);
+        Assert.Contains("Unobserved task exception", lines[0], StringComparison.Ordinal);
+        Assert.DoesNotContain(basicValue, lines[0], StringComparison.Ordinal);
+        Assert.Contains("IsTerminating=False", lines[1], StringComparison.Ordinal);
     }
 
     /// <summary>

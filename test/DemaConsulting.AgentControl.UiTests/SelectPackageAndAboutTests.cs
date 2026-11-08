@@ -86,13 +86,17 @@ public sealed class SelectPackageAndAboutTests
             Assert.NotNull(nameItem);
             nameItem.Select();
 
-            // The version list should default-select "1.0.0" (the only/latest available version)
-            // once the package name selection has propagated - proceed straight to confirming.
+            // The version defaults to the latest once it has loaded in the background; the Select
+            // button stays disabled until then.
             var confirmButton = Retry.WhileNull(
                 () => selectPackageWindow.FindFirstDescendant(cf => cf.ByAutomationId("SelectPackageConfirmButton")),
                 timeout: TimeSpan.FromSeconds(10),
                 interval: TimeSpan.FromMilliseconds(200)).Result?.AsButton();
             Assert.NotNull(confirmButton);
+            Assert.True(Retry.WhileFalse(
+                () => confirmButton.IsEnabled,
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200)).Result);
             confirmButton.Invoke();
 
             // Assert: the release notes window should appear once the apply completes.

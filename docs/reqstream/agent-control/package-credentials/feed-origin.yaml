@@ -1,0 +1,92 @@
+---
+# Software Unit Requirements for the FeedOrigin Class
+#
+# FeedOrigin is the identity - scheme, host and port - of a package server, which is the unit a
+# credential is scoped to. Each requirement states one observable criterion.
+
+sections:
+  - title: FeedOrigin Unit Requirements
+    requirements:
+      - id: AgentControl-FeedOrigin-NormalizedOrigin
+        title: >-
+          The FeedOrigin class shall reduce a package server's web address to its scheme, host
+          and port.
+        justification: |
+          A credential is tied to an origin, so one sign-in must cover every endpoint of a server
+          (service index, version list, package download) whatever path, query string or fragment
+          the address has.
+        tests:
+          - FeedOrigin_TryParse_FullFeedUrl_KeepsSchemeHostAndPortOnly
+
+      - id: AgentControl-FeedOrigin-EquivalentSpellings
+        title: >-
+          The FeedOrigin class shall treat differences in letter case and an explicit default
+          port as the same origin.
+        justification: |
+          Two spellings of one server must compare equal, or the user would be asked twice for
+          the same server.
+        tests:
+          - FeedOrigin_Equals_ExplicitDefaultPort_EqualsOriginWithoutPort
+
+      - id: AgentControl-FeedOrigin-RefusesNonWebAddress
+        title: >-
+          The FeedOrigin class shall refuse an address that is not an absolute http or https
+          address.
+        justification: |
+          Only a web server can be asked for credentials; a blank, relative, file or other-scheme
+          address is not a server identity and must never be mistaken for one.
+        tests:
+          - FeedOrigin_TryParse_NotAWebAddress_IsRefused
+
+      - id: AgentControl-FeedOrigin-RefusesUserInfo
+        title: >-
+          The FeedOrigin class shall refuse an absolute web address that embeds a user name or
+          password.
+        justification: |
+          An address that already carries a credential must never be accepted as a server
+          identity, because a feed must not be addressed with a credential in the address.
+        tests:
+          - FeedOrigin_TryParse_UserInfo_IsRefused
+          - FeedOrigin_TryParse_UserInfoOnAbsoluteUri_IsRefusedWithoutRepeatingIt
+
+      - id: AgentControl-FeedOrigin-RefusalNeverRepeatsAddress
+        title: >-
+          The FeedOrigin class shall not repeat a refused address, or any part of it, in the
+          message of the failure it reports.
+        justification: |
+          A refused address may embed a credential, and a failure message can be shown to the user
+          and written to a log.
+        tests:
+          - FeedOrigin_Create_UserInfo_ThrowsWithoutRepeatingTheSecret
+          - FeedOrigin_TryParse_UserInfoOnAbsoluteUri_IsRefusedWithoutRepeatingIt
+
+      - id: AgentControl-FeedOrigin-TextFormShowsOnlyOrigin
+        title: >-
+          The FeedOrigin class shall present an origin as text holding only its scheme, its host
+          - an IPv6 host in brackets - and its port when the port is not the scheme's default.
+        justification: |
+          The text form is shown to the user and logged, so it must hold nothing but the origin
+          and must still tell origins on different ports apart.
+        tests:
+          - FeedOrigin_TryParse_FullFeedUrl_KeepsSchemeHostAndPortOnly
+          - FeedOrigin_Equals_ExplicitDefaultPort_EqualsOriginWithoutPort
+          - FeedOrigin_ToString_Ipv6AndPorts_BracketsHostAndKeepsPorts
+
+      - id: AgentControl-FeedOrigin-MatchesSameOriginOnly
+        title: >-
+          The FeedOrigin class shall report that an address belongs to the origin only when its
+          scheme, host and port are all equal to the origin's.
+        justification: |
+          Credential scoping is only as strong as the match: a server on another port, scheme or
+          sub-domain is a different party and must not receive the credential.
+        tests:
+          - FeedOrigin_Matches_VariousUris_OnlyTheSameOriginMatches
+
+      - id: AgentControl-FeedOrigin-NeverMatchesRelativeOrMissingAddress
+        title: >-
+          The FeedOrigin class shall report that a relative address, or no address, does not
+          belong to the origin.
+        justification: |
+          An address that cannot be interpreted must never be mistaken for the server's own.
+        tests:
+          - FeedOrigin_Matches_NullOrRelativeUri_ReturnsFalse

@@ -40,9 +40,17 @@ internal static class TestRepoPinWriter
     /// <param name="repoPath">Absolute path to the repository root; must already exist.</param>
     /// <param name="packageName">The pinned package name.</param>
     /// <param name="version">The pinned package version.</param>
-    public static void Write(string repoPath, string packageName, string version)
+    /// <param name="sourceAlias">The alias of the source the package came from, or
+    ///     <see langword="null"/> to write a pin file in the older format that names no source.</param>
+    public static void Write(string repoPath, string packageName, string version, string? sourceAlias = null)
     {
-        var pin = new { PackageName = packageName, Version = version };
+        var pin = new Dictionary<string, object?> { ["PackageName"] = packageName, ["Version"] = version };
+        if (sourceAlias is not null)
+        {
+            pin["SchemaVersion"] = 2;
+            pin["Source"] = sourceAlias;
+        }
+
         var json = JsonSerializer.Serialize(pin, SerializerOptions);
         File.WriteAllText(Path.Combine(repoPath, ".agentcontrol.json"), json);
     }

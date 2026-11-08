@@ -23,6 +23,10 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - Search filtering and sort ordering produce the documented result for every tested input.
 - Applying updated settings preserves the recent-repos list and invalidates the shared
   package-version cache.
+- Applying settings drops cached package results only for sources that were edited or removed.
+- Constructing the view model reads no package source; upgrade availability is checked in the
+  background, and an unreachable source affects only the cards pinned to it.
+- The connection-test provider shares the application's session credentials with the cards.
 
 #### Test Scenarios
 
@@ -95,3 +99,40 @@ tracked repo. This scenario is tested by
 `MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus`, and
 `MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus`,
 covering `AgentControl-MainWindowViewModel-ApplySettings`.
+
+**MainWindowViewModel_InvalidateChangedSources_OnlyEditedOrRemovedSourcesAreInvalidated**:
+`ApplySettings` replaces one package source's location; a card pinned to the unchanged source
+keeps its cached upgrade answer even after that source's folder has disappeared (an invalidated
+cache would fail to read it and report no upgrade), while a changed source is observed afresh. This
+scenario is tested by `MainWindowViewModel_ApplySettings_OnlyEditedSourceIsInvalidated` and
+`MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache`, covering
+`AgentControl-MainWindowViewModel-InvalidateChangedSources`.
+
+**MainWindowViewModel_ApplySettings_CredentialBearingSource_IsRefused**: `ApplySettings` with a
+package source location that embeds a sentinel password throws `InvalidOperationException` whose
+message does not contain it, the live settings instance is unchanged, and no settings file is
+written. This scenario is tested by
+`MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings`,
+covering `AgentControl-MainWindowViewModel-ApplySettings`.
+
+**MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive**: `ApplySettings` against
+a configuration location that cannot be written throws `InvalidOperationException`, and the live
+settings instance is still the previous one with its previous values and recent repos. This
+scenario is tested by `MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive`,
+covering `AgentControl-MainWindowViewModel-ApplySettings`.
+
+**MainWindowViewModel_BackgroundUpgradeCheck_ConstructionReadsNoSourceAndFailuresAreIsolated**:
+Constructing the view model with a pinned repo reads no package source until the upgrade refresh
+begins; when the refresh runs with one source unreachable, the cards pinned to the other source
+are still checked and show their upgrade; and adding a pinned repo checks its upgrade status in
+the background. This scenario is tested by
+`MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins`,
+`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked`, and
+`MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground`, covering
+`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`.
+
+**MainWindowViewModel_ConnectionTestProvider_UsesTheSharedCredentialFacilities**: The view model hands out a
+real `NuGetSourceProvider` for the settings window's connection test, built with the same credential context
+(session store and prompt) as the cards, so a sign-in made during a test is remembered for the session. This
+scenario is tested by `MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials`
+(in `SettingsWindowServerSourceTests.cs`), covering `AgentControl-MainWindowViewModel-ConnectionTestProvider`.

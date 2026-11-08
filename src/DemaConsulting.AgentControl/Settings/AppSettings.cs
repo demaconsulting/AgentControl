@@ -18,10 +18,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Text.Json.Serialization;
+using DemaConsulting.AgentControl.AgentPackageManagement;
+
 namespace DemaConsulting.AgentControl.Settings;
 
 /// <summary>
-///     Per-user AgentControl settings: package source, tool overrides, agent/shell preferences,
+///     Per-user AgentControl settings: package sources, tool overrides, agent/shell preferences,
 ///     and the recent-repos list.
 /// </summary>
 /// <remarks>
@@ -29,15 +32,117 @@ namespace DemaConsulting.AgentControl.Settings;
 ///     <c>%APPDATA%\AgentControl\</c> (or a config-dir override). All members are mutable with
 ///     public getters/setters so <see cref="System.Text.Json.JsonSerializer"/> can round-trip the
 ///     type without custom converters. Not thread-safe; the Phase 2 UI is expected to own a single
-///     in-memory instance per application session.
+///     in-memory instance per application session. By design nothing here - and nothing in
+///     <see cref="PackageSourceDefinition"/> - can hold a password, token or other secret.
 /// </remarks>
 internal sealed class AppSettings
 {
     /// <summary>
-    ///     Gets or sets the filesystem path (local drive, mapped drive, or UNC path) from which
-    ///     agent package zip files are enumerated, or <see langword="null"/> if not yet configured.
+    ///     Gets or sets the configured agent package sources, in the order the user arranged them.
     /// </summary>
+    /// <remarks>
+    ///     When empty, <see cref="GetEffectiveSources"/> falls back to the legacy
+    ///     <see cref="PackageSourcePath"/> if one is set, and <see cref="SettingsStore.Load"/>
+    ///     migrates that value into this list.
+    /// </remarks>
+    public List<PackageSourceDefinition> Sources { get; set; } = [];
+
+    /// <summary>
+    ///     Gets or sets the legacy single filesystem path (local drive, mapped drive, or UNC path)
+    ///     from which agent package zip files were enumerated before multiple sources existed, or
+    ///     <see langword="null"/> if not configured.
+    /// </summary>
+    /// <remarks>
+    ///     Still read from older settings files (and by tests that seed settings directly) so an
+    ///     existing configuration keeps working, but never written back: <see cref="SettingsStore"/>
+    ///     persists the equivalent <c>Default</c> entry in <see cref="Sources"/> instead.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PackageSourcePath { get; set; }
+
+    /// <summary>
+    ///     Gets the package sources in effect: <see cref="Sources"/> when it has any entries,
+    ///     otherwise a single <c>Default</c> zip source for the legacy
+    ///     <see cref="PackageSourcePath"/> when that is set, otherwise none.
+    /// </summary>
+    /// <returns>The effective sources. When non-empty <see cref="Sources"/> exists the legacy path
+    ///     is ignored entirely. The returned list is a snapshot; the definitions in it are the live
+    ///     objects when they come from <see cref="Sources"/>.</returns>
+    public IReadOnlyList<PackageSourceDefinition> GetEffectiveSources()
+    {
+        if (Sources.Count > 0)
+        {
+            return Sources;
+        }
+
+        return string.IsNullOrWhiteSpace(PackageSourcePath)
+            ? []
+            : [PackageSourceDefinition.CreateDefaultZip(PackageSourcePath)];
+    }
+
+    /// <summary>
+    ///     Replaces every collection (and source text field) that an explicit JSON <c>null</c> may
+    ///     have left <see langword="null"/> with an empty value, and drops null list entries.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="System.Text.Json.JsonSerializer"/> bypasses a property's initializer when the
+    ///     file says <c>"Sources": null</c> (or <c>"RecentRepos"</c>/<c>"PackageIds"</c>), and the
+    ///     property is then really <see langword="null"/> despite its non-nullable type, which
+    ///     would crash migration, startup and the source providers. Called by
+    ///     <see cref="SettingsStore.Load"/> straight after deserialization so the rest of the
+    ///     application can rely on the declared non-null types. Idempotent.
+    /// </remarks>
+    public void NormalizeNulls()
+    {
+        // The declared types are non-nullable, but JSON null can still put null in them
+        Sources = Sources is null ? [] : [.. Sources.Where(source => source is not null)];
+        RecentRepos = RecentRepos is null ? [] : [.. RecentRepos.Where(repo => repo is not null)];
+
+        foreach (var source in Sources)
+        {
+            source.NormalizeNulls();
+        }
+
+        foreach (var repo in RecentRepos)
+        {
+            repo.Path ??= string.Empty;
+        }
+    }
+
+    /// <summary>
+    ///     Moves a legacy <see cref="PackageSourcePath"/> into <see cref="Sources"/> as the
+    ///     <c>Default</c> zip source, then clears the legacy value.
+    /// </summary>
+    /// <remarks>
+    ///     Does nothing when <see cref="Sources"/> already has entries (an existing source list
+    ///     always wins) or no legacy path is set; in the first case the stale legacy value is still
+    ///     cleared so it can never be written again. Idempotent.
+    /// </remarks>
+    public void MigrateLegacySource()
+    {
+        if (Sources.Count == 0 && !string.IsNullOrWhiteSpace(PackageSourcePath))
+        {
+            Sources.Add(PackageSourceDefinition.CreateDefaultZip(PackageSourcePath));
+        }
+
+        PackageSourcePath = null;
+    }
+
+    /// <summary>
+    ///     Creates the copy of these settings that is written to disk: the same values, but with the
+    ///     effective sources in <see cref="Sources"/> and no legacy <see cref="PackageSourcePath"/>.
+    /// </summary>
+    /// <returns>A shallow copy that shares the recent-repos list and source definition objects
+    ///     with this instance and is intended only for serialization. This instance is left
+    ///     unchanged, so callers holding it still see the values they set.</returns>
+    internal AppSettings CreatePersistedCopy()
+    {
+        // cspell:disable-next-line
+        var copy = (AppSettings)MemberwiseClone();
+        copy.Sources = [.. GetEffectiveSources()];
+        copy.PackageSourcePath = null;
+        return copy;
+    }
 
     /// <summary>
     ///     Gets or sets the git executable path override, or <see langword="null"/> to resolve

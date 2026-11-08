@@ -21,175 +21,249 @@
 namespace DemaConsulting.AgentControl.AgentPackageManagement;
 
 /// <summary>
-///     Session-scoped cache decorating <see cref="PackageSource"/>'s version-scanning logic,
-///     keyed by <c>(sourceDirectory, packageName)</c>.
+///     The answer to "is a newer package version available than the pinned one?".
+/// </summary>
+/// <param name="IsNewerAvailable"><see langword="true"/> if the highest discoverable version
+///     compares strictly greater than the pinned version, or if the pinned version does not parse
+///     (an unparsable pin is treated as needing attention); otherwise <see langword="false"/>,
+///     including when no version was found.</param>
+/// <param name="Latest">The highest-versioned discovered package whether or not it is newer than
+///     the pin, or <see langword="null"/> if none was found.</param>
+internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? Latest);
+
+/// <summary>
+///     Session-scoped cache of what each configured package source offers, keyed by
+///     <c>(source alias, package ID)</c>.
 /// </summary>
 /// <remarks>
 ///     <para>
-///     Per architecture.md's repo-fact caching strategy, the set of available package versions
-///     at the configured source is not repo-scoped at all (every repo pinned to the same package
-///     name shares the same answer) and may involve slow network/UNC I/O, so it is cached once
-///     per app session rather than rescanned per repo-card. <see cref="PackageSource"/> itself is
-///     deliberately left untouched (stateless/pure, per its own doc comment) - this class is a
-///     decorator, not a modification, constructed once by <c>MainWindowViewModel</c> and shared
-///     across every <c>RepoCardViewModel</c> instance for the lifetime of the app session.
+///     Per architecture.md's repo-fact caching strategy, the set of available package versions at
+///     a source is not repo-scoped at all (every repo pinned to the same package at the same source
+///     shares the same answer) and may involve slow network I/O, so it is fetched once per app
+///     session rather than per repo-card. Entries are keyed by alias, never by location, so two
+///     sources that offer the same package ID are cached - and invalidated - independently, and a
+///     result fetched from one source is never returned for another. Providers are reached through
+///     a <see cref="PackageSourceRegistry"/>, so an unconfigured alias fails with
+///     <see cref="UnknownSourceException"/> instead of reading any cached data.
 ///     </para>
 ///     <para>
-///     Not thread-safe; callers are expected to use this only from the UI thread, consistent
-///     with every other view-model-adjacent class in this codebase.
+///     A cached empty result (no versions found) is a valid, distinct entry from "not yet queried",
+///     and a failed fetch is never cached. <see cref="Invalidate()"/> clears everything, while
+///     <see cref="Invalidate(string)"/> clears one source so editing or removing a source does not
+///     discard the other sources' results; a fetch that was already in flight when its source was
+///     invalidated does not repopulate the cache. Safe for concurrent use; two simultaneous misses
+///     for the same key may both fetch, and the later result wins.
 ///     </para>
 /// </remarks>
 internal sealed class PackageVersionCache
 {
     /// <summary>
-    ///     The cached "latest discovered package" result, keyed by source directory and package
-    ///     name. A cached <see langword="null"/> value (no package found) is a valid, distinct
-    ///     cache entry from "not yet queried".
+    ///     Guards <see cref="_sources"/> and the per-source entries.
     /// </summary>
-    private readonly Dictionary<(string SourceDirectory, string PackageName), DiscoveredPackage?> _cache = [];
+    private readonly object _lock = new();
 
     /// <summary>
-    ///     The cached distinct package base names discoverable at a source directory, keyed by
-    ///     source directory.
+    ///     The cached data per source alias (case-insensitive).
     /// </summary>
-    private readonly Dictionary<string, IReadOnlyList<string>> _packageNamesCache = [];
+    private readonly Dictionary<string, SourceEntry> _sources = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    ///     The cached descending-by-version package list for a given <c>(sourceDirectory,
-    ///     packageName)</c> pair.
+    ///     Gets the package names or IDs a source offers, consulting (and populating) the cache.
     /// </summary>
-    private readonly Dictionary<(string SourceDirectory, string PackageName), IReadOnlyList<DiscoveredPackage>>
-        _versionsDescendingCache = [];
-
-    /// <summary>
-    ///     Enumerates the distinct package base names discoverable at a source directory,
-    ///     consulting (and populating) this session cache instead of re-scanning the filesystem
-    ///     on every call.
-    /// </summary>
-    /// <param name="sourceDirectory">Filesystem directory to scan (local, mapped drive, or UNC).</param>
-    /// <returns>The distinct package base names found, ordered by
-    ///     <see cref="StringComparer.OrdinalIgnoreCase"/>.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sourceDirectory"/> is
+    /// <param name="registry">The registry that resolves <paramref name="sourceAlias"/> to a
+    ///     provider on a cache miss.</param>
+    /// <param name="sourceAlias">The source alias.</param>
+    /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
+    /// <returns>The distinct package names, ordered case-insensitively.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry"/> is
     ///     <see langword="null"/>.</exception>
-    /// <exception cref="DirectoryNotFoundException">Thrown on a cache miss when
-    ///     <paramref name="sourceDirectory"/> does not exist or is unreachable; a cache hit
-    ///     returns the previously-observed result instead, even if the source directory has since
-    ///     become unreachable.</exception>
-    public IReadOnlyList<string> GetPackageNames(string sourceDirectory)
+    /// <exception cref="ArgumentException">Thrown when <paramref name="sourceAlias"/> is null,
+    ///     empty or whitespace.</exception>
+    /// <exception cref="UnknownSourceException">Thrown when the alias is not configured.</exception>
+    /// <exception cref="DirectoryNotFoundException">Thrown on a cache miss when a folder source
+    ///     does not exist or is unreachable; a cache hit returns the previously observed result
+    ///     even if the source has since become unreachable.</exception>
+    public async Task<IReadOnlyList<string>> GetPackageIdsAsync(
+        PackageSourceRegistry registry, string sourceAlias, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(sourceDirectory);
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceAlias);
 
-        if (!_packageNamesCache.TryGetValue(sourceDirectory, out var names))
+        var provider = registry.Resolve(sourceAlias);
+        var entry = GetOrCreateEntry(sourceAlias);
+        lock (_lock)
         {
-            names = PackageSource.EnumeratePackageNames(sourceDirectory);
-            _packageNamesCache[sourceDirectory] = names;
+            if (entry.PackageIds is not null)
+            {
+                return entry.PackageIds;
+            }
         }
 
-        return names;
+        var ids = await provider.ListPackageIdsAsync(cancellationToken);
+        lock (_lock)
+        {
+            entry.PackageIds = ids;
+        }
+
+        return ids;
     }
 
     /// <summary>
-    ///     Enumerates a named package's discoverable versions at a source directory, descending
-    ///     by version, consulting (and populating) this session cache instead of re-scanning the
-    ///     filesystem on every call.
+    ///     Gets a package's versions at a source, highest first, consulting (and populating) the
+    ///     cache.
     /// </summary>
-    /// <param name="sourceDirectory">Filesystem directory to scan (local, mapped drive, or UNC).</param>
-    /// <param name="packageName">The package base name to match.</param>
-    /// <returns>The discovered packages matching <paramref name="packageName"/>, ordered from
-    ///     highest to lowest version.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sourceDirectory"/> or
-    ///     <paramref name="packageName"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="packageName"/> is empty or
-    ///     whitespace.</exception>
-    /// <exception cref="DirectoryNotFoundException">Thrown on a cache miss when
-    ///     <paramref name="sourceDirectory"/> does not exist or is unreachable; a cache hit
-    ///     returns the previously-observed result instead, even if the source directory has since
-    ///     become unreachable.</exception>
-    public IReadOnlyList<DiscoveredPackage> GetVersionsDescending(string sourceDirectory, string packageName)
+    /// <param name="registry">The registry that resolves <paramref name="sourceAlias"/> to a
+    ///     provider on a cache miss.</param>
+    /// <param name="sourceAlias">The source alias.</param>
+    /// <param name="packageId">The package name or ID.</param>
+    /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
+    /// <returns>The discovered packages ordered from highest to lowest version.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="sourceAlias"/> or
+    ///     <paramref name="packageId"/> is null, empty or whitespace.</exception>
+    /// <exception cref="UnknownSourceException">Thrown when the alias is not configured.</exception>
+    /// <exception cref="DirectoryNotFoundException">Thrown on a cache miss when a folder source
+    ///     does not exist or is unreachable.</exception>
+    public async Task<IReadOnlyList<DiscoveredPackage>> GetVersionsDescendingAsync(
+        PackageSourceRegistry registry, string sourceAlias, string packageId, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(sourceDirectory);
-        ArgumentException.ThrowIfNullOrWhiteSpace(packageName);
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceAlias);
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
 
-        var key = (sourceDirectory, packageName);
-        if (!_versionsDescendingCache.TryGetValue(key, out var versions))
+        var provider = registry.Resolve(sourceAlias);
+        var entry = GetOrCreateEntry(sourceAlias);
+        lock (_lock)
         {
-            versions = PackageSource.EnumeratePackages(sourceDirectory, packageName)
-                .OrderByDescending(p => p.Version)
-                .ToList();
-            _versionsDescendingCache[key] = versions;
+            if (entry.Versions.TryGetValue(packageId, out var cached))
+            {
+                return cached;
+            }
+        }
+
+        var versions = (await provider.ListVersionsAsync(packageId, cancellationToken))
+            .OrderByDescending(package => package.Version)
+            .ToList();
+        lock (_lock)
+        {
+            entry.Versions[packageId] = versions;
         }
 
         return versions;
     }
 
     /// <summary>
-    ///     Determines whether a newer version of a package is available than the version
-    ///     currently pinned in a repo, consulting (and populating) this session cache instead of
-    ///     re-scanning the filesystem on every call.
+    ///     Determines whether a newer version of a package is available at a source than the version
+    ///     currently pinned in a repo, consulting (and populating) the cache.
     /// </summary>
-    /// <param name="sourceDirectory">Filesystem directory to scan (local, mapped drive, or UNC).</param>
-    /// <param name="packageName">The package base name to match.</param>
-    /// <param name="pinnedVersion">The repo's current pinned semantic version string.</param>
-    /// <param name="latest">
-    ///     On return, the highest-versioned discovered package (whether or not it is newer than
-    ///     <paramref name="pinnedVersion"/>), or <see langword="null"/> if none was found.
-    /// </param>
-    /// <returns>
-    ///     <see langword="true"/> if a discoverable version compares strictly greater than
-    ///     <paramref name="pinnedVersion"/>, or if <paramref name="pinnedVersion"/> fails to
-    ///     parse; otherwise <see langword="false"/>.
-    /// </returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="sourceDirectory"/>,
-    ///     <paramref name="packageName"/>, or <paramref name="pinnedVersion"/> is
-    ///     <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="packageName"/> is empty or
-    ///     whitespace.</exception>
-    /// <exception cref="DirectoryNotFoundException">Thrown on a cache miss when
-    ///     <paramref name="sourceDirectory"/> does not exist or is unreachable; a cache hit
-    ///     returns the previously-observed result instead, even if the source directory has since
-    ///     become unreachable.</exception>
-    public bool IsNewerVersionAvailable(
-        string sourceDirectory,
-        string packageName,
+    /// <param name="registry">The registry that resolves <paramref name="sourceAlias"/> to a
+    ///     provider on a cache miss.</param>
+    /// <param name="sourceAlias">The source alias.</param>
+    /// <param name="packageId">The package name or ID.</param>
+    /// <param name="pinnedVersion">The repo's current pinned version text.</param>
+    /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
+    /// <returns>The upgrade check result; see <see cref="UpgradeCheck"/>.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry"/> or
+    ///     <paramref name="pinnedVersion"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="sourceAlias"/> or
+    ///     <paramref name="packageId"/> is null, empty or whitespace.</exception>
+    /// <exception cref="UnknownSourceException">Thrown when the alias is not configured.</exception>
+    /// <exception cref="DirectoryNotFoundException">Thrown on a cache miss when a folder source
+    ///     does not exist or is unreachable.</exception>
+    public async Task<UpgradeCheck> IsNewerVersionAvailableAsync(
+        PackageSourceRegistry registry,
+        string sourceAlias,
+        string packageId,
         string pinnedVersion,
-        out DiscoveredPackage? latest)
+        CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(sourceDirectory);
-        ArgumentException.ThrowIfNullOrWhiteSpace(packageName);
         ArgumentNullException.ThrowIfNull(pinnedVersion);
 
-        var key = (sourceDirectory, packageName);
-        if (!_cache.TryGetValue(key, out latest))
-        {
-            latest = PackageSource.FindLatest(sourceDirectory, packageName);
-            _cache[key] = latest;
-        }
-
+        var versions = await GetVersionsDescendingAsync(registry, sourceAlias, packageId, cancellationToken);
+        var latest = versions.Count > 0 ? versions[0] : null;
         if (latest is null)
         {
-            return false;
+            return new UpgradeCheck(false, null);
         }
 
+        // An unparsable pin is treated as needing attention rather than silently ignored
         if (!PackageVersion.TryParse(pinnedVersion, out var pinned) || pinned is null)
         {
-            return true;
+            return new UpgradeCheck(true, latest);
         }
 
-        return latest.Version.CompareTo(pinned) > 0;
+        return new UpgradeCheck(latest.Version.CompareTo(pinned) > 0, latest);
     }
 
     /// <summary>
-    ///     Clears every cached entry, forcing the next <see cref="IsNewerVersionAvailable"/> call
-    ///     for any source/package pair to re-enumerate the filesystem.
+    ///     Clears every cached entry for every source, forcing the next call for any source to
+    ///     fetch again.
     /// </summary>
-    /// <remarks>
-    ///     Called when the package-source path setting changes, since a cached result for the old
-    ///     path would otherwise be silently (and incorrectly) reused for the new path.
-    /// </remarks>
     public void Invalidate()
     {
-        _cache.Clear();
-        _packageNamesCache.Clear();
-        _versionsDescendingCache.Clear();
+        lock (_lock)
+        {
+            _sources.Clear();
+        }
+    }
+
+    /// <summary>
+    ///     Clears the cached entries of one source only, leaving other sources' results in place.
+    /// </summary>
+    /// <param name="sourceAlias">The alias of the source whose cached results are stale (changed
+    ///     or removed); an alias with no cached data is ignored.</param>
+    /// <remarks>
+    ///     Called when a source is edited or removed, since a cached result for the old definition
+    ///     would otherwise be silently (and incorrectly) reused.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="sourceAlias"/> is null,
+    ///     empty or whitespace.</exception>
+    public void Invalidate(string sourceAlias)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceAlias);
+
+        lock (_lock)
+        {
+            _sources.Remove(sourceAlias);
+        }
+    }
+
+    /// <summary>
+    ///     Gets the cache entry of a source, creating it if needed.
+    /// </summary>
+    /// <param name="sourceAlias">The source alias.</param>
+    /// <returns>The entry. A fetch writes its result into the entry it captured here, so a result
+    ///     fetched before an invalidation lands in a detached entry and is discarded.</returns>
+    private SourceEntry GetOrCreateEntry(string sourceAlias)
+    {
+        lock (_lock)
+        {
+            if (!_sources.TryGetValue(sourceAlias, out var entry))
+            {
+                entry = new SourceEntry();
+                _sources[sourceAlias] = entry;
+            }
+
+            return entry;
+        }
+    }
+
+    /// <summary>
+    ///     The cached data of one source.
+    /// </summary>
+    private sealed class SourceEntry
+    {
+        /// <summary>
+        ///     Gets or sets the cached package names, or <see langword="null"/> when not yet
+        ///     queried.
+        /// </summary>
+        public IReadOnlyList<string>? PackageIds { get; set; }
+
+        /// <summary>
+        ///     Gets the cached descending version lists by package ID. A present key with an empty
+        ///     list means "queried, none found".
+        /// </summary>
+        public Dictionary<string, IReadOnlyList<DiscoveredPackage>> Versions { get; } = new(StringComparer.Ordinal);
     }
 }

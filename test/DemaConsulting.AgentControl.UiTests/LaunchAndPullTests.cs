@@ -30,14 +30,17 @@ namespace DemaConsulting.AgentControl.UiTests;
 public sealed class LaunchAndPullTests
 {
     /// <summary>
-    ///     Clicking "Launch" on a repo card must invoke the configured (custom) agent-tool
-    ///     command - here the arg-logger stub - with the repo's path as the working directory.
+    ///     Clicking "Launch" on a repo card must actually execute the configured (custom)
+    ///     agent-tool command - here the quoted arg-logger stub path followed by a marker
+    ///     argument - with the repo's path as the working directory.
     /// </summary>
     /// <remarks>
     ///     Per <c>AgentToolLauncher</c>, the agent-tool command runs inside a detected shell
-    ///     (PowerShell/cmd) rather than being exec'd directly, so no arguments are recorded for
-    ///     this invocation - only the working directory is asserted here, which is exactly what
-    ///     the shell process (and therefore the arg-logger stub it runs) inherits from
+    ///     (PowerShell/cmd) rather than being exec'd directly. The command starts with a quoted
+    ///     path, which PowerShell would merely echo unless <c>AgentToolLauncher</c> adds the call
+    ///     operator; the recorded invocation (arguments exactly the marker, which git
+    ///     invocations of the stub never carry) therefore proves the stub really ran, and its
+    ///     working directory is what the shell inherits from
     ///     <c>AgentToolLauncher.BuildProcessStartInfo</c>'s <c>WorkingDirectory</c>.
     /// </remarks>
     /// <remarks>
@@ -68,14 +71,14 @@ public sealed class LaunchAndPullTests
         Assert.NotNull(launchButton);
         launchButton.Invoke();
 
-        // Assert: the arg-logger stub (launched inside a shell by AgentToolLauncher) recorded an
-        // invocation whose working directory is the repo path.
-        var invocation = ArgLoggerLog.WaitForInvocation(
-            context.ArgLoggerOutputFile,
-            record => PathsEqual(record.WorkingDirectory, context.RepoPath),
-            TimeSpan.FromSeconds(15));
+        // Assert: the arg-logger stub, executed from the quoted agent-tool command inside the
+        // launched shell, recorded an invocation carrying the agent-tool marker argument (which
+        // no git invocation does) in the repo path.
+        var invocation = WaitForAgentToolInvocation(context);
 
         Assert.NotNull(invocation);
+        Assert.Equal([TestSettingsWriter.AgentToolMarkerArgument], invocation.Arguments);
+        Assert.True(PathsEqual(invocation.WorkingDirectory, context.RepoPath));
     }
 
     /// <summary>
@@ -101,14 +104,13 @@ public sealed class LaunchAndPullTests
         Assert.NotNull(launchButton);
         launchButton.Invoke();
 
-        // Assert: the arg-logger stub recorded an invocation whose working directory is the repo
-        // path, despite this repo never having had a package pinned.
-        var invocation = ArgLoggerLog.WaitForInvocation(
-            context.ArgLoggerOutputFile,
-            record => PathsEqual(record.WorkingDirectory, context.RepoPath),
-            TimeSpan.FromSeconds(15));
+        // Assert: the arg-logger stub recorded the agent-tool invocation (marker argument) in
+        // the repo path, despite this repo never having had a package pinned.
+        var invocation = WaitForAgentToolInvocation(context);
 
         Assert.NotNull(invocation);
+        Assert.Equal([TestSettingsWriter.AgentToolMarkerArgument], invocation.Arguments);
+        Assert.True(PathsEqual(invocation.WorkingDirectory, context.RepoPath));
     }
 
     /// <summary>
@@ -158,6 +160,18 @@ public sealed class LaunchAndPullTests
 
         Assert.NotNull(invocation);
     }
+
+    /// <summary>
+    ///     Waits for the arg-logger stub invocation that originated from the Launch action - the
+    ///     one carrying the agent-tool marker argument, which git invocations never do.
+    /// </summary>
+    /// <param name="context">The test context whose log file to poll.</param>
+    /// <returns>The invocation, or <see langword="null"/> if none was recorded in time.</returns>
+    private static ArgLoggerInvocation? WaitForAgentToolInvocation(AgentControlTestContext context) =>
+        ArgLoggerLog.WaitForInvocation(
+            context.ArgLoggerOutputFile,
+            record => record.Arguments.Contains(TestSettingsWriter.AgentToolMarkerArgument),
+            TimeSpan.FromSeconds(15));
 
     /// <summary>
     ///     Directly creates the four managed folders (empty) under a repo root, without going

@@ -1,0 +1,99 @@
+---
+# Software Unit Requirements for the SignatureVerificationSupport Class
+#
+# SignatureVerificationSupport tells whether the current platform can verify NuGet package
+# signatures, so the option to require signed packages is only offered where it can be honored.
+
+sections:
+  - title: SignatureVerificationSupport Unit Requirements
+    requirements:
+      - id: AgentControl-SignatureVerificationSupport-PlatformSupport
+        title: >-
+          The SignatureVerificationSupport class shall recognize Windows, Linux and macOS as the
+          platforms on which package signature verification is supported, and shall report that
+          it is not supported on any other platform.
+        justification: |
+          Requiring signatures is only meaningful where verification really happens; the supported
+          platforms are those on which the verification is exercised by the project's automated
+          builds.
+        tests:
+          - SignatureVerificationSupport_IsSupportedPlatform_WindowsLinuxAndMacOsOnly
+
+      - id: AgentControl-SignatureVerificationSupport-SupportedOnWindows
+        title: >-
+          The SignatureVerificationSupport class shall report that package signature verification
+          is supported when running on Windows.
+        justification: |
+          Windows is a platform on which the signature requirement can be honored, so the option
+          to require signed packages must be offered there.
+        tests:
+          - windows@SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue
+          - windows@SignatureVerificationSupport_ProbeCertificateChains_OnThisPlatform_BuildsAChainOfflineAndIsSupported
+
+      - id: AgentControl-SignatureVerificationSupport-SupportedOnLinux
+        title: >-
+          The SignatureVerificationSupport class shall report that package signature verification
+          is supported when running on Linux.
+        justification: |
+          Linux is a platform on which the signature requirement can be honored, so the option to
+          require signed packages must be offered there.
+        tests:
+          - ubuntu@SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue
+          - ubuntu@SignatureVerificationSupport_ProbeCertificateChains_OnThisPlatform_BuildsAChainOfflineAndIsSupported
+
+      - id: AgentControl-SignatureVerificationSupport-SupportedOnMacOS
+        title: >-
+          The SignatureVerificationSupport class shall report that package signature verification
+          is supported when running on macOS.
+        justification: |
+          macOS is a platform on which the signature requirement can be honored, so the option to
+          require signed packages must be offered there.
+        tests:
+          - macos@SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue
+          - macos@SignatureVerificationSupport_ProbeCertificateChains_OnThisPlatform_BuildsAChainOfflineAndIsSupported
+
+      - id: AgentControl-SignatureVerificationSupport-FailClosedProbe
+        title: >-
+          The SignatureVerificationSupport class shall report that signature verification is not
+          supported - and shall not fail - when the check of the platform's certificate facility
+          cannot be completed for any reason.
+        justification: |
+          A broken or missing cryptographic facility can fail in many ways; the only safe
+          reading of any failure is "verification cannot be relied on", so that a requirement for
+          signed packages is refused rather than silently skipped, and the settings dialog never
+          fails because of the check.
+        tests:
+          - SignatureVerificationSupport_RunProbe_ProbeAnswers_ReturnsTheAnswer
+          - SignatureVerificationSupport_RunProbe_ProbeFails_IsNotSupportedAndNeverThrows
+          - SignatureVerificationSupport_Evaluate_NeedsPlatformAndASuccessfulProbe
+
+      - id: AgentControl-SignatureVerificationSupport-RealChainProbe
+        title: >-
+          The SignatureVerificationSupport class shall report that signature verification is
+          supported only when the platform's certificate facility can build, without network
+          access, a certificate chain of exactly one element for a throw-away self-signed
+          certificate that it trusts for the purpose, with no unexpected chain status, and shall
+          report it as not supported when the chain cannot be built, has any unexpected status or
+          no certificate is given.
+        justification: |
+          Verifying a package signature means building a certificate chain; a platform whose
+          chain facility cannot do that - or only appears to exist - must not be reported as able
+          to verify, or a requirement for signed packages would be accepted and then fail or be
+          skipped. The check uses a certificate created on the spot and never the network, so its
+          answer does not depend on the machine's trust stores or connectivity.
+        tests:
+          - SignatureVerificationSupport_ProbeCertificateChains_OnThisPlatform_BuildsAChainOfflineAndIsSupported
+          - SignatureVerificationSupport_ProbeChain_ExpiredCertificate_IsNotSupported
+          - SignatureVerificationSupport_ProbeChain_NullCertificate_IsNotSupported
+
+      - id: AgentControl-SignatureVerificationSupport-UnsupportedExplanation
+        title: >-
+          The SignatureVerificationSupport class shall provide one fixed explanation, "Package
+          signature verification is not supported on this platform", for use wherever the
+          requirement cannot be honored.
+        justification: |
+          The settings dialog and the refusal message must say the same thing for the same
+          reason, so the user can recognize that an option is unavailable because of the platform
+          and not because of something they did.
+        tests:
+          - SignatureVerificationSupport_UnsupportedMessage_IsTheDocumentedExplanation

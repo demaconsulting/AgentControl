@@ -1,0 +1,606 @@
+---
+# Software Unit Requirements for the SourceEditorViewModel Class
+#
+# SourceEditorViewModel backs the dialog that adds or edits one package source - a folder of zip
+# packages, a NuGet package folder or a NuGet package server - and tests a server's connection.
+# Each requirement states one observable behavior.
+
+sections:
+  - title: SourceEditorViewModel Unit Requirements
+    requirements:
+      # ---- Validation ----
+      - id: AgentControl-SourceEditorViewModel-Validation
+        title: >-
+          The SourceEditorViewModel class shall permit saving a source only while none of its
+          fields has a validation error.
+        justification: |
+          A source that the application would later refuse to use or save must not be
+          acceptable in the dialog. What makes each field acceptable is stated by the
+          requirements for the alias, the location and the package IDs; this requirement is the
+          single gate that follows from them.
+        tests:
+          - SourceEditorViewModel_NewEmptyEditor_CannotSaveButShowsNoErrorsYet
+          - SourceEditorViewModel_SaveCommand_ValidZipSource_RaisesSavedWithDefinition
+          - SourceEditorViewModel_Alias_Invalid_ReportsProblemAndBlocksSave
+          - SourceEditorViewModel_Location_Invalid_ReportsProblemAndBlocksSave
+          - SourceEditorViewModel_NuGetSource_NoPackageIds_CannotSaveUntilOneIsAdded
+          - SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave
+
+      - id: AgentControl-SourceEditorViewModel-AliasRules
+        title: >-
+          The SourceEditorViewModel class shall explain, and refuse to save, an alias that is
+          blank, uses characters an alias may not use, or is already used by another source
+          (ignoring case).
+        justification: |
+          Repos pin to a source by its alias, so an alias must be usable as written and must name
+          exactly one source.
+        tests:
+          - SourceEditorViewModel_Alias_Invalid_ReportsProblemAndBlocksSave
+
+      - id: AgentControl-SourceEditorViewModel-FolderLocation
+        title: >-
+          The SourceEditorViewModel class shall explain, and refuse to save, a zip or NuGet
+          folder source whose location is blank, is a web address or is not a full folder path.
+        justification: |
+          A relative path would mean a different folder depending on where the application was
+          started, and a web address is not a folder.
+        tests:
+          - SourceEditorViewModel_Location_Invalid_ReportsProblemAndBlocksSave
+
+      - id: AgentControl-SourceEditorViewModel-NoEmbeddedCredential
+        title: >-
+          The SourceEditorViewModel class shall refuse to save a source whose location embeds a
+          credential.
+        justification: |
+          Credentials must never be stored with a source, so they are stopped where the user
+          types them.
+        tests:
+          - SourceEditorViewModel_Location_Invalid_ReportsProblemAndBlocksSave
+          - SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave
+
+      - id: AgentControl-SourceEditorViewModel-CredentialNeverEchoed
+        title: >-
+          The SourceEditorViewModel class shall not repeat a credential typed into a location in
+          any message it shows.
+        justification: |
+          An error message that echoed the secret would put it on screen, in screenshots and in
+          support requests.
+        tests:
+          - SourceEditorViewModel_Location_Invalid_ReportsProblemAndBlocksSave
+          - SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave
+
+      - id: AgentControl-SourceEditorViewModel-ServerAddressIndexJson
+        title: >-
+          The SourceEditorViewModel class shall explain, and refuse to save, a NuGet package
+          server address that is blank, is not a web address, does not end in index.json or
+          carries a query string or fragment.
+        justification: |
+          A feed is reached through its service index address; any other address would fail
+          later with a message that does not say what is wrong with the address.
+        tests:
+          - SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave
+
+      - id: AgentControl-SourceEditorViewModel-InsecureHttpAddress
+        title: >-
+          The SourceEditorViewModel class shall accept a plain http server address only while
+          "Allow insecure HTTP" is ticked and explain why it is refused otherwise.
+        justification: |
+          Plain http must be a deliberate choice because the sign-in would cross the network
+          unprotected.
+        tests:
+          - SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave
+          - SourceEditorViewModel_AllowInsecureHttp_Toggled_AcceptsHttpAndShowsWarning
+
+      - id: AgentControl-SourceEditorViewModel-PackageIdRequired
+        title: >-
+          The SourceEditorViewModel class shall explain, and refuse to save, a NuGet source that
+          lists no package ID.
+        justification: |
+          A NuGet folder or server is not scanned for packages, so a source without a listed ID
+          offers nothing.
+        tests:
+          - SourceEditorViewModel_NuGetSource_NoPackageIds_CannotSaveUntilOneIsAdded
+
+      - id: AgentControl-SourceEditorViewModel-PackageIdRequiredServerMessage
+        title: >-
+          The SourceEditorViewModel class shall word the explanation for a NuGet package server
+          that lists no package ID specifically for a server.
+        justification: |
+          A developer adding a server needs to be told which part of the server entry is missing,
+          not given the folder wording.
+        tests:
+          - SourceEditorViewModel_PackageIds_EmptyForServer_ReportsServerSpecificMessage
+
+      - id: AgentControl-SourceEditorViewModel-NoErrorsUntilTouched
+        title: >-
+          The SourceEditorViewModel class shall show no error for a field the user has not yet
+          touched.
+        justification: |
+          A freshly opened dialog covered in red errors tells the user nothing they can act on.
+        tests:
+          - SourceEditorViewModel_NewEmptyEditor_CannotSaveButShowsNoErrorsYet
+
+      # ---- Server source ----
+      - id: AgentControl-SourceEditorViewModel-ServerSource
+        title: >-
+          The SourceEditorViewModel class shall edit a NuGet package server source by asking for
+          its feed address.
+        justification: |
+          A server is reached through an address rather than a folder, so the dialog must ask for
+          the one and not the other.
+        tests:
+          - SourceEditorViewModel_Constructor_NewServer_HasServerTitleLabelAndExamples
+          - SourceEditorViewModel_Constructor_NuGetFolder_IsNotAServerAndCannotTest
+
+      - id: AgentControl-SourceEditorViewModel-ServerExamples
+        title: >-
+          The SourceEditorViewModel class shall show example feed addresses for JFrog
+          Artifactory and Azure Artifacts when editing a NuGet package server source.
+        justification: |
+          Users reach a feed through an address whose exact form differs between products, so
+          showing it for the two common servers avoids trial and error.
+        tests:
+          - SourceEditorViewModel_Constructor_NewServer_HasServerTitleLabelAndExamples
+
+      - id: AgentControl-SourceEditorViewModel-InsecureHttpChoice
+        title: >-
+          The SourceEditorViewModel class shall offer an "Allow insecure HTTP" choice for a
+          NuGet package server source, off by default.
+        justification: |
+          The insecure choice must be off unless the user turns it on knowingly.
+        tests:
+          - SourceEditorViewModel_Constructor_NewServer_HasServerTitleLabelAndExamples
+
+      - id: AgentControl-SourceEditorViewModel-InsecureHttpWarning
+        title: >-
+          The SourceEditorViewModel class shall warn, while "Allow insecure HTTP" is ticked,
+          that a password typed for the server would cross the network unprotected.
+        justification: |
+          The user choosing plain http must understand what they give up.
+        tests:
+          - SourceEditorViewModel_AllowInsecureHttp_Toggled_AcceptsHttpAndShowsWarning
+
+      - id: AgentControl-SourceEditorViewModel-ServerSettingsSaved
+        title: >-
+          The SourceEditorViewModel class shall save the address, the package IDs and the
+          insecure-HTTP choice of a NuGet package server source when it is saved.
+        justification: |
+          A server source that lost its package IDs or its insecure choice on save would not work
+          as the user configured it.
+        tests:
+          - SourceEditorViewModel_SaveCommand_ValidServer_SavesAddressPackageIdsAndInsecureChoice
+
+      - id: AgentControl-SourceEditorViewModel-ServerSettingsEdited
+        title: >-
+          The SourceEditorViewModel class shall, when an existing NuGet package server source is
+          edited, keep it a server source and show its address, package IDs and insecure-HTTP
+          choice.
+        justification: |
+          Editing a server source must not turn it into a folder source or lose what was
+          configured.
+        tests:
+          - SourceEditorViewModel_EditExistingServer_StaysAServerWithItsSettings
+
+      # ---- Connection test ----
+      - id: AgentControl-SourceEditorViewModel-TestConnectionAvailability
+        title: >-
+          The SourceEditorViewModel class shall offer the connection test only for a server
+          source with an acceptable address and at least one package ID, and shall say in the
+          disabled button's tooltip what is missing.
+        justification: |
+          A test of an address that cannot be used, or with no package to ask for, could only
+          fail; saying what is missing lets the user fix it without guessing.
+        tests:
+          - SourceEditorViewModel_CanTestConnection_NeedsValidAddressAndPackageId
+          - SourceEditorViewModel_Constructor_NuGetFolder_IsNotAServerAndCannotTest
+
+      - id: AgentControl-SourceEditorViewModel-TestConnection
+        title: >-
+          The SourceEditorViewModel class shall test a server's connection by listing the
+          versions of the first package ID through the source's provider, without saving
+          anything.
+        justification: |
+          The developer needs to learn which of the address, the package ID or the sign-in is
+          wrong while the dialog is still open; reading only a version list proves the address,
+          the package and the sign-in without downloading or changing anything.
+        tests:
+          - SourceEditorViewModel_TestConnection_ServerAnswers_ReportsVersionCountAndLatest
+
+      - id: AgentControl-SourceEditorViewModel-TestConnectionProgress
+        title: >-
+          The SourceEditorViewModel class shall show progress while a connection test runs and
+          shall not start a second test until it ends.
+        justification: |
+          A test against a slow server must not look like a frozen dialog, and two overlapping
+          tests could show the result of the wrong one.
+        tests:
+          - SourceEditorViewModel_TestConnection_CancelWhileRunning_StopsWithCanceledResult
+
+      - id: AgentControl-SourceEditorViewModel-TestConnectionCancel
+        title: >-
+          The SourceEditorViewModel class shall let the user cancel a running connection test
+          and shall report the canceled test as a neutral result rather than an error.
+        justification: |
+          A test against an unreachable server can take a long time; the user must be able to
+          stop waiting without the cancellation looking like a failure of the server.
+        tests:
+          - SourceEditorViewModel_TestConnection_CancelWhileRunning_StopsWithCanceledResult
+
+      - id: AgentControl-SourceEditorViewModel-TestConnectionSuccess
+        title: >-
+          The SourceEditorViewModel class shall report a successful connection test as
+          "connection works" with the number of versions found and the newest one.
+        justification: |
+          The count and the newest version show that the right package was reached, not merely
+          that something answered.
+        tests:
+          - SourceEditorViewModel_TestConnection_ServerAnswers_ReportsVersionCountAndLatest
+
+      - id: AgentControl-SourceEditorViewModel-TestConnectionPackageNotFound
+        title: >-
+          The SourceEditorViewModel class shall report a server that answers but does not have
+          the package as "package not found", naming the package.
+        justification: |
+          The address and sign-in are then known to work, so the developer only has to correct
+          the package ID.
+        tests:
+          - SourceEditorViewModel_TestConnection_PackageMissing_ReportsPackageNotFound
+
+      - id: AgentControl-SourceEditorViewModel-TestConnectionFailureReasons
+        title: >-
+          The SourceEditorViewModel class shall report why a connection test failed - sign-in
+          failed, sign-in canceled, timed out or server unreachable - with a headline specific to
+          that reason and the message the provider gave.
+        justification: |
+          Each reason calls for a different action by the developer; one set of failure reasons
+          mapped to distinct headlines is a single criterion, verified over every reason by one
+          parameterized test.
+        tests:
+          - SourceEditorViewModel_TestConnection_ProviderFails_ReportsHeadlineAndMessage
+
+      - id: AgentControl-SourceEditorViewModel-TestConnectionOtherFailures
+        title: >-
+          The SourceEditorViewModel class shall report any other failure of a connection test,
+          including a provider that cannot be created, in the dialog as "connection failed"
+          rather than letting it escape.
+        justification: |
+          A failure the test did not anticipate must never crash or freeze the dialog.
+        tests:
+          - SourceEditorViewModel_TestConnection_OtherFailures_AreReportedInTheDialog
+
+      - id: AgentControl-SourceEditorViewModel-TestConnectionResultDropped
+        title: >-
+          The SourceEditorViewModel class shall remove a connection test result that is showing
+          when the address, the package IDs or the insecure-HTTP choice change.
+        justification: |
+          A stale "connection OK" beside an address that was edited since would mislead the
+          user into saving a source that was never tested.
+        tests:
+          - SourceEditorViewModel_TestConnection_ResultDroppedWhenAddressChanges
+
+      - id: AgentControl-SourceEditorViewModel-TestConnectionStaleResult
+        title: >-
+          The SourceEditorViewModel class shall never show the result of a connection test that
+          was still running when the address, the package IDs or the "Allow insecure HTTP"
+          choice changed, so a result never describes inputs that are no longer in the dialog.
+        justification: |
+          A test that began before an edit would otherwise report on the old inputs beside the
+          new ones, and the user could save a source believing it had been tested.
+        tests:
+          - SourceEditorViewModel_TestConnection_LocationEditedWhileTesting_StaleResultIsNotShown
+          - SourceEditorViewModel_TestConnection_PackageIdsEditedWhileTesting_StaleResultIsNotShown
+          - SourceEditorViewModel_TestConnection_AllowInsecureHttpChangedWhileTesting_StaleResultIsNotShown
+
+      # ---- Package IDs ----
+      - id: AgentControl-SourceEditorViewModel-PackageIds
+        title: >-
+          The SourceEditorViewModel class shall let the user add the package IDs a NuGet package
+          folder or server offers.
+        justification: |
+          A NuGet folder or server is not scanned for packages, so the listed IDs define what it
+          offers.
+        tests:
+          - SourceEditorViewModel_NuGetSource_NoPackageIds_CannotSaveUntilOneIsAdded
+          - SourceEditorViewModel_SaveCommand_ValidNuGetSource_SavesPackageIds
+
+      - id: AgentControl-SourceEditorViewModel-PackageIdRemove
+        title: >-
+          The SourceEditorViewModel class shall let the user remove a listed package ID.
+        justification: |
+          A mistyped or no longer wanted ID must be correctable without recreating the source.
+        tests:
+          - SourceEditorViewModel_RemovePackageId_RemovesSelectedId
+
+      - id: AgentControl-SourceEditorViewModel-PackageIdMalformed
+        title: >-
+          The SourceEditorViewModel class shall refuse to add a package ID that is malformed and
+          say why.
+        justification: |
+          A malformed ID can never name a package, so it would only produce a failure later.
+        tests:
+          - SourceEditorViewModel_AddPackageId_InvalidOrDuplicate_IsRefused
+
+      - id: AgentControl-SourceEditorViewModel-PackageIdDuplicate
+        title: >-
+          The SourceEditorViewModel class shall refuse to add a package ID that is already
+          listed, ignoring case, and say so.
+        justification: |
+          A duplicate entry adds nothing and would be listed twice wherever the source is shown.
+        tests:
+          - SourceEditorViewModel_AddPackageId_InvalidOrDuplicate_IsRefused
+
+      # ---- Save ----
+      - id: AgentControl-SourceEditorViewModel-Save
+        title: >-
+          The SourceEditorViewModel class shall, on save, signal the resulting source definition
+          with a trimmed location.
+        justification: |
+          The owner of the dialog applies the definition, so it must receive exactly what the
+          user entered, without stray spaces.
+        tests:
+          - SourceEditorViewModel_SaveCommand_ValidZipSource_RaisesSavedWithDefinition
+          - SourceEditorViewModel_SaveCommand_ValidNuGetSource_SavesPackageIds
+
+      - id: AgentControl-SourceEditorViewModel-EditKeepsAlias
+        title: >-
+          The SourceEditorViewModel class shall keep the alias of an existing source fixed when
+          that source is edited.
+        justification: |
+          Repos pin to a source by alias, so an edit must never rename it.
+        tests:
+          - SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved
+
+      - id: AgentControl-SourceEditorViewModel-EditKeepsHiddenSettings
+        title: >-
+          The SourceEditorViewModel class shall save the settings of an existing source that the
+          dialog does not show unchanged.
+        justification: |
+          Settings managed elsewhere must survive an edit.
+        tests:
+          - SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved
+
+      - id: AgentControl-SourceEditorViewModel-SourceNotModified
+        title: >-
+          The SourceEditorViewModel class shall not change the source definition it was given to
+          edit.
+        justification: |
+          The edit may be canceled, so the original must be exactly as it was.
+        tests:
+          - SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved
+
+      - id: AgentControl-SourceEditorViewModel-SaveBlockedWhenInvalid
+        title: >-
+          The SourceEditorViewModel class shall not signal a save while the source is invalid.
+        justification: |
+          An invalid source must never reach the settings, however the command is invoked.
+        tests:
+          - SourceEditorViewModel_SaveCommand_InvalidEditor_DoesNotRaiseSaved
+
+      # ---- Signature options ----
+      - id: AgentControl-SourceEditorViewModel-SignatureOptions
+        title: >-
+          The SourceEditorViewModel class shall offer the choice "Require signed packages", off
+          by default, for a NuGet package folder or server source and not for a zip source.
+        justification: |
+          Requiring signed packages is a security control the user should be able to turn on for
+          a source that can carry signatures; a zip package carries none, so offering it there
+          would be misleading.
+        tests:
+          - SourceEditorViewModel_SignatureOptions_OfferedForNuGetOnlyAndOffByDefault
+
+      - id: AgentControl-SourceEditorViewModel-SignatureExplanation
+        title: >-
+          The SourceEditorViewModel class shall explain what "Require signed packages" does and
+          that, without a pinned publisher, any validly signed package - including one from an
+          unrelated publisher - is accepted, so pinning is recommended.
+        justification: |
+          The people who set the control must understand its limit, not believe it guarantees
+          more than it does.
+        tests:
+          - SourceEditorViewModel_SignatureOptions_OfferedForNuGetOnlyAndOffByDefault
+          - SourceEditorViewModel_RequireSigned_SupportedPlatform_CheckboxEnabledAndTickingEnablesTheFingerprint
+
+      - id: AgentControl-SourceEditorViewModel-SignatureUnsupportedPlatform
+        title: >-
+          The SourceEditorViewModel class shall show the "Require signed packages" choice
+          disabled, with the explanation that package signature verification is not supported on
+          this platform, where signatures cannot be verified.
+        justification: |
+          A control must never lead the user to believe it is active where it cannot be.
+        tests:
+          - SourceEditorViewModel_RequireSigned_UnsupportedPlatform_CheckboxDisabledWithExplanation
+          - SourceEditorViewModel_RequireSigned_ProbeFails_CheckboxDisabledWithExplanationAndNoThrow
+
+      - id: AgentControl-SourceEditorViewModel-SignatureSettingsKept
+        title: >-
+          The SourceEditorViewModel class shall keep the signature settings of an existing source
+          that requires signed packages when it is opened on a platform that cannot verify
+          signatures.
+        justification: |
+          The user's earlier decision must not be silently lost because the dialog happened to
+          be opened on another platform.
+        tests:
+          - SourceEditorViewModel_EditExistingRequiringSource_UnsupportedPlatform_KeepsTheSettings
+
+      - id: AgentControl-SourceEditorViewModel-SignatureChoiceSaved
+        title: >-
+          The SourceEditorViewModel class shall save the "Require signed packages" choice with
+          a NuGet package folder or server source.
+        justification: |
+          The choice only has an effect if it is stored with the source.
+        tests:
+          - SourceEditorViewModel_Save_RequireSignedWithoutFingerprint_PinsNothing
+          - SourceEditorViewModel_Save_RequireSignedWithFingerprint_SavesTheNormalizedFingerprint
+          - SourceEditorViewModel_Save_ZipNeverRequiresSignaturesAndFolderCan
+
+      - id: AgentControl-SourceEditorViewModel-ZipNeverRequiresSignatures
+        title: >-
+          The SourceEditorViewModel class shall save a zip source as not requiring signed
+          packages.
+        justification: |
+          A zip package carries no signature, so a requirement saved for it could never be met.
+        tests:
+          - SourceEditorViewModel_Save_ZipNeverRequiresSignaturesAndFolderCan
+
+      # ---- Signer fingerprint ----
+      - id: AgentControl-SourceEditorViewModel-SignerFingerprint
+        title: >-
+          The SourceEditorViewModel class shall let the user pin the trusted publisher by typing
+          or pasting the SHA-256 fingerprint of its signing certificate, usable only while
+          signed packages are required.
+        justification: |
+          Pinning the publisher is what makes the signature requirement mean "signed by the
+          publisher I trust" rather than "signed by anyone".
+        tests:
+          - SourceEditorViewModel_SignatureOptions_OfferedForNuGetOnlyAndOffByDefault
+          - SourceEditorViewModel_RequireSigned_SupportedPlatform_CheckboxEnabledAndTickingEnablesTheFingerprint
+          - SourceEditorViewModel_Fingerprint_NotInUse_IsIgnoredAndNotSaved
+
+      - id: AgentControl-SourceEditorViewModel-FingerprintOptional
+        title: >-
+          The SourceEditorViewModel class shall treat the fingerprint as optional, so a source
+          that requires signed packages and leaves it empty can be saved.
+        justification: |
+          Requiring signatures without pinning is still better than not requiring them.
+        tests:
+          - SourceEditorViewModel_Fingerprint_ValidationFollowsTheRules
+          - SourceEditorViewModel_Save_RequireSignedWithoutFingerprint_PinsNothing
+
+      - id: AgentControl-SourceEditorViewModel-FingerprintSpellings
+        title: >-
+          The SourceEditorViewModel class shall accept a fingerprint typed with or without
+          colons, dashes or spaces and in either letter case.
+        justification: |
+          Fingerprints are copied from tools and certificate viewers in many spellings; accepting
+          them as pasted avoids needless errors.
+        tests:
+          - SourceEditorViewModel_Fingerprint_ValidationFollowsTheRules
+
+      - id: AgentControl-SourceEditorViewModel-FingerprintHelp
+        title: >-
+          The SourceEditorViewModel class shall explain what the fingerprint is and how to find
+          it.
+        justification: |
+          Few developers know where a certificate fingerprint comes from; telling them where to
+          look makes the pin usable.
+        tests:
+          - SourceEditorViewModel_SignatureOptions_OfferedForNuGetOnlyAndOffByDefault
+
+      - id: AgentControl-SourceEditorViewModel-FingerprintError
+        title: >-
+          The SourceEditorViewModel class shall explain what is wrong with fingerprint text that
+          is not a fingerprint, once the user has typed it, and refuse to save while it is in use.
+        justification: |
+          An unreadable fingerprint must be caught in the dialog because it would otherwise stop
+          the source from working or, worse, be ignored.
+        tests:
+          - SourceEditorViewModel_Fingerprint_ValidationFollowsTheRules
+
+      - id: AgentControl-SourceEditorViewModel-FingerprintNormalized
+        title: >-
+          The SourceEditorViewModel class shall save a usable fingerprint in one normalized form.
+        justification: |
+          Every reader of the settings should see one spelling however the user typed it.
+        tests:
+          - SourceEditorViewModel_Save_RequireSignedWithFingerprint_SavesTheNormalizedFingerprint
+
+      - id: AgentControl-SourceEditorViewModel-FingerprintNotSavedWhenUnused
+        title: >-
+          The SourceEditorViewModel class shall save no fingerprint, and ignore what is typed in
+          the fingerprint box, while signed packages are not required.
+        justification: |
+          A fingerprint typed and then abandoned by unticking the choice must not pin a publisher
+          nor block the save.
+        tests:
+          - SourceEditorViewModel_Fingerprint_NotInUse_IsIgnoredAndNotSaved
+
+      # ---- Forget saved sign-in ----
+      - id: AgentControl-SourceEditorViewModel-ForgetSavedSignIn
+        title: >-
+          The SourceEditorViewModel class shall offer the action "Forget saved sign-in" for a
+          NuGet package server source only when a Git credential helper applies to that server.
+        justification: |
+          A remembered sign-in must be revocable from the place the user sees the server. Where
+          no helper is configured nothing can have been saved, so offering the action would only
+          suggest something that cannot happen.
+        tests:
+          - SourceEditorViewModel_ForgetSavedSignIn_AvailableOnlyForAUsableServerWithACredentialStore
+          - SourceEditorViewModel_ForgetSavedSignIn_NoCredentialHelper_UnavailableWithExplanation
+          - SourceEditorViewModel_ForgetSavedSignIn_HelperCheckPendingThenAnswered_FollowsTheAnswer
+          - SourceEditorViewModel_ForgetSavedSignIn_AddressEdits_AskTheHelperOncePerOrigin
+
+      - id: AgentControl-SourceEditorViewModel-ForgetAcceptableAddressOnly
+        title: >-
+          The SourceEditorViewModel class shall make "Forget saved sign-in" available, and
+          proceed with it, only for a server address that would be accepted for saving the source
+          - https unless "Allow insecure HTTP" is ticked, ending in index.json and without an
+          embedded credential - and shall not ask the credential helper about any other address.
+        justification: |
+          Removing a stored secret is destructive; it must act only on a server the dialog would
+          itself accept, never on whatever text happens to look like a web address.
+        tests:
+          - SourceEditorViewModel_ForgetSavedSignIn_AvailableOnlyForAUsableServerWithACredentialStore
+          - SourceEditorViewModel_ForgetSavedSignIn_NotAvailable_DoesNothing
+          - SourceEditorViewModel_CanForgetSavedSignIn_AddressNotAnAcceptableFeed_IsFalseAndHelperIsNeverAsked
+          - SourceEditorViewModel_CanForgetSavedSignIn_InsecureHttpOptedIn_BecomesAvailable
+
+      - id: AgentControl-SourceEditorViewModel-ForgetUnavailableExplained
+        title: >-
+          The SourceEditorViewModel class shall show "Forget saved sign-in" unavailable, with
+          the reason, when it cannot be used.
+        justification: |
+          A disabled action with no reason leaves the user guessing what to change.
+        tests:
+          - SourceEditorViewModel_ForgetSavedSignIn_AvailableOnlyForAUsableServerWithACredentialStore
+          - SourceEditorViewModel_ForgetSavedSignIn_NoCredentialHelper_UnavailableWithExplanation
+
+      - id: AgentControl-SourceEditorViewModel-ForgetChecking
+        title: >-
+          The SourceEditorViewModel class shall, while it is still checking whether a Git
+          credential helper applies to the server, keep "Forget saved sign-in" unavailable and
+          say that it is checking.
+        justification: |
+          The check can take noticeable time; an action that is silently disabled, or enabled
+          too early, would mislead.
+        tests:
+          - SourceEditorViewModel_ForgetSavedSignIn_HelperCheckPendingThenAnswered_FollowsTheAnswer
+
+      - id: AgentControl-SourceEditorViewModel-ForgetConfirmation
+        title: >-
+          The SourceEditorViewModel class shall ask for confirmation, naming the server and
+          saying what is removed, before forgetting a saved sign-in, and shall forget nothing
+          until the user has confirmed.
+        justification: |
+          The action removes a secret the user may not be able to recreate from memory, so an
+          accidental click must not do it.
+        tests:
+          - SourceEditorViewModel_ForgetSavedSignIn_CommandAsksForConfirmationAndForgetsOnlyOnceConfirmed
+
+      - id: AgentControl-SourceEditorViewModel-ForgetResultForgotten
+        title: >-
+          The SourceEditorViewModel class shall report in words, naming the server, that the
+          saved sign-in was forgotten.
+        justification: |
+          The user must be told that the action did what they asked.
+        tests:
+          - SourceEditorViewModel_ForgetSavedSignIn_CommandAsksForConfirmationAndForgetsOnlyOnceConfirmed
+
+      - id: AgentControl-SourceEditorViewModel-ForgetResultNothingSaved
+        title: >-
+          The SourceEditorViewModel class shall report in words, naming the server, that no
+          saved sign-in was found when nothing had been saved.
+        justification: |
+          "Nothing to forget" must not be reported as a removal.
+        tests:
+          - SourceEditorViewModel_ForgetSavedSignIn_ReportsNothingSavedRefusalAndFailureInWords
+
+      - id: AgentControl-SourceEditorViewModel-ForgetResultNotRemoved
+        title: >-
+          The SourceEditorViewModel class shall report in words, without revealing the secret,
+          that a saved sign-in could not be removed and must be removed with the credential
+          store's own tools, when the credential store refuses or fails.
+        justification: |
+          The outcome must be honest when the credential store refuses, and tell the user how to
+          finish the job.
+        tests:
+          - SourceEditorViewModel_ForgetSavedSignIn_ReportsNothingSavedRefusalAndFailureInWords

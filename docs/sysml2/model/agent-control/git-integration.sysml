@@ -1,6 +1,6 @@
 package AgentControl {
     part def GitIntegrationSubsystem {
-        doc /* Invokes git for status/pull/branch/committed-files queries; caches committed-agent-files results per HEAD hash. */
+        doc /* Invokes git for status/pull/branch/committed-files queries; caches committed-agent-files results per HEAD hash; and keeps, finds and removes package-feed sign-ins in the user's own Git credential helper. */
 
         comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/GitIntegration/ */
         comment designRef /* Design: docs/design/agent-control/git-integration.md */
@@ -8,6 +8,7 @@ package AgentControl {
         comment reqRef /* Requirements: docs/reqstream/agent-control/git-integration.yaml */
 
         part gitClient : GitClient;
+        part gitCredentialClient : GitCredentialClient;
         part committedAgentFilesCache : CommittedAgentFilesCache;
     }
 }

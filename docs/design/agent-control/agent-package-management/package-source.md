@@ -16,7 +16,10 @@ verification is performed here.
 function of its parameters plus the filesystem at the moment of the call.
 
 **DiscoveredPackage** (record, same file): `PackageName: string`, `Version: PackageVersion`,
-`FilePath: string` — describes one discovered package zip.
+`Location: string`, `SourceAlias: string = ""` — describes one package version discovered at a
+source. For this static scan `Location` is the zip file path and `SourceAlias` stays empty (the
+scan knows nothing of aliases); `ZipFolderSourceProvider` stamps the alias, and other source
+kinds use `Location` for a provider-defined locator.
 
 #### Key Methods
 
@@ -41,7 +44,7 @@ source, without requiring the caller to already know a name.
 - *Returns*: `IReadOnlyList<string>`, ordered `OrdinalIgnoreCase`
   (`AgentControl-PackageSource-DiscoverNames`).
 - *Postconditions*: For each zip's base name, scans hyphen positions left-to-right; the first
-  hyphen whose suffix parses via `PackageVersion.TryParse` is the split point (name = prefix,
+  hyphen whose suffix parses via `PackageVersion.TryParseStrict` is the split point (name = prefix,
   version = suffix). A file with no valid split point is skipped. This correctly handles
   package names that themselves contain hyphens (e.g. `contoso-agents-extra-1.2.0.zip` →
   name `contoso-agents-extra`, version `1.2.0`), since earlier hyphen candidates fail to parse
@@ -69,14 +72,14 @@ badge always produces a definite answer.
 
 #### Dependencies
 
-- **PackageVersion** — every version string is parsed/compared via `PackageVersion.TryParse`
-  and `PackageVersion.CompareTo`.
+- **PackageVersion** — every zip file-name version is parsed via `PackageVersion.TryParseStrict`
+  (so the file-name splitting rules are unaffected by the wider NuGet version grammar), a pinned
+  version via `PackageVersion.TryParse`, and versions compared via `PackageVersion.CompareTo`.
 - **.NET BCL** — `Directory.EnumerateFiles`, `Path`.
 
 #### Callers
 
-- **PackageVersionCache** — decorates every `PackageSource` method with per-session
-  memoization.
-- **RepoCardViewModel** — calls `EnumeratePackages`/`FindLatest` directly (not through the
-  cache) when resolving an exact pinned package during ensure-synced-before-launch, and when
-  applying a user-selected or upgraded package.
+- **ZipFolderSourceProvider** — adapts `EnumeratePackageNames`/`EnumeratePackages` to the
+  package-source provider contract; every zip-folder source is reached through it (and, above
+  it, through `PackageVersionCache` for memoization), so no other unit calls `PackageSource`
+  directly.

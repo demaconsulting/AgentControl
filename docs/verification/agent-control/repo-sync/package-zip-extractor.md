@@ -5,7 +5,9 @@
 `PackageZipExtractor` is verified with unit tests defined in `PackageZipExtractorTests.cs`.
 Every test creates a real temporary repo directory and a real temporary package zip file
 (built with `System.IO.Compression`), so extraction, folder-presence checks, and release-notes
-reading are all exercised against genuine filesystem/zip-archive state.
+reading are all exercised against genuine filesystem/zip-archive state. Because the unit is a
+facade over `PackageContentExtractor` (see its verification design), these tests also act as the
+regression suite proving the zip behavior is unchanged by the shared implementation.
 
 #### Test Environment
 
@@ -18,8 +20,9 @@ N/A - standard test environment.
 - An invalid zip file is rejected with a clear exception rather than a partial extraction.
 - A zip entry that resolves inside the repo root but outside every managed folder is skipped,
   and one that escapes the repo root is rejected; neither writes outside a managed folder.
-- Symbolic links and junctions already in the repo's folder layout are out of scope: they are
-  not inspected, and no test depends on them.
+- Links in the repo's `.github` folder or a managed folder are refused before anything is changed,
+  exactly as for any other package format; an archive entry that would resolve outside the repo
+  is rejected, and no rejection leaves pre-existing managed folders blind-deleted.
 - No rejection leaves pre-existing managed folders blind-deleted.
 - Folder-presence and release-notes checks reflect genuine filesystem/archive state.
 
@@ -43,6 +46,16 @@ This scenario is tested by
 `PackageZipExtractor_Extract_TraversalEntryWithinRepoRoot_DoesNotEscapeManagedFolders` and
 `PackageZipExtractor_Extract_EntryEscapesRepoRoot_ThrowsBeforeDeletingManagedFolders`, covering
 `AgentControl-PackageZipExtractor-Extract`.
+
+**PackageZipExtractor_Extract_RefusesLinkedRepoFolders**: A repo whose `.github` folder, or one of
+whose managed folders, is a directory junction (Windows) or symbolic link (Linux) is given to
+`Extract`; it throws `InvalidOperationException` naming a link, nothing at the link's target is
+deleted or written, and another ordinary managed folder is not blind-deleted. This scenario is
+tested by `windows@PackageZipExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched`,
+`windows@PackageZipExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched`,
+`ubuntu@PackageZipExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched` and
+`ubuntu@PackageZipExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched`,
+covering `AgentControl-PackageZipExtractor-RefuseLinkedRepoFolders`.
 
 **PackageZipExtractor_AllManagedFoldersExist_ReflectsActualPresence**: The check returns true
 when all four managed folders are present, and false when some or none are present. This

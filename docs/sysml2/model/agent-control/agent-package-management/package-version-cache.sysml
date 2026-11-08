@@ -1,6 +1,6 @@
 package AgentControl {
     part def PackageVersionCache {
-        doc /* Memoizes PackageSource scan results per source folder. */
+        doc /* Memoizes per-source, per-package version listings keyed by source alias and package id; invalidated per source. */
 
         comment sourceRef /* Source: src/DemaConsulting.AgentControl/AgentPackageManagement/PackageVersionCache.cs */
         comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/AgentPackageManagement/PackageVersionCacheTests.cs */

@@ -1,0 +1,626 @@
+---
+# Software Unit Requirements for the NuGetSourceProvider Class
+#
+# NuGetSourceProvider serves NuGet packages held in a local or network folder feed, or on a NuGet
+# server, through the common package-source contract, using the NuGet caching library inside
+# storage that AgentControl owns.
+#
+# Each requirement states one observable criterion. Where an ID names a broader topic (for example
+# ListVersions or ServerListAndAcquire), the requirement keeps its original ID for the primary
+# behavior and the other behaviors it once combined have their own IDs.
+
+sections:
+  - title: NuGetSourceProvider Unit Requirements
+    requirements:
+      # --- Folder feeds: listing --------------------------------------------------------------
+      - id: AgentControl-NuGetSourceProvider-ListVersions
+        title: >-
+          The NuGetSourceProvider class shall list the available versions of a named package found
+          in its NuGet package folder, including prereleases and four-part versions, labeling each
+          with its source alias.
+        justification: |
+          Users pick versions from what the feed actually holds, and a version must always be
+          traceable to the source that offered it.
+        tests:
+          - NuGetSourceProvider_ListVersions_FolderFeedWithVersions_ReturnsAllVersionsStampedWithAlias
+
+      - id: AgentControl-NuGetSourceProvider-ListVersionsUnknownPackageIsEmpty
+        title: >-
+          The NuGetSourceProvider class shall return no versions, rather than fail, for a package
+          its NuGet package folder does not have.
+        justification: |
+          A configured package that a feed does not (yet) carry is an ordinary situation that the
+          user interface reports as "not found"; it must not look like a broken source.
+        tests:
+          - NuGetSourceProvider_ListVersions_PackageNotInFeed_ReturnsEmptyList
+
+      - id: AgentControl-NuGetSourceProvider-ListVersionsMissingFolderReported
+        title: >-
+          The NuGetSourceProvider class shall report a NuGet package folder that does not exist
+          as a missing folder (DirectoryNotFoundException) when listing versions.
+        justification: |
+          A missing folder is the most common source problem and must be told apart from an
+          empty feed, in the same way as for a zip package folder.
+        tests:
+          - NuGetSourceProvider_ListVersions_FolderDoesNotExist_ThrowsDirectoryNotFoundException
+
+      - id: AgentControl-NuGetSourceProvider-ListPackageIds
+        title: >-
+          The NuGetSourceProvider class shall offer exactly the package IDs configured for its
+          source - trimmed, without blanks or case-insensitive duplicates, sorted - and none when
+          none are configured.
+        justification: |
+          A feed cannot be enumerated cheaply, so the offered IDs are the configured ones, and a
+          definition with no package list (as an explicit null in the settings file can produce)
+          must offer nothing rather than crash.
+        tests:
+          - NuGetSourceProvider_ListPackageIds_ConfiguredIds_ReturnsDistinctSortedTrimmedIds
+          - NuGetSourceProvider_Constructor_NullPackageIds_OffersNoPackages
+
+      - id: AgentControl-NuGetSourceProvider-CancellationHonoredBeforeSideEffects
+        title: >-
+          The NuGetSourceProvider class shall, when cancellation has been requested before listing
+          versions or supplying a package begins, throw OperationCanceledException before it
+          checks the source folder, probes whether signatures can be verified or creates any file
+          or folder.
+        justification: |
+          A canceled operation must neither report a misleading source problem nor leave
+          configuration or cache folders behind, and the checks it skips (a folder on a slow or
+          offline network share) are exactly the ones that would keep a canceled caller waiting.
+        tests:
+          - NuGetSourceProvider_ListVersions_AlreadyCanceled_ThrowsOperationCanceledException
+          - NuGetSourceProvider_ListVersions_PreCanceledToken_ThrowsOperationCanceledWithoutPreparingAnything
+          - NuGetSourceProvider_Acquire_PreCanceledToken_ThrowsOperationCanceledWithoutPreparingAnything
+
+      # --- Folder feeds: acquiring ------------------------------------------------------------
+      - id: AgentControl-NuGetSourceProvider-AcquireToPrivateCache
+        title: >-
+          The NuGetSourceProvider class shall supply a chosen version's content as a package
+          reader over the package's content folder, unpacked into a package cache that is private
+          to the source.
+        justification: |
+          The shared extraction sequence reads every package through one reader contract, and a
+          cache private to the source keeps the unpacked content under AgentControl's control.
+        tests:
+          - NuGetSourceProvider_Acquire_ExistingPackage_ReturnsReaderOverContentFolder
+          - NuGetSourceProvider_Acquire_ThenExtract_WritesManagedFoldersToRepoOnly
+
+      - id: AgentControl-NuGetSourceProvider-PrivateCachePerSource
+        title: >-
+          The NuGetSourceProvider class shall keep each source's packages in storage separate from
+          every other source's, so that two sources offering the same package ID and version each
+          supply their own content.
+        justification: |
+          A package cache shared with other sources (or with the developer's own NuGet cache)
+          could serve one source's package under another source's identity.
+        tests:
+          - NuGetSourceProvider_Acquire_SamePackageInTwoSources_EachSourceGetsItsOwnContent
+          - NuGetSourceProvider_BuildSourceKey_AliasAndLocation_StableDistinctAndFolderSafe
+          - NuGetSourceProvider_BuildSourceKey_CaseOfLocation_FoldedOnlyWhereComparisonIsCaseInsensitive
+
+      - id: AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder
+        title: >-
+          The NuGetSourceProvider class shall refuse to supply a package whose unpacked folder, or
+          any folder between the source's private package cache and it, is a symbolic link or
+          junction, and shall refuse - before calling the NuGet library - to use a private package
+          cache folder that is a link or that NuGet's package-cache environment variable overrides.
+        justification: |
+          A link that replaced a cache folder still lies lexically inside the cache while
+          redirecting every read elsewhere, so the package's content could come from a location
+          the source does not control.
+        tests:
+          - NuGetSourceProvider_Acquire_CacheFolderReplacedByLink_ThrowsInvalidOperationException
+          - NuGetSourceProvider_Acquire_PackagesFolderIsLink_RefusedBeforeAnythingIsWritten
+
+      - id: AgentControl-NuGetSourceProvider-RejectPackageWithoutContent
+        title: >-
+          The NuGetSourceProvider class shall reject a package that has no content folder.
+        justification: |
+          A package without the agreed content layout must never cause a repo's managed folders
+          to be replaced with nothing.
+        tests:
+          - NuGetSourceProvider_Acquire_PackageWithoutContentFolder_ThrowsInvalidOperationException
+
+      - id: AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource
+        title: >-
+          The NuGetSourceProvider class shall refuse to supply the content of a package that was
+          discovered at a different source.
+        justification: |
+          Content must only ever come from the source whose alias the pin names.
+        tests:
+          - NuGetSourceProvider_Acquire_PackageFromOtherSource_ThrowsArgumentException
+
+      # --- Storage and configuration isolation ------------------------------------------------
+      - id: AgentControl-NuGetSourceProvider-ExplicitCacheRoot
+        title: >-
+          The NuGetSourceProvider class shall obtain and store packages as the source's own
+          description and AgentControl's own storage dictate, never as directed by NuGet
+          configuration found in the target repo or the current directory.
+        justification: |
+          NuGet normally discovers configuration by walking up from the current folder, which
+          could be a repo whose settings redirect packages or sources; the user's own NuGet
+          configuration is deliberately left in effect only for what AgentControl itself does not
+          decide, so that people who already keep a feed's credentials there are not asked for
+          them again.
+        tests:
+          - NuGetSourceProvider_Acquire_UsesExplicitAgentControlOwnedRootWithGeneratedConfig
+
+      - id: AgentControl-NuGetSourceProvider-CacheRootMustBeAbsolute
+        title: >-
+          The NuGetSourceProvider class shall refuse a cache location that is not an absolute
+          path, and shall by default keep its storage under an absolute per-user application-data
+          location.
+        justification: |
+          A relative cache location would resolve against the current folder, which could be a
+          repo whose contents are not under AgentControl's control.
+        tests:
+          - NuGetSourceProvider_Constructor_RelativeRootBase_ThrowsArgumentException
+          - NuGetSourceProvider_Constructor_NoRootBase_RootIsAbsoluteUnderLocalApplicationData
+
+      - id: AgentControl-NuGetSourceProvider-NoRepoNuGetConfig
+        title: >-
+          The NuGetSourceProvider class shall neither read nor write the target repo's NuGet
+          configuration or create any file in the repo while listing or supplying packages.
+        justification: |
+          Agent package information must never appear in a repo's nuget.config, and a repo's
+          own nuget.config must not be able to influence where AgentControl obtains packages.
+        tests:
+          - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig
+
+      - id: AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration
+        title: >-
+          The NuGetSourceProvider class shall leave the way every other NuGet operation in the
+          application signs in unchanged by listing and supplying packages, and shall never
+          persist a credential.
+        justification: |
+          NuGet's credential handling is shared by every NuGet operation in the application;
+          altering it from a package source could change how unrelated operations authenticate,
+          and AgentControl must not store secrets.
+        tests:
+          - NuGetSourceProvider_ListAndAcquire_LeavesProcessWideCredentialServiceUnchanged
+          - NuGetSourceProvider_ProductAssembly_DoesNotReferenceNuGetCredentialService
+
+      # --- Source description validation ------------------------------------------------------
+      - id: AgentControl-NuGetSourceProvider-ValidateLocation
+        title: >-
+          The NuGetSourceProvider class shall reject, with a clear error that names the source and
+          does not repeat its location, a source whose location is a folder that is not an
+          absolute path.
+        justification: |
+          A relative folder would resolve against whatever the process's current folder happens
+          to be.
+        tests:
+          - NuGetSourceProvider_Constructor_RelativeLocation_ThrowsInvalidOperationException
+
+      - id: AgentControl-NuGetSourceProvider-RejectNonNuGetDefinition
+        title: >-
+          The NuGetSourceProvider class shall reject a source definition that is missing or is not
+          a NuGet source.
+        justification: |
+          A provider built for the wrong kind of definition would interpret the location with the
+          wrong rules.
+        tests:
+          - NuGetSourceProvider_Constructor_ZipTypeOrNullDefinition_Throws
+
+      - id: AgentControl-NuGetSourceProvider-PlainHttpRefusedUnlessAllowed
+        title: >-
+          The NuGetSourceProvider class shall reject, with an error that names the source and
+          explains the opt-in, a server address that is not https unless the source explicitly
+          allows plain http.
+        justification: |
+          Plain http would send a sign-in across the network unprotected unless the user opted in
+          knowingly.
+        tests:
+          - NuGetSourceProvider_Constructor_PlainHttpWithoutOptIn_ThrowsInvalidOperationExceptionWithClearMessage
+          - NuGetSourceProvider_Constructor_PlainHttp_RefusedUnlessInsecureHttpIsAllowed
+
+      - id: AgentControl-NuGetSourceProvider-ServerAddressMustBeServiceIndex
+        title: >-
+          The NuGetSourceProvider class shall reject, without repeating the address, a server
+          address that is not an address of a service index ending in index.json.
+        justification: |
+          A NuGet client treats an address that does not end in index.json (or that carries a query
+          string or fragment) as a different protocol, so the source would fail in a confusing way.
+        tests:
+          - NuGetSourceProvider_Constructor_InvalidServerLocation_ThrowsWithoutRepeatingTheLocation
+
+      - id: AgentControl-NuGetSourceProvider-CredentialInAddressRefused
+        title: >-
+          The NuGetSourceProvider class shall reject, without repeating the address, a server
+          address that embeds a credential.
+        justification: |
+          An address with a credential in it would put a secret where it is logged and stored.
+        tests:
+          - NuGetSourceProvider_Constructor_InvalidServerLocation_ThrowsWithoutRepeatingTheLocation
+
+      - id: AgentControl-NuGetSourceProvider-HttpsAddressAccepted
+        title: >-
+          The NuGetSourceProvider class shall accept a valid https server address and keep that
+          source's storage under the supplied base location.
+        justification: |
+          The rules above must not refuse the normal case, and the source's storage must be
+          AgentControl's own.
+        tests:
+          - NuGetSourceProvider_Constructor_HttpsServerLocation_IsAcceptedWithCacheRootUnderBase
+
+      # --- Server feeds: listing and acquiring ------------------------------------------------
+      - id: AgentControl-NuGetSourceProvider-ServerListAndAcquire
+        title: >-
+          The NuGetSourceProvider class shall list the available versions of a configured package
+          found on a NuGet server, including prereleases, labeling each with its source alias.
+        justification: |
+          Users pick a version from what the server holds, and a version must always be traceable
+          to the source that offered it.
+        tests:
+          - NuGetSourceProvider_ListVersions_AnonymousServer_ReturnsVersionsWithoutDownloading
+
+      - id: AgentControl-NuGetSourceProvider-ServerListDoesNotDownload
+        title: >-
+          The NuGetSourceProvider class shall list a server's versions without downloading any
+          package content.
+        justification: |
+          A listing that downloaded packages would be slow and costly on a large feed.
+        tests:
+          - NuGetSourceProvider_ListVersions_AnonymousServer_ReturnsVersionsWithoutDownloading
+
+      - id: AgentControl-NuGetSourceProvider-ServerUnknownPackageIsEmpty
+        title: >-
+          The NuGetSourceProvider class shall return no versions, rather than fail, for a package
+          the server does not have.
+        justification: |
+          A configured package that a server does not carry must be reportable as "not found"
+          without looking like a broken source.
+        tests:
+          - NuGetSourceProvider_ListVersions_PackageNotOnServer_ReturnsEmptyList
+
+      - id: AgentControl-NuGetSourceProvider-ServerAcquire
+        title: >-
+          The NuGetSourceProvider class shall supply a chosen version's content from the package
+          downloaded from the server into the source's private cache.
+        justification: |
+          The downloaded content must come only from this source, like the content of a folder
+          source, and be available to the shared extraction sequence.
+        tests:
+          - NuGetSourceProvider_Acquire_AnonymousServer_DownloadsPackageAndExposesContent
+
+      # --- Server feeds: signing in -----------------------------------------------------------
+      - id: AgentControl-NuGetSourceProvider-SignInOrder
+        title: >-
+          The NuGetSourceProvider class shall, for a server that asks for credentials, use in this
+          order the credentials of a source in the user's NuGet configuration with the same
+          address, the credential the user already entered during the session, and only then ask
+          the user.
+        justification: |
+          People who already keep credentials for a feed in their NuGet configuration expect them
+          to be used silently, and a dialog should be the last resort.
+        tests:
+          - NuGetSourceProvider_ListVersions_NuGetConfigHasCredentialsForTheFeed_SignsInWithoutPrompting
+          - NuGetSourceProvider_ListVersions_ServerNeedsSignIn_PromptsOnceAndRemembersCredentialForTheSession
+          - NuGetSourceProvider_Acquire_AfterSignInInAnEarlierOperation_ReusesSessionCredentialWithoutPrompting
+
+      - id: AgentControl-NuGetSourceProvider-AskUserOnce
+        title: >-
+          The NuGetSourceProvider class shall ask the user for a server's credential at most once
+          per operation, and only after the server has refused the credentials tried before.
+        justification: |
+          A person must not be asked repeatedly, or before the silently available credentials have
+          been tried.
+        tests:
+          - NuGetSourceProvider_ListVersions_ServerNeedsSignIn_PromptsOnceAndRemembersCredentialForTheSession
+          - NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt
+
+      - id: AgentControl-NuGetSourceProvider-CredentialRememberedAfterSuccess
+        title: >-
+          The NuGetSourceProvider class shall remember a credential the user entered for the
+          session only after the operation it was entered for has succeeded.
+        justification: |
+          A credential that has not yet been shown to work must not be kept.
+        tests:
+          - NuGetSourceProvider_ListVersions_ServerNeedsSignIn_PromptsOnceAndRemembersCredentialForTheSession
+          - NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt
+
+      - id: AgentControl-NuGetSourceProvider-NonInteractiveLibrary
+        title: >-
+          The NuGetSourceProvider class shall run the NuGet library non-interactively, so that the
+          only sign-in dialog the user can meet is AgentControl's own prompt, and shall, when no
+          prompt is available to it, fail a server operation that needs a sign-in with an
+          authentication failure instead of asking.
+        justification: |
+          Background work such as the upgrade check must never interrupt the user, and nothing the
+          library does may open a dialog of its own. What a NuGet credential-provider plug-in does
+          when the library runs it is the library's behavior and is not part of this requirement;
+          AgentControl supplies only the credentials of the user's NuGet configuration, of the
+          session store and of its own prompt.
+        tests:
+          - NuGetSourceProvider_ListVersions_ServerNeedsSignInAndNoPrompt_ThrowsAuthenticationFailedWithoutAsking
+
+      - id: AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin
+        title: >-
+          The NuGetSourceProvider class shall supply a credential only for requests to the
+          server's own origin and ask the user only for that server's credential, even when the
+          server's service index sends the client to resources on another host.
+        justification: |
+          A feed's index decides where its package resources are, so a credential must never be
+          offered to, or asked for on behalf of, a host the user did not enter it for.
+        tests:
+          - NuGetSourceProvider_ListVersions_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin
+
+      # --- Server feeds: saved sign-ins -------------------------------------------------------
+      - id: AgentControl-NuGetSourceProvider-SavedSignIn
+        title: >-
+          The NuGetSourceProvider class shall, for a server that asks for credentials, use a
+          sign-in the user saved with their own Git credential helper without asking - also when
+          no dialog may be shown, as for a background check.
+        justification: |
+          A saved sign-in is only useful if it is used without a dialog, including for work the
+          user did not start.
+        tests:
+          - NuGetSourceProvider_ListVersions_SavedSignInExists_UsedWithoutAsking
+          - NuGetSourceProvider_ListVersions_NoPromptButSavedSignIn_BackgroundCheckSucceeds
+
+      - id: AgentControl-NuGetSourceProvider-SavedSignInLookedUpOnce
+        title: >-
+          The NuGetSourceProvider class shall look for a saved sign-in in the user's Git credential
+          helper once per server per session.
+        justification: |
+          Every look-up runs an external program; repeating it for each request would slow every
+          operation.
+        tests:
+          - NuGetSourceProvider_ListVersions_SavedSignInExists_UsedWithoutAsking
+
+      - id: AgentControl-NuGetSourceProvider-RejectedSavedSignInRemoved
+        title: >-
+          The NuGetSourceProvider class shall remove a saved sign-in that the server rejects from
+          the user's Git credential helper and then ask the user once.
+        justification: |
+          A saved sign-in that stopped working must not be offered again and again.
+        tests:
+          - NuGetSourceProvider_ListVersions_SavedSignInRejected_RemovedFromTheUsersStoreAndUserAskedOnce
+
+      - id: AgentControl-NuGetSourceProvider-SignInSavedOnlyWhenChosen
+        title: >-
+          The NuGetSourceProvider class shall hand a sign-in to the user's Git credential helper
+          only when the user chose to remember it and the operation succeeded, and never when the
+          server rejected it or the user did not choose to remember it.
+        justification: |
+          What the user chose not to keep, or what was never shown to work, must not be kept.
+        tests:
+          - NuGetSourceProvider_ListVersions_RememberTicked_SavedByTheUsersStoreAfterSuccess
+          - NuGetSourceProvider_ListVersions_WrongPasswordOrRememberNotTicked_NothingIsSaved
+
+      # --- Server feeds: failures and secrets -------------------------------------------------
+      - id: AgentControl-NuGetSourceProvider-ServerFailures
+        title: >-
+          The NuGetSourceProvider class shall report each way a server can fail - it refuses
+          access, rejects the credential that was supplied, the user cancels the sign-in, the
+          address does not answer as a NuGet feed - as a distinct failure with a message that
+          names the source and the server's origin but no secret, path or query.
+        justification: |
+          The user must be told what to do - sign in, correct the address, try again; the messages
+          end up in dialogs and logs, so they carry no secret.
+        tests:
+          - NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt
+          - NuGetSourceProvider_ListVersions_UserCancelsSignIn_ThrowsSignInCanceledAfterOnePrompt
+          - NuGetSourceProvider_ListVersions_AddressIsNotANuGetFeed_ThrowsUnreachable
+          - PackageSourceAccessException_Constructor_CarriesKindMessageAndInnerException
+
+      - id: AgentControl-NuGetSourceProvider-RejectedCredentialForgotten
+        title: >-
+          The NuGetSourceProvider class shall forget a credential the server rejected, so that it
+          is not tried again.
+        justification: |
+          A credential that has been shown not to work must not be offered again and again.
+        tests:
+          - NuGetSourceProvider_ListVersions_SessionCredentialRejected_ForgetsItAndPromptsAgain
+
+      - id: AgentControl-NuGetSourceProvider-SignInTimeLimit
+        title: >-
+          The NuGetSourceProvider class shall stop an operation whose sign-in takes longer than
+          two minutes and report it as a timed-out failure.
+        justification: |
+          An abandoned sign-in dialog must not hold an operation forever.
+        tests:
+          - NuGetSourceProvider_ListVersions_SignInTakesTooLong_ThrowsTimedOut
+
+      - id: AgentControl-NuGetSourceProvider-CallerCancellationNotAFailure
+        title: >-
+          The NuGetSourceProvider class shall honor cancellation by the caller while a sign-in is
+          in progress without reporting it as a failure.
+        justification: |
+          A user who cancels an operation has not met a problem and must not be shown an error.
+        tests:
+          - NuGetSourceProvider_ListVersions_CallerCancelsWhileSigningIn_ThrowsOperationCanceled
+
+      - id: AgentControl-NuGetSourceProvider-SecretsNotLogged
+        title: >-
+          The NuGetSourceProvider class shall ensure that no password, token, authorization header
+          value or web-address query string reaches the application log during any sign-in flow,
+          whether it succeeds or fails.
+        justification: |
+          The diagnostic log is a plain file users attach to reports; the NuGet client writes the
+          addresses it requests and the errors it meets, which can quote a secret.
+        tests:
+          - NuGetSourceProvider_SignInFlows_NeverLogTheSecret
+
+      - id: AgentControl-NuGetSourceProvider-SecretsNotInExceptions
+        title: >-
+          The NuGetSourceProvider class shall ensure that no password, token, authorization header
+          value or web-address query string appears in an exception it raises, including its inner
+          exception, during any sign-in flow.
+        justification: |
+          A raw library exception kept as an inner exception would carry a secret to wherever the
+          exception is later logged or shown.
+        tests:
+          - NuGetSourceProvider_SignInFlows_NeverLogTheSecret
+          - NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt
+
+      # --- Signed packages --------------------------------------------------------------------
+      - id: AgentControl-NuGetSourceProvider-RequireSigned
+        title: >-
+          The NuGetSourceProvider class shall, for a source that requires signed packages, refuse
+          to supply a package that is unsigned, validly signed by nobody trusted or invalidly
+          signed, leaving nothing installed for it, for a NuGet package folder and for a NuGet
+          package server alike.
+        justification: |
+          The requirement is a promise about every package the source supplies, and a folder
+          source is as open to tampering as a server.
+        tests:
+          - NuGetSourceProvider_Acquire_RequireSignedAndPackageUnsigned_IsRejectedAndNothingIsInstalled
+          - NuGetSourceProvider_Acquire_ServerRequiresSignaturesAndPackageUnsigned_IsRejectedAsASignatureFailure
+
+      - id: AgentControl-NuGetSourceProvider-SignatureCheckedForCachedPackage
+        title: >-
+          The NuGetSourceProvider class shall check the signature requirement of a package that is
+          already held in the source's private cache every time it supplies the package.
+        justification: |
+          If a package already in the private cache escaped the check, turning the requirement on
+          later would leave unchecked packages in use.
+        tests:
+          - NuGetSourceProvider_Acquire_RequirementEnabledAfterPackageWasCached_RejectsTheCachedPackage
+
+      - id: AgentControl-NuGetSourceProvider-SignedPackageAccepted
+        title: >-
+          The NuGetSourceProvider class shall accept a validly signed package from a source that
+          requires signed packages and pins no publisher.
+        justification: |
+          The requirement must not refuse the packages it is meant to admit.
+        tests:
+          - NuGetSourceProvider_Acquire_SignedPackageAndNoPinnedSigner_SignatureIsAccepted
+
+      - id: AgentControl-NuGetSourceProvider-UnsignedAcceptedWhenNotRequired
+        title: >-
+          The NuGetSourceProvider class shall accept an unsigned package from a source that does
+          not require signatures.
+        justification: |
+          Requiring signatures is opt-in per source; sources that have not opted in keep working.
+        tests:
+          - NuGetSourceProvider_Acquire_SignaturesNotRequired_UnsignedPackageIsAccepted
+
+      - id: AgentControl-NuGetSourceProvider-SignerPin
+        title: >-
+          The NuGetSourceProvider class shall, for a source that pins a publisher's certificate
+          fingerprint, accept only a package whose author signature was made with exactly that
+          certificate, and refuse a package signed by another publisher.
+        justification: |
+          Without a pin any validly signed package from an unrelated publisher is accepted, which
+          does not answer the question an organization cares about - who published this.
+        tests:
+          - NuGetSourceProvider_Acquire_SignedPackageAndMatchingAuthorPinned_SignatureIsAccepted
+          - NuGetSourceProvider_Acquire_SignedPackageAndOtherSignerPinned_IsRejectedAndNotInstalled
+
+      - id: AgentControl-NuGetSourceProvider-RepositoryCountersignatureNotAPin
+        title: >-
+          The NuGetSourceProvider class shall refuse a package whose repository countersignature,
+          and not its author signature, matches the pinned certificate.
+        justification: |
+          Only the author's signature says who published the package; a repository countersignature
+          says only which feed served it.
+        tests:
+          - NuGetSourceProvider_Acquire_RepositoryCertificatePinned_IsNotTheAuthorAndIsRejected
+
+      - id: AgentControl-NuGetSourceProvider-ChangedPinAppliesToCachedPackages
+        title: >-
+          The NuGetSourceProvider class shall apply a changed pin to packages already held in the
+          source's private cache.
+        justification: |
+          Changing the pin to another publisher must take effect at once rather than leave the
+          packages of the previous publisher in use.
+        tests:
+          - NuGetSourceProvider_Acquire_PinnedSignerChangedAfterPackageWasCached_RejectsTheCachedPackage
+
+      - id: AgentControl-NuGetSourceProvider-GeneratedSignerConfiguration
+        title: >-
+          The NuGetSourceProvider class shall determine the publishers a source that requires
+          signed packages trusts from nothing but the source's own description - no publisher in
+          particular when none is pinned, exactly the pinned publisher when one is - and shall
+          reflect a changed pin in the next operation.
+        justification: |
+          The source's own description must be the only authority on who may publish to it, and a
+          change of pin must take effect without any manual cleanup of stored state.
+        tests:
+          - NuGetSourceProvider_PinnedSigner_GeneratesTrustedSignersWithOnlyThatAuthor
+          - NuGetSourceProvider_RequireSignedWithoutPin_ClearsInheritedSignersAndNoRequirementWritesNone
+          - NuGetSourceProvider_PinnedSignerChanged_RewritesTheConfigurationInTheSameRoot
+
+      - id: AgentControl-NuGetSourceProvider-NoSignerConfigurationWithoutRequirement
+        title: >-
+          The NuGetSourceProvider class shall impose no restriction on the publishers of a source
+          that does not require signed packages, even when a fingerprint remains in its settings.
+        justification: |
+          A leftover fingerprint of a source that no longer requires signatures must not influence
+          what the source accepts.
+        tests:
+          - NuGetSourceProvider_RequireSignedWithoutPin_ClearsInheritedSignersAndNoRequirementWritesNone
+
+      - id: AgentControl-NuGetSourceProvider-SignerTrustIsolated
+        title: >-
+          The NuGetSourceProvider class shall decide which signers a source trusts from the
+          source's own description alone, so that trusted signers configured elsewhere on the
+          machine or for the user can neither add a publisher to, nor remove the pinned publisher
+          from, what the source accepts.
+        justification: |
+          A trusted-signers list in the user's or machine's NuGet configuration is for the user's
+          own projects; if it were honored here, anyone able to edit it could widen the set of
+          publishers an agent package may come from, and a list that happened to exclude the
+          pinned publisher would silently break the source.
+        tests:
+          - NuGetSourceProvider_Acquire_UsersConfigurationTrustsTheAuthorButOtherSignerPinned_IsStillRejected
+          - NuGetSourceProvider_Acquire_UsersConfigurationTrustsOnlyAnotherSignerAndNoneIsPinned_SignatureIsAccepted
+
+      - id: AgentControl-NuGetSourceProvider-SignatureFailureReported
+        title: >-
+          The NuGetSourceProvider class shall report a package refused for its signature as a
+          signature failure, distinct from an unreachable or unauthorized source, with a message
+          that names the package and the source, explains the likely causes, and contains no
+          secret.
+        justification: |
+          The user must be able to tell a security refusal from a network problem and know what to
+          check - whether the package is unsigned, signed by someone else or damaged - without the
+          message revealing a credential.
+        tests:
+          - NuGetSourceProvider_Acquire_RequireSignedAndPackageUnsigned_IsRejectedAndNothingIsInstalled
+          - NuGetSourceProvider_Acquire_ServerRequiresSignaturesAndPackageUnsigned_IsRejectedAsASignatureFailure
+
+      - id: AgentControl-NuGetSourceProvider-SignatureFailureNamesPinnedPublisher
+        title: >-
+          The NuGetSourceProvider class shall, when it refuses a package of a source that pins a
+          publisher, say in the failure message that the package is not signed by the trusted
+          publisher, naming only the start and end of the pinned fingerprint.
+        justification: |
+          The user needs to know which publisher was expected without the message revealing the
+          full pinned certificate.
+        tests:
+          - NuGetSourceProvider_Acquire_PinnedSignerAndPackageUnsigned_MessageNamesTheTrustedPublisher
+
+      - id: AgentControl-NuGetSourceProvider-FailClosedWithoutVerification
+        title: >-
+          The NuGetSourceProvider class shall refuse to list or supply any package from a source
+          that requires signed packages when the platform cannot verify signatures, reporting a
+          signature failure that explains why.
+        justification: |
+          Skipping verification would silently install packages the user required to be checked;
+          refusing is safe and tells the user what to change.
+        tests:
+          - NuGetSourceProvider_RequireSignedOnUnsupportedPlatform_FailsClosedForListAndAcquire
+          - NuGetSourceProvider_RequireSignedAndProbeFails_FailsClosedWithoutThrowingFromTheProbe
+
+      - id: AgentControl-NuGetSourceProvider-UnsupportedPlatformDoesNotAffectOpenSources
+        title: >-
+          The NuGetSourceProvider class shall work as usual, on a platform that cannot verify
+          signatures, for a source that does not require signed packages.
+        justification: |
+          A platform limitation on signature verification must not break sources that never asked
+          for it.
+        tests:
+          - NuGetSourceProvider_SignaturesNotRequiredOnUnsupportedPlatform_WorksAsUsual
+
+      - id: AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused
+        title: >-
+          The NuGetSourceProvider class shall refuse to be created for a source that requires
+          signed packages and carries a trusted-signer fingerprint that cannot be read as a SHA-256
+          fingerprint, rather than ignore the fingerprint.
+        justification: |
+          Ignoring a fingerprint that cannot be read would silently widen the trust from one named
+          publisher to every validly signed package, defeating the pin the user set.
+        tests:
+          - NuGetSourceProvider_Constructor_InvalidFingerprint_RefusesWhenSignaturesAreRequired

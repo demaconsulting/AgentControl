@@ -23,17 +23,21 @@ This document covers the verification design for the following software items:
     bootstrap responsibility, which has no dedicated unit test file)
   - **LauncherUI** subsystem
     - **MainWindowViewModel**, **RepoCardViewModel**, **SelectPackageWindowViewModel**,
-      **SettingsWindowViewModel**
+      **SettingsWindowViewModel**, **SourceEditorViewModel**, **CredentialPromptViewModel**
   - **AgentPackageManagement** subsystem
-    - **PackageSource**, **PackageVersion**, **PackageVersionCache**
+    - **PackageSource**, **PackageVersion**, **PackageVersionCache**, **PackageSourceRegistry**,
+      **ZipFolderSourceProvider**, **NuGetSourceProvider**, **SignatureVerificationSupport**
+  - **PackageCredentials** subsystem
+    - **FeedOrigin**, **SessionCredentialStore**, **PackageCredentialCallback**,
+      **SecretRedactingLogger**
   - **RepoSync** subsystem
-    - **PackageZipExtractor**, **ReleaseNotesViewerViewModel**
+    - **PackageContentExtractor**, **PackageZipExtractor**, **ReleaseNotesViewerViewModel**
   - **RepoConfig** subsystem
     - **RepoPinStore**
   - **AgentToolLauncher** subsystem
     - **ShellDetector**, **AgentToolLauncher**
   - **GitIntegration** subsystem
-    - **GitClient**, **CommittedAgentFilesCache**
+    - **GitClient**, **CommittedAgentFilesCache**, **GitCredentialClient**
   - **Settings** subsystem
     - **SettingsStore**
   - **Logging** subsystem (no dedicated unit — indirect-only test coverage, disclosed below)
@@ -48,6 +52,7 @@ This document covers the verification design for the following software items:
 - **BuildMark** — build-notes documentation tool
 - **FileAssert** — document assertion tool
 - **FlaUI** — Windows UI Automation testing library
+- **NuGetCaching** — NuGet package listing and caching library
 - **Pandoc** — Markdown-to-HTML conversion tool
 - **ReqStream** — requirements traceability tool
 - **ReviewMark** — file review enforcement tool
@@ -77,6 +82,7 @@ test/
 ├── DemaConsulting.AgentControl.Tests/    — unit and integration tests (xUnit v3)
 │   ├── LauncherUI/
 │   ├── AgentPackageManagement/
+│   ├── PackageCredentials/
 │   ├── RepoSync/
 │   ├── RepoConfig/
 │   ├── AgentToolLauncher/

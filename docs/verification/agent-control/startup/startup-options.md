@@ -24,9 +24,11 @@ N/A - standard test environment.
 **StartupOptions_Parse_CapturesEachSupportedOverride**: Parsing with no arguments leaves all
 overrides null; parsing a configuration-directory argument, a git-path argument, or an
 agent-tool-command argument individually captures each value; and parsing all three together
-captures all values. This scenario is tested by
+captures all values; a relative configuration directory is resolved to a full path at parse time.
+This scenario is tested by
 `StartupOptions_Parse_NoArguments_AllOverridesNull`,
 `StartupOptions_Parse_ConfigDirArgument_CapturesValue`,
+`StartupOptions_Parse_RelativeConfigDirArgument_IsResolvedToFullPath`,
 `StartupOptions_Parse_GitPathArgument_CapturesValue`,
 `StartupOptions_Parse_AgentToolCommandArgument_CapturesValue`, and
 `StartupOptions_Parse_AllArguments_CapturesAllValues`, covering

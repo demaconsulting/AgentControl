@@ -20,8 +20,12 @@
 
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
+using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.Settings;
+using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
@@ -32,7 +36,9 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 public class DialogWindowTests
 {
     /// <summary>
-    ///     Raises a <see cref="Button.ClickEvent"/> on the named button, as a user click would.
+    ///     Clicks the named button the way a user's click does: raises <see cref="Button.ClickEvent"/>
+    ///     (for handlers wired in code-behind) and runs the button's <see cref="Button.Command"/>
+    ///     (for buttons bound to a view-model command), which raising the event alone does not.
     /// </summary>
     /// <param name="window">The window containing the button.</param>
     /// <param name="name">The button's XAML name.</param>
@@ -41,6 +47,10 @@ public class DialogWindowTests
         var button = window.FindControl<Button>(name);
         Assert.NotNull(button);
         button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (button.Command is { } command && command.CanExecute(button.CommandParameter))
+        {
+            command.Execute(button.CommandParameter);
+        }
     }
 
     /// <summary>
@@ -167,6 +177,43 @@ public class DialogWindowTests
     });
 
     /// <summary>
+    ///     Test that the agent tool picker shows friendly names (not the raw enum names) and that
+    ///     choosing one still stores the enum value, so the saved setting is unchanged.
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_AgentToolPicker_ShowsFriendlyNamesAndKeepsEnumValue() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        AppSettings? saved = null;
+        var viewModel = new SettingsWindowViewModel(
+            new AppSettings { AgentTool = AgentToolKind.ClaudeCode }, updated => saved = updated);
+        var window = new SettingsWindow(viewModel);
+        window.Show();
+        try
+        {
+            var combo = window.FindControl<ComboBox>("AgentToolComboBox")!;
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the closed picker names the current tool in words
+            Assert.Equal(AgentToolKind.ClaudeCode, combo.SelectedItem);
+            var shown = combo.GetVisualDescendants().OfType<TextBlock>().Select(text => text.Text).ToList();
+            Assert.Contains("Claude Code", shown);
+            Assert.DoesNotContain("ClaudeCode", shown);
+
+            // Act: choose another tool and save
+            combo.SelectedItem = AgentToolKind.CopilotCli;
+            viewModel.SaveCommand.Execute(null);
+
+            // Assert: the stored value is the enum, not its friendly name
+            Assert.Equal(AgentToolKind.CopilotCli, saved!.AgentTool);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that saving through the bound view model closes the settings window.
     /// </summary>
     [Fact]
@@ -189,19 +236,282 @@ public class DialogWindowTests
     });
 
     /// <summary>
-    ///     Test that the settings window rejects a null view model and that the browse button is
-    ///     a no-op without a bound view model.
+    ///     Test that the settings window rejects a null view model and the parameterless previewer
+    ///     constructor yields an unbound window.
     /// </summary>
     [Fact]
-    public void SettingsWindow_NullViewModel_ThrowsAndBrowseWithoutViewModelIsNoOp() => HeadlessTestApp.Run(() =>
+    public void SettingsWindow_NullViewModel_ThrowsAndParameterlessWindowIsUnbound() => HeadlessTestApp.Run(() =>
     {
         // Act / Assert
         Assert.Throws<ArgumentNullException>(() => new SettingsWindow(null!));
 
         var window = new SettingsWindow();
         window.Show();
-        Click(window, "BrowsePackageSourceButton");
         Assert.Null(window.DataContext);
         window.Close();
     });
+
+    /// <summary>
+    ///     Test that the settings window lists the configured sources and that "Add Zip-Package
+    ///     Folder" opens the editor dialog, whose save adds the source to the list.
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_AddZipSourceClicked_ShowsEditorAndSavingAddsSource() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: one configured source
+        var viewModel = new SettingsWindowViewModel(
+            new AppSettings
+            {
+                Sources = [new PackageSourceDefinition { Alias = "Existing", Type = PackageSourceType.Zip, Location = @"C:\x" }]
+            },
+            _ => { },
+            (_, _) => Task.FromResult(true));
+        var window = new SettingsWindow(viewModel);
+        window.Show();
+        try
+        {
+            Assert.NotNull(window.FindControl<ListBox>("SourcesList"));
+            Assert.Single(viewModel.Sources);
+
+            // Act: click the add button; the editor dialog opens
+            Click(window, "AddZipSourceButton");
+            Dispatcher.UIThread.RunJobs();
+            var editorWindow = Assert.Single(window.OwnedWindows.OfType<SourceEditorWindow>());
+            var editor = Assert.IsType<SourceEditorViewModel>(editorWindow.DataContext);
+            Assert.Equal("Add Zip-Package Folder", editorWindow.Title);
+            Assert.False(editorWindow.FindControl<StackPanel>("SourceEditorPackageIdsSection")!.IsVisible);
+
+            // Act: fill it in and save
+            editor.Alias = "Contoso";
+            editor.Location = Path.Combine(Path.GetTempPath(), "agentcontrol_headless_zips");
+            Click(editorWindow, "SourceEditorSaveButton");
+            Dispatcher.UIThread.RunJobs();
+            await viewModel.WaitForStatusChecksAsync();
+
+            // Assert: the dialog closed and the source was added and selected
+            Assert.Empty(window.OwnedWindows);
+            Assert.Equal(["Existing", "Contoso"], viewModel.Sources.Select(source => source.Alias));
+            Assert.Equal("Contoso", viewModel.SelectedSource?.Alias);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that "Add NuGet-Package Folder" shows the package ID section and that cancelling the
+    ///     editor adds nothing.
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_AddNuGetFolderClickedThenCancelled_AddsNothing() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true));
+        var window = new SettingsWindow(viewModel);
+        window.Show();
+
+        // Act
+        Click(window, "AddNuGetFolderSourceButton");
+        Dispatcher.UIThread.RunJobs();
+        var editorWindow = Assert.Single(window.OwnedWindows.OfType<SourceEditorWindow>());
+
+        // Assert: NuGet specific section visible; cancel closes without adding
+        Assert.Equal("Add NuGet-Package Folder", editorWindow.Title);
+        Assert.True(editorWindow.FindControl<StackPanel>("SourceEditorPackageIdsSection")!.IsVisible);
+        Click(editorWindow, "SourceEditorCancelButton");
+        Dispatcher.UIThread.RunJobs();
+        Assert.Empty(window.OwnedWindows);
+        Assert.Empty(viewModel.Sources);
+        window.Close();
+    });
+
+    /// <summary>
+    ///     Test that removing a source asks for confirmation (naming the pinned repos) and removes
+    ///     the source only after the user answers Yes.
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_RemoveClicked_ConfirmationDecidesRemoval() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: a source with a repo pinned to it
+        var viewModel = new SettingsWindowViewModel(
+            new AppSettings
+            {
+                Sources = [new PackageSourceDefinition { Alias = "Contoso", Type = PackageSourceType.Zip, Location = @"C:\x" }],
+                RecentRepos = [new RecentRepo { Path = @"C:\r", PinnedPackageName = "p", PinnedSource = "Contoso" }]
+            },
+            _ => { },
+            (_, _) => Task.FromResult(true));
+        var window = new SettingsWindow(viewModel);
+        window.Show();
+        viewModel.SelectedSource = viewModel.Sources[0];
+
+        // Act: decline first
+        Click(window, "RemoveSourceButton");
+        Dispatcher.UIThread.RunJobs();
+        var confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+        Assert.Contains("1 repo is pinned", confirmation.FindControl<TextBlock>("ConfirmationMessageText")!.Text);
+        Click(confirmation, "ConfirmationNoButton");
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert: still listed
+        Assert.Single(viewModel.Sources);
+
+        // Act: accept
+        Click(window, "RemoveSourceButton");
+        Dispatcher.UIThread.RunJobs();
+        confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+        Click(confirmation, "ConfirmationYesButton");
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert: removed
+        Assert.Empty(viewModel.Sources);
+        window.Close();
+    });
+
+    /// <summary>
+    ///     Test that closing the settings window cancels the view model's folder checks.
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_Closed_CancelsFolderChecks() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a folder check that only ends by cancellation
+        var viewModel = new SettingsWindowViewModel(
+            new AppSettings
+            {
+                Sources = [new PackageSourceDefinition { Alias = "Slow", Type = PackageSourceType.Zip, Location = @"C:\x" }]
+            },
+            _ => { },
+            async (_, token) =>
+            {
+                await Task.Delay(Timeout.Infinite, token);
+                return true;
+            });
+        var window = new SettingsWindow(viewModel);
+        window.Show();
+
+        // Act
+        window.Close();
+        await viewModel.WaitForStatusChecksAsync();
+
+        // Assert: the check ended without a result
+        Assert.True(viewModel.Sources[0].IsChecking);
+    });
+
+    /// <summary>
+    ///     Test that the source editor window rejects a null view model and supports the
+    ///     parameterless previewer constructor.
+    /// </summary>
+    [Fact]
+    public void SourceEditorWindow_Constructors_NullViewModelThrows_ParameterlessWorks() => HeadlessTestApp.Run(() =>
+    {
+        // Act / Assert
+        Assert.Throws<ArgumentNullException>(() => new SourceEditorWindow(null!));
+        new SourceEditorWindow().Close();
+    });
+
+    /// <summary>
+    ///     Test that a valid editor saved through the window closes it with the definition, and
+    ///     that an invalid editor's save button is disabled with the error text shown.
+    /// </summary>
+    [Fact]
+    public void SourceEditorWindow_SaveClicked_ClosesWithDefinitionOnlyWhenValid() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange
+        var owner = new Window();
+        owner.Show();
+        try
+        {
+            var editor = new SourceEditorViewModel(PackageSourceType.Zip, null, _ => false);
+            var dialog = new SourceEditorWindow(editor);
+            var result = dialog.ShowDialog<PackageSourceDefinition?>(owner);
+
+            // Assert: invalid so far, save disabled; typing a bad alias shows its error
+            Assert.False(dialog.FindControl<Button>("SourceEditorSaveButton")!.IsEffectivelyEnabled);
+            editor.Alias = "bad/alias";
+            Assert.True(dialog.FindControl<TextBlock>("SourceAliasErrorText")!.IsVisible);
+
+            // Act: make it valid and save
+            editor.Alias = "Contoso";
+            editor.Location = Path.Combine(Path.GetTempPath(), "agentcontrol_headless_zips");
+            Assert.True(dialog.FindControl<Button>("SourceEditorSaveButton")!.IsEffectivelyEnabled);
+            Click(dialog, "SourceEditorSaveButton");
+
+            // Assert
+            var saved = await result;
+            Assert.NotNull(saved);
+            Assert.Equal("Contoso", saved.Alias);
+        }
+        finally
+        {
+            owner.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the select-package window loads every source when it opens, shows a source's
+    ///     error inline without blocking the other, and returns the full package reference when the
+    ///     user confirms a source, package and version.
+    /// </summary>
+    [Fact]
+    public void SelectPackageWindow_OpenedWithTwoSources_LoadsAndConfirmReturnsPackageReference() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: source "Down" cannot be read, source "Up" offers a package with two versions
+        var up = new FakePackageSourceProvider("Up", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
+        var registry = new PackageSourceRegistry(
+            [
+                new PackageSourceDefinition
+                {
+                    Alias = "Down",
+                    Type = PackageSourceType.Zip,
+                    Location = Path.Combine(Path.GetTempPath(), "agentcontrol_missing_" + Guid.NewGuid())
+                },
+                new PackageSourceDefinition { Alias = "Up", Type = PackageSourceType.Zip, Location = "unused" }
+            ],
+            definition => definition.Alias == "Up" ? up : new ZipFolderSourceProvider(definition));
+        var viewModel = new SelectPackageWindowViewModel(registry, new PackageVersionCache());
+        var owner = new Window();
+        owner.Show();
+        try
+        {
+            var dialog = new SelectPackageWindow(viewModel);
+            var result = dialog.ShowDialog<PackageReference?>(owner);
+
+            // Act: wait for the sources to load (the window stays usable meanwhile)
+            await WaitUntilAsync(() => viewModel.Sources.All(source => !source.IsLoading));
+
+            // Assert: the failing source shows its error inline; the working one has its package
+            Assert.True(viewModel.HasSourceError);
+            Assert.True(dialog.FindControl<TextBlock>("SelectPackageSourceErrorText")!.IsVisible);
+            viewModel.SelectedSource = viewModel.Sources[1];
+            viewModel.SelectedPackageName = "contoso-agents";
+            await viewModel.PendingVersionsLoad;
+            Assert.Equal(["1.1.0", "1.0.0"], viewModel.AvailableVersions);
+
+            // Act: confirm
+            Click(dialog, "SelectPackageConfirmButton");
+
+            // Assert
+            Assert.Equal(new PackageReference("Up", "contoso-agents", "1.1.0"), await result);
+        }
+        finally
+        {
+            owner.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Polls on the UI thread until a condition holds, processing queued UI work meanwhile.
+    /// </summary>
+    /// <param name="condition">The condition to wait for.</param>
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        for (var attempt = 0; attempt < 200 && !condition(); attempt++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(25, TestContext.Current.CancellationToken);
+        }
+
+        Assert.True(condition());
+    }
 }

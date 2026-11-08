@@ -20,14 +20,18 @@ in that repo's working directory.
 ## Features
 
 - **Recent-repos list**: add repos via a folder-browse button; each repo is shown as a card
-  with its display name, path, pinned package/version, and current git branch
+  with its display name, path, and labeled chips for the pinned agent package (name, version
+  and source), an available upgrade, and the current git branch
 - **Version-pinned agent packages**: every repo names an exact agent package name and
-  semantic version in its `.agentcontrol.json` pin file — there is no floating "latest" mode,
-  so upgrades are always a deliberate, visible action
-- **Status badges**: each repo card shows an upgrade-available badge, a committed-agent-files
+  semantic version, and the source it came from, in its `.agentcontrol.json` pin file — there
+  is no floating "latest" mode, so upgrades are always a deliberate, visible action
+- **Status chips**: each repo card shows an amber upgrade chip ("Upgrade to" and the version an upgrade
+  would move to), an uncommitted-changes warning, a committed-agent-files
   warning (advisory only — flags when the managed folders were accidentally committed to
-  git), and a missing-repo indicator when the path no longer exists on disk. Separately,
-  AgentControl now proactively ensures the repo's `.gitignore` covers the four managed
+  git), a missing-folder indicator when the path no longer exists on disk, a
+  package-source-problem indicator when the pinned source is not configured, and a sign-in-needed indicator
+  when the pinned server needs a sign-in. Separately,
+  AgentControl proactively ensures the repo's `.gitignore` covers the four managed
   folders immediately after every "Select Package..."/Upgrade, making an accidental commit
   much less likely in the first place
 - **Ensure-synced-before-launch**: clicking Launch attempts a best-effort sync of the four
@@ -40,13 +44,67 @@ in that repo's working directory.
   only when the working tree is clean), with a configurable git executable override
 - **Configurable agent tool**: choose GitHub Copilot CLI, Cursor, Claude Code, or a custom
   command line, plus a shell/terminal preference
-- **Configurable package source**: agent packages are fetched from a configurable filesystem
-  path (local drive, mapped drive, or UNC share)
-- **Upgrade notifications**: a badge and release-notes viewer let you see when a newer agent
+- **Multiple package sources**: configure any number of agent package sources, each with its
+  own alias — a folder of zip packages, a folder of NuGet packages (local drive, mapped
+  drive, or UNC share), or a **NuGet-package server** such as JFrog Artifactory or Azure Artifacts.
+  A repo's pin records the alias of the source it came from and is only
+  ever resolved against that source: if the source is removed or renamed, AgentControl shows a
+  package source problem for the repo instead of quietly using another source
+- **Protected package servers**: a server source is added with its feed address (https; plain http only
+  after an explicit "Allow insecure HTTP" tick), can be checked with **Test connection** before it is saved,
+  and asks you to sign in only when the server needs it. Credentials are used for the current session
+  only and are never saved by AgentControl; you can opt in, per sign-in, to **Remember on this computer**,
+  which has your own Git credential helper keep it (AgentControl itself never stores a secret)
+- **Signed-package enforcement**: a NuGet source (folder or server) can **Require signed packages**,
+  optionally pinned to your publisher's certificate fingerprint. A package that is not validly signed (or
+  not signed by that publisher) is never installed — even one already downloaded earlier — and a platform
+  that cannot verify signatures refuses such a source instead of skipping the check
+- **Responsive**: package sources are read in the background with progress and a Cancel button, so a
+  slow or offline network share or server never freezes the window, and one unreachable source does not
+  hide the packages or upgrades of the others
+- **Upgrade notifications**: an upgrade chip and release-notes viewer let you see when a newer agent
   package version is available and what changed before you apply it
 - **About dialog**: reachable from the main window, shows the application logo, a short
   mission tagline, the running app's version, copyright, license, and a scrollable list of
   this application's direct third-party dependencies and their licenses
+
+### Security notes
+
+- A package source location must never contain credentials (a user name or password in a URL or
+  path is refused), and AgentControl never stores secrets: `settings.json` holds only aliases,
+  locations, NuGet package IDs, the insecure-HTTP flag of a server source and, per NuGet source, the
+  signature settings — whether signed packages are required (`RequireSignedPackages`) and the optional signer
+  fingerprint (`SignerFingerprint`), which is the SHA-256 fingerprint of a publisher's public certificate and
+  not a secret.
+- A password or token you type into the sign-in dialog is kept in memory for the current session
+  only — AgentControl does not write it to the settings, a repo's pin file, the log or anywhere else — and
+  offers it only to the server it was typed for, and only when that server asks for it. The dialog shows
+  the server that will receive it. A server on plain `http` is flagged and needs an explicit opt-in.
+- **Remember on this computer** (off by default, and disabled with an explanation when no Git credential
+  helper is configured) hands the sign-in to your own Git credential helper — Git Credential Manager,
+  the macOS keychain, libsecret or the credential-store file — after it has been shown to work. AgentControl
+  itself never stores a secret. A saved sign-in is read back once per server per session, without a dialog and
+  only for that server's exact scheme, host and port; if the server rejects it, it is removed from the helper
+  and you are asked once. **Forget saved sign-in** in the server source's editor removes it too.
+- Credentials AgentControl does not need to ask for are reused: a `nuget.config` source with the same
+  address (and its stored credentials) and NuGet credential-provider plug-ins such as the Azure Artifacts
+  Credential Provider are tried before the dialog. Background checks never open the dialog.
+- **Signed packages.** Per NuGet source you can require validly signed packages and, recommended, pin the
+  publisher by the SHA-256 fingerprint of the package **author** certificate. Without a pin, any validly
+  signed package from any publisher your machine trusts is accepted. The check is made every time a package is
+  used, including one already in AgentControl's cache; your own NuGet trusted-signer settings neither widen nor
+  narrow it; verification is supported on Windows, Linux and macOS, and elsewhere a source that requires
+  signatures is refused (fails closed) rather than skipped. Zip packages carry no signatures.
+- Exceptions that reach AgentControl's last-resort handlers are logged only after secrets (passwords,
+  authorization values, URL user information and query strings) have been removed from them.
+- **Only add servers you trust.** A server's own index tells the NuGet client where its package resources
+  are, and once a server has authenticated, the NuGet client can answer sign-in challenges from other hosts
+  that the index names with the same credential. AgentControl itself only ever offers a credential to the
+  server's own address, but cannot stop the NuGet client from doing that.
+- A repo's pin names its source by alias, and a package is only ever taken from that source; a
+  missing source is an error, never a fallback to another source with a package of the same name.
+- AgentControl never reads or writes the target repo's `nuget.config`, and keeps its NuGet
+  caches in its own folder under the user profile.
 
 See [architecture.md](architecture.md) for the full system design.
 
@@ -68,20 +126,24 @@ the .NET 10 runtime, so the target machine needs no pre-installed runtime.
 ### Adding a repo
 
 Click the folder-plus icon button on the toolbar and browse to a repository's root folder.
-The repo is added to the recent-repos list as a card showing its display name, path, pinned
-package/version (if any), and current git branch.
+The repo is added to the recent-repos list as a card showing its display name, path, and chips
+for the pinned package (name, version and source), an available upgrade, and the current git
+branch.
 
 ### Selecting a package
 
-A repo that has never been synced shows a **Select Package...** action (in place of
-**Upgrade**) in its card's "..." menu. This lists the distinct package names discoverable at
-the configured package source, lets you pick one, then lists that package's available
-versions (defaulting to the latest) before extracting and pinning it into the repo.
+A repo that has never been synced shows a grey **No agent package** chip, and a **Select
+Package...** action (in place of **Upgrade**) in its card's "..." menu. The dialog shows three
+columns: the configured package sources, the packages of the selected source, and that package's
+available versions (defaulting to the latest). Choosing one extracts it into the repo and pins it
+together with the source's alias. If a source is a server that needs a sign-in, a sign-in dialog opens
+when you choose it; if reading a source fails, a **Retry** button appears beside the message.
 
 ### Upgrading
 
-Once a repo is pinned, its card's "..." menu instead shows **Upgrade** whenever a newer
-version of the pinned package is discoverable at the package source. Upgrading re-runs the
+Once a repo is pinned, its card shows an amber upgrade chip (for example **Upgrade to 1.1.0**) whenever a
+newer version of the pinned package is available at the source the pin names, and its card's
+"..." menu offers **Upgrade**. Upgrading re-runs the
 same validate → delete → extract → pin sequence and then shows the new package's
 `release-notes.md` (when present) in a non-modal window.
 
@@ -100,7 +162,8 @@ every subsequent sync.
 
 ### Launching
 
-Click **Launch** to start your configured agentic CLI tool in the repo's working directory.
+Click **Launch** (labelled with your agent tool, for example **Launch Copilot**) to start your
+configured agentic CLI tool in the repo's working directory.
 Launch is never blocked by agent-package sync state — before launching, AgentControl makes a
 best-effort attempt to sync the four managed agent folders for a pinned repo (silently
 re-extracting the *currently pinned* version, never a newer one, if any are missing), but this
@@ -111,15 +174,23 @@ with migrating away from committed agent files.
 
 ### Pulling changes
 
-The **Pull** button on a repo card runs `git pull` in that repo, and is only offered when the
-working tree is clean.
+The **Git Pull** button on a repo card runs `git pull` in that repo. The button is always visible, and is
+enabled only when the working tree is clean (it is disabled while the status is dirty or cannot be
+determined).
 
 ### Settings
 
 The Settings window lets you configure:
 
-- **Package source path** — the filesystem path (local, mapped drive, or UNC) from which
-  agent package zip files are discovered
+- **Package sources** — a list of the configured sources (alias, kind, location and whether the
+  folder can be found; a server shows **Not checked** because AgentControl contacts it only when it is
+  needed). Use **Add Zip-Package Folder**, **Add NuGet-Package Folder** or **Add NuGet-Package Server**
+  to add a source, and **Edit** or **Remove** to change one; a NuGet source also lists the package
+  IDs it offers, a server can be checked with **Test connection** before it is saved, and a NuGet source can
+  **Require signed packages** (optionally pinned to a publisher's certificate fingerprint). An alias cannot
+  be changed once created, because repo pins refer to it. A single
+  package source folder configured in an earlier version appears as a zip source named `Default`.
+  See the [User Guide][link-guide] chapter "Package Sources".
 - **Git executable override** — a specific `git` executable to use instead of resolving it
   from `PATH`
 - **Agent tool selection** — GitHub Copilot CLI, Cursor, Claude Code, or a custom command
@@ -137,11 +208,12 @@ third-party dependencies and their licenses.
 
 ## Authoring agent packages
 
-Agent packages are plain zip files following a naming and content convention that
-AgentControl's package source scanner and extractor understand. See the
+Agent packages are either plain zip files or NuGet packages (served from a folder or a NuGet
+server) following a naming and content
+convention that AgentControl's package sources and extractor understand. See the
 [**Authoring Agent Packages**](docs/user_guide/introduction.md#authoring-agent-packages)
 section of the [User Guide][link-guide] for the full, source-verified guide to naming,
-versioning, and structuring a package zip.
+versioning, and structuring a package zip or NuGet package.
 
 ## Contributing
 

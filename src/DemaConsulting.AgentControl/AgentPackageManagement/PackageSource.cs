@@ -21,14 +21,19 @@
 namespace DemaConsulting.AgentControl.AgentPackageManagement;
 
 /// <summary>
-///     Describes an agent package zip file discovered on the configured filesystem package
-///     source.
+///     Describes an agent package version discovered at a configured package source.
 /// </summary>
-/// <param name="PackageName">The package base name (the <c>{name}</c> portion of
-///     <c>{name}-{version}.zip</c>).</param>
-/// <param name="Version">The package's parsed semantic version.</param>
-/// <param name="FilePath">Absolute path to the zip file.</param>
-internal sealed record DiscoveredPackage(string PackageName, PackageVersion Version, string FilePath);
+/// <param name="PackageName">The package base name (for zip sources the <c>{name}</c> portion of
+///     <c>{name}-{version}.zip</c>; for NuGet sources the package ID).</param>
+/// <param name="Version">The package's parsed version.</param>
+/// <param name="Location">Where the package content comes from: the absolute path of the zip file
+///     for zip sources, or a provider-defined locator (the version text) for sources whose
+///     content is acquired lazily, such as NuGet folders.</param>
+/// <param name="SourceAlias">Alias of the configured source that reported the package, or an empty
+///     string when the package was found by the alias-agnostic static scan in
+///     <see cref="PackageSource"/>; source providers always stamp it.</param>
+internal sealed record DiscoveredPackage(
+    string PackageName, PackageVersion Version, string Location, string SourceAlias = "");
 
 /// <summary>
 ///     Enumerates agent package zip files at a configured filesystem source path and resolves
@@ -88,7 +93,7 @@ internal static class PackageSource
             }
 
             var versionText = fileName[prefix.Length..];
-            if (PackageVersion.TryParse(versionText, out var version) && version is not null)
+            if (PackageVersion.TryParseStrict(versionText, out var version) && version is not null)
             {
                 results.Add(new DiscoveredPackage(packageName, version, filePath));
             }
@@ -132,7 +137,7 @@ internal static class PackageSource
     ///     For each <c>*.zip</c> file's base name (<see cref="Path.GetFileNameWithoutExtension(string)"/>),
     ///     this scans the file name's hyphen positions left-to-right; for each hyphen position, it
     ///     tests whether the substring <em>after</em> that hyphen parses via
-    ///     <see cref="PackageVersion.TryParse"/>. The first (leftmost) hyphen whose suffix parses
+    ///     <see cref="PackageVersion.TryParseStrict"/>. The first (leftmost) hyphen whose suffix parses
     ///     successfully is the split point: everything before that hyphen is the package name,
     ///     everything after is the version. Scanning a given file stops as soon as one hyphen
     ///     succeeds - ties are therefore impossible by construction. A file with zero valid split
@@ -193,7 +198,7 @@ internal static class PackageSource
             }
 
             var suffix = fileName[(hyphenIndex + 1)..];
-            if (PackageVersion.TryParse(suffix, out _))
+            if (PackageVersion.TryParseStrict(suffix, out _))
             {
                 return fileName[..hyphenIndex];
             }

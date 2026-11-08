@@ -26,7 +26,8 @@
                     FontStyle="Italic"
                     TextWrapping="Wrap" />
         <TextBlock Name="AboutVersionText"
-                    AutomationProperties.AutomationId="AboutVersionText" />
+                    AutomationProperties.AutomationId="AboutVersionText"
+                    TextWrapping="Wrap" />
         <TextBlock Name="AboutCopyrightText"
                     AutomationProperties.AutomationId="AboutCopyrightText" />
         <TextBlock Name="AboutLicenseText"

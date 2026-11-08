@@ -16,7 +16,8 @@ sections:
       - id: AgentControl-System-RecentRepos
         title: >-
           The tool shall display a recent-repos list showing each repo's display name, full
-          path, pinned package/version, current git branch, and status badges.
+          path, labeled chips for its pinned package with version and source, an available
+          upgrade, and its current git branch, and status warnings.
         tags: [system]
         justification: |
           A developer managing several repos needs an at-a-glance view of each repo's sync
@@ -25,10 +26,12 @@ sections:
         children:
           - AgentControl-LauncherUI-RecentReposDisplay
           - AgentControl-LauncherUI-StatusBadges
+          - AgentControl-LauncherUI-RepoCardChips
           - AgentControl-GitIntegration-DetectCommittedFiles
           - AgentControl-GitIntegration-CurrentBranch
         tests:
           - windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId
+          - windows@RepoCard_PinnedRepoWithNewerVersion_ShowsPackageAndUpgradeChips
 
       - id: AgentControl-System-AddRemoveRepo
         title: >-
@@ -92,8 +95,8 @@ sections:
 
       - id: AgentControl-System-SelectPackage
         title: >-
-          The tool shall let the user select an initial agent package name and version for a
-          repo that has no existing pin.
+          The tool shall let the user select an initial agent package, from a chosen configured
+          source, and its version for a repo that has no existing pin.
         tags: [system]
         justification: |
           A newly added repo has no prior pin to upgrade from; without an explicit
@@ -104,6 +107,37 @@ sections:
           - AgentControl-AgentPackageManagement-DiscoverPackages
         tests:
           - windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders
+          - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
+
+      - id: AgentControl-System-ServerSignIn
+        title: >-
+          The tool shall ask the user to sign in when the user starts an operation on a package
+          server that needs credentials.
+        tags: [system]
+        justification: |
+          A protected package server is only usable if the user can sign in at the point they
+          choose from it.
+        children:
+          - AgentControl-LauncherUI-SignIn
+          - AgentControl-LauncherUI-SignInDestination
+          - AgentControl-LauncherUI-SignInWarnings
+          - AgentControl-LauncherUI-SignInPasswordMasked
+          - AgentControl-LauncherUI-SignInSessionOnlyNote
+          - AgentControl-LauncherUI-SignInPlacement
+          - AgentControl-LauncherUI-SignInCancelsWithOperation
+          - AgentControl-AgentPackageManagement-NuGetServerSignIn
+          - AgentControl-PackageCredentials-AskOncePerOperation
+          - AgentControl-PackageCredentials-AskWhenNoCredentialKnown
+          - AgentControl-PackageCredentials-DeclinedAnswerShared
+          - AgentControl-OTS-NuGetCaching-ServerAccess
+          - AgentControl-OTS-NuGetCaching-ServerConfiguredCredentials
+          - AgentControl-OTS-NuGetCaching-AuthenticationTimeout
+          - AgentControl-OTS-NuGetCaching-UnauthorizedReported
+          - AgentControl-OTS-NuGetCaching-ForbiddenReported
+          - AgentControl-OTS-NuGetCaching-RejectedCredentialNotRetried
+          - AgentControl-OTS-NuGetCaching-NonInteractive
+        tests:
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
 
       - id: AgentControl-System-Upgrade
         title: >-
@@ -120,14 +154,16 @@ sections:
           - AgentControl-RepoSync-Sync
           - AgentControl-RepoSync-ReleaseNotes
           - AgentControl-RepoSync-GitIgnorePrevention
+          - AgentControl-RepoSync-RefuseLinkedRepoFolders
           - AgentControl-AgentPackageManagement-UpgradeDetection
         tests:
           - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
 
       - id: AgentControl-System-PinFile
         title: >-
-          The tool shall persist each repo's pinned agent package name and exact version, so
-          that upgrades are an explicit user action rather than an automatic version float.
+          The tool shall persist each repo's pinned agent package name, exact version, and
+          package source, so that upgrades are an explicit user action rather than an
+          automatic version float.
         tags: [system]
         justification: |
           Per architecture.md's "Mandatory version pinning" decision, package upgrades can
@@ -162,24 +198,376 @@ sections:
           - RepoCardViewModel_AcceptAgentsMdTemplate_WritesFileToRepoRootWithGivenContent
           - RepoCardViewModel_DeclineAgentsMdTemplate_PersistsDeclinedFlagInPinFile
 
+      - id: AgentControl-System-MultipleSources
+        title: >-
+          The tool shall support several configured agent package sources at once, each
+          identified by a unique alias and being either a folder of zip packages, a NuGet
+          package folder or a NuGet package server.
+        tags: [system]
+        justification: |
+          Organizations distribute agent packages in more than one place (a share of zip files,
+          a NuGet feed folder, a package server), so a developer needs more than one source
+          configured side by side.
+        children:
+          - AgentControl-AgentPackageManagement-SourceDefinitions
+          - AgentControl-AgentPackageManagement-SourceLocationKind
+          - AgentControl-AgentPackageManagement-ZipFolderSource
+          - AgentControl-AgentPackageManagement-NuGetFolderSource
+          - AgentControl-AgentPackageManagement-NuGetServerSource
+        tests:
+          # End to end: the published application runs with a zip source and a NuGet folder
+          # source configured side by side, sources are added through the Settings dialogs
+          # (including a NuGet server) and a package is selected from the NuGet sources.
+          - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
+          - windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt
+          - windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt
+          - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
+
+      - id: AgentControl-System-SourcesPersisted
+        title: >-
+          The tool shall keep the configured agent package sources in the user's settings, so
+          that they are still configured the next time the tool starts.
+        tags: [system]
+        justification: |
+          A developer sets up package sources once; having to configure them again at every
+          start would make several sources impractical.
+        children:
+          - AgentControl-Settings-PackageSources
+        tests:
+          # End to end: a source added through the Settings dialogs is found in the saved
+          # settings file.
+          - windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt
+          - windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt
+
+      - id: AgentControl-System-LegacySourceMigration
+        title: >-
+          The tool shall carry forward a previously configured single package-source folder as a
+          zip package source named Default.
+        tags: [system]
+        justification: |
+          Developers who configured the single package-source folder of earlier versions expect
+          it to keep working without being asked to set it up again.
+        children:
+          - AgentControl-Settings-PackageSources
+        tests:
+          # End to end: the older single-folder settings file used by these tests is migrated, and
+          # the package found in that folder is selected or upgraded from the Default source.
+          - windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders
+          - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
+
+      - id: AgentControl-System-NuGetSources
+        title: >-
+          The tool shall obtain agent packages from a NuGet package folder or a NuGet package
+          server, offering the configured package IDs with their available versions and applying
+          a chosen version's content to a repo exactly as it does a zip package.
+        tags: [system]
+        justification: |
+          Teams that already publish internal packages to a NuGet feed folder or a package server
+          (JFrog Artifactory, Azure Artifacts) can deliver agent packages the same way.
+        children:
+          - AgentControl-AgentPackageManagement-NuGetFolderSource
+          - AgentControl-AgentPackageManagement-NuGetServerSource
+          - AgentControl-AgentPackageManagement-NuGetServerAcquire
+          - AgentControl-RepoSync-SyncFromFolderPackage
+          - AgentControl-OTS-NuGetCaching-FolderListing
+          - AgentControl-OTS-NuGetCaching-ListAndCache
+          - AgentControl-OTS-NuGetCaching-CacheLocation
+          - AgentControl-OTS-NuGetCaching-ServerListing
+          - AgentControl-OTS-NuGetCaching-ServerDownload
+        tests:
+          # End to end through the published application against a real NuGet folder feed and
+          # against an in-process NuGet server (plain HTTP, explicitly allowed).
+          - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
+          - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
+
+      - id: AgentControl-System-NuGetTransportSecurity
+        title: >-
+          The tool shall require an https address for a NuGet package server unless the user
+          explicitly allows plain http for that source.
+        tags: [system, security]
+        justification: |
+          A sign-in sent over an unprotected connection can be read by anyone on the network, so
+          the tool must not do it unless the user, who knows the network, says so.
+        children:
+          - AgentControl-AgentPackageManagement-NuGetServerTransportPolicy
+          - AgentControl-AgentPackageManagement-SourceServerAddress
+          - AgentControl-LauncherUI-InsecureHttpChoice
+          - AgentControl-PackageSourceRegistry-PlainHttpServerSourceRefused
+        tests:
+          # End to end: the server dialog refuses a plain http address until the user ticks the
+          # option for that source.
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
+
+      - id: AgentControl-System-NuGetRepoConfigUntouched
+        title: >-
+          The tool shall neither use nor change the NuGet configuration of a repo when it
+          obtains an agent package for that repo.
+        tags: [system]
+        justification: |
+          A repo's own NuGet configuration belongs to the repo's owners: agent information must
+          not leak into it, and it must not be able to redirect where AgentControl reads or
+          stores agent packages.
+        children:
+          - AgentControl-AgentPackageManagement-NuGetFolderSource
+          - AgentControl-NuGetSourceProvider-NoRepoNuGetConfig
+        tests:
+          # End to end: a repo with its own NuGet configuration pointing at an unreachable source
+          # and a redirected package folder is upgraded from the configured source, and the
+          # configuration is left byte for byte as it was.
+          - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
+
+      - id: AgentControl-System-SourcePinIntegrity
+        title: >-
+          The tool shall record in each repo's pin the alias of the source its package came
+          from and shall resolve that pin only against that source; when the source is not
+          configured the tool shall report an error for that repo and shall never substitute
+          another source.
+        tags: [system]
+        justification: |
+          A package name is not unique across sources, so resolving a pin by name alone could
+          install a different source's package under the repo's pin (a dependency-confusion
+          attack, or just an accident). Pins must therefore be bound to their source, and a
+          missing source must stop the operation rather than be quietly replaced.
+        children:
+          - AgentControl-RepoConfig-SourcePin
+          - AgentControl-AgentPackageManagement-SourceResolution
+          - AgentControl-LauncherUI-SourceAwareActions
+        tests:
+          # End to end: a pin to the NuGet source is upgraded from that source although the zip
+          # source offers a higher version of the same package name, and a pin to an
+          # unconfigured source shows an error and offers no upgrade from another source.
+          - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
+          - windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
+
       - id: AgentControl-System-Settings
         title: >-
-          The tool shall let the user configure the package source path, a git executable
+          The tool shall let the user configure the package sources, a git executable
           override, the agent tool selection, and a shell/terminal preference.
         tags: [system]
         justification: |
-          The package source location, git installation, preferred agentic CLI tool, and
+          The package source locations, git installation, preferred agentic CLI tool, and
           preferred terminal all vary by company/developer, so they must be user-editable
           rather than hardcoded.
         children:
           - AgentControl-LauncherUI-Settings
+          - AgentControl-LauncherUI-PackageSources
+          - AgentControl-LauncherUI-AddPackageSource
+          - AgentControl-LauncherUI-PackageSourceValidation
+          - AgentControl-LauncherUI-PackageSourcePackageIds
+          - AgentControl-LauncherUI-ServerSourceEditor
+          - AgentControl-LauncherUI-ServerSourceSettingsKept
+          - AgentControl-LauncherUI-EditPackageSource
+          - AgentControl-LauncherUI-RemovePackageSource
           - AgentControl-Settings-Persistence
         tests:
-          # No dedicated FlaUI end-to-end test opens the Settings window (UiTests pre-seed
-          # settings JSON directly via TestSettingsWriter instead); this system requirement is
-          # therefore verified via the underlying view-model's own unit test - a disclosed
-          # granularity limitation, not a fabricated end-to-end claim.
+          - windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt
+          - windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
+          # Git executable, agent tool and shell preference are verified only through the
+          # view-model's own unit test (a disclosed pre-existing granularity limitation).
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
+
+      - id: AgentControl-System-ConnectionTest
+        title: >-
+          The tool shall let the user test a package server's connection before saving it, and
+          shall say in words whether it worked.
+        tags: [system]
+        justification: |
+          A server source depends on an address and a sign-in that the user can only get right
+          if they can try them before relying on them.
+        children:
+          - AgentControl-LauncherUI-TestConnection
+          - AgentControl-AgentPackageManagement-NuGetServerFailures
+        tests:
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
+          - windows@SettingsWindow_SignInWithRememberTicked_SavedOnlyByTheUsersCredentialHelper
+
+      - id: AgentControl-System-ResponsiveOperations
+        title: >-
+          The tool shall never open a sign-in dialog for package-source work the user did not
+          start, telling the user on the repo's card that a sign-in is needed instead.
+        tags: [system]
+        justification: |
+          Package sources are often network shares or servers that can be slow or offline, and
+          a dialog that opens by itself during background work is disruptive and looks like a
+          fault.
+        children:
+          - AgentControl-LauncherUI-BackgroundChecksDoNotPrompt
+          # The responsiveness, progress, cancellation and failure-isolation behavior of package
+          # operations is specified by the LauncherUI requirements below; a frozen window is not
+          # observable through UI automation without an artificially slow share, so it has no
+          # system-level scenario.
+          - AgentControl-LauncherUI-ResponsiveOperations
+          - AgentControl-LauncherUI-OperationProgress
+          - AgentControl-LauncherUI-OneOperationPerRepo
+          - AgentControl-LauncherUI-CancelOperation
+          - AgentControl-LauncherUI-SourceFailureIsolation
+          - AgentControl-LauncherUI-RetryFailedRead
+          - AgentControl-LauncherUI-StaleResultsDiscarded
+        tests:
+          # End to end: the background upgrade check of a repo pinned to a server that needs a
+          # sign-in opens no dialog and the card says a sign-in is needed.
+          - windows@RepoCard_PinnedToServerNeedingSignIn_BackgroundCheckNeverOpensSignInDialog
+
+      - id: AgentControl-System-CredentialSafety
+        title: >-
+          The tool shall never itself write a credential it is given for a package source to its
+          settings, a repo's pin file, its log or the target repo.
+        tags: [system, security]
+        justification: |
+          Package servers need credentials, but a credential that the tool writes anywhere
+          outlives the session and can leak through backups, synced profiles, shared logs or a
+          commit. The log in particular is a plain file users attach to reports, so no credential
+          may reach it, whether it appears in a message, a header, an address or an exception,
+          including an exception no part of the tool was prepared for.
+        children:
+          - AgentControl-Settings-PackageSources
+          - AgentControl-AgentPackageManagement-SourceDefinitions
+          - AgentControl-AgentPackageManagement-SourceNoSecrets
+          - AgentControl-AgentPackageManagement-SourceCredentialBearingLocation
+          - AgentControl-AgentPackageManagement-NuGetServerSecretSafety
+          - AgentControl-PackageCredentials-SecretsNeverLogged
+          - AgentControl-PackageCredentials-SecretRedactedWhileInUse
+          - AgentControl-PackageCredentials-UrlUserInfoNeverLogged
+          - AgentControl-PackageCredentials-UrlQueryNeverLogged
+          - AgentControl-PackageCredentials-UrlFragmentNeverLogged
+          - AgentControl-PackageCredentials-AuthorizationValuesNeverLogged
+          - AgentControl-PackageCredentials-LoggedMessagesRedacted
+          - AgentControl-PackageCredentials-LoggedPropertiesRedacted
+          - AgentControl-PackageCredentials-LoggedScopesRedacted
+          - AgentControl-PackageCredentials-ExceptionsLoggedSanitized
+          - AgentControl-Logging-UnhandledExceptionsRedacted
+          - AgentControl-Program-StartupFailureRedacted
+        tests:
+          # System level, end to end: the sentinel password is searched for in every file the
+          # application wrote and in the target repo. What no log line may contain, in every form
+          # an address, header or exception can take, is verified at the unit and subsystem
+          # levels as evidence of the children.
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
+          - windows@SettingsWindow_SignInWithRememberTicked_SavedOnlyByTheUsersCredentialHelper
+
+      - id: AgentControl-System-CredentialSessionScope
+        title: >-
+          The tool shall keep a credential the user types for a package source only for the
+          current session unless the user explicitly chooses "Remember on this computer", in
+          which case only the user's own Git credential helper keeps it and never the tool.
+        tags: [system, security]
+        justification: |
+          Typing a token every session is a real burden, so the user may opt in, per credential,
+          to having their own Git credential helper - the operating system's protected store they
+          already trust with their other secrets - keep it. The tool itself never stores a secret,
+          the choice is off by default, and it is offered only where a helper exists to honor it.
+        children:
+          - AgentControl-PackageCredentials-SessionOnly
+          - AgentControl-PackageCredentials-KeptOnlyAfterSuccess
+          - AgentControl-PackageCredentials-SessionCredentialReused
+          - AgentControl-PackageCredentials-ForgottenAtExit
+          - AgentControl-PackageCredentials-RememberOnRequest
+          - AgentControl-PackageCredentials-NeverRememberUnasked
+          - AgentControl-PackageCredentials-RememberOnlyAfterSuccess
+          - AgentControl-PackageCredentials-RememberOfferedOnlyWhenPossible
+          - AgentControl-AgentPackageManagement-NuGetServerCredentialRetention
+          - AgentControl-GitIntegration-SavedSignIns
+          - AgentControl-LauncherUI-RememberSignIn
+        tests:
+          # End to end: a typed sign-in is reused within the session without a second dialog,
+          # ticking "Remember" hands it to the helper (the arg-logger stub standing in for git,
+          # with an emulated credential helper kept outside the application's folders) and to
+          # nothing else, and with no helper the choice is unavailable.
+          - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
+          - windows@SettingsWindow_SignInWithRememberTicked_SavedOnlyByTheUsersCredentialHelper
+          - windows@SettingsWindow_NoCredentialHelper_RememberAndForgetAreUnavailable
+
+      - id: AgentControl-System-SavedSignInLifecycle
+        title: >-
+          The tool shall use a sign-in saved by the user's Git credential helper without asking,
+          and shall remove it from there when the server rejects it or the user asks to forget it.
+        tags: [system, security]
+        justification: |
+          A saved credential must spare the user the dialog while it works, but a stale or
+          unwanted one must not linger: the saved credential can be forgotten from the tool and is
+          removed when it stops working.
+        children:
+          - AgentControl-PackageCredentials-SavedCredentialUsedWithoutAsking
+          - AgentControl-PackageCredentials-SavedCredentialLookedUpOnce
+          - AgentControl-PackageCredentials-RejectedSavedCredentialRemoved
+          - AgentControl-PackageCredentials-NewerCredentialSurvivesLateRejection
+          - AgentControl-PackageCredentials-RejectedCredentialForgotten
+          - AgentControl-PackageCredentials-ForgetSavedSignIn
+          - AgentControl-PackageCredentials-ForgetSessionSignIn
+          - AgentControl-PackageCredentials-ForgetSignInReportsOutcome
+          - AgentControl-LauncherUI-ForgetSavedSignIn
+        tests:
+          # End to end: a sign-in the helper holds is used without any dialog and "Forget saved
+          # sign-in" removes it after a confirmation; a saved sign-in the server refuses is
+          # removed from the helper.
+          - windows@SettingsWindow_SavedSignIn_UsedWithoutDialogAndForgottenOnRequest
+          - windows@SettingsWindow_SavedSignInRejectedByServer_IsRemovedFromTheUsersHelper
+
+      - id: AgentControl-System-CredentialOriginScope
+        title: >-
+          The tool shall offer a credential for a package server only to the server it was typed
+          for.
+        tags: [system, security]
+        justification: |
+          A credential offered to a host other than the one it was typed for is a credential given
+          away. A server's own index can still direct the NuGet client to resources on other hosts
+          that then challenge it, so users must only add servers they trust.
+        children:
+          - AgentControl-PackageCredentials-ScopedToFeedOrigin
+          - AgentControl-PackageCredentials-NoPromptForOtherOrigins
+          - AgentControl-AgentPackageManagement-NuGetServerOriginScoping
+        tests:
+          # End to end: after signing in to one server, a second server on another origin asks for
+          # its own sign-in and never receives the first server's credential.
+          - windows@SettingsWindow_SignInToOneServer_IsNeverOfferedToAnotherServer
+
+      - id: AgentControl-System-PackageAuthenticity
+        title: >-
+          The tool shall let the user require, for each NuGet package source, that packages are
+          validly signed, and shall refuse to install a package that does not meet its source's
+          requirement, leaving the repo unchanged.
+        tags: [system, security]
+        justification: |
+          An agent package changes the instructions an AI agent follows in a developer's repo, so
+          an organization needs to control who may publish what reaches those repos; a signature
+          proves who published a package and that it was not altered since, whether it arrives
+          from a server or a shared folder. Zip packages carry no signature, so the requirement
+          covers NuGet sources only. The finer rules - an optional publisher pin, the re-check of
+          packages already on the computer, independence from the user's NuGet trust settings and
+          the refusal to rely on a platform that cannot verify signatures - are specified by the
+          children and need a real signed package or another platform to demonstrate, so they
+          have no system-level scenario.
+        children:
+          - AgentControl-AgentPackageManagement-SignedPackages
+          - AgentControl-AgentPackageManagement-SignaturePlatformSupport
+          - AgentControl-AgentPackageManagement-SourceDefinitions
+          - AgentControl-AgentPackageManagement-SourceFingerprintNormalization
+          - AgentControl-AgentPackageManagement-SourceUnreadableFingerprint
+          - AgentControl-LauncherUI-SignatureOptions
+          - AgentControl-LauncherUI-SignatureIndicator
+          - AgentControl-OTS-NuGetCaching-SignatureVerification
+          - AgentControl-OTS-NuGetCaching-UnsignedRejected
+          - AgentControl-OTS-NuGetCaching-CachedUnsignedRejected
+          - AgentControl-OTS-NuGetCaching-InvalidSignatureRejected
+          - AgentControl-OTS-NuGetCaching-UntrustedSignerRejected
+          - AgentControl-OTS-NuGetCaching-TrustedSignerAccepted
+          - AgentControl-OTS-NuGetCaching-CachedSignerRechecked
+          - AgentControl-OTS-NuGetCaching-OtherConfigurationCannotWidenTrust
+          - AgentControl-OTS-NuGetCaching-OtherConfigurationCannotNarrowTrust
+          - AgentControl-OTS-NuGetCaching-SignatureFailureIdentified
+        tests:
+          # System level: with a NuGet source that requires signatures the published application
+          # refuses to upgrade to an unsigned package and leaves the repo unchanged. The rules the
+          # parent text leaves to its children (acceptance of a validly signed package, the
+          # publisher pin, the re-check of cached packages, the independence from the user's NuGet
+          # trust settings and the refusal on a platform that cannot verify) need a real signed
+          # package or another platform and are verified at the subsystem and unit levels (against
+          # a real signed package from nuget.org, skipped only where it cannot be reached) as
+          # evidence of the child requirements.
+          - windows@UpgradeMenuItem_Click_NuGetSourceRequiresSignaturesAndPackageUnsigned_IsRefusedAndRepoUnchanged
 
       - id: AgentControl-System-DiagnosticLogging
         title: >-

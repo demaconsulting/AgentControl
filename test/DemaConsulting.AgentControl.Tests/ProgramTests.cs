@@ -63,6 +63,42 @@ public class ProgramTests
     }
 
     /// <summary>
+    ///     Test that an exception escaping startup is logged only after secrets are removed from
+    ///     it - an <c>Authorization</c> value and a URL's query never reach the log raw - while the
+    ///     entry still says what happened, and that the exception returned for rethrow carries
+    ///     only the sanitized stand-in rather than the original.
+    /// </summary>
+    [Fact]
+    public void Program_ReportStartupFailure_ExceptionCarryingSecrets_LogsAndRethrowsOnlySanitizedDescription()
+    {
+        // Arrange: an exception chain whose texts carry secrets
+        var inner = new InvalidOperationException(
+            "GET https://user:startup-password-7731@feeds.example.com/v3/index.json?token=startup-token-7731 failed");
+        var exception = new InvalidOperationException(
+            "request failed. Authorization: Bearer startup-bearer-7731", inner);
+        var logger = new DemaConsulting.AgentControl.Tests.PackageCredentials.ListLogger();
+
+        // Act
+        var wrapper = Program.ReportStartupFailure(logger, exception);
+
+        // Assert: the log line names the failure but holds no secret
+        var line = Assert.Single(logger.Snapshot());
+        Assert.Contains("Unhandled exception during application startup or execution", line, StringComparison.Ordinal);
+        Assert.Contains(nameof(InvalidOperationException), line, StringComparison.Ordinal);
+        Assert.DoesNotContain("startup-token-7731", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("startup-password-7731", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("startup-bearer-7731", line, StringComparison.Ordinal);
+
+        // Assert: the exception to rethrow wraps a sanitized stand-in, never the original
+        Assert.NotSame(exception, wrapper.InnerException);
+        Assert.IsType<DemaConsulting.AgentControl.PackageCredentials.SanitizedException>(wrapper.InnerException);
+        var rethrown = wrapper.InnerException.ToString();
+        Assert.DoesNotContain("startup-token-7731", rethrown, StringComparison.Ordinal);
+        Assert.DoesNotContain("startup-password-7731", rethrown, StringComparison.Ordinal);
+        Assert.DoesNotContain("startup-bearer-7731", rethrown, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that Main with an unsupported argument writes an error and returns a non-zero
     ///     exit code without attempting to start the Avalonia UI.
     /// </summary>

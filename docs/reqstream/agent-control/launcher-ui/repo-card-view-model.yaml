@@ -11,25 +11,101 @@ sections:
       - id: AgentControl-RepoCardViewModel-DisplayInfo
         title: >-
           The RepoCardViewModel class shall expose the repo's leaf folder name as its display
-          name, and its pinned package name/version when a pin file exists.
+          name, and - when a pin file exists - a chip text naming the pinned package and its
+          version together with a tooltip and icon that say which configured source it came
+          from and of what kind (a zip folder, a NuGet folder or a NuGet server, or not
+          configured), the source's alias as text beside the icon so the source is recognizable
+          at a glance, and - when no package is pinned - a distinct "no agent package" state.
         justification: |
-          A developer identifies a repo card primarily by its folder name; the pinned
-          package/version tells them at a glance which agent package version is installed.
+          A developer identifies a repo card primarily by its folder name; the chip tells them
+          at a glance which agent package, which version and from where, instead of an
+          unlabeled version number.
         tests:
           - RepoCardViewModel_RepoName_ReturnsLeafFolderName
           - RepoCardViewModel_Refresh_PinFileExists_PopulatesPinnedFields
+          - RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip
+          - RepoCardViewModel_PackageChip_PinnedToNuGetFolderSource_ShowsNuGetFolderIconAndKind
+          - RepoCardViewModel_PinnedToServerSource_ChipShowsAliasAndServerIcon
+          - RepoCardViewModel_PackageChip_PinnedSourceNotConfigured_ShowsUnknownSource
+          - RepoCardViewModel_NoPackageChip_NeverPinnedRepo_ShowsNoPackageChipOnly
+          - RepoCardViewModel_Chips_MissingRepo_ShowNeitherPackageChip
 
       - id: AgentControl-RepoCardViewModel-UpgradeBadge
         title: >-
           The RepoCardViewModel class shall indicate an upgrade is available only when the
-          package source has a version newer than the repo's pinned version.
+          pinned package's source has a version newer than the repo's pinned version, and shall
+          then expose the version an upgrade would move to and a tooltip naming both versions.
         justification: |
-          Prevents the upgrade badge from appearing when the repo is already current, or when
-          no package source is configured to compare against.
+          Prevents the upgrade chip from appearing when the repo is already current, or when
+          no package source is configured to compare against; naming the target version tells
+          the developer what the upgrade is.
         tests:
           - RepoCardViewModel_Refresh_NewerVersionAtSource_SetsUpgradeAvailableTrue
           - RepoCardViewModel_Refresh_AlreadyOnLatestVersion_SetsUpgradeAvailableFalse
           - RepoCardViewModel_Refresh_NoPackageSourceConfigured_SetsUpgradeAvailableFalse
+          - RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions
+
+      - id: AgentControl-RepoCardViewModel-LaunchLabel
+        title: >-
+          The RepoCardViewModel class shall label its Launch action with the short name of the
+          configured agent tool, falling back to a plain "Launch" when the tool has no usable
+          short name or the name is too long, and shall update the label when the configured
+          tool changes.
+        justification: |
+          A button that names the tool it will start is clearer than a generic one, but a long
+          command name must not widen the card's buttons.
+        tests:
+          - RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack
+          - RepoCardViewModel_LaunchButtonText_AgentToolChanged_UpdatesAfterRefreshCheap
+
+      - id: AgentControl-RepoCardViewModel-ResponsiveOperations
+        title: >-
+          The RepoCardViewModel class shall read package sources and apply packages without
+          blocking its caller.
+        justification: |
+          A slow or unreachable source must never freeze the window.
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_SourceSlow_DoesNotBlockAndShowsChecking
+          - RepoCardViewModel_ApplySelectedPackageAsync_SourceSlow_ReturnsToCallerBeforeSourceAnswers
+
+      - id: AgentControl-RepoCardViewModel-OperationBusyState
+        title: >-
+          The RepoCardViewModel class shall report that an operation is running, with a message
+          saying which, and disable the card's other actions while it runs.
+        justification: |
+          The user must be able to see that the card is working and must not be able to start a
+          second, conflicting action on the same repo meanwhile.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackageAsync_Running_ReportsBusyAndDisablesOtherActions
+
+      - id: AgentControl-RepoCardViewModel-OneOperationAtATime
+        title: >-
+          The RepoCardViewModel class shall ignore a second request for an operation while one is
+          running.
+        justification: |
+          A double click must not apply a package twice.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored
+
+      - id: AgentControl-RepoCardViewModel-CancelOperation
+        title: >-
+          The RepoCardViewModel class shall let the user cancel a cancellable operation without
+          reporting an error or changing the repo's pin.
+        justification: |
+          A source that never answers must not trap the user in a wait they cannot leave, and
+          giving up must leave the repo exactly as it was.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackageAsync_CancelledWhileRunning_ReportsNoErrorAndKeepsPinUnchanged
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_Cancelled_ThrowsAndKeepsPreviousState
+
+      - id: AgentControl-RepoCardViewModel-SupersededUpgradeCheck
+        title: >-
+          The RepoCardViewModel class shall let a newer upgrade check supersede an older one that
+          is still waiting, discarding the older check's late answer.
+        justification: |
+          An answer that arrives after the sources changed must not overwrite the newer state.
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded
 
       - id: AgentControl-RepoCardViewModel-PullGating
         title: >-
@@ -93,7 +169,8 @@ sections:
       - id: AgentControl-RepoCardViewModel-Launch
         title: >-
           The RepoCardViewModel class shall launch the configured agent tool in the repo's
-          working directory, recording the launch timestamp on success, and shall raise an
+          working directory, recording the launch timestamp on success, shall launch even when
+          the user cancels the wait for the pre-launch sync, and shall raise an
           error when no agent tool command is configured.
         justification: |
           Launch is the primary action of AgentControl; the launch timestamp feeds the
@@ -102,6 +179,7 @@ sections:
         tests:
           - RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded
           - RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred
+          - RepoCardViewModel_LaunchCommand_PreLaunchSyncCancelledByUser_StillLaunches
 
       - id: AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch
         title: >-
@@ -151,7 +229,7 @@ sections:
           - RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CannotExecute
           - RepoCardViewModel_SelectPackageCommand_RepoIsMissing_CannotExecute
           - RepoCardViewModel_SelectPackageCommand_NoPackageSourceConfigured_RaisesErrorOccurredOnly
-          - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourcePath
+          - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias
 
       - id: AgentControl-RepoCardViewModel-ApplySelectedPackage
         title: >-
@@ -268,3 +346,64 @@ sections:
           not unilaterally remove itself or change state before that confirmation occurs.
         tests:
           - RepoCardViewModel_RemoveCommand_RaisesRemoveRequestedWithoutMutatingState
+
+      - id: AgentControl-RepoCardViewModel-SourceAwareness
+        title: >-
+          The RepoCardViewModel class shall resolve its pinned package, check for upgrades and
+          repair missing managed folders only at the source named in the repo's pin (a pin
+          without a source is a pin to the source named Default), shall record the source in
+          the pin when a package is applied while keeping the pin's other fields, shall refuse to
+          apply a package to a repo whose pin was written by a newer version of the tool, and shall
+          expose an error state - with no upgrade offered and nothing extracted - when the
+          pinned source is not configured.
+        justification: |
+          The pin binds the repo to one source; resolving it anywhere else, or overwriting a
+          pin the tool does not understand, could change what is installed without the user
+          knowing.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_LegacySinglePath_PinRecordsDefaultSourceAlias
+          - RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent
+          - RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
+          - RepoCardViewModel_ApplySelectedPackage_UnconfiguredSourceAlias_RaisesErrorAndChangesNothing
+          - RepoCardViewModel_EnsureAgentFilesSynced_PinNamesUnconfiguredSource_ReturnsFalseWithoutExtracting
+          - RepoCardViewModel_Refresh_SamePackageNameInTwoSources_ComparesOnlyAgainstPinnedSource
+          - RepoCardViewModel_Refresh_LegacyV1PinFile_ResolvesAgainstDefaultSource
+          - RepoCardViewModel_Refresh_LegacyV1PinFileAndNoDefaultSource_ShowsSourceProblem
+          - RepoCardViewModel_ApplySelectedPackage_PinWithUnknownFieldAndDecline_PreservesBoth
+          - RepoCardViewModel_ApplySelectedPackage_NewerSchemaPinFile_RaisesErrorAndChangesNothing
+          - RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes
+          - RepoCardViewModel_UpgradeCommand_NuGetFolderSource_UpgradesToHighestVersion
+
+      - id: AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt
+        title: >-
+          The RepoCardViewModel class shall, when it checks a server source for an upgrade in the
+          background, use only the credentials already entered during the session or saved by the
+          user's own credential store and never ask
+          the user to sign in, shall instead show a package source problem that says a sign-in is
+          needed and how to give it, and shall allow a check the user asks for to ask the user to
+          sign in.
+        justification: |
+          A sign-in dialog that opens by itself while the user is working elsewhere is
+          disruptive and hard to trust; the user signs in only for an action they chose, and the
+          card tells them which action does it.
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_AnonymousServer_OffersNewerVersion
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential
+
+      - id: AgentControl-RepoCardViewModel-SignatureIndicator
+        title: >-
+          The RepoCardViewModel class shall indicate that the pinned package's source requires
+          signed packages - only when the pinned source is a NuGet source that requires them, not
+          for a zip source, a source that is not configured or a source without the requirement -
+          with a tooltip that says signatures are required and either that any trusted signer is
+          accepted or the start and end of the pinned publisher's certificate fingerprint, and
+          shall update the indication when the source's requirement changes.
+        justification: |
+          The user should see at a glance, on the card of the repo the package is installed in,
+          that its packages are checked and how strictly, so a source whose requirement was
+          switched off or never pinned is noticed.
+        tests:
+          - RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip
+          - RepoCardViewModel_NoSignatureRequirement_ShowsNoShield
+          - RepoCardViewModel_SourceRequirementChanges_RaisesChangeNotificationsForTheShield

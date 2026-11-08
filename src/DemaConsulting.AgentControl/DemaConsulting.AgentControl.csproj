@@ -99,6 +99,14 @@
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
 
+  <!-- Agent Package Source Dependencies -->
+  <!-- DemaConsulting.NuGet.Caching lists package versions and unpacks NuGet packages (from
+       local/network folder feeds, and later servers) into a per-source cache that AgentControl
+       owns; see docs/design/ots/nuget-caching.md. -->
+  <ItemGroup>
+    <PackageReference Include="DemaConsulting.NuGet.Caching" Version="2.0.0-beta.2" />
+  </ItemGroup>
+
   <!-- Avalonia UI Dependencies -->
   <!-- Avalonia.Diagnostics (the classic F12 dev-tools overlay) was removed as of Avalonia 12.0
        (see https://docs.avaloniaui.net/docs/avalonia12-breaking-changes) with no free-tier

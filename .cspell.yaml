@@ -16,26 +16,49 @@ language: en
 words:
   - agentcontrol
   - abbrevref
+  - apikey
+  - askpass
   - ARGLOGGER
   - arglogger
   - ARGLOGGERSTUB
+  - Argb
   - Avalonia
   - axaml
   - Blockquotes
   - contoso
+  - dwmapi
   - esac
+  - fabrikam
   - favorited
+  - findstr
+  - flyouts
   - gitdir
+  - gpgsign
   - headlessly
+  - instnace
+  - HMAC
+  - libsecret
   - lsfiles
+  - metacharacters
+  - LTRB
   - Mvvm
   - MVVM
+  - Newtonsoft
+  - NTLM
+  - osxkeychain
   - Postconditions
+  - timestamper
+  - unticked
+  - unticking
+  - urlmatch
   - Inlines
   - inlines
   - renderable
+  - ROOTOWNER
   - buildmark
   - buildtransitive
+  - cascadia
+  - conhost
   - contentfiles
   - dcterms
   - DEMA
@@ -71,6 +94,7 @@ words:
   - sysml2tools
   - venv
   - unconfigured
+  - unredacted
   - unreordered
   - versionmark
   - Weasyprint

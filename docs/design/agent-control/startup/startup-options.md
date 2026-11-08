@@ -14,8 +14,10 @@ same tests can substitute an arg-logging stub executable for git and the agentic
 
 #### Data Model
 
-**ConfigDirectory**: `string?` — configuration directory override, or `null` to use the
-default `%APPDATA%\AgentControl\`.
+**ConfigDirectory**: `string?` — configuration directory override as a full path (a relative
+value is resolved once, against the launch-time current directory, at parse time so later code can
+never interpret it against another folder such as a target repo), or `null` to use the default
+`%APPDATA%\AgentControl\`.
 
 **GitExecutableOverride**: `string?` — git executable path override supplied for test
 isolation, or `null`. Overrides only the startup-time default; the per-user `Settings`

@@ -3,8 +3,10 @@
 #
 # PURPOSE:
 # - Define requirements for the AgentControl RepoSync subsystem
-# - RepoSync spans PackageZipExtractor.cs (extracts a package zip's managed folders into a
-#   repo, blind delete-replace), ReleaseNotesViewerViewModel.cs (backs the release-notes
+# - RepoSync spans PackageContentExtractor.cs (applies a package's managed folders - from a zip
+#   or an unpacked folder package, via the content readers - to a repo, blind
+#   delete-replace), PackageZipExtractor.cs (the zip-file entry point to it),
+#   ReleaseNotesViewerViewModel.cs (backs the release-notes
 #   dialog shown after a sync), and GitIgnoreEnsurer.cs (proactively ensures a repo's
 #   .gitignore covers the four managed folders after a successful sync); the
 #   ReleaseNotesViewerView .axaml has no dedicated test file and is folded into this
@@ -27,11 +29,34 @@ sections:
         children:
           - AgentControl-PackageZipExtractor-Extract
           - AgentControl-PackageZipExtractor-AllManagedFoldersExist
+          - AgentControl-PackageContentExtractor-ZipOpenFailure
           - AgentControl-Utilities-SafePaths
         tests:
           - PackageZipExtractor_Extract_FreshRepo_CreatesManagedFoldersOnly
           - PackageZipExtractor_Extract_ExistingManagedFolder_ReplacesOldContents
           - PackageZipExtractor_Extract_InvalidZipFile_ThrowsInvalidOperationException
+
+      - id: AgentControl-RepoSync-RefuseLinkedRepoFolders
+        title: >-
+          The RepoSync subsystem shall refuse to replace a repo's managed agent-file folders when
+          the repo's .github folder or a managed folder is a symbolic link or junction (or is a
+          file), or a package file's destination is a link, changing nothing inside or outside
+          the repo.
+        justification: |
+          A repo can contain links the developer did not intend a sync to follow; replacing
+          managed folders through one would delete or overwrite files outside the repository.
+        children:
+          - AgentControl-PackageZipExtractor-RefuseLinkedRepoFolders
+          - AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders
+          - AgentControl-PackageContentExtractor-RefuseNonFolderRepoComponent
+          - AgentControl-PackageContentExtractor-RefuseLinkedDestinationFile
+          - AgentControl-PackageContentExtractor-ManagedFoldersExist
+          - AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink
+        tests:
+          - windows@RepoSync_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched
+          - windows@RepoSync_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched
+          - ubuntu@RepoSync_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched
+          - ubuntu@RepoSync_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched
 
       - id: AgentControl-RepoSync-ReleaseNotes
         title: >-
@@ -91,3 +116,34 @@ sections:
           - PackageZipExtractor_ReadAgentsMdTemplate_EntryPresent_ReturnsContentWithoutExtracting
           - PackageZipExtractor_ReadAgentsMdTemplate_NoEntry_ReturnsNull
           - PackageZipExtractor_Extract_FreshRepoWithAgentsMdEntry_DoesNotExtractAgentsMdRootEntry
+
+      - id: AgentControl-RepoSync-SyncFromFolderPackage
+        title: >-
+          The RepoSync subsystem shall replace a repo's managed agent-file folders with the
+          contents of an unpacked package folder (a NuGet package's content folder) exactly as
+          it does for a package zip, reading its release notes and AGENTS.md template the same
+          way, and shall refuse links and path traversal in the package before changing the
+          repo.
+        justification: |
+          NuGet sources deliver their package as an unpacked folder in a shared cache; the repo
+          must end up in the same state whichever package format delivered the agent files, and
+          a cache that other tools can write to must be treated as untrusted input.
+        children:
+          - AgentControl-PackageContentExtractor-ExtractFromFolder
+          - AgentControl-PackageContentExtractor-ReplaceManagedFolders
+          - AgentControl-PackageContentExtractor-NoRootFilesCopied
+          - AgentControl-PackageContentExtractor-PackageNeverModified
+          - AgentControl-PackageContentExtractor-RejectMissingContentFolder
+          - AgentControl-PackageContentExtractor-RejectLinksAndTraversal
+          - AgentControl-PackageContentExtractor-RejectPathOutsideContent
+          - AgentControl-PackageContentExtractor-RejectLinkedPackageFolder
+          - AgentControl-PackageContentExtractor-RejectLinkedPackageDirectory
+          - AgentControl-PackageContentExtractor-RejectLinkedPackageFile
+          - AgentControl-PackageContentExtractor-RejectBrokenLink
+          - AgentControl-PackageContentExtractor-ReadReleaseNotes
+          - AgentControl-PackageContentExtractor-ReadAgentsMdTemplate
+          - AgentControl-Utilities-SafePaths
+        tests:
+          - PackageContentExtractor_Extract_DirectoryPackageIntoFreshRepo_CreatesManagedFoldersOnly
+          - PackageContentExtractor_Extract_ZipAndDirectoryWithSameContent_ProduceIdenticalRepoTrees
+          - PackageContentExtractor_Extract_TraversalPathFromReader_ThrowsBeforeDeletingManagedFolders

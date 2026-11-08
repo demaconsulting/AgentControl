@@ -32,6 +32,7 @@ sections:
           - AgentControl-ShellDetector-DetectPosix
           - AgentControl-ShellDetector-ShellPreference
           - AgentControl-AgentToolLauncher-BuildCommand
+          - AgentControl-AgentToolLauncher-QuotedPathInvocation
           - AgentControl-AgentToolLauncher-Validation
         tests:
           - windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory

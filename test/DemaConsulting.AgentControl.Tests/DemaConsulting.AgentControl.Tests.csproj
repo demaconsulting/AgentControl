@@ -72,4 +72,10 @@
     <ProjectReference Include="..\..\src\DemaConsulting.AgentControl\DemaConsulting.AgentControl.csproj" />
   </ItemGroup>
 
+  <!-- ASP.NET Core shared framework (part of the .NET runtime, not a NuGet package): hosts the
+       in-process Kestrel mock NuGet V3 feed that server-source tests talk to over plain HTTP. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>

@@ -44,6 +44,15 @@ internal static class TestSettingsWriter
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
 
     /// <summary>
+    ///     The single argument appended to the quoted arg-logger stub path in the custom
+    ///     agent-tool command. Git invocations of the stub never carry it, so a recorded
+    ///     invocation whose arguments are exactly this value can only have come from the
+    ///     agent-tool launch (the quoted path therefore also had to be executed by the shell,
+    ///     not merely echoed).
+    /// </summary>
+    public const string AgentToolMarkerArgument = "--agent-tool-launch";
+
+    /// <summary>
     ///     Writes a <c>settings.json</c> file under <paramref name="configDirectory"/> pointing
     ///     the git executable and the (custom) agent-tool command at the arg-logger stub, and
     ///     pre-populating the recent-repos list with a single repo.
@@ -60,13 +69,27 @@ internal static class TestSettingsWriter
     /// <param name="pinnedPackageVersion">The pinned package version for
     ///     <paramref name="repoPath"/>, or <see langword="null"/> if the repo has never been
     ///     synced.</param>
+    /// <param name="nuGetFeedPath">A NuGet package folder to configure as an additional source
+    ///     with alias <c>Feed</c> (switching the file to the multi-source format, in which
+    ///     <paramref name="packageSourcePath"/> becomes the <c>Default</c> zip source), or
+    ///     <see langword="null"/> for the older single-folder format.</param>
+    /// <param name="nuGetPackageIds">The package IDs offered by the <c>Feed</c> source.</param>
+    /// <param name="nuGetRequireSigned">Whether the <c>Feed</c> source requires signed
+    ///     packages.</param>
+    /// <param name="nuGetServerIndexUrl">The service-index address of a NuGet package server (plain
+    ///     http allowed) to configure as an additional source with alias <c>Server</c>, or
+    ///     <see langword="null"/> for none; its package IDs are <paramref name="nuGetPackageIds"/>.</param>
     public static void Write(
         string configDirectory,
         string argLoggerStubExePath,
         string? packageSourcePath,
         string repoPath,
         string? pinnedPackageName = null,
-        string? pinnedPackageVersion = null)
+        string? pinnedPackageVersion = null,
+        string? nuGetFeedPath = null,
+        IReadOnlyList<string>? nuGetPackageIds = null,
+        bool nuGetRequireSigned = false,
+        string? nuGetServerIndexUrl = null)
     {
         Directory.CreateDirectory(configDirectory);
 
@@ -74,14 +97,13 @@ internal static class TestSettingsWriter
         // the anonymous type property below a type without an unnecessary upcast.
         string? shellPreference = null;
 
-        var settings = new
+        var settings = new Dictionary<string, object?>
         {
-            PackageSourcePath = packageSourcePath,
-            GitExecutablePath = argLoggerStubExePath,
-            AgentTool = 3, // AgentToolKind.Custom
-            CustomAgentCommand = $"\"{argLoggerStubExePath}\"",
-            ShellPreference = shellPreference,
-            RecentRepos = new[]
+            ["GitExecutablePath"] = argLoggerStubExePath,
+            ["AgentTool"] = 3, // AgentToolKind.Custom
+            ["CustomAgentCommand"] = $"\"{argLoggerStubExePath}\" {AgentToolMarkerArgument}",
+            ["ShellPreference"] = shellPreference,
+            ["RecentRepos"] = new[]
             {
                 new
                 {
@@ -91,6 +113,46 @@ internal static class TestSettingsWriter
                 }
             }
         };
+
+        if (nuGetFeedPath is null && nuGetServerIndexUrl is null)
+        {
+            // Older single-folder format, which the application migrates to a "Default" source
+            settings["PackageSourcePath"] = packageSourcePath;
+        }
+        else
+        {
+            var sources = new List<object>();
+            if (packageSourcePath is not null)
+            {
+                sources.Add(new { Alias = "Default", Type = "Zip", Location = packageSourcePath });
+            }
+
+            if (nuGetFeedPath is not null)
+            {
+                sources.Add(new
+                {
+                    Alias = "Feed",
+                    Type = "NuGet",
+                    Location = nuGetFeedPath,
+                    PackageIds = nuGetPackageIds ?? [],
+                    RequireSignedPackages = nuGetRequireSigned
+                });
+            }
+
+            if (nuGetServerIndexUrl is not null)
+            {
+                sources.Add(new
+                {
+                    Alias = "Server",
+                    Type = "NuGet",
+                    Location = nuGetServerIndexUrl,
+                    PackageIds = nuGetPackageIds ?? [],
+                    AllowInsecureHttp = true
+                });
+            }
+
+            settings["Sources"] = sources;
+        }
 
         var json = JsonSerializer.Serialize(settings, SerializerOptions);
         File.WriteAllText(Path.Combine(configDirectory, "settings.json"), json);

@@ -23,21 +23,38 @@ using System.Globalization;
 namespace DemaConsulting.AgentControl.AgentPackageManagement;
 
 /// <summary>
-///     Parses and compares semantic version strings (<c>MAJOR.MINOR.PATCH[-PRERELEASE]</c>) used
-///     to name and pin agent package zip files.
+///     Parses and compares version strings (<c>MAJOR.MINOR.PATCH[.REVISION][-PRERELEASE][+METADATA]</c>)
+///     used to name and pin agent packages from zip files and NuGet sources.
 /// </summary>
 /// <remarks>
-///     Implements the subset of the <see href="https://semver.org">Semantic Versioning 2.0.0</see>
-///     grammar needed for AgentControl: numeric major/minor/patch plus an optional dot-separated
-///     prerelease identifier list (build metadata after <c>+</c> is intentionally unsupported —
-///     package file names never carry it). A prerelease version always compares as lower than the
+///     <para>
+///     Implements the <see href="https://semver.org">Semantic Versioning 2.0.0</see> grammar plus
+///     the two extensions NuGet package versions need: an optional fourth numeric segment (the
+///     revision, compared after the patch and treated as zero when absent, so <c>1.0.0.0</c>
+///     equals <c>1.0.0</c>) and optional <c>+metadata</c> build metadata. Metadata is preserved in
+///     <see cref="Metadata"/> and <see cref="Original"/> but is ignored by comparison, equality and
+///     hashing, per semver precedence rules. A prerelease version always compares as lower than the
 ///     same numeric version without one (e.g. <c>1.0.0-beta &lt; 1.0.0</c>), and prerelease
 ///     identifiers follow semver precedence (numeric identifiers compare numerically, e.g.
 ///     <c>beta.2 &lt; beta.10</c>; numeric ranks below alphanumeric; more identifiers rank higher).
+///     </para>
+///     <para>
+///     Zip package file names carry only the strict three-part form, so
+///     <see cref="TryParseStrict"/> keeps that narrower grammar for file-name splitting while
+///     <see cref="TryParse"/> accepts the extended NuGet-compatible grammar. Prerelease labels
+///     compare without regard to letter case, as NuGet does (so <c>1.0.0-beta</c> equals
+///     <c>1.0.0-BETA</c>), and equality and hashing agree with that comparison.
 ///     Immutable and thread-safe once constructed.
+///     </para>
 /// </remarks>
 internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<PackageVersion>
 {
+    /// <summary>
+    ///     The exact text this version was parsed from, or its canonical rendering when it was
+    ///     built from components; returned by <see cref="ToString"/> and <see cref="Original"/>.
+    /// </summary>
+    private readonly string _original;
+
     /// <summary>
     ///     Gets the major version component.
     /// </summary>
@@ -60,6 +77,25 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
     public string? Prerelease { get; }
 
     /// <summary>
+    ///     Gets the optional fourth numeric segment (NuGet's legacy revision), or zero when the
+    ///     version has only three numeric segments.
+    /// </summary>
+    public int Revision { get; }
+
+    /// <summary>
+    ///     Gets the build metadata (the text after <c>+</c>), or <see langword="null"/> when none
+    ///     was supplied. Never taken into account by comparison or equality.
+    /// </summary>
+    public string? Metadata { get; }
+
+    /// <summary>
+    ///     Gets the exact text this version was parsed from (including any metadata), or the
+    ///     canonical rendering when it was constructed from components. This is the text to
+    ///     persist in a pin so the original spelling survives a round trip.
+    /// </summary>
+    public string Original => _original;
+
+    /// <summary>
     ///     Initializes a new <see cref="PackageVersion"/> from its components.
     /// </summary>
     /// <param name="major">Major version component. Must be non-negative.</param>
@@ -67,9 +103,33 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
     /// <param name="patch">Patch version component. Must be non-negative.</param>
     /// <param name="prerelease">Optional prerelease identifier; <see langword="null"/> for a
     ///     release version.</param>
+    /// <param name="revision">Optional fourth numeric segment. Must be non-negative; zero (the
+    ///     default) means "absent".</param>
+    /// <param name="metadata">Optional build metadata; <see langword="null"/> for none.</param>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when any numeric component is
     ///     negative.</exception>
-    public PackageVersion(int major, int minor, int patch, string? prerelease = null)
+    public PackageVersion(int major, int minor, int patch, string? prerelease = null, int revision = 0, string? metadata = null)
+        : this(major, minor, patch, prerelease, revision, metadata, original: null)
+    {
+    }
+
+    /// <summary>
+    ///     Initializes a new <see cref="PackageVersion"/> from its components and, optionally, the
+    ///     exact text it was parsed from.
+    /// </summary>
+    /// <param name="major">Major version component. Must be non-negative.</param>
+    /// <param name="minor">Minor version component. Must be non-negative.</param>
+    /// <param name="patch">Patch version component. Must be non-negative.</param>
+    /// <param name="prerelease">Optional prerelease identifier; <see langword="null"/> for a
+    ///     release version.</param>
+    /// <param name="revision">Fourth numeric segment; zero means "absent". Must be non-negative.</param>
+    /// <param name="metadata">Build metadata, or <see langword="null"/>.</param>
+    /// <param name="original">The text the version was parsed from, or <see langword="null"/> to
+    ///     derive the canonical rendering from the components.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when any numeric component is
+    ///     negative.</exception>
+    private PackageVersion(
+        int major, int minor, int patch, string? prerelease, int revision, string? metadata, string? original)
     {
         if (major < 0)
         {
@@ -86,24 +146,82 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
             throw new ArgumentOutOfRangeException(nameof(patch), patch, "Patch version must be non-negative.");
         }
 
+        if (revision < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(revision), revision, "Revision must be non-negative.");
+        }
+
         Major = major;
         Minor = minor;
         Patch = patch;
+        Revision = revision;
         Prerelease = string.IsNullOrEmpty(prerelease) ? null : prerelease;
+        Metadata = string.IsNullOrEmpty(metadata) ? null : metadata;
+        _original = original ?? BuildCanonicalText();
     }
 
     /// <summary>
-    ///     Attempts to parse a semantic version string.
+    ///     Renders the canonical text of this version from its components, used when no original
+    ///     text is available (a version built directly from components).
+    /// </summary>
+    /// <returns>The canonical rendering, e.g. <c>1.2.3</c>, <c>1.2.3.4-beta.1+build5</c>. The
+    ///     fourth segment is only rendered when non-zero.</returns>
+    private string BuildCanonicalText()
+    {
+        var text = Revision == 0 ? $"{Major}.{Minor}.{Patch}" : $"{Major}.{Minor}.{Patch}.{Revision}";
+        if (Prerelease is not null)
+        {
+            text += "-" + Prerelease;
+        }
+
+        return Metadata is null ? text : text + "+" + Metadata;
+    }
+
+    /// <summary>
+    ///     Attempts to parse a version string using the extended, NuGet-compatible grammar:
+    ///     three or four numeric segments, an optional prerelease, and optional <c>+metadata</c>.
+    /// </summary>
+    /// <param name="value">The string to parse, e.g. <c>"1.2.3"</c>, <c>"1.2.3.4"</c>,
+    ///     <c>"1.2.3-beta.1"</c> or <c>"1.2.3+build5"</c>.</param>
+    /// <param name="version">On success, the parsed version; otherwise <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> if <paramref name="value"/> was a valid version;
+    ///     otherwise <see langword="false"/>.</returns>
+    /// <remarks>
+    ///     Used for pins and NuGet-reported versions. Does not throw on malformed input. Zip file
+    ///     names must instead use <see cref="TryParseStrict"/> so their name/version splitting
+    ///     rules stay exactly as they always were.
+    /// </remarks>
+    public static bool TryParse(string? value, out PackageVersion? version) =>
+        TryParseCore(value, allowExtended: true, out version);
+
+    /// <summary>
+    ///     Attempts to parse a strict semantic version string
+    ///     (<c>MAJOR.MINOR.PATCH[-PRERELEASE]</c>): exactly three numeric segments and no
+    ///     <c>+metadata</c>.
     /// </summary>
     /// <param name="value">The string to parse, e.g. <c>"1.2.3"</c> or <c>"1.2.3-beta.1"</c>.</param>
     /// <param name="version">On success, the parsed version; otherwise <see langword="null"/>.</param>
-    /// <returns><see langword="true"/> if <paramref name="value"/> was a valid semantic version;
-    ///     otherwise <see langword="false"/>.</returns>
+    /// <returns><see langword="true"/> if <paramref name="value"/> was a valid strict semantic
+    ///     version; otherwise <see langword="false"/>.</returns>
     /// <remarks>
-    ///     Does not throw on malformed input — callers enumerating a directory of arbitrary file
-    ///     names are expected to skip entries that fail to parse rather than treat them as errors.
+    ///     Used for zip package file names, where the package name and version are split at the
+    ///     leftmost hyphen whose suffix parses; accepting the extended grammar there would change
+    ///     which file names are recognized as packages. Does not throw on malformed input —
+    ///     callers enumerating a directory of arbitrary file names are expected to skip entries
+    ///     that fail to parse rather than treat them as errors.
     /// </remarks>
-    public static bool TryParse(string? value, out PackageVersion? version)
+    public static bool TryParseStrict(string? value, out PackageVersion? version) =>
+        TryParseCore(value, allowExtended: false, out version);
+
+    /// <summary>
+    ///     Shared parser behind <see cref="TryParse"/> and <see cref="TryParseStrict"/>.
+    /// </summary>
+    /// <param name="value">The string to parse.</param>
+    /// <param name="allowExtended"><see langword="true"/> to accept a fourth numeric segment and
+    ///     <c>+metadata</c>; <see langword="false"/> for the strict three-part grammar.</param>
+    /// <param name="version">On success, the parsed version; otherwise <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> on success.</returns>
+    private static bool TryParseCore(string? value, bool allowExtended, out PackageVersion? version)
     {
         version = null;
         if (string.IsNullOrWhiteSpace(value))
@@ -111,14 +229,36 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
             return false;
         }
 
-        // Split off the optional prerelease suffix (everything after the first '-')
-        var dashIndex = value.IndexOf('-');
-        var numericPart = dashIndex >= 0 ? value[..dashIndex] : value;
-        var prerelease = dashIndex >= 0 ? value[(dashIndex + 1)..] : null;
+        // Split off the optional build metadata (everything after the first '+'); only the
+        // extended grammar permits it, and it must be dot-separated non-empty identifiers
+        var remainder = value;
+        string? metadata = null;
+        var plusIndex = remainder.IndexOf('+');
+        if (plusIndex >= 0)
+        {
+            if (!allowExtended)
+            {
+                return false;
+            }
 
-        // The numeric part must be exactly three dot-separated non-negative integers
+            metadata = remainder[(plusIndex + 1)..];
+            remainder = remainder[..plusIndex];
+            if (!IsValidMetadata(metadata))
+            {
+                return false;
+            }
+        }
+
+        // Split off the optional prerelease suffix (everything after the first '-')
+        var dashIndex = remainder.IndexOf('-');
+        var numericPart = dashIndex >= 0 ? remainder[..dashIndex] : remainder;
+        var prerelease = dashIndex >= 0 ? remainder[(dashIndex + 1)..] : null;
+
+        // The numeric part must be three (strict) or three-to-four (extended) dot-separated
+        // non-negative integers
         var parts = numericPart.Split('.');
-        if (parts.Length != 3)
+        var maxParts = allowExtended ? 4 : 3;
+        if (parts.Length < 3 || parts.Length > maxParts)
         {
             return false;
         }
@@ -130,6 +270,13 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
             return false;
         }
 
+        var revision = 0;
+        if (parts.Length == 4 &&
+            !int.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out revision))
+        {
+            return false;
+        }
+
         // Reject an empty prerelease identifier (e.g. a trailing "-" with nothing after it) or
         // one that is not valid semver (empty/invalid identifiers, numeric leading zeros)
         if (dashIndex >= 0 && (string.IsNullOrEmpty(prerelease) || !IsValidPrerelease(prerelease)))
@@ -137,9 +284,18 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
             return false;
         }
 
-        version = new PackageVersion(major, minor, patch, prerelease);
+        version = new PackageVersion(major, minor, patch, prerelease, revision, metadata, value);
         return true;
     }
+
+    /// <summary>
+    ///     Determines whether a build-metadata string is valid semver: dot-separated, non-empty
+    ///     identifiers of ASCII letters, digits, and hyphens (leading zeros are permitted).
+    /// </summary>
+    /// <param name="metadata">The metadata text after the <c>+</c>.</param>
+    /// <returns><see langword="true"/> if valid.</returns>
+    private static bool IsValidMetadata(string metadata) =>
+        metadata.Split('.').All(id => id.Length > 0 && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'));
 
     /// <summary>
     ///     Compares this version to another, following semver precedence rules.
@@ -175,8 +331,15 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
             return patchCompare;
         }
 
-        // Same major.minor.patch: a release (no prerelease) outranks any prerelease of the
-        // same numeric version, per semver precedence rules
+        // The optional fourth segment ranks after the patch (zero when absent)
+        var revisionCompare = Revision.CompareTo(other.Revision);
+        if (revisionCompare != 0)
+        {
+            return revisionCompare;
+        }
+
+        // Same numeric version: a release (no prerelease) outranks any prerelease of the
+        // same numeric version, per semver precedence rules. Build metadata never takes part.
         if (Prerelease is null && other.Prerelease is null)
         {
             return 0;
@@ -198,7 +361,8 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
     /// <summary>
     ///     Compares two prerelease strings using semver precedence: identifiers are compared left
     ///     to right; numeric identifiers compare numerically and rank below alphanumeric ones;
-    ///     alphanumeric identifiers compare in ASCII order; and when all shared identifiers are
+    ///     alphanumeric identifiers compare in ASCII order ignoring letter case (as NuGet does,
+    ///     so <c>1.0.0-beta</c> equals <c>1.0.0-BETA</c>); and when all shared identifiers are
     ///     equal, the longer list ranks higher.
     /// </summary>
     /// <param name="left">The left prerelease string (dot-separated identifiers).</param>
@@ -252,7 +416,9 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
             return 1;
         }
 
-        return string.CompareOrdinal(left, right);
+        // Prerelease labels compare without regard to letter case, as NuGet does, so the
+        // "latest" chosen here for a NuGet source is the one NuGet itself would choose
+        return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -283,11 +449,13 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
     public override bool Equals(object? obj) => Equals(obj as PackageVersion);
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(Major, Minor, Patch, CanonicalPrerelease(Prerelease));
+    public override int GetHashCode() => HashCode.Combine(
+        Major, Minor, Patch, Revision, StringComparer.OrdinalIgnoreCase.GetHashCode(CanonicalPrerelease(Prerelease) ?? string.Empty));
 
     /// <summary>
     ///     Produces the representation equality is based on: numeric identifiers with leading
-    ///     zeros removed, so versions that compare equal always hash equally.
+    ///     zeros removed (the hash is then taken ignoring letter case), so versions that compare
+    ///     equal always hash equally.
     /// </summary>
     /// <param name="prerelease">The prerelease string, or <see langword="null"/>.</param>
     /// <returns>The canonical prerelease string, or <see langword="null"/>.</returns>
@@ -297,8 +465,11 @@ internal sealed class PackageVersion : IComparable<PackageVersion>, IEquatable<P
             : string.Join('.', prerelease.Split('.').Select(id => IsNumeric(id) ? id.TrimStart('0') : id));
 
     /// <inheritdoc />
-    public override string ToString() =>
-        Prerelease is null ? $"{Major}.{Minor}.{Patch}" : $"{Major}.{Minor}.{Patch}-{Prerelease}";
+    /// <remarks>
+    ///     Returns <see cref="Original"/>, so a version parsed from text renders exactly as
+    ///     written (including any metadata) and round-trips through <see cref="TryParse"/>.
+    /// </remarks>
+    public override string ToString() => _original;
 
     /// <summary>
     ///     Determines whether two versions are equal.

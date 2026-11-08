@@ -1,0 +1,104 @@
+---
+# Software Unit Requirements for the PackageSourceRegistry Class
+#
+# PackageSourceRegistry maps a package source alias to the provider that serves that source,
+# and is the single place a source is looked up; it never falls back to another source.
+#
+# Each requirement states one observable criterion. MissingAliasIsError keeps its original ID for
+# the reporting of an unconfigured alias; the behaviors it once combined have their own IDs.
+
+sections:
+  - title: PackageSourceRegistry Unit Requirements
+    requirements:
+      - id: AgentControl-PackageSourceRegistry-ResolveAlias
+        title: >-
+          The PackageSourceRegistry class shall return, for a configured source alias
+          (compared case-insensitively), the provider of exactly that source.
+        justification: |
+          Every operation on a package source starts from its alias, so the lookup must be
+          exact and case-insensitive like the alias uniqueness rule, and must always yield the
+          source that alias names.
+        tests:
+          - PackageSourceRegistry_Resolve_ConfiguredAlias_ReturnsThatSourcesProvider
+          - PackageSourceRegistry_Resolve_RepeatedCalls_CreatesProviderOnceAndLazily
+          - PackageSourceRegistry_Create_ZipAndNuGetDefinitions_ResolvesMatchingProviderKinds
+
+      - id: AgentControl-PackageSourceRegistry-MissingAliasIsError
+        title: >-
+          The PackageSourceRegistry class shall report an error naming the alias when asked
+          for a source alias that is not configured.
+        justification: |
+          A pin to a removed source must stop with an actionable message instead of proceeding
+          with something else.
+        tests:
+          - PackageSourceRegistry_Resolve_MissingAlias_ThrowsUnknownSourceExceptionNamingAlias
+
+      - id: AgentControl-PackageSourceRegistry-BlankAliasNeverConfigured
+        title: >-
+          The PackageSourceRegistry class shall never treat a blank alias as configured and shall
+          reject a request to resolve one.
+        justification: |
+          A blank alias can only come from a damaged pin or settings file; resolving it to any
+          source would install a package from a source nobody chose.
+        tests:
+          - PackageSourceRegistry_BlankAlias_ContainsFalseAndResolveThrowsArgumentException
+
+      - id: AgentControl-PackageSourceRegistry-InvalidAliasesRejected
+        title: >-
+          The PackageSourceRegistry class shall reject, when it is built, a configuration in which
+          an alias is blank or is used by more than one source (compared case-insensitively).
+        justification: |
+          An ambiguous configuration (the same alias twice) must be refused rather than resolved
+          arbitrarily.
+        tests:
+          - PackageSourceRegistry_Constructor_DuplicateOrBlankAlias_ThrowsInvalidOperationException
+
+      - id: AgentControl-PackageSourceRegistry-NullDefinitionRejected
+        title: >-
+          The PackageSourceRegistry class shall reject, when it is built, a configuration that
+          contains a missing source entry, with an error that says a configured source entry is
+          missing.
+        justification: |
+          A missing entry (as a hand-edited settings file can produce) is a configuration error
+          that must be reported in words the user can act on rather than surface as an incidental
+          crash.
+        tests:
+          - PackageSourceRegistry_Constructor_NullDefinitionEntry_ThrowsInvalidOperationException
+
+      - id: AgentControl-PackageSourceRegistry-PlainHttpServerSourceRefused
+        title: >-
+          The PackageSourceRegistry class shall refuse to provide a plain-http server source whose
+          definition does not allow insecure http, and shall provide an https server source.
+        justification: |
+          A server source that is not acceptable must stop where it is resolved rather than be
+          contacted.
+        tests:
+          - PackageSourceRegistry_Create_NuGetServerSource_ResolvesHttpsAndRefusesPlainHttpWithoutOptIn
+
+      - id: AgentControl-PackageSourceRegistry-DefinitionsAreASnapshot
+        title: >-
+          The PackageSourceRegistry class shall resolve aliases from a snapshot of the source
+          definitions taken when it is built, so that changing a definition or the list it was
+          built from afterwards, or changing a definition obtained from the registry, cannot change
+          which source an alias resolves to.
+        justification: |
+          A registry shared between threads, or built from settings that are edited afterwards,
+          must keep naming the sources it was built for; otherwise an alias that was already
+          resolved could start to name another source.
+        tests:
+          - PackageSourceRegistry_Constructor_DefinitionsMutatedAfterwards_RegistryIsASnapshot
+          - PackageSourceRegistry_Definitions_CallerMutatesReturnedDefinitions_RegistryIsUnaffected
+
+      - id: AgentControl-PackageSourceRegistry-NoCrossSourceFallback
+        title: >-
+          The PackageSourceRegistry class shall never resolve a missing source alias to
+          another source, even when only one source is configured, and shall not contact any
+          other source while resolving.
+        justification: |
+          The same package ID can exist at several sources with different content; quietly
+          substituting a different source for a missing one would let an attacker, or a
+          configuration mistake, change what gets installed under an existing pin.
+        tests:
+          - PackageSourceRegistry_Resolve_MissingAliasWithSingleConfiguredSource_DoesNotFallBack
+          - PackageSourceRegistry_PinToSourceB_SamePackageIdAtBothSources_OnlyBIsContacted
+          - PackageSourceRegistry_PinToRemovedSource_ThrowsAndContactsNoOtherSource

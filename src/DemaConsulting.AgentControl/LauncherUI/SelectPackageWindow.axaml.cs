@@ -21,23 +21,30 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using DemaConsulting.AgentControl.AgentPackageManagement;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     Modal "Select Package..." dialog: lets the user pick a package name then a version from
-///     the configured source, mirroring <see cref="ConfirmationWindow"/>'s
+///     Modal "Select Package..." dialog: lets the user pick a source, then a package name, then a
+///     version, mirroring <see cref="ConfirmationWindow"/>'s
 ///     <see cref="Window.ShowDialog{TResult}(Window)"/> convention.
 /// </summary>
 /// <remarks>
 ///     All list population/selection logic lives in <see cref="SelectPackageWindowViewModel"/>;
-///     this code-behind only wires the "Cancel" button (which has no bindable command, matching
-///     <see cref="ConfirmationWindow"/>'s "No" button) and closes the window with the selected
-///     <c>(Name, Version)</c> tuple once <see cref="SelectPackageWindowViewModel.Confirmed"/>
-///     fires.
+///     this code-behind only starts the (asynchronous, cancellable) loading of the sources when
+///     the window opens, cancels it when the window closes, wires the "Cancel" button (which has no
+///     bindable command, matching <see cref="ConfirmationWindow"/>'s "No" button) and closes the
+///     window with the selected <see cref="PackageReference"/> once
+///     <see cref="SelectPackageWindowViewModel.Confirmed"/> fires.
 /// </remarks>
 internal sealed partial class SelectPackageWindow : Window
 {
+    /// <summary>
+    ///     Cancels the loading of the sources when the window closes.
+    /// </summary>
+    private readonly CancellationTokenSource _loadCancellation = new();
+
     /// <summary>
     ///     Initializes a new <see cref="SelectPackageWindow"/> with no bound view model; used by
     ///     the Avalonia XAML previewer/loader only. Production code should use
@@ -50,17 +57,44 @@ internal sealed partial class SelectPackageWindow : Window
 
     /// <summary>
     ///     Initializes a new <see cref="SelectPackageWindow"/> bound to the given view model,
-    ///     closing itself with the selected <c>(Name, Version)</c> tuple once the view model
+    ///     closing itself with the selected <see cref="PackageReference"/> once the view model
     ///     reports a confirmed selection.
     /// </summary>
-    /// <param name="viewModel">The view model supplying the package/version lists and selection.</param>
+    /// <param name="viewModel">The view model supplying the source/package/version lists and
+    ///     selection.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="viewModel"/> is
     ///     <see langword="null"/>.</exception>
     public SelectPackageWindow(SelectPackageWindowViewModel viewModel) : this()
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         DataContext = viewModel;
-        viewModel.Confirmed += (_, result) => Close(result);
+        viewModel.Confirmed += (_, selection) => Close(selection);
+        Opened += async (_, _) => await LoadSourcesAsync(viewModel);
+        Closed += (_, _) =>
+        {
+            _loadCancellation.Cancel();
+            _loadCancellation.Dispose();
+            viewModel.CancelLoading();
+        };
+    }
+
+    /// <summary>
+    ///     Starts reading every source's packages once the window is showing; the window stays
+    ///     responsive meanwhile and each source reports its own failure.
+    /// </summary>
+    /// <param name="viewModel">The view model to load.</param>
+    /// <returns>A task that completes when loading has finished or was cancelled by closing the
+    ///     window.</returns>
+    private async Task LoadSourcesAsync(SelectPackageWindowViewModel viewModel)
+    {
+        try
+        {
+            await viewModel.LoadAsync(_loadCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The window was closed before loading finished; nothing is left to show
+        }
     }
 
     /// <summary>

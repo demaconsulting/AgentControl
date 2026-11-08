@@ -3,11 +3,18 @@
 #
 # PURPOSE:
 # - Define requirements for the AgentControl AgentPackageManagement subsystem
-# - AgentPackageManagement spans PackageSource.cs (discovers packages/versions at a source
-#   folder), PackageVersion.cs (parses/compares version strings), and PackageVersionCache.cs
-#   (caches per-source scan results)
+# - AgentPackageManagement spans PackageSource.cs (discovers packages/versions at a zip source
+#   folder), PackageVersion.cs (parses/compares version strings), PackageVersionCache.cs
+#   (caches per-source results), the source providers (ZipFolderSourceProvider.cs,
+#   NuGetSourceProvider.cs) behind the IPackageSourceProvider contract, PackageSourceRegistry.cs
+#   (resolves a source alias to its provider) and SignatureVerificationSupport.cs (tells whether
+#   the platform can verify package signatures); the supporting
+#   PackageSourceDefinition/PackageSourceType/PackageReference/IPackageSourceProvider/
+#   PackageSourceAccessException types have no dedicated unit documents and are folded into
+#   this subsystem-level description
 # - Subsystem requirements describe the package-discovery/version-comparison behavior shared
-#   by the rest of the application
+#   by the rest of the application, and how configured package sources are modeled and
+#   resolved
 
 sections:
   - title: AgentPackageManagement Subsystem Requirements
@@ -26,9 +33,12 @@ sections:
           - AgentControl-PackageSource-DiscoverNames
           - AgentControl-PackageSource-FindLatest
           - AgentControl-PackageVersion-Parse
+          - AgentControl-PackageVersion-ExtendedVersions
           - AgentControl-PackageVersionCache-CachePackageNames
           - AgentControl-PackageVersionCache-CacheVersions
           - AgentControl-PackageVersionCache-Invalidate
+          - AgentControl-PackageVersionCache-KeyedBySource
+          - AgentControl-PackageVersionCache-InvalidateBySource
         tests:
           - PackageSource_EnumeratePackageNames_MixedDirectory_ReturnsDistinctSortedNames
 
@@ -44,7 +54,383 @@ sections:
         children:
           - AgentControl-PackageSource-DetectNewerVersion
           - AgentControl-PackageVersion-Compare
+          - AgentControl-PackageVersion-MetadataIgnoredInComparison
           - AgentControl-PackageVersionCache-CacheNewerVersion
         tests:
           - PackageSource_IsNewerVersionAvailable_SourceHasNewerVersion_ReturnsTrue
           - PackageSource_IsNewerVersionAvailable_UnparsablePin_ReturnsTrue
+
+      - id: AgentControl-AgentPackageManagement-SourceDefinitions
+        title: >-
+          The AgentPackageManagement subsystem shall describe a configured package source by a
+          unique alias, a type (zip package folder or NuGet), a location and - for NuGet sources -
+          the package IDs it offers and the trust options (whether signed packages are required,
+          optionally the fingerprint of the one publisher's certificate to trust, and whether
+          plain http is allowed), with safe defaults for every option, and shall persist the type
+          by name.
+        justification: |
+          The source description is persisted in the user's settings file, so it must carry
+          everything needed to reach a source, and its defaults must never weaken a source's
+          protection until the user chooses so.
+        tests:
+          - PackageSourceDefinition_Defaults_AreSafeAndEmpty
+          - PackageSourceDefinition_Serialize_TypeAsNameAndNoDerivedLocationKind
+
+      - id: AgentControl-AgentPackageManagement-SourceLocationKind
+        title: >-
+          The AgentPackageManagement subsystem shall treat a source location that is an absolute
+          http or https address as a server and any other location as a folder, deciding this from
+          the location alone.
+        justification: |
+          The folder-versus-server distinction must follow the location so that the two can never
+          disagree.
+        tests:
+          - PackageSourceDefinition_LocationKind_DerivedFromLocation
+
+      - id: AgentControl-AgentPackageManagement-SourceNoSecrets
+        title: >-
+          The AgentPackageManagement subsystem shall never hold a password, token or other secret
+          in the description of a configured package source.
+        justification: |
+          The description is persisted in the user's settings file, which must never become a
+          credential store.
+        tests:
+          - PackageSourceDefinition_Members_HaveNoSecretLikeProperty
+
+      - id: AgentControl-AgentPackageManagement-SourceCredentialBearingLocation
+        title: >-
+          The AgentPackageManagement subsystem shall identify a source location that embeds a
+          credential (such as URL user information, a query string or a fragment), with a message
+          that does not repeat the credential, and shall not flag an ordinary location.
+        justification: |
+          A location that embeds a credential must be caught before it is persisted or shown, or
+          the secret would end up in the settings file and in messages.
+        tests:
+          - PackageSourceDefinition_GetCredentialProblem_CredentialBearingLocation_ReturnsMessageWithoutSecret
+          - PackageSourceDefinition_GetCredentialProblem_OrdinaryLocation_ReturnsNull
+
+      - id: AgentControl-AgentPackageManagement-SourceServerAddress
+        title: >-
+          The AgentPackageManagement subsystem shall identify a server address that is not an
+          https address of a service index ending in index.json (accepting http only when the
+          source explicitly allows it), with a message that says what to change, and shall accept
+          an address that is.
+        justification: |
+          A server address that would send a sign-in unprotected or be treated as another protocol
+          must be caught where the source is described, so every user of the description applies
+          the same rules.
+        tests:
+          - PackageSourceDefinition_GetServerLocationProblem_AcceptableAddress_ReturnsNull
+          - PackageSourceDefinition_GetServerLocationProblem_UnacceptableAddress_ReturnsClearMessage
+
+      - id: AgentControl-AgentPackageManagement-SourceFingerprintNormalization
+        title: >-
+          The AgentPackageManagement subsystem shall accept a trusted-publisher fingerprint
+          written with or without separators and in either letter case, and hold it in one
+          normalized form.
+        justification: |
+          A fingerprint that is pasted from a certificate viewer or a tool is written in many ways,
+          and equivalent spellings must denote the same publisher.
+        tests:
+          - PackageSourceDefinition_TryNormalizeFingerprint_ValidSpellings_NormalizeToUpperCaseHex
+
+      - id: AgentControl-AgentPackageManagement-SourceUnreadableFingerprint
+        title: >-
+          The AgentPackageManagement subsystem shall refuse text that cannot be read as a SHA-256
+          fingerprint, and shall identify a fingerprint of that kind in a source that requires
+          signed packages, and no other fingerprint problem.
+        justification: |
+          A fingerprint that cannot be read must be caught rather than ignored, because ignoring it
+          would widen the trust from one publisher to any signer.
+        tests:
+          - PackageSourceDefinition_TryNormalizeFingerprint_InvalidText_IsRefused
+          - PackageSourceDefinition_GetSignaturePolicyProblem_OnlyAnUnreadableFingerprintOfARequiringNuGetSource
+
+      - id: AgentControl-AgentPackageManagement-SourceResolution
+        title: >-
+          The AgentPackageManagement subsystem shall resolve a package source by its alias to
+          that source alone, from a snapshot of the configured sources that rejects ambiguous
+          or missing entries, and shall report an error for an alias that is not configured
+          without ever consulting, or falling back to, any other source.
+        justification: |
+          A package name is not unique across sources; resolving a pin or a request by anything
+          weaker than the source alias could fetch another source's package under the wrong
+          identity, so a missing source must be an error rather than be quietly replaced, and
+          the configuration an alias is resolved against must be unambiguous and unable to change
+          underneath a caller.
+        children:
+          - AgentControl-PackageSourceRegistry-ResolveAlias
+          - AgentControl-PackageSourceRegistry-MissingAliasIsError
+          - AgentControl-PackageSourceRegistry-BlankAliasNeverConfigured
+          - AgentControl-PackageSourceRegistry-InvalidAliasesRejected
+          - AgentControl-PackageSourceRegistry-NullDefinitionRejected
+          - AgentControl-PackageSourceRegistry-DefinitionsAreASnapshot
+          - AgentControl-PackageSourceRegistry-NoCrossSourceFallback
+        tests:
+          - PackageSourceRegistry_PinToSourceB_SamePackageIdAtBothSources_OnlyBIsContacted
+          - PackageSourceRegistry_Resolve_MissingAliasWithSingleConfiguredSource_DoesNotFallBack
+
+      - id: AgentControl-AgentPackageManagement-ZipFolderSource
+        title: >-
+          The AgentPackageManagement subsystem shall offer the packages and versions found in a
+          folder of zip packages, and supply a chosen package's content, only from the
+          configured folder, reporting a folder that cannot be used in a documented way and
+          honoring cancellation.
+        justification: |
+          The zip package folder is the original, still supported source type; exposing it
+          through the common source contract lets it sit beside other source types without any
+          change to how its packages are named, discovered or compared. The folder is often a
+          network share, so a problem with it must be reported in a way callers can rely on and
+          a user's cancellation must be honored.
+        children:
+          - AgentControl-ZipFolderSourceProvider-ListAndAcquire
+          - AgentControl-ZipFolderSourceProvider-ListPackageNames
+          - AgentControl-ZipFolderSourceProvider-AcquireContent
+          - AgentControl-ZipFolderSourceProvider-FolderErrorsNormalized
+          - AgentControl-ZipFolderSourceProvider-CancellationObserved
+          - AgentControl-ZipFolderSourceProvider-AcquireOnlyFromOwnSource
+          - AgentControl-ZipFolderSourceProvider-ZipMustBeInOwnFolder
+          - AgentControl-ZipFolderSourceProvider-RefusesLinkedZipOutsideFolder
+          - AgentControl-ZipFolderSourceProvider-AllowsLinkedZipInsideFolder
+          - AgentControl-ZipFolderSourceProvider-ValidateDefinition
+        tests:
+          - ZipFolderSourceProvider_ListVersions_MixedFolder_ReturnsMatchingPackagesStampedWithAlias
+          - ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReturnsReaderOverZipRoot
+
+      - id: AgentControl-AgentPackageManagement-NuGetFolderSource
+        title: >-
+          The AgentPackageManagement subsystem shall offer the versions of the configured
+          packages found in a NuGet package folder, and supply a chosen version's content from
+          the package's content folder, keeping everything it creates in AgentControl's own
+          storage and never in, or influenced by, the target repo, and honoring cancellation
+          before it does any work.
+        justification: |
+          Agent information must never be written into the target repo's NuGet configuration,
+          and a repo's own NuGet settings must not be able to redirect where AgentControl reads
+          or stores packages, so each NuGet source is accessed through storage that AgentControl
+          alone owns. A folder feed is often a network share, so a canceled request must not
+          wait on it or leave anything behind.
+        children:
+          - AgentControl-NuGetSourceProvider-ListVersions
+          - AgentControl-NuGetSourceProvider-ListVersionsUnknownPackageIsEmpty
+          - AgentControl-NuGetSourceProvider-ListVersionsMissingFolderReported
+          - AgentControl-NuGetSourceProvider-ListPackageIds
+          - AgentControl-NuGetSourceProvider-CancellationHonoredBeforeSideEffects
+          - AgentControl-NuGetSourceProvider-AcquireToPrivateCache
+          - AgentControl-NuGetSourceProvider-PrivateCachePerSource
+          - AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder
+          - AgentControl-NuGetSourceProvider-RejectPackageWithoutContent
+          - AgentControl-NuGetSourceProvider-ExplicitCacheRoot
+          - AgentControl-NuGetSourceProvider-CacheRootMustBeAbsolute
+          - AgentControl-NuGetSourceProvider-NoRepoNuGetConfig
+          - AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration
+          - AgentControl-NuGetSourceProvider-ValidateLocation
+          - AgentControl-NuGetSourceProvider-RejectNonNuGetDefinition
+          - AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource
+        tests:
+          - NuGetSourceProvider_ListVersions_FolderFeedWithVersions_ReturnsAllVersionsStampedWithAlias
+          - NuGetSourceProvider_Acquire_ExistingPackage_ReturnsReaderOverContentFolder
+          - NuGetSourceProvider_ListAndAcquire_NeverTouchesRepoNuGetConfig
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerSource
+        title: >-
+          The AgentPackageManagement subsystem shall offer the versions of the configured
+          packages found on a NuGet package server, labeled with the source's alias, without
+          downloading any package, and offer none for a package the server does not carry.
+        justification: |
+          Teams publish agent packages to servers such as JFrog Artifactory or Azure Artifacts;
+          users pick a version from what the server holds, a version must always be traceable to
+          the source that offered it, and listing must stay cheap on a large server.
+        children:
+          - AgentControl-NuGetSourceProvider-ServerListAndAcquire
+          - AgentControl-NuGetSourceProvider-ServerListDoesNotDownload
+          - AgentControl-NuGetSourceProvider-ServerUnknownPackageIsEmpty
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_ListVersions_ReturnsVersionsWithoutDownloadingAndNoneForUnknownPackage
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerAcquire
+        title: >-
+          The AgentPackageManagement subsystem shall supply the content of a chosen version of a
+          package from a NuGet package server, downloaded from that server.
+        justification: |
+          A chosen version must reach the repo exactly as the server holds it, through the same
+          package contract as the other source types.
+        children:
+          - AgentControl-NuGetSourceProvider-ServerAcquire
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_Acquire_SuppliesContentOfChosenVersion
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerTransportPolicy
+        title: >-
+          The AgentPackageManagement subsystem shall use a NuGet package server only through an
+          https address of the server's service index, accepting plain http only when the source
+          explicitly allows it, and shall refuse, without repeating it, an address that is not
+          such an address or that embeds a credential.
+        justification: |
+          Plain http would send a sign-in across the network unprotected unless the user opted in
+          knowingly; an address that is not a service index would fail in a confusing way, and an
+          address that embeds a credential would put a secret where it is logged and stored.
+        children:
+          - AgentControl-NuGetSourceProvider-PlainHttpRefusedUnlessAllowed
+          - AgentControl-NuGetSourceProvider-ServerAddressMustBeServiceIndex
+          - AgentControl-NuGetSourceProvider-CredentialInAddressRefused
+          - AgentControl-NuGetSourceProvider-HttpsAddressAccepted
+          - AgentControl-PackageSourceRegistry-PlainHttpServerSourceRefused
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_Address_RefusedUnlessHttpsServiceIndexOrOptedInHttp
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerSignIn
+        title: >-
+          The AgentPackageManagement subsystem shall, for a NuGet package server that asks for
+          credentials, sign in only through the credential facilities it is given, using in this
+          order what the user's NuGet configuration holds for that address, a credential entered
+          or saved earlier, and only then asking the user - at most once per operation and only
+          after the server has refused the credentials tried before - and shall fail without
+          asking when no prompt is available.
+        justification: |
+          People who already keep credentials for a feed expect them to be used silently, a person
+          must not be asked repeatedly or before the silently available credentials have been
+          tried, and background work such as the upgrade check must never interrupt the user.
+        children:
+          - AgentControl-NuGetSourceProvider-SignInOrder
+          - AgentControl-NuGetSourceProvider-AskUserOnce
+          - AgentControl-NuGetSourceProvider-NonInteractiveLibrary
+          - AgentControl-NuGetSourceProvider-SavedSignIn
+          - AgentControl-NuGetSourceProvider-SavedSignInLookedUpOnce
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_NeedsSignIn_UsesSavedSignInOtherwiseAsksOnceAndReusesTheAnswer
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerCredentialRetention
+        title: >-
+          The AgentPackageManagement subsystem shall keep a credential entered for a NuGet package
+          server for the session only after the operation it was entered for has succeeded,
+          shall hand it to the user's own credential helper only when the user chose to remember
+          it and the operation succeeded, and shall forget - and remove from that helper - a
+          credential the server rejects.
+        justification: |
+          A credential that has not yet been shown to work must not be kept, one the user chose
+          not to keep must not be kept, and one that stopped working must not be offered again
+          and again.
+        children:
+          - AgentControl-NuGetSourceProvider-CredentialRememberedAfterSuccess
+          - AgentControl-NuGetSourceProvider-RejectedCredentialForgotten
+          - AgentControl-NuGetSourceProvider-RejectedSavedSignInRemoved
+          - AgentControl-NuGetSourceProvider-SignInSavedOnlyWhenChosen
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_Credentials_KeptOnlyAfterSuccessAndForgottenWhenRejected
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerOriginScoping
+        title: >-
+          The AgentPackageManagement subsystem shall offer a credential, and ask the user for
+          one, only on behalf of the NuGet package server's own origin, even when the server's
+          service index sends the client to resources on another host.
+        justification: |
+          A server's index decides where its package resources are, so a credential must never be
+          offered to, or asked for on behalf of, a host the user did not enter it for.
+        children:
+          - AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerFailures
+        title: >-
+          The AgentPackageManagement subsystem shall report each way a NuGet package server can
+          fail - it needs a sign-in, rejects the credential, the user cancels the sign-in, the
+          sign-in takes longer than the allowed time, the address does not answer as a NuGet
+          feed - as a distinct failure whose message names no secret or address path, and shall
+          honor cancellation by the caller during a sign-in without reporting a failure.
+        justification: |
+          The user must be told what to do - sign in, correct the address, try again - and a user
+          who cancels an operation has not met a problem; an abandoned sign-in dialog must not
+          hold an operation forever.
+        children:
+          - AgentControl-NuGetSourceProvider-ServerFailures
+          - AgentControl-NuGetSourceProvider-SignInTimeLimit
+          - AgentControl-NuGetSourceProvider-CallerCancellationNotAFailure
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_Failures_AreDistinctAndNameNeitherSecretNorPath
+          - AgentPackageManagementSubsystem_ServerSource_CallerCancelsWhileSigningIn_IsCancellationNotFailure
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerSecretSafety
+        title: >-
+          The AgentPackageManagement subsystem shall never let a password, token, authorization
+          header value or web-address query string reach the application log or an exception,
+          including its inner exception, during any NuGet package server sign-in flow, whether
+          it succeeds or fails.
+        justification: |
+          The diagnostic log is a plain file users attach to reports, and a raw library exception
+          kept as an inner exception would carry a secret to wherever it is later logged or shown.
+        children:
+          - AgentControl-NuGetSourceProvider-SecretsNotLogged
+          - AgentControl-NuGetSourceProvider-SecretsNotInExceptions
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_SignInFlows_NeverLogOrRaiseTheSecret
+
+      - id: AgentControl-AgentPackageManagement-SignedPackages
+        title: >-
+          The AgentPackageManagement subsystem shall, for a NuGet package folder or server source
+          that requires signed packages, supply only a package that carries a valid signature -
+          and, when the source pins a publisher's certificate, only one signed by that publisher -
+          checking it every time the package is supplied, whether it was just downloaded or is
+          already held in the source's private cache, so that a changed requirement or pin takes
+          effect at once; shall not let trust settings outside the source's own description widen
+          or narrow what the source accepts; shall report a refused package as a signature failure
+          in words that name the package and the source but no secret; and shall leave a package
+          that fails the check uninstalled.
+        justification: |
+          A package that is installed into a repo is instructions an AI agent will follow, so a
+          package from an untrusted publisher, or one tampered with in transit or on a share, is a
+          real attack; requiring a signature, ideally from one named publisher, lets an organization
+          decide who may publish to its sources. The check must not depend on whether the package
+          happened to be downloaded just now, and must not be weakened or strengthened by whatever
+          signers the user's machine happens to trust for other purposes. A zip package carries no
+          signature, so the requirement applies to NuGet sources only.
+        children:
+          - AgentControl-NuGetSourceProvider-RequireSigned
+          - AgentControl-NuGetSourceProvider-SignatureCheckedForCachedPackage
+          - AgentControl-NuGetSourceProvider-SignedPackageAccepted
+          - AgentControl-NuGetSourceProvider-UnsignedAcceptedWhenNotRequired
+          - AgentControl-NuGetSourceProvider-SignerPin
+          - AgentControl-NuGetSourceProvider-RepositoryCountersignatureNotAPin
+          - AgentControl-NuGetSourceProvider-ChangedPinAppliesToCachedPackages
+          - AgentControl-NuGetSourceProvider-GeneratedSignerConfiguration
+          - AgentControl-NuGetSourceProvider-NoSignerConfigurationWithoutRequirement
+          - AgentControl-NuGetSourceProvider-SignerTrustIsolated
+          - AgentControl-NuGetSourceProvider-SignatureFailureReported
+          - AgentControl-NuGetSourceProvider-SignatureFailureNamesPinnedPublisher
+          - AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused
+        tests:
+          # Subsystem tests: the registry resolving configured sources into providers. The
+          # signed-package test uses a real signed package downloaded from nuget.org and is
+          # skipped only where nuget.org cannot be reached or the machine lacks the trust roots
+          # the package needs; the others need no network. The cached-package re-check and the
+          # independence from the user's own NuGet settings are verified one level down, on the
+          # provider itself, and are evidence of the child requirements.
+          - AgentPackageManagementSubsystem_RequireSignedSource_UnsignedPackageRefusedWhileOpenSourceServesIt
+          - AgentPackageManagementSubsystem_SignedPackage_AcceptedWhenAnyOrAuthorPinnedAndRejectedWhenOtherPinned
+          - AgentPackageManagementSubsystem_UnreadableSignerFingerprint_SourceIsRefusedWhenResolved
+
+      - id: AgentControl-AgentPackageManagement-SignaturePlatformSupport
+        title: >-
+          The AgentPackageManagement subsystem shall know whether the current platform can verify
+          package signatures, shall refuse to list or supply packages from a source that requires
+          signed packages when it cannot - rather than skip the verification and install
+          unchecked packages - and shall give the same explanation wherever the requirement
+          cannot be honored.
+        justification: |
+          A signature requirement that is silently skipped is worse than none, because the user
+          believes packages are being checked; a settings file edited by hand can require
+          signatures on any machine, so the refusal must not depend on the settings dialog having
+          prevented it.
+        children:
+          - AgentControl-SignatureVerificationSupport-PlatformSupport
+          - AgentControl-SignatureVerificationSupport-SupportedOnWindows
+          - AgentControl-SignatureVerificationSupport-SupportedOnLinux
+          - AgentControl-SignatureVerificationSupport-SupportedOnMacOS
+          - AgentControl-SignatureVerificationSupport-FailClosedProbe
+          - AgentControl-SignatureVerificationSupport-RealChainProbe
+          - AgentControl-SignatureVerificationSupport-UnsupportedExplanation
+          - AgentControl-NuGetSourceProvider-FailClosedWithoutVerification
+          - AgentControl-NuGetSourceProvider-UnsupportedPlatformDoesNotAffectOpenSources
+        tests:
+          - AgentPackageManagementSubsystem_RequireSignedOnUnsupportedPlatform_SourceRefusesAndOthersWork

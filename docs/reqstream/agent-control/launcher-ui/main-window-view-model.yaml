@@ -91,7 +91,9 @@ sections:
           reappeared (was missing, now present) since it was last checked or whose
           GitExecutablePath setting changed, so it is not left showing a stale, indefinitely
           "not yet checked", or wrong-executable Pull-disabled state, without re-checking the
-          Git status of every other already-present, unchanged-executable repo.
+          Git status of every other already-present, unchanged-executable repo. It shall
+          refuse, leaving the current settings unchanged, updated settings whose package source
+          location embeds a credential, and updated settings that cannot be saved to disk.
         justification: |
           A settings change (e.g. a new package source path) must take effect immediately for
           subsequent upgrade checks, without discarding the developer's tracked repos. Because
@@ -112,3 +114,46 @@ sections:
           - MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately
           - MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus
           - MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus
+          - MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings
+          - MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive
+
+      - id: AgentControl-MainWindowViewModel-InvalidateChangedSources
+        title: >-
+          The MainWindowViewModel class shall, when settings are applied, discard the cached
+          package results of each package source that was edited or removed, and keep those of
+          sources that did not change.
+        justification: |
+          A cached answer for the old definition of a source must not be reused for the edited
+          one, yet unrelated sources (which may be slow network locations) should not be
+          queried again just because another source changed.
+        tests:
+          - MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache
+          - MainWindowViewModel_ApplySettings_OnlyEditedSourceIsInvalidated
+
+      - id: AgentControl-MainWindowViewModel-BackgroundUpgradeCheck
+        title: >-
+          The MainWindowViewModel class shall not read any package source while it is being
+          constructed, shall check every card's upgrade availability in the background when
+          asked, when a repo is added and after settings are applied - a few cards at a time,
+          with a source that cannot be read affecting only the cards pinned to it.
+        justification: |
+          Starting the window must not wait for package sources, which may be slow network
+          locations; one offline source must not hide the upgrade state of repos pinned to
+          other sources.
+        tests:
+          - MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins
+          - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked
+          - MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground
+
+      - id: AgentControl-MainWindowViewModel-ConnectionTestProvider
+        title: >-
+          The MainWindowViewModel class shall give the settings window's connection test a
+          package-source provider that signs in through the same session credentials and
+          sign-in dialog as the repo cards, so that a sign-in made during a test is remembered for
+          the session and not asked for again when a package is selected.
+        justification: |
+          A user who has typed a credential to test a server expects the application to remember
+          it for the session, and to ask exactly once, wherever the next use of the server
+          happens.
+        tests:
+          - MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials

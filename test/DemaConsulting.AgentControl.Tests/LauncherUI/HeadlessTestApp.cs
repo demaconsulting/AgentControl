@@ -51,7 +51,8 @@ public static class HeadlessTestApp
     public static void Run(Action action) => Session.Value.Dispatch(action, CancellationToken.None);
 
     /// <summary>
-    ///     Runs <paramref name="action"/> on the headless UI thread and waits for it to finish.
+    ///     Runs <paramref name="action"/> on the headless UI thread and waits for it to finish, so
+    ///     an assertion that fails inside it fails the calling test.
     /// </summary>
     /// <param name="action">The asynchronous UI test body.</param>
     public static void RunAsync(Func<Task> action) =>
@@ -59,5 +60,5 @@ public static class HeadlessTestApp
         {
             await action();
             return 0;
-        }, CancellationToken.None);
+        }, CancellationToken.None).GetAwaiter().GetResult();
 }

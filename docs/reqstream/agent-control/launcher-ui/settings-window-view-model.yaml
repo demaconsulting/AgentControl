@@ -1,8 +1,8 @@
 ---
 # Software Unit Requirements for the SettingsWindowViewModel Class
 #
-# SettingsWindowViewModel backs the settings dialog: the package source path, git executable
-# override, agent tool selection, and shell preference.
+# SettingsWindowViewModel backs the settings dialog: the list of package sources (add, edit and
+# remove), git executable override, agent tool selection, and shell preference.
 
 sections:
   - title: SettingsWindowViewModel Unit Requirements
@@ -34,13 +34,20 @@ sections:
       - id: AgentControl-SettingsWindowViewModel-Save
         title: >-
           The SettingsWindowViewModel class shall, on save, pass its current property values
-          to its owner and signal that settings were saved.
+          and its list of package sources to its owner and signal that settings were saved,
+          except that it shall refuse to save, showing an explanation, a package source
+          location that embeds a credential, and except that it shall keep the window open
+          showing the reason, without signaling a save, when its owner rejects the settings.
         justification: |
           Persisting settings and notifying the caller must happen together so the main window
           can immediately apply the new configuration (e.g. invalidate cached package
-          versions) after a save.
+          versions) after a save; a credential typed into a location must be stopped where the
+          user can correct it, because AgentControl never stores secrets; a failed save must
+          be explained where the user can react rather than escape as an unhandled error.
         tests:
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
+          - SettingsWindowViewModel_Save_SourceLocationWithEmbeddedCredential_IsRefusedWithErrorMessage
+          - SettingsWindowViewModel_SaveCommand_OnSaveThrowsInvalidOperation_ShowsErrorAndDoesNotRaiseSaved
 
       - id: AgentControl-SettingsWindowViewModel-ShellPreferencePresets
         title: >-
@@ -56,3 +63,80 @@ sections:
           - SettingsWindowViewModel_AvailableShellPreferences_IsNonEmptyWithBlankFirstEntry
           - SettingsWindowViewModel_AvailableShellPreferences_NoDuplicateEntries
           - SettingsWindowViewModel_AvailableShellPreferences_CurrentOs_ContainsExpectedPresets
+
+      - id: AgentControl-SettingsWindowViewModel-SourceList
+        title: >-
+          The SettingsWindowViewModel class shall list every configured package source in order
+          with its alias, kind and location - presenting a previously configured single
+          package-source folder as the source named Default - and shall show, without blocking
+          the caller, whether each source's folder can currently be found, treating a folder
+          that cannot be examined as not found and abandoning checks still running when the
+          window is disposed, and shall show a server source as not checked instead of
+          contacting it.
+        justification: |
+          A developer must see what is configured and whether it is usable at a glance; a folder
+          check against a network share that does not answer must never freeze the window, and
+          a server that may need a sign-in must not be contacted just to draw the list.
+        tests:
+          - SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder
+          - SettingsWindowViewModel_Constructor_NoSources_ReportsHasNoSources
+          - SettingsWindowViewModel_Constructor_FolderCheckSlow_ShowsCheckingThenResultWithoutBlocking
+          - SettingsWindowViewModel_FolderCheck_MissingOrFailing_ShowsMissing
+          - SettingsWindowViewModel_Dispose_CancelsPendingFolderChecks
+          - SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt
+
+      - id: AgentControl-SettingsWindowViewModel-AddSource
+        title: >-
+          The SettingsWindowViewModel class shall let the user add a zip-package folder source,
+          a NuGet-package folder source or a NuGet-package server source, keeping the package IDs
+          of a NuGet source.
+        justification: |
+          Sources are added over time, and a NuGet source that lost its package IDs on being added
+          would offer nothing.
+        tests:
+          - SettingsWindowViewModel_AddCommands_RaiseEditorRequestedForNewSourceOfEachKind
+          - SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource
+          - SettingsWindowViewModel_AddNuGetFolderSource_EditorSaved_KeepsPackageIds
+          - SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor
+
+      - id: AgentControl-SettingsWindowViewModel-EditSource
+        title: >-
+          The SettingsWindowViewModel class shall let the user edit the selected source in place,
+          keeping its alias, and shall carry settings it does not show through the edit unchanged.
+        justification: |
+          Sources are corrected over time, but repos pin to a source by alias, so an edit must never
+          rename it or lose settings that are managed elsewhere.
+        tests:
+          - SettingsWindowViewModel_EditSource_EditorSaved_ReplacesSourceInPlaceKeepingAlias
+          - SettingsWindowViewModel_EditServerSource_OpensServerEditorThatTestsThroughTheFactory
+
+      - id: AgentControl-SettingsWindowViewModel-RemoveSource
+        title: >-
+          The SettingsWindowViewModel class shall let the user remove the selected source, and
+          shall describe - before the removal - how many repos are pinned to it and that they will
+          show a package source problem.
+        justification: |
+          Removing a source that repos are pinned to is allowed (the pin is the repos' own record)
+          but the developer must be told what will happen to those repos first.
+        tests:
+          - SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource
+          - SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves
+
+      - id: AgentControl-SettingsWindowViewModel-SaveResultingSources
+        title: >-
+          The SettingsWindowViewModel class shall, on save, pass the sources that result from the
+          user's additions, edits and removals to its owner in their listed order.
+        justification: |
+          What the developer sees in the list after changing it is what must be persisted.
+        tests:
+          - SettingsWindowViewModel_Save_AfterAddEditRemove_WritesResultingSourcesInOrder
+
+      - id: AgentControl-SettingsWindowViewModel-AliasUnique
+        title: >-
+          The SettingsWindowViewModel class shall refuse a new source whose alias equals an
+          already configured alias when compared ignoring case.
+        justification: |
+          Repos pin to a source by alias, so two sources with the same alias would make a pin
+          ambiguous.
+        tests:
+          - SettingsWindowViewModel_AddSource_AliasAlreadyConfiguredIgnoringCase_EditorCannotSave

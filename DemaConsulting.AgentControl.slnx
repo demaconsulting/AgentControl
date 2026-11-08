@@ -7,9 +7,13 @@
       <Build Solution="Release|Any CPU" Project="true" />
     </Project>
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/DemaConsulting.AgentControl.Puppet/DemaConsulting.AgentControl.Puppet.csproj" />
+  </Folder>
   <Folder Name="/test/">
     <Project Path="test/DemaConsulting.AgentControl.Tests/DemaConsulting.AgentControl.Tests.csproj" />
     <Project Path="test/DemaConsulting.AgentControl.UiTests/DemaConsulting.AgentControl.UiTests.csproj" />
+    <Project Path="test/DemaConsulting.AgentControl.Puppet.Tests/DemaConsulting.AgentControl.Puppet.Tests.csproj" />
     <Project Path="test/DemaConsulting.AgentControl.ArgLoggerStub/DemaConsulting.AgentControl.ArgLoggerStub.csproj" />
   </Folder>
 </Solution>

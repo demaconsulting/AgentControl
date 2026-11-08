@@ -51,7 +51,8 @@ startup-time failures are also captured on disk — then sets `App.Options` and 
 Once `StartWithClassicDesktopLifetime` returns (i.e. the desktop lifetime has shut down
 normally), logs an `Information`-level "AgentControl terminating normally" entry, symmetric
 with the startup log entry, before returning 0. Any unhandled exception escaping the desktop
-lifetime is logged at `Critical` and wrapped in an `InvalidOperationException` before being
+lifetime is logged at `Critical` with its secrets removed (see Error Handling) and wrapped in an
+`InvalidOperationException` before being
 rethrown; a `finally` block always calls `Log.CloseAndFlush()` so buffered log entries are
 not lost.
 
@@ -81,15 +82,24 @@ directly.
 Calls `SettingsStore.Load(Options?.ConfigDirectory)` so the launcher window opens with the
 user's recent repos and preferences already populated, constructs a `MainWindowViewModel`
 from the loaded settings and `Options`, and assigns the new `MainWindow` as the desktop
-lifetime's main window.
+lifetime's main window. It also creates the process-wide credential facilities handed to the
+`MainWindowViewModel`: one `SessionCredentialStore` (cleared when the desktop lifetime exits), the sign-in dialog
+(`AvaloniaCredentialPrompt`) and a `GitCredentialClient` that reaches the user's Git credential helper through the
+git executable resolved on every call in the same order as every other git call (the per-user setting, else the
+startup override, else `git`). This is the only place `GitIntegration` and `PackageCredentials` meet
+(`AgentControl-System-CredentialSafety`).
 
 ### Error Handling
 
 `Main` treats `ArgumentException` from `StartupOptions.Parse` as an expected error: its
 message is written to stderr and 1 is returned without a stack trace or starting the UI. Any
-other unhandled exception that escapes the desktop lifetime is logged at `Critical` via
-`AppLogging.Factory` before being wrapped in an `InvalidOperationException` and rethrown —
-wrapped rather than a bare rethrow so the exception carries explicit contextual information
+other unhandled exception that escapes the desktop lifetime is logged at `Critical` before being
+wrapped in an `InvalidOperationException` and rethrown — through `Program.ReportStartupFailure`,
+which writes via a `SecretRedactingLogger` (`PackageCredentials` subsystem) so the entry holds only
+a sanitized stand-in with the redacted type name, message chain and stack trace, never the raw
+exception, and which also uses that sanitized stand-in as the wrapper's inner exception
+(`AgentControl-Program-StartupFailureRedacted`, supporting `AgentControl-System-CredentialSafety`).
+It is wrapped rather than a bare rethrow so the exception carries explicit contextual information
 about where it was caught. The `finally` block's `Log.CloseAndFlush()` call runs regardless
 of how `Main` exits, guaranteeing buffered diagnostic log entries are always written.
 `App.OnFrameworkInitializationCompleted` does not itself catch exceptions; any failure during
@@ -103,11 +113,17 @@ handler.
 - **LoggingSetup**, **AppLogging** (`Logging` subsystem) — `Program.Main` calls
   `LoggingSetup.Initialize` before the Avalonia app builder runs, and uses
   `AppLogging.Factory` to log startup information and unhandled exceptions.
+- **SecretRedactingLogger**, **SecretRedactor** (`PackageCredentials` subsystem) —
+  `Program.ReportStartupFailure` logs an escaping exception through the redacting logger and
+  wraps its sanitized stand-in.
 - **SettingsStore** (`Settings` subsystem) — `App.OnFrameworkInitializationCompleted` calls
   `SettingsStore.Load` to populate the launcher window's initial state.
 - **MainWindowViewModel**, **MainWindow** (`LauncherUI` subsystem) — `App` constructs the
   view-model from loaded settings and options, and assigns the window as the desktop
   lifetime's main window.
+- **SessionCredentialStore**, **PackageCredentialContext** (`PackageCredentials` subsystem),
+  **AvaloniaCredentialPrompt** (`LauncherUI`), **GitCredentialClient** (`GitIntegration`) — `App` creates them and
+  hands the context to the view-model; the store is cleared at exit.
 - **Serilog** (OTS) — `Program.Main`'s `finally` block calls `Log.CloseAndFlush()` to flush
   the diagnostic log pipeline configured by `LoggingSetup`. See `docs/design/ots/serilog.md`.
 - **Avalonia** (OTS) — `BuildAvaloniaApp` configures the `AppBuilder`, and `App` derives from

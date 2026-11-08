@@ -1,29 +1,29 @@
 ---
 # Software Unit Requirements for the PackageVersionCache Class
 #
-# PackageVersionCache memoizes PackageSource scan results per source folder so repeated
-# refreshes (e.g. across multiple repo cards sharing one package source) do not repeatedly
-# re-scan the filesystem.
+# PackageVersionCache memoizes what each configured package source offers, keyed by source alias
+# and package ID, so repeated refreshes (e.g. across multiple repo cards sharing one package
+# source) do not repeatedly re-query the source.
 
 sections:
   - title: PackageVersionCache Unit Requirements
     requirements:
       - id: AgentControl-PackageVersionCache-CachePackageNames
         title: >-
-          The PackageVersionCache class shall cache the package names discovered at a source
-          folder and reuse that cached result on repeated calls without re-scanning, until
+          The PackageVersionCache class shall cache the package names offered by a source and
+          reuse that cached result on repeated calls without querying the source again, until
           invalidated.
         justification: |
           Multiple repo cards commonly share the same configured package source; caching
-          avoids redundant filesystem scans on every UI refresh.
+          avoids redundant source queries on every UI refresh.
         tests:
-          - PackageVersionCache_GetPackageNames_RepeatedCall_ReturnsCachedResultWithoutRescanning
+          - PackageVersionCache_GetPackageIds_RepeatedCall_ReturnsCachedResultWithoutRescanning
 
       - id: AgentControl-PackageVersionCache-CacheVersions
         title: >-
           The PackageVersionCache class shall cache a package's descending version list and
-          reuse it on repeated calls without re-scanning, and shall throw when the source
-          folder does not exist and no cached result is available.
+          reuse it on repeated calls without querying the source again, and shall throw when a
+          source folder does not exist and no cached result is available.
         justification: |
           Version-list lookups for the package-selection window are frequent; caching avoids
           redundant scans, while an invalid uncached source folder must still be reported
@@ -48,10 +48,39 @@ sections:
       - id: AgentControl-PackageVersionCache-Invalidate
         title: >-
           The PackageVersionCache class shall discard all cached package name and version
-          results when invalidated, forcing the next call to re-scan the source folder.
+          results when invalidated, forcing the next call to query the source again.
         justification: |
-          When the configured package source path itself changes (a settings update), any
-          previously cached scan results become stale and must not continue to be served.
+          When the configured package sources change (a settings update), any previously
+          cached results become stale and must not continue to be served.
         tests:
           - PackageVersionCache_Invalidate_ForcesReEnumeration
           - PackageVersionCache_Invalidate_ClearsPackageNamesAndVersionsDescendingCaches
+
+      - id: AgentControl-PackageVersionCache-KeyedBySource
+        title: >-
+          The PackageVersionCache class shall cache results per source alias and package ID, so
+          the same package ID offered by two sources is cached and returned separately for each,
+          and shall report an error for an alias that is not configured instead of returning
+          cached data.
+        justification: |
+          A package ID is not unique across sources; a result fetched from one source must never
+          be served for another, or an upgrade check could compare a repo against the wrong
+          source's versions.
+        tests:
+          - PackageVersionCache_SamePackageIdInTwoSources_CachedPerSourceAlias
+          - PackageVersionCache_UnknownAlias_ThrowsUnknownSourceExceptionWithoutContactingOtherSources
+          - PackageVersionCache_PinWithRevisionOrMetadata_ComparedByVersionNotTreatedAsUnparsable
+          - PackageVersionCache_NoPackagesFound_ReturnsNoUpgradeAndNoLatest
+
+      - id: AgentControl-PackageVersionCache-InvalidateBySource
+        title: >-
+          The PackageVersionCache class shall be able to discard the cached results of a single
+          source, leaving other sources' results cached, and shall not let a query that was
+          already in flight for that source repopulate the cache with its stale result.
+        justification: |
+          Editing or removing one source must not force every other source to be queried again
+          (they may be slow network locations), and a late answer from the old definition of a
+          source must not be mistaken for the new one.
+        tests:
+          - PackageVersionCache_InvalidateSingleSource_LeavesOtherSourcesCached
+          - PackageVersionCache_InvalidateDuringInFlightFetch_DoesNotCacheStaleResult
