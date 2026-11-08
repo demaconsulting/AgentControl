@@ -966,8 +966,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
         const uint offsetBasis = 2166136261;
         const uint prime = 16777619;
 
+        // Both separators are trimmed on every OS (not Path.DirectorySeparatorChar) so a repo
+        // keeps the same color on every machine, however its path was typed
         var normalized = repoPath
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .TrimEnd('\\', '/')
             .ToUpperInvariant();
         var hash = offsetBasis;
         foreach (var character in normalized)
