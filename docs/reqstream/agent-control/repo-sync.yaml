@@ -45,6 +45,7 @@ sections:
           A repo can contain links the developer did not intend a sync to follow; replacing
           managed folders through one would delete or overwrite files outside the repository.
         children:
+          - AgentControl-PackageZipExtractor-RefuseLinkedRepoFolders
           - AgentControl-PackageContentExtractor-RefuseLinkedRepoFolders
           - AgentControl-PackageContentExtractor-ManagedFoldersExist
           - AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink

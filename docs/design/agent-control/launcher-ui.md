@@ -57,7 +57,8 @@ shown in the main window.
   event (`LaunchRecorded`, `SelectPackageRequested`, `ReleaseNotesReady`,
   `AgentsMdTemplateOfferRequested`, `ErrorOccurred`, `RemoveRequested`) reporting the outcome.
   An asynchronous command ignores a second request while it runs and can be cancelled through
-  `CancelOperationCommand` (`AgentControl-LauncherUI-ResponsiveOperations`). The card also
+  `CancelOperationCommand` (`AgentControl-LauncherUI-OneOperationPerRepo`,
+  `AgentControl-LauncherUI-CancelOperation`, `AgentControl-LauncherUI-OperationProgress`). The card also
   exposes the chip properties (package, upgrade, branch, status) the view binds to
   (`AgentControl-LauncherUI-RepoCardChips`, `AgentControl-LauncherUI-StatusBadges`).
 - *Constraints*: Never mutates state before a required confirmation (see `RemoveRequest`
@@ -91,7 +92,8 @@ definition, and tests a server source's connection.
 - *Contract*: `SaveCommand` is executable only while the alias, location and (for a NuGet source) package
   identifiers are valid - for a server, an `https` address ending in `index.json`, or `http` only while
   "Allow insecure HTTP" is ticked; it raises `Saved` with the resulting source definition for the settings
-  view model to add to or replace in its list (`AgentControl-LauncherUI-PackageSources`).
+  view model to add to or replace in its list (`AgentControl-LauncherUI-PackageSourceValidation`,
+  `AgentControl-LauncherUI-AddPackageSource`, `AgentControl-LauncherUI-EditPackageSource`).
   `TestConnectionCommand` lists the versions of the first package ID, with progress and a Cancel action, and
   reports a plain-language result; it may open the sign-in dialog (`AgentControl-LauncherUI-TestConnection`).
 - *Constraints*: The alias of an existing source cannot be changed. The test saves nothing.
@@ -103,7 +105,8 @@ definition, and tests a server source's connection.
 - *Contract*: Returns the answer the user gave in the sign-in dialog - the credential they typed and whether
   they ticked "Remember on this computer" - or no answer when the user
   cancels or the dialog is closed; cancelling the supplied token closes the dialog
-  (`AgentControl-LauncherUI-SignIn`, `AgentControl-LauncherUI-RememberSignIn`).
+  (`AgentControl-LauncherUI-SignIn`, `AgentControl-LauncherUI-SignInCancelsWithOperation`,
+  `AgentControl-LauncherUI-RememberSignIn`).
 - *Constraints*: See *Sign-in dialog* in the design below.
 
 **SourceEditorViewModel signature options and ForgetSavedSignInCommand**: The "Package signatures" section of
@@ -157,7 +160,8 @@ existing pin. It shows three columns - source, package, version. Selecting a sou
 source's package names from `PackageVersionCache` in the background, with a progress indicator
 and cancellation; a source that cannot be read shows its error inline, with a **Retry** button that reads
 only that source (or, when only a package's versions failed, only those) again, and never blocks the other
-sources (`AgentControl-LauncherUI-ResponsiveOperations`). A source whose folder is missing is explained in
+sources (`AgentControl-LauncherUI-ResponsiveOperations`, `AgentControl-LauncherUI-SourceFailureIsolation`,
+`AgentControl-LauncherUI-RetryFailedRead`). A source whose folder is missing is explained in
 words, naming the folder; until a package is selected the version column says "Select a package to see its
 versions." (`ShowVersionsHint`); each source row has a UI Automation name made of its alias, kind and status
 (`AutomationName`). Selecting a package lists its versions in
@@ -185,7 +189,8 @@ its Save command stays disabled while anything is invalid. For a server it also 
 the result in words (*Connection OK* with the version count and newest; *Sign-in failed*; *Sign-in canceled*;
 *Package not found*; *Timed out*; *Server unreachable*; *Connection failed*), and shows example addresses for
 JFrog Artifactory and Azure Artifacts
-(`AgentControl-LauncherUI-TestConnection`, `AgentControl-LauncherUI-PackageSources`). For a NuGet source it also
+(`AgentControl-LauncherUI-TestConnection`, `AgentControl-LauncherUI-ServerSourceEditor`,
+`AgentControl-LauncherUI-InsecureHttpChoice`). For a NuGet source it also
 offers the **Package signatures** section: a "Require signed packages" checkbox (off by default; disabled, with
 its tooltip shown even though it is disabled, where `SignatureVerificationSupport` says signatures cannot be
 verified) with help text that explains the limit of requiring signatures without a pinned publisher, and a
@@ -206,7 +211,8 @@ while one runs. Upgrade availability is determined by a separate background chec
 (`RefreshUpgradeStatusAsync`, where a newer check supersedes an older one), which
 `MainWindowViewModel` starts a few cards at a time after construction, after a repo is added
 and after settings are applied, so that one slow or unreachable source delays only the cards
-pinned to it (`AgentControl-LauncherUI-ResponsiveOperations`). That background check never opens the
+pinned to it (`AgentControl-LauncherUI-ResponsiveOperations`, `AgentControl-LauncherUI-SourceFailureIsolation`,
+`AgentControl-LauncherUI-StaleResultsDiscarded`). That background check never opens the
 sign-in dialog (`RefreshUpgradeStatusAsync` defaults to `allowPrompt: false`): for a server it uses the
 credentials already typed this session or saved with the user's Git credential helper (read without any dialog)
 and otherwise sets the card's source problem to say a sign-in is
@@ -216,7 +222,8 @@ needed and to use the card's menu > Refresh, which is a check the user started a
 **Sign-in dialog.** When a NuGet server needs credentials for something the user started - Select Package,
 Upgrade, Refresh, or the editor's Test connection - the `PackageCredentials` subsystem calls
 `ICredentialPrompt`, which `AvaloniaCredentialPrompt` implements
-(`AgentControl-LauncherUI-SignIn`). The NuGet library asks on worker threads while a window can only be shown
+(`AgentControl-LauncherUI-SignIn`, `AgentControl-LauncherUI-SignInPlacement`). The NuGet library asks on worker
+threads while a window can only be shown
 on the UI thread, so each question is marshalled with `Dispatcher.UIThread.InvokeAsync` and the caller awaits
 asynchronously, which means an operation started from a UI-thread command cannot deadlock against its own
 dialog. Questions are serialized with a `SemaphoreSlim` gate, so if two sources need a sign-in at once the

@@ -69,7 +69,7 @@ covering `AgentControl-PackageCredentials-KeptOnlyAfterSuccess`,
 kept for two servers and the store is cleared, as the application does when it exits; no credential is found
 for either server and the next operation on each asks the user. This scenario is tested by
 `PackageCredentials_ClearedSessionStore_ForgetsEveryCredentialAndTheNextOperationAsksAgain`, covering
-`AgentControl-PackageCredentials-ForgottenAtExit`. (A test still to be written.)
+`AgentControl-PackageCredentials-ForgottenAtExit`.
 
 **PackageCredentials_CredentialForOneFeed_IsNeverOfferedToAnotherOrigin**: A credential is remembered for one
 server; a callback for a different server finds nothing and may not ask, and a callback for the first server
@@ -111,16 +111,16 @@ covering `AgentControl-PackageCredentials-SavedCredentialUsedWithoutAsking`.
 
 **PackageCredentials_RememberNotTickedOrOperationNotSucceeded_NothingIsSavedInTheUsersStore**: The user signs
 in without ticking "Remember" and the operation succeeds - nothing is handed to the user's credential store;
-the user ticks "Remember" but the operation is rejected or released - nothing is handed to it either. This
+the user ticks "Remember" but the operation is rejected - nothing is handed to it either. This
 scenario is tested by `PackageCredentials_RememberNotTickedOrOperationNotSucceeded_NothingIsSavedInTheUsersStore`,
 covering `AgentControl-PackageCredentials-NeverRememberUnasked` and
-`AgentControl-PackageCredentials-RememberOnlyAfterSuccess`. (A test still to be written.)
+`AgentControl-PackageCredentials-RememberOnlyAfterSuccess`.
 
 **PackageCredentials_PromptRequest_OffersRememberOnlyWhenTheUsersStoreCanKeepIt**: The question the callback
 puts to the prompt says the sign-in can be remembered only when the user's credential store applies to the
 server, and says it cannot with no store or when the store reports that no helper is available. This scenario is
 tested by `PackageCredentials_PromptRequest_OffersRememberOnlyWhenTheUsersStoreCanKeepIt`, covering
-`AgentControl-PackageCredentials-RememberOfferedOnlyWhenPossible`. (A test still to be written; the sign-in
+`AgentControl-PackageCredentials-RememberOfferedOnlyWhenPossible`. (The sign-in
 dialog's presentation of an unavailable choice - shown disabled, with an explanation - is verified at the
 `LauncherUI` level.)
 
@@ -128,13 +128,13 @@ dialog's presentation of an unavailable choice - shown disabled, with an explana
 server start together with nothing in the session store and a credential saved in the user's credential store;
 the store is asked once and every operation uses the saved credential. This scenario is tested by
 `PackageCredentials_ConcurrentOperationsOnOneServer_LookUpTheSavedCredentialOnce`, covering
-`AgentControl-PackageCredentials-SavedCredentialLookedUpOnce`. (A test still to be written.)
+`AgentControl-PackageCredentials-SavedCredentialLookedUpOnce`.
 
 **PackageCredentials_RejectedSavedCredential_IsRemovedFromTheUsersStoreAndTheNextSessionAsks**: A credential
 found in the user's credential store is offered and the server rejects it; it is removed from the user's
 credential store and the session store, and the next session asks the user. This scenario is tested by
 `PackageCredentials_RejectedSavedCredential_IsRemovedFromTheUsersStoreAndTheNextSessionAsks`, covering
-`AgentControl-PackageCredentials-RejectedSavedCredentialRemoved`. (A test still to be written.)
+`AgentControl-PackageCredentials-RejectedSavedCredentialRemoved`.
 
 **PackageCredentials_LateRejectionOfAnOldCredential_KeepsTheNewerRememberedCredential**: An operation holds a
 saved credential; before the server's rejection of it arrives, the user signs in again and a newer credential

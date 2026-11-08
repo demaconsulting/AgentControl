@@ -176,6 +176,48 @@ public sealed class NuGetServerSourceTests
         {
             Assert.DoesNotContain(FeedPassword, ReadSharedText(file), StringComparison.Ordinal);
         }
+
+        // Assert: nor is it anywhere in the target repo
+        foreach (var file in Directory.EnumerateFiles(context.RepoPath, "*", SearchOption.AllDirectories))
+        {
+            Assert.DoesNotContain(FeedPassword, ReadSharedText(file), StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    ///     A repo pinned to a server that needs a sign-in never gets a sign-in dialog from the
+    ///     background upgrade check: the card says a sign-in is needed instead, and the server
+    ///     receives no credential.
+    /// </summary>
+    [Fact]
+    public async Task RepoCard_PinnedToServerNeedingSignIn_BackgroundCheckNeverOpensSignInDialog()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        const string packageName = "contoso-agents";
+        await using var feed = await MockNuGetFeed.StartAsync();
+        feed.AddPackage(packageName, "2.0.0");
+        feed.RequiredUser = FeedUser;
+        feed.RequiredPassword = FeedPassword;
+        using var context = new AgentControlTestContext(
+            pinnedPackageName: packageName,
+            pinnedPackageVersion: "1.0.0",
+            nuGetPackageIds: [packageName],
+            pinnedSource: "Server",
+            nuGetServerIndexUrl: feed.IndexUrl);
+
+        // Act: start the application; the background check of the pinned server runs on its own
+        var mainWindow = context.Launch();
+
+        // Assert: the card says a sign-in is needed
+        Assert.True(WaitForText(mainWindow, "SourceProblemBadge", "Sign-in needed"));
+
+        // Assert: no sign-in dialog opened for work the user did not start
+        Assert.Null(context.WaitForWindowWithDescendant("CredentialPromptUserNameTextBox", TimeSpan.FromSeconds(2)));
     }
 
     /// <summary>

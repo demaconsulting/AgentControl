@@ -55,11 +55,11 @@ Each repo card shows:
 - The repo's name (its folder name) and, in smaller muted text below, its full path (hover for the
   full text if it is shortened)
 - A row of **chips** — small rounded labels, each with a hover tooltip that explains it in full
-  (see [Reading the Chips](#reading-the-chips) below)
+  (see *Reading the Chips* below)
 - A favorite star toggle, letting you pin specific repos above the default
   most-recently-launched sort order
-- A **Launch** button labelled with your agent tool (see [Launching](#launching))
-- A **Git Pull** button (see [Pulling Changes](#pulling-changes))
+- A **Launch** button labelled with your agent tool (see *Launching*)
+- A **Git Pull** button (see *Pulling Changes*)
 - A "..." menu offering Refresh, **Select Package...** or **Upgrade** (mutually exclusive —
   see below), and Remove
 - A manual **Refresh** action that re-checks the repo's git state and committed-agent-files
@@ -103,7 +103,7 @@ itself).
   offered and no other source is ever used instead; restore the source with the same alias in
   Settings to resolve it.
 - **Sign-in needed** (red) — the repo is pinned to a server that needs a sign-in, and the background check
-  never asks. Use the card's "..." menu > **Refresh** to sign in (see [Signing In](#signing-in)).
+  never asks. Use the card's "..." menu > **Refresh** to sign in (see *Signing In*).
 
 Below the chips, a card shows the outcome of the last action you started on it - for example the reason a
 **Git Pull** failed - in small text under the repo's path (hover for the full text).
@@ -120,7 +120,7 @@ Settings. Three kinds of source are supported:
   the **package IDs** it offers.
 - **NuGet-package server** — a NuGet feed served over the web, such as JFrog Artifactory or Azure
   Artifacts. You give its **feed address** and, as for a folder, the **package IDs** you want from it.
-  A server may need you to sign in (see [Signing In](#signing-in)).
+  A server may need you to sign in (see *Signing In*).
 
 Each source has an **alias**, the short name shown in the app and recorded in a repo's pin.
 
@@ -128,7 +128,7 @@ Each source has an **alias**, the short name shown in the app and recorded in a 
 
 1. Open Settings (the gear icon) and, in the **Package sources** list, click **Add Zip-Package
    Folder**, **Add NuGet-Package Folder** or **Add NuGet-Package Server** (see
-   [Adding a NuGet-Package Server](#adding-a-nuget-package-server) for the last one).
+   *Adding a NuGet-Package Server* for the last one).
 2. Type an **alias**. It must be unique (letters are compared ignoring case) and cannot be
    changed later, because repo pins refer to it.
 3. For a folder, enter the **location** as a full folder path, or use **Browse** to pick the
@@ -136,7 +136,7 @@ Each source has an **alias**, the short name shown in the app and recorded in a 
    (a web address is a server, which has its own button).
 4. For a NuGet-package folder, enter each package ID and click **Add**; at least one is required.
    A NuGet source (folder or server) also has a **Package signatures** section, where you can require signed
-   packages (see [Requiring Signed Packages](#requiring-signed-packages)).
+   packages (see *Requiring Signed Packages*).
 5. Messages under each field say what is wrong, and **Save** stays disabled until everything is
    valid. Then save the source, and save the Settings window to keep the change.
 
@@ -171,17 +171,19 @@ Click **Add NuGet-Package Server**. The dialog is a stack of titled sections - *
   listed cheaply, so you name the packages. Package IDs use the same names as the NuGet packages
   themselves.
 - **Sign-in** — explains when AgentControl asks you to sign in and holds **Forget saved sign-in** (see
-  [Remembering a Sign-In](#remembering-a-sign-in)).
-- **Package signatures** — see [Requiring Signed Packages](#requiring-signed-packages).
-- **Connection test** — see [Testing the Connection](#testing-the-connection).
+  *Remembering a Sign-In*).
+- **Package signatures** — see *Requiring Signed Packages*.
+- **Connection test** — see *Testing the Connection*.
 
 ## Testing the Connection
 
 Before saving a server, click **Test connection**. It becomes available once the address is
 acceptable and at least one package ID is listed. AgentControl asks the server for the versions of
-the **first** package ID in your list - it reads only the version list, downloads nothing and saves
-nothing. While it works you see progress and a **Cancel test** button (separate from the dialog's own
-**Cancel**; a server that has to refuse a
+the **first** package ID in your list - it reads only the version list and downloads no package, and it
+saves no package or source setting. A sign-in you type during the test is handled as for any other
+sign-in: kept for this session, and saved by your Git credential helper only if you tick the
+remember option (see *Signing In* and *Remembering a Sign-In*). While it works you see progress and a
+**Cancel test** button (separate from the dialog's own **Cancel**; a server that has to refuse a
 credential first can take several seconds to answer). The result tells you in words what happened:
 
 - **Connection OK** — the server answered and has the package; the number of versions found and the
@@ -191,7 +193,7 @@ credential first can take several seconds to answer). The result tells you in wo
 - **Sign-in canceled** — you closed the sign-in dialog without signing in.
 - **Package not found** — the server answered, but it has no package with that ID. Check the ID, and
   that your account may see it.
-- **Timed out** — signing in took longer than the allowed time (see [Signing In](#signing-in)).
+- **Timed out** — signing in took longer than the allowed time (see *Signing In*).
 - **Server unreachable** — the server could not be reached, or the address did not answer as a NuGet
   feed. Check that the address ends in `index.json` and that the server is reachable from your
   machine.
@@ -286,7 +288,7 @@ window you were using. It shows:
   access token as the password);
 - the sentence **"Used for this session only - AgentControl does not save it."**;
 - a **"Remember on this computer (saved by your Git credential helper)"** checkbox, unticked by default
-  (see [Remembering a Sign-In](#remembering-a-sign-in)). Ticking it changes the sentence to **"Saved by your
+  (see *Remembering a Sign-In*). Ticking it changes the sentence to **"Saved by your
   Git credential helper on this computer - AgentControl does not store it."**
 
 **Sign in** is enabled only when both boxes are filled. **Cancel**, pressing Escape or closing the
@@ -378,19 +380,20 @@ For a server, AgentControl looks for credentials in this order and asks you only
      <packageSourceCredentials>
        <Contoso>
          <add key="Username" value="you@contoso.com" />
-         <add key="ClearTextPassword" value="<personal access token>" />
+         <add key="ClearTextPassword" value="YOUR_PERSONAL_ACCESS_TOKEN" />
        </Contoso>
      </packageSourceCredentials>
    </configuration>
    ```
 
-   Put it in your user-level NuGet configuration (`%AppData%\NuGet\NuGet.Config`). The
+   Replace `YOUR_PERSONAL_ACCESS_TOKEN` with your own token. Put it in your user-level NuGet
+   configuration (`%AppData%\NuGet\NuGet.Config`). The
    `dotnet nuget add source` and `dotnet nuget update source` commands can create and update such an
    entry for you (with `--username` and `--password`; add `--store-password-in-clear-text` where the
    platform cannot encrypt it). Credentials stored in your NuGet configuration are yours to protect -
    AgentControl only reads them. AgentControl never reads or writes the `nuget.config` of a repo.
 2. **A credential you already typed in this session, or one you saved earlier with "Remember on this
-   computer"** (kept by your Git credential helper; see [Remembering a Sign-In](#remembering-a-sign-in)).
+   computer"** (kept by your Git credential helper; see *Remembering a Sign-In*).
 3. **The sign-in dialog**, at most once per operation, and only after the server has refused the
    first two.
 
@@ -414,7 +417,7 @@ Select a row and click **Edit** (the **Edit** and **Remove** buttons sit above t
 selected row) to change its location (a server's feed address and insecure-HTTP
 choice) or (for NuGet) its package IDs; the alias is fixed, and a server opens the same dialog as when
 adding, including the **Sign-in** section with **Forget saved sign-in** (see
-[Remembering a Sign-In](#remembering-a-sign-in)), the signature options and **Test connection**.
+*Remembering a Sign-In*), the signature options and **Test connection**.
 **Remove** asks for confirmation. Removing a source is allowed
 even when repos are pinned to it, but the confirmation tells you how many are: those repos will show a
 **Package source problem** chip until a source with that alias is configured again.
@@ -473,7 +476,7 @@ shows **Select Package...**. Choosing it opens a dialog with three columns:
    offline share, or a server that could not be reached), it shows **Unavailable** and its error appears
    in the dialog with a
    **Retry** button that reads just that source again, and the other sources still work. A server
-   that needs a sign-in opens the [sign-in dialog](#signing-in) when you select it.
+   that needs a sign-in opens the sign-in dialog (see *Signing In*) when you select it.
 2. **Package** — the packages the selected source offers.
 3. **Version** — until you pick a package it reads "Select a package to see its versions."; once you
    do, its versions in descending order, defaulting the
@@ -485,7 +488,7 @@ On confirm, AgentControl runs the same extract-and-pin sequence as an upgrade: v
 package, delete the four managed folders if present, extract the new files, ensure your
 `.gitignore` covers the four managed folders, write the `.agentcontrol.json` pin (naming the
 source), show the release notes, then offer the `AGENTS.md` template if applicable (see
-[AGENTS.md Template Offer](#agentsmd-template-offer) below). While this runs the card shows
+*AGENTS.md Template Offer* below). While this runs the card shows
 that it is busy and offers **Cancel**.
 
 ## Upgrading an Already-Pinned Repo
@@ -496,7 +499,7 @@ upgrade chip). Upgrading:
 
 1. Opens and validates the new package. If it opens without error, its contents are
    assumed good - unless the source requires signed packages (see
-   [Requiring Signed Packages](#requiring-signed-packages)), in which case a package that is not validly
+   *Requiring Signed Packages*), in which case a package that is not validly
    signed (or not signed by the pinned publisher) is refused and nothing is changed.
 2. Deletes the four managed agent folders under the repo root, if present.
 3. Extracts the new files into those same four folders.
@@ -563,8 +566,8 @@ Open Settings from the gear icon on the toolbar to configure:
 
 - **Package sources** — the list of configured package sources, with **Add Zip-Package Folder**,
   **Add NuGet-Package Folder**, **Add NuGet-Package Server**, **Edit** and **Remove** (see
-  [Package Sources](#package-sources)).
-  A NuGet source can require signed packages (see [Requiring Signed Packages](#requiring-signed-packages));
+  *Package Sources*).
+  A NuGet source can require signed packages (see *Requiring Signed Packages*);
   a source that does not require them is not checked - no checksum or signature
   verification is performed on its packages by AgentControl, so the security and integrity of such a
   shared folder or server is the responsibility of whoever maintains it.
@@ -600,7 +603,7 @@ This section is the reference for teams that build and publish agent packages fo
 AgentControl to discover and apply — not for developers who only consume packages through
 the app's own Select Package/Upgrade UI. A package can be published as a **zip file** in a
 zip-package folder, or as a **NuGet package** in a NuGet-package folder; both carry the same
-content (see [Managed Folders](#managed-folders) and the sections after it), differing only in
+content (see *Managed Folders* and the sections after it), differing only in
 where the content sits and how the name and version are found.
 
 ## Package File Naming
@@ -812,7 +815,7 @@ A minimal `.nuspec` listing the files explicitly:
 
 Pack it with `nuget pack` or `dotnet pack`, and copy the resulting `.nupkg` into the folder the
 source points to. If the source requires signed packages, sign it first (see
-[Requiring Signed Packages](#requiring-signed-packages)).
+*Requiring Signed Packages*).
 
 When you pack with an **SDK-style project** instead, use an explicit `PackagePath` that names the
 `.github` folder, because wildcard globbing may skip dot-folders:

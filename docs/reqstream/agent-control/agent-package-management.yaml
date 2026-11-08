@@ -63,36 +63,86 @@ sections:
       - id: AgentControl-AgentPackageManagement-SourceDefinitions
         title: >-
           The AgentPackageManagement subsystem shall describe a configured package source by a
-          unique alias, a type (zip package folder or NuGet package folder or server), a
-          location, and - for NuGet sources - the package IDs it offers, together with trust
-          options, shall never hold a password, token or other secret in that description, shall
-          identify a location that embeds a credential (such as URL user information) so it is
-          never persisted, and shall identify a server address that is not an https address of a
-          service index ending in index.json (accepting http only when the source explicitly
-          allows it). The trust options are whether signed packages are required and, optionally,
-          the fingerprint of the one publisher's certificate to trust; the description shall
-          accept a fingerprint written with or without separators and in either letter case, hold
-          it in one normalized form, and identify a fingerprint of a source that requires signed
-          packages that cannot be read as a SHA-256 fingerprint.
+          unique alias, a type (zip package folder or NuGet), a location and - for NuGet sources -
+          the package IDs it offers and the trust options (whether signed packages are required,
+          optionally the fingerprint of the one publisher's certificate to trust, and whether
+          plain http is allowed), with safe defaults for every option, and shall persist the type
+          by name.
         justification: |
           The source description is persisted in the user's settings file, so it must carry
-          everything needed to reach a source and nothing that would turn the settings file
-          into a credential store; the derived folder-versus-server distinction must follow
-          the location so the two can never disagree; and a server address that would send a
-          sign-in unprotected or be treated as another protocol must be caught where the source
-          is described, so every user of the description applies the same rules. A fingerprint
-          that is pasted from a certificate viewer or a tool is written in many ways, and one that
-          cannot be read must be caught rather than ignored, because ignoring it would widen the
-          trust from one publisher to any signer.
+          everything needed to reach a source, and its defaults must never weaken a source's
+          protection until the user chooses so.
+        tests:
+          - PackageSourceDefinition_Defaults_AreSafeAndEmpty
+          - PackageSourceDefinition_Serialize_TypeAsNameAndNoDerivedLocationKind
+
+      - id: AgentControl-AgentPackageManagement-SourceLocationKind
+        title: >-
+          The AgentPackageManagement subsystem shall treat a source location that is an absolute
+          http or https address as a server and any other location as a folder, deciding this from
+          the location alone.
+        justification: |
+          The folder-versus-server distinction must follow the location so that the two can never
+          disagree.
+        tests:
+          - PackageSourceDefinition_LocationKind_DerivedFromLocation
+
+      - id: AgentControl-AgentPackageManagement-SourceNoSecrets
+        title: >-
+          The AgentPackageManagement subsystem shall never hold a password, token or other secret
+          in the description of a configured package source.
+        justification: |
+          The description is persisted in the user's settings file, which must never become a
+          credential store.
         tests:
           - PackageSourceDefinition_Members_HaveNoSecretLikeProperty
-          - PackageSourceDefinition_LocationKind_DerivedFromLocation
-          - PackageSourceDefinition_Serialize_TypeAsNameAndNoDerivedLocationKind
+
+      - id: AgentControl-AgentPackageManagement-SourceCredentialBearingLocation
+        title: >-
+          The AgentPackageManagement subsystem shall identify a source location that embeds a
+          credential (such as URL user information, a query string or a fragment), with a message
+          that does not repeat the credential, and shall not flag an ordinary location.
+        justification: |
+          A location that embeds a credential must be caught before it is persisted or shown, or
+          the secret would end up in the settings file and in messages.
+        tests:
           - PackageSourceDefinition_GetCredentialProblem_CredentialBearingLocation_ReturnsMessageWithoutSecret
           - PackageSourceDefinition_GetCredentialProblem_OrdinaryLocation_ReturnsNull
+
+      - id: AgentControl-AgentPackageManagement-SourceServerAddress
+        title: >-
+          The AgentPackageManagement subsystem shall identify a server address that is not an
+          https address of a service index ending in index.json (accepting http only when the
+          source explicitly allows it), with a message that says what to change, and shall accept
+          an address that is.
+        justification: |
+          A server address that would send a sign-in unprotected or be treated as another protocol
+          must be caught where the source is described, so every user of the description applies
+          the same rules.
+        tests:
           - PackageSourceDefinition_GetServerLocationProblem_AcceptableAddress_ReturnsNull
           - PackageSourceDefinition_GetServerLocationProblem_UnacceptableAddress_ReturnsClearMessage
+
+      - id: AgentControl-AgentPackageManagement-SourceFingerprintNormalization
+        title: >-
+          The AgentPackageManagement subsystem shall accept a trusted-publisher fingerprint
+          written with or without separators and in either letter case, and hold it in one
+          normalized form.
+        justification: |
+          A fingerprint that is pasted from a certificate viewer or a tool is written in many ways,
+          and equivalent spellings must denote the same publisher.
+        tests:
           - PackageSourceDefinition_TryNormalizeFingerprint_ValidSpellings_NormalizeToUpperCaseHex
+
+      - id: AgentControl-AgentPackageManagement-SourceUnreadableFingerprint
+        title: >-
+          The AgentPackageManagement subsystem shall refuse text that cannot be read as a SHA-256
+          fingerprint, and shall identify a fingerprint of that kind in a source that requires
+          signed packages, and no other fingerprint problem.
+        justification: |
+          A fingerprint that cannot be read must be caught rather than ignored, because ignoring it
+          would widen the trust from one publisher to any signer.
+        tests:
           - PackageSourceDefinition_TryNormalizeFingerprint_InvalidText_IsRefused
           - PackageSourceDefinition_GetSignaturePolicyProblem_OnlyAnUnreadableFingerprintOfARequiringNuGetSource
 
@@ -184,46 +234,136 @@ sections:
       - id: AgentControl-AgentPackageManagement-NuGetServerSource
         title: >-
           The AgentPackageManagement subsystem shall offer the versions of the configured
-          packages found on a NuGet package server, and supply a chosen version's content, only
-          from an https address of the server's service index (http only when the source
-          explicitly allows it), signing in only through the credential facilities it is given,
-          offering a credential only to the server's own origin, reporting each failure in terms
-          the user can act on, and never letting a secret reach a message or the log.
+          packages found on a NuGet package server, labeled with the source's alias, without
+          downloading any package, and offer none for a package the server does not carry.
         justification: |
           Teams publish agent packages to servers such as JFrog Artifactory or Azure Artifacts;
-          reaching them safely means encrypted transport by default, credentials that are used
-          only for the server they were entered for and never kept beyond the session, and error
-          messages that say what to do without revealing a secret.
+          users pick a version from what the server holds, a version must always be traceable to
+          the source that offered it, and listing must stay cheap on a large server.
         children:
           - AgentControl-NuGetSourceProvider-ServerListAndAcquire
           - AgentControl-NuGetSourceProvider-ServerListDoesNotDownload
           - AgentControl-NuGetSourceProvider-ServerUnknownPackageIsEmpty
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_ListVersions_ReturnsVersionsWithoutDownloadingAndNoneForUnknownPackage
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerAcquire
+        title: >-
+          The AgentPackageManagement subsystem shall supply the content of a chosen version of a
+          package from a NuGet package server, downloaded from that server.
+        justification: |
+          A chosen version must reach the repo exactly as the server holds it, through the same
+          package contract as the other source types.
+        children:
           - AgentControl-NuGetSourceProvider-ServerAcquire
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_Acquire_SuppliesContentOfChosenVersion
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerTransportPolicy
+        title: >-
+          The AgentPackageManagement subsystem shall use a NuGet package server only through an
+          https address of the server's service index, accepting plain http only when the source
+          explicitly allows it, and shall refuse, without repeating it, an address that is not
+          such an address or that embeds a credential.
+        justification: |
+          Plain http would send a sign-in across the network unprotected unless the user opted in
+          knowingly; an address that is not a service index would fail in a confusing way, and an
+          address that embeds a credential would put a secret where it is logged and stored.
+        children:
           - AgentControl-NuGetSourceProvider-PlainHttpRefusedUnlessAllowed
           - AgentControl-NuGetSourceProvider-ServerAddressMustBeServiceIndex
           - AgentControl-NuGetSourceProvider-CredentialInAddressRefused
           - AgentControl-NuGetSourceProvider-HttpsAddressAccepted
+          - AgentControl-PackageSourceRegistry-PlainHttpServerSourceRefused
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_Address_RefusedUnlessHttpsServiceIndexOrOptedInHttp
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerSignIn
+        title: >-
+          The AgentPackageManagement subsystem shall, for a NuGet package server that asks for
+          credentials, sign in only through the credential facilities it is given, using in this
+          order what the user's NuGet configuration holds for that address, a credential entered
+          or saved earlier, and only then asking the user - at most once per operation and only
+          after the server has refused the credentials tried before - and shall fail without
+          asking when no prompt is available.
+        justification: |
+          People who already keep credentials for a feed expect them to be used silently, a person
+          must not be asked repeatedly or before the silently available credentials have been
+          tried, and background work such as the upgrade check must never interrupt the user.
+        children:
           - AgentControl-NuGetSourceProvider-SignInOrder
           - AgentControl-NuGetSourceProvider-AskUserOnce
-          - AgentControl-NuGetSourceProvider-CredentialRememberedAfterSuccess
           - AgentControl-NuGetSourceProvider-NonInteractiveLibrary
           - AgentControl-NuGetSourceProvider-SavedSignIn
           - AgentControl-NuGetSourceProvider-SavedSignInLookedUpOnce
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_NeedsSignIn_UsesSavedSignInOtherwiseAsksOnceAndReusesTheAnswer
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerCredentialRetention
+        title: >-
+          The AgentPackageManagement subsystem shall keep a credential entered for a NuGet package
+          server for the session only after the operation it was entered for has succeeded,
+          shall hand it to the user's own credential helper only when the user chose to remember
+          it and the operation succeeded, and shall forget - and remove from that helper - a
+          credential the server rejects.
+        justification: |
+          A credential that has not yet been shown to work must not be kept, one the user chose
+          not to keep must not be kept, and one that stopped working must not be offered again
+          and again.
+        children:
+          - AgentControl-NuGetSourceProvider-CredentialRememberedAfterSuccess
+          - AgentControl-NuGetSourceProvider-RejectedCredentialForgotten
           - AgentControl-NuGetSourceProvider-RejectedSavedSignInRemoved
           - AgentControl-NuGetSourceProvider-SignInSavedOnlyWhenChosen
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_Credentials_KeptOnlyAfterSuccessAndForgottenWhenRejected
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerOriginScoping
+        title: >-
+          The AgentPackageManagement subsystem shall offer a credential, and ask the user for
+          one, only on behalf of the NuGet package server's own origin, even when the server's
+          service index sends the client to resources on another host.
+        justification: |
+          A server's index decides where its package resources are, so a credential must never be
+          offered to, or asked for on behalf of, a host the user did not enter it for.
+        children:
           - AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerFailures
+        title: >-
+          The AgentPackageManagement subsystem shall report each way a NuGet package server can
+          fail - it needs a sign-in, rejects the credential, the user cancels the sign-in, the
+          sign-in takes longer than the allowed time, the address does not answer as a NuGet
+          feed - as a distinct failure whose message names no secret or address path, and shall
+          honor cancellation by the caller during a sign-in without reporting a failure.
+        justification: |
+          The user must be told what to do - sign in, correct the address, try again - and a user
+          who cancels an operation has not met a problem; an abandoned sign-in dialog must not
+          hold an operation forever.
+        children:
           - AgentControl-NuGetSourceProvider-ServerFailures
-          - AgentControl-NuGetSourceProvider-RejectedCredentialForgotten
           - AgentControl-NuGetSourceProvider-SignInTimeLimit
           - AgentControl-NuGetSourceProvider-CallerCancellationNotAFailure
+        tests:
+          - AgentPackageManagementSubsystem_ServerSource_Failures_AreDistinctAndNameNeitherSecretNorPath
+          - AgentPackageManagementSubsystem_ServerSource_CallerCancelsWhileSigningIn_IsCancellationNotFailure
+
+      - id: AgentControl-AgentPackageManagement-NuGetServerSecretSafety
+        title: >-
+          The AgentPackageManagement subsystem shall never let a password, token, authorization
+          header value or web-address query string reach the application log or an exception,
+          including its inner exception, during any NuGet package server sign-in flow, whether
+          it succeeds or fails.
+        justification: |
+          The diagnostic log is a plain file users attach to reports, and a raw library exception
+          kept as an inner exception would carry a secret to wherever it is later logged or shown.
+        children:
           - AgentControl-NuGetSourceProvider-SecretsNotLogged
           - AgentControl-NuGetSourceProvider-SecretsNotInExceptions
-          - AgentControl-PackageSourceRegistry-PlainHttpServerSourceRefused
         tests:
-          - NuGetSourceProvider_ListVersions_AnonymousServer_ReturnsVersionsWithoutDownloading
-          - NuGetSourceProvider_ListVersions_ServerNeedsSignIn_PromptsOnceAndRemembersCredentialForTheSession
-          - NuGetSourceProvider_Constructor_PlainHttp_RefusedUnlessInsecureHttpIsAllowed
-          - PackageSourceDefinition_GetServerLocationProblem_UnacceptableAddress_ReturnsClearMessage
+          - AgentPackageManagementSubsystem_ServerSource_SignInFlows_NeverLogOrRaiseTheSecret
 
       - id: AgentControl-AgentPackageManagement-SignedPackages
         title: >-
@@ -283,6 +423,9 @@ sections:
           prevented it.
         children:
           - AgentControl-SignatureVerificationSupport-PlatformSupport
+          - AgentControl-SignatureVerificationSupport-SupportedOnWindows
+          - AgentControl-SignatureVerificationSupport-SupportedOnLinux
+          - AgentControl-SignatureVerificationSupport-SupportedOnMacOS
           - AgentControl-SignatureVerificationSupport-FailClosedProbe
           - AgentControl-SignatureVerificationSupport-RealChainProbe
           - AgentControl-SignatureVerificationSupport-UnsupportedExplanation

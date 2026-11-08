@@ -76,16 +76,40 @@ by `RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack` and
 `RepoCardViewModel_LaunchButtonText_AgentToolChanged_UpdatesAfterRefreshCheap`, covering
 `AgentControl-RepoCardViewModel-LaunchLabel`.
 
-**RepoCardViewModel_ResponsiveOperations_BusyIgnoresRepeatCancelAndSupersede**: An apply that
-is waiting on a slow source reports busy, ignores a second request and, when cancelled, leaves
-the pin unchanged; an upgrade check against a slow source does not block the caller and shows a
-"checking" state; a cancelled check throws and keeps the previous state; and the result of an
-older check is discarded when a newer one has started. This scenario is tested by
-`RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged`,
-`RepoCardViewModel_RefreshUpgradeStatusAsync_SourceSlow_DoesNotBlockAndShowsChecking`,
-`RepoCardViewModel_RefreshUpgradeStatusAsync_Cancelled_ThrowsAndKeepsPreviousState`, and
-`RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded`, covering
-`AgentControl-RepoCardViewModel-ResponsiveOperations`.
+**RepoCardViewModel_ResponsiveOperations_ReadAndApplyDoNotBlockTheCaller**: Applying a package against a
+source that never answers returns control to the caller while the source is still being read, and an upgrade
+check against a slow source does not block the caller either and shows a "checking" state. This scenario is
+tested by `RepoCardViewModel_RefreshUpgradeStatusAsync_SourceSlow_DoesNotBlockAndShowsChecking` and
+`RepoCardViewModel_ApplySelectedPackageAsync_SourceSlow_ReturnsToCallerBeforeSourceAnswers`, covering
+`AgentControl-RepoCardViewModel-ResponsiveOperations`. Pull is routed through the same busy-operation wrapper
+but is not exercised against a slow git process, so it is not claimed by this requirement.
+
+**RepoCardViewModel_OperationBusyState_ReportsBusyAndDisablesOtherActions**: While a package apply is waiting
+on a slow source the card is busy, shows the "Applying agent package..." message, and the Launch, Refresh and
+Select Package commands cannot execute; when the operation ends the card is idle and the actions are available
+again. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackageAsync_Running_ReportsBusyAndDisablesOtherActions`, covering
+`AgentControl-RepoCardViewModel-OperationBusyState`.
+
+**RepoCardViewModel_OneOperationAtATime_SecondRequestIsIgnored**: A second apply requested while one is
+running returns without reading the source again. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored`, covering
+`AgentControl-RepoCardViewModel-OneOperationAtATime`.
+
+**RepoCardViewModel_CancelOperation_NoErrorAndPinUnchanged**: Cancelling a running package apply ends it with
+the "canceled" status, raises no `ErrorOccurred` and leaves the repo unpinned, and cancelling an upgrade check
+throws the cancellation and keeps the previous upgrade state. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackageAsync_CancelledWhileRunning_ReportsNoErrorAndKeepsPinUnchanged` and
+`RepoCardViewModel_RefreshUpgradeStatusAsync_Cancelled_ThrowsAndKeepsPreviousState`, covering
+`AgentControl-RepoCardViewModel-CancelOperation`. The combined
+`RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged`
+test asserts the busy, repeat and cancel outcomes together and remains as supporting evidence for the three
+requirements above.
+
+**RepoCardViewModel_SupersededUpgradeCheck_OlderResultIsDiscarded**: When a newer upgrade check starts while an
+older one is still waiting, the older check's late answer does not overwrite the newer result. This scenario is
+tested by `RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded`, covering
+`AgentControl-RepoCardViewModel-SupersededUpgradeCheck`.
 
 **RepoCardViewModel_PullGating_CleanTreeEnablesDirtyOrFailureDisables**: A clean working tree
 sets `CanPull` true, a dirty working tree sets it false, and a git status failure also sets it

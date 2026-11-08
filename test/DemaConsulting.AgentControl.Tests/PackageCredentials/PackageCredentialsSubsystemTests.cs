@@ -365,11 +365,16 @@ public class PackageCredentialsSubsystemTests
         store.Clear();
         var next = new PackageCredentialCallback(origin, "Feed", store, prompt);
         var answer = await next.Callback(FeedIndex, CancellationToken.None);
+        var nextOther = new PackageCredentialCallback(other, "Other", store, prompt);
+        var answerOther = await nextOther.Callback(new Uri("https://other.example.com/v3/index.json"), CancellationToken.None);
 
         // Assert
         Assert.Equal(0, store.Count);
+        Assert.False(store.TryGet(origin, out _));
+        Assert.False(store.TryGet(other, out _));
         Assert.Null(answer);
-        Assert.Equal(1, prompt.AskCount);
+        Assert.Null(answerOther);
+        Assert.Equal(2, prompt.AskCount);
         Assert.Equal(secret, SecretRedactor.Redact(secret));
     }
 
@@ -471,7 +476,8 @@ public class PackageCredentialsSubsystemTests
         var origin = FeedOrigin.Create(FeedIndex);
         var usersStore = new FakeRememberedCredentialStore();
         usersStore.Save(origin, new NuGetCredential("svc", "pw-saved-bad-" + Guid.NewGuid().ToString("N")));
-        var silent = new PackageCredentialCallback(origin, "Feed", new SessionCredentialStore(), prompt: null, remembered: usersStore);
+        var session = new SessionCredentialStore();
+        var silent = new PackageCredentialCallback(origin, "Feed", session, prompt: null, remembered: usersStore);
         await silent.Callback(FeedIndex, CancellationToken.None);
 
         // Act: the server rejects it; a later session (a fresh session store) is allowed to ask
@@ -484,6 +490,7 @@ public class PackageCredentialsSubsystemTests
 
         // Assert
         Assert.Null(usersStore.Peek(origin));
+        Assert.False(session.TryGet(origin, out _));
         Assert.Null(answer);
         Assert.Equal(1, prompt.AskCount);
     }

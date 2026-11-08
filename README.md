@@ -174,8 +174,9 @@ with migrating away from committed agent files.
 
 ### Pulling changes
 
-The **Git Pull** button on a repo card runs `git pull` in that repo, and is only offered when the
-working tree is clean.
+The **Git Pull** button on a repo card runs `git pull` in that repo. The button is always visible, and is
+enabled only when the working tree is clean (it is disabled while the status is dirty or cannot be
+determined).
 
 ### Settings
 

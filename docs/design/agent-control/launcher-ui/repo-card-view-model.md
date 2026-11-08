@@ -85,9 +85,12 @@ which would otherwise hide the explanation precisely when it is most needed.
 current settings' effective sources for each operation (`CreateSourceRegistry`) and awaits the
 asynchronous providers, so reading a source, extracting a package and pulling never run on the UI
 thread. `LaunchCommand`, `PullCommand`, `UpgradeCommand` and `RefreshCommand` are
-`AsyncRelayCommand` instances: a second request while one runs is ignored, and while one runs
-**IsBusy** is set, **BusyMessage** says what is happening and **CanCancelOperation** lets
-`CancelOperationCommand` cancel it (`AgentControl-RepoCardViewModel-ResponsiveOperations`).
+`AsyncRelayCommand` instances: a second request while one runs is ignored
+(`AgentControl-RepoCardViewModel-OneOperationAtATime`), and while one runs
+**IsBusy** is set, **BusyMessage** says what is happening (`AgentControl-RepoCardViewModel-OperationBusyState`)
+and **CanCancelOperation** lets
+`CancelOperationCommand` cancel it (`AgentControl-RepoCardViewModel-CancelOperation`); package reads and
+applies do not block the caller (`AgentControl-RepoCardViewModel-ResponsiveOperations`).
 Cancelling is not an error and leaves the repo's pin unchanged. NuGet sources keep their private
 caches under a `nuget` folder inside the startup configuration-directory override when one is
 supplied (so automated tests never touch the user profile), otherwise in the per-user default.
@@ -167,8 +170,9 @@ immediate full refresh; `RefreshCommand` runs it asynchronously.
 
 **RefreshUpgradeStatusAsync**: Checks, in the background, whether the pin's source offers a
 newer version than the pinned one, using the shared cache. A check started later supersedes one
-still waiting, so a result for settings that have since changed is discarded; cancellation leaves
-the previous state in place (`AgentControl-RepoCardViewModel-ResponsiveOperations`). Its
+still waiting (`AgentControl-RepoCardViewModel-SupersededUpgradeCheck`), so a result for settings that have
+since changed is discarded; cancellation leaves
+the previous state in place (`AgentControl-RepoCardViewModel-CancelOperation`). Its
 `allowPrompt` parameter defaults to `false`, which is what the background check at start-up, after a
 repo is added and after settings change uses: it reads a server through the remembered session
 credentials and **never opens the sign-in dialog**. A server that then answers that it needs a sign-in

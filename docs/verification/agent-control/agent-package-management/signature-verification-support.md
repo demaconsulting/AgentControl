@@ -38,10 +38,28 @@ platforms of the project's build matrix.
 #### Test Scenarios
 
 **SignatureVerificationSupport_PlatformSupport_WindowsLinuxAndMacOsOnly**: Each of Windows, Linux and macOS alone
-is supported, and no operating system flagged at all is not; on the machine running the tests `IsSupported` is
-`true`. This scenario is tested by `SignatureVerificationSupport_IsSupportedPlatform_WindowsLinuxAndMacOsOnly` and
-`SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue`, covering
+is supported, and no operating system flagged at all is not. This is a pure decision over three booleans, so it is
+verified on any platform, with no source filter. This scenario is tested by
+`SignatureVerificationSupport_IsSupportedPlatform_WindowsLinuxAndMacOsOnly`, covering
 `AgentControl-SignatureVerificationSupport-PlatformSupport`.
+
+**SignatureVerificationSupport_SupportedOnWindows_ReportsSupportAndBuildsAChain**: On Windows, `IsSupported` is
+`true` and the real probe builds a certificate chain offline and reports support. Each test asserts the answer
+for the platform it runs on, so it proves Windows only when it runs on Windows; the requirement therefore accepts
+only the test runs of the Windows leg of the build matrix (source filter `windows@`). This scenario is tested by
+`SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue` and
+`SignatureVerificationSupport_ProbeCertificateChains_OnThisPlatform_BuildsAChainOfflineAndIsSupported`, covering
+`AgentControl-SignatureVerificationSupport-SupportedOnWindows`.
+
+**SignatureVerificationSupport_SupportedOnLinux_ReportsSupportAndBuildsAChain**: The same two tests, run on the
+Linux leg of the build matrix (source filter `ubuntu@`), prove that on Linux `IsSupported` is `true` and the real
+probe builds a certificate chain offline. This scenario is covered by those tests for
+`AgentControl-SignatureVerificationSupport-SupportedOnLinux`.
+
+**SignatureVerificationSupport_SupportedOnMacOS_ReportsSupportAndBuildsAChain**: The same two tests, run on the
+macOS leg of the build matrix (source filter `macos@`), prove that on macOS `IsSupported` is `true` and the real
+probe builds a certificate chain offline. This scenario is covered by those tests for
+`AgentControl-SignatureVerificationSupport-SupportedOnMacOS`.
 
 **SignatureVerificationSupport_UnsupportedExplanation_IsTheDocumentedText**: The explanation constant equals the
 documented sentence. This scenario is tested by

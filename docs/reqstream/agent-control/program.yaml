@@ -44,3 +44,16 @@ sections:
           the UI to start with unexpected/undefined behavior.
         tests:
           - Program_Main_WithInvalidArgument_ReturnsNonZeroExitCode
+
+      - id: AgentControl-Program-StartupFailureRedacted
+        title: >-
+          The Program class shall write an exception that escapes startup or the desktop lifetime
+          to the log, and pass it on to the process, only after removing every secret from it -
+          an authorization header value, web-address user information, query string or fragment
+          - while keeping its type and message otherwise readable for troubleshooting.
+        justification: |
+          The diagnostic log is a plain file users attach to reports, and a failure that escapes
+          startup can quote an address or a header from a package server; the tool promises that
+          no credential reaches its log, so this last-resort path must keep that promise too.
+        tests:
+          - Program_ReportStartupFailure_ExceptionCarryingSecrets_LogsAndRethrowsOnlySanitizedDescription

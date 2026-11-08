@@ -132,13 +132,17 @@ paths can refuse it without repeating it in any message, and `GetServerLocationP
 address: an absolute `https` address (`http` only when `AllowInsecureHttp` is set, which is enforced) of a V3
 service index, so ending in `index.json`, with no credential - NuGet treats an address that does not end in
 `.json` as the older V2 protocol, which AgentControl does not rely on
-(`AgentControl-AgentPackageManagement-SourceDefinitions`). `RequireSignedPackages` and `SignerFingerprint`
+(`AgentControl-AgentPackageManagement-SourceDefinitions`, `AgentControl-AgentPackageManagement-SourceLocationKind`,
+`AgentControl-AgentPackageManagement-SourceNoSecrets`,
+`AgentControl-AgentPackageManagement-SourceCredentialBearingLocation`,
+`AgentControl-AgentPackageManagement-SourceServerAddress`). `RequireSignedPackages` and `SignerFingerprint`
 are the per-source trust options (see *Package authenticity* below). `TryNormalizeFingerprint` accepts the
 fingerprint as it is pasted from a tool or certificate viewer - hexadecimal with optional colons, dashes or
 spaces, in either letter case - and reduces it to 64 upper-case hexadecimal characters; `GetSignaturePolicyProblem`
 reports a fingerprint that cannot be read on a NuGet source that requires signatures, which every consumer treats
 as an error rather than ignoring the fingerprint (ignoring it would silently widen trust from one publisher to any
-signer). A
+signer (`AgentControl-AgentPackageManagement-SourceFingerprintNormalization`,
+`AgentControl-AgentPackageManagement-SourceUnreadableFingerprint`). A
 `PackageReference` is the identity a repo pin records: source alias, package ID and the exact
 version text — a package ID is never unique across sources, so a package is only ever identified
 together with its source. `DiscoveredPackage` is a package version found at a source, carrying
@@ -156,7 +160,13 @@ non-interactively, so nothing it does can open a dialog of its own), the credent
 session or saved earlier with their own Git credential helper, and only then the
 sign-in dialog - at most once per operation - through the `PackageCredentials` subsystem, and maps every
 failure to a `PackageSourceAccessException` with a secret-free message
-(`AgentControl-AgentPackageManagement-NuGetServerSource`). Listing a server's versions never downloads a
+(`AgentControl-AgentPackageManagement-NuGetServerSource`, `AgentControl-AgentPackageManagement-NuGetServerAcquire`,
+`AgentControl-AgentPackageManagement-NuGetServerTransportPolicy`,
+`AgentControl-AgentPackageManagement-NuGetServerSignIn`,
+`AgentControl-AgentPackageManagement-NuGetServerCredentialRetention`,
+`AgentControl-AgentPackageManagement-NuGetServerOriginScoping`,
+`AgentControl-AgentPackageManagement-NuGetServerFailures`,
+`AgentControl-AgentPackageManagement-NuGetServerSecretSafety`). Listing a server's versions never downloads a
 package. Both hand a package's content to the
 `RepoSync` subsystem as an `IPackageContentReader`.
 

@@ -28,6 +28,9 @@ N/A - standard test environment.
   class, without starting any UI lifetime.
 - `Program.Main` returns a non-zero exit code and writes an error message to stderr when given
   an unsupported startup argument, without attempting to start the Avalonia UI.
+- An exception escaping startup is logged at `Critical` and passed on only as a sanitized
+  stand-in: an authorization header value, a URL's user information and query string never
+  appear in the log entry or in the exception handed on.
 
 ### Test Scenarios
 
@@ -49,3 +52,12 @@ stderr output contains "Error", confirming an invalid startup argument is report
 starting the UI. This scenario is tested by
 `Program_Main_WithInvalidArgument_ReturnsNonZeroExitCode`, covering
 `AgentControl-Program-ErrorHandling`.
+
+**Program_ReportStartupFailure_ExceptionCarryingSecrets_LogsAndRethrowsOnlySanitizedDescription**:
+`Program.ReportStartupFailure` is given an exception chain whose texts carry an `Authorization`
+bearer value and a URL with user information and a query token, and a capturing logger; the single
+`Critical` entry names the failure and the exception type but contains none of the secrets, and the
+exception returned for rethrow wraps a `SanitizedException` that also contains none of them. This
+scenario is tested by
+`Program_ReportStartupFailure_ExceptionCarryingSecrets_LogsAndRethrowsOnlySanitizedDescription`,
+covering `AgentControl-Program-StartupFailureRedacted`.

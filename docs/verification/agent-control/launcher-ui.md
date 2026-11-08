@@ -205,23 +205,80 @@ cited directly at the subsystem level, covering `AgentControl-LauncherUI-SourceA
 `AgentControl-MainWindowViewModel-InvalidateChangedSources`,
 `AgentControl-SelectPackageWindowViewModel-SourceScoped`).
 
-**LauncherUI_PackageSources_ManageSourcesThroughSettingsAndEditor**: The settings view model
-lists, adds, edits and removes sources (warning about pinned repos before a removal), and the
-source editor validates what is entered and only saves a valid source; the
-dialogs are exercised end to end by adding a zip folder source and a NuGet folder source
-through the real windows. A NuGet server is added through its own button and editor window (feed address,
-examples, "Allow insecure HTTP" off by default, test button), an invalid or plain-http address blocks Save
-until fixed or explicitly allowed, and a saved server is listed as "Not checked" without any folder check or
-network access. This scenario is tested by
-`SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder`,
-`SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource`,
-`SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves`,
-`SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved`,
-`SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor`,
-`SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt`,
-`SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls` and
-`SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave`, covering
+**LauncherUI_PackageSources_ListedWithKindLocationAndStatus**: The settings view model lists the configured
+sources in order with their kind and location and whether their folder can be found, and a saved NuGet server
+is listed as "Not checked" without any folder check or network access. This scenario is tested by
+`SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder` and
+`SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt`, covering
 `AgentControl-LauncherUI-PackageSources`.
+
+**LauncherUI_AddPackageSource_ZipNuGetFolderAndServerThroughDialogs**: The settings window offers an add
+command for each kind of source, each raising the editor request for a new source of that kind; saving the
+editor adds and selects the zip source or keeps the package IDs of the NuGet folder source, a NuGet server is
+added through its own button, which opens the server editor, and a valid saved definition carries a trimmed
+location. This scenario is tested by
+`SettingsWindowViewModel_AddCommands_RaiseEditorRequestedForNewSourceOfEachKind`,
+`SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource`,
+`SettingsWindowViewModel_AddNuGetFolderSource_EditorSaved_KeepsPackageIds`,
+`SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor`,
+`SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls` and
+`SourceEditorViewModel_SaveCommand_ValidZipSource_RaisesSavedWithDefinition`, covering
+`AgentControl-LauncherUI-AddPackageSource`.
+
+**LauncherUI_PackageSourceValidation_OnlyAValidSourceCanBeSaved**: An alias that duplicates a configured
+alias ignoring case, an invalid alias, an invalid or credential-bearing folder location, an invalid or
+plain-http server address, and a NuGet source without a package ID each show an explanation and keep Save
+disabled, and the save command does nothing while the editor is invalid. This scenario is tested by
+`SettingsWindowViewModel_AddSource_AliasAlreadyConfiguredIgnoringCase_EditorCannotSave`,
+`SourceEditorViewModel_Alias_Invalid_ReportsProblemAndBlocksSave`,
+`SourceEditorViewModel_Location_Invalid_ReportsProblemAndBlocksSave`,
+`SourceEditorViewModel_ServerLocation_Invalid_ReportsProblemAndBlocksSave`,
+`SourceEditorViewModel_NuGetSource_NoPackageIds_CannotSaveUntilOneIsAdded` and
+`SourceEditorViewModel_SaveCommand_InvalidEditor_DoesNotRaiseSaved`, covering
+`AgentControl-LauncherUI-PackageSourceValidation`.
+
+**LauncherUI_PackageSourcePackageIds_AddRemoveAndRefuseBadIds**: A package ID can be added to a NuGet source
+and saved with it, a listed ID can be removed, and an ID that is malformed or already listed (ignoring case)
+is refused with a reason. This scenario is tested by
+`SourceEditorViewModel_SaveCommand_ValidNuGetSource_SavesPackageIds`,
+`SourceEditorViewModel_RemovePackageId_RemovesSelectedId` and
+`SourceEditorViewModel_AddPackageId_InvalidOrDuplicate_IsRefused`, covering
+`AgentControl-LauncherUI-PackageSourcePackageIds`.
+
+**LauncherUI_ServerSourceEditor_AsksForFeedAddressAndShowsExamples**: The server editor window has the feed
+address, the example addresses for JFrog Artifactory and Azure Artifacts and the server title. This scenario
+is tested by `SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls` and
+`SourceEditorViewModel_Constructor_NewServer_HasServerTitleLabelAndExamples`, covering
+`AgentControl-LauncherUI-ServerSourceEditor`.
+
+**LauncherUI_InsecureHttpChoice_OffByDefaultAndWarnsWhenTicked**: "Allow insecure HTTP" is off in a new server
+editor, and ticking it makes a plain-http address acceptable and shows the warning. This scenario is tested by
+`SourceEditorViewModel_Constructor_NewServer_HasServerTitleLabelAndExamples` and
+`SourceEditorViewModel_AllowInsecureHttp_Toggled_AcceptsHttpAndShowsWarning`, covering
+`AgentControl-LauncherUI-InsecureHttpChoice`.
+
+**LauncherUI_ServerSourceSettingsKept_SavedAndEditedServerKeepsItsSettings**: A valid server is saved with its
+trimmed address, package IDs and insecure choice, and editing an existing server keeps it a server with its
+settings. This scenario is tested by
+`SourceEditorViewModel_SaveCommand_ValidServer_SavesAddressPackageIdsAndInsecureChoice` and
+`SourceEditorViewModel_EditExistingServer_StaysAServerWithItsSettings`, covering
+`AgentControl-LauncherUI-ServerSourceSettingsKept`.
+
+**LauncherUI_EditPackageSource_ReplacedInPlaceKeepingAliasAndHiddenSettings**: Editing a source replaces it in
+place with its alias fixed and the settings the dialog does not show preserved, without modifying the
+definition the editor was given, and editing a server source opens the server editor wired to the connection
+test. This scenario is tested by
+`SettingsWindowViewModel_EditSource_EditorSaved_ReplacesSourceInPlaceKeepingAlias`,
+`SettingsWindowViewModel_EditServerSource_OpensServerEditorThatTestsThroughTheFactory` and
+`SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved`, covering
+`AgentControl-LauncherUI-EditPackageSource`.
+
+**LauncherUI_RemovePackageSource_WarnsAboutPinnedReposThenRemoves**: Removing the selected source first asks
+for confirmation, describing how many repos are pinned to it and that they will show a package source problem,
+and then removes it. This scenario is tested by
+`SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource` and
+`SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves`, covering
+`AgentControl-LauncherUI-RemovePackageSource`.
 
 **LauncherUI_TestConnection_ProgressCancelAndPlainLanguageResult**: In the server editor, the test lists the
 versions of the first package ID through a scripted provider; while it runs the dialog shows progress and a
@@ -238,23 +295,46 @@ provider wired to the same credential facilities as the cards. This scenario is 
 `MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials`, covering
 `AgentControl-LauncherUI-TestConnection`.
 
-**LauncherUI_SignIn_DialogShowsDestinationMasksPasswordAndAnswersOnce**: The sign-in window, shown
-headlessly, displays the server's origin and the sentence "Used for this session only - AgentControl does not
-save it.", masks the password box and keeps Sign in disabled until both fields are filled; a plain-http server
-shows a warning and a previously rejected credential shows a notice; Sign in closes with the typed credential
-while Cancel, Escape and closing the window all answer no credential. `AvaloniaCredentialPrompt`, asked from a
-worker thread, shows the dialog on the UI thread and returns the typed credential, reports a cancel as no
-credential, closes the dialog and throws a cancellation when its token is cancelled, shows two simultaneous
-questions one at a time, and refuses a null request. This scenario is tested by
-`CredentialPromptWindow_Shown_ShowsOriginSessionNoteAndMaskedPassword`,
-`CredentialPromptWindow_InsecureAndRejected_ShowWarningAndRejectedNotice`,
-`CredentialPromptWindow_SignInClicked_ReturnsTheTypedCredential`,
+**LauncherUI_SignIn_DialogReturnsTheTypedCredentialOrNoneAndAnswersOnce**: Sign in closes the sign-in window with
+the typed credential, while Cancel, Escape and closing the window all answer no credential;
+`AvaloniaCredentialPrompt`, asked from a worker thread, returns the typed credential and reports a cancel as no
+credential. This scenario is tested by `CredentialPromptWindow_SignInClicked_ReturnsTheTypedCredential`,
 `CredentialPromptWindow_CancelEscapeOrClose_ReturnNoCredential`,
-`AvaloniaCredentialPrompt_PromptAsync_FromWorkerThread_ShowsDialogAndReturnsCredential`,
-`AvaloniaCredentialPrompt_PromptAsync_UserCancels_ReturnsNull`,
-`AvaloniaCredentialPrompt_PromptAsync_TokenCancelled_ClosesDialogAndThrows` and
+`AvaloniaCredentialPrompt_PromptAsync_FromWorkerThread_ShowsDialogAndReturnsCredential` and
+`AvaloniaCredentialPrompt_PromptAsync_UserCancels_ReturnsNull`, covering `AgentControl-LauncherUI-SignIn`.
+
+**LauncherUI_SignInDestination_DialogShowsTheServerOrigin**: The sign-in window, shown headlessly, displays the
+server's origin (scheme, host and port). This scenario is tested by
+`CredentialPromptWindow_Shown_ShowsOriginSessionNoteAndMaskedPassword`, covering
+`AgentControl-LauncherUI-SignInDestination`.
+
+**LauncherUI_SignInWarnings_PlainHttpAndRejectedCredential**: A plain-http server shows a warning and a
+previously rejected credential shows a notice, and neither is shown otherwise. This scenario is tested by
+`CredentialPromptWindow_InsecureAndRejected_ShowWarningAndRejectedNotice` (the not-shown case is asserted by
+`CredentialPromptWindow_Shown_ShowsOriginSessionNoteAndMaskedPassword`), covering
+`AgentControl-LauncherUI-SignInWarnings`.
+
+**LauncherUI_SignInPasswordMasked_PasswordBoxMasksTypedText**: The password box of the sign-in window masks
+what is typed and Sign in stays disabled until both fields are filled. This scenario is tested by
+`CredentialPromptWindow_Shown_ShowsOriginSessionNoteAndMaskedPassword`, covering
+`AgentControl-LauncherUI-SignInPasswordMasked`.
+
+**LauncherUI_SignInSessionOnlyNote_DialogStatesTheCredentialIsNotSaved**: The sign-in window displays the
+sentence "Used for this session only - AgentControl does not save it.". This scenario is tested by
+`CredentialPromptWindow_Shown_ShowsOriginSessionNoteAndMaskedPassword`, covering
+`AgentControl-LauncherUI-SignInSessionOnlyNote`.
+
+**LauncherUI_SignInPlacement_ShownOverTheOwnerOneAtATime**: `AvaloniaCredentialPrompt`, asked from a worker
+thread, shows the dialog on the UI thread as a window owned by the asking window, and shows two simultaneous
+questions one at a time. This scenario is tested by
+`AvaloniaCredentialPrompt_PromptAsync_FromWorkerThread_ShowsDialogAndReturnsCredential` and
 `AvaloniaCredentialPrompt_PromptAsync_TwoQuestionsAtOnce_AreShownOneAtATime`, covering
-`AgentControl-LauncherUI-SignIn`.
+`AgentControl-LauncherUI-SignInPlacement`.
+
+**LauncherUI_SignInCancelsWithOperation_TokenCancellationClosesDialog**: Cancelling the question's token closes
+the open dialog and throws a cancellation. This scenario is tested by
+`AvaloniaCredentialPrompt_PromptAsync_TokenCancelled_ClosesDialogAndThrows`, covering
+`AgentControl-LauncherUI-SignInCancelsWithOperation`.
 
 **LauncherUI_RememberSignIn_OptionOfferedOnlyWhenItCanBeKept**: With a request that says a credential helper is
 available the sign-in window shows the "Remember on this computer" checkbox enabled and unchecked, and ticking it
@@ -317,17 +397,52 @@ This scenario is tested by
 `RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack`, covering
 `AgentControl-LauncherUI-RepoCardChips`.
 
-**LauncherUI_ResponsiveOperations_AsyncCommandsBackgroundChecksAndIsolatedFailures**: The
-asynchronous command ignores a repeated request while running and treats cancellation as no
-error; a package apply that is waiting on a slow source reports busy and cancels without changing
-the pin; the background upgrade refresh keeps checking other cards when one source is
-unreachable; and the Select Package dialog loads the other sources and shows an inline error for
-the unreachable one, and the failed read can be retried on its own without touching the other sources. This
-scenario is tested by
-`AsyncRelayCommand_ExecuteAsync_WhileRunning_DoesNotRunOperationTwice`,
-`AsyncRelayCommand_Cancel_Running_SignalsTokenAndIsNotAnError`,
-`RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged`,
-`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked`,
-`SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline`, and
-`SelectPackageWindowViewModel_Retry_SourceFailedThenAnswers_LoadsOnlyThatSource`,
-covering `AgentControl-LauncherUI-ResponsiveOperations`.
+**LauncherUI_ResponsiveOperations_SlowSourcesNeverFreezeTheWindow**: Upgrade checks and package applies against
+a slow source return control to the caller, the Select Package dialog shows progress without blocking while a
+package's versions load, and constructing the main window view model reads no source until the background
+upgrade refresh begins. This scenario is tested by
+`RepoCardViewModel_RefreshUpgradeStatusAsync_SourceSlow_DoesNotBlockAndShowsChecking`,
+`RepoCardViewModel_ApplySelectedPackageAsync_SourceSlow_ReturnsToCallerBeforeSourceAnswers`,
+`SelectPackageWindowViewModel_SelectPackageName_VersionsSlow_ShowsProgressWithoutBlocking` and
+`MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins`, covering
+`AgentControl-LauncherUI-ResponsiveOperations`.
+
+**LauncherUI_OperationProgress_BusyCardDisablesOtherActions**: A card applying a package reports that it is
+busy and disables its other actions until the operation ends, and the Select Package dialog shows that it is
+loading. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackageAsync_Running_ReportsBusyAndDisablesOtherActions` and
+`SelectPackageWindowViewModel_SelectPackageName_VersionsSlow_ShowsProgressWithoutBlocking`, covering
+`AgentControl-LauncherUI-OperationProgress`.
+
+**LauncherUI_OneOperationPerRepo_RepeatedRequestIsIgnored**: The asynchronous command ignores a repeated
+request while running, and a second package apply for the same card does not read the source again. This
+scenario is tested by `AsyncRelayCommand_ExecuteAsync_WhileRunning_DoesNotRunOperationTwice` and
+`RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored`, covering
+`AgentControl-LauncherUI-OneOperationPerRepo`.
+
+**LauncherUI_CancelOperation_CancellationIsNotAnErrorAndLeavesPinUnchanged**: The asynchronous command treats
+cancellation as no error, and cancelling a package apply that is waiting on a slow source raises no error and
+leaves the pin unchanged. This scenario is tested by
+`AsyncRelayCommand_Cancel_Running_SignalsTokenAndIsNotAnError` and
+`RepoCardViewModel_ApplySelectedPackageAsync_CancelledWhileRunning_ReportsNoErrorAndKeepsPinUnchanged`,
+covering `AgentControl-LauncherUI-CancelOperation`.
+
+**LauncherUI_SourceFailureIsolation_OneUnreachableSourceAffectsOnlyItself**: The background upgrade refresh
+keeps checking other cards when one source is unreachable, and the Select Package dialog loads the other
+sources and shows an inline error for the unreachable one. This scenario is tested by
+`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked` and
+`SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline`, covering
+`AgentControl-LauncherUI-SourceFailureIsolation`.
+
+**LauncherUI_RetryFailedRead_OnlyTheFailedReadIsRepeated**: A read that failed can be retried on its own
+without touching the other sources, and a retry that still fails keeps the error and the retry offer. This
+scenario is tested by `SelectPackageWindowViewModel_Retry_SourceFailedThenAnswers_LoadsOnlyThatSource` and
+`SelectPackageWindowViewModel_Retry_StillFailing_KeepsErrorAndRetryAvailable`, covering
+`AgentControl-LauncherUI-RetryFailedRead`.
+
+**LauncherUI_StaleResultsDiscarded_SupersededReadNeverOverwritesNewerState**: When a newer upgrade check starts
+the older check's late answer is discarded, and a slower earlier version load is superseded by a later package
+selection. This scenario is tested by
+`RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded` and
+`SelectPackageWindowViewModel_ChangeSelectedPackageName_SupersedesSlowerEarlierLoad`, covering
+`AgentControl-LauncherUI-StaleResultsDiscarded`.

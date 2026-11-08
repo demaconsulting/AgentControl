@@ -147,3 +147,6 @@ cannot log them.
 - **SessionCredentialStore / PackageCredentialCallback** - register and withdraw the secrets in use.
 - **RepoCardViewModel** - logs through it; with **SourceEditorViewModel**, **SelectPackageWindowViewModel**
   and **MainWindow** it shows only `SafeMessage` text for package-source failures.
+- **LoggingSetup** (`Logging` subsystem) and **Program** - the process-wide unhandled and unobserved
+  exception handlers and the startup-failure path log every escaping exception through it, so no raw
+  exception reaches the diagnostic log.

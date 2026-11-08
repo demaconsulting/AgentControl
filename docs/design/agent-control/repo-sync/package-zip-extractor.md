@@ -41,9 +41,14 @@ four managed folders if present, and extracts the already-validated entries into
   (`AgentControl-PackageZipExtractor-Extract`). An entry that resolves inside the repo but
   outside the four managed folders is skipped, not extracted. An entry that resolves outside
   `repoRoot` is rejected before any managed folder is deleted, so that failure mode never
-  leaves the repo partially upgraded. Symbolic links and junctions already present in the
-  repo's folder layout are the repo owner's concern and are deliberately not inspected; only
-  archive-supplied paths are validated, and this class never creates links. A delete or
+  leaves the repo partially upgraded. The same path-safety contract as for every package format
+  applies, because `Extract` delegates to `PackageContentExtractor`: before anything is deleted,
+  the repo's real folder layout below the repo root is checked, and a symbolic link, junction or
+  other reparse point in the `.github` folder, a managed folder or a destination folder refuses
+  the whole extraction with a clear error, changing nothing inside or outside the repo
+  (`AgentControl-PackageZipExtractor-RefuseLinkedRepoFolders`; see `PackageContentExtractor` for
+  the checks, including the repo root itself being allowed to sit under a link). Archive entries
+  are validated the same way, and this class never creates links. A delete or
   extraction I/O failure can still leave the repo partially upgraded — there is
   intentionally no rollback for that case, and it must be resolved manually by the caller, per
   architecture.md's "Upgrade sequence and failure handling" decision. Logs at `Debug` before

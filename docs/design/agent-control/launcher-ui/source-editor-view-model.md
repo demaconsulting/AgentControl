@@ -19,7 +19,10 @@ package-ID rules), server source (`-ServerSource` and its examples, insecure-HTT
 connection test
 (`-TestConnection` and its availability, progress, cancel, outcome and stale-result rules), package IDs, save,
 signature options (`-SignatureOptions`), signer fingerprint (`-SignerFingerprint`) and forgetting a saved sign-in
-(`-ForgetSavedSignIn`); together they provide `AgentControl-LauncherUI-PackageSources`,
+(`-ForgetSavedSignIn`); together they provide `AgentControl-LauncherUI-PackageSourceValidation`,
+`AgentControl-LauncherUI-PackageSourcePackageIds`, `AgentControl-LauncherUI-AddPackageSource`,
+`AgentControl-LauncherUI-EditPackageSource`, `AgentControl-LauncherUI-ServerSourceEditor`,
+`AgentControl-LauncherUI-InsecureHttpChoice`, `AgentControl-LauncherUI-ServerSourceSettingsKept`,
 `AgentControl-LauncherUI-TestConnection`, `AgentControl-LauncherUI-SignatureOptions` and
 `AgentControl-LauncherUI-ForgetSavedSignIn`.
 

@@ -303,6 +303,38 @@ public class PackageZipExtractorTests
     }
 
     /// <summary>
+    ///     Test that Extract refuses a repo whose <c>.github</c> folder is a directory junction,
+    ///     deleting and writing nothing at the junction's target.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched() =>
+        AssertGitHubFolderLinkRefused(CreateJunctionOrSkip);
+
+    /// <summary>
+    ///     Test that Extract refuses a repo whose <c>.github</c> folder is a symbolic link,
+    ///     deleting and writing nothing at the link's target.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched() =>
+        AssertGitHubFolderLinkRefused(CreateSymlinkOrSkip);
+
+    /// <summary>
+    ///     Test that Extract refuses a repo with a managed folder that is a directory junction,
+    ///     before any other managed folder is deleted.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched() =>
+        AssertManagedFolderLinkRefused(CreateJunctionOrSkip);
+
+    /// <summary>
+    ///     Test that Extract refuses a repo with a managed folder that is a symbolic link,
+    ///     before any other managed folder is deleted.
+    /// </summary>
+    [Fact]
+    public void PackageZipExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched() =>
+        AssertManagedFolderLinkRefused(CreateSymlinkOrSkip);
+
+    /// <summary>
     ///     Test that the subsystem's zip extraction path refuses a repo whose <c>.github</c>
     ///     folder is a directory junction, deleting and writing nothing at the junction's target.
     /// </summary>

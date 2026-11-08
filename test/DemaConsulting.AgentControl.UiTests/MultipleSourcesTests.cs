@@ -66,6 +66,23 @@ public sealed class MultipleSourcesTests
                 nuGetFeedPath: feedDirectory,
                 nuGetPackageIds: [packageName],
                 pinnedSource: "Feed");
+
+            // The repo carries its own NuGet configuration, which AgentControl must neither use nor
+            // change: it points at an unreachable source and redirects the package folder
+            var repoNuGetConfig = Path.Combine(context.RepoPath, "nuget.config");
+            var hijackedPackagesFolder = Path.Combine(context.RepoPath, "hijacked-packages");
+            var repoNuGetConfigText =
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+                "<configuration>\n" +
+                "  <packageSources>\n" +
+                "    <clear />\n" +
+                "    <add key=\"Unreachable\" value=\"https://unreachable.invalid/v3/index.json\" />\n" +
+                "  </packageSources>\n" +
+                "  <config>\n" +
+                $"    <add key=\"globalPackagesFolder\" value=\"{hijackedPackagesFolder}\" />\n" +
+                "  </config>\n" +
+                "</configuration>\n";
+            File.WriteAllText(repoNuGetConfig, repoNuGetConfigText);
             var mainWindow = context.Launch();
 
             // The badge appears once the NuGet source has been listed and 2.0.0 found newer
@@ -98,6 +115,13 @@ public sealed class MultipleSourcesTests
             var pinJson = File.ReadAllText(Path.Combine(context.RepoPath, ".agentcontrol.json"));
             Assert.Contains("\"Source\": \"Feed\"", pinJson, StringComparison.Ordinal);
             Assert.Contains("\"Version\": \"2.0.0\"", pinJson, StringComparison.Ordinal);
+
+            // The repo's own NuGet configuration was neither used (the upgrade came from the
+            // configured source although the repo's configuration offers nothing reachable) nor
+            // changed, and the package folder it asks for was never created
+            Assert.Equal(repoNuGetConfigText, File.ReadAllText(repoNuGetConfig));
+            Assert.False(Directory.Exists(hijackedPackagesFolder));
+            Assert.Equal(["nuget.config"], Directory.GetFiles(context.RepoPath, "nuget.config*").Select(Path.GetFileName));
         }
         finally
         {

@@ -148,7 +148,9 @@ alias.
   its agent files under its `content` folder, and its versions are listed and unpacked by the
   NuGet caching library into a per-source cache AgentControl owns (see
   `docs/design/agent-control/agent-package-management/nuget-source-provider.md`)
-  (`AgentControl-System-MultipleSources`, `AgentControl-System-NuGetSources`). A server address must be
+  (`AgentControl-System-MultipleSources`, `AgentControl-System-NuGetSources`,
+  `AgentControl-System-NuGetTransportSecurity`, `AgentControl-System-NuGetRepoConfigUntouched`). A server
+  address must be
   `https` and end in `index.json`; plain `http` is accepted only when the user explicitly ticks
   "Allow insecure HTTP" for that source. A server that needs credentials is signed in to as described under
   *Credentials* below. Nothing about a
@@ -170,8 +172,8 @@ alias.
 - *Contract*: Credentials come, in order, from what NuGet itself knows (a `nuget.config` source with the
   same address and its stored credentials, or an installed credential-provider plug-in running without
   interaction), from what the user already typed this session or saved earlier in their own Git credential helper,
-  and only then from the sign-in dialog, at most once per operation (`AgentControl-System-NuGetSources`,
-  `AgentControl-System-CredentialSafety`). A
+  and only then from the sign-in dialog, at most once per operation (`AgentControl-System-ServerSignIn`,
+  `AgentControl-System-CredentialSessionScope`). A
   credential the user types is kept in memory for the session only - unless the user ticks "Remember on this
   computer", in which case the user's own Git credential helper keeps it, never AgentControl - and is offered only
   to the server it was
@@ -269,7 +271,9 @@ untrusted input: pins are bound to their source alias and never resolved elsewhe
 (`AgentControl-System-SourcePinIntegrity`), NuGet content is read from a private per-source cache
 that rejects links and path traversal, and no secret is ever stored (see
 `docs/design/agent-control/agent-package-management.md` and `repo-sync.md`). **Credentials for package
-servers** are the other accepted risk area and are controlled as follows (`AgentControl-System-CredentialSafety`):
+servers** are the other accepted risk area and are controlled as follows (`AgentControl-System-CredentialSafety`,
+`AgentControl-System-CredentialSessionScope`, `AgentControl-System-SavedSignInLifecycle` and
+`AgentControl-System-CredentialOriginScope`):
 a credential is never persisted by AgentControl (not in the settings file, a pin file, the log or a repo), is kept
 in memory for the session only and cleared at exit, is asked for only through a dialog that shows which server
 receives it, is offered by AgentControl only to the origin (scheme, host and port) of the configured server - a

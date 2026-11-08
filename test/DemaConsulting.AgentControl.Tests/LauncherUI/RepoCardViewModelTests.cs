@@ -2051,6 +2051,112 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that applying a package returns control to the caller while the source is still
+    ///     being read.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackageAsync_SourceSlow_ReturnsToCallerBeforeSourceAnswers()
+    {
+        // Arrange: a source whose version listing never answers unless cancelled
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
+        var selection = new PackageReference("Default", "contoso-agents", "1.1.0");
+
+        // Act: start applying
+        var running = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+
+        // Assert: the caller has its control back although the source has not answered
+        Assert.False(running.IsCompleted);
+
+        // Cleanup
+        card.CancelOperationCommand.Execute(null);
+        await running;
+    }
+
+    /// <summary>
+    ///     Test that while a package is being applied the card reports that it is busy, with a
+    ///     message, and disables its other actions.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackageAsync_Running_ReportsBusyAndDisablesOtherActions()
+    {
+        // Arrange
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
+        var selection = new PackageReference("Default", "contoso-agents", "1.1.0");
+
+        // Act
+        var running = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+
+        // Assert: busy, and no other action can start
+        Assert.True(card.IsBusy);
+        Assert.Equal("Applying agent package...", card.BusyMessage);
+        Assert.False(card.LaunchCommand.CanExecute(null));
+        Assert.False(card.RefreshCommand.CanExecute(null));
+        Assert.False(card.SelectPackageCommand.CanExecute(null));
+
+        // Act: finish the operation
+        card.CancelOperationCommand.Execute(null);
+        await running;
+
+        // Assert: idle again, actions available again
+        Assert.False(card.IsBusy);
+        Assert.Null(card.BusyMessage);
+        Assert.True(card.LaunchCommand.CanExecute(null));
+    }
+
+    /// <summary>
+    ///     Test that a second apply while one is running is ignored and does not read the source
+    ///     again.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored()
+    {
+        // Arrange
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
+        var selection = new PackageReference("Default", "contoso-agents", "1.1.0");
+        var running = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+
+        // Act: a second request while the first is still running
+        await card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+
+        // Assert: the source was read only once
+        Assert.Equal(1, provider.ListVersionsCalls);
+
+        // Cleanup
+        card.CancelOperationCommand.Execute(null);
+        await running;
+    }
+
+    /// <summary>
+    ///     Test that cancelling a running package apply stops it without raising an error and
+    ///     without changing the repo's pin.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackageAsync_CancelledWhileRunning_ReportsNoErrorAndKeepsPinUnchanged()
+    {
+        // Arrange
+        var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
+        var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
+        string? error = null;
+        card.ErrorOccurred += (_, message) => error = message;
+        var selection = new PackageReference("Default", "contoso-agents", "1.1.0");
+        var running = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
+        Assert.True(card.CanCancelOperation);
+
+        // Act
+        card.CancelOperationCommand.Execute(null);
+        await running;
+
+        // Assert: cancelled quietly, nothing pinned
+        Assert.Equal("The operation was canceled.", card.StatusMessage);
+        Assert.Null(error);
+        Assert.True(card.IsPackageSelectionNeeded);
+        Assert.Null(RepoPinStore.Load(card.RepoPath));
+    }
+
+    /// <summary>
     ///     Test that cancelling the wait for the pre-launch sync still launches the agent tool, per
     ///     the rule that sync state never blocks a launch.
     /// </summary>

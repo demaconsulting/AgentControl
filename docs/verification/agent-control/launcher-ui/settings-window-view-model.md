@@ -82,24 +82,34 @@ failing check shows as missing, disposing cancels pending checks, and a saved se
 `SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt`, covering
 `AgentControl-SettingsWindowViewModel-SourceList`.
 
-**SettingsWindowViewModel_AddEditRemoveSource_ChangeListAndWarnBeforeRemoval**: The add commands
-request an editor for each source kind (including the NuGet server, whose editor is in server mode);
-saving an editor adds and selects a zip or NuGet source
-(keeping the NuGet package identifiers), an edit replaces the source in place keeping its alias, editing a
-listed server opens the server editor whose connection test goes through the supplied provider factory,
-the remove command requests a removal for the selected source, a removal's warning names the
-pinned repos before the source is removed, and the saved settings hold the resulting list in
-order. This scenario is tested by
+**SettingsWindowViewModel_AddSource_AddsEachKindOfSource**: The add commands
+request an editor for each source kind (including the NuGet server, whose editor is in server mode), and
+saving an editor adds and selects a zip or NuGet source, keeping the NuGet package identifiers. This scenario is
+tested by
 `SettingsWindowViewModel_AddCommands_RaiseEditorRequestedForNewSourceOfEachKind`,
 `SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource`,
-`SettingsWindowViewModel_AddNuGetFolderSource_EditorSaved_KeepsPackageIds`,
-`SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor`,
-`SettingsWindowViewModel_EditSource_EditorSaved_ReplacesSourceInPlaceKeepingAlias`,
-`SettingsWindowViewModel_EditServerSource_OpensServerEditorThatTestsThroughTheFactory`,
-`SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource`,
-`SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves`, and
+`SettingsWindowViewModel_AddNuGetFolderSource_EditorSaved_KeepsPackageIds` and
+`SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor`, covering
+`AgentControl-SettingsWindowViewModel-AddSource`.
+
+**SettingsWindowViewModel_EditSource_ReplacesTheSourceInPlace**: An edit replaces the source in place keeping its
+alias, and editing a listed server opens the server editor whose connection test goes through the supplied provider
+factory. This scenario is tested by
+`SettingsWindowViewModel_EditSource_EditorSaved_ReplacesSourceInPlaceKeepingAlias` and
+`SettingsWindowViewModel_EditServerSource_OpensServerEditorThatTestsThroughTheFactory`, covering
+`AgentControl-SettingsWindowViewModel-EditSource`.
+
+**SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposBeforeRemoval**: The remove command requests a removal
+for the selected source, and a removal's warning names the pinned repos before the source is removed. This scenario
+is tested by
+`SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource` and
+`SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves`, covering
+`AgentControl-SettingsWindowViewModel-RemoveSource`.
+
+**SettingsWindowViewModel_Save_WritesTheResultingSourcesInOrder**: After additions, an edit and a removal, the
+saved settings hold the resulting list in order. This scenario is tested by
 `SettingsWindowViewModel_Save_AfterAddEditRemove_WritesResultingSourcesInOrder`, covering
-`AgentControl-SettingsWindowViewModel-AddEditRemoveSource`.
+`AgentControl-SettingsWindowViewModel-SaveResultingSources`.
 
 **SettingsWindowViewModel_AliasUnique_DuplicateIgnoringCaseCannotBeSaved**: An editor created for a
 new source cannot be saved with an alias already configured under a different letter case. This

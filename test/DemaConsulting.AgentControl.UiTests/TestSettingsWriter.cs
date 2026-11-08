@@ -76,6 +76,9 @@ internal static class TestSettingsWriter
     /// <param name="nuGetPackageIds">The package IDs offered by the <c>Feed</c> source.</param>
     /// <param name="nuGetRequireSigned">Whether the <c>Feed</c> source requires signed
     ///     packages.</param>
+    /// <param name="nuGetServerIndexUrl">The service-index address of a NuGet package server (plain
+    ///     http allowed) to configure as an additional source with alias <c>Server</c>, or
+    ///     <see langword="null"/> for none; its package IDs are <paramref name="nuGetPackageIds"/>.</param>
     public static void Write(
         string configDirectory,
         string argLoggerStubExePath,
@@ -85,7 +88,8 @@ internal static class TestSettingsWriter
         string? pinnedPackageVersion = null,
         string? nuGetFeedPath = null,
         IReadOnlyList<string>? nuGetPackageIds = null,
-        bool nuGetRequireSigned = false)
+        bool nuGetRequireSigned = false,
+        string? nuGetServerIndexUrl = null)
     {
         Directory.CreateDirectory(configDirectory);
 
@@ -110,7 +114,7 @@ internal static class TestSettingsWriter
             }
         };
 
-        if (nuGetFeedPath is null)
+        if (nuGetFeedPath is null && nuGetServerIndexUrl is null)
         {
             // Older single-folder format, which the application migrates to a "Default" source
             settings["PackageSourcePath"] = packageSourcePath;
@@ -123,14 +127,30 @@ internal static class TestSettingsWriter
                 sources.Add(new { Alias = "Default", Type = "Zip", Location = packageSourcePath });
             }
 
-            sources.Add(new
+            if (nuGetFeedPath is not null)
             {
-                Alias = "Feed",
-                Type = "NuGet",
-                Location = nuGetFeedPath,
-                PackageIds = nuGetPackageIds ?? [],
-                RequireSignedPackages = nuGetRequireSigned
-            });
+                sources.Add(new
+                {
+                    Alias = "Feed",
+                    Type = "NuGet",
+                    Location = nuGetFeedPath,
+                    PackageIds = nuGetPackageIds ?? [],
+                    RequireSignedPackages = nuGetRequireSigned
+                });
+            }
+
+            if (nuGetServerIndexUrl is not null)
+            {
+                sources.Add(new
+                {
+                    Alias = "Server",
+                    Type = "NuGet",
+                    Location = nuGetServerIndexUrl,
+                    PackageIds = nuGetPackageIds ?? [],
+                    AllowInsecureHttp = true
+                });
+            }
+
             settings["Sources"] = sources;
         }
 

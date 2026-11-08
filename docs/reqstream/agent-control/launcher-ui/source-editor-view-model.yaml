@@ -11,14 +11,16 @@ sections:
       # ---- Validation ----
       - id: AgentControl-SourceEditorViewModel-Validation
         title: >-
-          The SourceEditorViewModel class shall permit saving a source only when its alias, its
-          location and - for a NuGet source - its package ID list are all acceptable.
+          The SourceEditorViewModel class shall permit saving a source only while none of its
+          fields has a validation error.
         justification: |
           A source that the application would later refuse to use or save must not be
-          acceptable in the dialog.
+          acceptable in the dialog. What makes each field acceptable is stated by the
+          requirements for the alias, the location and the package IDs; this requirement is the
+          single gate that follows from them.
         tests:
-          - SourceEditorViewModel_Constructor_NewSourceOfEachKind_HasMatchingTitleAndSections
           - SourceEditorViewModel_NewEmptyEditor_CannotSaveButShowsNoErrorsYet
+          - SourceEditorViewModel_SaveCommand_ValidZipSource_RaisesSavedWithDefinition
           - SourceEditorViewModel_Alias_Invalid_ReportsProblemAndBlocksSave
           - SourceEditorViewModel_Location_Invalid_ReportsProblemAndBlocksSave
           - SourceEditorViewModel_NuGetSource_NoPackageIds_CannotSaveUntilOneIsAdded

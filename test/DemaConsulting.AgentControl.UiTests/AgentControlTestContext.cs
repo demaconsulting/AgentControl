@@ -70,6 +70,8 @@ internal sealed class AgentControlTestContext : IDisposable
     ///     <see langword="null"/> to write a pin that names no source.</param>
     /// <param name="nuGetRequireSigned">Whether the <c>Feed</c> source requires signed
     ///     packages.</param>
+    /// <param name="nuGetServerIndexUrl">The service-index address of a NuGet package server to
+    ///     configure as the additional <c>Server</c> source, or <see langword="null"/> for none.</param>
     public AgentControlTestContext(
         string? packageSourcePath = null,
         string? pinnedPackageName = null,
@@ -77,7 +79,8 @@ internal sealed class AgentControlTestContext : IDisposable
         string? nuGetFeedPath = null,
         IReadOnlyList<string>? nuGetPackageIds = null,
         string? pinnedSource = null,
-        bool nuGetRequireSigned = false)
+        bool nuGetRequireSigned = false,
+        string? nuGetServerIndexUrl = null)
     {
         var root = Directory.CreateTempSubdirectory("AgentControlUiTests-");
         RootDirectory = root.FullName;
@@ -98,7 +101,8 @@ internal sealed class AgentControlTestContext : IDisposable
             pinnedPackageVersion,
             nuGetFeedPath,
             nuGetPackageIds,
-            nuGetRequireSigned);
+            nuGetRequireSigned,
+            nuGetServerIndexUrl);
 
         if (pinnedPackageName is not null && pinnedPackageVersion is not null)
         {

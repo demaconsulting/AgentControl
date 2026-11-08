@@ -172,9 +172,12 @@ tested by `SecretRedactor_RegisterAndUnregister_ReplacesEveryOccurrenceOfTheSecr
 
 **SecretRedactingLogger_RedactsWhileAnyHolderUsesSecret**: A secret registered twice stays redacted after the
 first withdrawal and is released by the last; a lease taken for one holder is idempotent, withdraws only its own
-registration and leaves another holder's registration in force. This scenario is tested by
-`SecretRedactor_Unregister_SecretRegisteredTwice_StaysRedactedUntilTheLastWithdrawal` and
-`SecretRedactor_Lease_DisposedTwiceOrAlongsideOtherHolders_WithdrawsOnlyItsOwnRegistration`, covering
+registration and leaves another holder's registration in force; a lease alone redacts the secret only while it is
+held, and a lease cannot be taken without a credential. This scenario is tested by
+`SecretRedactor_Unregister_SecretRegisteredTwice_StaysRedactedUntilTheLastWithdrawal`,
+`SecretRedactor_Lease_DisposedTwiceOrAlongsideOtherHolders_WithdrawsOnlyItsOwnRegistration`,
+`SecretRedactor_Lease_HeldAndDisposed_RedactsTheSecretOnlyWhileLeased` and
+`SecretRedactor_Lease_NullCredential_Throws`, covering
 `AgentControl-SecretRedactingLogger-RedactsWhileAnyHolderUsesSecret`.
 
 **SecretRedactingLogger_RegistryIsThreadSafe**: Registering, redacting and withdrawing secrets from many

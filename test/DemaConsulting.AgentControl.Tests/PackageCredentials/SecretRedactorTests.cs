@@ -632,6 +632,55 @@ public sealed class SecretRedactorTests
     }
 
     /// <summary>
+    ///     Test that a lease alone registers the secret for as long as it is held - redacting it from
+    ///     the moment it is taken - and withdraws the registration when it is disposed, leaving
+    ///     a registration made by someone else in force.
+    /// </summary>
+    [Fact]
+    public void SecretRedactor_Lease_HeldAndDisposed_RedactsTheSecretOnlyWhileLeased()
+    {
+        // Arrange
+        var secret = "sec-" + Guid.NewGuid().ToString("N");
+        var credential = new NuGetCredential("u", secret);
+        var text = $"value {secret} end";
+        var before = SecretRedactor.Redact(text);
+
+        // Act
+        var lease = SecretRedactor.Lease(credential);
+        var whileLeased = SecretRedactor.Redact(text);
+        lease.Dispose();
+        var afterDispose = SecretRedactor.Redact(text);
+        lease.Dispose();
+        var afterSecondDispose = SecretRedactor.Redact(text);
+
+        // Act: a lease disposed twice does not withdraw a separate registration
+        SecretRedactor.Register(credential);
+        var another = SecretRedactor.Lease(credential);
+        another.Dispose();
+        another.Dispose();
+        var whileRegistered = SecretRedactor.Redact(text);
+        SecretRedactor.Unregister(credential);
+
+        // Assert
+        Assert.Equal(text, before);
+        Assert.Equal("value [redacted] end", whileLeased);
+        Assert.Equal(text, afterDispose);
+        Assert.Equal(text, afterSecondDispose);
+        Assert.Equal("value [redacted] end", whileRegistered);
+        Assert.Equal(text, SecretRedactor.Redact(text));
+    }
+
+    /// <summary>
+    ///     Test that a lease cannot be taken without a credential.
+    /// </summary>
+    [Fact]
+    public void SecretRedactor_Lease_NullCredential_Throws()
+    {
+        // Act / Assert
+        Assert.Throws<ArgumentNullException>(() => SecretRedactor.Lease(null!));
+    }
+
+    /// <summary>
     ///     An object whose text is fixed, to prove arbitrary objects are redacted via their text.
     /// </summary>
     /// <param name="Text">The text.</param>

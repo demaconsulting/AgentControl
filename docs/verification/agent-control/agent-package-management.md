@@ -11,7 +11,8 @@ in its own unit-level verification
 design, plus `PackageSourceDefinitionTests.cs` and `PackageSourceServerLocationTests.cs`, which verify the
 supporting source model types and `PackageSourceAccessException` that have no unit of their own, and
 `AgentPackageManagementSubsystemTests.cs`, the subsystem tests that resolve configured sources through the registry
-into providers and exercise the signature requirement and platform check together. Zip discovery,
+into providers and exercise the NuGet server source (against the in-process mock feed), the signature requirement and
+the platform check together. Zip discovery,
 version parsing, and caching use real temporary
 directories containing real zip files, and the NuGet provider runs the real NuGet caching library
 against a real folder feed built on the fly and, for servers, against an in-process mock NuGet V3 feed, so
@@ -72,31 +73,48 @@ subsystem level, covering `AgentControl-AgentPackageManagement-UpgradeDetection`
 `AgentControl-PackageSource-DetectNewerVersion`, `AgentControl-PackageVersion-Compare`,
 `AgentControl-PackageVersionCache-CacheNewerVersion`).
 
-**AgentPackageManagement_SourceDefinitions_HoldNoSecretsAndDeriveLocationKind**: The source
-description carries alias, type, location, package IDs and trust options with safe defaults,
-derives folder-versus-server from the location, serializes its type by name without the derived
-kind, validates aliases, has no property named like a password, token, key, credential or
-secret, and flags a location that embeds a credential (URL user information, or a server URL
-with a query string or fragment) without repeating it in the message, and judges a server address (`https`,
-or `http` only when insecure HTTP is allowed; ends in `index.json`; no credential) with a message that says
-what to do. This scenario is tested by
-the source model tests, with
-`PackageSourceDefinition_Members_HaveNoSecretLikeProperty`,
-`PackageSourceDefinition_LocationKind_DerivedFromLocation`,
-`PackageSourceDefinition_Serialize_TypeAsNameAndNoDerivedLocationKind`,
-`PackageSourceDefinition_GetCredentialProblem_CredentialBearingLocation_ReturnsMessageWithoutSecret`,
-`PackageSourceDefinition_GetCredentialProblem_OrdinaryLocation_ReturnsNull`,
-`PackageSourceDefinition_GetServerLocationProblem_AcceptableAddress_ReturnsNull`, and
-`PackageSourceDefinition_GetServerLocationProblem_UnacceptableAddress_ReturnsClearMessage` (the last two in
-`PackageSourceServerLocationTests.cs`) cited directly at the
-subsystem level, covering `AgentControl-AgentPackageManagement-SourceDefinitions`. The trust options are verified
-too: a fingerprint written with or without colons, dashes or spaces and in either letter case is reduced to 64
-upper-case hexadecimal characters, text that is not such a fingerprint is refused, and only an unreadable
-fingerprint of a NuGet source that requires signatures is reported as a policy problem (not an empty one, one that is
-not in use, or a zip source). This is tested by
-`PackageSourceDefinition_TryNormalizeFingerprint_ValidSpellings_NormalizeToUpperCaseHex`,
-`PackageSourceDefinition_TryNormalizeFingerprint_InvalidText_IsRefused` and
-`PackageSourceDefinition_GetSignaturePolicyProblem_OnlyAnUnreadableFingerprintOfARequiringNuGetSource`.
+**AgentPackageManagement_SourceDefinitions_CarryAliasTypeLocationAndTrustOptions**: The source
+description carries alias, type, location, package IDs and trust options with safe defaults and
+serializes its type by name without the derived kind. This scenario is tested by the source model tests, with
+`PackageSourceDefinition_Defaults_AreSafeAndEmpty` and
+`PackageSourceDefinition_Serialize_TypeAsNameAndNoDerivedLocationKind` cited directly at the subsystem level,
+covering `AgentControl-AgentPackageManagement-SourceDefinitions`.
+
+**AgentPackageManagement_SourceLocationKind_FollowsTheLocation**: A location that is an absolute `http` or `https`
+address is a server and any other location is a folder, decided from the location alone. This scenario is tested
+by `PackageSourceDefinition_LocationKind_DerivedFromLocation`, covering
+`AgentControl-AgentPackageManagement-SourceLocationKind`.
+
+**AgentPackageManagement_SourceNoSecrets_NoMemberCanHoldASecret**: No property of the source description is named
+like a password, token, key, credential or secret. This scenario is tested by
+`PackageSourceDefinition_Members_HaveNoSecretLikeProperty`, covering
+`AgentControl-AgentPackageManagement-SourceNoSecrets`.
+
+**AgentPackageManagement_SourceCredentialBearingLocation_IsFlaggedWithoutRepeatingIt**: A location that embeds a
+credential (URL user information, or a server URL with a query string or fragment) is flagged without repeating it
+in the message, and an ordinary location is not. This scenario is tested by
+`PackageSourceDefinition_GetCredentialProblem_CredentialBearingLocation_ReturnsMessageWithoutSecret` and
+`PackageSourceDefinition_GetCredentialProblem_OrdinaryLocation_ReturnsNull`, covering
+`AgentControl-AgentPackageManagement-SourceCredentialBearingLocation`.
+
+**AgentPackageManagement_SourceServerAddress_IsJudgedWithAMessageThatSaysWhatToDo**: A server address is judged
+(`https`, or `http` only when insecure HTTP is allowed; ends in `index.json`; no credential) with a message that
+says what to do. This scenario is tested by
+`PackageSourceDefinition_GetServerLocationProblem_AcceptableAddress_ReturnsNull` and
+`PackageSourceDefinition_GetServerLocationProblem_UnacceptableAddress_ReturnsClearMessage` (in
+`PackageSourceServerLocationTests.cs`), covering `AgentControl-AgentPackageManagement-SourceServerAddress`.
+
+**AgentPackageManagement_SourceFingerprintNormalization_SpellingsDenoteOnePublisher**: A fingerprint written with or
+without colons, dashes or spaces and in either letter case is reduced to 64 upper-case hexadecimal characters. This
+scenario is tested by `PackageSourceDefinition_TryNormalizeFingerprint_ValidSpellings_NormalizeToUpperCaseHex`,
+covering `AgentControl-AgentPackageManagement-SourceFingerprintNormalization`.
+
+**AgentPackageManagement_SourceUnreadableFingerprint_IsRefusedAndReportedAsAPolicyProblem**: Text that is not a
+SHA-256 fingerprint is refused, and only an unreadable fingerprint of a NuGet source that requires signatures is
+reported as a policy problem (not an empty one, one that is not in use, or a zip source). This scenario is tested
+by `PackageSourceDefinition_TryNormalizeFingerprint_InvalidText_IsRefused` and
+`PackageSourceDefinition_GetSignaturePolicyProblem_OnlyAnUnreadableFingerprintOfARequiringNuGetSource`, covering
+`AgentControl-AgentPackageManagement-SourceUnreadableFingerprint`.
 
 **AgentPackageManagement_SourceResolution_ResolvesOnlyTheNamedSourceWithNoFallback**: Resolving a
 source alias returns that source alone; a missing alias is an error that contacts no other source
@@ -156,44 +174,64 @@ level, covering `AgentControl-AgentPackageManagement-NuGetFolderSource` (childre
 `AgentControl-NuGetSourceProvider-RejectNonNuGetDefinition`,
 `AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource`).
 
-**AgentPackageManagement_NuGetServerSource_ListsSignsInAndReportsFailuresWithoutLeakingSecrets**: A NuGet
-server source, run against an in-process mock NuGet V3 feed, lists versions without downloading a package and
-supplies a chosen version's content; for a server that requires a sign-in it uses a credential from the
-user's NuGet configuration without asking, otherwise asks the user once and remembers a working credential for
-the session, reuses it without asking, forgets a rejected one and asks again; it never opens the prompt for
-another host that the feed's index advertises; it reports a refused access, a wrong credential, a cancelled
-sign-in, a sign-in that takes too long and an address that is not a feed as distinct failures with messages
-that name only the server's origin; it accepts only `https` addresses (plain `http` only with the explicit
-opt-in) of an `index.json` with no credential; and no secret reaches the log. This scenario is verified by the
-`NuGetSourceProvider` unit tests (see its unit verification design), with
-`NuGetSourceProvider_ListVersions_AnonymousServer_ReturnsVersionsWithoutDownloading`,
-`NuGetSourceProvider_ListVersions_ServerNeedsSignIn_PromptsOnceAndRemembersCredentialForTheSession` and
-`NuGetSourceProvider_Constructor_PlainHttp_RefusedUnlessInsecureHttpIsAllowed` cited directly at the subsystem
-level, covering `AgentControl-AgentPackageManagement-NuGetServerSource` (children:
-`AgentControl-NuGetSourceProvider-ServerListAndAcquire`,
-`AgentControl-NuGetSourceProvider-ServerListDoesNotDownload`,
-`AgentControl-NuGetSourceProvider-ServerUnknownPackageIsEmpty`,
-`AgentControl-NuGetSourceProvider-ServerAcquire`,
-`AgentControl-NuGetSourceProvider-PlainHttpRefusedUnlessAllowed`,
-`AgentControl-NuGetSourceProvider-ServerAddressMustBeServiceIndex`,
-`AgentControl-NuGetSourceProvider-CredentialInAddressRefused`,
-`AgentControl-NuGetSourceProvider-HttpsAddressAccepted`,
-`AgentControl-NuGetSourceProvider-SignInOrder`,
-`AgentControl-NuGetSourceProvider-AskUserOnce`,
-`AgentControl-NuGetSourceProvider-CredentialRememberedAfterSuccess`,
-`AgentControl-NuGetSourceProvider-NonInteractiveLibrary`,
-`AgentControl-NuGetSourceProvider-SavedSignIn`,
-`AgentControl-NuGetSourceProvider-SavedSignInLookedUpOnce`,
-`AgentControl-NuGetSourceProvider-RejectedSavedSignInRemoved`,
-`AgentControl-NuGetSourceProvider-SignInSavedOnlyWhenChosen`,
-`AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin`,
-`AgentControl-NuGetSourceProvider-ServerFailures`,
-`AgentControl-NuGetSourceProvider-RejectedCredentialForgotten`,
-`AgentControl-NuGetSourceProvider-SignInTimeLimit`,
-`AgentControl-NuGetSourceProvider-CallerCancellationNotAFailure`,
-`AgentControl-NuGetSourceProvider-SecretsNotLogged`,
-`AgentControl-NuGetSourceProvider-SecretsNotInExceptions`,
-`AgentControl-PackageSourceRegistry-PlainHttpServerSourceRefused`).
+**AgentPackageManagement_NuGetServerSource_ListsAcquiresSignsInAndReportsFailuresWithoutLeakingSecrets**: A NuGet
+server source is resolved through the registry and run against an in-process mock NuGet V3 feed in the subsystem
+tests (`AgentPackageManagementSubsystemTests.cs`); the finer evidence for each child requirement is in the
+`NuGetSourceProvider` unit tests (see its unit verification design). Each requirement is covered as follows.
+
+- Listing: versions are listed, labeled with the alias, without downloading a package, and none for an unknown
+  package, by
+  `AgentPackageManagementSubsystem_ServerSource_ListVersions_ReturnsVersionsWithoutDownloadingAndNoneForUnknownPackage`,
+  covering `AgentControl-AgentPackageManagement-NuGetServerSource` (children:
+  `AgentControl-NuGetSourceProvider-ServerListAndAcquire`,
+  `AgentControl-NuGetSourceProvider-ServerListDoesNotDownload`,
+  `AgentControl-NuGetSourceProvider-ServerUnknownPackageIsEmpty`).
+- Acquisition: a chosen version's content is downloaded and supplied, by
+  `AgentPackageManagementSubsystem_ServerSource_Acquire_SuppliesContentOfChosenVersion`, covering
+  `AgentControl-AgentPackageManagement-NuGetServerAcquire` (child: `AgentControl-NuGetSourceProvider-ServerAcquire`).
+- Transport policy: a source is only usable with an `https` address of an `index.json` (plain `http` only with the
+  explicit opt-in) that embeds no credential, and a refusal does not repeat the address, by
+  `AgentPackageManagementSubsystem_ServerSource_Address_RefusedUnlessHttpsServiceIndexOrOptedInHttp`, covering
+  `AgentControl-AgentPackageManagement-NuGetServerTransportPolicy` (children:
+  `AgentControl-NuGetSourceProvider-PlainHttpRefusedUnlessAllowed`,
+  `AgentControl-NuGetSourceProvider-ServerAddressMustBeServiceIndex`,
+  `AgentControl-NuGetSourceProvider-CredentialInAddressRefused`,
+  `AgentControl-NuGetSourceProvider-HttpsAddressAccepted`,
+  `AgentControl-PackageSourceRegistry-PlainHttpServerSourceRefused`).
+- Sign-in order: a credential from the user's NuGet configuration or a saved sign-in is used without asking,
+  otherwise the user is asked once and the answer is reused by the next operation without asking, by
+  `AgentPackageManagementSubsystem_ServerSource_NeedsSignIn_UsesSavedSignInOtherwiseAsksOnceAndReusesTheAnswer`,
+  covering `AgentControl-AgentPackageManagement-NuGetServerSignIn` (children:
+  `AgentControl-NuGetSourceProvider-SignInOrder`, `AgentControl-NuGetSourceProvider-AskUserOnce`,
+  `AgentControl-NuGetSourceProvider-NonInteractiveLibrary`, `AgentControl-NuGetSourceProvider-SavedSignIn`,
+  `AgentControl-NuGetSourceProvider-SavedSignInLookedUpOnce`). The failure when no prompt is available is verified
+  by the failures scenario below.
+- Credential retention: a wrong password is neither remembered nor saved, a rejected saved sign-in is removed from
+  the user's store and replaced after one question, and a working credential the user chose to remember is saved,
+  by `AgentPackageManagementSubsystem_ServerSource_Credentials_KeptOnlyAfterSuccessAndForgottenWhenRejected`,
+  covering `AgentControl-AgentPackageManagement-NuGetServerCredentialRetention` (children:
+  `AgentControl-NuGetSourceProvider-CredentialRememberedAfterSuccess`,
+  `AgentControl-NuGetSourceProvider-RejectedCredentialForgotten`,
+  `AgentControl-NuGetSourceProvider-RejectedSavedSignInRemoved`,
+  `AgentControl-NuGetSourceProvider-SignInSavedOnlyWhenChosen`).
+- Origin scoping: the user is asked for the feed's own origin only, even when the feed's index advertises resources
+  on another host, by
+  `AgentPackageManagementSubsystem_ServerSource_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin`, covering
+  `AgentControl-AgentPackageManagement-NuGetServerOriginScoping` (child:
+  `AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin`).
+- Failures: a sign-in that is needed but cannot be asked for, a cancelled sign-in, a sign-in that takes too long
+  and an address that is not a feed are distinct failures without a secret or address path, and a caller's
+  cancellation during a sign-in is not a failure, by
+  `AgentPackageManagementSubsystem_ServerSource_Failures_AreDistinctAndNameNeitherSecretNorPath` and
+  `AgentPackageManagementSubsystem_ServerSource_CallerCancelsWhileSigningIn_IsCancellationNotFailure`, covering
+  `AgentControl-AgentPackageManagement-NuGetServerFailures` (children:
+  `AgentControl-NuGetSourceProvider-ServerFailures`, `AgentControl-NuGetSourceProvider-SignInTimeLimit`,
+  `AgentControl-NuGetSourceProvider-CallerCancellationNotAFailure`).
+- Secret safety: no password, encoded credential or secret-bearing inner exception reaches the log or an
+  exception, whether a sign-in succeeds or fails, by
+  `AgentPackageManagementSubsystem_ServerSource_SignInFlows_NeverLogOrRaiseTheSecret`, covering
+  `AgentControl-AgentPackageManagement-NuGetServerSecretSafety` (children:
+  `AgentControl-NuGetSourceProvider-SecretsNotLogged`, `AgentControl-NuGetSourceProvider-SecretsNotInExceptions`).
 
 **AgentPackageManagement_SignedPackages_RefusesEveryPackageThatFailsTheRequirement**: Through the registry, which
 resolves configured sources into providers, a NuGet source that requires signed packages refuses an unsigned
@@ -225,13 +263,17 @@ support check answers "not supported" - including when its probe fails - a NuGet
 refuses to list with a signature failure that explains why, while a source that does not require signatures over
 the same feed works as usual. This scenario is tested by
 `AgentPackageManagementSubsystem_RequireSignedOnUnsupportedPlatform_SourceRefusesAndOthersWork`, covering
-`AgentControl-AgentPackageManagement-SignaturePlatformSupport`. The support check's own behavior (exactly Windows,
-Linux and macOS, the fail-closed probe, the real offline certificate-chain probe, the documented explanation) and
-the provider's refusal to acquire are
-verified by the unit tests and covered by the children
-`AgentControl-SignatureVerificationSupport-PlatformSupport`,
+`AgentControl-AgentPackageManagement-SignaturePlatformSupport`. The support check's own behavior is verified by the
+unit tests and covered by the children
+`AgentControl-SignatureVerificationSupport-PlatformSupport` (the decision for exactly Windows, Linux and macOS, a
+platform-independent test), `AgentControl-SignatureVerificationSupport-SupportedOnWindows`,
+`AgentControl-SignatureVerificationSupport-SupportedOnLinux` and
+`AgentControl-SignatureVerificationSupport-SupportedOnMacOS` (each proven only by the test runs of that platform in
+the continuous-integration matrix, selected by the `windows@`, `ubuntu@` and `macos@` source filters of the
+test-result files, where the check reports "supported" and a real offline certificate-chain probe succeeds),
 `AgentControl-SignatureVerificationSupport-FailClosedProbe`,
 `AgentControl-SignatureVerificationSupport-RealChainProbe`,
-`AgentControl-SignatureVerificationSupport-UnsupportedExplanation`,
+`AgentControl-SignatureVerificationSupport-UnsupportedExplanation`; the provider's refusal to acquire is verified by
+the unit tests and covered by
 `AgentControl-NuGetSourceProvider-FailClosedWithoutVerification` and
 `AgentControl-NuGetSourceProvider-UnsupportedPlatformDoesNotAffectOpenSources`.

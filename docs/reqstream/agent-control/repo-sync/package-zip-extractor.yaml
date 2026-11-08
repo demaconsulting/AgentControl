@@ -16,8 +16,6 @@ sections:
           that resolves outside the four managed folders, skipping it when it stays within the
           repo root and rejecting the whole extraction when it resolves outside the repo root,
           in either case without having deleted any pre-existing managed folder beforehand.
-          Existing symbolic links or junctions in the repo's folder layout are out of scope and
-          are not inspected.
         justification: |
           Guarantees the repo's agent files are always an exact match for the pinned
           package's contents, whether this is the first extraction or replacing an older
@@ -31,6 +29,22 @@ sections:
           - PackageZipExtractor_Extract_InvalidZipFile_ThrowsInvalidOperationException
           - PackageZipExtractor_Extract_TraversalEntryWithinRepoRoot_DoesNotEscapeManagedFolders
           - PackageZipExtractor_Extract_EntryEscapesRepoRoot_ThrowsBeforeDeletingManagedFolders
+
+      - id: AgentControl-PackageZipExtractor-RefuseLinkedRepoFolders
+        title: >-
+          The PackageZipExtractor class shall refuse to extract a package zip into a repo whose
+          .github folder or a managed folder is a symbolic link or junction, changing nothing
+          inside or outside the repo.
+        justification: |
+          The same protection applies whatever the package format: replacing managed folders
+          through a link the developer did not intend a sync to follow would delete or overwrite
+          files outside the repository, so the zip entry point must refuse exactly as the
+          folder-package path does.
+        tests:
+          - windows@PackageZipExtractor_Extract_GitHubFolderIsJunction_RefusesAndLeavesTargetUntouched
+          - windows@PackageZipExtractor_Extract_ManagedFolderIsJunction_RefusesAndLeavesTargetUntouched
+          - ubuntu@PackageZipExtractor_Extract_GitHubFolderIsSymlink_RefusesAndLeavesTargetUntouched
+          - ubuntu@PackageZipExtractor_Extract_ManagedFolderIsSymlink_RefusesAndLeavesTargetUntouched
 
       - id: AgentControl-PackageZipExtractor-AllManagedFoldersExist
         title: >-

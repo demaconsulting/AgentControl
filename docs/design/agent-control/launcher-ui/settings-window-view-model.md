@@ -83,7 +83,8 @@ check of every source.
 ("Add Zip-Package Folder", "Add NuGet-Package Folder", "Add NuGet-Package Server") or for the
 selected source; editing a source whose location is a web address opens the server editor. When the editor
 reports `Saved`, the resulting definition is appended to `Sources` and selected, or replaces the
-edited row in place keeping its position (`AgentControl-SettingsWindowViewModel-AddEditRemoveSource`).
+edited row in place keeping its position (`AgentControl-SettingsWindowViewModel-AddSource`,
+`AgentControl-SettingsWindowViewModel-EditSource`).
 The editor's alias check refuses an alias already configured, ignoring case
 (`AgentControl-SettingsWindowViewModel-AliasUnique`). Because the editor works on the source's
 own definition, any value of that source the dialog does not show is carried through an edit

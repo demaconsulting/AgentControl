@@ -60,20 +60,51 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-ResponsiveOperations
         title: >-
-          The RepoCardViewModel class shall read package sources, apply packages and pull
-          without blocking its caller, shall report that an operation is running and disable
-          the card's other actions while it runs, shall ignore a second request for an
-          operation while one runs, shall let the user cancel a cancellable operation without
-          reporting an error or changing the repo's pin, and shall let a newer upgrade check
-          supersede an older one still waiting.
+          The RepoCardViewModel class shall read package sources and apply packages without
+          blocking its caller.
         justification: |
-          A slow or unreachable source must never freeze the window; a double click must not
-          apply a package twice; and an answer that arrives after the sources changed must not
-          overwrite the newer state.
+          A slow or unreachable source must never freeze the window.
         tests:
-          - RepoCardViewModel_ApplySelectedPackageAsync_Running_IsBusyIgnoresSecondCallAndCancelLeavesPinUnchanged
           - RepoCardViewModel_RefreshUpgradeStatusAsync_SourceSlow_DoesNotBlockAndShowsChecking
+          - RepoCardViewModel_ApplySelectedPackageAsync_SourceSlow_ReturnsToCallerBeforeSourceAnswers
+
+      - id: AgentControl-RepoCardViewModel-OperationBusyState
+        title: >-
+          The RepoCardViewModel class shall report that an operation is running, with a message
+          saying which, and disable the card's other actions while it runs.
+        justification: |
+          The user must be able to see that the card is working and must not be able to start a
+          second, conflicting action on the same repo meanwhile.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackageAsync_Running_ReportsBusyAndDisablesOtherActions
+
+      - id: AgentControl-RepoCardViewModel-OneOperationAtATime
+        title: >-
+          The RepoCardViewModel class shall ignore a second request for an operation while one is
+          running.
+        justification: |
+          A double click must not apply a package twice.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored
+
+      - id: AgentControl-RepoCardViewModel-CancelOperation
+        title: >-
+          The RepoCardViewModel class shall let the user cancel a cancellable operation without
+          reporting an error or changing the repo's pin.
+        justification: |
+          A source that never answers must not trap the user in a wait they cannot leave, and
+          giving up must leave the repo exactly as it was.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackageAsync_CancelledWhileRunning_ReportsNoErrorAndKeepsPinUnchanged
           - RepoCardViewModel_RefreshUpgradeStatusAsync_Cancelled_ThrowsAndKeepsPreviousState
+
+      - id: AgentControl-RepoCardViewModel-SupersededUpgradeCheck
+        title: >-
+          The RepoCardViewModel class shall let a newer upgrade check supersede an older one that
+          is still waiting, discarding the older check's late answer.
+        justification: |
+          An answer that arrives after the sources changed must not overwrite the newer state.
+        tests:
           - RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded
 
       - id: AgentControl-RepoCardViewModel-PullGating

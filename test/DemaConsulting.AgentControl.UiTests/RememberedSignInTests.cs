@@ -212,6 +212,104 @@ public sealed class RememberedSignInTests
     }
 
     /// <summary>
+    ///     A sign-in the user's helper saved earlier that the server no longer accepts is removed
+    ///     from the helper, so the user is not stuck with a stale saved credential.
+    /// </summary>
+    [Fact]
+    public async Task SettingsWindow_SavedSignInRejectedByServer_IsRemovedFromTheUsersHelper()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        const string staleSentinel = "ui-test-stale-pw-9c13";
+        await using var feed = await StartFeedAsync();
+        using var context = new AgentControlTestContext();
+        var helperStore = Path.Combine(context.RootDirectory, "helper-credentials.tsv");
+        await File.WriteAllTextAsync(helperStore, $"{feed.BaseUrl}\t{FeedUser}\t{staleSentinel}\n", TestContext.Current.CancellationToken);
+        context.CredentialStoreFile = helperStore;
+        var mainWindow = context.Launch();
+
+        // Act: add the server and test it - the stale saved sign-in is tried and refused
+        var settingsWindow = OpenSettings(context, mainWindow);
+        var editor = FillServerEditor(context, settingsWindow, feed);
+        Find(editor, "SourceTestConnectionButton").AsButton().Invoke();
+
+        // Assert: the helper no longer holds the stale sign-in once the server has refused it
+        Assert.True(Retry.WhileFalse(
+            () => !ReadSharedText(helperStore).Contains(staleSentinel, StringComparison.Ordinal),
+            TimeSpan.FromSeconds(30),
+            TimeSpan.FromMilliseconds(200)).Result);
+
+        // Act: leave without signing in, if the application asked
+        var signIn = context.WaitForWindowWithDescendant("CredentialPromptUserNameTextBox", TimeSpan.FromSeconds(5));
+        if (signIn is not null)
+        {
+            Find(signIn, "CredentialPromptCancelButton").AsButton().Invoke();
+        }
+    }
+
+    /// <summary>
+    ///     A sign-in typed for one server is never offered to another server: the second server gets
+    ///     its own sign-in dialog and never receives the first server's credential.
+    /// </summary>
+    [Fact]
+    public async Task SettingsWindow_SignInToOneServer_IsNeverOfferedToAnotherServer()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        await using var firstFeed = await StartFeedAsync();
+        await using var secondFeed = await MockNuGetFeed.StartAsync();
+        secondFeed.AddPackage(PackageName, "1.0.0");
+        secondFeed.RequiredUser = "svc-other";
+        secondFeed.RequiredPassword = "ui-test-other-pw-4d82";
+        using var context = new AgentControlTestContext();
+        var mainWindow = context.Launch();
+
+        // Act: add the first server, sign in to it and save it
+        var settingsWindow = OpenSettings(context, mainWindow);
+        var editor = FillServerEditor(context, settingsWindow, firstFeed);
+        Find(editor, "SourceTestConnectionButton").AsButton().Invoke();
+        var signIn = context.WaitForWindowWithDescendant("CredentialPromptUserNameTextBox", TimeSpan.FromSeconds(30));
+        Assert.NotNull(signIn);
+        Find(signIn, "CredentialPromptUserNameTextBox").AsTextBox().Text = FeedUser;
+        Find(signIn, "CredentialPromptPasswordTextBox").AsTextBox().Text = FeedPassword;
+        var signInButton = Find(signIn, "CredentialPromptSignInButton").AsButton();
+        Assert.True(Retry.WhileFalse(() => signInButton.IsEnabled, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200)).Result);
+        signInButton.Invoke();
+        Assert.True(WaitForText(editor, "SourceTestResultTitleText", "Connection OK"));
+        var save = Find(editor, "SourceEditorSaveButton").AsButton();
+        Assert.True(Retry.WhileFalse(() => save.IsEnabled, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200)).Result);
+        save.Invoke();
+        Assert.True(WaitForText(settingsWindow, "SourceAliasText", "Feed"));
+
+        // Act: add a second server on another origin and test it
+        var secondEditor = FillServerEditor(context, settingsWindow, secondFeed, "Other");
+        Find(secondEditor, "SourceTestConnectionButton").AsButton().Invoke();
+
+        // Assert: the second server asks for its own sign-in, naming itself
+        var secondSignIn = context.WaitForWindowWithDescendant("CredentialPromptUserNameTextBox", TimeSpan.FromSeconds(30));
+        Assert.NotNull(secondSignIn);
+        Assert.Equal(secondFeed.BaseUrl, Find(secondSignIn, "CredentialPromptOriginText").Name);
+
+        // Act: leave without signing in
+        Find(secondSignIn, "CredentialPromptCancelButton").AsButton().Invoke();
+        Assert.True(WaitForText(secondEditor, "SourceTestResultTitleText", "Sign-in canceled"));
+
+        // Assert: the second server never received the first server's credential
+        var firstServersHeader = "Basic " + Convert.ToBase64String(
+            System.Text.Encoding.UTF8.GetBytes($"{FeedUser}:{FeedPassword}"));
+        Assert.DoesNotContain(firstServersHeader, secondFeed.AuthorizationHeaders);
+        Assert.Contains(firstServersHeader, firstFeed.AuthorizationHeaders);
+    }
+
+    /// <summary>
     ///     Starts a mock feed that requires the test account's sign-in.
     /// </summary>
     /// <returns>The running feed.</returns>
@@ -231,13 +329,15 @@ public sealed class RememberedSignInTests
     /// <param name="context">The running test context.</param>
     /// <param name="settingsWindow">The Settings window.</param>
     /// <param name="feed">The mock feed.</param>
+    /// <param name="alias">The alias to give the source.</param>
     /// <returns>The source editor window.</returns>
-    private static Window FillServerEditor(AgentControlTestContext context, Window settingsWindow, MockNuGetFeed feed)
+    private static Window FillServerEditor(
+        AgentControlTestContext context, Window settingsWindow, MockNuGetFeed feed, string alias = "Feed")
     {
         Find(settingsWindow, "AddNuGetServerSourceButton").AsButton().Invoke();
         var editor = context.WaitForWindowWithDescendant("SourceTestConnectionButton", TimeSpan.FromSeconds(15));
         Assert.NotNull(editor);
-        Find(editor, "SourceAliasTextBox").AsTextBox().Text = "Feed";
+        Find(editor, "SourceAliasTextBox").AsTextBox().Text = alias;
         Find(editor, "SourceLocationTextBox").AsTextBox().Text = feed.IndexUrl;
         Find(editor, "SourceAllowInsecureHttpCheckBox").AsCheckBox().IsChecked = true;
         Find(editor, "SourcePackageIdTextBox").AsTextBox().Text = PackageName;

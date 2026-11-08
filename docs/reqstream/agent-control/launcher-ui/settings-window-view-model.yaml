@@ -82,26 +82,50 @@ sections:
           - SettingsWindowViewModel_Dispose_CancelsPendingFolderChecks
           - SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt
 
-      - id: AgentControl-SettingsWindowViewModel-AddEditRemoveSource
+      - id: AgentControl-SettingsWindowViewModel-AddSource
         title: >-
           The SettingsWindowViewModel class shall let the user add a zip-package folder source,
-          a NuGet-package folder source or a NuGet-package server source, edit the selected
-          source in place, and remove the selected source, shall carry settings it does not show
-          through an edit unchanged, and shall describe - before a removal - how many repos are
-          pinned to the source being removed and that they will show a package source problem.
+          a NuGet-package folder source or a NuGet-package server source, keeping the package IDs
+          of a NuGet source.
         justification: |
-          Sources are added, corrected and retired over time; removing one that repos are pinned
-          to is allowed (the pin is the repos' own record) but the developer must be told what
-          will happen to those repos first.
+          Sources are added over time, and a NuGet source that lost its package IDs on being added
+          would offer nothing.
         tests:
           - SettingsWindowViewModel_AddCommands_RaiseEditorRequestedForNewSourceOfEachKind
           - SettingsWindowViewModel_AddZipSource_EditorSaved_AddsAndSelectsSource
           - SettingsWindowViewModel_AddNuGetFolderSource_EditorSaved_KeepsPackageIds
           - SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor
+
+      - id: AgentControl-SettingsWindowViewModel-EditSource
+        title: >-
+          The SettingsWindowViewModel class shall let the user edit the selected source in place,
+          keeping its alias, and shall carry settings it does not show through the edit unchanged.
+        justification: |
+          Sources are corrected over time, but repos pin to a source by alias, so an edit must never
+          rename it or lose settings that are managed elsewhere.
+        tests:
           - SettingsWindowViewModel_EditSource_EditorSaved_ReplacesSourceInPlaceKeepingAlias
           - SettingsWindowViewModel_EditServerSource_OpensServerEditorThatTestsThroughTheFactory
+
+      - id: AgentControl-SettingsWindowViewModel-RemoveSource
+        title: >-
+          The SettingsWindowViewModel class shall let the user remove the selected source, and
+          shall describe - before the removal - how many repos are pinned to it and that they will
+          show a package source problem.
+        justification: |
+          Removing a source that repos are pinned to is allowed (the pin is the repos' own record)
+          but the developer must be told what will happen to those repos first.
+        tests:
           - SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource
           - SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves
+
+      - id: AgentControl-SettingsWindowViewModel-SaveResultingSources
+        title: >-
+          The SettingsWindowViewModel class shall, on save, pass the sources that result from the
+          user's additions, edits and removals to its owner in their listed order.
+        justification: |
+          What the developer sees in the list after changing it is what must be persisted.
+        tests:
           - SettingsWindowViewModel_Save_AfterAddEditRemove_WritesResultingSourcesInOrder
 
       - id: AgentControl-SettingsWindowViewModel-AliasUnique

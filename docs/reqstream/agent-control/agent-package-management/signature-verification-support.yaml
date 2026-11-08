@@ -9,16 +9,48 @@ sections:
     requirements:
       - id: AgentControl-SignatureVerificationSupport-PlatformSupport
         title: >-
-          The SignatureVerificationSupport class shall report that package signature verification
-          is supported only on Windows, Linux and macOS, and that it is not supported on any other
-          platform.
+          The SignatureVerificationSupport class shall recognize Windows, Linux and macOS as the
+          platforms on which package signature verification is supported, and shall report that
+          it is not supported on any other platform.
         justification: |
           Requiring signatures is only meaningful where verification really happens; the supported
           platforms are those on which the verification is exercised by the project's automated
           builds.
         tests:
           - SignatureVerificationSupport_IsSupportedPlatform_WindowsLinuxAndMacOsOnly
-          - SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue
+
+      - id: AgentControl-SignatureVerificationSupport-SupportedOnWindows
+        title: >-
+          The SignatureVerificationSupport class shall report that package signature verification
+          is supported when running on Windows.
+        justification: |
+          Windows is a platform on which the signature requirement can be honored, so the option
+          to require signed packages must be offered there.
+        tests:
+          - windows@SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue
+          - windows@SignatureVerificationSupport_ProbeCertificateChains_OnThisPlatform_BuildsAChainOfflineAndIsSupported
+
+      - id: AgentControl-SignatureVerificationSupport-SupportedOnLinux
+        title: >-
+          The SignatureVerificationSupport class shall report that package signature verification
+          is supported when running on Linux.
+        justification: |
+          Linux is a platform on which the signature requirement can be honored, so the option to
+          require signed packages must be offered there.
+        tests:
+          - ubuntu@SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue
+          - ubuntu@SignatureVerificationSupport_ProbeCertificateChains_OnThisPlatform_BuildsAChainOfflineAndIsSupported
+
+      - id: AgentControl-SignatureVerificationSupport-SupportedOnMacOS
+        title: >-
+          The SignatureVerificationSupport class shall report that package signature verification
+          is supported when running on macOS.
+        justification: |
+          macOS is a platform on which the signature requirement can be honored, so the option to
+          require signed packages must be offered there.
+        tests:
+          - macos@SignatureVerificationSupport_IsSupported_OnTheCiPlatforms_IsTrue
+          - macos@SignatureVerificationSupport_ProbeCertificateChains_OnThisPlatform_BuildsAChainOfflineAndIsSupported
 
       - id: AgentControl-SignatureVerificationSupport-FailClosedProbe
         title: >-

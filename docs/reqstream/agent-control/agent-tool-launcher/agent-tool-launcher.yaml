@@ -29,13 +29,13 @@ sections:
           The AgentToolLauncher class shall execute, rather than echo, a custom agent tool
           command that begins with a quoted executable path when the shell is PowerShell Core
           or Windows PowerShell, and shall leave the command unchanged for the Command shell,
-          POSIX shells, and PowerShell commands that do not begin with a quote or that already
-          begin with an invocation operator.
+          POSIX shells, and PowerShell commands that already run as written.
         justification: |
           PowerShell treats a leading quoted string as an expression and merely prints it, so
           a custom command such as a quoted path containing spaces would never start the tool
-          unless it is invoked with the PowerShell call operator. The command must be adapted
-          only where PowerShell needs it, so commands that already work are not altered.
+          unless the command is adapted for PowerShell. The command must be adapted only where
+          PowerShell needs it, so commands that already work are not altered; how the command is
+          adapted is described in the unit's design.
         tests:
           - AgentToolLauncher_BuildProcessStartInfo_PowerShellCoreQuotedPathWithArguments_PrefixesCallOperator
           - AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShellQuotedPathWithArguments_PrefixesCallOperator
