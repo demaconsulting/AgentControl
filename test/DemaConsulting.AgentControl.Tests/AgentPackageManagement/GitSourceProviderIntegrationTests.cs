@@ -450,7 +450,7 @@ public sealed class GitSourceProviderIntegrationTests
     }
 
     /// <summary>
-    ///     Test that cancelling stops the acquisition with an <see cref="OperationCanceledException"/>.
+    ///     Test that canceling stops the acquisition with an <see cref="OperationCanceledException"/>.
     /// </summary>
     [Fact]
     public async Task GitSourceProvider_Acquire_AlreadyCancelled_ThrowsOperationCanceled()

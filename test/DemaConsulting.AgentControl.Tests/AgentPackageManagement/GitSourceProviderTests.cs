@@ -284,7 +284,7 @@ public sealed class GitSourceProviderTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that cancelling a listing stops it with an <see cref="OperationCanceledException"/> and
+    ///     Test that canceling a listing stops it with an <see cref="OperationCanceledException"/> and
     ///     kills git.
     /// </summary>
     [Fact]

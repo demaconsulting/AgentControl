@@ -63,7 +63,7 @@ by `CredentialPromptViewModel_Remember_TickedWhenAvailable_AnswersWithRememberAn
 **CredentialPromptViewModel_SignIn**: Sign in is disabled with nothing entered, with only a user name and with
 a blank user name; it is enabled with both. Signing in completes once with a credential whose user name is
 trimmed and whose password, spaces included, is exactly as typed, and a later cancel or sign-in changes
-nothing; cancelling completes with no credential and signing in before the form is complete does nothing. This
+nothing; canceling completes with no credential and signing in before the form is complete does nothing. This
 scenario is tested by `CredentialPromptViewModel_CanSignIn_NeedsUserNameAndPassword`,
 `CredentialPromptViewModel_SignIn_EnteredCredential_CompletesOnceWithTrimmedUserName` and
 `CredentialPromptViewModel_Cancel_CompletesWithNoCredential`, covering

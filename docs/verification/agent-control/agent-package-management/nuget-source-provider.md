@@ -264,7 +264,7 @@ asserted as a guarantee.) This scenario is tested by
 cancelled dialog produces `SignInCanceled` after one question; a remembered credential that the server now
 rejects is forgotten and the user is asked again, being told the last one failed; a sign-in that never
 completes is stopped after the configured authentication timeout and reported as `TimedOut` (not as the
-caller's cancellation); cancelling the caller's token while the dialog is open propagates
+caller's cancellation); canceling the caller's token while the dialog is open propagates
 `OperationCanceledException`; an address on a live server that has no service index is `Unreachable` with a
 message naming the origin but not the path; and the exception type carries its kind, message and inner
 exception. This scenario is tested by

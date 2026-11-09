@@ -46,7 +46,7 @@ OTS item.
 - *Type*: In-process .NET interface.
 - *Role*: Provider (implemented by `ZipFolderSourceProvider`, `NuGetSourceProvider` and `GitSourceProvider`;
   consumed through `PackageSourceRegistry` and `PackageVersionCache`).
-- *Contract*: Asynchronous, cancellable operations to list a source's package IDs, list one
+- *Contract*: Asynchronous, cancelable operations to list a source's package IDs, list one
   package's versions (each stamped with the source alias), and make one discovered package's
   content available as a package reader. A provider serves exactly one configured source and
   never consults another; it refuses a package discovered at a different source, and never

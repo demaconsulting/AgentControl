@@ -103,7 +103,7 @@ public class CredentialPromptViewModelTests
     }
 
     /// <summary>
-    ///     Test that cancelling answers with no credential, and that signing in before the fields
+    ///     Test that canceling answers with no credential, and that signing in before the fields
     ///     are complete does nothing.
     /// </summary>
     [Fact]

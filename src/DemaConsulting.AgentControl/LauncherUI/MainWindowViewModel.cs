@@ -434,7 +434,7 @@ internal sealed class MainWindowViewModel : ViewModelBase
 
     /// <summary>
     ///     Starts checking, in the background and without blocking the UI thread, whether a newer
-    ///     package version is available for every repo card, cancelling any such check still
+    ///     package version is available for every repo card, canceling any such check still
     ///     running.
     /// </summary>
     /// <remarks>
@@ -449,7 +449,7 @@ internal sealed class MainWindowViewModel : ViewModelBase
 
     /// <summary>
     ///     Starts the background upgrade check for a single card (a repo that was just added),
-    ///     without cancelling the check of the other cards.
+    ///     without canceling the check of the other cards.
     /// </summary>
     /// <param name="card">The card to check.</param>
     private void BeginSingleCardUpgradeRefresh(RepoCardViewModel card)

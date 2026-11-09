@@ -1949,7 +1949,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <returns>A task that completes when every property is current; a failing source is
     ///     reported through the card's state, not thrown.</returns>
     public Task RefreshAsync(CancellationToken cancellationToken = default) =>
-        RunOperationAsync("Refreshing...", cancellable: true, async token =>
+        RunOperationAsync("Refreshing...", cancelable: true, async token =>
         {
             RefreshCheap();
 
@@ -2087,11 +2087,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     an agentic tool is useful even with zero agent files present - either way, sync state
     ///     must never stand in the way of launching.
     /// </remarks>
-    /// <param name="cancellationToken">Signalled when the command itself is cancelled.</param>
+    /// <param name="cancellationToken">Signaled when the command itself is cancelled.</param>
     /// <returns>A task that completes once the agent tool has been started or the failure has
     ///     been reported.</returns>
     private Task LaunchAsync(CancellationToken cancellationToken) =>
-        RunOperationAsync("Preparing agent files...", cancellable: true, async token =>
+        RunOperationAsync("Preparing agent files...", cancelable: true, async token =>
         {
             // The pre-launch sync is best effort: whether it succeeds, fails or is cancelled by
             // the user, the agent tool is still started below
@@ -2318,11 +2318,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Runs <c>git pull</c> in this repo on a worker thread, then refreshes the working-tree
     ///     status.
     /// </summary>
-    /// <param name="cancellationToken">Signalled when the command itself is cancelled; a pull that
+    /// <param name="cancellationToken">Signaled when the command itself is cancelled; a pull that
     ///     has already started is not interrupted.</param>
     /// <returns>A task that completes when the pull and the status refresh have finished.</returns>
     private Task PullAsync(CancellationToken cancellationToken) =>
-        RunOperationAsync("Pulling...", cancellable: false, async _ => await PullCoreAsync(), cancellationToken);
+        RunOperationAsync("Pulling...", cancelable: false, async _ => await PullCoreAsync(), cancellationToken);
 
     /// <summary>
     ///     Performs the pull for <see cref="PullAsync"/>.
@@ -2380,10 +2380,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     the upgrade is refused with an explanatory message rather than offered from another
     ///     source.
     /// </remarks>
-    /// <param name="cancellationToken">Signalled when the command itself is cancelled.</param>
+    /// <param name="cancellationToken">Signaled when the command itself is cancelled.</param>
     /// <returns>A task that completes when the upgrade has finished or failed.</returns>
     private Task UpgradeAsync(CancellationToken cancellationToken) =>
-        RunOperationAsync("Upgrading agent package...", cancellable: true, UpgradeCoreAsync, cancellationToken);
+        RunOperationAsync("Upgrading agent package...", cancelable: true, UpgradeCoreAsync, cancellationToken);
 
     /// <summary>
     ///     Performs the upgrade for <see cref="UpgradeAsync"/>.
@@ -2498,7 +2498,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         return RunOperationAsync(
             "Applying agent package...",
-            cancellable: true,
+            cancelable: true,
             token => ApplySelectedPackageCoreAsync(selection, acceptContentChange, token),
             cancellationToken);
     }
@@ -2681,7 +2681,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             var releaseNotes = PackageContentExtractor.ReadReleaseNotes(reader) ?? string.Empty;
 
-            // The package is applied; the follow-up status refresh is no longer cancellable so
+            // The package is applied; the follow-up status refresh is no longer cancelable so
             // the card never shows the old pin's upgrade state next to the new pin
             RefreshPin();
             EvaluatePinnedSource();
@@ -3480,11 +3480,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Runs a package operation for this card while holding <see cref="IsBusy"/>, so a second
-    ///     operation cannot start until it finishes, and makes it cancellable through
-    ///     <see cref="CancelOperationCommand"/> when <paramref name="cancellable"/> is set.
+    ///     operation cannot start until it finishes, and makes it cancelable through
+    ///     <see cref="CancelOperationCommand"/> when <paramref name="cancelable"/> is set.
     /// </summary>
     /// <param name="busyMessage">The text shown while the operation runs.</param>
-    /// <param name="cancellable">Whether the user may cancel the operation.</param>
+    /// <param name="cancelable">Whether the user may cancel the operation.</param>
     /// <param name="operation">The work to run; receives a token cancelled by either
     ///     <paramref name="cancellationToken"/> or the card's cancel command.</param>
     /// <param name="cancellationToken">The caller's cancellation token.</param>
@@ -3493,7 +3493,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     running. A cancelled operation sets a status message instead of failing.</returns>
     private async Task RunOperationAsync(
         string busyMessage,
-        bool cancellable,
+        bool cancelable,
         Func<CancellationToken, Task> operation,
         CancellationToken cancellationToken)
     {
@@ -3508,7 +3508,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _operationCancellation = cancellation;
         BusyMessage = busyMessage;
-        CanCancelOperation = cancellable;
+        CanCancelOperation = cancelable;
         IsBusy = true;
         try
         {

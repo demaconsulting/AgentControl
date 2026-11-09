@@ -239,7 +239,7 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
     }
 
     /// <summary>
-    ///     Test that cancelling the sign-in dialog ends the operation with a "sign-in canceled"
+    ///     Test that canceling the sign-in dialog ends the operation with a "sign-in canceled"
     ///     failure after one prompt, with no retry loop.
     /// </summary>
     [Fact]
@@ -426,7 +426,7 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
     }
 
     /// <summary>
-    ///     Test that cancelling the caller's token while the dialog is open propagates as a
+    ///     Test that canceling the caller's token while the dialog is open propagates as a
     ///     cancellation, not as a failure.
     /// </summary>
     [Fact]

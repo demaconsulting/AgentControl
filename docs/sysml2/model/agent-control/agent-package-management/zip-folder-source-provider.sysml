@@ -1,11 +1,16 @@
 package AgentControl {
+    private import SoftwareItemMetadata::*;
+
     part def ZipFolderSourceProvider {
         doc /* Provider over a folder of name-semver zip packages, adapting the static PackageSource scan. */
 
-        comment sourceRef /* Source: src/DemaConsulting.AgentControl/AgentPackageManagement/ZipFolderSourceProvider.cs */
-        comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/AgentPackageManagement/ZipFolderSourceProviderTests.cs */
-        comment designRef /* Design: docs/design/agent-control/agent-package-management/zip-folder-source-provider.md */
-        comment verificationRef /* Verification: docs/verification/agent-control/agent-package-management/zip-folder-source-provider.md */
-        comment reqRef /* Requirements: docs/reqstream/agent-control/agent-package-management/zip-folder-source-provider.yaml */
+        metadata info : SoftwareInfo {
+            description = "Provider over a folder of name-semver zip packages, adapting the static PackageSource scan.";
+            sourceFiles = ("src/DemaConsulting.AgentControl/AgentPackageManagement/ZipFolderSourceProvider.cs");
+            testFiles = ("test/DemaConsulting.AgentControl.Tests/AgentPackageManagement/ZipFolderSourceProviderTests.cs");
+            designFiles = ("docs/design/agent-control/agent-package-management/zip-folder-source-provider.md");
+            verificationFiles = ("docs/verification/agent-control/agent-package-management/zip-folder-source-provider.md");
+            requirementFiles = ("docs/reqstream/agent-control/agent-package-management/zip-folder-source-provider.yaml");
+        }
     }
 }

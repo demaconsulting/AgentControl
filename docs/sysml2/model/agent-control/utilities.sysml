@@ -1,11 +1,16 @@
 package AgentControl {
+    private import SoftwareItemMetadata::*;
+
     part def UtilitiesSubsystem {
         doc /* Shared, independently testable helper functions used by other subsystems. */
 
-        comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/Utilities/UtilitiesSubsystemTests.cs */
-        comment designRef /* Design: docs/design/agent-control/utilities.md */
-        comment verificationRef /* Verification: docs/verification/agent-control/utilities.md */
-        comment reqRef /* Requirements: docs/reqstream/agent-control/utilities.yaml */
+        metadata info : SoftwareInfo {
+            description = "Shared, independently testable helper functions used by other subsystems.";
+            testFiles = ("test/DemaConsulting.AgentControl.Tests/Utilities/UtilitiesSubsystemTests.cs");
+            designFiles = ("docs/design/agent-control/utilities.md");
+            verificationFiles = ("docs/verification/agent-control/utilities.md");
+            requirementFiles = ("docs/reqstream/agent-control/utilities.yaml");
+        }
 
         part pathHelpers : PathHelpers;
     }

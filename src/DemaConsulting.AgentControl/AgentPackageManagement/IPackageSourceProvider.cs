@@ -29,7 +29,7 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 /// <remarks>
 ///     <para>
 ///     One provider instance serves exactly one configured source (<see cref="Alias"/>) and never
-///     consults any other. All members are asynchronous and cancellable because real sources can
+///     consults any other. All members are asynchronous and cancelable because real sources can
 ///     be slow or unreachable (a network share today, a remote server later); callers must be able
 ///     to abandon a call. Providers never write to the repo, and never persist credentials.
 ///     </para>

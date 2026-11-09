@@ -116,7 +116,7 @@ address and a package ID (the disabled button's tooltip says what is missing). A
 first package ID only, uses a placeholder alias when none was typed, and reports the version count and newest;
 a server without the package is "Package not found"; each failure kind - sign-in failed, sign-in canceled,
 timed out, server unreachable - gets its own headline with the provider's message; a configuration error
-raised when the provider is created and an unexpected failure are both reported in the dialog; cancelling a
+raised when the provider is created and an unexpected failure are both reported in the dialog; canceling a
 running test shows progress naming the package, ends with a neutral "canceled" result, and the test can be run
 again; a result is dropped when the address changes. A test that is still running when the address, the package IDs
 or the "Allow insecure HTTP" choice change is canceled and its eventual result is never shown: the test holds the
@@ -261,7 +261,7 @@ no preview falls back to its list of versions; changing the pattern after a test
 failure kind of the provider gets its own headline and the provider's message ("Sign-in needed", "Repository not found",
 "Repository unreachable", "Timed out"), any other failure is "Connection failed" and
 a git that is too old is "Git is too
-old"; cancelling a running test ends with a neutral "canceled" result; and a test still running when any input of the
+old"; canceling a running test ends with a neutral "canceled" result; and a test still running when any input of the
 test (the address, the tag pattern, the folder or the package name, one theory case each) is edited shows neither a
 result nor a preview, even when the provider ignores cancellation. This scenario is tested by
 `SourceEditorViewModel_CanTestConnection_Git_DoesNotNeedAnAliasWhenThePackageNameIsGiven`,

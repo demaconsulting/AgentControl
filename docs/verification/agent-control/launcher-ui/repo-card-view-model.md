@@ -133,8 +133,8 @@ second time), which proves it was the busy guard, not some other cause, that ref
 scenario is tested by `RepoCardViewModel_ApplySelectedPackageAsync_SecondCallWhileRunning_IsIgnored`, covering
 `AgentControl-RepoCardViewModel-OneOperationAtATime`.
 
-**RepoCardViewModel_CancelOperation_NoErrorAndPinUnchanged**: Cancelling a running package apply ends it with
-the "canceled" status, raises no `ErrorOccurred` and leaves the repo unpinned, and cancelling an upgrade check
+**RepoCardViewModel_CancelOperation_NoErrorAndPinUnchanged**: Canceling a running package apply ends it with
+the "canceled" status, raises no `ErrorOccurred` and leaves the repo unpinned, and canceling an upgrade check
 throws the cancellation and keeps the previous upgrade state. This scenario is tested by
 `RepoCardViewModel_ApplySelectedPackageAsync_CancelledWhileRunning_ReportsNoErrorAndKeepsPinUnchanged` and
 `RepoCardViewModel_RefreshUpgradeStatusAsync_Cancelled_ThrowsAndKeepsPreviousState`, covering

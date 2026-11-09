@@ -221,7 +221,7 @@ thread. `LaunchCommand`, `PullCommand`, `UpgradeCommand` and `RefreshCommand` ar
 and **CanCancelOperation** lets
 `CancelOperationCommand` cancel it (`AgentControl-RepoCardViewModel-CancelOperation`); package reads and
 applies do not block the caller (`AgentControl-RepoCardViewModel-ResponsiveOperations`).
-Cancelling is not an error and leaves the repo's pin unchanged. NuGet sources keep their private
+Canceling is not an error and leaves the repo's pin unchanged. NuGet sources keep their private
 caches under a `nuget` folder inside the startup configuration-directory override when one is
 supplied (so automated tests never touch the user profile), otherwise in the per-user default.
 `CreateSourceRegistry(allowPrompt)` also hands NuGet server sources the application's
@@ -385,7 +385,7 @@ becomes a source problem with the exception's secret-free message and no sign-in
 Calls `EnsureAgentFilesSyncedBeforeLaunchAsync` purely for its best-effort sync side effect, then
 always proceeds to resolve the shell/agent command and spawn the process regardless of that
 call's outcome — the agent-package sync state (missing pin, missing managed folders, failed
-re-extraction) never gates the launch, and neither does the user cancelling the wait for the sync.
+re-extraction) never gates the launch, and neither does the user canceling the wait for the sync.
 
 **EnsureAgentFilesSyncedBeforeLaunchAsync** (internal): Best-effort attempt to sync the repo's four
 managed agent folders with the pinned package version before `Launch` spawns the process. This

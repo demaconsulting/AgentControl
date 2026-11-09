@@ -225,7 +225,7 @@ agentcontrol-puppet wheel <notches> [--ctrl] [--on <automationId> | --at <x>,<y>
   the keys), else the main window. A
   chord is modifiers joined with `+`: `Ctrl+C`, `Ctrl+Shift+Z`, `Delete`, `F2`, `Escape`, `Enter`, `Ctrl+Enter`,
   letters, digits, `F1`-`F12`, `Tab`, `Space`, `Backspace`, arrows, `Home`/`End`/`PageUp`/`PageDown`, `Plus`, `Minus`.
-- `hover <id>` rests the real cursor on the centre of the element so its tooltip opens. It only reads the element's
+- `hover <id>` rests the real cursor on the center of the element so its tooltip opens. It only reads the element's
   bounds, so it works on **disabled** elements (their tooltip explains why they are disabled, for example the "Require
   signed packages" check box on a platform that does not support it). The cursor first **parks** beside the element
   (the nearest point outside it, on the instance's window, with the instance's window on top there), which closes a
@@ -236,10 +236,10 @@ agentcontrol-puppet wheel <notches> [--ctrl] [--on <automationId> | --at <x>,<y>
   `OK hover id=... at=(x,y) park=(x,y)|none wait=700 shot="..."`.
 - `click-at <x> <y>` clicks a physical screen pixel (read element bounds with `find`); `--right` uses the right button,
   `--double` double-clicks, `--shift` and `--ctrl` hold the modifier.
-- `drag-element <id> <dx> <dy>` presses at the centre of the element and drags by a screen offset (a splitter, a
+- `drag-element <id> <dx> <dy>` presses at the center of the element and drags by a screen offset (a splitter, a
   scrollbar thumb).
-- `wheel <notches>` turns the wheel (positive up, negative down; a whole number from -1000 to 1000) at the centre of
-  the main window, at the centre of
+- `wheel <notches>` turns the wheel (positive up, negative down; a whole number from -1000 to 1000) at the center of
+  the main window, at the center of
   `--on <id>`, or at the screen pixel `--at x,y`; `--ctrl` holds Ctrl.
 
 Coordinates are **physical screen pixels**; the Puppet is per-monitor DPI aware, so `find` bounds and cursor positions

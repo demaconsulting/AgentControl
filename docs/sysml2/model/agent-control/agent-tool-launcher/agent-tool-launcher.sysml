@@ -1,11 +1,16 @@
 package AgentControl {
+    private import SoftwareItemMetadata::*;
+
     part def AgentToolLauncher {
         doc /* Builds process-start information to run the agent tool inside a detected shell. */
 
-        comment sourceRef /* Source: src/DemaConsulting.AgentControl/AgentToolLauncher/AgentToolLauncher.cs */
-        comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/AgentToolLauncher/AgentToolLauncherTests.cs */
-        comment designRef /* Design: docs/design/agent-control/agent-tool-launcher/agent-tool-launcher.md */
-        comment verificationRef /* Verification: docs/verification/agent-control/agent-tool-launcher/agent-tool-launcher.md */
-        comment reqRef /* Requirements: docs/reqstream/agent-control/agent-tool-launcher/agent-tool-launcher.yaml */
+        metadata info : SoftwareInfo {
+            description = "Builds process-start information to run the agent tool inside a detected shell.";
+            sourceFiles = ("src/DemaConsulting.AgentControl/AgentToolLauncher/AgentToolLauncher.cs");
+            testFiles = ("test/DemaConsulting.AgentControl.Tests/AgentToolLauncher/AgentToolLauncherTests.cs");
+            designFiles = ("docs/design/agent-control/agent-tool-launcher/agent-tool-launcher.md");
+            verificationFiles = ("docs/verification/agent-control/agent-tool-launcher/agent-tool-launcher.md");
+            requirementFiles = ("docs/reqstream/agent-control/agent-tool-launcher/agent-tool-launcher.yaml");
+        }
     }
 }

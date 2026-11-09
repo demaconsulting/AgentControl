@@ -42,7 +42,7 @@ shell script elsewhere). The tests pass an explicit working folder, so they neve
 - A lookup that finds nothing or an incomplete credential reports no credential; a helper that is configured, absent,
   reset or failing is reported as available or not accordingly; a missing git and a failing git are results, not
   exceptions.
-- A hanging git is killed, with its process tree, at the time limit and reported as "nothing"; cancelling kills it too
+- A hanging git is killed, with its process tree, at the time limit and reported as "nothing"; canceling kills it too
   and propagates the cancellation.
 - No request line, response line, credential or credential-bearing command-line argument appears in the log, and a
   credential (or origin) with a line feed, carriage
