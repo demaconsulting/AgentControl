@@ -2,8 +2,10 @@
 
 #### Verification Approach
 
-`GitRemoteClient` is verified two ways. `GitRemoteClientTests.cs` runs the client against **`GitRemoteStub`**, a fake git
-executable (a batch file on Windows, a shell script elsewhere) that records every invocation's arguments, the environment
+`GitRemoteClient` is verified two ways. `GitRemoteClientTests.cs` runs the client against **`GitRemoteStub`**,
+a fake git
+executable (a batch file on Windows, a shell script elsewhere) that records every invocation's arguments,
+the environment
 variables that matter and the working folder, and answers each git command with canned output, error text, exit code and
 an optional sleep; the tests therefore assert the *exact* command line and environment of each operation, the prompt
 rules of background and interactive work, the time limit and cancellation (the sleeping stub never reaches its
@@ -22,8 +24,10 @@ parent produce no trace text.
 The stub tests need nothing but the operating system's shell; they belong to the `RealProcess` collection because they
 launch processes and some set variables in the test process (restored afterwards). The real-git tests need git on `PATH`
 and are skipped only when it is not installed; no network, credential or user configuration is used. They build their
-repositories with `GitRepositoryFixture`, which belongs to the `AgentPackageManagement` test folder (the Git source tests
-created it first): a deliberate, test-only cross-hierarchy dependency, so a change to the fixture must be checked against
+repositories with `GitRepositoryFixture`, which belongs to the `AgentPackageManagement` test folder
+(the Git source tests
+created it first): a deliberate, test-only cross-hierarchy dependency,
+so a change to the fixture must be checked against
 both `GitRemoteClientIntegrationTests` and `GitSourceProviderIntegrationTests`. The batch stub
 drops a `^` from its recorded argument text, so tests assert the commands and options rather than `^{commit}`. The
 version of git is remembered per executable for the whole test process, so every stub-based version test uses its own
@@ -33,8 +37,10 @@ stub (a unique executable path) and the real-git version test uses the full path
 
 - The `ls-remote` command line is exactly the documented list of command-scoped settings with the address and glob after
   `--`; each transport allows only its own protocol in the configuration and in `GIT_ALLOW_PROTOCOL`.
-- A tag name that is not a legal ref name (empty, dot-leading or `.lock`-ending component, `//`, leading or trailing `/`,
-  `..`, trailing `.`, a forbidden character, too long) is dropped from a server listing and refused for a fetch before git
+- A tag name that is not a legal ref name (empty, dot-leading or `.lock`-ending component, `//`,
+  leading or trailing `/`,
+  `..`, trailing `.`, a forbidden character, too long) is dropped from a server listing and refused for a fetch
+  before git
   runs; legal names, including nested ones, are fetched.
 - A tree listing with no path, an object id that is not a full id and blob entries that are not well-formed are refused
   before git runs.
@@ -49,7 +55,8 @@ stub (a unique executable path) and the real-git version test uses the full path
   set; user-started work leaves them; trace and redirection variables never reach git; git runs in a neutral folder.
 - ssh gets batch mode and a connect timeout around the user's own OpenSSH command and is left alone for other commands.
 - A hanging command is killed at its limit or on cancellation and the termination is confirmed; a process that cannot be
-  confirmed to have ended is reported as `ProcessNotStopped`, within the stop timeout, in both cases; output over the cap
+  confirmed to have ended is reported as `ProcessNotStopped`, within the stop timeout, in both cases;
+  output over the cap
   is refused, counted in bytes (a multi-byte text over the cap is refused, exactly the cap is accepted); a failure
   message is one fixed sentence that repeats neither the address, the host nor a path; logs hold no address or argument;
   failures are classified; a missing git is explained.
@@ -85,9 +92,11 @@ cites).
 **GitRemoteClient_TagNames_OnlyLegalRefNamesReachGit**: a listing in which a server reports `a//b`, `.hidden`, `x.lock`,
 `a/.b`, `a/b.lock/c`, `trailing/`, `/leading`, `a..b`, `ends.`, `-dash`, a name with a space or colon, `a@{b}` and a
 256-character name (each with a peeled line) yields only the legal names around them and never throws; a fetch of the
-same hostile names (and of option-like names such as `-oProxyCommand=calc`, `--upload-pack=calc`, `v1$(calc)`) is refused
+same hostile names (and of option-like names such as `-oProxyCommand=calc`, `--upload-pack=calc`, `v1$(calc)`)
+is refused
 with `ArgumentException` before git is started; legal names (`v1.0.0`, `release/1.2.3-beta.1`, `pkg+build_1/v1.0.0`) are
-fetched. The rule is `GitRemoteClient.IsSafeTagName`, the same implementation `GitTagPattern.IsSafeTagName` delegates to.
+fetched. The rule is `GitRemoteClient.IsSafeTagName`,
+the same implementation `GitTagPattern.IsSafeTagName` delegates to.
 This scenario is tested by `GitRemoteClient_ListTags_HostileServerTagNames_AreDropped`,
 `GitRemoteClient_FetchTag_UnsafeTagName_IsRefusedWithoutRunningGit` and
 `GitRemoteClient_FetchTag_LegalTagName_IsFetched`, covering `AgentControl-GitRemoteClient-SafeTagNames`,
@@ -100,8 +109,10 @@ its entry (including an empty blob), and refuses before git starts an empty entr
 object id that is an option, an entry without a size and sizes that together exceed the budget by one byte; an answer
 with another object id, `missing`, another type, another size, a header that is not a number, bytes after the last
 answer, a following byte that is not a line feed or data that ends early is a `GitRemoteException` that names no object;
-a failing `cat-file` is classified with the fixed message `git cat-file failed (exit code 128).`; a `cat-file` that sleeps
-is stopped at the limit and reported as timed out without finishing. With the real git, a blob committed with CRLF and LF
+a failing `cat-file` is classified with the fixed message `git cat-file failed (exit code 128).`;
+a `cat-file` that sleeps
+is stopped at the limit and reported as timed out without finishing. With the real git,
+a blob committed with CRLF and LF
 line endings, a lone carriage return, a NUL byte, a byte-order mark and an identifier keyword, in a repository whose
 attributes select `text eol=crlf ident`, is delivered byte for byte equal to the content (and to the size `ls-tree`
 reported) although the user's configuration sets `core.autocrlf=true` and `core.eol=crlf`. This scenario is tested by
@@ -136,7 +147,8 @@ hardened command line is accepted and the installed git passes. This scenario is
 `GitRemoteClient_EnsureSupportedVersion_UnreadableVersionIsNotBlocked_AndMissingGitIsReported` and
 `GitRemoteClient_RealGit_EnsureSupportedVersion_AcceptsTheInstalledGit`, covering
 `AgentControl-GitRemoteClient-MinimumGitVersion`, `AgentControl-GitRemoteClient-MinimumGitVersionMessage`,
-`AgentControl-GitRemoteClient-UnreadableVersionNotBlocked` and `AgentControl-GitRemoteClient-MinimumGitVersionCheckedOnce`.
+`AgentControl-GitRemoteClient-UnreadableVersionNotBlocked`
+and `AgentControl-GitRemoteClient-MinimumGitVersionCheckedOnce`.
 
 **GitRemoteClient_Transport_OnlyTheAllowedProtocol**: for https, ssh and file targets only that protocol is allowed
 (`protocol.allow=never` plus one `protocol.<kind>.allow=always`, `ext` and `fd` never, `GIT_ALLOW_PROTOCOL`); with the
@@ -173,7 +185,8 @@ one-second limit and reported as `TimedOut` with the message `git ls-remote did 
 stopped.`, and is killed when cancelled and reported as an `OperationCanceledException`; the process never finishes in
 either case. With a test seam that replaces the termination (it records the process and leaves it running, or throws an
 access error), a timeout and a cancellation are both reported as a `GitRemoteException` of kind `ProcessNotStopped`
-with the fixed message "was stopped but could not be confirmed to have ended" within the one-second stop timeout, and the
+with the fixed message "was stopped but could not be confirmed to have ended" within the one-second stop timeout,
+and the
 test kills the stub itself afterwards. This scenario is tested by
 `GitRemoteClient_ListTags_ExceedsTimeLimit_KillsProcessAndReportsTimedOut`,
 `GitRemoteClient_ListTags_Cancelled_KillsProcessAndThrowsOperationCanceled`,
@@ -188,7 +201,8 @@ operating system for the descent into children.
 
 **GitRemoteClient_Output_BytesCapFixedMessagesAndClassification**: more than 8 MB of output is `OutputTooLarge`; 5
 million two-byte characters (under the cap as characters, 10 MB as bytes) is `OutputTooLarge`; exactly the cap in bytes
-is accepted and one byte more is refused; an error text that starts with `password=...` and an `Authorization: Basic ...`
+is accepted and one byte more is refused; an error text that starts with `password=...`
+and an `Authorization: Basic ...`
 line and continues for 200 KB yields the fixed sentence `git ls-remote failed (exit code 128).` with neither secret,
 and the logs hold neither the address nor the arguments; git's error text that repeats the address, the host and a local
 path (for authentication, not-found, unreachable, host-key, ownership and unknown failures) yields the fixed sentence of

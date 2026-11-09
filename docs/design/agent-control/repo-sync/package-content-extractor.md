@@ -29,7 +29,7 @@ messages), `ContentIdentity` (the identity of the package the reader reads, or `
 
 **ZipPackageContentReader**: holds a `ZipArchive` open until disposed; `Open` opens the zip **once**, hashes the
 whole file with `PackageContentIdentity.ComputeSha256` (`ContentIdentity`), rewinds the same handle and builds the
-archive over it, so the identity describes exactly the bytes that are extracted and the file cannot be swapped
+archive over it, so the identity describes exactly the bytes that are extracted and no other file can be read
 between hashing and reading (`AgentControl-PackageContentExtractor-ReaderContentIdentity`); the handle is released
 when the archive cannot be built (`AgentControl-PackageContentExtractor-ZipReaderReleasesHandleOnFailure`). `Open` wraps
 open

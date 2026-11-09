@@ -42,9 +42,11 @@ public sealed class RepoSyncSubsystemTests : IDisposable
     /// <summary>
     ///     Test that the identity a zip reader reports is that of exactly the bytes that are extracted
     ///     and that a republished zip is told apart: the identity equals an independently computed
-    ///     SHA-256 of the file, the file cannot be replaced while the reader holds it (so the identity
-    ///     cannot describe other bytes than the ones read), the applied files are the ones the zip held,
-    ///     and a zip republished with other content reports another identity with the other content applied.
+    ///     SHA-256 of the file, the applied files are the ones the zip held (the reader hashes and reads
+    ///     the one handle, so the identity cannot describe other bytes than the ones read), on Windows the
+    ///     file cannot be replaced while the reader holds it (elsewhere file locks are advisory, so no
+    ///     replacement is attempted), and a zip republished with other content reports another identity
+    ///     with the other content applied.
     /// </summary>
     [Fact]
     public void RepoSync_ContentIdentity_ZipIdentityDescribesTheBytesThatAreApplied()
@@ -56,16 +58,22 @@ public sealed class RepoSyncSubsystemTests : IDisposable
         var expectedOriginal = Sha256Identity(File.ReadAllBytes(zip));
         var repo = CreateTempDirectory();
 
-        // Act: read the zip, try to replace it while it is held, and apply it
+        // Act: read the zip, try to replace it while it is held (Windows only: elsewhere the lock is
+        // advisory and a write would succeed and corrupt the zip), and apply it
         string identityOfRead;
         using (var reader = ZipPackageContentReader.Open(zip))
         {
             identityOfRead = reader.ContentIdentity;
-            var replaceWhileHeld = Record.Exception(() => File.WriteAllBytes(zip, [1, 2, 3]));
+            var replaceWhileHeld = OperatingSystem.IsWindows()
+                ? Record.Exception(() => File.WriteAllBytes(zip, [1, 2, 3]))
+                : null;
             PackageContentExtractor.Extract(reader, repo);
 
-            // Assert (while held): the file could not be swapped under the reader
-            Assert.IsAssignableFrom<IOException>(replaceWhileHeld);
+            // Assert (while held): on Windows the file could not be swapped under the reader
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.IsAssignableFrom<IOException>(replaceWhileHeld);
+            }
         }
 
         // Assert: the reported identity is that of the file, and the applied file is the one in the zip

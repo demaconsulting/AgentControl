@@ -241,6 +241,58 @@ public sealed class UsabilityWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the card of a repo pinned to a Git source draws the Git icon and the source's alias
+    ///     in its package chip, and that the chip's tooltip names the tag and the first seven
+    ///     characters of the commit the files came from: the chip as the user sees it in the main window.
+    /// </summary>
+    [Fact]
+    public void MainWindow_PinnedGitSourceCard_ChipShowsGitIconAliasTagAndShortCommit() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: a Git source (a local folder, so nothing is fetched) and a repo pinned to its tag
+        var source = new PackageSourceDefinition
+        {
+            Alias = "Repo",
+            Type = PackageSourceType.Git,
+            Location = CreateTempDirectory(),
+            TagPattern = "release/{version}",
+            PackageIds = ["contoso-agents"]
+        };
+        var repo = CreateRepoDirectory("git-pinned");
+        RepoPinStore.Save(repo, new RepoPin
+        {
+            Source = "Repo",
+            PackageName = "contoso-agents",
+            Version = "1.2.3",
+            ContentIdentity = "git-commit:abcdef0123456789abcdef0123456789abcdef01"
+        });
+
+        // Act: the main window shows the repo's card
+        var (window, viewModel) = CreateWindow(
+            [new RecentRepo { Path = repo }], new AppSettings { Sources = [source] });
+
+        try
+        {
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the chip in the window carries the Git icon, the alias, the package and the tooltip
+            var chip = Assert.Single(window.GetVisualDescendantsOf<Border>("PackageChip"));
+            Assert.True(chip.IsVisible);
+            var icon = Assert.Single(chip.GetVisualDescendants().OfType<MaterialIcon>(), icon => icon.Name == "PackageSourceIcon");
+            Assert.Equal(Material.Icons.MaterialIconKind.Git, icon.Kind);
+            Assert.Equal("Repo", Assert.Single(chip.GetVisualDescendants().OfType<TextBlock>(), text => text.Name == "PackageSourceAliasText").Text);
+            Assert.Equal("contoso-agents 1.2.3", Assert.Single(chip.GetVisualDescendants().OfType<TextBlock>(), text => text.Name == "RepoPinnedVersionText").Text);
+            Assert.Equal(
+                "Agent files: contoso-agents 1.2.3 from source 'Repo' (git repository), tag release/1.2.3 @ abcdef0.",
+                ToolTip.GetTip(chip));
+            Assert.Equal(viewModel.RepoCards[0].PackageChipTooltip, ToolTip.GetTip(chip));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that a card's name ends in an ellipsis with a full-name tooltip, that its path keeps the
     ///     folder name readable (whole, or with a middle ellipsis that keeps its start and its end) and
     ///     gives way in the folder part first, with the full path as its tooltip and accessible name, and

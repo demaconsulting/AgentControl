@@ -79,7 +79,8 @@ asking, a wrong password is never saved), through the real `git credential` prot
 against a throw-away helper in a temporary folder, and through a stub git that records exactly what is sent, in what
 environment and within what time limit.
 
-The Git source scenarios (`GitSourceTests.cs`, `GitSourceSafetyTests.cs` and `GitSignInTests.cs`, with `GitFixtureRepository.cs`
+The Git source scenarios (`GitSourceTests.cs`, `GitSourceSafetyTests.cs` and `GitSignInTests.cs`,
+with `GitFixtureRepository.cs`
 and `GitHttpsServer.cs`) are the exception to the stub git: each builds a real local bare Git repository in a temporary
 folder, runs the application with the real `git` (isolated from the developer's global and system configuration and
 credential helpers, so no credential store is touched) and is skipped when git is not installed - or failed instead
@@ -674,7 +675,8 @@ a source of type `Git` with the address, the pattern and the package name (the a
 run a pattern whose capitalization differs ("Release/{version}") gives "No matching tags" with a hint that names a real
 tag (`release/1.0.0`) and says the fixed parts are case-sensitive, no preview list is shown, and correcting the pattern
 makes the same test succeed. In a third run, with the Git source preconfigured, a never-pinned repo is offered Select
-Package... (and not Change package...); choosing the package and version 1.0.0 applies the tag's files, opens its release
+Package... (and not Change package...); choosing the package and version 1.0.0 applies the tag's files,
+opens its release
 notes and writes a pin holding the source, package, version and `git-commit:` plus the commit the tag points to, and the
 card shows the package and version, the alias and (as drawn ink beside the alias - the icon itself is decorative and
 not in the UI Automation tree) the Git icon. This scenario is tested by

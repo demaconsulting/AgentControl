@@ -42,7 +42,8 @@ its end.
 
 - *Parameters*: `string commit`.
 - *Returns*: `string`, with the hash lower-cased.
-- *Postconditions*: The result is `git-commit:` plus the lower-cased hash (`AgentControl-PackageContentIdentity-Format`).
+- *Postconditions*: The result is `git-commit:` plus the lower-cased hash
+  (`AgentControl-PackageContentIdentity-Format`).
   Throws `ArgumentException` unless the hash is 40 or 64 hexadecimal digits and `ArgumentNullException` for a null
   hash, so a malformed value never reaches a pin (`AgentControl-PackageContentIdentity-FormatRejectMalformed`).
 
@@ -60,7 +61,8 @@ its end.
 **Describe**: Produces a short form for messages and logs.
 
 - *Parameters*: `string? identity`.
-- *Returns*: `string` - the kind prefix and the first 12 characters of the value (`AgentControl-PackageContentIdentity-Describe`),
+- *Returns*: `string` - the kind prefix and the first 12 characters of the value
+  (`AgentControl-PackageContentIdentity-Describe`),
   or `none` when no identity is known (`AgentControl-PackageContentIdentity-DescribeNone`). The text is split at its
   first colon, so an identity of an unrecognized shape is cut the same way and never echoed in full.
 

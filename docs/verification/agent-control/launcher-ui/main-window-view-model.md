@@ -144,10 +144,12 @@ the background. This scenario is tested by
 `AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`.
 
 **MainWindowViewModel_ConnectionTestProvider_UsesTheSharedCredentialFacilities**: The view model hands out a
-real `NuGetSourceProvider` for the settings window's connection test of a NuGet source, built with the same credential context
+real `NuGetSourceProvider` for the settings window's connection test of a NuGet source,
+built with the same credential context
 (session store and prompt) as the cards, so a sign-in made during a test is remembered for the session. This
 scenario is tested by `MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials`
-(in `SettingsWindowServerSourceTests.cs`) and `MainWindowViewModel_CreateConnectionTestProvider_NuGetSource_ReturnsNuGetProvider`,
+(in `SettingsWindowServerSourceTests.cs`) and
+`MainWindowViewModel_CreateConnectionTestProvider_NuGetSource_ReturnsNuGetProvider`,
 covering `AgentControl-MainWindowViewModel-ConnectionTestProvider`.
 
 **MainWindowViewModel_GitConnectionTestProvider_InteractiveGitWithTheConfiguredGit**: For a Git source the view model

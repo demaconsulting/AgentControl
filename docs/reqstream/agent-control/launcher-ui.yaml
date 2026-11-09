@@ -1628,6 +1628,7 @@ sections:
           - PackageSourceIcons_GitSource_HasGitIconAndNames
           - SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName
           - RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias
+          - MainWindow_PinnedGitSourceCard_ChipShowsGitIconAliasTagAndShortCommit
 
       - id: AgentControl-LauncherUI-GitSourceRowStatus
         title: >-
@@ -1657,6 +1658,7 @@ sections:
           - AgentControl-RepoCardViewModel-GitSourceTooltip
         tests:
           - RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit
+          - MainWindow_PinnedGitSourceCard_ChipShowsGitIconAliasTagAndShortCommit
 
       - id: AgentControl-LauncherUI-TagMovedWarning
         title: >-

@@ -333,8 +333,8 @@ sections:
           A link that is not copied cannot hurt, and refusing it would reject good packages because
           of unrelated files.
         tests:
-          - DirectoryPackageContentReader_OpenLayoutRoot_JunctionOutsideLayoutIgnoredInsideLayoutRefused
-          - DirectoryPackageContentReader_OpenLayoutRoot_SymlinkOutsideLayoutIgnoredInsideLayoutRefused
+          - windows@DirectoryPackageContentReader_OpenLayoutRoot_JunctionOutsideLayoutIgnoredInsideLayoutRefused
+          - ubuntu@DirectoryPackageContentReader_OpenLayoutRoot_SymlinkOutsideLayoutIgnoredInsideLayoutRefused
 
       - id: AgentControl-PackageContentExtractor-RefuseLinkInManagedFolder
         title: >-

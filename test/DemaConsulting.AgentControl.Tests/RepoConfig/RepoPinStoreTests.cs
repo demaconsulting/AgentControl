@@ -569,12 +569,48 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
+    ///     Test that saving over a pin file whose declared schema is a number beyond any numeric range
+    ///     (a positive integer of forty-odd digits) is refused as a newer schema and leaves the file
+    ///     byte-for-byte unchanged: it is never mistaken for a corrupt file and overwritten.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_Save_SchemaVersionBeyondAnyNumericRange_ThrowsAndLeavesFileUnchanged()
+    {
+        // Arrange: a pin file declaring a schema that fits no decimal or integer
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(repoRoot, ".agentcontrol.json");
+            File.WriteAllText(path, """{ "SchemaVersion": 999999999999999999999999999999999999999999, "PackageName": "p" }""");
+            var before = File.ReadAllBytes(path);
+
+            // Act
+            var ex = Assert.Throws<UnsupportedPinSchemaException>(
+                () => RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" }));
+            var loadFailure = Assert.Throws<UnsupportedPinSchemaException>(() => RepoPinStore.Load(repoRoot));
+
+            // Assert: refused as newer in both directions, and the file and its folder are untouched
+            Assert.Equal(int.MaxValue, ex.SchemaVersion);
+            Assert.Equal(int.MaxValue, loadFailure.SchemaVersion);
+            Assert.Equal(before, File.ReadAllBytes(path));
+            Assert.Equal([path], Directory.GetFiles(repoRoot));
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that a declared schema that is text or a whole number too large for an integer is
     ///     still recognized as newer, and that a letter-case variant of the property name is read.
     /// </summary>
     [Theory]
     [InlineData("""{ "SchemaVersion": "5", "PackageName": ["p"] }""", 5)]
     [InlineData("""{ "SchemaVersion": 99999999999, "PackageName": ["p"] }""", int.MaxValue)]
+    [InlineData("""{ "SchemaVersion": 999999999999999999999999999999999999999999 }""", int.MaxValue)]
+    [InlineData("""{ "SchemaVersion": 1e999 }""", int.MaxValue)]
+    [InlineData("""{ "SchemaVersion": "999999999999999999999999999999999999999999" }""", int.MaxValue)]
     [InlineData("""{ "SCHEMAVERSION": 7 }""", 7)]
     public void RepoPinStore_ProbeSchemaVersion_TextOrOversizedOrDifferentlyCasedVersion_IsReadAsNewer(string json, int expected)
     {

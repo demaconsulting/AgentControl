@@ -103,7 +103,8 @@ in progress. This scenario is tested by
 `SelectPackageWindowViewModel_Retry_NothingFailed_DoesNothing`, covering
 `AgentControl-SelectPackageWindowViewModel-Retry`.
 
-**SelectPackageWindowViewModel_PreselectCurrentPackage_OpensOnThePinnedChoice**: Given the source, package and version of
+**SelectPackageWindowViewModel_PreselectCurrentPackage_OpensOnThePinnedChoice**: Given the source, package and
+version of
 a pin, loading selects that package and version in the preferred source; when the pinned version is no longer listed the
 newest stays selected; when the source's package list does not offer the package, when the source could not be read and
 when the alias names no configured source nothing is selected; and a package chosen by the user before the load ends is
@@ -123,6 +124,7 @@ to the caller. This scenario is tested by
 `AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage`, `-PreselectNewestWhenVersionGone`,
 `-PreselectNothingWhenSourceFailed`, `-PreselectNothingWhenNotOffered`, `-PreselectNothingWhenSourceUnknown`,
 `-PreselectKeepsUserChoice` and `-PreselectCancelled`. The row of a Git source showing the Git icon and
-the type name "Git repository" is checked by `SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName`
+the type name "Git repository" is checked by
+`SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName`
 and is cited by the `LauncherUI` subsystem requirement `AgentControl-LauncherUI-GitSourcePresentation`; the dialog
 opening on the pinned choice from the card menu is verified in the `LauncherUI` subsystem tests.

@@ -28,8 +28,10 @@ their bytes from the fetched commit with `git cat-file --batch`, and nothing is 
 folders and the two root files, never `.git`, other `.github` content or any other file, and - unlike the
 `content`-folder mode, which refuses a link anywhere - it neither inspects nor refuses a link that is not part of the
 layout while still refusing one that is (`AgentControl-RepoSync-LayoutRoot`, `-LayoutRootOnlyLayout`,
-`-LayoutRootRefusesLinks` and `-LayoutRootIgnoresOtherLinks`, which support `AgentControl-System-GitSourceLayoutOnly` and
-`AgentControl-System-GitSourceRefusesLinks`). The *layout root rule*: the root a reader reports must be an existing folder
+`-LayoutRootRefusesLinks` and `-LayoutRootIgnoresOtherLinks`, which support `AgentControl-System-GitSourceLayoutOnly`
+and
+`AgentControl-System-GitSourceRefusesLinks`). The *layout root rule*: the root a reader reports must be an existing
+folder
 that is not a link, and a path outside the layout paths - including one that climbs out with `..` - is never read.
 Before anything is written the provider also verifies, with the same list of layout paths, that in the fetched commit
 the managed folders are folders and the root files are regular files, so a file or a link where a managed folder

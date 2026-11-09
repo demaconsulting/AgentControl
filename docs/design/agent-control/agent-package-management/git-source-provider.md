@@ -92,7 +92,8 @@ list" before anything is fetched. Then, in a temporary folder:
    must exist (`-RejectTagWithoutLayout`). Every path component must be safe on every file system
    (`IsSafePathComponent`): not empty, not `.` or `..`, no `\ : * ? " < > |` and no control character (so no drive, no
    alternate data stream), no trailing dot or space, and not a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`
-   to `COM9`, `LPT1` to `LPT9`, with or without an extension) (`-RejectUnsafeEntryNames`); and no
+   to `COM9`, `LPT1` to `LPT9`, and the superscript forms `COM¹ COM² COM³ LPT¹ LPT² LPT³`, with or without an
+   extension) (`-RejectUnsafeEntryNames`); and no
    component may spell the repository metadata folder in any way a file system would (`IsGitFolderName`: `.git` in any
    letter case, with the zero-width and direction characters HFS+ ignores, with trailing dots or spaces that NTFS
    ignores, or as the short name `GIT~1`) (`-RejectGitEntryInLayout`). These checks matter because AgentControl writes

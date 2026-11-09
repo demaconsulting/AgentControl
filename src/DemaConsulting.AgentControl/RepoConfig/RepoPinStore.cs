@@ -295,8 +295,9 @@ internal static class RepoPinStore
     /// </summary>
     /// <param name="json">The text of the pin file.</param>
     /// <returns>The declared version (property name matched without regard to letter case; a number,
-    ///     or text holding a whole number); <see cref="int.MaxValue"/> for a whole number too large
-    ///     for an <see cref="int"/>, which is certainly newer; <see langword="null"/> when the
+    ///     or text holding a whole number); <see cref="int.MaxValue"/> for a positive number too
+    ///     large for an <see cref="int"/> (however many digits it has), which is certainly newer;
+    ///     <see langword="null"/> when the
     ///     document is not an object or declares no usable version (a schema 1 file, or one whose
     ///     <c>SchemaVersion</c> is another kind of value, which typed reading then judges).</returns>
     /// <exception cref="JsonException">Thrown when the text is not valid JSON.</exception>
@@ -323,13 +324,36 @@ internal static class RepoPinStore
                     return version;
                 }
 
-                // A whole number beyond int is newer than any version this build knows
-                return value.TryGetDecimal(out var wide) && wide > RepoPin.CurrentSchemaVersion ? int.MaxValue : null;
+                // A positive number beyond int (a whole number of any length, or one written with
+                // an exponent) is newer than any version this build knows; the text is judged, so
+                // no numeric range can make it look unusable and let the file be overwritten
+                return ReadBeyondInt(value.GetRawText());
             }
 
-            return value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var parsed) ? parsed : null;
+            if (value.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            var text = value.GetString();
+            return int.TryParse(text, out var parsed) ? parsed : ReadBeyondInt(text);
         }
 
         return null;
     }
+
+    /// <summary>
+    ///     Judges a number written beyond the range of an <see cref="int"/>.
+    /// </summary>
+    /// <param name="text">The number as written.</param>
+    /// <returns><see cref="int.MaxValue"/> when it is a number above the current schema version
+    ///     (however large), otherwise <see langword="null"/>.</returns>
+    private static int? ReadBeyondInt(string? text) =>
+        double.TryParse(
+            text,
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var wide) && wide > RepoPin.CurrentSchemaVersion
+            ? int.MaxValue
+            : null;
 }

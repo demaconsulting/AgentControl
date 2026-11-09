@@ -60,7 +60,8 @@ N/A - standard test environment.
   a tag pattern without the version placeholder exactly once, a folder that is not relative and a package name that is
   not valid each show an inline message and block saving and testing; a folder typed with backslashes is saved with
   slashes; an existing Git source keeps its alias.
-- The Git connection test lists the repository's tags through the provider, shows the matching ones newest first (at most
+- The Git connection test lists the repository's tags through the provider, shows the matching ones newest first
+  (at most
   ten) with how many of the tags match, shows "No matching tags" with sample tag names and a case/prefix hint when none
   does (or says the repository has no tags yet), reports each failure with its own headline (including "Git is too
   old"), can be cancelled as a neutral result, and never shows the result - or keeps the preview - of inputs that
@@ -246,16 +247,20 @@ showing them is verified in the `LauncherUI` subsystem tests), each prefixed
 `AgentControl-SourceEditorViewModel`. The sign-in note is checked as text: whether Git Credential Manager really shows
 its dialog from the application's hidden-console git is not verifiable by an automated test and is a manual check.
 
-**SourceEditorViewModel_GitTestConnection_TagPreviewAndOutcomes**: The test is available for a Git source without an alias
+**SourceEditorViewModel_GitTestConnection_TagPreviewAndOutcomes**: The test is available for a Git source
+without an alias
 when the package name is given; the default provider of a Git source is a real Git provider (tested against a local
 repository, with the tags that match listed and the others counted); a prepared preview of three tags with two matches
-shows "Connection OK", the newest version and "2 of 3 tags match the pattern. 1 other tag does not match."; more than ten
+shows "Connection OK", the newest version and "2 of 3 tags match the pattern. 1 other tag does not match.";
+more than ten
 matches list only the newest ten; a repository where no tag matches reports "No matching tags", names a few of the
 tags it
-does have and says the fixed parts are case-sensitive; a repository with no tags says it has none yet; a provider that has
+does have and says the fixed parts are case-sensitive; a repository with no tags says it has none yet;
+a provider that has
 no preview falls back to its list of versions; changing the pattern after a test clears the result and the preview; each
 failure kind of the provider gets its own headline and the provider's message ("Sign-in needed", "Repository not found",
-"Repository unreachable", "Timed out"), any other failure is "Connection failed" and a git that is too old is "Git is too
+"Repository unreachable", "Timed out"), any other failure is "Connection failed" and
+a git that is too old is "Git is too
 old"; cancelling a running test ends with a neutral "canceled" result; and a test still running when any input of the
 test (the address, the tag pattern, the folder or the package name, one theory case each) is edited shows neither a
 result nor a preview, even when the provider ignores cancellation. This scenario is tested by

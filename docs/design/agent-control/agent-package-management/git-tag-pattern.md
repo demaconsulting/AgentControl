@@ -55,7 +55,8 @@ message `TryCreate` gives.
 
 **TryMatch**: Decides whether a tag is a package version under the pattern.
 
-- *Parameters*: `string? tagName` - the tag without `refs/tags/`, as a server reported it; `out PackageVersion? version`.
+- *Parameters*: `string? tagName` - the tag without `refs/tags/`, as a server reported it;
+  `out PackageVersion? version`.
 - *Returns*: `bool`.
 - *Postconditions*: `true` only when the name is a safe tag name (`IsSafeTagName`), starts with the prefix, ends with
   the suffix and has a strict Semantic Versioning 2.0 version between them; then `version` is set. Otherwise `false`

@@ -13,7 +13,8 @@ configuration replaced by an isolated one (and, for the sign-in test, against `G
 of the test), or against `GitRemoteStub`, a fake git executable that records its arguments and environment. The
 subsystem test class reuses `GitRepositoryFixture` of the `AgentPackageManagement` test folder, a deliberate
 cross-hierarchy dependency of test code only (the fixture builds real local repositories with the user's git
-configuration isolated; nothing in the shipped code depends on it). `GitClientTests` uses `GitStub`, a fake git executable
+configuration isolated; nothing in the shipped code depends on it). `GitClientTests` uses `GitStub`,
+a fake git executable
 script that records its invocation arguments and returns configured output/exit codes, so
 tests never depend on a real git installation or a real repository's actual history. The credential tests use
 `GitCredentialStub`, a similar fake that also records the environment, working folder and standard input, and -
@@ -131,7 +132,8 @@ are listed. These tests are `GitIntegrationSubsystem_RemoteClient_BackgroundWork
 `AgentControl-GitIntegration-RemoteGitNoBackgroundPrompt` (child: `AgentControl-GitRemoteClient-NoPromptInBackground`)
 and `AgentControl-GitIntegration-RemoteGitSignIn` (child: `AgentControl-GitRemoteClient-InteractiveWhenUserStarted`).
 
-**GitIntegration_RemoteGit_FailuresAreClassifiedBoundedAndVersionChecked**: With the real git, a repository that does not
+**GitIntegration_RemoteGit_FailuresAreClassifiedBoundedAndVersionChecked**: With the real git,
+a repository that does not
 exist is reported as "not found" in one fixed sentence that repeats neither the path nor git's text, and a git
 executable that does not exist is reported as missing with a pointer to Settings. With a stub that reports a git older
 than the minimum, the check refuses it with a message that says what to do before any other command ran, and with a stub

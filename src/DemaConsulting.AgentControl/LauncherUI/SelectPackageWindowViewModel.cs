@@ -463,9 +463,9 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
             return;
         }
 
-        // The version read is cancelled by the same token as the rest of the load; the
-        // registration is made for the read that is current when the token fires
-        using var cancelVersionRead = cancellationToken.Register(CancelVersionLoad);
+        // A load that is already cancelled starts nothing: no selection is made and no read begun
+        cancellationToken.ThrowIfCancellationRequested();
+
         _applyingPreference = true;
         try
         {
@@ -475,6 +475,13 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         {
             _applyingPreference = false;
         }
+
+        // The version read is cancelled by the same token as the rest of the load, but only the
+        // read this preference started: the exact source of its token is captured here (the setter
+        // has just created it), so a newer selection by the user, with its own read, is never
+        // cancelled by this registration
+        var preferredRead = _versionsCancellation;
+        using var cancelVersionRead = cancellationToken.Register(() => CancelVersionLoad(preferredRead));
 
         await PendingVersionsLoad;
         cancellationToken.ThrowIfCancellationRequested();
@@ -494,14 +501,15 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Cancels the version load that is current, ignoring one whose source was already
-    ///     replaced and released by a newer selection.
+    ///     Cancels the given version load, ignoring one whose source was already replaced and
+    ///     released by a newer selection.
     /// </summary>
-    private void CancelVersionLoad()
+    /// <param name="read">The exact source of the token of the version load to cancel.</param>
+    private static void CancelVersionLoad(CancellationTokenSource read)
     {
         try
         {
-            _versionsCancellation.Cancel();
+            read.Cancel();
         }
         catch (ObjectDisposedException)
         {

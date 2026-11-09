@@ -579,14 +579,16 @@ contrast, is reachable through Change package... and is shown end to end in the 
 
 **RepoCardViewModel_GitSourceAwareness_IconAliasTagAndShortCommit**: A card pinned to a Git source shows the Git icon
 and the source's alias beside the package and version; its chip tooltip reads "Agent files: {package} {version} from
-source '{alias}' (git repository), tag {tag} @ {first seven characters of the commit}." where the tag is the source's tag
+source '{alias}' (git repository), tag {tag} @ {first seven characters of the commit}."
+where the tag is the source's tag
 pattern applied to the pinned version and the commit is the one the pin recorded; with no recorded commit (a pin made
 before commits were recorded) it names the tag only; and a pin to a zip source names neither. This scenario is tested by
 `RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias`,
 `RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit`,
 `RepoCardViewModel_PackageChipTooltip_GitPinWithoutIdentity_NamesTagOnly` and
 `RepoCardViewModel_PackageChipTooltip_ZipPin_HasNoTagOrCommit`, covering
-`AgentControl-RepoCardViewModel-GitSourceAwareness` (icon and alias) and `AgentControl-RepoCardViewModel-GitSourceTooltip`
+`AgentControl-RepoCardViewModel-GitSourceAwareness` (icon and alias)
+and `AgentControl-RepoCardViewModel-GitSourceTooltip`
 (tag and short commit). The tag is derived from the source's tag pattern as configured now, not stored in the pin. The
 tests use a `FakePackageSourceProvider` standing in for the Git
 source and a pin file written for the test, so no Git repository or network is involved.

@@ -672,6 +672,72 @@ public sealed class SelectPackageWindowViewModelTests
     }
 
     /// <summary>
+    ///     Test that cancelling the load after the user chose another package cancels nothing of the
+    ///     user's read: the registration made for the preferred read cancels exactly the read it was
+    ///     made for, never the newer one.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_CancelledAfterUserChoseAnotherPackage_DoesNotCancelTheUsersRead()
+    {
+        // Arrange: the preferred read ignores cancellation (so it is still pending when the token
+        // fires); the user's own read honors it
+        var provider = new PreferenceRaceProvider("A");
+        var registry = new PackageSourceRegistry(
+            [new PackageSourceDefinition { Alias = "A", Type = PackageSourceType.Zip, Location = "unused" }],
+            _ => provider);
+        var viewModel = new SelectPackageWindowViewModel(registry, new PackageVersionCache(), "A", "contoso-agents", "1.0.0");
+        using var cancellation = new CancellationTokenSource();
+        var loading = viewModel.LoadAsync(cancellation.Token);
+        for (var attempt = 0; attempt < 1000 && provider.VersionCalls < 1; attempt++)
+        {
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+
+        // Act: the user chooses another package (a newer read), then the load is cancelled
+        viewModel.SelectedPackageName = "other-agents";
+        Assert.Equal(2, provider.VersionCalls);
+        await cancellation.CancelAsync();
+
+        // Assert: the user's read is still running, and delivers its versions once the source answers
+        Assert.True(viewModel.IsLoadingVersions);
+        Assert.False(provider.UserReadToken.IsCancellationRequested);
+        provider.ReleaseUserRead();
+        await viewModel.PendingVersionsLoad.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        Assert.Equal(["2.0.0"], viewModel.AvailableVersions);
+        Assert.Equal("2.0.0", viewModel.SelectedVersion);
+
+        // Clean up: let the preferred read end, which surfaces the cancellation to the caller
+        provider.ReleasePreferredRead();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => loading.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that a load whose token is already cancelled when the preferred package would be
+    ///     selected makes no selection and starts no version read.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_CancelledBeforePreferredSelection_StartsNoVersionRead()
+    {
+        // Arrange: the source's package list arrives, and cancels the load while doing so
+        using var cancellation = new CancellationTokenSource();
+        var provider = new PreferenceRaceProvider("A") { OnListPackageIds = cancellation.Cancel };
+        var registry = new PackageSourceRegistry(
+            [new PackageSourceDefinition { Alias = "A", Type = PackageSourceType.Zip, Location = "unused" }],
+            _ => provider);
+        var viewModel = new SelectPackageWindowViewModel(registry, new PackageVersionCache(), "A", "contoso-agents", "1.0.0");
+
+        // Act
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => viewModel.LoadAsync(cancellation.Token));
+
+        // Assert: nothing was selected and no version read was begun
+        Assert.Null(viewModel.SelectedPackageName);
+        Assert.Equal(0, provider.VersionCalls);
+        Assert.False(viewModel.IsLoadingVersions);
+        Assert.False(viewModel.IsLoading);
+    }
+
+    /// <summary>
     ///     Test that a Git source is listed with the Git icon and its kind name, like the other kinds.
     /// </summary>
     [Fact]
@@ -741,6 +807,93 @@ public sealed class SelectPackageWindowViewModelTests
         new(
             providers.Select(p => new PackageSourceDefinition { Alias = p.Alias, Type = PackageSourceType.Zip, Location = "unused" }),
             definition => providers.Single(p => p.Alias == definition.Alias));
+
+    /// <summary>
+    ///     A source offering two packages whose version reads a test controls: the read of
+    ///     <c>contoso-agents</c> (the preferred package) ignores cancellation and ends only when
+    ///     released, the read of any other package honors it and ends when released.
+    /// </summary>
+    /// <param name="alias">The alias this provider reports.</param>
+    private sealed class PreferenceRaceProvider(string alias) : IPackageSourceProvider
+    {
+        /// <summary>
+        ///     The gate of the preferred package's read.
+        /// </summary>
+        private readonly TaskCompletionSource _preferredGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>
+        ///     The gate of the other package's read.
+        /// </summary>
+        private readonly TaskCompletionSource _userGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>
+        ///     The number of version reads begun.
+        /// </summary>
+        private int _versionCalls;
+
+        /// <inheritdoc />
+        public string Alias { get; } = alias;
+
+        /// <summary>
+        ///     Gets or sets an action run while the package list is read.
+        /// </summary>
+        public Action? OnListPackageIds { get; set; }
+
+        /// <summary>
+        ///     Gets the number of version reads begun.
+        /// </summary>
+        public int VersionCalls => Volatile.Read(ref _versionCalls);
+
+        /// <summary>
+        ///     Gets the token the read of the other package received.
+        /// </summary>
+        public CancellationToken UserReadToken { get; private set; }
+
+        /// <summary>
+        ///     Lets the read of the preferred package end.
+        /// </summary>
+        public void ReleasePreferredRead() => _preferredGate.TrySetResult();
+
+        /// <summary>
+        ///     Lets the read of the other package end.
+        /// </summary>
+        public void ReleaseUserRead() => _userGate.TrySetResult();
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken)
+        {
+            OnListPackageIds?.Invoke();
+            return Task.FromResult<IReadOnlyList<string>>(["contoso-agents", "other-agents"]);
+        }
+
+        /// <inheritdoc />
+        public async Task<IReadOnlyList<DiscoveredPackage>> ListVersionsAsync(
+            string packageId, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _versionCalls);
+            if (packageId == "contoso-agents")
+            {
+                await _preferredGate.Task;
+                return [new DiscoveredPackage(packageId, Version("1.0.0"), "1.0.0", Alias, null)];
+            }
+
+            UserReadToken = cancellationToken;
+            await _userGate.Task.WaitAsync(cancellationToken);
+            return [new DiscoveredPackage(packageId, Version("2.0.0"), "2.0.0", Alias, null)];
+        }
+
+        /// <inheritdoc />
+        public Task<IPackageContentReader> AcquireAsync(DiscoveredPackage package, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        /// <summary>
+        ///     Parses a version the test wrote.
+        /// </summary>
+        private static PackageVersion Version(string text) =>
+            PackageVersion.TryParse(text, out var parsed) && parsed is not null
+                ? parsed
+                : throw new ArgumentException("Invalid test version.", nameof(text));
+    }
 
     /// <summary>
     ///     A source whose package list arrives (empty) only when its gate opens, so a test can keep

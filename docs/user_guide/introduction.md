@@ -891,7 +891,8 @@ as an informational side action:
   re-extraction attempt fails (for example, the package source is unreachable, or the pinned
   version is no longer available), a non-blocking warning is shown, but the tool is still
   launched. If you cancel the wait, the tool is launched as well. If the pinned version has been republished with
-  different content (see *Republished Versions*), nothing is re-extracted and a warning says so. This re-extraction never
+  different content (see *Republished Versions*), nothing is re-extracted and a warning says so. This re-extraction
+  never
   rewrites the pin file. A successful re-extraction
   here also offers the package's `AGENTS.md` template if
   applicable, consistent with Select Package and Upgrade (see

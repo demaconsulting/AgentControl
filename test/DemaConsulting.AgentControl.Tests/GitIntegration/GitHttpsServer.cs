@@ -52,6 +52,11 @@ namespace DemaConsulting.AgentControl.Tests.GitIntegration;
 /// </remarks>
 internal sealed class GitHttpsServer : IAsyncDisposable
 {
+    /// <summary>
+    ///     How long one <c>git upload-pack</c> may run before it is killed.
+    /// </summary>
+    private static readonly TimeSpan UploadPackTimeout = TimeSpan.FromSeconds(60);
+
     private static readonly Lazy<string> EmptyConfiguration = new(() =>
     {
         var path = Path.Combine(Path.GetTempPath(), $"agentcontrol-git-server-{Guid.NewGuid():N}.gitconfig");
@@ -227,7 +232,7 @@ internal sealed class GitHttpsServer : IAsyncDisposable
         if (HttpMethods.IsGet(context.Request.Method) && path.EndsWith("/info/refs", StringComparison.Ordinal) &&
             context.Request.Query["service"] == "git-upload-pack")
         {
-            var advertisement = await RunUploadPackAsync(["--stateless-rpc", "--advertise-refs", _bareRepository], null);
+            var advertisement = await RunUploadPackAsync(["--stateless-rpc", "--advertise-refs", _bareRepository], null, context.RequestAborted);
             context.Response.ContentType = "application/x-git-upload-pack-advertisement";
             await context.Response.Body.WriteAsync(
                 Encoding.ASCII.GetBytes("001e# service=git-upload-pack\n0000"), context.RequestAborted);
@@ -245,7 +250,7 @@ internal sealed class GitHttpsServer : IAsyncDisposable
             }
 
             await input.CopyToAsync(body, context.RequestAborted);
-            var result = await RunUploadPackAsync(["--stateless-rpc", _bareRepository], body.ToArray());
+            var result = await RunUploadPackAsync(["--stateless-rpc", _bareRepository], body.ToArray(), context.RequestAborted);
             context.Response.ContentType = "application/x-git-upload-pack-result";
             await context.Response.Body.WriteAsync(result, context.RequestAborted);
             return;
@@ -255,12 +260,15 @@ internal sealed class GitHttpsServer : IAsyncDisposable
     }
 
     /// <summary>
-    ///     Runs <c>git upload-pack</c> and returns what it writes.
+    ///     Runs <c>git upload-pack</c> and returns what it writes. The run is bounded by a timeout
+    ///     and by the request: when either ends first the whole process tree is killed and waited
+    ///     for, so no <c>git</c> process outlives the request.
     /// </summary>
     /// <param name="arguments">The arguments after <c>upload-pack</c>.</param>
     /// <param name="input">The bytes for standard input, or <see langword="null"/> for none.</param>
+    /// <param name="requestAborted">Signals that the client abandoned the request.</param>
     /// <returns>The standard output.</returns>
-    private static async Task<byte[]> RunUploadPackAsync(string[] arguments, byte[]? input)
+    private static async Task<byte[]> RunUploadPackAsync(string[] arguments, byte[]? input, CancellationToken requestAborted)
     {
         var startInfo = new ProcessStartInfo("git")
         {
@@ -278,19 +286,60 @@ internal sealed class GitHttpsServer : IAsyncDisposable
 
         startInfo.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
         startInfo.Environment["GIT_CONFIG_GLOBAL"] = EmptyConfiguration.Value;
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
+        limit.CancelAfter(UploadPackTimeout);
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("git did not start.");
         var output = new MemoryStream();
-        var copy = process.StandardOutput.BaseStream.CopyToAsync(output);
-        var error = process.StandardError.ReadToEndAsync();
-        if (input is not null)
+        Task? copy = null;
+        Task<string>? error = null;
+        try
         {
-            await process.StandardInput.BaseStream.WriteAsync(input);
-        }
+            copy = process.StandardOutput.BaseStream.CopyToAsync(output, limit.Token);
+            error = process.StandardError.ReadToEndAsync(limit.Token);
+            if (input is not null)
+            {
+                await process.StandardInput.BaseStream.WriteAsync(input, limit.Token);
+            }
 
-        process.StandardInput.Close();
-        await copy;
-        await process.WaitForExitAsync();
-        _ = await error;
-        return output.ToArray();
+            process.StandardInput.Close();
+            await copy;
+            await process.WaitForExitAsync(limit.Token);
+            _ = await error;
+            return output.ToArray();
+        }
+        finally
+        {
+            // After a timeout or an aborted request git may still be running: kill it with
+            // everything it started and wait, so nothing is left behind
+            if (!process.HasExited)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (InvalidOperationException)
+                {
+                    // It ended between the check and the kill
+                }
+
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+
+            // Observe the reads so a cancelled one is never an unobserved exception
+            foreach (var pending in new Task?[] { copy, error })
+            {
+                if (pending is not null)
+                {
+                    try
+                    {
+                        await pending;
+                    }
+                    catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException)
+                    {
+                        // Ended with the process or the cancellation
+                    }
+                }
+            }
+        }
     }
 }

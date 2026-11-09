@@ -506,7 +506,8 @@ letters on every palette color use whichever of white and near-black reads bette
 at least 4.5:1 (`ThemeResourceTests` checks every entry in both themes).
 
 **Settings window package-source actions.** One **Add** button opens a menu with the source types that can be
-added (zip-package folder, NuGet-package folder, NuGet-package server, Git repository), each with its type's icon (the one
+added (zip-package folder, NuGet-package folder, NuGet-package server, Git repository), each with its type's icon
+(the one
 the sources list uses) and a one-line description; another source type is added as one more menu item
 (`AgentControl-LauncherUI-AddSourceMenu`).
 The `.axaml` Views other than `MainWindow`
@@ -599,12 +600,14 @@ slow process-kill fallbacks in automated UI tests that close the main window. Bo
 tracked-window-open and forced-close events are logged (`Debug`/`Information`) via
 `MainWindow`'s `_logger`.
 
-**Git package sources.** The card builds its package source registry with Git options (`RepoCardViewModel.CreateSourceRegistry`):
+**Git package sources.** The card builds its package source registry with Git options
+(`RepoCardViewModel.CreateSourceRegistry`):
 the configured or overridden git executable, a cache folder inside the isolated configuration directory when one was
 given, and `Interactive` equal to the `allowPrompt` switch that already decides whether a NuGet server may open the
 sign-in dialog. The same switch therefore keeps Git quiet for the background upgrade check and the restore
 before launch -
-a missing sign-in is reported as a source authentication failure, which the card shows as "sign-in needed" - and lets Git
+a missing sign-in is reported as a source authentication failure, which the card shows as "sign-in needed" - and lets
+Git
 show its own credential UI for work the user started (`AgentControl-LauncherUI-GitSourcePrompts`,
 `AgentControl-System-GitSignIn`).
 

@@ -181,7 +181,8 @@ the package extracts and its notes and template are read, and paths outside the 
 `DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity`, covering
 `AgentControl-PackageContentExtractor-ReadLayoutRoot` and `AgentControl-PackageContentExtractor-ExcludeGitFolder`;
 by `DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused`, covering
-`AgentControl-PackageContentExtractor-RefuseOutsideLayoutPaths` and `AgentControl-PackageContentExtractor-ExcludeGitFolder`;
+`AgentControl-PackageContentExtractor-RefuseOutsideLayoutPaths`
+and `AgentControl-PackageContentExtractor-ExcludeGitFolder`;
 by `DirectoryPackageContentReader_OpenLayoutRoot_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull`, covering
 `AgentControl-PackageContentExtractor-LayoutRootIdentity`; and by
 `DirectoryPackageContentReader_OpenLayoutRoot_MissingFolderOrLink_ThrowsInvalidOperationException`, covering

@@ -15,7 +15,8 @@ repaired, how look-alike names are given one spelling) are logic of their own, w
 observable behavior of persisting application-wide preferences (package sources, git/agent
 tool overrides, recent repos, shell preference, color theme) and the user's own organizing choices (repo groups,
 card colors, collapsed sections) (`AgentControl-Settings-Persistence`,
-`AgentControl-Settings-PackageSources`, `AgentControl-Settings-GitSourcePersistence`, `AgentControl-Settings-Appearance`,
+`AgentControl-Settings-PackageSources`, `AgentControl-Settings-GitSourcePersistence`,
+`AgentControl-Settings-Appearance`,
 `AgentControl-Settings-RepoOrganization`). The subsystem contains two units: `SettingsStore` and `RepoGroupName`.
 
 ### Interfaces
