@@ -84,6 +84,9 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         Assert.Contains("Nothing was changed", message, StringComparison.Ordinal);
         Assert.Contains("Change package...", message, StringComparison.Ordinal);
         Assert.DoesNotContain(".agentcontrol.json", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("sha256", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            RepoPinStore.Load(repo)!.ContentIdentity!["sha256:".Length..], message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("v1", ReadMarker(repo));
         Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
     }

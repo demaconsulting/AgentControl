@@ -236,9 +236,13 @@ and a folder typed with backslashes is saved with slashes. This scenario is test
 `SourceEditorViewModel_Subfolder_WindowsStyle_IsNormalizedWhenSaved`,
 `SourceEditorViewModel_CanSave_Git_NeedsAliasAndAddress`,
 `SourceEditorViewModel_Save_NewGit_BuildsTheGitDefinition` and
-`SourceEditorViewModel_Save_ExistingGit_KeepsAliasAndAppliesEdits`, covering
-`AgentControl-SourceEditorViewModel-GitEditor`, `-GitValidation` and `-GitSignInNote` (the note's text is asserted by
-the first test; the window showing it is verified in the `LauncherUI` subsystem tests), each prefixed
+`SourceEditorViewModel_Save_ExistingGit_KeepsAliasAndAppliesEdits`,
+`SourceEditorViewModel_GitSignInHelpText_ExplainsWhoSignsInAndWhenPromptsAppear` and
+`SourceEditorViewModel_TagPatternHelpText_GivesExamplesAndSaysCaseMatters`, covering
+`AgentControl-SourceEditorViewModel-GitEditor`, `-GitEditorDefaults`, `-GitSubfolderNormalized`, `-GitSaveNew`,
+`-GitSaveExisting`, `-GitSaveGate`, `-GitValidation` (address), `-GitValidationTagPattern`, `-GitValidationSubfolder`,
+`-GitValidationPackageName`, `-GitSignInNote` and `-GitTagPatternHelp` (the help texts are asserted as text; the window
+showing them is verified in the `LauncherUI` subsystem tests), each prefixed
 `AgentControl-SourceEditorViewModel`. The sign-in note is checked as text: whether Git Credential Manager really shows
 its dialog from the application's hidden-console git is not verifiable by an automated test and is a manual check.
 
@@ -252,8 +256,9 @@ does have and says the fixed parts are case-sensitive; a repository with no tags
 no preview falls back to its list of versions; changing the pattern after a test clears the result and the preview; each
 failure kind of the provider gets its own headline and the provider's message ("Sign-in needed", "Repository not found",
 "Repository unreachable", "Timed out"), any other failure is "Connection failed" and a git that is too old is "Git is too
-old"; cancelling a running test ends with a neutral "canceled" result; and a test still running when an input is edited
-shows no result. This scenario is tested by
+old"; cancelling a running test ends with a neutral "canceled" result; and a test still running when any input of the
+test (the address, the tag pattern, the folder or the package name, one theory case each) is edited shows neither a
+result nor a preview, even when the provider ignores cancellation. This scenario is tested by
 `SourceEditorViewModel_CanTestConnection_Git_DoesNotNeedAnAliasWhenThePackageNameIsGiven`,
 `SourceEditorViewModel_TestConnection_Git_DefaultProviderFactory_UsesGitProvider`,
 `SourceEditorViewModel_TestConnection_Git_ShowsMatchingTagsAndSummary`,
@@ -266,6 +271,12 @@ shows no result. This scenario is tested by
 `SourceEditorViewModel_TestConnection_Git_OtherFailure_ReportsConnectionFailed`,
 `SourceEditorViewModel_TestConnection_Git_GitTooOld_ReportsGitIsTooOld`,
 `SourceEditorViewModel_TestConnection_Git_CancelWhileRunning_StopsWithCanceledResult` and
-`SourceEditorViewModel_TestConnection_Git_EditedWhileTesting_StaleResultIsNotShown`, covering
-`AgentControl-SourceEditorViewModel-GitTestConnection`, `-GitTestFailureReasons`, `-GitTestCancelAndStale` and
-`-GitTagPreview` (each prefixed `AgentControl-SourceEditorViewModel`).
+`SourceEditorViewModel_TestConnection_Git_EditedWhileTesting_StaleResultIsNotShown` (a theory over the four inputs),
+covering
+`AgentControl-SourceEditorViewModel-GitTestConnection`, `-GitTestRuns`, `-GitTestDefaultProvider`,
+`-GitTestFailureReasons`, `-GitTestGitTooOld`, `-GitTestOtherFailure`, `-GitTestCancel`, `-GitTestCancelAndStale`,
+`-GitTagPreview`, `-GitTagPreviewNoMatch`, `-GitTagPreviewNoTags` and `-GitTagPreviewCleared` (each prefixed
+`AgentControl-SourceEditorViewModel`). The default provider test proves a Git provider (not a NuGet one) is used;
+that the default is interactive and enforces the minimum git version is the factory's design (`CreateDefaultProvider`)
+and is not asserted by this unit's tests; the owner-supplied equivalent is verified in the `MainWindowViewModel`
+tests.

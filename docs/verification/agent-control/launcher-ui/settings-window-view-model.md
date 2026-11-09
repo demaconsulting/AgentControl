@@ -110,15 +110,24 @@ a tag pattern, a folder and a package name lists the source with the Git icon an
 "Not checked" - the folder check is never asked about it - and saving the settings passes the source to the owner with
 its address, tag pattern, folder and package name; a Git source on a local path gets the folder status instead (found
 or not found). Removing a Git source warns, like any source, by name and by how many repos are pinned to it, and
-saving settings that hold a Git source whose tag pattern has no version placeholder (as a hand-edited settings file
-could) is refused: the owner's callback is not invoked, the window does not report saved and the explanation is shown.
+saving settings that hold a Git source whose tag pattern has no version placeholder, whose address embeds a credential,
+whose folder inside the repository leaves the repository or whose package name has characters a name may not have (as
+a hand-edited settings file could) is refused, one test per field: the owner's callback is not invoked, the window does
+not report saved and the explanation is shown, without repeating the address, the folder or the name that was
+rejected.
 This scenario is tested by
 `SettingsWindowViewModel_AddGitSourceCommand_RequestsGitEditor`,
 `SettingsWindowViewModel_SaveGitSource_ListsItAsNotCheckedAndPersistsIt`,
+`SettingsWindowViewModel_SaveGitSource_PersistsAddressPatternFolderAndPackageName`,
 `SettingsWindowViewModel_GitSourceWithLocalPath_ShowsFolderStatus`,
-`SettingsWindowViewModel_RemoveGitSource_WarnsAboutPinnedRepos` and
-`SettingsWindowViewModel_Save_GitSourceWithBadTagPattern_IsRefusedWithErrorMessage`, covering
-`AgentControl-SettingsWindowViewModel-AddGitSourceMenu`, `-GitSourceRowStatus`, `-RefuseInvalidGitSource` and, for the
+`SettingsWindowViewModel_RemoveGitSource_WarnsAboutPinnedRepos`,
+`SettingsWindowViewModel_Save_GitSourceWithBadTagPattern_IsRefusedWithErrorMessage`,
+`SettingsWindowViewModel_Save_GitSourceWithBadAddress_IsRefusedWithErrorMessage`,
+`SettingsWindowViewModel_Save_GitSourceWithBadSubfolder_IsRefusedWithErrorMessage` and
+`SettingsWindowViewModel_Save_GitSourceWithBadPackageName_IsRefusedWithErrorMessage`, covering
+`AgentControl-SettingsWindowViewModel-AddGitSourceMenu`, `-GitSourceRowStatus`, `-GitSourceLocalFolderStatus`,
+`-GitSourcePersisted`, `-RefuseInvalidGitSource` (tag pattern), `-RefuseInvalidGitAddress`,
+`-RefuseInvalidGitSubfolder`, `-RefuseInvalidGitPackageName` and, for the
 removal warning, `-RemoveSource` (each prefixed `AgentControl-SettingsWindowViewModel`). The window's menu item for
 Git (the fourth item, with the Git icon) is shown by `SettingsWindow_AddGitSourceButton_IsInTheAddMenuAndOpensGitEditor`
 in the same test file, cited by the `LauncherUI` subsystem requirement `AgentControl-LauncherUI-AddSourceMenu`.

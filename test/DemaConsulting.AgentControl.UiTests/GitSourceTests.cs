@@ -64,9 +64,10 @@ public sealed class GitSourceTests
         var settingsWindow = OpenSettings(context, mainWindow);
         Find(settingsWindow, "AddSourceButton").AsButton().Invoke();
 
-        // Assert: the menu offers the Git repository type, titled
+        // Assert: the menu offers the Git repository type, titled and described
         var menuItem = Find(settingsWindow, "AddGitSourceButton");
         Assert.NotNull(menuItem.FindFirstDescendant(cf => cf.ByName("Git repository")));
+        Assert.NotNull(menuItem.FindFirstDescendant(cf => cf.ByName("Packages are tags of a Git repository")));
 
         // Act: choose it, which opens the source editor in Git mode
         menuItem.AsMenuItem().Invoke();
@@ -97,6 +98,12 @@ public sealed class GitSourceTests
         Assert.True(Retry.WhileFalse(() => save.IsEnabled, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200)).Result);
         save.Invoke();
         Assert.True(WaitForText(settingsWindow, "SourceAliasText", "Repo"));
+
+        // Assert: the list names the kind of the new source and, because the fixture repository is a
+        // local path, shows the status of its folder (a remote repository would read "Not checked")
+        var sourcesList = Find(settingsWindow, "SourcesList");
+        Assert.NotNull(sourcesList.FindFirstDescendant(cf => cf.ByName("Git repository")));
+        Assert.True(WaitForText(settingsWindow, "SourceStatusText", "Folder found"));
         Find(settingsWindow, "SaveSettingsButton").AsButton().Invoke();
 
         // Assert: the source was persisted as a Git source with its address, pattern and package name

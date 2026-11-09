@@ -154,8 +154,13 @@ covering `AgentControl-MainWindowViewModel-ConnectionTestProvider`.
 hands out a real `GitSourceProvider` that runs the git named by the startup override (a recording stub stands in for git
 here), asks for the git version before it lists the repository's tags (the version gate), and runs git as work the user
 started - `GCM_INTERACTIVE` is not forced to `never` and `core.askPass` is not blanked, so Git's own sign-in may appear.
-This scenario is tested by `MainWindowViewModel_CreateConnectionTestProvider_GitSource_ReturnsInteractiveGitProvider`,
-covering `AgentControl-MainWindowViewModel-GitConnectionTestProvider`.
+With a stub that reports an old git version (2.20.1) the provider's listing fails with a `GitRemoteException` of kind
+`GitTooOld` ("Git 2.29 or newer") and the stub saw only the version query, never `ls-remote`.
+This scenario is tested by `MainWindowViewModel_CreateConnectionTestProvider_GitSource_RunsTheConfiguredGitExecutable`,
+`MainWindowViewModel_CreateConnectionTestProvider_GitSource_ReturnsInteractiveGitProvider` and
+`MainWindowViewModel_CreateConnectionTestProvider_GitSource_OldGit_IsRefusedBeforeAnyTagIsListed`,
+covering `AgentControl-MainWindowViewModel-GitConnectionTestProvider`, `-GitConnectionTestInteractive` and
+`-GitConnectionTestRefusesOldGit`.
 
 **MainWindowViewModel_ApplyTheme_SavedThemeIsHandedToTheApplierOnlyAfterTheSave**: With a recording theme
 applier, `ApplySettings` with the dark theme persists it and calls the applier once with it, covering

@@ -74,6 +74,39 @@ public class SourceEditorGitViewModelTests
     }
 
     /// <summary>
+    ///     Test that the sign-in note of a Git source says whose sign-in is used, that no credentials
+    ///     are stored, where Git's sign-in may be shown and that background checks never prompt.
+    /// </summary>
+    [Fact]
+    public void SourceEditorViewModel_GitSignInHelpText_ExplainsWhoSignsInAndWhenPromptsAppear()
+    {
+        // Arrange / Act
+        var text = SourceEditorViewModel.GitSignInHelpText;
+
+        // Assert: the note's four statements
+        Assert.Contains("normal Git sign-in", text, StringComparison.Ordinal);
+        Assert.Contains("never stores credentials", text, StringComparison.Ordinal);
+        Assert.Contains("Test connection and Select Package may show Git's sign-in", text, StringComparison.Ordinal);
+        Assert.Contains("background never prompt", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that the explanation of the tag pattern gives examples and says that its literal parts
+    ///     are case-sensitive.
+    /// </summary>
+    [Fact]
+    public void SourceEditorViewModel_TagPatternHelpText_GivesExamplesAndSaysCaseMatters()
+    {
+        // Arrange / Act
+        var text = SourceEditorViewModel.TagPatternHelpText;
+
+        // Assert
+        Assert.Contains("Examples: v{version} finds v1.2.3.", text, StringComparison.Ordinal);
+        Assert.Contains("release/V{version} finds release/V1.2.3", text, StringComparison.Ordinal);
+        Assert.Contains("upper and lower case, so V{version} does not find v1.2.3", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that editing a Git source shows the edit title, keeps the alias read-only and loads
     ///     the pattern, folder and package name of the source.
     /// </summary>
@@ -675,12 +708,18 @@ public class SourceEditorGitViewModelTests
     }
 
     /// <summary>
-    ///     Test that when the folder is edited while a Git test runs, the result of the old test - even
-    ///     from a provider that ignores cancellation - is never shown, because it describes inputs that
-    ///     are no longer in the dialog.
+    ///     Test that when any input of a Git test (the address, the tag pattern, the folder or the package
+    ///     name) is edited while the test runs, the result of the old test - even from a provider that
+    ///     ignores cancellation - is never shown, because it describes inputs that are no longer in the
+    ///     dialog.
     /// </summary>
-    [Fact]
-    public async Task SourceEditorViewModel_TestConnection_Git_EditedWhileTesting_StaleResultIsNotShown()
+    /// <param name="field">The input that is edited while the test runs.</param>
+    [Theory]
+    [InlineData("Location")]
+    [InlineData("TagPattern")]
+    [InlineData("Subfolder")]
+    [InlineData("GitPackageId")]
+    public async Task SourceEditorViewModel_TestConnection_Git_EditedWhileTesting_StaleResultIsNotShown(string field)
     {
         // Arrange
         var release = new TaskCompletionSource();
@@ -694,12 +733,27 @@ public class SourceEditorGitViewModelTests
         var running = editor.TestConnectionCommand.ExecuteAsync();
         Assert.True(editor.IsTesting);
 
-        // Act: an edit mid-test, then the old test finishes
-        editor.Subfolder = "packaging";
+        // Act: an edit of one input mid-test, then the old test finishes
+        switch (field)
+        {
+            case "Location":
+                editor.Location = "https://git.example.com/other/agents.git";
+                break;
+            case "TagPattern":
+                editor.TagPattern = "release/{version}";
+                break;
+            case "Subfolder":
+                editor.Subfolder = "packaging";
+                break;
+            default:
+                editor.GitPackageId = "other-agents";
+                break;
+        }
+
         release.SetResult();
         await running;
 
-        // Assert
+        // Assert: neither the result nor the preview of the old test is shown
         Assert.False(editor.IsTesting);
         Assert.False(editor.HasTestResult);
         Assert.False(editor.HasTagPreview);

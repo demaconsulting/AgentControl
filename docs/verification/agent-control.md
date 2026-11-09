@@ -606,7 +606,8 @@ types, each with an icon and a description, and a Git repository item that title
 the Git icon (the test finds its AutomationId `AddGitSourceButton` and its title in the UI Automation tree; the
 icon is a drawn glyph that is not read back) and, when invoked, opens the source editor in Git mode, with the
 defaults of that editor in place. This scenario is tested by
-`windows@SettingsWindow_AddMenu_OffersThreeSourceTypesWithIconAndDescription` (the three existing types) and
+`windows@SettingsWindow_AddMenu_OffersAllFourSourceTypesWithIconAndDescription` (all four types, with their icons and
+descriptions, and the empty-list text naming them) and
 `windows@SettingsWindow_AddGitRepositoryViaDialog_TestsConnectionListsTagsAndPersistsIt` (the Git item and its
 editor), covering `AgentControl-System-AddSourceMenu`.
 

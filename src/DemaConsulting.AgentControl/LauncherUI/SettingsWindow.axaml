@@ -138,7 +138,7 @@
                 <TextBlock Name="SourcesEmptyText"
                             AutomationProperties.AutomationId="SourcesEmptyText"
                             IsVisible="{Binding HasNoSources}"
-                            Text="No package sources yet. Use Add (above) to add a zip-package folder, a NuGet-package folder or a NuGet-package server."
+                            Text="No package sources yet. Use Add (above) to add a zip-package folder, a NuGet-package folder, a NuGet-package server or a Git repository."
                             TextWrapping="Wrap" TextAlignment="Center"
                             Opacity="0.65" MaxWidth="360"
                             HorizontalAlignment="Center" VerticalAlignment="Center" />

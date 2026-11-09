@@ -28,6 +28,13 @@ nothing.
 tag
 name, `Revision` = the commit, `SourceAlias` = the source alias.
 
+**The tag is derived, not stored.** A pin to this source records the commit (`git-commit:` identity) and the version,
+never the tag: the tag of a version is whatever the source's tag pattern, as configured now, maps that version to. If
+the pattern of a source is edited, a pinned version maps to a different tag, whose commit may differ from the one the
+pin recorded; the listing then carries that other commit as the package's `Revision`, the comparison with the pin
+reports changed content, and the application shows it as a moved tag and applies nothing until the user accepts it
+with Change package (see the `RepoCardViewModel` design). No schema or provider change is needed for this.
+
 **Cache layout** (`-CacheByAddressAndCommit`, `-CacheSeparatesRepositories`, `-CacheTrustsOnlyCompleteFolders`,
 `-CacheSweepsTemporaryFolders`): `{CacheRoot}/{addressKey}/{commit}/` holds the written layout (below `{subfolder}` when
 one is configured) plus the marker file `.agentcontrol-commit` containing exactly the commit; `{addressKey}` is the

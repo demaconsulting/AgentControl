@@ -226,9 +226,11 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     ///     folder; ignored when <paramref name="existing"/> is supplied (its location decides) and
     ///     for a zip source.</param>
     /// <param name="providerFactory">Creates the provider the connection test uses;
-    ///     <see langword="null"/> creates a real <see cref="NuGetSourceProvider"/> without
-    ///     credential facilities. Supplied so the application can give it the session
-    ///     credentials and so tests can use a fake.</param>
+    ///     <see langword="null"/> creates the default: a <see cref="GitSourceProvider"/> for a Git
+    ///     source (interactive, because the user started the test, and refusing a Git that is too
+    ///     old) and a <see cref="NuGetSourceProvider"/> without credential facilities for any
+    ///     other. Supplied so the application can give it the session credentials and the
+    ///     configured git executable and so tests can use a fake.</param>
     /// <param name="credentials">The credential facilities, used by "Forget saved sign-in";
     ///     <see langword="null"/> when there are none (the action is then unavailable).</param>
     /// <param name="signatureVerificationSupported">Whether the platform can verify package

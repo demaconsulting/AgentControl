@@ -526,10 +526,10 @@ sections:
         children:
           - AgentControl-LauncherUI-AddSourceMenu
         tests:
-          # The first test shows the zip, NuGet folder and NuGet server choices with their icons
-          # and descriptions; the second shows the Git repository choice and that it opens the
+          # The first test shows the zip, NuGet folder, NuGet server and Git repository choices with
+          # their icons and descriptions; the second shows that the Git repository choice opens the
           # Git source editor.
-          - windows@SettingsWindow_AddMenu_OffersThreeSourceTypesWithIconAndDescription
+          - windows@SettingsWindow_AddMenu_OffersAllFourSourceTypesWithIconAndDescription
           - windows@SettingsWindow_AddGitRepositoryViaDialog_TestsConnectionListsTagsAndPersistsIt
 
       - id: AgentControl-System-SourcesPersisted

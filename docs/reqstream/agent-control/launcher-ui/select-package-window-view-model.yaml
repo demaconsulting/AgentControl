@@ -115,17 +115,68 @@ sections:
         title: >-
           The SelectPackageWindowViewModel class shall, when given the source, package and version
           a repo is pinned to, start on that source and, once it has been read, select that package
-          and version (keeping the newest version when the pinned one is no longer listed), shall
-          select nothing when that source failed, does not offer the package or is not configured,
-          and shall never override a choice the user made while the source was loading.
+          and version.
         justification: |
           Change package opens on what the repo uses now, so choosing the same version again to
-          accept changed content takes one click; a preference that cannot be honored, or that
-          arrives after the user has chosen, must never select something else on the user's behalf.
+          accept changed content takes one click.
         tests:
+          - SelectPackageWindowViewModel_Constructor_PreferredSourceAlias_SelectsThatSourceOrFirst
           - SelectPackageWindowViewModel_LoadAsync_PreferredPackageAndVersion_AreSelected
+
+      - id: AgentControl-SelectPackageWindowViewModel-PreselectNewestWhenVersionGone
+        title: >-
+          The SelectPackageWindowViewModel class shall keep the newest version selected when the
+          version the repo is pinned to is no longer listed by the source.
+        justification: |
+          A pinned version that disappeared must not leave the dialog without a usable choice.
+        tests:
           - SelectPackageWindowViewModel_LoadAsync_PreferredVersionNotListed_KeepsNewestVersion
-          - SelectPackageWindowViewModel_LoadAsync_PreferredPackageNotOffered_SelectsNothing
+
+      - id: AgentControl-SelectPackageWindowViewModel-PreselectNothingWhenSourceFailed
+        title: >-
+          The SelectPackageWindowViewModel class shall select no package when the source the repo
+          is pinned to could not be read.
+        justification: |
+          There is nothing to select from, and the failure is shown on the source instead.
+        tests:
           - SelectPackageWindowViewModel_LoadAsync_PreferredSourceFailed_SelectsNothing
+
+      - id: AgentControl-SelectPackageWindowViewModel-PreselectNothingWhenNotOffered
+        title: >-
+          The SelectPackageWindowViewModel class shall select no package when the source the repo
+          is pinned to does not offer the pinned package.
+        justification: |
+          A package that is no longer offered cannot be chosen on the user's behalf.
+        tests:
+          - SelectPackageWindowViewModel_LoadAsync_PreferredPackageNotOffered_SelectsNothing
+
+      - id: AgentControl-SelectPackageWindowViewModel-PreselectNothingWhenSourceUnknown
+        title: >-
+          The SelectPackageWindowViewModel class shall select no package when the source the repo
+          is pinned to is not configured.
+        justification: |
+          A pin naming a source that is not configured must not be replaced by another source's
+          package.
+        tests:
           - SelectPackageWindowViewModel_LoadAsync_PreferredAliasUnknown_SelectsNothing
+
+      - id: AgentControl-SelectPackageWindowViewModel-PreselectKeepsUserChoice
+        title: >-
+          The SelectPackageWindowViewModel class shall never override a source or package choice
+          the user made while the sources were loading, including a return to the pinned source.
+        justification: |
+          A preference that arrives after the user has chosen must never select something else on
+          the user's behalf.
+        tests:
           - SelectPackageWindowViewModel_LoadAsync_UserChoiceBeforeLoadEnds_IsNotOverridden
+          - SelectPackageWindowViewModel_LoadAsync_UserSwitchedSourceAndBackBeforeLoadEnds_PreferredNotApplied
+
+      - id: AgentControl-SelectPackageWindowViewModel-PreselectCancelled
+        title: >-
+          The SelectPackageWindowViewModel class shall cancel the read of the pinned package's
+          versions when the loading of the dialog is cancelled.
+        justification: |
+          Closing the dialog must stop work it started, including the read that preselects the
+          pinned version.
+        tests:
+          - SelectPackageWindowViewModel_LoadAsync_CancelledWhilePreferredVersionsLoad_CancelsThatReadToo

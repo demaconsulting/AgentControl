@@ -1000,13 +1000,20 @@ internal sealed class MainWindowViewModel : ViewModelBase
 
     /// <summary>
     ///     Creates the provider that the settings window's "Test connection" lists versions
-    ///     through for a source being edited, with the same credential facilities and cache
-    ///     location the cards use.
+    ///     through for a source being edited. A NuGet source gets a NuGet provider with the same
+    ///     credential facilities and cache location the cards use; a Git source gets a Git
+    ///     provider that runs the configured git executable, may show Git's own sign-in (the user
+    ///     started the test) and refuses a git older than the supported version before listing
+    ///     any tag.
     /// </summary>
     /// <param name="definition">The source as currently edited (not yet saved).</param>
-    /// <returns>A provider that can sign in through the application's sign-in dialog.</returns>
+    /// <returns>A provider for the source's kind: NuGet that can sign in through the
+    ///     application's sign-in dialog, or Git as described above.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the definition is not an
-    ///     acceptable NuGet source.</exception>
+    ///     acceptable NuGet source or, for a Git source, is not an acceptable Git source (an
+    ///     unusable address, tag pattern, folder or package name).</exception>
+    /// <exception cref="ArgumentException">Thrown when the definition is a Git source whose
+    ///     settings the Git provider refuses.</exception>
     internal IPackageSourceProvider CreateConnectionTestProvider(PackageSourceDefinition definition) =>
         definition.Type == PackageSourceType.Git
             ? new GitSourceProvider(

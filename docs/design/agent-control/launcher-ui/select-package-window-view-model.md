@@ -79,12 +79,19 @@ all selected.
   `AgentControl-SelectPackageWindowViewModel-AsyncLoading`,
   `AgentControl-SelectPackageWindowViewModel-SourceFailureIsolation`). A cancelled token
   surfaces as `OperationCanceledException`. When a preferred package was given, `LoadAsync` ends by selecting it
-  (`ApplyPreferredSelectionAsync`): only if the user has not already chosen a package, the selected source is the
+  (`ApplyPreferredSelectionAsync`): only if the user has not changed the source or the package since the dialog opened
+  (a flag set by the `SelectedSource` and `SelectedPackageName` setters, not by the preference itself; returning to
+  the preferred source does not count as not having changed), the selected source is the
   preferred one and was read without error, and it offers the package (compared ignoring case); then
   `SelectedPackageName` is set, the version read is awaited and the preferred version is selected if it is still
-  listed, otherwise the newest stays selected; a choice the user makes meanwhile is never overridden. An unknown or
+  listed, otherwise the newest stays selected; a choice the user makes meanwhile is never overridden. The version read
+  that the preference starts is cancelled with the token passed to `LoadAsync` (a registration on that token
+  cancels the current version read, ignoring one already replaced), and the cancellation then surfaces from
+  `LoadAsync` as well. An unknown or
   failed source, or a package the source no longer offers, selects nothing
-  (`AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage`).
+  (`AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage`, `-PreselectNewestWhenVersionGone`,
+  `-PreselectNothingWhenSourceFailed`, `-PreselectNothingWhenNotOffered`, `-PreselectNothingWhenSourceUnknown`,
+  `-PreselectKeepsUserChoice`, `-PreselectCancelled`).
 
 **SelectedPackageName (setter)**: Starts the background read of the versions of the chosen package
 at the selected source.

@@ -84,8 +84,10 @@ mistaken for the dialog's own Cancel button, which is visible at the same time. 
 (`None`, `Succeeded`, `Failed`, `Canceled`) with a headline and an explanation.
 
 **_providerFactory**: `Func<PackageSourceDefinition, IPackageSourceProvider>` — creates the provider the
-test uses; by default a plain `NuGetSourceProvider` without credential facilities, supplied by the owner
-so that the test signs in through the application's session credentials and tests can use a fake.
+test uses; by default (`CreateDefaultProvider`) an interactive `GitSourceProvider` that enforces the minimum git
+version for a Git source and a plain `NuGetSourceProvider` without credential facilities for any other source. The
+owner supplies one so that the test signs in through the application's session credentials and uses the
+configured git executable, and tests can use a fake.
 
 **ShowSignatureOptions**: `bool` — `true` for a NuGet source (folder or server); a zip package carries no
 signature, so a zip source has no such section and always saves `RequireSignedPackages` as off.
@@ -209,7 +211,10 @@ source the dialog accepts is never refused later. `CanSave` additionally require
 and `CanTestConnection` for a Git source needs the address and those fields but no alias when the package name is
 given. The saved definition carries the trimmed address, the trimmed tag pattern, the normalized folder (or none),
 the single package name as the only package identifier, and the insecure-HTTP, signature and fingerprint settings
-switched off, which do not apply to Git (`AgentControl-SourceEditorViewModel-GitEditor`, `-GitValidation`).
+switched off, which do not apply to Git (`AgentControl-SourceEditorViewModel-GitEditor`, `-GitEditorDefaults`,
+`-GitSubfolderNormalized`, `-GitSaveNew`, `-GitSaveExisting`, `-GitSaveGate`, `-GitValidation`,
+`-GitValidationTagPattern`, `-GitValidationSubfolder`, `-GitValidationPackageName`). The editor also shows the examples
+and the case-sensitivity note of the tag pattern and the sign-in note (`-GitTagPatternHelp`, `-GitSignInNote`).
 
 **TestGitConnectionAsync** (private, used by `TestConnectionAsync` for a Git source): Clears the previous result and
 preview, builds the definition from the dialog and creates the provider through the factory; by default
@@ -220,14 +225,16 @@ the provider offers it (no clone: tags are listed with `git ls-remote`), otherwi
 list - and shows it: when at least one tag matches, the preview list and summary and *Connection OK* with the number
 of versions and the newest; when none matches, *No matching tags* with the tag names the repository does have (a few,
 safe names only) and a hint to check the prefix and the capitalization, or, when the repository has no tags at all,
-that it has none yet and how to create one (`AgentControl-SourceEditorViewModel-GitTestConnection`, `-GitTagPreview`).
+that it has none yet and how to create one (`AgentControl-SourceEditorViewModel-GitTestConnection`, `-GitTestRuns`,
+`-GitTestDefaultProvider`, `-GitTagPreview`, `-GitTagPreviewNoMatch`, `-GitTagPreviewNoTags`).
 The outcome of a failure is chosen from `PackageSourceAccessException.Kind` - *Sign-in needed*, *Repository not
 found*, *Timed out*, otherwise *Repository unreachable* - with the provider's message; a `GitRemoteException` of kind
 `GitTooOld` is *Git is too old* with its message (git 2.29 or newer is required); any other `InvalidOperationException`
 is *Connection failed*; and a cancelled test is the neutral *Test canceled*
-(`AgentControl-SourceEditorViewModel-GitTestFailureReasons`, `-GitTestCancelAndStale`). A result of a test whose inputs
+(`AgentControl-SourceEditorViewModel-GitTestFailureReasons`, `-GitTestGitTooOld`, `-GitTestOtherFailure`,
+`-GitTestCancel`, `-GitTestCancelAndStale`). A result of a test whose inputs
 changed (address, tag pattern, folder, package name) is not shown, and any change clears a showing result and the
-preview, so a stale "Connection OK" or tag list never sits beside an edited pattern.
+preview, so a stale "Connection OK" or tag list never sits beside an edited pattern (`-GitTagPreviewCleared`).
 
 **Save** (private, bound to `SaveCommand`): Raises `Saved` with the definition when `CanSave`.
 

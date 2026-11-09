@@ -271,6 +271,189 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a user-started refresh reads a Git source again instead of reusing the session's
+    ///     cached listing, so a tag moved after the first listing is shown, while the background check
+    ///     keeps using the cache.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshAsync_GitSourceTagMovedAfterCachedListing_ListsAgainAndShowsTagMoved()
+    {
+        // Arrange: a listing was cached while the tag still pointed to the recorded commit
+        var (_, card, provider) = CreatePinnedCard();
+        provider.Revisions["1.2.3"] = PinnedCommit;
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.False(card.IsPinnedTagMoved);
+        provider.Revisions["1.2.3"] = OtherCommit;
+
+        // Act: a background check answers from the cache; then the user refreshes the card
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        var backgroundCalls = provider.ListVersionsCalls;
+        var movedAfterBackground = card.IsPinnedTagMoved;
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the cache was used by the background check only
+        Assert.Equal(1, backgroundCalls);
+        Assert.False(movedAfterBackground);
+        Assert.Equal(2, provider.ListVersionsCalls);
+        Assert.True(card.IsPinnedTagMoved);
+        Assert.Equal(RepoCardStatus.TagMoved, card.Status);
+    }
+
+    /// <summary>
+    ///     Test that a user-started refresh of a repo pinned to a source that is not a Git source still
+    ///     uses the cached listing: only mutable Git tags need to be read again.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshAsync_ZipSource_KeepsUsingCachedListing()
+    {
+        // Arrange
+        var (_, card, provider) = CreatePinnedCard(source: ZipSource(), identity: "sha256:" + new string('a', 64));
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Act
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(1, provider.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that a refresh that fails does not leave an earlier "Tag moved" warning up as if it had
+    ///     been confirmed: the warning is cleared and the card says the check failed.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshAsync_FailsAfterTagMoved_ClearsTagMovedAndShowsCheckFailed()
+    {
+        // Arrange: a moved tag is shown
+        var (_, card, provider) = CreatePinnedCard();
+        provider.Revisions["1.2.3"] = OtherCommit;
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.IsPinnedTagMoved);
+
+        // Act: the source can no longer be read when the user refreshes
+        provider.ListVersionsException = new IOException("The source is unreachable.");
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(card.IsPinnedTagMoved);
+        Assert.Equal(string.Empty, card.PinnedTagMovedTooltip);
+        Assert.True(card.IsUpgradeStatusUnknown);
+        Assert.NotEqual(RepoCardStatus.TagMoved, card.Status);
+    }
+
+    /// <summary>
+    ///     Test that a "Tag moved" warning is cleared when the repo's folder goes missing, so a card
+    ///     for a repo that cannot be checked does not keep a warning about it.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshCheap_RepoFolderGoesMissingAfterTagMoved_ClearsTagMoved()
+    {
+        // Arrange: a moved tag is shown
+        var (repo, card, provider) = CreatePinnedCard();
+        provider.Revisions["1.2.3"] = OtherCommit;
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.IsPinnedTagMoved);
+        var changed = new List<string?>();
+        card.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Act: the folder disappears and the card re-checks
+        Directory.Delete(repo, recursive: true);
+        card.RefreshCheap();
+
+        // Assert: the warning is gone and its bindings were told
+        Assert.True(card.IsMissing);
+        Assert.False(card.IsPinnedTagMoved);
+        Assert.Equal(string.Empty, card.PinnedTagMovedTooltip);
+        Assert.NotEqual(RepoCardStatus.TagMoved, card.Status);
+        Assert.Contains(nameof(RepoCardViewModel.IsPinnedTagMoved), changed);
+    }
+
+    /// <summary>
+    ///     Test that a pin whose content identity is not a well-formed commit identity is never reported
+    ///     as a moved tag, whatever the listing says: there is no recorded commit to compare with.
+    /// </summary>
+    [Theory]
+    [InlineData("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("git-commit:not-a-commit")]
+    [InlineData("git-commit:abcdef0")]
+    [InlineData("something-else")]
+    public async Task RepoCardViewModel_RefreshUpgradeStatus_GitSourceWithNonCommitIdentity_IsNotMoved(string identity)
+    {
+        // Arrange: a Git source whose tag now points to another commit
+        var (_, card, provider) = CreatePinnedCard(identity: identity);
+        provider.Revisions["1.2.3"] = OtherCommit;
+
+        // Act
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(card.IsPinnedTagMoved);
+        Assert.Equal(RepoCardStatus.UpToDate, card.Status);
+    }
+
+    /// <summary>
+    ///     Test that a pin does not record the tag: editing the source's tag pattern maps the pinned
+    ///     version to another tag, and when that tag names another commit it is reported as "Tag moved"
+    ///     (changed content) with nothing applied, until the pattern is restored or the user accepts it.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshUpgradeStatus_TagPatternEdited_RemappedTagAtOtherCommitIsReportedAsTagMoved()
+    {
+        // Arrange: the pin was made from tag release/1.2.3; the same version is also tagged v1.2.3 at
+        // another commit
+        var tags = new Dictionary<string, string>
+        {
+            ["release/1.2.3"] = PinnedCommit,
+            ["v1.2.3"] = OtherCommit
+        };
+        var repo = CreateTempDirectory();
+        RepoPinStore.Save(repo, new RepoPin
+        {
+            Source = "Repo",
+            PackageName = "contoso-agents",
+            Version = "1.2.3",
+            ContentIdentity = PinnedIdentity
+        });
+        var settings = new AppSettings { Sources = [GitSource()] };
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo },
+            () => settings,
+            new PackageVersionCache(),
+            registryFactory: current => new PackageSourceRegistry(
+                current.Sources, definition => new TagListingGitProvider(definition, tags)));
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.False(card.IsPinnedTagMoved);
+        Assert.Equal("release/1.2.3", card.PinnedTagName);
+        var pinBefore = await File.ReadAllTextAsync(Path.Combine(repo, ".agentcontrol.json"), TestContext.Current.CancellationToken);
+
+        // Act: the user edits the tag pattern (the owner drops the old listing of the edited source)
+        var edited = GitSource();
+        edited.TagPattern = "v{version}";
+        settings.Sources = [edited];
+        card.PackageVersionCache.Invalidate("Repo");
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the pinned version now means another tag at another commit; shown, never applied
+        Assert.Equal("v1.2.3", card.PinnedTagName);
+        Assert.True(card.IsPinnedTagMoved);
+        Assert.Equal(RepoCardStatus.TagMoved, card.Status);
+        Assert.Contains("abcdef0 -> 1234567", card.PinnedTagMovedTooltip, StringComparison.Ordinal);
+        Assert.Equal(pinBefore, await File.ReadAllTextAsync(Path.Combine(repo, ".agentcontrol.json"), TestContext.Current.CancellationToken));
+
+        // Act: the pattern is restored
+        settings.Sources = [GitSource()];
+        card.PackageVersionCache.Invalidate("Repo");
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the pin matches its tag again
+        Assert.False(card.IsPinnedTagMoved);
+        Assert.Equal("release/1.2.3", card.PinnedTagName);
+    }
+
+    /// <summary>
     ///     Test that a Git that is too old, found by the background check, becomes a package source
     ///     problem with the reason (not a sign-in prompt), and that the card is a problem.
     /// </summary>
@@ -529,6 +712,44 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
         /// <inheritdoc />
         public Task<IPackageContentReader> AcquireAsync(DiscoveredPackage package, CancellationToken cancellationToken) =>
             Task.FromResult<IPackageContentReader>(new CommitReader(Commit));
+    }
+
+    /// <summary>
+    ///     A Git-like source that lists a fixed set of tags with the commit each points to, reading them
+    ///     through the tag pattern of the definition it was created from, as the real Git source does.
+    /// </summary>
+    /// <param name="definition">The source definition whose tag pattern selects and parses the tags.</param>
+    /// <param name="tags">The tags of the repository and the commit each points to.</param>
+    private sealed class TagListingGitProvider(
+        PackageSourceDefinition definition, IReadOnlyDictionary<string, string> tags) : IPackageSourceProvider
+    {
+        /// <inheritdoc />
+        public string Alias => definition.Alias;
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<string>>(["contoso-agents"]);
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<DiscoveredPackage>> ListVersionsAsync(string packageId, CancellationToken cancellationToken)
+        {
+            // Only the tags the pattern matches are versions, exactly like the real listing
+            Assert.True(GitTagPattern.TryCreate(definition.TagPattern, out var pattern, out _) && pattern is not null);
+            var found = new List<DiscoveredPackage>();
+            foreach (var (tag, commit) in tags)
+            {
+                if (pattern.TryMatch(tag, out var version) && version is not null)
+                {
+                    found.Add(new DiscoveredPackage(packageId, version, tag, Alias, commit));
+                }
+            }
+
+            return Task.FromResult<IReadOnlyList<DiscoveredPackage>>(found);
+        }
+
+        /// <inheritdoc />
+        public Task<IPackageContentReader> AcquireAsync(DiscoveredPackage package, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     /// <summary>

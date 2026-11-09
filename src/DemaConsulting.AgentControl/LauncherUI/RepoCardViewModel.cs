@@ -1942,6 +1942,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     the single full-refresh entry point behind <see cref="RefreshCommand"/>, rather than
     ///     the split eager/lazy sequencing <see cref="MainWindowViewModel"/> uses at app launch.
     ///     It holds <see cref="IsBusy"/> while it runs so no other card action starts meanwhile.
+    ///     Because the user asked for it, a Git source is read again rather than answered from the
+    ///     session's cached listing, so a tag that was moved since the last listing is noticed.
     /// </remarks>
     /// <param name="cancellationToken">Cancels the package-source part of the refresh.</param>
     /// <returns>A task that completes when every property is current; a failing source is
@@ -1952,7 +1954,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             RefreshCheap();
 
             // The user asked for this refresh, so a server that needs a sign-in may ask for it
-            await RefreshUpgradeStatusAsync(token, allowPrompt: true);
+            await RefreshUpgradeStatusAsync(token, allowPrompt: true, relistGitSource: true);
             RefreshDirtyStatus();
         }, cancellationToken);
 
@@ -1994,6 +1996,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
             SetSourceProblem(null, needsSignIn: false);
+
+            // A tag-moved warning belongs to a repo that can be checked: a missing folder
+            // has no package chip to carry it, and nothing is known about it once it returns
+            SetMovedTag(null);
 
             // The repo just disappeared (or was already missing): any previously-cached Git
             // status is no longer trustworthy, so invalidate it rather than let it linger and
@@ -2679,7 +2685,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // the card never shows the old pin's upgrade state next to the new pin
             RefreshPin();
             EvaluatePinnedSource();
-            await RefreshUpgradeStatusAsync(CancellationToken.None);
+            await RefreshUpgradeStatusAsync(CancellationToken.None, relistGitSource: true);
             RaisePackageChipChanged();
             StatusMessage = successMessage;
 
@@ -3230,10 +3236,17 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     after settings change, which must never interrupt the user with a dialog: it uses a
     ///     remembered credential if there is one and otherwise reports that a sign-in is needed.
     ///     <see langword="true"/> when the user asked for the check.</param>
+    /// <param name="relistGitSource">Whether a Git source is read again instead of answered from
+    ///     the session's cached listing. <see langword="true"/> when the user asked for the check
+    ///     (a tag can be moved at any time, and the cached listing would still show the old
+    ///     commit) and after a package was applied; <see langword="false"/> (the default) for the
+    ///     background check, which may reuse the cache. Has no effect for other kinds of source,
+    ///     whose versions are immutable by convention.</param>
     /// <returns>A task that completes when the card's upgrade state is current.</returns>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is cancelled; the card keeps its previous upgrade state.</exception>
-    public async Task RefreshUpgradeStatusAsync(CancellationToken cancellationToken = default, bool allowPrompt = false)
+    public async Task RefreshUpgradeStatusAsync(
+        CancellationToken cancellationToken = default, bool allowPrompt = false, bool relistGitSource = false)
     {
         // A card that was removed from the list checks nothing any more
         if (_isRetired)
@@ -3251,6 +3264,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             IsUpgradeStatusUnknown = false;
             LatestAvailableVersion = null;
             IsCheckingUpgrade = false;
+            SetMovedTag(null);
             return;
         }
 
@@ -3268,6 +3282,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
         IsCheckingUpgrade = true;
         try
         {
+            // A moved tag is only visible in a fresh listing: when the user asked, drop what the
+            // session learned about this Git source so the check below reads it again. The
+            // cache discards the entries of just this source, and a read that was already running
+            // for it cannot put its older answer back.
+            if (relistGitSource && PinnedSourceDefinition is { Type: PackageSourceType.Git })
+            {
+                _packageVersionCache.Invalidate(sourceAlias);
+            }
+
             var registry = CreateSourceRegistry(allowPrompt);
             var check = await _packageVersionCache.IsNewerVersionAvailableAsync(
                 registry, sourceAlias, pinnedPackageName, pinnedVersion, cancellationToken);
@@ -3292,6 +3315,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 IsUpgradeAvailable = false;
                 IsUpgradeStatusUnknown = true;
                 LatestAvailableVersion = null;
+
+                // Whether the tag moved is unknown too: a "Tag moved" warning from an earlier
+                // check must not stay up as if this check had confirmed it
+                SetMovedTag(null);
 
                 // A server that needs a sign-in is worth telling the user about, because the
                 // background check must not ask: the card says what to do instead
@@ -3342,14 +3369,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="check">The result of the upgrade check, which carries the listing's entry for
     ///     the pinned version.</param>
     /// <returns>The commit the tag points to now when it differs from the recorded commit;
-    ///     <see langword="null"/> when the source is not a Git source, the pin recorded no commit
-    ///     (an older pin adopts one the next time a package is applied), the listing does not
-    ///     show the pinned version, or the commit is the same.</returns>
+    ///     <see langword="null"/> when the source is not a Git source, the pin did not record a
+    ///     valid <c>git-commit:</c> identity (an older pin adopts one the next time a package is
+    ///     applied, and an identity of another kind or shape is no commit to compare with - a
+    ///     tag did not move because of it), the listing does not show the pinned version, or the
+    ///     commit is the same.</returns>
+    /// <remarks>
+    ///     A pin does not record the tag, only the commit: the tag is derived from the source's
+    ///     tag pattern as it is configured now (see <see cref="PinnedTagName"/>). Editing the
+    ///     pattern therefore maps the pinned version to another tag, and when that tag names a
+    ///     different commit it is reported here like a moved tag - the files are not what the
+    ///     pin recorded - and the user accepts it with Change package.
+    /// </remarks>
     private string? FindMovedTagCommit(UpgradeCheck check)
     {
         var revision = check.Pinned?.Revision;
         if (PinnedSourceDefinition is not { Type: PackageSourceType.Git } ||
-            revision is null || !GitRemoteClient.ObjectIdPattern().IsMatch(revision))
+            revision is null || !GitRemoteClient.ObjectIdPattern().IsMatch(revision) ||
+            !IsGitCommitIdentity(PinnedContentIdentity))
         {
             return null;
         }
@@ -3358,6 +3395,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
                ContentIdentityComparison.Changed
             ? revision
             : null;
+    }
+
+    /// <summary>
+    ///     Tells whether a pin's content identity is a well-formed <c>git-commit:</c> identity.
+    /// </summary>
+    /// <param name="identity">The identity the pin recorded, or <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> when it is the <c>git-commit:</c> prefix followed by 40 or
+    ///     64 hexadecimal digits; otherwise <see langword="false"/>.</returns>
+    private static bool IsGitCommitIdentity(string? identity)
+    {
+        var trimmed = identity?.Trim();
+        if (trimmed is null || !trimmed.StartsWith(PackageContentIdentity.GitCommitPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var commit = trimmed[PackageContentIdentity.GitCommitPrefix.Length..];
+        return (commit.Length == 40 || commit.Length == 64) && commit.All(Uri.IsHexDigit);
     }
 
     /// <summary>

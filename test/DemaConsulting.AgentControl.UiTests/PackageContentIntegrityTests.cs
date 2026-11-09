@@ -35,7 +35,8 @@ public sealed class PackageContentIntegrityTests
     /// <summary>
     ///     A republished package version (same version, different zip bytes) must not be re-synced
     ///     at launch: the launch tells the user the agent files were not synced, extracts nothing
-    ///     and leaves the pin file exactly as it was.
+    ///     and leaves the pin file exactly as it was - and the launch itself continues: the
+    ///     configured agent tool is still invoked in the repo's working directory.
     /// </summary>
     [Fact]
     public void LaunchButton_Click_PinnedVersionRepublished_ExplainsAndSyncsNothing()
@@ -83,6 +84,21 @@ public sealed class PackageContentIntegrityTests
             Assert.NotNull(message);
             Assert.Contains("not synced", message, StringComparison.Ordinal);
             Assert.Contains("now contains different files", message, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));
+            Assert.Equal(pinBefore, File.ReadAllText(pinPath));
+
+            // Assert: the warning did not stop the launch - the configured agent tool (the arg-logger
+            // stub, recognized by its marker argument, which git invocations never carry) was invoked,
+            // in the repo's working directory
+            var invocation = ArgLoggerLog.WaitForInvocation(
+                context.ArgLoggerOutputFile,
+                record => record.Arguments.Contains(TestSettingsWriter.AgentToolMarkerArgument),
+                TimeSpan.FromSeconds(30));
+            Assert.NotNull(invocation);
+            Assert.Equal([TestSettingsWriter.AgentToolMarkerArgument], invocation.Arguments);
+            Assert.True(PathsEqual(invocation.WorkingDirectory, context.RepoPath));
+
+            // Assert: and nothing was synced or written even though the launch went on
             Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));
             Assert.Equal(pinBefore, File.ReadAllText(pinPath));
         }
@@ -220,6 +236,19 @@ public sealed class PackageContentIntegrityTests
             TryDelete(sourceDirectory);
         }
     }
+
+    /// <summary>
+    ///     Compares two filesystem paths for equality, tolerating Windows' case-insensitivity and
+    ///     a trailing directory separator difference.
+    /// </summary>
+    /// <param name="left">The first path.</param>
+    /// <param name="right">The second path.</param>
+    /// <returns><see langword="true"/> if the paths refer to the same location.</returns>
+    private static bool PathsEqual(string left, string right) =>
+        string.Equals(
+            left.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            right.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     ///     Computes the <c>sha256:</c> content identity of a file independently of the application.

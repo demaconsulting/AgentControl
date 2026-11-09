@@ -96,10 +96,11 @@ public sealed class PackageSourcesTests
     /// <summary>
     ///     The Settings window's Add button opens a menu that offers all four source types - a
     ///     zip-package folder, a NuGet-package folder, a NuGet-package server and a Git repository - each with a drawn icon
-    ///     and a one-line description, and choosing the NuGet-package folder item opens its own dialog.
+    ///     and a one-line description, the empty source list names all four types too, and choosing
+    ///     the NuGet-package folder item opens its own dialog.
     /// </summary>
     [Fact]
-    public void SettingsWindow_AddMenu_OffersThreeSourceTypesWithIconAndDescription()
+    public void SettingsWindow_AddMenu_OffersAllFourSourceTypesWithIconAndDescription()
     {
         if (!System.OperatingSystem.IsWindows())
         {
@@ -107,10 +108,17 @@ public sealed class PackageSourcesTests
             return;
         }
 
-        // Arrange: the Settings window
+        // Arrange: the Settings window of an application that has no source yet
         using var context = new AgentControlTestContext();
         var mainWindow = context.Launch();
         var settingsWindow = OpenSettings(context, mainWindow);
+
+        // Assert: the empty list tells the user what Add offers, the Git repository included
+        var emptyText = Find(settingsWindow, "SourcesEmptyText").Name;
+        Assert.Contains("zip-package folder", emptyText, StringComparison.Ordinal);
+        Assert.Contains("NuGet-package folder", emptyText, StringComparison.Ordinal);
+        Assert.Contains("NuGet-package server", emptyText, StringComparison.Ordinal);
+        Assert.Contains("Git repository", emptyText, StringComparison.Ordinal);
 
         // Act: open the Add menu
         Find(settingsWindow, "AddSourceButton").AsButton().Invoke();

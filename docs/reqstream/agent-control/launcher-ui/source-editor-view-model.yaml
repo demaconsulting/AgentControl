@@ -619,43 +619,111 @@ sections:
       # ---- Git repository source ----
       - id: AgentControl-SourceEditorViewModel-GitEditor
         title: >-
-          The SourceEditorViewModel class shall edit a Git repository source: titled and labelled
-          for a Git repository, with the repository address explained by examples (https, SSH and a
-          local path), a package name that is the alias when left empty, a tag pattern that starts
-          as v{version}, and an optional folder inside the repository whose backslashes are saved as
-          slashes; shall save a new source with the alias and those values and an existing source with
-          its alias unchanged; and shall permit saving only when an alias and an address are given
-          and every Git field is acceptable.
+          The SourceEditorViewModel class shall present a Git repository source in an editor titled
+          and labelled for a Git repository, with the repository address explained by examples of an
+          https, an SSH and a local-path address.
         justification: |
           A Git source is one repository that delivers one package whose versions are its tags; the
-          defaults and examples let the common case be set up by typing an address, a folder path
-          typed the Windows way must still work, and repos pin to the alias, so it never changes.
+          Git-specific title, labels and address examples let a developer who has never added one
+          recognize what is being asked for.
         tests:
           - SourceEditorViewModel_Constructor_NewGit_HasGitTitleLabelAndDefaults
-          - SourceEditorViewModel_Constructor_ExistingGit_LoadsFieldsAndKeepsAliasReadOnly
+
+      - id: AgentControl-SourceEditorViewModel-GitEditorDefaults
+        title: >-
+          The SourceEditorViewModel class shall start a new Git source with the tag pattern
+          v{version} and use the alias as the package name when the package name is left empty.
+        justification: |
+          The common case is set up by typing an address and an alias; the defaults make everything
+          else optional.
+        tests:
+          - SourceEditorViewModel_Constructor_NewGit_HasGitTitleLabelAndDefaults
           - SourceEditorViewModel_GitPackageId_Empty_DefaultsToTheAlias
+
+      - id: AgentControl-SourceEditorViewModel-GitSubfolderNormalized
+        title: >-
+          The SourceEditorViewModel class shall save the folder inside a Git repository with
+          backslashes as slashes and without surrounding separators or blanks.
+        justification: |
+          A folder path typed the Windows way must still work, because a Git repository always
+          addresses a folder with forward slashes.
+        tests:
           - SourceEditorViewModel_Subfolder_WindowsStyle_IsNormalizedWhenSaved
-          - SourceEditorViewModel_CanSave_Git_NeedsAliasAndAddress
+
+      - id: AgentControl-SourceEditorViewModel-GitSaveNew
+        title: >-
+          The SourceEditorViewModel class shall save a new Git source with the alias, address, tag
+          pattern, folder and package name that were entered.
+        justification: |
+          What the user typed in the dialog is the source that is configured; nothing else may be
+          added to or dropped from it.
+        tests:
           - SourceEditorViewModel_Save_NewGit_BuildsTheGitDefinition
+
+      - id: AgentControl-SourceEditorViewModel-GitSaveExisting
+        title: >-
+          The SourceEditorViewModel class shall save an edited Git source with its alias unchanged
+          and its other values as edited.
+        justification: |
+          Repos pin to the alias, so it never changes; loading and saving must otherwise round-trip
+          every Git setting.
+        tests:
+          - SourceEditorViewModel_Constructor_ExistingGit_LoadsFieldsAndKeepsAliasReadOnly
           - SourceEditorViewModel_Save_ExistingGit_KeepsAliasAndAppliesEdits
+
+      - id: AgentControl-SourceEditorViewModel-GitSaveGate
+        title: >-
+          The SourceEditorViewModel class shall permit saving a Git source only when an alias and a
+          repository address are given and every Git field is acceptable.
+        justification: |
+          A source the application would later refuse to use must not be saved from the dialog.
+        tests:
+          - SourceEditorViewModel_CanSave_Git_NeedsAliasAndAddress
 
       - id: AgentControl-SourceEditorViewModel-GitValidation
         title: >-
           The SourceEditorViewModel class shall explain while the user types, and refuse to save or
-          to test, a Git source whose address is blank, is not an https, SSH or local-path address or
-          embeds a credential, whose tag pattern does not hold the version placeholder exactly once
-          or is not a usable tag name, whose folder inside the repository is not a relative folder, or
-          whose package name is not a valid name (the alias being used when the name is empty).
+          to test, a Git repository address that is blank, is not an https, SSH or local-path address
+          or embeds a credential.
         justification: |
-          A source the application would later refuse to use or save must not be acceptable in the
-          dialog, and a credential must be stopped where the user types it, because AgentControl
-          never stores one; the explanations are what let the user fix a field without guessing.
+          A credential must be stopped where the user types it, because AgentControl never stores
+          one, and an address the application would later refuse must not be acceptable in the
+          dialog.
         tests:
           - SourceEditorViewModel_GitLocation_Invalid_ReportsProblemAndBlocksSaveAndTest
           - SourceEditorViewModel_GitLocation_Valid_IsAcceptedAndAllowsSave
           - SourceEditorViewModel_GitLocation_LocalPath_IsAccepted
+
+      - id: AgentControl-SourceEditorViewModel-GitValidationTagPattern
+        title: >-
+          The SourceEditorViewModel class shall explain while the user types, and refuse to save or
+          to test, a Git tag pattern that does not hold the version placeholder exactly once or is not
+          a usable tag name.
+        justification: |
+          The tag pattern is what turns tags into versions; a pattern that cannot produce a usable
+          tag must be caught in the dialog, with the reason, rather than found as an empty list later.
+        tests:
           - SourceEditorViewModel_TagPattern_Invalid_ReportsProblemLiveAndBlocksSaveAndTest
+
+      - id: AgentControl-SourceEditorViewModel-GitValidationSubfolder
+        title: >-
+          The SourceEditorViewModel class shall explain, and refuse to save, a folder inside a Git
+          repository that is not a relative folder within the repository.
+        justification: |
+          A folder that leaves the repository, names a drive or names Git's own data would make the
+          source read something other than the agent package.
+        tests:
           - SourceEditorViewModel_Subfolder_Invalid_ReportsProblemAndBlocksSave
+
+      - id: AgentControl-SourceEditorViewModel-GitValidationPackageName
+        title: >-
+          The SourceEditorViewModel class shall explain, and refuse to save, a Git package name that
+          is not a valid name, using the alias as the name when the name is empty and asking for a
+          name when the alias cannot be used as one.
+        justification: |
+          Repos pin to the package name, so it must be one the application accepts everywhere; an
+          alias is only a fallback while it is a valid name.
+        tests:
           - SourceEditorViewModel_GitPackageId_AliasIsNotAValidName_RequiresAName
           - SourceEditorViewModel_GitPackageId_AliasTypedButNotAValidName_ExplainsAndSuggestsAName
           - SourceEditorViewModel_GitPackageId_InvalidCharacters_ReportsProblemAndBlocksSave
@@ -663,66 +731,126 @@ sections:
       - id: AgentControl-SourceEditorViewModel-GitTestConnection
         title: >-
           The SourceEditorViewModel class shall offer the connection test for a Git source as soon
-          as its address, tag pattern, folder and package name are acceptable (the alias is not
-          needed when the package name is given), and shall run it by listing the repository's tags
-          through the source's provider - by default a Git provider that may show Git's sign-in and
-          refuses a Git that is too old - without saving anything.
+          as its address, tag pattern, folder and package name are acceptable, without needing an
+          alias when the package name is given.
         justification: |
-          The developer needs to learn whether the address, the sign-in and the pattern are right
-          while the dialog is still open; listing the tags proves the address and the sign-in
-          without cloning or changing anything, and nothing needs to be typed that the test does not
-          use.
+          The developer needs to learn whether the address and the sign-in are right while the
+          dialog is still open, and nothing needs to be typed that the test does not use.
         tests:
           - SourceEditorViewModel_CanTestConnection_Git_DoesNotNeedAnAliasWhenThePackageNameIsGiven
-          - SourceEditorViewModel_TestConnection_Git_DefaultProviderFactory_UsesGitProvider
+
+      - id: AgentControl-SourceEditorViewModel-GitTestRuns
+        title: >-
+          The SourceEditorViewModel class shall run the connection test of a Git source by listing
+          the repository's tags, without saving anything.
+        justification: |
+          Listing the tags proves the address and the sign-in without cloning or changing
+          anything.
+        tests:
           - SourceEditorViewModel_TestConnection_Git_ShowsMatchingTagsAndSummary
+
+      - id: AgentControl-SourceEditorViewModel-GitTestDefaultProvider
+        title: >-
+          The SourceEditorViewModel class shall, when no provider is supplied, test a Git source with
+          a Git provider rather than a NuGet one.
+        justification: |
+          The dialog must work on its own for a Git source, and a Git repository is never read as a
+          NuGet feed.
+        tests:
+          - SourceEditorViewModel_TestConnection_Git_DefaultProviderFactory_UsesGitProvider
 
       - id: AgentControl-SourceEditorViewModel-GitTestFailureReasons
         title: >-
           The SourceEditorViewModel class shall report why a Git connection test failed - Sign-in
-          needed, Repository not found, Repository unreachable, Timed out or Git is too old - with a
-          headline specific to that reason and the message the provider gave, and any other failure
-          as "Connection failed" rather than letting it escape.
+          needed, Repository not found, Repository unreachable or Timed out - with a headline
+          specific to that reason and the message the provider gave.
         justification: |
           Each reason calls for a different action by the developer (sign in, correct the address,
-          retry, update Git); a failure the test did not anticipate must never crash or freeze the
-          dialog.
+          retry).
         tests:
           - SourceEditorViewModel_TestConnection_Git_ProviderFails_ReportsHeadlineAndMessage
-          - SourceEditorViewModel_TestConnection_Git_OtherFailure_ReportsConnectionFailed
+
+      - id: AgentControl-SourceEditorViewModel-GitTestGitTooOld
+        title: >-
+          The SourceEditorViewModel class shall report a Git connection test that failed because the
+          installed Git is too old as "Git is too old", with the provider's message, not as a
+          sign-in or network problem.
+        justification: |
+          Updating Git is the only remedy, and a sign-in or network headline would send the user
+          to the wrong fix.
+        tests:
           - SourceEditorViewModel_TestConnection_Git_GitTooOld_ReportsGitIsTooOld
+
+      - id: AgentControl-SourceEditorViewModel-GitTestOtherFailure
+        title: >-
+          The SourceEditorViewModel class shall report any other failure of a Git connection test as
+          "Connection failed" with its message, rather than letting it escape.
+        justification: |
+          A failure the test did not anticipate must never crash or freeze the dialog.
+        tests:
+          - SourceEditorViewModel_TestConnection_Git_OtherFailure_ReportsConnectionFailed
+
+      - id: AgentControl-SourceEditorViewModel-GitTestCancel
+        title: >-
+          The SourceEditorViewModel class shall let the user cancel a running Git connection test and
+          report it as a neutral "Test canceled" result.
+        justification: |
+          A test against a slow or unreachable repository can take long, and the user must be able
+          to stop waiting without the cancellation looking like a failure.
+        tests:
+          - SourceEditorViewModel_TestConnection_Git_CancelWhileRunning_StopsWithCanceledResult
 
       - id: AgentControl-SourceEditorViewModel-GitTestCancelAndStale
         title: >-
-          The SourceEditorViewModel class shall let the user cancel a running Git connection test and
-          report it as a neutral result, and shall never show the result of a Git connection test that
-          was still running when an input of the test changed.
+          The SourceEditorViewModel class shall never show the result or the tag preview of a Git
+          connection test that was still running when its address, tag pattern, folder or package
+          name changed.
         justification: |
-          A test against a slow or unreachable repository can take long, and the user must be able to
-          stop waiting without the cancellation looking like a failure; a result that describes inputs
-          that are no longer in the dialog could make the user save a source that was never tested.
+          A result that describes inputs that are no longer in the dialog could make the user save a
+          source that was never tested.
         tests:
-          - SourceEditorViewModel_TestConnection_Git_CancelWhileRunning_StopsWithCanceledResult
           - SourceEditorViewModel_TestConnection_Git_EditedWhileTesting_StaleResultIsNotShown
 
       - id: AgentControl-SourceEditorViewModel-GitTagPreview
         title: >-
           The SourceEditorViewModel class shall, after a Git connection test, show how many of the
           repository's tags match the tag pattern and list the matching tags with their versions,
-          newest first and at most ten, and when none matches shall say "No matching tags" and show a
-          few of the tag names the repository does have with a hint about the pattern's prefix and
-          capitalization (or say the repository has no tags yet), and shall remove the preview when the
-          pattern or another input changes.
+          newest first and at most ten.
         justification: |
-          A tag pattern that matches nothing is the commonest mistake (a capital letter, a prefix);
-          seeing the real tag names next to the pattern lets the user fix it at once, and a preview of
-          an earlier pattern beside an edited one would mislead.
+          Seeing which tags became which versions lets the user confirm the pattern before saving.
         tests:
           - SourceEditorViewModel_TestConnection_Git_ShowsMatchingTagsAndSummary
           - SourceEditorViewModel_TestConnection_Git_ManyTags_ListsTheNewestTen
-          - SourceEditorViewModel_TestConnection_Git_NoTagMatches_ShowsSampleTagsAndCaseHint
-          - SourceEditorViewModel_TestConnection_Git_NoTagsAtAll_SaysTheRepositoryHasNoTagsYet
           - SourceEditorViewModel_TestConnection_Git_ProviderWithoutPreview_FallsBackToItsVersions
+
+      - id: AgentControl-SourceEditorViewModel-GitTagPreviewNoMatch
+        title: >-
+          The SourceEditorViewModel class shall, when no tag of the repository matches the tag
+          pattern, say "No matching tags", show a few of the tag names the repository does have and
+          hint at the pattern's prefix and capitalization.
+        justification: |
+          A tag pattern that matches nothing is the commonest mistake (a capital letter, a prefix);
+          seeing the real tag names next to the pattern lets the user fix it at once.
+        tests:
+          - SourceEditorViewModel_TestConnection_Git_NoTagMatches_ShowsSampleTagsAndCaseHint
+
+      - id: AgentControl-SourceEditorViewModel-GitTagPreviewNoTags
+        title: >-
+          The SourceEditorViewModel class shall, when the repository has no tags at all, say that it
+          has no tags yet.
+        justification: |
+          An empty repository is a different problem from a wrong pattern and needs a different
+          remedy: publishing a tag.
+        tests:
+          - SourceEditorViewModel_TestConnection_Git_NoTagsAtAll_SaysTheRepositoryHasNoTagsYet
+
+      - id: AgentControl-SourceEditorViewModel-GitTagPreviewCleared
+        title: >-
+          The SourceEditorViewModel class shall remove the result and the tag preview of a finished
+          Git connection test when the tag pattern is changed.
+        justification: |
+          A preview of an earlier pattern beside an edited one would mislead.
+        tests:
           - SourceEditorViewModel_TagPattern_ChangedAfterTest_ClearsResultAndPreview
 
       - id: AgentControl-SourceEditorViewModel-GitSignInNote
@@ -730,11 +858,19 @@ sections:
           The SourceEditorViewModel class shall give a Git source a sign-in note saying that
           AgentControl uses the user's own Git sign-in (credential manager or SSH keys), never
           stores credentials, may show Git's sign-in for the connection test and Select Package, and
-          never prompts for checks it runs in the background; and shall explain the tag pattern's
-          examples and its case-sensitivity.
+          never prompts for checks it runs in the background.
         justification: |
           A user who does not know where the sign-in comes from may put a password into the address;
-          saying who signs in, and when a prompt can appear, prevents that, and the examples and the
-          case-sensitivity note prevent the most likely pattern mistake.
+          saying who signs in, and when a prompt can appear, prevents that.
         tests:
-          - SourceEditorViewModel_Constructor_NewGit_HasGitTitleLabelAndDefaults
+          - SourceEditorViewModel_GitSignInHelpText_ExplainsWhoSignsInAndWhenPromptsAppear
+
+      - id: AgentControl-SourceEditorViewModel-GitTagPatternHelp
+        title: >-
+          The SourceEditorViewModel class shall explain the tag pattern with examples and say that
+          its literal parts are case-sensitive.
+        justification: |
+          A capital letter or a prefix that does not match is the most likely pattern mistake, and
+          the examples show the accepted forms.
+        tests:
+          - SourceEditorViewModel_TagPatternHelpText_GivesExamplesAndSaysCaseMatters

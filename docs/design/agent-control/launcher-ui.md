@@ -606,5 +606,30 @@ sign-in dialog. The same switch therefore keeps Git quiet for the background upg
 before launch -
 a missing sign-in is reported as a source authentication failure, which the card shows as "sign-in needed" - and lets Git
 show its own credential UI for work the user started (`AgentControl-LauncherUI-GitSourceSetup`,
-`AgentControl-System-GitSignIn`). The Settings editor and the card presentation of Git sources are not part of this
-description yet.
+`AgentControl-System-GitSignIn`).
+
+**Git source in the Settings editor and on the card.** The Settings window's one Add menu offers "Git repository" as
+its fourth item (`AgentControl-LauncherUI-AddSourceMenu`). It opens the `SourceEditorViewModel` in Git mode: the
+repository address, the package name (the alias when left empty), the tag pattern (default `v{version}`) and an optional
+folder inside the repository, each explained by examples and validated while the user types with the same rules the
+settings save applies, a sign-in note, and a connection test that lists the repository's tags and previews which of
+them match the pattern (`AgentControl-LauncherUI-GitSourceEditor`, `AgentControl-LauncherUI-GitSignInGuidance`). The
+test's provider is the owner's (`MainWindowViewModel.CreateConnectionTestProvider`): the configured git, interactive,
+refusing a git that is too old. A Git source is listed with the Git icon and the kind name "Git repository": "Not
+checked" when its address is remote, the folder status when it is a local path; the Select Package list and the repo
+card use the same icon, and the card's package chip tooltip names the tag the pinned version has under the source's
+current tag pattern and the first seven characters of the commit the files came from
+(`AgentControl-LauncherUI-GitSourcePresentation`).
+
+**Tag moved and Change package.** A Git pin records the commit of the content it was set up from as a `git-commit:`
+identity, not the tag. When a check finds that the tag of the pinned version now points to another commit, the card
+shows an amber "Tag moved" chip, explains what happened and applies nothing; because a tag can move at any time, the
+card's Refresh command, which the user starts, reads the Git source again instead of reusing the session's cached
+listing, while the background check may use the cache, and a warning is cleared again whenever a later check fails or
+the repo's folder is missing, since the state is then unknown (`AgentControl-LauncherUI-TagMovedWarning`). Editing a
+source's tag pattern re-maps a pinned version to another tag, which is reported the same way when that tag names a
+different commit. The way to accept the change is the card menu's "Change package...", which opens the Select Package
+dialog on the repo's own source, package and version; choosing the pinned version again asks for confirmation before
+the changed content replaces the files (`AgentControl-LauncherUI-ChangePackage`,
+`AgentControl-LauncherUI-ContentChangeProtection`). The Select Package dialog never replaces a choice the
+user made while the sources were loading with the repo's own source and package.

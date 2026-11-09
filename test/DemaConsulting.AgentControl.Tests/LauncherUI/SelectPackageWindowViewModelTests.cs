@@ -602,6 +602,76 @@ public sealed class SelectPackageWindowViewModelTests
     }
 
     /// <summary>
+    ///     Test that a user who switched to another source and back to the preferred one while the
+    ///     sources were still loading keeps their choice: the preferred package is not selected.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_UserSwitchedSourceAndBackBeforeLoadEnds_PreferredNotApplied()
+    {
+        // Arrange: the preferred source A loads at once, B only when released
+        var gate = new TaskCompletionSource();
+        var a = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"), ("other", "1.0.0"));
+        var registry = new PackageSourceRegistry(
+            [
+                new PackageSourceDefinition { Alias = "A", Type = PackageSourceType.Zip, Location = "unused" },
+                new PackageSourceDefinition { Alias = "B", Type = PackageSourceType.Zip, Location = "unused" }
+            ],
+            definition => definition.Alias == "A" ? a : new GatedPackageListProvider("B", gate.Task));
+        var viewModel = new SelectPackageWindowViewModel(registry, new PackageVersionCache(), "A", "contoso-agents", "1.0.0");
+        var loading = viewModel.LoadAsync(CancellationToken.None);
+        for (var attempt = 0; attempt < 1000 && viewModel.Sources[0].IsLoading; attempt++)
+        {
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+
+        // Act: the user looks at B and returns to A, then loading ends
+        viewModel.SelectedSource = viewModel.Sources[1];
+        viewModel.SelectedSource = viewModel.Sources[0];
+        gate.SetResult();
+        await loading;
+
+        // Assert: nothing was chosen for the user
+        Assert.Equal("A", viewModel.SelectedSource?.Alias);
+        Assert.Null(viewModel.SelectedPackageName);
+        Assert.Null(viewModel.SelectedVersion);
+        Assert.False(viewModel.CanConfirm);
+    }
+
+    /// <summary>
+    ///     Test that cancelling the load while the preferred package's versions are being read cancels
+    ///     that read as well, and the cancellation surfaces to the caller.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_CancelledWhilePreferredVersionsLoad_CancelsThatReadToo()
+    {
+        // Arrange: the preferred package's versions never arrive unless the read is cancelled
+        var a = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsGate = new TaskCompletionSource().Task
+        };
+        var viewModel = CreatePreferringViewModel("A", "contoso-agents", "1.0.0", a);
+        using var cancellation = new CancellationTokenSource();
+        var loading = viewModel.LoadAsync(cancellation.Token);
+        for (var attempt = 0; attempt < 1000 && !viewModel.IsLoadingVersions; attempt++)
+        {
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+
+        // Act
+        Assert.True(viewModel.IsLoadingVersions);
+        await cancellation.CancelAsync();
+
+        // Assert: the load ends with the cancellation (it would wait for ever if the version read
+        // were not cancelled) and the version read is over
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => loading.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+        await viewModel.PendingVersionsLoad.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        Assert.False(viewModel.IsLoadingVersions);
+        Assert.Null(viewModel.SelectedVersion);
+        Assert.False(viewModel.IsLoading);
+    }
+
+    /// <summary>
     ///     Test that a Git source is listed with the Git icon and its kind name, like the other kinds.
     /// </summary>
     [Fact]

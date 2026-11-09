@@ -23,6 +23,14 @@ names are written exactly as declared on `RepoPin` (PascalCase, as pin files alw
 `SchemaVersion`, `Source`, `PackageName`, `Version`, `AgentsMdTemplateDeclined`, `ContentIdentity` (omitted when
 null), followed by any unknown properties.
 
+**Git pins record the commit, not the tag**: for a Git source `ContentIdentity` is the `git-commit:` identity of the
+commit the files came from, and no property records the tag. The tag of a pinned version is derived whenever it is
+needed, by applying the source's tag pattern as it is configured at that moment to the pinned `Version`. If the user
+edits the pattern of a source, a pinned version therefore maps to another tag; when that tag's commit differs from the
+recorded `git-commit:` identity, the content is reported as changed (the card's "Tag moved" warning) and the user
+accepts it with Change package, which records the new commit. The pin schema is unchanged by this
+(`AgentControl-RepoCardViewModel-TagMovedFollowsTagPattern`).
+
 **FirstSchemaWithSource**: `const int` — `2`, the first schema version whose pins name their source; only an older
 pin (no `Source`) is read as a pin to the legacy `Default` source, whatever the current schema is.
 

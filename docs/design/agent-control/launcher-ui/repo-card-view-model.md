@@ -238,7 +238,8 @@ session credentials and the user's saved sign-in (read without any dialog) but c
   `PinnedTagName`, the source's tag pattern applied to the pinned version, and the commit is
   `PinnedCommitShort`, the first seven characters of the `git-commit:` identity the pin recorded - and only
   ", tag {tag}" when the pin recorded no commit; a pin to any other kind of source names neither,
-  `AgentControl-RepoCardViewModel-GitSourceAwareness`), the source kind's icon from `PackageSourceIcons` (a server
+  `AgentControl-RepoCardViewModel-GitSourceAwareness`, `-GitSourceTooltip`), the source kind's icon from
+  `PackageSourceIcons` (a server
   source has its own network-server icon, distinct from the zip-folder and NuGet-folder icons, and a Git source
   the Git logo), and
   `PinnedSourceLabel`, the source's alias shown as muted text beside the icon so the source is
@@ -267,7 +268,7 @@ session credentials and the user's saved sign-in (read without any dialog) but c
   commit - seven characters each - what AgentControl did not do, and that the way to accept it is the menu's "Change
   package..." and choosing the version again). The amber chip is a button bound to `SelectPackageCommand`, so a click
   only opens the Change package dialog; it applies nothing
-  (`AgentControl-RepoCardViewModel-TagMovedWarning`).
+  (`AgentControl-RepoCardViewModel-TagMovedWarning`, `-TagMovedAppliesNothing`).
 - *Status chips* — uncommitted changes, committed agent files, folder missing and package source
   problem (whose tooltip is the actual problem), each color-coded amber or red
   (`AgentControl-LauncherUI-StatusBadges`).
@@ -351,12 +352,26 @@ Select Package and Upgrade actions the user chooses use a source registry that m
 pinned version (`UpgradeCheck.Pinned`). For a Git source whose pin recorded a `git-commit:` identity, a listing that
 shows the pinned version at a different commit (`FindMovedTagCommit`, using `PackageContentIdentity.Compare`) sets
 the moved-tag state through `SetMovedTag`, which notifies `IsPinnedTagMoved`, the tooltip and the status; nothing is
-read, extracted or written because of it, and the state is cleared whenever the pin changes (`RefreshPin`) or the
-listing no longer differs. A pin without an identity, a listing without a revision, a source that is not a Git
-source and a tag that still points to the recorded commit are never reported as moved
-(`AgentControl-RepoCardViewModel-TagMovedWarning`). A `GitRemoteException` of kind `GitTooOld` found by the check
+read, extracted or written because of it, and the state is cleared whenever the pin changes (`RefreshPin`), the
+listing no longer differs, a check fails (the tag state is then unknown, so an earlier warning must not stay up as if
+it had been confirmed) or the repo's folder is missing (`AgentControl-RepoCardViewModel-TagMovedWarning`,
+`-TagMovedClearedByNewPin`, `-TagMovedClearedWhenUnknown`). Only a well-formed `git-commit:` identity (40 or 64 hex
+digits) is compared: a pin without an identity, a pin whose identity is of another kind or malformed, a listing without
+a revision, a source that is not a Git source and a tag that still points to the recorded commit are never reported as
+moved (`-TagMovedNeedsEvidence`). The tag of the pinned version is not stored in the pin: it is derived from the
+source's tag pattern as configured now (`PinnedTagName`). Editing the pattern therefore maps the pinned version to
+another tag, and when that tag names a different commit than the pin recorded it is reported as a moved tag; the user
+accepts it, or not, with "Change package..." (`-TagMovedFollowsTagPattern`).
+
+The session's `PackageVersionCache` answers the background check, which is cheap, from the listing it already read.
+A moved tag is only visible in a fresh listing, so the optional `relistGitSource` parameter (true for the
+**Refresh** command and for the status check that follows an applied package) discards the cached entries of the pin's
+source - `PackageVersionCache.Invalidate(sourceAlias)`, which also stops a read already in flight from putting an
+older answer back - before the check, but only when the pinned source is a Git source; the versions of other kinds
+of source are immutable by convention and keep using the cache (`-TagMovedFreshListing`). A `GitRemoteException` of
+kind `GitTooOld` found by the check
 becomes a source problem with the exception's secret-free message and no sign-in hint
-(`AgentControl-RepoCardViewModel-GitTooOldProblem`).
+(`AgentControl-RepoCardViewModel-GitTooOldProblem`, `-GitTooOldNoUpgrade`).
 
 **Launch**: Launches the configured agentic CLI tool in the repo's working directory.
 
@@ -431,8 +446,8 @@ then applies it via `ApplyPackageAndShowReleaseNotesAsync`.
   and its content differs from the recorded identity, nothing is changed and
   `ContentChangeConfirmationRequested` is raised with the selection and a plain-language question; the view layer
   calls this method again with `acceptContentChange: true` if the user agrees
-  (`AgentControl-RepoCardViewModel-ConfirmChangedContent`). With no subscriber there is nobody to ask, so the change
-  is refused with `ErrorOccurred` instead.
+  (`AgentControl-RepoCardViewModel-ConfirmChangedContent`, `-ApplyConfirmedContent`). With no subscriber there is nobody
+  to ask, so the change is refused with `ErrorOccurred` instead (`-RefuseChangeWithoutAsking`).
 
 **ApplyPackageAndShowReleaseNotesAsync** (private): Shared extract-and-pin sequence reused by
 `Upgrade` and `ApplySelectedPackageAsync`: first loads the repo's existing pin (a newer-schema pin
@@ -441,8 +456,10 @@ tolerated and replaced), acquires the package from its provider, compares the ac
 pin's when the pin is for this very package version (`ContentChangedSincePinned`; a different version, a pin
 without an identity and a reader without one are never a change) and, on a change, applies the requested
 `ContentChangeHandling` before anything is touched - `Refuse` (Upgrade: log a warning, `ErrorOccurred` saying the
-package may have been republished, that nothing was changed and that "Change package..." accepts it;
-`AgentControl-RepoCardViewModel-RefuseChangedContent`), `Ask` (Select Package / Change package: raise
+package may have been republished, that nothing was changed and that "Change package..." accepts it, without a hash
+or any advice to edit the pin file;
+`AgentControl-RepoCardViewModel-RefuseChangedContent`, `-RefuseChangedContentMessage`), `Ask` (Select Package / Change
+package: raise
 `ContentChangeConfirmationRequested`, return) or `Accept` (the user already confirmed: log and continue); then
 extracts it
 (blind-delete-and-replace), proactively ensures the repo's `.gitignore` covers the four managed
@@ -516,7 +533,8 @@ then raises
 the source the repo is pinned to when it has one
 (`AgentControl-RepoCardViewModel-SelectPackage`). The command is executable for any repo that is present and idle,
 whether or not it has a pin: for an unpinned repo it is "Select Package...", for a pinned one "Change package..."
-(`AgentControl-RepoCardViewModel-ChangePackage`). Raising the event never reads or writes the pin; the view layer
+(`AgentControl-RepoCardViewModel-ChangePackage`, `-ChangePackageRequest`). Raising the event never reads or writes the
+pin; the view layer
 passes the pin's source, package and version to the dialog so it opens on them, and the confirmed choice comes back
 through `ApplySelectedPackageAsync`, where choosing the pinned version again is the explicit way to accept changed
 content (`ConfirmChangedContent`; for a Git source the content differs when the tag now delivers a different commit).
@@ -531,7 +549,8 @@ folder inside the
 `--config-dir` when one was given, so automated tests never touch the real profile) and `Interactive = allowPrompt`.
 Work the user started (Select Package, Upgrade) is therefore interactive; the background upgrade check and the restore
 before launch are not, and a missing Git sign-in there is a source authentication failure, which the card already
-presents as "sign-in needed" (`AgentControl-RepoCardViewModel-GitSourceOptions`, `AgentControl-LauncherUI-GitSourceSetup`).
+presents as "sign-in needed" (`AgentControl-RepoCardViewModel-GitSourceOptions`, `-GitSourcePrompts`,
+`-GitSourceCacheRoot`, `AgentControl-LauncherUI-GitSourceSetup`).
 
 #### Error Handling
 

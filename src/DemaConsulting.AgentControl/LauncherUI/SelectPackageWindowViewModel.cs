@@ -118,6 +118,20 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     private bool _isLoadingVersions;
 
     /// <summary>
+    ///     Whether the user has changed the source or the package since the dialog opened. Once
+    ///     set, the preferred selection is never applied: it would override a choice the user made
+    ///     while the sources were loading, even one that happens to land on the preferred source
+    ///     again.
+    /// </summary>
+    private bool _userChangedSelection;
+
+    /// <summary>
+    ///     Whether the preferred selection itself is changing <see cref="SelectedPackageName"/>, so
+    ///     that change is not mistaken for the user's.
+    /// </summary>
+    private bool _applyingPreference;
+
+    /// <summary>
     ///     Backing field for <see cref="VersionsError"/>.
     /// </summary>
     private string? _versionsError;
@@ -199,6 +213,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
                 value.PropertyChanged += OnSelectedSourceChanged;
             }
 
+            _userChangedSelection = true;
             SelectedPackageName = null;
             OnPropertyChanged(nameof(PackageNames));
             OnPropertyChanged(nameof(SourceErrorMessage));
@@ -255,6 +270,12 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
             if (!SetField(ref _selectedPackageName, value))
             {
                 return;
+            }
+
+            // Only the preference itself sets the package without the user having chosen it
+            if (!_applyingPreference)
+            {
+                _userChangedSelection = true;
             }
 
             OnPropertyChanged(nameof(ShowVersionsHint));
@@ -401,7 +422,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         try
         {
             await Task.WhenAll(Sources.Select(source => LoadSourceAsync(source, cancellationToken)));
-            await ApplyPreferredSelectionAsync();
+            await ApplyPreferredSelectionAsync(cancellationToken);
         }
         finally
         {
@@ -414,15 +435,21 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     ///     preferred source has loaded, so "Change package..." opens on the current choice.
     /// </summary>
     /// <remarks>
-    ///     Does nothing when no preference was given, when the user has already picked a package
-    ///     (or another source), when the selected source failed or does not offer the package, and
-    ///     keeps the newest version when the preferred version is no longer listed.
+    ///     Does nothing when no preference was given, when the user has changed the source or the
+    ///     package since the dialog opened (even if they came back to the preferred one: their
+    ///     choice stands), when the selected source failed or does not offer the package, and
+    ///     keeps the newest version when the preferred version is no longer listed. The version
+    ///     read the preference starts is cancelled with <paramref name="cancellationToken"/>.
     /// </remarks>
+    /// <param name="cancellationToken">The token of <see cref="LoadAsync"/>: cancelling it
+    ///     cancels the version read of the preferred package as well.</param>
     /// <returns>A task that completes when the selection (and the version load it starts) is
     ///     done.</returns>
-    private async Task ApplyPreferredSelectionAsync()
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is cancelled while the preferred package's versions load.</exception>
+    private async Task ApplyPreferredSelectionAsync(CancellationToken cancellationToken)
     {
-        if (_preferredPackageName is null || _selectedPackageName is not null ||
+        if (_preferredPackageName is null || _userChangedSelection || _selectedPackageName is not null ||
             _selectedSource is not { HasError: false, IsLoading: false } source ||
             !string.Equals(source.Alias, _preferredSourceAlias, StringComparison.OrdinalIgnoreCase))
         {
@@ -436,11 +463,24 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
             return;
         }
 
-        SelectedPackageName = package;
+        // The version read is cancelled by the same token as the rest of the load; the
+        // registration is made for the read that is current when the token fires
+        using var cancelVersionRead = cancellationToken.Register(CancelVersionLoad);
+        _applyingPreference = true;
+        try
+        {
+            SelectedPackageName = package;
+        }
+        finally
+        {
+            _applyingPreference = false;
+        }
+
         await PendingVersionsLoad;
+        cancellationToken.ThrowIfCancellationRequested();
 
         // A newer selection by the user while the versions loaded must not be overridden
-        if (_selectedPackageName != package || _preferredVersion is null)
+        if (_userChangedSelection || _selectedPackageName != package || _preferredVersion is null)
         {
             return;
         }
@@ -450,6 +490,22 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         if (version is not null)
         {
             SelectedVersion = version;
+        }
+    }
+
+    /// <summary>
+    ///     Cancels the version load that is current, ignoring one whose source was already
+    ///     replaced and released by a newer selection.
+    /// </summary>
+    private void CancelVersionLoad()
+    {
+        try
+        {
+            _versionsCancellation.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Replaced by a newer selection, which is not the preferred read any more
         }
     }
 

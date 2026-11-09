@@ -233,7 +233,8 @@ of the menu's agent files group (`HasAgentFileActions`), and executing it raises
 repo stays pinned. This scenario is tested by
 `RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CanExecuteAsChangePackage` and
 `RepoCardViewModel_SelectPackageCommand_PinnedRepo_RaisesSelectPackageRequested`, covering
-`AgentControl-RepoCardViewModel-ChangePackage`.
+`AgentControl-RepoCardViewModel-ChangePackage` (offered, counted among the agent files actions) and
+`AgentControl-RepoCardViewModel-ChangePackageRequest` (the request, the repo still pinned).
 
 **RepoCardViewModel_ApplySelectedPackage_RejectsStaleVersionWithoutMutatingPin**: Applying a
 valid chosen name/version updates the pin, extracts files, and raises `ReleaseNotesReady`; a
@@ -563,11 +564,15 @@ not marked declined, while declining the offer raised by an explicit apply is st
 `RepoCardViewModel_ApplySelectedPackage_AgentsMdOfferDeclined_RecordsDeclineInPin`) and
 `RepoCardViewModel_ApplySelectedPackage_SourceReportsNoIdentity_IsNeverTreatedAsChanged` (in
 `RepoCardContentIdentityTests.cs`), covering `AgentControl-RepoCardViewModel-RecordContentIdentity`,
-`AgentControl-RepoCardViewModel-RefuseChangedContent`, `AgentControl-RepoCardViewModel-ConfirmChangedContent`,
-`AgentControl-RepoCardViewModel-AdoptMissingIdentity` and `AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin`.
+`AgentControl-RepoCardViewModel-RefuseChangedContent`, `AgentControl-RepoCardViewModel-RefuseChangedContentMessage`,
+`AgentControl-RepoCardViewModel-ConfirmChangedContent`, `AgentControl-RepoCardViewModel-ApplyConfirmedContent`,
+`AgentControl-RepoCardViewModel-RefuseChangeWithoutAsking`, `AgentControl-RepoCardViewModel-AdoptMissingIdentity`,
+`AgentControl-RepoCardViewModel-IgnoreMissingSourceIdentity` and
+`AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin`.
 The refusal messages (the Upgrade of a republished version and the restore before launch) say that "Change package..."
 is how to accept the change and no longer tell the user to delete the pin file; the two refusal tests assert that
-(`RepoCardContentIdentityTests.cs`: the message contains `Change package...` and does not contain `.agentcontrol.json`).
+(`RepoCardContentIdentityTests.cs`: the message contains `Change package...` and does not contain `.agentcontrol.json`;
+the Upgrade refusal also asserts that neither `sha256` nor the recorded hash appears in the message).
 Refusing an Upgrade of a republished version is, in the application, reachable only by a race (an Upgrade is offered
 only for a version newer than the pin), so this refusal is verified at this unit level only; the confirmation, by
 contrast, is reachable through Change package... and is shown end to end in the system verification.
@@ -581,16 +586,20 @@ before commits were recorded) it names the tag only; and a pin to a zip source n
 `RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit`,
 `RepoCardViewModel_PackageChipTooltip_GitPinWithoutIdentity_NamesTagOnly` and
 `RepoCardViewModel_PackageChipTooltip_ZipPin_HasNoTagOrCommit`, covering
-`AgentControl-RepoCardViewModel-GitSourceAwareness`. The tests use a `FakePackageSourceProvider` standing in for the Git
+`AgentControl-RepoCardViewModel-GitSourceAwareness` (icon and alias) and `AgentControl-RepoCardViewModel-GitSourceTooltip`
+(tag and short commit). The tag is derived from the source's tag pattern as configured now, not stored in the pin. The
+tests use a `FakePackageSourceProvider` standing in for the Git
 source and a pin file written for the test, so no Git repository or network is involved.
 
 **RepoCardViewModel_TagMovedWarning_ShownNeverAppliedAndClearedWhenAccepted**: With a Git pin that recorded a commit,
 a listing that shows the pinned version at another commit makes the card show the "Tag moved" status - outranking an
 available upgrade, hiding the up-to-date cue, with a tooltip that names the tag, "abcdef0 -> 1234567" and "Change
 package..." - and the check acquires nothing, extracts nothing and leaves the pin byte for byte unchanged; a tag that
-still points to the recorded commit, a pin that recorded no commit and a source that is not a Git source (even if its
-listing carries a revision) are never reported as moved; and once the pin records the new commit (the user accepted
-it) a refresh clears the warning and the card is up to date again. Choosing the pinned version again when the tag now
+still points to the recorded commit, a pin that recorded no commit, a pin whose identity is not a well-formed commit
+identity (a `sha256:` digest, a malformed or short `git-commit:` value or any other text, in a theory) and a source that
+is not a Git source (even if its listing carries a revision) are never reported as moved; and once the pin records the
+new commit (the user accepted it) a refresh clears the warning and the card is up to date again. Choosing the pinned
+version again when the tag now
 delivers another commit asks for confirmation and changes nothing (no error, no extraction, the pin as it was); with the
 confirmation it extracts the new content and records the new commit (the short commit and the warning follow); and with
 nobody to ask the refusal advises Change package... and does not tell the user to edit or delete the pin file. This
@@ -599,27 +608,51 @@ scenario is tested by `RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagM
 `RepoCardViewModel_RefreshUpgradeStatus_SameCommit_IsNotMoved`,
 `RepoCardViewModel_RefreshUpgradeStatus_ZipSourceWithRevision_IsNotMoved`,
 `RepoCardViewModel_RefreshUpgradeStatus_PinWithoutIdentity_IsNotMoved`,
+`RepoCardViewModel_RefreshUpgradeStatus_GitSourceWithNonCommitIdentity_IsNotMoved`,
 `RepoCardViewModel_RefreshUpgradeStatus_PinUpdatedAfterTagMoved_ClearsMovedTag`,
 `RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommit_AsksAndChangesNothing`,
 `RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommitAccepted_AppliesAndRecordsCommit` and
 `RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommitWithoutSubscriber_AdvisesChangePackage` (all in
-`RepoCardGitAwarenessTests.cs`), covering `AgentControl-RepoCardViewModel-TagMovedWarning` and, for the three apply
-tests, `AgentControl-RepoCardViewModel-ConfirmChangedContent`. That a click on the chip opens Change package... is the
-chip's binding to the same command and is exercised only end to end.
+`RepoCardGitAwarenessTests.cs`), covering `AgentControl-RepoCardViewModel-TagMovedWarning`, `-TagMovedAppliesNothing`,
+`-TagMovedNeedsEvidence` and `-TagMovedClearedByNewPin` and, for the apply tests,
+`AgentControl-RepoCardViewModel-ConfirmChangedContent`, `-ApplyConfirmedContent` and `-RefuseChangeWithoutAsking`. That
+a click on the chip opens Change package... is the chip's binding to the same command and is exercised only end to end.
+
+**RepoCardViewModel_TagMovedFreshness_UserRefreshListsAgainAndUnknownStateClearsTheWarning**: A listing is cached while
+the tag still points to the recorded commit and the tag is then moved: a background check answers from the cache (the
+fake provider was asked once and no warning shows), while the card's Refresh reads the Git source again (the provider is
+asked a second time) and shows "Tag moved"; the same Refresh of a card pinned to a zip source keeps using the cached
+listing (still one call). When the warning is shown and the next Refresh fails because the source cannot be read, the
+warning is cleared, its tooltip is empty, the check-failed state is shown and the status is no longer "Tag moved"; and
+when the repo's folder disappears the next cheap refresh clears the warning and tells its bindings. Because a pin does
+not record the tag, editing the source's tag pattern re-maps the pinned version to another tag: with the tags
+`release/1.2.3` at the recorded commit and `v1.2.3` at another commit, a pattern changed from `release/{version}` to
+`v{version}` makes the card name `v1.2.3` and show "Tag moved" with both commits (nothing applied, the pin file byte for
+byte unchanged), and restoring the pattern clears it. This scenario is tested by
+`RepoCardViewModel_RefreshAsync_GitSourceTagMovedAfterCachedListing_ListsAgainAndShowsTagMoved`,
+`RepoCardViewModel_RefreshAsync_ZipSource_KeepsUsingCachedListing`,
+`RepoCardViewModel_RefreshAsync_FailsAfterTagMoved_ClearsTagMovedAndShowsCheckFailed`,
+`RepoCardViewModel_RefreshCheap_RepoFolderGoesMissingAfterTagMoved_ClearsTagMoved` and
+`RepoCardViewModel_RefreshUpgradeStatus_TagPatternEdited_RemappedTagAtOtherCommitIsReportedAsTagMoved` (the last uses a
+fake Git provider that lists a fixed tag set through the tag pattern of the definition it is created from), covering
+`AgentControl-RepoCardViewModel-TagMovedFreshListing`, `-TagMovedClearedWhenUnknown` and `-TagMovedFollowsTagPattern`.
 
 **RepoCardViewModel_GitTooOld_BackgroundCheckExplainsWithoutSignIn**: When the background check's listing fails because
 the installed git is older than the supported version, the card has a package source problem with the explanation as
 the message, does not say a sign-in is needed, is a problem status and offers no upgrade. This scenario is tested by
 `RepoCardViewModel_RefreshUpgradeStatus_GitTooOld_ShowsSourceProblemWithoutSignIn`, covering
-`AgentControl-RepoCardViewModel-GitTooOldProblem`. The version gate itself (git older than 2.29 is refused before any
+`AgentControl-RepoCardViewModel-GitTooOldProblem` and `AgentControl-RepoCardViewModel-GitTooOldNoUpgrade`. The version
+gate itself (git older than 2.29 is refused before any
 remote command, and a git at the minimum is accepted) is verified in the `GitIntegration` and `AgentPackageManagement`
 tests, and the existing `RepoCardGitSourceTests.cs` shows the gate asked first, then `ls-remote`.
 
 **RepoCardViewModel_GitSourceOptions_PromptOnlyForUserStartedWork**: With a Git source configured and a stub as the git
-executable (from the startup override), the registry built for work the user started runs git without
+executable (from the settings, or from the startup override when the settings name none), the registry runs git through
+that executable; the registry built for work the user started runs git without
 `core.askPass=` and with `GCM_INTERACTIVE` left alone, and the registry built for background work runs it with
 `GCM_INTERACTIVE=never` and `core.askPass=`, both with `GIT_TERMINAL_PROMPT=0`; the Git cache root is a `git-cache`
 folder inside the isolated configuration directory when one is given, and the default (none) otherwise. This scenario is
-tested by `RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork` and
+tested by `RepoCardViewModel_CreateSourceRegistry_GitSource_RunsTheConfiguredOrOverriddenGit`,
+`RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork` and
 `RepoCardViewModel_GetGitCacheRoot_UsesConfigDirectoryWhenGiven`, covering
-`AgentControl-RepoCardViewModel-GitSourceOptions`.
+`AgentControl-RepoCardViewModel-GitSourceOptions`, `-GitSourcePrompts` and `-GitSourceCacheRoot`.

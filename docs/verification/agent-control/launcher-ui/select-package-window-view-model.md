@@ -107,14 +107,22 @@ in progress. This scenario is tested by
 a pin, loading selects that package and version in the preferred source; when the pinned version is no longer listed the
 newest stays selected; when the source's package list does not offer the package, when the source could not be read and
 when the alias names no configured source nothing is selected; and a package chosen by the user before the load ends is
-not replaced by the preference. This scenario is tested by
+not replaced by the preference, nor is the preference applied when the user switched to another source and back to the
+preferred one while the sources were loading; cancelling the load while the preferred package's versions are read
+cancels that read too (its provider never answers, so the load would not end otherwise) and the cancellation surfaces
+to the caller. This scenario is tested by
+`SelectPackageWindowViewModel_Constructor_PreferredSourceAlias_SelectsThatSourceOrFirst`,
 `SelectPackageWindowViewModel_LoadAsync_PreferredPackageAndVersion_AreSelected`,
 `SelectPackageWindowViewModel_LoadAsync_PreferredVersionNotListed_KeepsNewestVersion`,
 `SelectPackageWindowViewModel_LoadAsync_PreferredPackageNotOffered_SelectsNothing`,
 `SelectPackageWindowViewModel_LoadAsync_PreferredSourceFailed_SelectsNothing`,
-`SelectPackageWindowViewModel_LoadAsync_PreferredAliasUnknown_SelectsNothing` and
-`SelectPackageWindowViewModel_LoadAsync_UserChoiceBeforeLoadEnds_IsNotOverridden`, covering
-`AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage`. The row of a Git source showing the Git icon and
+`SelectPackageWindowViewModel_LoadAsync_PreferredAliasUnknown_SelectsNothing`,
+`SelectPackageWindowViewModel_LoadAsync_UserChoiceBeforeLoadEnds_IsNotOverridden`,
+`SelectPackageWindowViewModel_LoadAsync_UserSwitchedSourceAndBackBeforeLoadEnds_PreferredNotApplied` and
+`SelectPackageWindowViewModel_LoadAsync_CancelledWhilePreferredVersionsLoad_CancelsThatReadToo`, covering
+`AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage`, `-PreselectNewestWhenVersionGone`,
+`-PreselectNothingWhenSourceFailed`, `-PreselectNothingWhenNotOffered`, `-PreselectNothingWhenSourceUnknown`,
+`-PreselectKeepsUserChoice` and `-PreselectCancelled`. The row of a Git source showing the Git icon and
 the type name "Git repository" is checked by `SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName`
 and is cited by the `LauncherUI` subsystem requirement `AgentControl-LauncherUI-GitSourcePresentation`; the dialog
 opening on the pinned choice from the card menu is verified in the `LauncherUI` subsystem tests.

@@ -1460,8 +1460,12 @@ sections:
         children:
           - AgentControl-RepoCardViewModel-RecordContentIdentity
           - AgentControl-RepoCardViewModel-RefuseChangedContent
+          - AgentControl-RepoCardViewModel-RefuseChangedContentMessage
           - AgentControl-RepoCardViewModel-ConfirmChangedContent
+          - AgentControl-RepoCardViewModel-ApplyConfirmedContent
+          - AgentControl-RepoCardViewModel-RefuseChangeWithoutAsking
           - AgentControl-RepoCardViewModel-AdoptMissingIdentity
+          - AgentControl-RepoCardViewModel-IgnoreMissingSourceIdentity
           - AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin
         tests:
           - RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin
@@ -1486,7 +1490,10 @@ sections:
           so the card says what is wrong and what to do.
         children:
           - AgentControl-RepoCardViewModel-GitSourceOptions
+          - AgentControl-RepoCardViewModel-GitSourcePrompts
+          - AgentControl-RepoCardViewModel-GitSourceCacheRoot
           - AgentControl-RepoCardViewModel-GitTooOldProblem
+          - AgentControl-RepoCardViewModel-GitTooOldNoUpgrade
         tests:
           - RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork
           - RepoCardViewModel_RefreshUpgradeStatus_GitTooOld_ShowsSourceProblemWithoutSignIn
@@ -1505,13 +1512,35 @@ sections:
           the dialog is still open instead of discovering an empty package list later.
         children:
           - AgentControl-SourceEditorViewModel-GitEditor
+          - AgentControl-SourceEditorViewModel-GitEditorDefaults
+          - AgentControl-SourceEditorViewModel-GitSubfolderNormalized
+          - AgentControl-SourceEditorViewModel-GitSaveNew
+          - AgentControl-SourceEditorViewModel-GitSaveExisting
+          - AgentControl-SourceEditorViewModel-GitSaveGate
           - AgentControl-SourceEditorViewModel-GitValidation
+          - AgentControl-SourceEditorViewModel-GitValidationTagPattern
+          - AgentControl-SourceEditorViewModel-GitValidationSubfolder
+          - AgentControl-SourceEditorViewModel-GitValidationPackageName
           - AgentControl-SourceEditorViewModel-GitTestConnection
+          - AgentControl-SourceEditorViewModel-GitTestRuns
+          - AgentControl-SourceEditorViewModel-GitTestDefaultProvider
           - AgentControl-SourceEditorViewModel-GitTestFailureReasons
+          - AgentControl-SourceEditorViewModel-GitTestGitTooOld
+          - AgentControl-SourceEditorViewModel-GitTestOtherFailure
+          - AgentControl-SourceEditorViewModel-GitTestCancel
           - AgentControl-SourceEditorViewModel-GitTestCancelAndStale
           - AgentControl-SourceEditorViewModel-GitTagPreview
+          - AgentControl-SourceEditorViewModel-GitTagPreviewNoMatch
+          - AgentControl-SourceEditorViewModel-GitTagPreviewNoTags
+          - AgentControl-SourceEditorViewModel-GitTagPreviewCleared
+          - AgentControl-SourceEditorViewModel-GitTagPatternHelp
           - AgentControl-SettingsWindowViewModel-RefuseInvalidGitSource
+          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitAddress
+          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitSubfolder
+          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitPackageName
           - AgentControl-MainWindowViewModel-GitConnectionTestProvider
+          - AgentControl-MainWindowViewModel-GitConnectionTestInteractive
+          - AgentControl-MainWindowViewModel-GitConnectionTestRefusesOldGit
         tests:
           - SourceEditorWindow_GitSource_ShowsGitSectionsAndHidesNuGetOnes
           - SourceEditorWindow_GitSource_BadTagPattern_ShowsErrorAndDisablesSave
@@ -1546,7 +1575,10 @@ sections:
           from is what makes a later change to that tag recognizable.
         children:
           - AgentControl-SettingsWindowViewModel-GitSourceRowStatus
+          - AgentControl-SettingsWindowViewModel-GitSourceLocalFolderStatus
+          - AgentControl-SettingsWindowViewModel-GitSourcePersisted
           - AgentControl-RepoCardViewModel-GitSourceAwareness
+          - AgentControl-RepoCardViewModel-GitSourceTooltip
         tests:
           - PackageSourceIcons_GitSource_HasGitIconAndNames
           - SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName
@@ -1554,22 +1586,34 @@ sections:
           - PackageSourceItemViewModel_LocalGitSource_ChecksTheFolder
           - PackageSourceItemViewModel_OtherKinds_RemoteClassificationUnchanged
           - RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias
+          - RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit
 
       - id: AgentControl-LauncherUI-TagMovedWarning
         title: >-
           The LauncherUI subsystem shall show, on the card of a repo pinned to a Git source, a
           "Tag moved" warning when the tag of the pinned version now points to a different commit
           than the one the repo's files came from, explaining what happened and how to accept it,
-          and shall never apply anything because of it.
+          and shall never apply anything because of it; a refresh the user starts shall read the
+          Git source again, so that a tag moved during the session is not missed, and a warning
+          shall not stay up once a later check could not confirm it.
         justification: |
           A moved tag changes the instructions an agent follows without a new version, so the user
           must be told; applying it silently would defeat the point of pinning, so the decision
-          stays with the user.
+          stays with the user. A cached listing would hide a tag moved later in the session, and a
+          warning kept after a failed check would claim something nothing established.
         children:
           - AgentControl-RepoCardViewModel-TagMovedWarning
+          - AgentControl-RepoCardViewModel-TagMovedAppliesNothing
+          - AgentControl-RepoCardViewModel-TagMovedNeedsEvidence
+          - AgentControl-RepoCardViewModel-TagMovedClearedByNewPin
+          - AgentControl-RepoCardViewModel-TagMovedFreshListing
+          - AgentControl-RepoCardViewModel-TagMovedClearedWhenUnknown
+          - AgentControl-RepoCardViewModel-TagMovedFollowsTagPattern
         tests:
           - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip
           - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing
+          - RepoCardViewModel_RefreshAsync_GitSourceTagMovedAfterCachedListing_ListsAgainAndShowsTagMoved
+          - RepoCardViewModel_RefreshAsync_FailsAfterTagMoved_ClearsTagMovedAndShowsCheckFailed
 
       - id: AgentControl-LauncherUI-ChangePackage
         title: >-
@@ -1584,7 +1628,14 @@ sections:
           one a first selection gets.
         children:
           - AgentControl-RepoCardViewModel-ChangePackage
+          - AgentControl-RepoCardViewModel-ChangePackageRequest
           - AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage
+          - AgentControl-SelectPackageWindowViewModel-PreselectNewestWhenVersionGone
+          - AgentControl-SelectPackageWindowViewModel-PreselectNothingWhenSourceFailed
+          - AgentControl-SelectPackageWindowViewModel-PreselectNothingWhenNotOffered
+          - AgentControl-SelectPackageWindowViewModel-PreselectNothingWhenSourceUnknown
+          - AgentControl-SelectPackageWindowViewModel-PreselectKeepsUserChoice
+          - AgentControl-SelectPackageWindowViewModel-PreselectCancelled
         tests:
           - MainWindow_ChangePackageOnPinnedRepo_OpensSelectPackageOnThePinnedChoice
           - MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed

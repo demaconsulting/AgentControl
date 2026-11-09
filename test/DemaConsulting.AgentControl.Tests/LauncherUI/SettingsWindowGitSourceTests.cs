@@ -245,6 +245,111 @@ public class SettingsWindowGitSourceTests
     }
 
     /// <summary>
+    ///     Test that saving a Git source writes it to the settings with its address, tag pattern, folder
+    ///     and package name.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_SaveGitSource_PersistsAddressPatternFolderAndPackageName()
+    {
+        // Arrange
+        AppSettings? saved = null;
+        var viewModel = new SettingsWindowViewModel(
+            new AppSettings(), settings => saved = settings, (_, _) => Task.FromResult(true));
+        var editor = viewModel.CreateEditor(PackageSourceType.Git, null);
+        editor.Alias = "Agents";
+        editor.Location = RepositoryAddress;
+        editor.TagPattern = "release/{version}";
+        editor.Subfolder = "packaging";
+        editor.GitPackageId = "contoso-agents";
+
+        // Act
+        editor.SaveCommand.Execute(null);
+        viewModel.SaveCommand.Execute(null);
+
+        // Assert
+        Assert.NotNull(saved);
+        var source = Assert.Single(saved.Sources);
+        Assert.Equal(PackageSourceType.Git, source.Type);
+        Assert.Equal("Agents", source.Alias);
+        Assert.Equal(RepositoryAddress, source.Location);
+        Assert.Equal("release/{version}", source.TagPattern);
+        Assert.Equal("packaging", source.Subfolder);
+        Assert.Equal(["contoso-agents"], source.PackageIds);
+    }
+
+    /// <summary>
+    ///     Test that a Git source whose address the application would not accept is refused on save,
+    ///     with a message that does not repeat the address.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_Save_GitSourceWithBadAddress_IsRefusedWithErrorMessage()
+    {
+        // Arrange: a hand-edited address that embeds a credential
+        var source = GitSource("Agents", "https://user:sentinel-secret@git.example.com/org/agents.git");
+
+        // Act / Assert
+        AssertSaveRefused(source, unwanted: "sentinel-secret");
+    }
+
+    /// <summary>
+    ///     Test that a Git source whose folder inside the repository the application would not accept is
+    ///     refused on save.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_Save_GitSourceWithBadSubfolder_IsRefusedWithErrorMessage()
+    {
+        // Arrange: a folder that leaves the repository
+        var source = GitSource("Agents", RepositoryAddress);
+        source.Subfolder = "../outside";
+
+        // Act / Assert
+        AssertSaveRefused(source, unwanted: "../outside");
+    }
+
+    /// <summary>
+    ///     Test that a Git source whose package name the application would not accept is refused on save.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_Save_GitSourceWithBadPackageName_IsRefusedWithErrorMessage()
+    {
+        // Arrange: a name with characters a package name may not have
+        var source = GitSource("Agents", RepositoryAddress);
+        source.PackageIds = ["bad name!"];
+
+        // Act / Assert
+        AssertSaveRefused(source, unwanted: "bad name!");
+    }
+
+    /// <summary>
+    ///     Saves the settings with one source and checks that the save is refused: the callback is not
+    ///     invoked, the window does not report saved, an explanation is shown and it does not repeat the
+    ///     given text.
+    /// </summary>
+    /// <param name="source">The source with unusable settings.</param>
+    /// <param name="unwanted">Text the explanation must not contain.</param>
+    private static void AssertSaveRefused(PackageSourceDefinition source, string unwanted)
+    {
+        // Arrange
+        var saveCalled = false;
+        var savedRaised = false;
+        var viewModel = new SettingsWindowViewModel(
+            new AppSettings { Sources = [source] },
+            _ => saveCalled = true,
+            (_, _) => Task.FromResult(true));
+        viewModel.Saved += (_, _) => savedRaised = true;
+
+        // Act
+        viewModel.SaveCommand.Execute(null);
+
+        // Assert
+        Assert.False(saveCalled);
+        Assert.False(savedRaised);
+        Assert.True(viewModel.HasError);
+        Assert.NotEmpty(viewModel.ErrorMessage!);
+        Assert.DoesNotContain(unwanted, viewModel.ErrorMessage, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Creates a valid Git source.
     /// </summary>
     /// <param name="alias">The alias.</param>

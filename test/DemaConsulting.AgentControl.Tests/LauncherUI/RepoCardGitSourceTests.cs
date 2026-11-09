@@ -105,6 +105,50 @@ public sealed class RepoCardGitSourceTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a Git source's registry runs the git executable the user configured in the settings,
+    ///     or the one named at startup when the settings name none.
+    /// </summary>
+    /// <param name="useStartupOverride">Whether the stub is named at startup (the settings then name
+    ///     none) rather than in the settings.</param>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RepoCardViewModel_CreateSourceRegistry_GitSource_RunsTheConfiguredOrOverriddenGit(bool useStartupOverride)
+    {
+        // Arrange: the stub is the configured git, or the startup override while the settings name none
+        var stub = GitRemoteStub.Create();
+        _stubs.Add(stub);
+        var settings = new AppSettings
+        {
+            GitExecutablePath = useStartupOverride ? string.Empty : stub.Path,
+            Sources =
+            [
+                new PackageSourceDefinition
+                {
+                    Alias = "Repo",
+                    Type = PackageSourceType.Git,
+                    Location = "https://example.invalid/org/repo.git",
+                    TagPattern = "v{version}",
+                    PackageIds = ["contoso-agents"]
+                }
+            ]
+        };
+        var configDir = Path.Combine(Path.GetTempPath(), "agentcontrol_card_git_" + Guid.NewGuid().ToString("N"));
+        _folders.Add(configDir);
+        var options = StartupOptions.Parse(
+            useStartupOverride ? ["--config-dir", configDir, "--git-path", stub.Path] : ["--config-dir", configDir]);
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = Path.GetTempPath() }, () => settings, new PackageVersionCache(), options);
+
+        // Act
+        var provider = card.CreateSourceRegistry(allowPrompt: false).Resolve("Repo");
+        await provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
+
+        // Assert: the listing ran through the stub
+        Assert.Contains("ls-remote", stub.ReadInvocations().Select(item => item.Command));
+    }
+
+    /// <summary>
     ///     Test that Git sources cache under a <c>git-cache</c> folder inside the isolated
     ///     configuration directory when one was given at startup, and use the per-user default
     ///     (<see langword="null"/> here) otherwise.

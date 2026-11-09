@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.Settings;
@@ -797,6 +798,79 @@ public sealed class MainWindowViewModelTests : IDisposable
             stub.Delete();
         }
     }
+
+    /// <summary>
+    ///     Test that the connection-test provider for a Git source runs the git executable from the
+    ///     startup override (here a stub that records every call) and not a git found some other way.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_CreateConnectionTestProvider_GitSource_RunsTheConfiguredGitExecutable()
+    {
+        // Arrange: the stub stands in for the configured git
+        var stub = GitRemoteStub.Create();
+        try
+        {
+            var options = StartupOptions.Parse(["--config-dir", CreateTempDirectory(), "--git-path", stub.Path]);
+            var viewModel = new MainWindowViewModel(new AppSettings(), options, configDirectory: CreateTempDirectory());
+
+            // Act
+            var provider = viewModel.CreateConnectionTestProvider(CreateGitDefinition());
+            await provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
+
+            // Assert: every git call of the listing went through the configured executable
+            Assert.IsType<GitSourceProvider>(provider);
+            Assert.Contains("ls-remote", stub.ReadInvocations().Select(item => item.Command));
+        }
+        finally
+        {
+            stub.Delete();
+        }
+    }
+
+    /// <summary>
+    ///     Test that a git that is older than the supported version is refused by the connection-test
+    ///     provider before any tag is listed: the failure says git is too old and the stub saw only
+    ///     the version query, never <c>ls-remote</c>.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_CreateConnectionTestProvider_GitSource_OldGit_IsRefusedBeforeAnyTagIsListed()
+    {
+        // Arrange: a git that reports an old version
+        var stub = GitRemoteStub.Create().Respond("version", "git version 2.20.1\n");
+        try
+        {
+            var options = StartupOptions.Parse(["--config-dir", CreateTempDirectory(), "--git-path", stub.Path]);
+            var viewModel = new MainWindowViewModel(new AppSettings(), options, configDirectory: CreateTempDirectory());
+            var provider = viewModel.CreateConnectionTestProvider(CreateGitDefinition());
+
+            // Act
+            var failure = await Assert.ThrowsAsync<GitRemoteException>(
+                () => provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken));
+
+            // Assert: refused as too old, and only the version query ran
+            Assert.Equal(GitFailureKind.GitTooOld, failure.Kind);
+            Assert.Contains("Git 2.29 or newer", failure.Message, StringComparison.Ordinal);
+            Assert.All(stub.ReadInvocations(), invocation => Assert.Equal("version", invocation.Command));
+            Assert.DoesNotContain("ls-remote", stub.ReadInvocations().Select(item => item.Command));
+        }
+        finally
+        {
+            stub.Delete();
+        }
+    }
+
+    /// <summary>
+    ///     Creates a Git source definition for the connection-test provider tests.
+    /// </summary>
+    /// <returns>The definition.</returns>
+    private static PackageSourceDefinition CreateGitDefinition() => new()
+    {
+        Alias = "Repo",
+        Type = PackageSourceType.Git,
+        Location = "https://git.example.com/org/agents.git",
+        TagPattern = "v{version}",
+        PackageIds = ["contoso-agents"]
+    };
 
     /// <summary>
     ///     Test that a NuGet source still gets a NuGet provider, with or without startup options that

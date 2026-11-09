@@ -213,7 +213,11 @@ asked for again when a package is selected (`AgentControl-MainWindowViewModel-Co
 source a `GitSourceProvider` that runs git with the configured git executable (the setting, else the startup
 override, else `git`, as the cards do), keeps its cache in the same `git-cache` folder, is **interactive** (git may
 show its own sign-in, because the user started the test) and enforces the minimum git version, so an old git is
-reported as such instead of failing obscurely (`AgentControl-MainWindowViewModel-GitConnectionTestProvider`).
+reported as such - before any tag is listed - instead of failing obscurely
+(`AgentControl-MainWindowViewModel-GitConnectionTestProvider`, `-GitConnectionTestInteractive`,
+`-GitConnectionTestRefusesOldGit`). It throws `InvalidOperationException` or `ArgumentException` for a definition the
+provider refuses (an unacceptable NuGet source, or a Git source whose address, tag pattern, folder or package name is
+unusable).
 `MainWindow` passes it to `SettingsWindowViewModel` as the provider factory.
 
 **UpdateDisplayedRepoCards** (private): Recomputes `DisplayedItems` and `DisplayedRepoCards` from

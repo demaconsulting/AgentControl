@@ -25,7 +25,8 @@ sign-in dialog for a window that was only opened to look. The row's icon and too
 to *Edit > Test connection*. A Git source is classified by `PackageSourceItemViewModel.IsRemote`: one whose address is
 an https or SSH address is remote and behaves exactly like a server row ("Not checked", no folder check, the tooltip
 says "repository"), while one whose address is a local path is a folder like any other and gets the folder status
-(`AgentControl-SettingsWindowViewModel-GitSourceRowStatus`). Its icon is the Git logo and its kind name "Git
+(`AgentControl-SettingsWindowViewModel-GitSourceRowStatus`, `-GitSourceLocalFolderStatus`). Its icon is the Git logo and
+its kind name "Git
 repository" (`PackageSourceIcons`).
 
 **SelectedSource**: `PackageSourceItemViewModel?` — The row the Edit and Remove commands act on.
@@ -133,7 +134,8 @@ the window calls it when it closes (`AgentControl-SettingsWindowViewModel-Source
 The constructor throws `ArgumentNullException` for a null `initial` or `onSave`. `Save` checks
 every source location with `PackageSourceDefinition.GetCredentialProblem` and every Git source with
 `PackageSourceDefinition.GetGitSettingsProblem` (address, tag pattern, folder inside the repository and package
-name; this also stops a hand-edited settings file, `AgentControl-SettingsWindowViewModel-RefuseInvalidGitSource`):
+name; this also stops a hand-edited settings file, `AgentControl-SettingsWindowViewModel-RefuseInvalidGitSource`,
+`-RefuseInvalidGitAddress`, `-RefuseInvalidGitSubfolder`, `-RefuseInvalidGitPackageName`):
 a location embedding a
 credential (for example a URL with user information) or a Git source with unusable settings is not
 saved - `onSave` is not invoked, `Saved` is not raised, and `ErrorMessage` (shown in red in the
