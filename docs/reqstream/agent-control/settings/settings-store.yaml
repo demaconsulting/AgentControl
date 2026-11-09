@@ -201,11 +201,17 @@ sections:
       - id: AgentControl-SettingsStore-GitSourceRoundTrip
         title: >-
           The SettingsStore class shall save and load a Git source with its repository address, tag
-          pattern, sub-folder and single package ID, writing its type by name, and shall refuse to
-          save an address that embeds a credential, without repeating it and without changing the
-          saved file.
+          pattern, sub-folder and single package ID, writing its type by name.
         justification: |
-          A Git source is configured once and must survive restarts like every other source, and
-          the settings file must never become a place where an address with a secret is stored.
+          A Git source is configured once and must survive restarts like every other source.
         tests:
-          - SettingsStore_SaveThenLoad_GitSource_RoundTripsAndRefusesCredentials
+          - SettingsStore_SaveThenLoad_GitSource_RoundTripsByNameWithoutSecretLikeProperties
+
+      - id: AgentControl-SettingsStore-GitSourceRefusesCredential
+        title: >-
+          The SettingsStore class shall refuse to save a Git source whose address embeds a
+          credential, without repeating it and without changing the saved file.
+        justification: |
+          The settings file must never become a place where an address with a secret is stored.
+        tests:
+          - SettingsStore_Save_GitSourceAddressWithCredential_IsRefusedWithoutChangingTheFile

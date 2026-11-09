@@ -88,13 +88,15 @@ else
 when it is a wrapper such as `plink` or the user set only `GIT_SSH` (`-SshBatchMode`); an https or local remote gets
 none.
 
-**EnsureSupportedVersionAsync / ParseVersion**: Git 2.29 (`MinimumGitVersion`) is the oldest git that has
-`fetch --no-write-fetch-head`, which the single-tag fetch uses. The method runs `git --version` through the same
+**EnsureSupportedVersionAsync / ParseVersion**: The minimum supported Git version (the `MinimumGitVersion` constant; its
+value is stated in the requirements and the user guide) is the oldest git that has `fetch --no-write-fetch-head`, the
+capability the single-tag fetch relies on. The method runs `git --version` through the same
 hardened path as every command (`git -c ... --literal-pathspecs --version`, in the neutral folder, 30-second limit, 4 KB
 output cap), one caller at a time per executable (a per-executable `SemaphoreSlim` gate: callers that arrive while the
 check runs wait for it and then find its result, so `-MinimumGitVersionCheckedOnce` holds for concurrent callers too),
-reads the version with `ParseVersion` (the text after `git version`, for example `2.51.0.windows.2`,
-`2.39.5 (Apple Git-154)` or `2.29`; anything else is `null`) and throws a `GitRemoteException` of kind `GitTooOld` whose
+reads the version with `ParseVersion` (the text after `git version`: a dotted number, optionally followed by vendor
+text such as a Windows or Apple build suffix, of which only the leading numbers are used; anything else is `null`) and
+throws a `GitRemoteException` of kind `GitTooOld` whose
 message names the minimum and the version in use and says to update Git or choose a newer one under
 Settings > Git executable (`-MinimumGitVersionMessage`). A text that cannot be read is logged as a warning and the git
 is treated as supported (`-UnreadableVersionNotBlocked`). A

@@ -576,9 +576,10 @@ sign-in note and a successful Test connection that lists the tags matching the p
   | `release/V{version}` | `release/V1.2.3-beta.1` | 1.2.3-beta.1 |
   | `ver{version}` | `ver1.2.3` | 1.2.3 |
 
-  The version part must be a strict SemVer: three numbers such as `1.2.3`, optionally with a prerelease such as
-  `1.2.3-beta.1`. A tag with build metadata (`v1.2.3+build.5`), with two or four numbers, or without a version is
-  **ignored**. The fixed parts of the pattern are **case-sensitive**: `V{version}` does not find `v1.2.3`, and
+  The version part must be a strict SemVer: three numbers without leading zeros such as `1.2.3`, optionally with a
+  prerelease such as `1.2.3-beta.1`. A tag with build metadata (`v1.2.3+build.5`), with two or four numbers, with a
+  leading zero (`v01.2.3`) or without a version is **ignored**. The fixed parts of the pattern are **case-sensitive**:
+  `V{version}` does not find `v1.2.3`, and
   `v{version}` does not find `V1.2.3`. The box checks the pattern as you type and says what is wrong.
 - **Folder (optional)** (the **Location in repo** section) — if the package layout is not at the top of the
   repository but in a subfolder (for example `packaging/agents`), enter that folder; the `.github` folders,
@@ -624,9 +625,9 @@ the sign-in your own Git setup already provides:
 - **Local path** — the file permissions of your own account.
 
 Sign-in may be asked for only when **you** start the action: **Test connection**, **Select Package...**,
-**Change package...** and **Upgrade**. The background checks AgentControl makes (at start, after you change Settings
-and when you add a repo) **never prompt**. When one needs a sign-in, the repo's card shows a red **Sign-in needed**
-chip; sign in with Git as above, then choose the card's "..." menu > **Refresh**.
+**Change package...**, **Upgrade** and the card's **Refresh**. The background checks AgentControl makes (at start,
+after you change Settings and when you add a repo) **never prompt**. When one needs a sign-in, the repo's card shows a
+red **Sign-in needed** chip; sign in with Git as above, then choose the card's "..." menu > **Refresh**.
 
 ### Git on Your Computer
 
@@ -639,10 +640,11 @@ old** and say which version was found. Install a newer Git, or set **Git executa
 
 AgentControl runs Git with a locked-down command line, because the contents of a repository are not trusted:
 
-- It **lists** tags (no clone), and to apply a version it **fetches just that tag, one commit deep**, and checks out
-  **only the package layout**: the four managed folders (`.github/agents`, `.github/standards`,
-  `.github/templates`, `.github/skills`), `release-notes.md` and `AGENTS.md` (inside the configured folder, if any).
-  Nothing else in the repository is read or written.
+- It **lists** tags (no clone), and to apply a version it **fetches just that tag, one commit deep**, and then reads
+  **only the package layout** straight from the fetched commit - nothing is checked out: the four managed folders
+  (`.github/agents`, `.github/standards`, `.github/templates`, `.github/skills`), `release-notes.md` and `AGENTS.md`
+  (inside the configured folder, if any). Each file is written exactly as the commit holds it (no line-ending
+  conversion, no filters). Nothing else in the repository is read or written.
 - It **never runs hooks**, never initializes or updates **submodules**, never runs **Git LFS** filters, and never
   uses **remote helpers** (such as `ext::` or `fd::`). Only https, SSH and a local path are allowed - never plain
   `http` or `git://`.
@@ -721,11 +723,17 @@ name in another place from being installed under your repo's pin.
 A pin names a package, a version and a source, but a version number is only a label: whether the content behind
 `contoso-agents 1.1.0` can change later depends on the source. AgentControl therefore also records a **content
 identity** in the pin - for a zip package, a SHA-256 fingerprint of the zip file; for a NuGet package, the same
-fingerprint of the package file in AgentControl's private cache for that source; for a Git repository, the
+fingerprint of the package file in AgentControl's private cache for that source - that is, of the copy **cached on
+this computer**; for a Git repository, the
 **commit** the version's tag pointed to (`git-commit:` and the commit id) - and uses it to notice when a version
 you already applied has been **republished** with different content, or its Git tag **moved** (see *Republished
 Versions* below). The
-identity detects a changed package; it does not tell you who published it.
+identity detects a changed package; it does not tell you who published it. Because a NuGet package's identity
+describes the copy cached on this computer, a **server-side republish of a version that this computer already has
+cached is not detected** until that cached copy is cleared (AgentControl's NuGet caches live in its own folder under
+your user profile and may be deleted while AgentControl is closed; they are downloaded again when needed). Another
+computer that has not cached the version yet gets, and reports, the new content - which is the warning you want - but
+the first one keeps the old copy. This is why a published version number must never be reused.
 
 - **Zip-package folders and NuGet-package folders** - anyone with write access to the folder can overwrite
   `contoso-agents-1.1.0.zip` or `contoso-agents.1.1.0.nupkg` in place. For a NuGet folder this can also make
@@ -1003,9 +1011,10 @@ example, `contoso-agents-extra-1.2.0.zip` splits into name `contoso-agents-extra
 parse as valid versions.
 
 **When choosing a package name, avoid naming segments that could themselves be mistaken for
-a version** — for example, a package name ending in something like `-2` or `-1.0` could
+a version** — for example, a package name ending in something like `-1.2.3` (a complete version of its own) could
 cause an earlier hyphen to win the split unexpectedly, since the scan stops at the first
-hyphen whose suffix is a valid version, not necessarily the one the author intended. This is
+hyphen whose suffix parses as a complete version (three numbers, with an optional prerelease), not necessarily the
+one the author intended. This is
 an accepted "simplicity over precision" limitation: choose package names that don't create
 this ambiguity, rather than relying on any escaping mechanism (none exists).
 
@@ -1220,12 +1229,16 @@ the versions. Package authors need to know four things:
 
    Only the four `.github` folders, `release-notes.md` and the optional `AGENTS.md` are used (they behave as
    described in *Managed Folders*, *Release Notes* and *AGENTS.md Template Offer*); everything else in the repository is
-   ignored and never read. A repository with none of the four folders and no `release-notes.md` at that place is not a
-   package. A symbolic link or a submodule anywhere inside the layout makes AgentControl refuse that version, so do
-   not use them there.
+   ignored and never read. A tag is a package when it holds at least **one** file of that layout - a file below one of
+   the four folders, `release-notes.md` or `AGENTS.md`; a tag with none of them is refused as having no package layout.
+   Applying a version replaces the four managed folders with what the tag holds, so a version that holds only
+   `AGENTS.md` or `release-notes.md` would leave them empty: always include every folder you want delivered. (A zip
+   package has no such minimum either, and a NuGet package only needs its `content` folder.) A symbolic link or a
+   submodule anywhere inside the layout makes AgentControl refuse that version, so do not use them there.
 2. **A release is a tag.** Tag each release with a **SemVer** tag that matches the tag pattern the consumers
    configured - by default `v{version}`, for example `v1.2.0` or `v1.3.0-beta.1`. The version part must be three
-   numbers with an optional prerelease; tags with build metadata (`+...`) or any other form are ignored. The literal
+   numbers without leading zeros, with an optional prerelease; tags with build metadata (`+...`), leading zeros or any
+   other form are ignored. The literal
    parts of the pattern are case-sensitive, so tell consumers the exact pattern you use (`v{version}`,
    `release/V{version}`, `ver{version}`, ...). Create and publish the tag:
 

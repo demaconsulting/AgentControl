@@ -826,24 +826,35 @@ This scenario is verified by the `RepoCardViewModel` unit tests (see their unit 
 `RepoCardViewModel_ApplySelectedPackage_PinWithoutIdentity_AdoptsIdentityWithoutWarning` cited directly at the
 subsystem level, and by the headless window test
 `MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed` (the question is asked before
-anything changes; No changes nothing; Yes applies and records the new identity), covering
-`AgentControl-LauncherUI-ContentChangeProtection` (children: `AgentControl-RepoCardViewModel-RecordContentIdentity`,
-`-RefuseChangedContent`, `-RefuseChangedContentMessage`, `-ConfirmChangedContent`, `-ApplyConfirmedContent`,
-`-RefuseChangeWithoutAsking`, `-AdoptMissingIdentity`, `-IgnoreMissingSourceIdentity` and
-`-LaunchSyncNeverWritesPin`).
+anything changes; No changes nothing; Yes applies and records the new identity). The requirements are covered as
+follows: `AgentControl-LauncherUI-ContentChangeProtection` (the identity is recorded; child
+`AgentControl-RepoCardViewModel-RecordContentIdentity`) by the first test; `AgentControl-LauncherUI-ContentChangeRefusal`
+(children: `AgentControl-RepoCardViewModel-RefuseChangedContent`, `-RefuseChangedContentMessage` and
+`-LaunchSyncNeverWritesPin`) by the Upgrade and the launch-restore tests;
+`AgentControl-LauncherUI-ContentChangeConfirmation` (children: `-ConfirmChangedContent`, `-ApplyConfirmedContent` and
+`-RefuseChangeWithoutAsking`) by the confirmation-request test and the window test; and
+`AgentControl-LauncherUI-ContentChangeAdoption` (children: `-AdoptMissingIdentity` and `-IgnoreMissingSourceIdentity`) by
+the pin-without-identity test. As the evidence rules above say, these are view-model tests of the units that realize the
+behavior, except the headless window test: the behavior is observable only in the view-model layer the window is drawn
+from, so no window-level test exists for the refusal.
 The card offers "Change package..." to a repo that has a pin (and "Select Package..." only to one that has none), so the
 confirmation is reached through the card's menu: the Change package scenario below shows the dialog opening on the pinned
 choice, and the end-to-end scenarios of the system verification (`AgentControl_PackageContentIntegrity_MovedGitTagIs...`)
 take it through to the confirmation with a real Git repository.
 
-**LauncherUI_GitSourceSetup_PromptOnlyForUserStartedWork**: The registry the card builds for work the user started lets
-git show its credential UI, the registry for background work never does, and Git packages are cached inside the isolated
-configuration directory; when the background check finds that the installed git is older than the supported version the
+**LauncherUI_GitSourceSetup_PromptOnlyForUserStartedWork**: The registry the card builds for Git sources runs git with
+the configured git executable (or the one the owner supplies) and caches Git packages inside the isolated configuration
+directory; the registry for work the user started lets git show its credential UI, and the registry for background work
+never does; when the background check finds that the installed git is older than the supported version the
 card's source problem says so and does not ask the user to sign in, and no upgrade is offered. This scenario is tested by
-`RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork` and
-`RepoCardViewModel_RefreshUpgradeStatus_GitTooOld_ShowsSourceProblemWithoutSignIn`, covering
-`AgentControl-LauncherUI-GitSourceSetup` (children: `AgentControl-RepoCardViewModel-GitSourceOptions`, `-GitSourcePrompts`,
-`-GitSourceCacheRoot`, `-GitTooOldProblem` and `-GitTooOldNoUpgrade`).
+`RepoCardViewModel_CreateSourceRegistry_GitSource_RunsTheConfiguredOrOverriddenGit` (covering
+`AgentControl-LauncherUI-GitSourceSetup`, children `AgentControl-RepoCardViewModel-GitSourceOptions` and
+`-GitSourceCacheRoot`), `RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork` (covering
+`AgentControl-LauncherUI-GitSourcePrompts`, child `AgentControl-RepoCardViewModel-GitSourcePrompts`) and
+`RepoCardViewModel_RefreshUpgradeStatus_GitTooOld_ShowsSourceProblemWithoutSignIn` (covering
+`AgentControl-LauncherUI-GitTooOld`, children `AgentControl-RepoCardViewModel-GitTooOldProblem` and
+`-GitTooOldNoUpgrade`). These are view-model tests of the unit that realizes the behavior; the same prompt rule is shown
+end to end against a private Git server in the system verification (`GitSignInTests.cs`).
 
 **LauncherUI_GitSourceEditor_AddressPatternPreviewAndSave**: The Git editor window shows the Git sections (the package
 name box with the alias as its placeholder, the tag pattern box with `v{version}` and its help, the folder box, the
@@ -861,13 +872,14 @@ shown by
 `SettingsWindowViewModel_Save_GitSourceWithBadTagPattern_IsRefusedWithErrorMessage` (unit evidence cited directly), covering
 `AgentControl-LauncherUI-GitSourceEditor` (children: `AgentControl-SourceEditorViewModel-GitEditor`,
 `-GitEditorDefaults`, `-GitSubfolderNormalized`, `-GitSaveNew`, `-GitSaveExisting`, `-GitSaveGate`, `-GitValidation`,
-`-GitValidationTagPattern`, `-GitValidationSubfolder`, `-GitValidationPackageName`, `-GitTestConnection`,
-`-GitTestRuns`, `-GitTestDefaultProvider`, `-GitTestFailureReasons`, `-GitTestGitTooOld`, `-GitTestOtherFailure`,
-`-GitTestCancel`, `-GitTestCancelAndStale`, `-GitTagPreview`, `-GitTagPreviewNoMatch`, `-GitTagPreviewNoTags`,
-`-GitTagPreviewCleared`, `-GitTagPatternHelp`,
-`AgentControl-SettingsWindowViewModel-RefuseInvalidGitSource`, `-RefuseInvalidGitAddress`, `-RefuseInvalidGitSubfolder`,
-`-RefuseInvalidGitPackageName`, `AgentControl-MainWindowViewModel-GitConnectionTestProvider`,
-`-GitConnectionTestInteractive` and `-GitConnectionTestRefusesOldGit`).
+`-GitValidationTagPattern`, `-GitValidationSubfolder`, `-GitValidationPackageName`, `-GitTagPatternHelp`,
+`AgentControl-SettingsWindowViewModel-RefuseInvalidGitSource`, `-RefuseInvalidGitAddress`, `-RefuseInvalidGitSubfolder`
+and `-RefuseInvalidGitPackageName`) with the first, second and fourth window test, and
+`AgentControl-LauncherUI-GitSourceConnectionTest` (children: `-GitTestConnection`, `-GitTestRuns`,
+`-GitTestDefaultProvider`, `-GitTestFailureReasons`, `-GitTestGitTooOld`, `-GitTestOtherFailure`, `-GitTestCancel`,
+`-GitTestCancelAndStale`, `-GitTagPreview`, `-GitTagPreviewNoMatch`, `-GitTagPreviewNoTags`, `-GitTagPreviewCleared`,
+each prefixed `AgentControl-SourceEditorViewModel`, and `AgentControl-MainWindowViewModel-GitConnectionTestProvider`,
+`-GitConnectionTestInteractive` and `-GitConnectionTestRefusesOldGit`) with the third window test.
 The real provider, the real git and the connection test against a repository are shown end to end in the system
 verification.
 
@@ -882,15 +894,17 @@ repository" (and the short name "git repository") in the lists that show sources
 the same icon and name; a Git source on a remote address is listed "Not checked" and never asks for its folder, while one
 on a local path gets the folder status, and the classification of the zip, NuGet folder and server kinds is unchanged;
 and a card pinned to a Git source shows the Git icon and the alias in its package chip. This scenario is tested by
-`PackageSourceIcons_GitSource_HasGitIconAndNames`, `SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName`,
+`PackageSourceIcons_GitSource_HasGitIconAndNames`, `SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName`
+and `RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias` (covering `AgentControl-LauncherUI-GitSourcePresentation`,
+child `AgentControl-RepoCardViewModel-GitSourceAwareness`),
 `PackageSourceItemViewModel_RemoteGitSource_IsNotCheckedAndNeverAsksTheFolder`,
-`PackageSourceItemViewModel_LocalGitSource_ChecksTheFolder`,
-`PackageSourceItemViewModel_OtherKinds_RemoteClassificationUnchanged`,
-`RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias` and
+`PackageSourceItemViewModel_LocalGitSource_ChecksTheFolder` and
+`PackageSourceItemViewModel_OtherKinds_RemoteClassificationUnchanged` (covering
+`AgentControl-LauncherUI-GitSourceRowStatus`, children `AgentControl-SettingsWindowViewModel-GitSourceRowStatus`,
+`-GitSourceLocalFolderStatus` and `-GitSourcePersisted`) and
 `RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit` (the tag and the seven-character commit
-in the chip's tooltip), covering `AgentControl-LauncherUI-GitSourcePresentation`
-(children: `AgentControl-SettingsWindowViewModel-GitSourceRowStatus`, `-GitSourceLocalFolderStatus`,
-`AgentControl-RepoCardViewModel-GitSourceAwareness` and `-GitSourceTooltip`).
+in the chip's tooltip, covering `AgentControl-LauncherUI-GitSourceCardTooltip`, child
+`AgentControl-RepoCardViewModel-GitSourceTooltip`).
 The drawn icon is shown only as ink in the end-to-end test (`SettingsWindow_AddMenu_OffersAllFourSourceTypes...`).
 
 **LauncherUI_TagMovedWarning_ShownNeverApplied**: When a check finds the pinned Git version at another
@@ -898,23 +912,27 @@ commit than the pin recorded, the card's status is "Tag moved" (it outranks "upg
 cue and uses the tooltip that names the tag, both commits and Change package...), and nothing is acquired, extracted or
 written; a card refresh the user starts reads the Git source again, so a tag moved after a listing was cached is shown,
 while a failed refresh clears the warning instead of leaving it up. This scenario is tested by
-`RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip`,
-`RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing`,
-`RepoCardViewModel_RefreshAsync_GitSourceTagMovedAfterCachedListing_ListsAgainAndShowsTagMoved` and
-`RepoCardViewModel_RefreshAsync_FailsAfterTagMoved_ClearsTagMovedAndShowsCheckFailed`, covering
-`AgentControl-LauncherUI-TagMovedWarning` (children: `AgentControl-RepoCardViewModel-TagMovedWarning`,
-`-TagMovedAppliesNothing`, `-TagMovedNeedsEvidence`, `-TagMovedClearedByNewPin`, `-TagMovedFreshListing`,
-`-TagMovedClearedWhenUnknown` and `-TagMovedFollowsTagPattern`). The chip itself is exercised end to end only
+`RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip` (covering
+`AgentControl-LauncherUI-TagMovedWarning`, children `AgentControl-RepoCardViewModel-TagMovedWarning`,
+`-TagMovedNeedsEvidence`, `-TagMovedClearedByNewPin` and `-TagMovedFollowsTagPattern`),
+`RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing` (covering `AgentControl-LauncherUI-TagMovedAppliesNothing`,
+child `-TagMovedAppliesNothing`),
+`RepoCardViewModel_RefreshAsync_GitSourceTagMovedAfterCachedListing_ListsAgainAndShowsTagMoved` (covering
+`AgentControl-LauncherUI-TagMovedFreshListing`, child `-TagMovedFreshListing`) and
+`RepoCardViewModel_RefreshAsync_FailsAfterTagMoved_ClearsTagMovedAndShowsCheckFailed` (covering
+`AgentControl-LauncherUI-TagMovedClearedWhenUnknown`, child `-TagMovedClearedWhenUnknown`; each child prefixed
+`AgentControl-RepoCardViewModel`). The chip itself is exercised end to end only
 (`TagMovedChip` in the system verification); no headless window test renders it.
 
 **LauncherUI_ChangePackage_PinnedRepoChoosesAgainOnTheCurrentChoice**: For a repo that has a pin the select-package
 command can execute and raises the request ("Change package..."); the main window opens the Select Package dialog on the
 pin's own source, package and version although a newer version exists; and choosing the pinned version again when its
 content changed asks for confirmation first, No changing nothing and Yes applying and recording the new identity. This
-scenario is tested by `RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CanExecuteAsChangePackage`,
-`MainWindow_ChangePackageOnPinnedRepo_OpensSelectPackageOnThePinnedChoice` and
-`MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed`, covering
-`AgentControl-LauncherUI-ChangePackage` (children: `AgentControl-RepoCardViewModel-ChangePackage`,
-`-ChangePackageRequest` and the `AgentControl-SelectPackageWindowViewModel-Preselect*` requirements: `-PreselectCurrentPackage`,
-`-PreselectNewestWhenVersionGone`, `-PreselectNothingWhenSourceFailed`, `-PreselectNothingWhenNotOffered`,
-`-PreselectNothingWhenSourceUnknown`, `-PreselectKeepsUserChoice` and `-PreselectCancelled`).
+scenario is tested by `RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CanExecuteAsChangePackage` (covering
+`AgentControl-LauncherUI-ChangePackage`, children `AgentControl-RepoCardViewModel-ChangePackage` and
+`-ChangePackageRequest`), `MainWindow_ChangePackageOnPinnedRepo_OpensSelectPackageOnThePinnedChoice` (also covering
+`AgentControl-LauncherUI-ChangePackageStartsOnCurrentChoice`, children: the `AgentControl-SelectPackageWindowViewModel-Preselect*`
+requirements: `-PreselectCurrentPackage`, `-PreselectNewestWhenVersionGone`, `-PreselectNothingWhenSourceFailed`,
+`-PreselectNothingWhenNotOffered`, `-PreselectNothingWhenSourceUnknown`, `-PreselectKeepsUserChoice` and
+`-PreselectCancelled`) and `MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed` (the
+confirmation, covered above).

@@ -23,6 +23,16 @@ names are written exactly as declared on `RepoPin` (PascalCase, as pin files alw
 `SchemaVersion`, `Source`, `PackageName`, `Version`, `AgentsMdTemplateDeclined`, `ContentIdentity` (omitted when
 null), followed by any unknown properties.
 
+**ContentIdentity forms**: the identity is opaque text to the store, which reads it and writes it back unchanged. Two
+forms exist side by side: `sha256:<hex>` (zip and NuGet sources: the SHA-256 of the delivered zip or `.nupkg` file; for
+a NuGet source it describes the copy cached on this machine) and `git-commit:<commit id>` (Git sources: the commit the
+tag pointed to). A pin without an identity (written before identities were recorded, or by a source that reports none)
+is valid; it adopts an identity the next time the user deliberately applies a package (Select Package, Upgrade or
+Change package), never at launch, which does not write the pin. Schema compatibility: pins of schema 1 and 2 are read
+and rewritten as the current schema (3) on the next save; a pin of a newer schema is refused by `Load` and never
+overwritten by `Save`, so a build that does not know a newer form can neither misread nor destroy it
+(`AgentControl-RepoPinStore-RejectNewerSchema`, `AgentControl-System-IdentityAdoptedOnUpgrade`).
+
 **Git pins record the commit, not the tag**: for a Git source `ContentIdentity` is the `git-commit:` identity of the
 commit the files came from, and no property records the tag. The tag of a pinned version is derived whenever it is
 needed, by applying the source's tag pattern as it is configured at that moment to the pinned `Version`. If the user

@@ -27,5 +27,14 @@ package AgentControl {
         part logging : LoggingSubsystem;
         part startup : StartupSubsystem;
         part utilities : UtilitiesSubsystem;
+
+        // Git repository source: the provider runs hardened git through the remote client; the editor validates the
+        // address and the tag pattern; the content identity the provider reports flows through the extractor to the
+        // pin the card writes
+        connect agentPackageManagement.gitSourceProvider to gitIntegration.gitRemoteClient;
+        connect launcherUi.sourceEditorViewModel to agentPackageManagement.gitRepositoryAddress;
+        connect launcherUi.sourceEditorViewModel to agentPackageManagement.gitTagPattern;
+        connect repoSync.packageContentExtractor to agentPackageManagement.packageContentIdentity;
+        connect launcherUi.repoCardViewModel to repoConfig.repoPinStore;
     }
 }

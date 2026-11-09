@@ -99,7 +99,8 @@ internal sealed class GitRepositoryFixture : IDisposable
     }
 
     /// <summary>
-    ///     Skips the calling test when no git executable can be run.
+    ///     Skips the calling test when no git executable can be run - or fails it when the environment
+    ///     variable <c>CI</c> is set, so that Git evidence a pipeline requires is never silently skipped.
     /// </summary>
     public static void SkipWithoutGit()
     {
@@ -123,7 +124,23 @@ internal sealed class GitRepositoryFixture : IDisposable
             // Not installed: skipped below
         }
 
-        Assert.Skip("git is not installed, so the Git source cannot be exercised against a real repository.");
+        SkipOrFail("git is not installed, so the Git source cannot be exercised against a real repository.");
+    }
+
+    /// <summary>
+    ///     Ends the calling test because a Git prerequisite is missing: the test is skipped when it runs
+    ///     on a developer machine, and fails when the environment variable <c>CI</c> is set (a pipeline
+    ///     must have git, so a missing git is a defect of the pipeline, not a reason to skip the evidence).
+    /// </summary>
+    /// <param name="reason">Why git cannot be used.</param>
+    public static void SkipOrFail(string reason)
+    {
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")))
+        {
+            Assert.Fail($"{reason} The environment variable CI is set, so the test cannot be skipped.");
+        }
+
+        Assert.Skip(reason);
     }
 
     /// <summary>
@@ -275,6 +292,110 @@ internal sealed class GitRepositoryFixture : IDisposable
             IsolationEnvironment,
             TimeSpan.FromSeconds(60),
             TimeSpan.FromSeconds(120));
+
+    /// <summary>
+    ///     Builds an environment in which every new repository gets a post-checkout hook that writes a
+    ///     marker file: through a template directory and through a global <c>core.hooksPath</c>.
+    /// </summary>
+    /// <param name="marker">The file the hook writes.</param>
+    /// <returns>The environment variables.</returns>
+    public Dictionary<string, string?> CreateHostileHooksEnvironment(string marker)
+    {
+        var hook = "#!/bin/sh\necho ran > \"" + marker.Replace('\\', '/') + "\"\n";
+        var template = Path.Combine(Root, "hostile-template");
+        var hooks = Path.Combine(template, "hooks");
+        Directory.CreateDirectory(hooks);
+        File.WriteAllText(Path.Combine(hooks, "post-checkout"), hook);
+        var hooksPath = Path.Combine(Root, "hostile-hooks");
+        Directory.CreateDirectory(hooksPath);
+        File.WriteAllText(Path.Combine(hooksPath, "post-checkout"), hook);
+        if (!OperatingSystem.IsWindows())
+        {
+            foreach (var file in new[] { Path.Combine(hooks, "post-checkout"), Path.Combine(hooksPath, "post-checkout") })
+            {
+                File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+        }
+
+        var config = Path.Combine(Root, "hostile.gitconfig");
+        File.WriteAllText(
+            config,
+            $"[core]\n\thooksPath = {hooksPath.Replace('\\', '/')}\n[protocol \"file\"]\n\tallow = always\n");
+        return new Dictionary<string, string?>
+        {
+            ["GIT_CONFIG_GLOBAL"] = config,
+            ["GIT_CONFIG_NOSYSTEM"] = "1",
+            ["GIT_TEMPLATE_DIR"] = template,
+            ["GIT_CONFIG_COUNT"] = null,
+            ["GIT_CONFIG_PARAMETERS"] = null
+        };
+    }
+
+    /// <summary>
+    ///     Builds an environment in which the user's global git configuration defines a filter driver
+    ///     named <c>pwn</c> whose smudge command writes a marker file, and asks for line-ending
+    ///     conversion.
+    /// </summary>
+    /// <param name="marker">The file the smudge command writes.</param>
+    /// <returns>The environment variables.</returns>
+    public Dictionary<string, string?> CreateHostileFilterEnvironment(string marker)
+    {
+        var config = Path.Combine(Root, "hostile-filter.gitconfig");
+        var command = $"echo ran >> \\\"{marker.Replace('\\', '/')}\\\" && cat";
+        File.WriteAllText(
+            config,
+            $"[core]\n\tautocrlf = true\n[filter \"pwn\"]\n\tsmudge = \"{command}\"\n\tclean = cat\n\trequired = false\n" +
+            "[protocol \"file\"]\n\tallow = always\n");
+        return new Dictionary<string, string?>
+        {
+            ["GIT_CONFIG_GLOBAL"] = config,
+            ["GIT_CONFIG_NOSYSTEM"] = "1",
+            ["GIT_CONFIG_COUNT"] = null,
+            ["GIT_CONFIG_PARAMETERS"] = null
+        };
+    }
+
+    /// <summary>
+    ///     Runs plain git with an environment, for the control of a test that shows a hostile
+    ///     environment really would run code if git were not hardened.
+    /// </summary>
+    /// <param name="environment">The environment to apply (a <see langword="null"/> value removes
+    ///     the variable).</param>
+    /// <param name="folder">The working directory.</param>
+    /// <param name="arguments">The arguments.</param>
+    public void RunWithEnvironment(IReadOnlyDictionary<string, string?> environment, string folder, params string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = folder,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        foreach (var (name, value) in environment)
+        {
+            if (value is null)
+            {
+                startInfo.Environment.Remove(name);
+            }
+            else
+            {
+                startInfo.Environment[name] = value;
+            }
+        }
+
+        using var process = Process.Start(startInfo)!;
+        var error = process.StandardError.ReadToEndAsync();
+        process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error.Result} ({Root})");
+    }
 
     /// <summary>
     ///     Runs git in a folder with the user's configuration replaced and a fixed identity.

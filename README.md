@@ -89,9 +89,10 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   `ssh://git@host/org/repo.git` or a local or UNC path, and the package layout (`.github/` folders,
   `release-notes.md`, `AGENTS.md`) may sit in an optional subfolder. **Test connection** lists the tags without
   cloning and shows which ones match. Sign-in is whatever your own Git setup already does (Git Credential Manager or
-  another credential helper for https, your SSH keys or ssh-agent for SSH); AgentControl never stores credentials,
-  and background checks never prompt - a repo whose Git source needs a sign-in shows a red **Sign-in needed** chip
-  until you choose **Refresh** in its "..." menu
+  another credential helper for https, your SSH keys or ssh-agent for SSH); AgentControl never stores credentials.
+  Only work you start (**Test connection**, **Select Package...**, **Change package...**, **Upgrade** and the card's
+  **Refresh**) may open your own sign-in; background checks never prompt - a repo whose Git source needs a sign-in
+  shows a red **Sign-in needed** chip until you choose **Refresh** in its "..." menu
 - **Protected package servers**: a server source is added with its feed address (https; plain http only
   after an explicit "Allow insecure HTTP" tick), can be checked with **Test connection** before it is saved,
   and asks you to sign in only when the server needs it. Credentials are used for the current session
@@ -150,15 +151,19 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   records a fingerprint of each package it applies and does not replace a repo's agent files with a package of the
   same version whose content changed (an Upgrade or the restore at launch stops with a message; choosing that
   version again with **Change package...** asks for confirmation). The fingerprint detects a changed package; it
-  does not prove who published it. See the User Guide's section "Version Immutability and Trust" for how to guard
+  does not prove who published it. For a NuGet package it describes the copy cached on this computer, so a server-side
+  republish of a version this computer already has cached is not noticed until that cached copy is cleared. See the
+  User Guide's section "Version Immutability and Trust" for how to guard
   against it.
 - **Git repository sources.** AgentControl runs your own `git` with a hardened command line: no hooks, no
   submodules, no Git LFS, no remote helpers (such as `ext::`), and only `https`, `ssh` or a local path (never plain
-  `http` or `git://`). Only the package layout is checked out - the four managed folders, `release-notes.md` and
+  `http` or `git://`). Only the package layout is read, straight from the fetched commit - nothing is checked out, so no
+  filter or line-ending conversion can change a file: the four managed folders, `release-notes.md` and
   `AGENTS.md`; a symbolic link or submodule inside it is refused, nothing else in the repository is read, and the
   `.git` folder is never copied into your repo. The pin records the **commit** the tag pointed to. A tag that is
-  **moved** to another commit afterwards is flagged with a **Tag moved** chip and nothing is applied until you
-  accept it with **Change package...**, so never move a tag - publish a new version instead. For SSH, connect
+  **moved** to another commit afterwards is flagged with a **Tag moved** chip, and the pinned version is not re-applied
+  with the changed content until you accept it with **Change package...** (an upgrade to a different, newer version
+  stays available), so never move a tag - publish a new version instead. For SSH, connect
   once with `ssh` so the host key is trusted; AgentControl never accepts a host key on your behalf.
 - AgentControl never reads or writes the target repo's `nuget.config`, and keeps its NuGet
   caches in its own folder under the user profile.

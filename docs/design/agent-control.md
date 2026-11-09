@@ -35,6 +35,9 @@ flowchart TD
         NuGetSourceProvider
         SignatureVerificationSupport
         PackageContentIdentity
+        GitSourceProvider
+        GitRepositoryAddress
+        GitTagPattern
     end
     subgraph PackageCredentials
         FeedOrigin
@@ -58,7 +61,9 @@ flowchart TD
         GitClient
         GitCredentialClient
         CommittedAgentFilesCache
+        GitRemoteClient
     end
+    GitExecutable["git executable (the user's own, external)"]
     subgraph Settings
         SettingsStore
         RepoGroupName
@@ -94,6 +99,18 @@ flowchart TD
     RepoCardViewModel --> PackageVersionCache
     PackageSourceRegistry --> ZipFolderSourceProvider
     PackageSourceRegistry --> NuGetSourceProvider
+    PackageSourceRegistry --> GitSourceProvider
+    GitSourceProvider --> GitRepositoryAddress
+    GitSourceProvider --> GitTagPattern
+    GitSourceProvider --> GitRemoteClient
+    GitSourceProvider --> PackageContentIdentity
+    GitSourceProvider -.->|layout reader with the git-commit identity| PackageContentExtractor
+    GitRemoteClient --> SecretRedactingLogger
+    GitRemoteClient -->|hardened subprocess| GitExecutable
+    SourceEditorViewModel --> GitRepositoryAddress
+    SourceEditorViewModel --> GitTagPattern
+    SourceEditorViewModel --> GitSourceProvider
+    RepoCardViewModel --> GitTagPattern
     ZipFolderSourceProvider --> PackageSource
     NuGetSourceProvider --> PackageCredentialCallback
     NuGetSourceProvider --> SecretRedactingLogger
@@ -110,7 +127,7 @@ flowchart TD
     PackageVersionCache --> PackageSourceRegistry
     RepoCardViewModel --> PackageContentExtractor
     PackageZipExtractor --> PackageContentExtractor
-    RepoCardViewModel --> RepoPinStore
+    RepoCardViewModel -->|reads and writes the pin, with the applied package's identity| RepoPinStore
     RepoCardViewModel --> GitClient
     RepoCardViewModel --> AgentToolLauncher_Unit
     RepoCardViewModel --> SelectPackageWindowViewModel
@@ -128,7 +145,8 @@ credentials in memory only - unless the user opts in to having their own Git cre
 signed packages, refusing any package that is not validly signed), `RepoSync` for
 extracting a package zip's managed folders (from a zip or an
 unpacked NuGet package folder) into a repo and displaying release notes, `RepoConfig` for persisting
-each repo's pin, `GitIntegration` for status/pull/branch queries, and `AgentToolLauncher` for
+each repo's pin, `GitIntegration` for status/pull/branch queries and for hardened git runs against remote package
+repositories, and `AgentToolLauncher` for
 detecting a shell and launching the configured agentic CLI tool in it. `Utilities` provides shared,
 independently testable helpers (currently safe path combination) consumed across subsystems. After a
 genuine sync (Select Package, Upgrade, or Launch's best-effort re-extraction), `RepoCardViewModel`
@@ -142,7 +160,17 @@ tag that now points to another commit is shown on the card as a "Tag moved" warn
 with no identity adopts one silently the next time a package is selected or upgraded to - the launch-time restore never
 writes the pin (`AgentControl-System-PackageContentIntegrity`). A Git repository can be a package source: the user
 adds it from Settings with a tag pattern, sees which tags match before saving and chooses a version in Select Package
-(`AgentControl-System-GitSources`). See
+(`AgentControl-System-GitSources`, `AgentControl-System-GitSourceSettings`, `AgentControl-System-GitSourceSetup`,
+`AgentControl-System-GitSourceSelection`, `AgentControl-System-GitSourcePresentation`). Inside `AgentPackageManagement`,
+`PackageSourceRegistry` creates one `GitSourceProvider` per Git source; the provider uses `GitRepositoryAddress` (the
+validated, normalized address and its one allowed transport) and `GitTagPattern` (the tags that are versions) and
+reports `PackageContentIdentity`'s `git-commit:` form, and every git command it needs goes through `GitRemoteClient`
+of `GitIntegration`, the one place that runs the user's own `git` executable against an untrusted remote repository.
+`SourceEditorViewModel` uses `GitRepositoryAddress` and `GitTagPattern` to validate what the user types and a
+`GitSourceProvider` to preview the matching tags, and `RepoCardViewModel` uses `GitTagPattern` to name the tag of a
+pinned version. The provider hands the fetched package layout to `RepoSync` through the layout reader of
+`PackageContentExtractor`, and the identity that reader reports is the one `RepoCardViewModel` records in the pin
+after the extraction succeeded. See
 `docs/design/agent-control/{subsystem}.md` for each subsystem's own design, and
 `docs/design/agent-control/program.md` for `Program`'s design (which also documents Avalonia's `App`
 bootstrap responsibility, per program.sysml's documented exception for units without a dedicated
@@ -243,11 +271,12 @@ longer raise an error box, release notes or a prompt, and the window releases it
   capable (see architecture.md's Open Concerns #2).
 
 **Package Sources**: Any number of user-configured sources, each a folder of agent package zip
-files, a NuGet package folder (a local, mapped-drive or UNC folder feed) or a NuGet package server
-(the V3 service index of, for example, JFrog Artifactory or Azure Artifacts), identified by a unique
-alias.
+files, a NuGet package folder (a local, mapped-drive or UNC folder feed), a NuGet package server
+(the V3 service index of, for example, JFrog Artifactory or Azure Artifacts) or a Git repository, identified by a
+unique alias.
 
-- *Type*: File (folders) or network service (servers, HTTP).
+- *Type*: File (folders), network service (servers, HTTP) or external process (a Git repository, reached through the
+  user's own `git` executable over https, ssh or a local path).
 - *Role*: Consumer (`AgentPackageManagement`/`RepoSync` read packages from them).
 - *Contract*: Zip package filenames encode a name and a `PackageVersion`-parsable version (see
   `docs/design/agent-control/agent-package-management/package-source.md`); a NuGet package carries
@@ -268,6 +297,28 @@ alias.
   require it is refused (`AgentControl-System-PackageAuthenticity`). A zip package carries no signature, and a source
   that does not require signatures is not checked; the integrity of such a shared folder or server is the
   responsibility of whoever maintains it.
+
+  A **Git repository source** is configured with a repository address (an `https` or `ssh` address or a local path,
+  never carrying a credential), a tag pattern (a literal prefix and suffix around `{version}`, for example
+  `v{version}`, so the tags that match are the versions of the one package the source delivers), an optional
+  sub-folder of the repository that holds the package layout, and the package name
+  (`AgentControl-System-GitSourceSettings`, `AgentControl-System-GitSourceSetup`). The tags are listed from the remote
+  without a clone; when the user picks a version, exactly that one tag is fetched shallowly and the package files
+  are read directly from the fetched commit's blobs, so the files delivered are exactly those of the commit
+  (`AgentControl-System-GitSourceSelection`, `AgentControl-System-GitSources`). Only the transport of the address
+  itself is permitted for every git command - an `https` address never reaches a local path, an `ssh` helper or any
+  other protocol (`AgentControl-System-GitSourceTransport`). Only the package layout (the four managed folders and
+  the two root files, below the sub-folder when one is set) is ever read: a link or a submodule in it, a name that is
+  unsafe on some file system and two names that a case-insensitive or normalizing file system would merge are
+  refused, and nothing is delivered from a refused repository
+  (`AgentControl-System-GitSourceLayoutOnly`, `AgentControl-System-GitSourceRefusesLinks`,
+  `AgentControl-System-GitSourceRefusesCollisions`). Nothing the repository or the remote supplies is ever run
+  (`AgentControl-System-GitSourceSafety`). The sign-in is the user's own Git sign-in (see *Git sign-in* below). Where
+  the tag of a version is shown, the card names the tag and the first characters of the commit
+  (`AgentControl-System-GitSourcePresentation`); the content identity of the delivered package is the commit
+  (`git-commit:<commit id>`), never the tag, so a tag that moves is noticed (`AgentControl-System-MovedTagWarning`).
+  See `docs/design/agent-control/agent-package-management/git-source-provider.md` and
+  `docs/design/agent-control/git-integration/git-remote-client.md`.
 - *Constraints*: AgentControl never stores a password or token. Users must only add servers they trust
   (see *Risk Control Measures*).
 
@@ -294,24 +345,35 @@ alias.
 - *Type*: File.
 - *Role*: Provider/Consumer (`RepoConfig` reads and writes it).
 - *Contract*: Records the pinned package name, exact version and the alias of the source it came
-  from for that repo, the content identity of the package that was applied (a SHA-256 of the zip or
-  `.nupkg`, absent when none is known), plus a schema version (3); a missing file means the repo has
-  no pin yet, a pin without a source is read as a pin to the source named `Default`, a pin without an
-  identity is read as such (it adopts one the next time a package is selected or upgraded to), and a
-  pin from a newer schema is neither interpreted nor overwritten
-  (`AgentControl-System-SourcePinIntegrity`, `AgentControl-System-PackageContentIntegrity`).
+  from for that repo, the content identity of the package that was applied (absent when none is known), plus a
+  schema version (3). The identity is one of two forms, which are never compared as equal to each other:
+  `sha256:<hex>` for a zip or NuGet source (the SHA-256 of the delivered zip or `.nupkg` file; for NuGet it describes
+  the copy cached on this machine) and `git-commit:<commit id>` for a Git source (the commit the tag pointed to when
+  it was fetched - the tag itself is not stored, it is derived from the source's tag pattern whenever it is needed).
+  A missing file means the repo has no pin yet, a pin without a source is read as a pin to the source named `Default`,
+  a pin without an identity is read as such (it adopts one the next time a package is selected or upgraded to, never
+  at launch), and a pin from a newer schema is neither interpreted nor overwritten - the user is told to update
+  AgentControl (`AgentControl-System-SourcePinIntegrity`, `AgentControl-System-PinFile`,
+  `AgentControl-System-PackageContentIntegrity`, `AgentControl-System-IdentityAdoptedOnUpgrade`).
 - *Constraints*: No "latest"/unpinned mode is supported (mandatory version pinning). The restore of
   missing agent files at launch never writes the file.
 
-**Configured Git Executable**: The git executable used for status/pull/branch queries.
+**Configured Git Executable**: The git executable used for status/pull/branch queries and, hardened, for the Git
+package source.
 
 - *Type*: External process.
 - *Role*: Consumer (`GitIntegration` invokes it as a subprocess).
 - *Contract*: Invoked with `status`, `pull`, `rev-parse`, and `ls-files`-style arguments
   against a repo's working directory; failures are reported as result values, not unhandled
-  exceptions, for the operations users trigger directly (status, pull).
+  exceptions, for the operations users trigger directly (status, pull). For a Git package source `GitRemoteClient`
+  runs it from a neutral folder of AgentControl's own, never inside a repo, with command-scoped hardening and a time
+  and output limit (`ls-remote`, `init`, a one-tag `fetch`, `ls-tree`, `cat-file`); its failures are classified
+  and reported with fixed messages that never repeat git's own text or the repository address.
 - *Constraints*: Path is configurable via Settings; a missing/invalid executable raises a
-  clear error rather than a silent no-op.
+  clear error rather than a silent no-op. A Git package source needs at least the minimum supported Git version
+  (the `MinimumGitVersion` constant of `GitRemoteClient`; its value is stated in the requirements and the user guide),
+  because it relies on `fetch --no-write-fetch-head`; an older git is refused up front with a message that says how to
+  update it or choose another one.
 
 **Configured Agentic CLI Tool**: The developer's chosen agent tool command (e.g. GitHub
 Copilot CLI), launched inside a detected shell.
@@ -370,7 +432,10 @@ override for hermetic testing).
   application's logging stack.
 - **The user's git executable and Git credential helper** (not a software item of this system): when the user
   ticks "Remember on this computer", `GitCredentialClient` asks them - through `git credential` - to keep, find and
-  remove a package server's sign-in, so that AgentControl never stores a secret itself.
+  remove a package server's sign-in, so that AgentControl never stores a secret itself. `GitClient` uses the git
+  executable for a repo's status, pull and branch, and `GitRemoteClient` uses it - hardened, from a neutral folder -
+  to list, fetch and read the packages of a Git repository source, whose sign-in is the user's own credential helper
+  and ssh keys; it must be at least the minimum supported Git version (see *External Interfaces*).
 - **FlaUI** (`AgentControl-OTS-FlaUI-DriveUiTests`): drives the published application's UI
   via Windows UI Automation for end-to-end test scenarios. See `docs/design/ots/flaui.md`.
 - **WiX Toolset** (`AgentControl-OTS-WixToolset-BuildInstaller`): packages the published
@@ -385,7 +450,11 @@ Open Concerns #3 (local customizations inside the four managed folders are silen
 on the next sync/upgrade); this is a disclosed, accepted trade-off, not a defect. Package sources are
 untrusted input: pins are bound to their source alias and never resolved elsewhere
 (`AgentControl-System-SourcePinIntegrity`), NuGet content is read from a private per-source cache
-that rejects links and path traversal, a package version republished with different content is
+that rejects links and path traversal, a Git repository's package is never checked out - only the package layout is
+read, blob by blob, from the one fetched commit, after the tree was validated and with nothing from the repository or
+the remote ever run (`AgentControl-System-GitSourceSafety`; see *Design Constraints* and
+`docs/design/agent-control/agent-package-management/git-source-provider.md`), a package version republished with
+different content is
 detected by the content identity recorded in the pin and is not synced silently
 (`AgentControl-System-PackageContentIntegrity`; the identity detects a changed package, it does not prove who
 published it), and no secret is ever stored (see
@@ -479,7 +548,36 @@ an unwanted or repeated file write.
    optional root-level `AGENTS.md` template (`PackageContentExtractor.ReadAgentsMdTemplate`),
    writes it via `AcceptAgentsMdTemplate`, or persists a decline via `RepoPinStore.Save`
    (`AgentControl-System-AgentsMdTemplate`).
-5. The user's own choices - favorite, group, card color, collapsed section, renaming or removing a group, adding or
+5. **Git repository source.** The normal flow of a Git source (`AgentControl-System-GitSources`) is: (a) the user adds
+   the source in Settings; `SourceEditorViewModel` validates the address, tag pattern, sub-folder and package name
+   (`GitRepositoryAddress`, `GitTagPattern`) and its Test connection lists the remote's tags through
+   `GitSourceProvider` and previews which ones match - no clone, no fetch
+   (`AgentControl-System-GitSourceSetup`); `SettingsStore.Save` persists the source and refuses an address that
+   embeds a credential (`AgentControl-System-GitSourceSettings`). (b) Select Package, Upgrade and the card's
+   upgrade check call `GitSourceProvider.ListVersionsAsync`, which runs one `GitRemoteClient.ListTagsAsync`
+   (`git ls-remote`), keeps the tags that are strict versions under the pattern and returns each version with the
+   commit its tag points to (`AgentControl-System-GitSourceSelection`). (c) When the user picks a version,
+   `AcquireAsync` lists again to confirm that the repository still offers that version at that tag and commit,
+   then `GitRemoteClient` initializes an empty repository, fetches exactly that tag shallowly and checks that it
+   is the listed commit; the provider lists the layout entries of the commit and verifies the layout (only layout
+   paths, regular files only, no link or submodule, no unsafe or colliding name, within the size limits) before
+   anything is written, then reads the blobs with `git cat-file --batch` - nothing is checked out - into a
+   per-repository, per-commit cache and exposes the result through the layout reader
+   (`AgentControl-System-GitSourceLayoutOnly`, `AgentControl-System-GitSourceRefusesLinks`,
+   `AgentControl-System-GitSourceRefusesCollisions`). (d) `RepoCardViewModel` compares the reader's identity with the
+   pin (an Upgrade or the restore at launch stops on a difference, Change package asks first), passes the reader to
+   `PackageContentExtractor.Extract`, and only after the extraction succeeded `RepoPinStore.Save` records the
+   source alias, package, version and `git-commit:<commit id>`
+   (`AgentControl-System-PinFile`, `AgentControl-System-PackageContentIntegrity`). The *failure flow* never applies
+   anything and never changes the pin: a remote that needs a sign-in the user did not start is reported as "sign-in
+   needed" (see *Git sign-in* under *Design Constraints*); a git older than the minimum supported version is refused
+   before any command with a message that says how to update it or choose another git; a repository whose layout is
+   hostile (a link, a submodule, an unsafe or colliding name, a managed folder that is a file, too many or too
+   large files) is refused before a byte is written, with nothing cached; and every other failure (unreachable,
+   not found, time out, an unverified ssh host key) is reported with a fixed message that names the source alias and
+   never repeats git's text or the address. A tag that moved after the pin was made is shown on the card as "Tag
+   moved" and applies nothing (`AgentControl-System-MovedTagWarning`).
+6. The user's own choices - favorite, group, card color, collapsed section, renaming or removing a group, adding or
    removing a repo, and a launch being recorded - flow from the card or the group header through
    `MainWindowViewModel`'s transactional change: a candidate copy of the settings is changed and
    `SettingsStore.Save` writes it; only when that succeeded is the live state changed and `DisplayedItems` rebuilt
@@ -488,7 +586,7 @@ an unwanted or repeated file write.
    (`AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
    `AgentControl-System-AddRemoveRepo`). A saved theme is applied to the running application after the save
    (`AgentControl-System-Appearance`).
-6. Throughout, `Utilities.PathHelpers.SafePathCombine` validates any caller-supplied path
+7. Throughout, `Utilities.PathHelpers.SafePathCombine` validates any caller-supplied path
    component before file-system use, and `Logging` records process-launch and
    git-integration detail to the diagnostic log file.
 
@@ -521,9 +619,17 @@ an unwanted or repeated file write.
   plain file of the repo's root; otherwise there is no picture (`AgentControl-System-RecentRepos`).
 - Modal dialogs: every dialog is modal and keyboard-operable through one shared behavior, so the window behind a
   dialog can neither be used nor reached with the keyboard (`AgentControl-System-DialogKeyboard`).
-- Git repository sources: a Git repository can be a package source - its tags that match a pattern are the versions of one
-  package, fetched shallow into a cache keyed by repository and commit, with the commit as the pin's content identity
-  (`AgentControl-System-GitSources`). Fetching never runs anything from the repository or the remote - no hooks,
-  submodules, filters or remote helpers, one transport, only the package layout read, links and submodules refused
-  (`AgentControl-System-GitSourceSafety`) - and the sign-in is the user's own Git sign-in, offered only for work the user
-  started (`AgentControl-System-GitSignIn`).
+- Git repository sources: a Git repository can be a package source - its tags that match a pattern are the versions of
+  one package, fetched shallow into a cache keyed by repository and commit, with the commit as the pin's content
+  identity (`AgentControl-System-GitSources`). Fetching never runs anything from the repository or the remote - no
+  hooks, submodules, filters or remote helpers, one transport (the address's own), only the package layout read, links
+  and submodules refused (`AgentControl-System-GitSourceSafety`, `AgentControl-System-GitSourceTransport`,
+  `AgentControl-System-GitSourceLayoutOnly`, `AgentControl-System-GitSourceRefusesLinks`). The files are read straight
+  from the fetched commit's blobs; nothing is checked out, so no checkout filter or conversion can change them. The
+  Git source needs a git executable of at least the minimum supported version (the `MinimumGitVersion` constant; its
+  value is stated in the requirements and the user guide) and is refused with an actionable message otherwise.
+- Git sign-in: the sign-in is the user's own Git sign-in - their credential helper, ssh keys and ssh-agent - and
+  AgentControl never stores a credential for it. Only work the user started (testing a source's connection, listing
+  or choosing a version, Upgrade, Change package, a card's Refresh, and the repair at Launch) may let git show its
+  sign-in UI; the background upgrade check never prompts and reports "sign-in needed" on the card instead
+  (`AgentControl-System-GitSignIn`, `AgentControl-System-GitSignInBackgroundNeverPrompts`).

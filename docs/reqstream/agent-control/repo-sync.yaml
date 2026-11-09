@@ -151,9 +151,22 @@ sections:
       - id: AgentControl-RepoSync-ContentIdentity
         title: >-
           The RepoSync subsystem shall expose, for a package it reads, the content identity that
-          the package's source supplied or computed for it, and for a zip package shall compute it
-          from the very bytes that are extracted, so that what is recorded is always what was
-          applied.
+          the package's source supplied (or none when the source supplied none), so that what a
+          source can say about its package reaches the pin.
+        justification: |
+          The identity recorded in a repo's pin comes from the source of the package (the hash of a
+          zip or a NuGet package, the commit of a Git tag); the reader is the channel that carries
+          it from the source to the code that records it.
+        children:
+          - AgentControl-PackageContentExtractor-FolderReaderIdentity
+          - AgentControl-PackageContentExtractor-FolderReaderNoIdentity
+        tests:
+          - RepoSync_ContentIdentity_FolderReadersReportTheSuppliedIdentityOrNone
+
+      - id: AgentControl-RepoSync-ContentIdentityOfAppliedBytes
+        title: >-
+          The RepoSync subsystem shall, for a zip package, compute the content identity from the
+          very bytes that are extracted, so that what is recorded is always what was applied.
         justification: |
           An identity taken in a separate look at the package file could describe different bytes
           than the ones extracted if the file were replaced in between; computing it from the one
@@ -161,33 +174,62 @@ sections:
         children:
           - AgentControl-PackageContentExtractor-ReaderContentIdentity
           - AgentControl-PackageContentExtractor-ZipReaderReleasesHandleOnFailure
-          - AgentControl-PackageContentExtractor-FolderReaderIdentity
-          - AgentControl-PackageContentExtractor-FolderReaderNoIdentity
         tests:
-          - ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries
-          - DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull
+          - RepoSync_ContentIdentity_ZipIdentityDescribesTheBytesThatAreApplied
 
       - id: AgentControl-RepoSync-LayoutRoot
         title: >-
           The RepoSync subsystem shall be able to read a package from a folder whose root is the
-          package layout - a checked-out Git repository - seeing only the managed agent folders and
-          the two root files, never the repository's metadata or other content, and refusing any
-          link that is part of the layout while ignoring links that are not.
+          package layout (such as the files of a Git package), reporting the content identity its
+          source supplied, and shall refuse a layout root that does not exist or is a link.
         justification: |
-          A Git package is delivered as a checked-out folder rather than a zip or a NuGet package;
-          the same extraction rules must apply to it, and what a repository holds besides the
-          package must not influence or leak into the repos that are synced.
+          A Git package is delivered as a folder rather than a zip or a NuGet package; the same
+          extraction rules must apply to it.
         children:
           - AgentControl-PackageContentExtractor-ReadLayoutRoot
           - AgentControl-PackageContentExtractor-LayoutRootIdentity
           - AgentControl-PackageContentExtractor-RefuseMissingOrLinkedLayoutRoot
+        tests:
+          - RepoSync_LayoutRoot_OnlyTheLayoutIsSeenReadAndApplied
+
+      - id: AgentControl-RepoSync-LayoutRootOnlyLayout
+        title: >-
+          The RepoSync subsystem shall, when it reads a folder whose root is the package layout,
+          see only the managed agent folders and the two root files, never the folder's metadata
+          or other content.
+        justification: |
+          A folder that holds a package holds many things that are not the package; what it holds
+          besides the package must not influence or leak into the repos that are synced.
+        children:
           - AgentControl-PackageContentExtractor-RefuseOutsideLayoutPaths
-          - AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout
+          - AgentControl-PackageContentExtractor-ExcludeGitFolder
+        tests:
+          - RepoSync_LayoutRoot_OnlyTheLayoutIsSeenReadAndApplied
+
+      - id: AgentControl-RepoSync-LayoutRootRefusesLinks
+        title: >-
+          The RepoSync subsystem shall refuse, when it reads a folder whose root is the package
+          layout, any link that is part of the layout, before the repo is touched.
+        justification: |
+          A link in the layout could redirect a read, or the write that follows it, to any file on
+          the machine.
+        children:
           - AgentControl-PackageContentExtractor-RefuseLinkInManagedFolder
           - AgentControl-PackageContentExtractor-RefuseLinkInPlaceOfGitHub
           - AgentControl-PackageContentExtractor-RefuseLinkInPlaceOfManagedFolder
           - AgentControl-PackageContentExtractor-RefuseLinkAsRootFile
-          - AgentControl-PackageContentExtractor-ExcludeGitFolder
         tests:
-          - DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity
-          - DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused
+          - RepoSync_LayoutRoot_LinkInTheLayoutIsRefusedWhileLinkOutsideItIsIgnored
+
+      - id: AgentControl-RepoSync-LayoutRootIgnoresOtherLinks
+        title: >-
+          The RepoSync subsystem shall neither inspect nor refuse a link in a folder whose root is
+          the package layout when the link is not part of the layout.
+        justification: |
+          A repository may legitimately hold links in content that is not part of the package;
+          refusing the package for them would make such repositories unusable without protecting
+          anything.
+        children:
+          - AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout
+        tests:
+          - RepoSync_LayoutRoot_LinkInTheLayoutIsRefusedWhileLinkOutsideItIsIgnored

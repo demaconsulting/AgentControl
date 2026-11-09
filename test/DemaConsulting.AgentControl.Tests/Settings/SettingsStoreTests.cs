@@ -111,11 +111,10 @@ public class SettingsStoreTests
 
     /// <summary>
     ///     Test that a Git source round-trips through the settings file with its address, tag pattern,
-    ///     sub-folder and single package ID, is written by name, holds no secret-like property, and that
-    ///     an address with credentials is refused before anything is written.
+    ///     sub-folder and single package ID, is written by name and holds no secret-like property.
     /// </summary>
     [Fact]
-    public void SettingsStore_SaveThenLoad_GitSource_RoundTripsAndRefusesCredentials()
+    public void SettingsStore_SaveThenLoad_GitSource_RoundTripsByNameWithoutSecretLikeProperties()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -156,11 +155,46 @@ public class SettingsStoreTests
                 names,
                 name => new[] { "password", "token", "secret", "credential", "key" }
                     .Any(marker => name.Contains(marker, StringComparison.OrdinalIgnoreCase)));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
 
-            // Act / Assert: a credential in the address stops the save and writes nothing new
+    /// <summary>
+    ///     Test that a Git source whose address embeds a credential is refused before anything is
+    ///     written: the failure does not repeat the secret and the saved file is unchanged.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Save_GitSourceAddressWithCredential_IsRefusedWithoutChangingTheFile()
+    {
+        // Arrange: a saved Git source
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var settings = new AppSettings
+            {
+                Sources =
+                [
+                    new PackageSourceDefinition
+                    {
+                        Alias = "Repo",
+                        Type = PackageSourceType.Git,
+                        Location = "git@example.invalid:org/repo.git",
+                        TagPattern = "release/{version}",
+                        PackageIds = ["contoso-agents"]
+                    }
+                ]
+            };
+            SettingsStore.Save(settings, configDir);
             var before = File.ReadAllText(Path.Combine(configDir, "settings.json"));
+
+            // Act: a credential in the address stops the save
             settings.Sources[0].Location = "https://user:SentinelSecretValue@example.invalid/org/repo.git";
             var failure = Assert.Throws<InvalidOperationException>(() => SettingsStore.Save(settings, configDir));
+
+            // Assert: the secret is not repeated and nothing new was written
             Assert.DoesNotContain("SentinelSecretValue", failure.Message, StringComparison.Ordinal);
             Assert.Equal(before, File.ReadAllText(Path.Combine(configDir, "settings.json")));
         }

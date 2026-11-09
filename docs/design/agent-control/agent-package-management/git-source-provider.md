@@ -174,4 +174,8 @@ when the token is cancelled, at every step (`-CancellationObserved`). `Interacti
 
 - **PackageSourceRegistry** - creates it for a Git source.
 - **PackageVersionCache**, **RepoCardViewModel** and the Select Package window - through `IPackageSourceProvider`.
-- The source editor (a later change) - through `IGitTagPreview`.
+- **SourceEditorViewModel** and **MainWindowViewModel** (`LauncherUI`) - create one for the source editor's Test
+  connection (the main window supplies the provider the settings window's connection test uses; the editor creates a
+  default one when its owner supplies none), always with `Interactive` set because the user started the test; the
+  editor lists the tags through `IPackageSourceProvider` and shows the tag preview through `IGitTagPreview`
+  (`PreviewAsync`).

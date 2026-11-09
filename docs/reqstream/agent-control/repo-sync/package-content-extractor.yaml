@@ -284,15 +284,15 @@ sections:
         tests:
           - DirectoryPackageContentReader_Open_WithoutIdentity_ReportsNone
 
-      # ---- Package layout in the root of a checked-out folder (Git packages) ----
+      # ---- Package layout in the root of a folder (Git packages) ----
       - id: AgentControl-PackageContentExtractor-ReadLayoutRoot
         title: >-
           The folder package reader shall be able to read a folder whose root is the package layout
-          (a checked-out Git repository), listing and reading only the four managed agent folders
-          and the two root files.
+          (for example the files of a Git package), listing and reading only the four managed agent
+          folders and the two root files.
         justification: |
-          A checked-out repository holds many things that are not the package; the extractor must
-          see only the layout.
+          A folder that holds a package holds many things that are not the package; the extractor
+          must see only the layout.
         tests:
           - DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity
 
@@ -310,7 +310,7 @@ sections:
           The folder package reader shall refuse to open a layout root that does not exist or that
           is a link.
         justification: |
-          A link in place of the checked-out folder could make the extractor read content from
+          A link in place of the layout folder could make the extractor read content from
           anywhere; a missing folder is a failed fetch that must be reported, not read as empty.
         tests:
           - DirectoryPackageContentReader_OpenLayoutRoot_MissingFolderOrLink_ThrowsInvalidOperationException
@@ -380,7 +380,7 @@ sections:
           The folder package reader, when reading a layout root, shall never list or read a .git
           folder or any other path outside the layout.
         justification: |
-          A checked-out repository's metadata is not part of a package and must not be copied into
+          A repository's metadata is not part of a package and must not be copied into
           another repository.
         tests:
           - DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity

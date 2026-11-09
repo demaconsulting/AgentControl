@@ -1442,74 +1442,114 @@ sections:
 
       - id: AgentControl-LauncherUI-ContentChangeProtection
         title: >-
-          The LauncherUI subsystem shall record the content identity of a package when it is
-          selected or upgraded to, shall not replace a repo's agent files with a package of the
-          pinned version whose content differs from the recorded identity when upgrading or when
-          restoring missing agent files before launch (telling the user in plain language,
-          changing nothing and never writing the pin during a launch), shall ask the user to
-          confirm before a selected package of that version replaces them, and shall apply a
-          package silently, recording its identity, when the pin recorded none or the source
-          reports none.
+          The LauncherUI subsystem shall record the content identity of a package in the repo's pin
+          when the package is selected or upgraded to.
         justification: |
           A package republished under the version a repo is pinned to would silently change the
-          instructions an agent follows, so a changed copy must never be applied without the user
-          knowing; the launch-time restore must also never rewrite the pin, because that would
-          change a file under version control every time the agent tool is started. Pins made
-          before identities existed, and sources that cannot name an identity, must keep working
-          without warnings that mean nothing.
+          instructions an agent follows; recording what was applied is what makes that detectable.
         children:
           - AgentControl-RepoCardViewModel-RecordContentIdentity
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin
+
+      - id: AgentControl-LauncherUI-ContentChangeRefusal
+        title: >-
+          The LauncherUI subsystem shall not replace a repo's agent files with a package of the
+          pinned version whose content differs from the recorded identity when upgrading or when
+          restoring missing agent files before launch, shall tell the user in plain language,
+          shall change nothing and shall never write the pin during a launch.
+        justification: |
+          A changed copy of the pinned version must never be applied without the user knowing; the
+          launch-time restore must also never rewrite the pin, because that would change a file
+          under version control every time the agent tool is started.
+        children:
           - AgentControl-RepoCardViewModel-RefuseChangedContent
           - AgentControl-RepoCardViewModel-RefuseChangedContentMessage
+          - AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin
+        tests:
+          - RepoCardViewModel_UpgradeCommand_SameVersionRepublished_RefusesWithoutChangingRepoOrPin
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SameVersionRepublished_RefusesWithoutExtractingOrWritingPin
+
+      - id: AgentControl-LauncherUI-ContentChangeConfirmation
+        title: >-
+          The LauncherUI subsystem shall ask the user to confirm before a selected package of the
+          pinned version, whose content differs from the recorded identity, replaces the repo's
+          agent files, and shall change nothing unless the user confirms.
+        justification: |
+          Accepting changed content is a decision that belongs to the user; asking first makes it
+          deliberate, and choosing the same version again is the one way to make it.
+        children:
           - AgentControl-RepoCardViewModel-ConfirmChangedContent
           - AgentControl-RepoCardViewModel-ApplyConfirmedContent
           - AgentControl-RepoCardViewModel-RefuseChangeWithoutAsking
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing
+          - MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed
+
+      - id: AgentControl-LauncherUI-ContentChangeAdoption
+        title: >-
+          The LauncherUI subsystem shall apply a package silently, recording its identity, when the
+          pin recorded none or the source reports none.
+        justification: |
+          Pins made before identities existed, and sources that cannot name an identity, must keep
+          working without warnings that mean nothing.
+        children:
           - AgentControl-RepoCardViewModel-AdoptMissingIdentity
           - AgentControl-RepoCardViewModel-IgnoreMissingSourceIdentity
-          - AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin
         tests:
-          - RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin
-          - RepoCardViewModel_UpgradeCommand_SameVersionRepublished_RefusesWithoutChangingRepoOrPin
-          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SameVersionRepublished_RefusesWithoutExtractingOrWritingPin
-          - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing
           - RepoCardViewModel_ApplySelectedPackage_PinWithoutIdentity_AdoptsIdentityWithoutWarning
-          - MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed
 
       - id: AgentControl-LauncherUI-GitSourceSetup
         title: >-
-          The LauncherUI subsystem shall set up Git package sources so that git is run with the
-          configured git executable, may show its credential UI only for work the user started and
-          never for background work such as the upgrade check or the restore before launch, keeps
-          what it fetches inside the isolated configuration directory when one is given, and, when
-          the installed git is older than the supported version, says so on the card (for the
-          background check) instead of failing in an unclear way.
+          The LauncherUI subsystem shall run git for Git package sources with the configured git
+          executable and shall keep what it fetches inside the isolated configuration directory
+          when one is given.
         justification: |
-          A sign-in window that opens by itself, or a test that writes into the real user profile,
-          would be a defect; the card is where the difference between user-started and background
-          work is known. A git that is too old fails with an error that means nothing to the user,
-          so the card says what is wrong and what to do.
+          A test that writes into the real user profile, or a git other than the one the user
+          configured, would be a defect; the card is where those settings are known.
         children:
           - AgentControl-RepoCardViewModel-GitSourceOptions
-          - AgentControl-RepoCardViewModel-GitSourcePrompts
           - AgentControl-RepoCardViewModel-GitSourceCacheRoot
+        tests:
+          - RepoCardViewModel_CreateSourceRegistry_GitSource_RunsTheConfiguredOrOverriddenGit
+
+      - id: AgentControl-LauncherUI-GitSourcePrompts
+        title: >-
+          The LauncherUI subsystem shall let git show its credential UI only for work the user
+          started and never for background work such as the upgrade check or the restore before
+          launch.
+        justification: |
+          A sign-in window that opens by itself would be a defect; the card is where the difference
+          between user-started and background work is known.
+        children:
+          - AgentControl-RepoCardViewModel-GitSourcePrompts
+        tests:
+          - RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork
+
+      - id: AgentControl-LauncherUI-GitTooOld
+        title: >-
+          The LauncherUI subsystem shall say on the card, when the installed git is older than the
+          supported version, that the git is too old (for the background check) and offer no
+          upgrade, instead of failing in an unclear way.
+        justification: |
+          A git that is too old fails with an error that means nothing to the user, so the card
+          says what is wrong and what to do.
+        children:
           - AgentControl-RepoCardViewModel-GitTooOldProblem
           - AgentControl-RepoCardViewModel-GitTooOldNoUpgrade
         tests:
-          - RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork
           - RepoCardViewModel_RefreshUpgradeStatus_GitTooOld_ShowsSourceProblemWithoutSignIn
 
       - id: AgentControl-LauncherUI-GitSourceEditor
         title: >-
           The LauncherUI subsystem shall offer, for a Git repository source, an editor in which the
           user enters the repository address, the package name, a tag pattern and optionally the
-          folder inside the repository, each explained with examples, validated while the user types
-          and saved only when the application would accept it, and in which the user can test the
-          connection to see which of the repository's tags match the pattern before saving.
+          folder inside the repository, each explained with examples, validated while the user
+          types and saved only when the application would accept it.
         justification: |
-          A Git source is only useful when its address and tag pattern are right, and a pattern that
-          matches nothing is an easy mistake (a capital letter, a missing prefix); showing the
-          matching tags, and the tags that did not match when none does, lets the user fix it while
-          the dialog is still open instead of discovering an empty package list later.
+          A Git source is only useful when its address and tag pattern are right; validating while
+          the user types lets them fix a mistake while the dialog is still open instead of
+          discovering an empty package list later.
         children:
           - AgentControl-SourceEditorViewModel-GitEditor
           - AgentControl-SourceEditorViewModel-GitEditorDefaults
@@ -1521,6 +1561,26 @@ sections:
           - AgentControl-SourceEditorViewModel-GitValidationTagPattern
           - AgentControl-SourceEditorViewModel-GitValidationSubfolder
           - AgentControl-SourceEditorViewModel-GitValidationPackageName
+          - AgentControl-SourceEditorViewModel-GitTagPatternHelp
+          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitSource
+          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitAddress
+          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitSubfolder
+          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitPackageName
+        tests:
+          - SourceEditorWindow_GitSource_ShowsGitSectionsAndHidesNuGetOnes
+          - SourceEditorWindow_GitSource_BadTagPattern_ShowsErrorAndDisablesSave
+          - SourceEditorWindow_GitSource_Save_ClosesWithTheGitDefinition
+
+      - id: AgentControl-LauncherUI-GitSourceConnectionTest
+        title: >-
+          The LauncherUI subsystem shall let the user test the connection to a Git repository in
+          the source editor and see which of the repository's tags match the pattern - and, when
+          none matches, which tags the repository has - before saving.
+        justification: |
+          A tag pattern that matches nothing is an easy mistake (a capital letter, a missing
+          prefix); showing the matching tags, and the tags that did not match when none does, lets
+          the user fix it while the dialog is still open.
+        children:
           - AgentControl-SourceEditorViewModel-GitTestConnection
           - AgentControl-SourceEditorViewModel-GitTestRuns
           - AgentControl-SourceEditorViewModel-GitTestDefaultProvider
@@ -1533,19 +1593,11 @@ sections:
           - AgentControl-SourceEditorViewModel-GitTagPreviewNoMatch
           - AgentControl-SourceEditorViewModel-GitTagPreviewNoTags
           - AgentControl-SourceEditorViewModel-GitTagPreviewCleared
-          - AgentControl-SourceEditorViewModel-GitTagPatternHelp
-          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitSource
-          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitAddress
-          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitSubfolder
-          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitPackageName
           - AgentControl-MainWindowViewModel-GitConnectionTestProvider
           - AgentControl-MainWindowViewModel-GitConnectionTestInteractive
           - AgentControl-MainWindowViewModel-GitConnectionTestRefusesOldGit
         tests:
-          - SourceEditorWindow_GitSource_ShowsGitSectionsAndHidesNuGetOnes
-          - SourceEditorWindow_GitSource_BadTagPattern_ShowsErrorAndDisablesSave
           - SourceEditorWindow_GitSource_TestConnection_ShowsTagPreviewList
-          - SourceEditorWindow_GitSource_Save_ClosesWithTheGitDefinition
 
       - id: AgentControl-LauncherUI-GitSignInGuidance
         title: >-
@@ -1566,69 +1618,119 @@ sections:
         title: >-
           The LauncherUI subsystem shall present a Git repository source with the Git icon and its
           type name wherever sources are shown (the Settings list, Select Package and the repo
-          card), list a remote Git source as not checked and a Git source on a local path with its
-          folder status, and show on the card of a repo pinned to a Git source the tag and the
-          shortened commit its files came from.
+          card).
         justification: |
           The same name can exist in several sources, so the user must be able to tell a Git source
-          from a folder or a server at a glance; knowing the exact tag and commit a repo's files came
-          from is what makes a later change to that tag recognizable.
+          from a folder or a server at a glance.
+        children:
+          - AgentControl-RepoCardViewModel-GitSourceAwareness
+        tests:
+          - PackageSourceIcons_GitSource_HasGitIconAndNames
+          - SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName
+          - RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias
+
+      - id: AgentControl-LauncherUI-GitSourceRowStatus
+        title: >-
+          The LauncherUI subsystem shall list a remote Git source in the Settings window as not
+          checked, list a Git source on a local path with the status of its folder, and keep a
+          saved Git source in the settings.
+        justification: |
+          A remote repository cannot be checked without a network and a sign-in, so claiming a
+          status for it would mislead; a local path can be checked like any folder source.
         children:
           - AgentControl-SettingsWindowViewModel-GitSourceRowStatus
           - AgentControl-SettingsWindowViewModel-GitSourceLocalFolderStatus
           - AgentControl-SettingsWindowViewModel-GitSourcePersisted
-          - AgentControl-RepoCardViewModel-GitSourceAwareness
-          - AgentControl-RepoCardViewModel-GitSourceTooltip
         tests:
-          - PackageSourceIcons_GitSource_HasGitIconAndNames
-          - SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName
           - PackageSourceItemViewModel_RemoteGitSource_IsNotCheckedAndNeverAsksTheFolder
           - PackageSourceItemViewModel_LocalGitSource_ChecksTheFolder
           - PackageSourceItemViewModel_OtherKinds_RemoteClassificationUnchanged
-          - RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias
+
+      - id: AgentControl-LauncherUI-GitSourceCardTooltip
+        title: >-
+          The LauncherUI subsystem shall show on the card of a repo pinned to a Git source the tag
+          and the shortened commit its files came from.
+        justification: |
+          Knowing the exact tag and commit a repo's files came from is what makes a later change
+          to that tag recognizable.
+        children:
+          - AgentControl-RepoCardViewModel-GitSourceTooltip
+        tests:
           - RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit
 
       - id: AgentControl-LauncherUI-TagMovedWarning
         title: >-
-          The LauncherUI subsystem shall show, on the card of a repo pinned to a Git source, a
-          "Tag moved" warning when the tag of the pinned version now points to a different commit
-          than the one the repo's files came from, explaining what happened and how to accept it,
-          and shall never apply anything because of it; a refresh the user starts shall read the
-          Git source again, so that a tag moved during the session is not missed, and a warning
-          shall not stay up once a later check could not confirm it.
+          The LauncherUI subsystem shall show, on the card of a repo pinned to a Git source, a "Tag
+          moved" warning when the tag of the pinned version now points to a different commit than
+          the one the repo's files came from, explaining what happened and how to accept it.
         justification: |
           A moved tag changes the instructions an agent follows without a new version, so the user
-          must be told; applying it silently would defeat the point of pinning, so the decision
-          stays with the user. A cached listing would hide a tag moved later in the session, and a
-          warning kept after a failed check would claim something nothing established.
+          must be told.
         children:
           - AgentControl-RepoCardViewModel-TagMovedWarning
-          - AgentControl-RepoCardViewModel-TagMovedAppliesNothing
           - AgentControl-RepoCardViewModel-TagMovedNeedsEvidence
           - AgentControl-RepoCardViewModel-TagMovedClearedByNewPin
-          - AgentControl-RepoCardViewModel-TagMovedFreshListing
-          - AgentControl-RepoCardViewModel-TagMovedClearedWhenUnknown
           - AgentControl-RepoCardViewModel-TagMovedFollowsTagPattern
         tests:
           - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip
+
+      - id: AgentControl-LauncherUI-TagMovedAppliesNothing
+        title: >-
+          The LauncherUI subsystem shall never apply anything because a tag moved.
+        justification: |
+          Applying a moved tag silently would defeat the point of pinning, so the decision stays
+          with the user.
+        children:
+          - AgentControl-RepoCardViewModel-TagMovedAppliesNothing
+        tests:
           - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing
+
+      - id: AgentControl-LauncherUI-TagMovedFreshListing
+        title: >-
+          The LauncherUI subsystem shall read the Git source again when the user starts a refresh,
+          so that a tag moved during the session is not missed.
+        justification: |
+          A cached listing would hide a tag moved later in the session.
+        children:
+          - AgentControl-RepoCardViewModel-TagMovedFreshListing
+        tests:
           - RepoCardViewModel_RefreshAsync_GitSourceTagMovedAfterCachedListing_ListsAgainAndShowsTagMoved
+
+      - id: AgentControl-LauncherUI-TagMovedClearedWhenUnknown
+        title: >-
+          The LauncherUI subsystem shall not keep a "Tag moved" warning up once a later check could
+          not confirm it.
+        justification: |
+          A warning kept after a failed check would claim something nothing established.
+        children:
+          - AgentControl-RepoCardViewModel-TagMovedClearedWhenUnknown
+        tests:
           - RepoCardViewModel_RefreshAsync_FailsAfterTagMoved_ClearsTagMovedAndShowsCheckFailed
 
       - id: AgentControl-LauncherUI-ChangePackage
         title: >-
           The LauncherUI subsystem shall let the user, for a repo that already has a pin, open the
-          package selection from the card menu as Change package, starting on the source, package
-          and version the repo uses, so that the user can choose another package or version, or
-          choose the same version again to accept content that changed behind it.
+          package selection from the card menu as Change package, so that the user can choose
+          another package or version, or choose the same version again to accept content that
+          changed behind it.
         justification: |
           A pinned repo needs a way to move to another package, and the deliberate way to accept a
-          republished version or a moved tag is to choose it again; starting on the current choice
-          makes that a single confirmation, and the confirmation of changed content is the same
-          one a first selection gets.
+          republished version or a moved tag is to choose it again.
         children:
           - AgentControl-RepoCardViewModel-ChangePackage
           - AgentControl-RepoCardViewModel-ChangePackageRequest
+        tests:
+          - MainWindow_ChangePackageOnPinnedRepo_OpensSelectPackageOnThePinnedChoice
+          - RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CanExecuteAsChangePackage
+
+      - id: AgentControl-LauncherUI-ChangePackageStartsOnCurrentChoice
+        title: >-
+          The LauncherUI subsystem shall start Change package on the source, package and version
+          the repo uses, never overriding a choice the user makes while it loads.
+        justification: |
+          Starting on the current choice makes accepting changed content a single confirmation,
+          and a start that overrode the user's own choice would be a trap.
+        children:
           - AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage
           - AgentControl-SelectPackageWindowViewModel-PreselectNewestWhenVersionGone
           - AgentControl-SelectPackageWindowViewModel-PreselectNothingWhenSourceFailed
@@ -1638,5 +1740,3 @@ sections:
           - AgentControl-SelectPackageWindowViewModel-PreselectCancelled
         tests:
           - MainWindow_ChangePackageOnPinnedRepo_OpensSelectPackageOnThePinnedChoice
-          - MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed
-          - RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CanExecuteAsChangePackage

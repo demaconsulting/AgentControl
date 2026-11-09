@@ -173,6 +173,64 @@ public sealed class GitSourceTests
     }
 
     /// <summary>
+    ///     An address that carries a credential (a password in the URL) is refused by the Git source editor with
+    ///     a message that does not repeat it: the source cannot be saved, and the settings file never holds the
+    ///     secret.
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_AddGitRepositoryWithCredentialInAddress_IsRefusedAndNothingIsSaved()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        using var fixture = GitFixtureRepository.CreateOrSkip();
+        using var context = new AgentControlTestContext(useRealGit: true)
+        {
+            LaunchEnvironment = fixture.IsolationEnvironment
+        };
+        var mainWindow = context.Launch();
+        var settingsWindow = OpenSettings(context, mainWindow);
+        Find(settingsWindow, "AddSourceButton").AsButton().Invoke();
+        Find(settingsWindow, "AddGitSourceButton").AsMenuItem().Invoke();
+        var editor = context.WaitForWindowWithDescendant("SourceGitPackageIdTextBox", TimeSpan.FromSeconds(15));
+        Assert.NotNull(editor);
+
+        // Act: type an address with a password in it, and a valid alias and pattern
+        Find(editor, "SourceAliasTextBox").AsTextBox().Text = "Repo";
+        Find(editor, "SourceTagPatternTextBox").AsTextBox().Text = "release/{version}";
+        Find(editor, "SourceLocationTextBox").AsTextBox().Text = "https://user:SentinelSecretValue@example.invalid/org/agents.git";
+
+        // Assert: the address is refused with a message that does not repeat the secret, and cannot be saved
+        Assert.True(Retry.WhileFalse(
+            () => !string.IsNullOrWhiteSpace(
+                editor.FindFirstDescendant(cf => cf.ByAutomationId("SourceLocationErrorText"))?.Name),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.DoesNotContain(
+            "SentinelSecretValue", Find(editor, "SourceLocationErrorText").Name, StringComparison.Ordinal);
+        Assert.False(Find(editor, "SourceEditorSaveButton").AsButton().IsEnabled);
+
+        // Act: leave the editor and save the settings
+        Find(editor, "SourceEditorCancelButton").AsButton().Invoke();
+        Find(settingsWindow, "SaveSettingsButton").AsButton().Invoke();
+
+        // Assert: no source was added and the secret is in no file the application wrote
+        Assert.True(Retry.WhileFalse(
+            () => File.Exists(Path.Combine(context.ConfigDirectory, "settings.json")),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        foreach (var file in Directory.EnumerateFiles(context.RootDirectory, "*", SearchOption.AllDirectories))
+        {
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            Assert.DoesNotContain("SentinelSecretValue", reader.ReadToEnd(), StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
     ///     A never-pinned repo is offered "Select Package..." (not "Change package..."); choosing a version
     ///     of the pre-configured Git source applies that tag's files, records the source, package, version
     ///     and the tag's commit in the pin file, and the card shows the Git source icon and alias.
@@ -465,7 +523,7 @@ public sealed class GitSourceTests
     /// <param name="mainWindow">The main window.</param>
     /// <param name="menuItemAutomationId">The AutomationId of the wanted item.</param>
     /// <returns>The menu item.</returns>
-    private static AutomationElement OpenCardMenuItem(Window mainWindow, string menuItemAutomationId)
+    internal static AutomationElement OpenCardMenuItem(Window mainWindow, string menuItemAutomationId)
     {
         AutomationElement? item = null;
         for (var attempt = 0; attempt < 3 && item is null; attempt++)
@@ -487,7 +545,7 @@ public sealed class GitSourceTests
     /// <param name="context">The running test context.</param>
     /// <param name="mainWindow">The main window.</param>
     /// <returns>The Settings window.</returns>
-    private static Window OpenSettings(AgentControlTestContext context, Window mainWindow)
+    internal static Window OpenSettings(AgentControlTestContext context, Window mainWindow)
     {
         Find(mainWindow, "OpenSettingsButton").AsButton().Invoke();
         var settingsWindow = context.WaitForWindowWithDescendant("AddSourceButton", TimeSpan.FromSeconds(15));
@@ -501,7 +559,7 @@ public sealed class GitSourceTests
     /// <param name="parent">The window or element to search under.</param>
     /// <param name="automationId">The AutomationId to find.</param>
     /// <returns>The element.</returns>
-    private static AutomationElement Find(AutomationElement parent, string automationId)
+    internal static AutomationElement Find(AutomationElement parent, string automationId)
     {
         var element = Retry.WhileNull(
             () => parent.FindFirstDescendant(cf => cf.ByAutomationId(automationId)),
@@ -518,7 +576,7 @@ public sealed class GitSourceTests
     /// <param name="automationId">The AutomationId of the text element.</param>
     /// <param name="expected">The text expected.</param>
     /// <returns><see langword="true"/> when the text appeared in time.</returns>
-    private static bool WaitForText(AutomationElement parent, string automationId, string expected) =>
+    internal static bool WaitForText(AutomationElement parent, string automationId, string expected) =>
         Retry.WhileFalse(
             () => parent.FindAllDescendants(cf => cf.ByAutomationId(automationId))
                 .Any(element => string.Equals(element.Name, expected, StringComparison.Ordinal)),
@@ -541,7 +599,7 @@ public sealed class GitSourceTests
     /// <param name="dialog">The dialog window.</param>
     /// <param name="listAutomationId">The AutomationId of the list.</param>
     /// <param name="itemName">The name of the item to select.</param>
-    private static void SelectListItem(AutomationElement dialog, string listAutomationId, string itemName)
+    internal static void SelectListItem(AutomationElement dialog, string listAutomationId, string itemName)
     {
         var item = Retry.WhileNull(
             () => dialog.FindFirstDescendant(cf => cf.ByAutomationId(listAutomationId))

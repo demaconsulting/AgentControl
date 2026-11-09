@@ -94,3 +94,8 @@ throws `ArgumentNullException` for a null version. No message repeats the patter
 
 - **PackageSourceDefinition** - `GetGitSettingsProblem`.
 - **GitSourceProvider** - listing glob, matching of listed tags, vetting of server tag names, check of a package's tag.
+- **SourceEditorViewModel** (`LauncherUI`) - `GetProblem` validates the tag pattern the user types before a Git
+  source can be tested or saved, and its tag preview shows which listed tags match the pattern (the matching is
+  `GitSourceProvider.PreviewAsync`, which applies `TryMatch`).
+- **RepoCardViewModel** (`LauncherUI`) - `TryCreate` and `Format` name the tag of a pinned version from the source's
+  tag pattern as configured now (no tag when the version cannot be written as a safe tag name).

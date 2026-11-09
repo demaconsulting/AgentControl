@@ -71,3 +71,8 @@ Invalid input is reported through the `problem` out value and `false`; nothing t
 
 - **PackageSourceDefinition** - `GetGitSettingsProblem`, `GetCredentialProblem`.
 - **GitSourceProvider** - parses the address once at construction.
+- **SourceEditorViewModel** (`LauncherUI`) - `GetProblem` validates the address the user types (after the credential
+  check of `PackageSourceDefinition`) before a Git source can be tested or saved; the editor uses the address rules
+  directly, not the provider's parse.
+- **PackageSourceItemViewModel** (`LauncherUI`) - `TryParse` tells a local path from a remote address, so a remote
+  source is listed as not checked and a local one with the status of its folder.

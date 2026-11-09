@@ -51,12 +51,25 @@ sections:
           - AgentControl-SettingsStore-LegacySourceMigration
           - AgentControl-SettingsStore-NoSecretsPersisted
           - AgentControl-SettingsStore-AtomicSave
-          - AgentControl-SettingsStore-GitSourceRoundTrip
         tests:
           - SettingsStore_SaveThenLoad_RoundTripsAllFields
-          - SettingsStore_SaveThenLoad_GitSource_RoundTripsAndRefusesCredentials
           - SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource
           - SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties
+
+      - id: AgentControl-Settings-GitSourcePersistence
+        title: >-
+          The Settings subsystem shall persist a Git source - its repository address, tag
+          pattern, optional sub-folder and single package ID, with its type written by name - and
+          shall refuse to persist an address that embeds a credential, without repeating it and
+          without changing the saved settings.
+        justification: |
+          A Git source is configured once and must survive restarts like every other source, and
+          the settings file must never become a place where an address with a secret is stored.
+        children:
+          - AgentControl-SettingsStore-GitSourceRoundTrip
+          - AgentControl-SettingsStore-GitSourceRefusesCredential
+        tests:
+          - Settings_GitSource_SurvivesSessionsAndAddressWithCredentialIsRefusedWithoutChangingTheFile
 
       - id: AgentControl-Settings-Appearance
         title: >-

@@ -601,6 +601,7 @@ reviews:
       - "docs/verification/agent-control/repo-sync.md"
       - "src/**/RepoSync/ReleaseNotesViewer.axaml"
       - "src/**/RepoSync/ReleaseNotesViewer.axaml.cs"
+      - "test/**/RepoSync/RepoSyncSubsystemTests.cs"
 
   - id: AgentControl-RepoSync-PackageZipExtractor
     title: Review of Agent Control PackageZipExtractor unit implementation
@@ -672,6 +673,7 @@ reviews:
       - "docs/design/agent-control/repo-config.md"
       - "docs/verification/agent-control/repo-config.md"
       - "src/**/RepoConfig/RepoPin.cs"
+      - "test/**/RepoConfig/RepoConfigSubsystemTests.cs"
 
   - id: AgentControl-RepoConfig-RepoPinStore
     title: Review of Agent Control RepoPinStore unit implementation
@@ -738,6 +740,7 @@ reviews:
       - "docs/design/agent-control/git-integration.md"
       - "docs/verification/agent-control/git-integration.md"
       - "test/**/GitIntegration/GitIntegrationSubsystemTests.cs"
+      - "test/**/GitIntegration/GitHttpsServer.cs"
 
   - id: AgentControl-GitIntegration-GitClient
     title: Review of Agent Control GitClient unit implementation

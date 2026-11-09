@@ -79,16 +79,17 @@ asking, a wrong password is never saved), through the real `git credential` prot
 against a throw-away helper in a temporary folder, and through a stub git that records exactly what is sent, in what
 environment and within what time limit.
 
-The Git source scenarios (`GitSourceTests.cs`, with `GitFixtureRepository.cs`) are the exception to the stub git: each
-builds a real local bare Git repository in a temporary folder, runs the application with the real `git` (isolated
-from the developer's global and system configuration and credential helpers, so no credential store is touched) and
-is skipped when git is not installed. No network is used, so what depends on one is not claimed end to end: an https or
-SSH address, a sign-in (`AgentControl-System-GitSignIn`) and Git Credential Manager's own dialog. Those are verified
-against the recording stub of git and the unit tests, and the one thing that could not be checked by a machine here -
-whether Git Credential Manager shows its dialog from a hidden-console process - is left to a manual check on a machine
-with a private https repository. `AgentControl-System-GitSourceSafety` has no end-to-end scenario through the windows:
-what makes it true (no hook, submodule or link is ever followed) is verified with the real git against hostile local
-repositories at the provider and subsystem levels.
+The Git source scenarios (`GitSourceTests.cs`, `GitSourceSafetyTests.cs` and `GitSignInTests.cs`, with `GitFixtureRepository.cs`
+and `GitHttpsServer.cs`) are the exception to the stub git: each builds a real local bare Git repository in a temporary
+folder, runs the application with the real `git` (isolated from the developer's global and system configuration and
+credential helpers, so no credential store is touched) and is skipped when git is not installed - or failed instead
+when the environment variable `CI` is set, so that a pipeline can never pass with this evidence silently missing. No
+network is used beyond loopback. The sign-in scenarios use a private Git server of the test on a loopback port (TLS
+with a throw-away certificate, 401 without credentials) and a test credential helper that behaves like Git Credential
+Manager in an isolated git configuration; they show, with the real application and the real git, that background work
+never prompts and that work the user started may. What is not exercised end to end is named in the scenarios: an SSH
+address, and Git Credential Manager's own dialog - whether it can be shown from a hidden-console process - which is
+left to a manual check on a machine with a private https repository.
 
 `AgentControl-System-PackageAuthenticity` is stated as far as one end-to-end scenario in `MultipleSourcesTests.cs`
 can show it: the published application runs against a real NuGet folder feed that holds an unsigned newer package,
@@ -111,12 +112,15 @@ an isolated temporary configuration directory (via `--config-dir`) and stub git/
 executables (via `--git-path`/`--agent-tool-command`, built with
 `DemaConsulting.AgentControl.ArgLoggerStub`) so no test depends on, or mutates, a real git
 installation, a real agentic CLI tool, or a developer's actual `%APPDATA%\AgentControl\`
-folder (the Git source tests use the real `git` against a local repository, as described above). Unit tests that back
+folder (the Git source tests use the real `git` against a local repository, as described above, which needs git on the
+machine; the Git source tests are failed instead of skipped when the environment variable `CI` is set and git is
+absent). Unit tests that back
 the disclosed exceptions above run on .NET 10 on any
 supported platform with no additional environment setup
 (`AgentControl-Platform-Net10`). The server-source end-to-end test also needs loopback networking: it starts
 the in-process mock feed (Kestrel, hosted by the ASP.NET Core shared framework that the test project references)
-on a fresh port.
+on a fresh port; the Git sign-in tests likewise start the private Git server (Kestrel with TLS on a fresh loopback
+port, and the real `git upload-pack`).
 
 ## Acceptance Criteria
 
@@ -129,7 +133,18 @@ on a fresh port.
   the real UI.
 - No test depends on a real git installation, a real agentic CLI tool, or the developer's
   actual settings/log folders; the Git source end-to-end tests are the one exception for git (a throw-away local
-  repository, skipped when git is absent) and still never touch the developer's settings, credentials or network.
+  repository, skipped when git is absent and failed when it is absent in CI) and still never touch the developer's
+  settings or credentials; their only network is loopback.
+- A package from a Git repository is applied only as a package layout: a hostile user configuration (a hook and a filter
+  program that plain git runs) runs nothing and the delivered bytes are those of the commit, a tag whose layout holds a
+  link, a submodule or names that collide on a case-insensitive file system is refused with an explanation and writes
+  nothing, an address that names a program to run or carries a credential is refused by the editor, and nothing of the
+  repository besides its layout reaches the repo.
+- A Git repository that needs a sign-in is never prompted for by a background check (the card shows "Sign-in needed",
+  the user's helper was asked but could not prompt, the server saw no credential) and may be prompted for by work the
+  user starts (Refresh on the card, Test connection in the editor).
+- A package's content identity is recorded in the pin for a zip, a NuGet-package and a Git source; a republished
+  zip or NuGet package of the pinned version is not synced at launch.
 - Several package sources can be configured and carried forward from the legacy setting, a NuGet
   folder source supplies packages applied like zip packages, a NuGet server source can be added with a
   typed sign-in and supplies packages the same way, and a repo pin is only ever resolved
@@ -435,44 +450,57 @@ badge, offers no upgrade, and keeps its pin file unchanged. This scenario is tes
 `windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
 covering `AgentControl-System-SourcePinIntegrity`.
 
-**AgentControl_PackageContentIntegrity_RecordedOnSelectRefusedAtLaunchAndAdoptedOnUpgrade**: In the published
-application, selecting a package for a never-pinned repo writes a pin (schema version 3) whose content identity is
-the SHA-256 of the zip that was applied, computed independently by the test. In a second run a repo is pinned to
-1.0.0 with the identity of the original zip, its managed folders are missing, and the 1.0.0 zip has since been
-republished with other content; clicking Launch shows a message that the agent files were not synced because the
-package now contains different files than the copy the repo was set up with, no managed folder is created, and the
-pin file is byte for byte unchanged. In a third run a repo whose pin has no identity (as written before identities
-existed) is upgraded from 1.0.0 to 1.1.0 with the upgrade chip: the release notes open, no message is shown, and the
-pin now holds the SHA-256 of the 1.1.0 zip. The refusal of an Upgrade of a republished version is a rule of the repo
-card, specified by the child requirements and verified at the subsystem and unit levels; the application offers an
-Upgrade only for a newer version than the one pinned, so there is no end-to-end path to it and it is not claimed as
-system-level evidence (the system requirement states the refusal for the launch-time restore, which the second run
-above shows). The acceptance of changed content is reachable end to end through the card menu's Change package...
-and is verified with a Git tag that has moved, in three further runs against a real local Git repository (see
-`AgentControl_PackageContentIntegrity_MovedGitTagIsShownNeverAppliedAndAcceptedOnlyByChangePackage`). The NuGet case is
-likewise verified at the subsystem and unit levels only. This scenario is tested by
-`windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile`,
-`windows@LaunchButton_Click_PinnedVersionRepublished_ExplainsAndSyncsNothing` and
-`windows@UpgradeChip_Click_PinWithoutIdentity_AdoptsIdentityOfNewVersionWithoutWarning`, covering
-`AgentControl-System-PackageContentIntegrity`.
+**AgentControl_PackageContentIntegrity_IdentityIsRecordedForEveryKindOfSource**: In the published application,
+selecting a package for a never-pinned repo writes a pin (schema version 3) whose content identity names what was
+applied, computed independently by the test: for a zip source the SHA-256 of the zip, for a NuGet-package folder
+source the SHA-256 of the `.nupkg` file, and for a Git source `git-commit:` plus the commit the chosen tag points to
+(the Git run is `SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip`, described with the Git
+scenarios below). This scenario is tested by `windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile`,
+`windows@SelectPackage_FromNuGetFolderSource_RecordsSha256OfNupkgInPinFile` and
+`windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip`, covering
+`AgentControl-System-PackageContentIntegrity` and `AgentControl-System-PinFile`. For a NuGet package the identity
+describes the copy held on this machine (see the NuGet source unit verification), so a republish in the feed of a
+version already held is not noticed until that copy is cleared; the NuGet scenario of the next paragraph republishes
+a version the application has not held yet.
 
-**AgentControl_PackageContentIntegrity_MovedGitTagIsShownNeverAppliedAndAcceptedOnlyByChangePackage**: In the
-published application, run against a real local bare Git repository (git isolated from the user's configuration and
+**AgentControl_ChangedContentRefusedAtLaunch_RepublishedPackageIsExplainedAndNothingIsSynced**: In the published
+application a repo is pinned to 1.0.0 with the identity of the original package, its managed folders are missing, and
+the 1.0.0 package has since been republished with other content - in a zip folder in the first run, in a NuGet-package
+folder in the second. Clicking Launch shows a message that the agent files were not synced because the package now
+contains different files than the copy the repo was set up with, no managed folder is created, the pin file is byte
+for byte unchanged, and the launch goes on: the configured agent tool is still invoked in the repo's working directory
+(how that fits the system Launch requirement is a pre-existing follow-up, not changed by this scenario). The refusal
+of an Upgrade of a republished version is a rule of the repo card, specified by the
+child requirements and verified at the subsystem and unit levels; the application offers an Upgrade only for a newer
+version than the one pinned, so there is no end-to-end path to it and it is not claimed as system-level evidence. This
+scenario is tested by `windows@LaunchButton_Click_PinnedVersionRepublished_ExplainsAndSyncsNothing` and
+`windows@LaunchButton_Click_NuGetPinnedVersionRepublished_ExplainsAndSyncsNothing`, covering
+`AgentControl-System-ChangedContentRefusedAtLaunch`.
+
+**AgentControl_IdentityAdoptedOnUpgrade_PinWithoutIdentityRecordsOneWithoutWarning**: A repo whose pin has no identity
+(as written before identities existed) is upgraded from 1.0.0 to 1.1.0 with the upgrade chip: the release notes open,
+no message is shown, and the pin now holds the SHA-256 of the 1.1.0 zip. This scenario is tested by
+`windows@UpgradeChip_Click_PinWithoutIdentity_AdoptsIdentityOfNewVersionWithoutWarning`, covering
+`AgentControl-System-IdentityAdoptedOnUpgrade`.
+
+**AgentControl_MovedGitTag_IsShownNeverAppliedAndAcceptedOnlyByChangePackage**: In the published
+application, run against a real local bare Git repository (git isolated from the user's configuration and
 credential helpers, no network), a repo is pinned to 1.0.0 of a Git source with the commit the tag pointed to when
 the repo was set up, and the tag has since been moved to another commit. In the first run the background check makes
 the amber "Tag moved" chip appear on the card (`TagMovedChip`, with the text "Tag moved"); nothing is applied: no
 managed folder is created, no release notes open and the pin file is byte for byte unchanged; and the card menu
-offers "Change package..." and no longer "Select Package...". In the second run Change package... opens the Select
+offers "Change package..." and no longer "Select Package...". This run is tested by
+`windows@RepoCard_PinnedGitTagMoved_ShowsTagMovedChipAndAppliesNothing`, covering
+`AgentControl-System-MovedTagWarning`. In the second run Change package... opens the Select
 Package dialog on the pin's source, package and version, choosing that version again shows the plain-language
 question that the package now contains different files, and answering No changes nothing (the repo's file, the pin
 and the warning are as before). In the third run answering Yes applies the tag's new content, opens its release notes,
 keeps the version and records the commit the tag points to now as the pin's identity, and the "Tag moved" chip goes
-away. The refusal of the launch-time restore and the confirmation for a republished zip are covered by the scenario
-above and at the unit levels. This scenario is tested by
-`windows@RepoCard_PinnedGitTagMoved_ShowsTagMovedChipAndAppliesNothing`,
+away. These two runs are tested by
 `windows@ChangePackageMenuItem_SameVersionWithMovedTag_AsksAndDecliningLeavesRepoUnchanged` and
 `windows@ChangePackageMenuItem_SameVersionWithMovedTag_ConfirmingAppliesNewContentAndRecordsNewCommit`, covering
-`AgentControl-System-PackageContentIntegrity`.
+`AgentControl-System-ChangedContentAcceptedDeliberately`. The confirmation for a republished zip is covered at the
+subsystem and unit levels.
 
 **AgentControl_UpgradeFromChip_ClickStartsTheUpgrade**: On a repo pinned to 1.0.0 with 1.1.0 at the source, the
 real application shows the upgrade chip as a button (invocable through UI Automation); invoking it runs the same
@@ -636,14 +664,6 @@ tested by `windows@MainSettingsSourceEditorAndAbout_LightTheme_RenderLegibly`,
 covering `AgentControl-System-WindowsLegible`. The 3:1 contrast of the status bars and the favorite star, which its
 child requirement adds, is verified in the `LauncherUI` subsystem tests only.
 
-**AgentControl_GitSources_ThroughTheRealGitAgainstALocalRepository**: Through the registry, the version cache and the
-provider, with the real git against a local repository, the tags that match the pattern are listed as versions with
-their commits, the pinned version is acquired with the identity `git-commit:{commit}`, and a moved tag is seen as another
-commit; a Git source round-trips through the settings file and an address with a credential is refused at save. This
-scenario is tested by
-`AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag` and
-`SettingsStore_SaveThenLoad_GitSource_RoundTripsAndRefusesCredentials`, covering `AgentControl-System-GitSources`.
-
 **AgentControl_GitSources_AddedInSettingsAndChosenInSelectPackage**: In the published application, against a real local
 bare Git repository whose tags include `release/1.0.0` and `release/1.1.0` and two that are not versions (git isolated
 from the user's configuration and credential helpers, no network): the Add menu's Git repository item opens the editor
@@ -657,33 +677,83 @@ makes the same test succeed. In a third run, with the Git source preconfigured, 
 Package... (and not Change package...); choosing the package and version 1.0.0 applies the tag's files, opens its release
 notes and writes a pin holding the source, package, version and `git-commit:` plus the commit the tag points to, and the
 card shows the package and version, the alias and (as drawn ink beside the alias - the icon itself is decorative and
-not in the UI Automation tree) the Git icon. The repository's SSH and https transports and the sign-in need a network
-and a credential store and are verified only through the recording stub of git and the unit tests, not end to end. This
-scenario is tested by
+not in the UI Automation tree) the Git icon. This scenario is tested by
 `windows@SettingsWindow_AddGitRepositoryViaDialog_TestsConnectionListsTagsAndPersistsIt`,
 `windows@SettingsWindow_AddGitRepositoryWithWrongCasePattern_ShowsNoMatchingTagsThenSucceedsWhenFixed` and
 `windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip`, covering
-`AgentControl-System-GitSources`.
+`AgentControl-System-GitSources`, `AgentControl-System-GitSourceSetup` (the first two),
+`AgentControl-System-GitSourceSelection` and `AgentControl-System-GitSourcePresentation` (the third). The tag and the
+shortened commit that the card shows in its tooltip are not read back end to end - the tooltip is not reliably
+reachable through UI Automation - so `AgentControl-System-GitSourcePresentation` states only the Git origin (the icon
+and the alias), and the tooltip is verified in the `LauncherUI` subsystem and unit tests.
 
-**AgentControl_GitSourceSafety_HostileRepositoryExecutesAndEscapesNothing**: With the real git against a hostile local
-repository and a user environment that installs a post-checkout hook into every new repository (a template directory and
-a global hooks path), the hook never runs when a package is fetched; a tag whose layout holds a symbolic link, a
-submodule, a link in place of `.github`, a managed folder or `release-notes.md` is refused before anything is cached; and
-git itself refuses a transport other than the one of the address. This scenario is tested by
-`GitSourceProvider_Acquire_HostileHooksAndTemplate_NeverRun`,
-`GitSourceProvider_Acquire_LinkOrSubmoduleInLayout_IsRefusedAndNothingCached` and
-`GitIntegrationSubsystem_RemoteClient_ListsFetchesOneTagAndRefusesOtherTransports`, covering
-`AgentControl-System-GitSourceSafety`.
+**AgentControl_GitSourceSettings_AddressPatternAndSubfolderAreKeptAndNeverHoldACredential**: In the published
+application the source added through the Settings dialogs is persisted with its address, tag pattern and package name
+(the first scenario above), and an address that carries a password (`https://user:...@host/...`) is refused in the
+Git source editor with an error that does not repeat the secret and the source cannot be saved; after leaving the
+editor and saving the settings, the secret is in no file the application wrote. This scenario is tested by
+`windows@SettingsWindow_AddGitRepositoryViaDialog_TestsConnectionListsTagsAndPersistsIt` and
+`windows@SettingsWindow_AddGitRepositoryWithCredentialInAddress_IsRefusedAndNothingIsSaved`, covering
+`AgentControl-System-GitSourceSettings`.
 
-**AgentControl_GitSignIn_OnlyUserStartedWorkMayPrompt**: The registry the card builds for work the user started lets git
-show its credential UI, and the one for background work runs git with every prompt switched off; a git that needs a
-sign-in is reported as a source authentication failure naming the source, never with git's own text. The Git source
-editor tells the user where the sign-in comes from: its sign-in note (the user's own credential manager or SSH keys,
-no credentials stored by AgentControl, Git's sign-in possible for the connection test and Select Package, never for
-background checks) is shown by the editor window, checked in a headless window test on every platform. The card's
-"sign-in needed" notice for a Git source shares the existing source authentication path and has no end-to-end scenario:
-a repository that asks for a sign-in cannot be provided without a network or a credential store, so that part is
-verified at the unit and subsystem levels only. This scenario is tested by
-`RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork`,
-`GitSourceProvider_GitFailure_IsTranslatedToFailureKind` and
-`SourceEditorWindow_GitSource_ShowsGitSectionsAndHidesNuGetOnes`, covering `AgentControl-System-GitSignIn`.
+**AgentControl_GitSourceSafety_HostileRepositoryAndHostileUserConfigurationRunAndEscapeNothing**: The tests of
+`GitSourceSafetyTests.cs` run the published application with the real git against a real local bare Git repository
+(built by `GitFixtureRepository.cs`, isolated from the developer's global and system configuration and credential
+helpers, no network), through the same windows a user uses. They cover the following requirements.
+
+- `AgentControl-System-GitSourceSafety` (no code from the repository, the remote or the user's configuration): the
+  user's global git configuration is replaced by one that would run a post-checkout hook for every new repository (a
+  template directory and a global hooks path) and a `pwn` filter program for every file whose attributes select it
+  (and asks for line-ending conversion); a control first shows that a plain `git checkout` of the package's tag under
+  that configuration really runs both, and the test is skipped when it cannot be shown. Choosing the package in Select
+  Package then applies it normally, neither the hook nor the filter ran (the markers they would write do not exist) and
+  the delivered files hold exactly the bytes of the commit - carriage returns and an identifier the attributes would
+  have expanded are untouched. A tag whose layout holds a submodule is refused (below). This part is tested by
+  `windows@SelectPackage_FromGitRepositoryUnderHostileUserConfiguration_RunsNoCodeAndAppliesRawBytes` and
+  `windows@SelectPackage_FromGitRepositoryWithSubmoduleInLayout_IsRefusedAndWritesNothing`.
+- `AgentControl-System-GitSourceTransport`: an address that asks git to run a program (`ext::sh -c "..."`) is refused
+  by the Git source editor - the error is shown, the source cannot be saved - and the program is never run (its marker
+  file does not exist). Git's own refusal of a transport other than the one of the address is verified in the
+  `GitIntegration` subsystem tests. This part is tested by
+  `windows@SettingsWindow_AddGitRepositoryWithRemoteHelperAddress_IsRefusedAndRunsNothing`.
+- `AgentControl-System-GitSourceLayoutOnly`: the repository of the first bullet also holds a `README.md` and a `docs`
+  folder; after the package is applied the repo holds neither, nor a `.git` folder - only the package layout. This part
+  is tested by `windows@SelectPackage_FromGitRepositoryUnderHostileUserConfiguration_RunsNoCodeAndAppliesRawBytes` and
+  `windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip`.
+- `AgentControl-System-GitSourceRefusesLinks` and `AgentControl-System-GitSourceRefusesCollisions`: a tag whose layout
+  holds a symbolic link in a managed folder (staged without creating a link on disk, which needs no privilege), a
+  submodule, or two files whose names differ only in letter case is chosen in Select Package; a message explains that
+  the package holds "a symbolic link", "a submodule" or names that "differ only in letter case", the repo gets no
+  files, no pin and no release notes, nothing of the tag (no folder named by its commit, no temporary folder) is left in
+  the application's cache, and nothing is written outside the repo and the configuration folder. This part is tested by
+  `windows@SelectPackage_FromGitRepositoryWithLinkInLayout_IsRefusedAndWritesNothing`,
+  `windows@SelectPackage_FromGitRepositoryWithSubmoduleInLayout_IsRefusedAndWritesNothing` and
+  `windows@SelectPackage_FromGitRepositoryWithCaseCollidingNames_IsRefusedAndWritesNothing`.
+
+**AgentControl_GitSignIn_ThroughAPrivateGitServerAndTheUsersOwnHelper**: The tests of `GitSignInTests.cs` run the
+published application with the real git against a private Git server of the test (`GitHttpsServer.cs`, shared with the
+`GitIntegration` subsystem tests: Kestrel on a loopback port, TLS with a throw-away self-signed certificate, the smart
+HTTP protocol served by the real `git upload-pack`, and a 401 for every request without the right HTTP Basic
+credentials). The user's own sign-in is replaced by a credential helper in an isolated global git configuration
+(certificate checks off there, because the certificate is self-signed) that behaves like Git Credential Manager: it
+supplies the credential only when it may show its sign-in UI, that is when `GCM_INTERACTIVE` is not `never`, and it
+logs `asked` when it was asked and could not prompt and `prompted` when it supplied the credential. The tests assert on
+that log, on what the server received and on what the card and the editor show; no real credential store and no
+network are involved. This part is the only evidence of sign-in behavior against a server that really asks for one.
+Git Credential Manager's own dialog (whether it can be shown from a hidden-console process) is not exercised: that is
+a manual check on a machine with a private https repository.
+
+- `AgentControl-System-GitSignInBackgroundNeverPrompts`: a repo is pinned to a Git source at the private server; the
+  application's background check at start-up asks git, git asks the helper, which may not prompt (`asked`, never
+  `prompted`), the server receives only anonymous requests and no signed-in one, the card shows the red "Sign-in
+  needed" chip, and no sign-in dialog opens. This part is tested by
+  `windows@RepoCard_PinnedToPrivateGitRepository_BackgroundCheckNeverPromptsAndReportsSignInNeeded`.
+- `AgentControl-System-GitSignIn`: on that card the user chooses Refresh (work the user started): the helper is now
+  allowed to prompt and supplies the credential (`prompted`), the server receives a signed-in request, the "Sign-in
+  needed" chip goes away, the check completes (the newer version is offered) and the password is in no file the
+  application wrote; and in the Git source editor, Test connection to the private repository lets the helper prompt,
+  reports "Connection OK" and shows the summary "2 of 4 tags match the pattern.". Select Package and Change package
+  start user-started work in the same way and are verified at the `LauncherUI` subsystem and unit levels (the card
+  hands the same user-started options to every one of them). This part is tested by
+  `windows@RepoCard_PrivateGitRepositoryNeedingSignIn_RefreshMayPromptAndThenSignsIn` and
+  `windows@SettingsWindow_TestConnectionToPrivateGitRepository_MaySignInAndListsTheTags`.

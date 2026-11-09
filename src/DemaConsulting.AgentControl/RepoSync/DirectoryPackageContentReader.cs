@@ -64,7 +64,7 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
 
     /// <summary>
     ///     Whether this reader exposes only the package layout (<see cref="PackageContentExtractor.LayoutPaths"/>)
-    ///     of a folder that holds other things too (a checked-out Git repository).
+    ///     of a folder that holds other things too (a Git package's cache folder).
     /// </summary>
     private readonly bool _layoutOnly;
 
@@ -139,8 +139,9 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     }
 
     /// <summary>
-    ///     Opens a folder whose root <em>is</em> the package layout - for example a Git repository
-    ///     checked out to disk - for reading, exposing only the layout paths.
+    ///     Opens a folder whose root <em>is</em> the package layout - for example the folder a Git
+    ///     package's files were written to (nothing is checked out) - for reading, exposing only the
+    ///     layout paths.
     /// </summary>
     /// <param name="layoutRoot">The folder that holds <c>.github/...</c>, <c>release-notes.md</c>
     ///     and <c>AGENTS.md</c> directly (the repository root or the configured sub-folder).</param>

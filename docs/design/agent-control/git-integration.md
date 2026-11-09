@@ -6,15 +6,18 @@
 
 The `GitIntegration` subsystem spans `GitClient.cs` (invokes the configured git executable
 for status, pull, branch, and committed-files queries), `CommittedAgentFilesCache.cs`
-(caches the committed-agent-files-changed check keyed by HEAD commit hash) and
+(caches the committed-agent-files-changed check keyed by HEAD commit hash),
 `GitCredentialClient.cs` (keeps, finds and removes a package feed's sign-in in the user's own Git
 credential helper) and `GitRemoteClient.cs` (runs hardened git against untrusted remote repositories for the Git
 package source). It provides the observable git-derived status/actions surfaced on
 each repo card and the saved sign-ins of package servers
 (`AgentControl-GitIntegration-SavedSignIns`, which supports `AgentControl-System-CredentialSafety`).
-It also provides the safe use of a remote repository as a package source (`AgentControl-GitIntegration-RemoteGit`, which
-supports `AgentControl-System-GitSourceSafety` and `AgentControl-System-GitSignIn`). The subsystem contains four units:
-`GitClient`, `CommittedAgentFilesCache`, `GitCredentialClient` and `GitRemoteClient`.
+It also provides the safe use of a remote repository as a package source (`AgentControl-GitIntegration-RemoteGit`,
+`-RemoteGitNoCodeExecution`, `-RemoteGitBounded`, `-RemoteGitFailureReporting` and `-RemoteGitMinimumVersion`, which
+support `AgentControl-System-GitSourceSafety`, `AgentControl-System-GitSourceTransport` and
+`AgentControl-System-GitSources`; and `-RemoteGitNoBackgroundPrompt` and `-RemoteGitSignIn`, which support
+`AgentControl-System-GitSignInBackgroundNeverPrompts` and `AgentControl-System-GitSignIn`). The subsystem contains four
+units: `GitClient`, `CommittedAgentFilesCache`, `GitCredentialClient` and `GitRemoteClient`.
 
 ### Interfaces
 
@@ -32,6 +35,36 @@ and reports whether a credential helper applies to the feed.
   request or response (`AgentControl-GitCredentialClient-NeverInteractive`,
   `AgentControl-GitCredentialClient-BoundedTime`, `AgentControl-GitCredentialClient-SecretsNeverLogged`).
   Only a cancelled token surfaces as `OperationCanceledException`.
+
+**GitRemoteClient**: Runs git against a remote repository that is untrusted, on behalf of the Git package source.
+
+- *Type*: In-process .NET asynchronous interface (`EnsureSupportedVersionAsync`, `ListTagsAsync`,
+  `InitRepositoryAsync`, `FetchTagAsync`, `ListTreeAsync` and `ReadBlobsAsync`, plus the tag-name rule `IsSafeTagName`)
+  implemented over external git processes.
+- *Role*: Provider. Its one consumer is `GitSourceProvider` (`AgentPackageManagement`), so the dependency points from
+  `AgentPackageManagement` to `GitIntegration`; the client uses no code of the other units of this subsystem.
+- *Boundary*: Everything that touches the user's `git` executable for a remote package repository is behind this
+  interface, and nothing else in the application starts git for one. What is inside the boundary: the hardening of
+  every command, the neutral working folder, the time and output limits, the classification of failures and the
+  protection of secrets in logs. What is outside: the meaning of a tag (the tag pattern), the address rules, the
+  layout rules, the files written to the cache and the user-facing failure kinds - `GitSourceProvider` owns those.
+- *Input*: Values from outside the boundary are checked before they reach a command line: a `GitRemoteTarget` (the
+  address text and the one `GitTransport` allowed for it, derived by the provider from `GitRepositoryAddress`), a tag
+  glob or tag name that passes the tag-name rule, a full commit id, a non-empty list of layout paths, and the entries
+  of a tree listing for blob reading. Anything else is an `ArgumentException` before git starts.
+- *Output*: The tags of the remote with their peeled commits, the commit a fetched tag points to, the entries of the
+  listed tree (mode, type, object id, size, path), and the raw bytes of the named blobs handed to a destination
+  stream the caller opens.
+- *Failure contract*: Every failure of git itself is a `GitRemoteException` (an `InvalidOperationException`) with a
+  `GitFailureKind` - `AuthenticationRequired`, `NotFound`, `Unreachable`, `HostKeyUnverified`, `UnsafeRepository`,
+  `TimedOut`, `GitNotFound`, `OutputTooLarge`, `GitTooOld`, `ProcessNotStopped` or `Other` - and a fixed message per
+  kind that never repeats git's text or the address. `OperationCanceledException` appears only when the caller's token
+  was cancelled and the process was confirmed to have ended
+  (`AgentControl-GitIntegration-RemoteGit`, `-RemoteGitFailureReporting`, with the unit requirements of
+  `GitRemoteClient`).
+- *Constraints*: Never interactive in the background; sign-in UI only for work the user started; time limit that kills
+  the whole process tree; output bounded in bytes; the git version is checked against the minimum supported version
+  (the `MinimumGitVersion` constant) when the caller asks.
 
 **GitClient.IsWorkingTreeClean**: Reports whether a repo's working tree is clean.
 
@@ -115,14 +148,47 @@ Why Git's credential helper, the `--get-urlmatch` availability check, the origin
 never-interactive environment, the time limit with process-tree kill and the neutral working folder are explained in
 the *GitCredentialClient Design*.
 
-`GitRemoteClient` is a fourth, deliberately separate unit because its threat model differs from both neighbors: the repository
-and the server behind it are untrusted, so every command is hardened by command-scoped configuration and environment (no
-hooks, one transport, no submodules or filters, no trace output), run asynchronously from a neutral folder with a time and
-output limit that kills the whole process tree, and reported through classified, redacted failures; a git older than 2.29
-is refused up front with an actionable message. It shares only the
-git executable setting with `GitClient` and `GitCredentialClient`; none of their code was changed. The user's own
-credential helper, proxy and CA settings are left in force, so sign-in is whatever the user already has - and
-it may show its
-UI only when the work was started by the user (the same `allowPrompt` switch the package sources use). The full command
-lines, the environment and the reasoning are in the *GitRemoteClient Design*; its only caller is `GitSourceProvider`
-(`AgentPackageManagement`), so the dependency points from `AgentPackageManagement` to `GitIntegration`.
+`GitRemoteClient` is a fourth, deliberately separate unit because its threat model differs from both neighbors: the
+repository and the server behind it are untrusted, so every command is hardened by command-scoped configuration and
+environment (no hooks, one transport, no submodules or filters, no trace output), run asynchronously from a neutral
+folder with a time and output limit that kills the whole process tree, and reported through classified failures with
+fixed messages. A git older than the minimum supported Git version (the `MinimumGitVersion` constant; its value is
+stated in the requirements and the user guide) is refused up front with an actionable message, because the single-tag
+fetch needs `fetch --no-write-fetch-head`. It shares only the git executable setting with `GitClient` and
+`GitCredentialClient`; none of their code was changed. The user's own credential helper, proxy and CA settings are
+left in force, so sign-in is whatever the user already has - and it may show its UI only when the work was started by
+the user (the same `allowPrompt` switch the package sources use). The full command lines, the environment and the
+reasoning are in the *GitRemoteClient Design*; its only caller is `GitSourceProvider` (`AgentPackageManagement`), so
+the dependency points from `AgentPackageManagement` to `GitIntegration`.
+
+**Collaboration between `GitSourceProvider` and `GitRemoteClient`.** The provider owns the meaning, the client owns
+the git processes. Listing versions is one step; acquiring one version is a fixed sequence in which each step
+depends on the one before and a failure stops the sequence without publishing anything:
+
+1. *Version check* - when the application asks for it (`GitSourceOptions.EnforceMinimumGitVersion`),
+   `EnsureSupportedVersionAsync` runs `git --version` once per executable. A too-old git ends the sequence with
+   `GitTooOld`.
+2. *List tags* - `ListTagsAsync` runs `ls-remote --tags` with a glob the provider derived from the tag pattern and
+   returns each tag with the commit it points to; the provider matches the names against the pattern and the address's
+   transport is the only one allowed. This is the whole of what listing versions, previewing a pattern and the
+   background upgrade check do - there is no clone and no fetch.
+3. *Initialize an empty repository* - `InitRepositoryAsync` creates it in a temporary folder of the provider's cache,
+   from an empty template.
+4. *Fetch one tag* - `FetchTagAsync` fetches exactly that tag, one level deep and without other tags or submodules,
+   and returns the commit it points to; the provider requires that commit to equal the one it listed.
+5. *List the tree* - `ListTreeAsync` lists the entries of the fetched commit below the layout paths; the provider
+   validates every entry (kinds, links and submodules, names, limits) *before* anything is written.
+6. *Read blobs* - `ReadBlobsAsync` reads the validated blobs with `git cat-file --batch`, verifies each answer against
+   the listed entry and hands the raw bytes to a stream the provider opens in its temporary folder. No file is checked
+   out, so no filter, attribute or line-ending conversion applies and the bytes are exactly those of the commit.
+
+**Failure propagation.** The client reports every failure of git as a `GitRemoteException` of a fixed kind with a fixed
+message; the provider translates the kinds into the failures the rest of the application understands:
+`AuthenticationRequired` into a `PackageSourceAccessException` of kind `AuthenticationFailed` ("sign-in needed", which
+the card shows in the background and the dialogs show with the actionable text), `HostKeyUnverified` and `Unreachable`
+into `Unreachable`, `NotFound` into `NotFound` and `TimedOut` into `TimedOut`; `GitTooOld` passes through unchanged so
+the application can recognize it; every other kind (git missing, an unsafe repository owner, output too large, a
+process that could not be stopped) becomes an `InvalidOperationException` with the client's message. Neither side puts
+git's own text, the address or an argument into a message or a log: the provider's messages name the source alias
+only. A cancelled token is an `OperationCanceledException` at every step. The *GitRemoteClient Design* has the
+unit-level contract of each operation, and the *GitSourceProvider Design* the validation and the cache.

@@ -424,13 +424,13 @@ public sealed class GitSourceProviderIntegrationTests
         fixture.Tag("v1.0.0");
         fixture.Push();
         var marker = Path.Combine(fixture.Root, "hook-ran.txt");
-        var hostile = CreateHostileEnvironment(fixture, marker);
+        var hostile = fixture.CreateHostileHooksEnvironment(marker);
 
         // Control: plain git with the same hostile environment does run the hook, so the test is meaningful
         var control = Path.Combine(fixture.Root, "control");
-        RunWithEnvironment(fixture, hostile, fixture.Root, "init", "-q", control);
-        RunWithEnvironment(fixture, hostile, control, "fetch", "-q", fixture.RemotePath, "refs/tags/v1.0.0:refs/tags/v1.0.0");
-        RunWithEnvironment(fixture, hostile, control, "checkout", "-q", "refs/tags/v1.0.0", "--", ".github");
+        fixture.RunWithEnvironment(hostile, fixture.Root, "init", "-q", control);
+        fixture.RunWithEnvironment(hostile, control, "fetch", "-q", fixture.RemotePath, "refs/tags/v1.0.0:refs/tags/v1.0.0");
+        fixture.RunWithEnvironment(hostile, control, "checkout", "-q", "refs/tags/v1.0.0", "--", ".github");
         if (!File.Exists(marker))
         {
             Assert.Skip("Hooks do not run in this environment, so the neutralization cannot be demonstrated.");
@@ -831,14 +831,14 @@ public sealed class GitSourceProviderIntegrationTests
         fixture.Tag("v1.0.0");
         fixture.Push();
         var marker = Path.Combine(fixture.Root, "filter-ran.txt");
-        var hostile = CreateHostileFilterEnvironment(fixture, marker);
+        var hostile = fixture.CreateHostileFilterEnvironment(marker);
 
         // Control: a plain git checkout with the same hostile configuration does run the filter, so the
         // test is meaningful
         var control = Path.Combine(fixture.Root, "control");
-        RunWithEnvironment(fixture, hostile, fixture.Root, "init", "-q", control);
-        RunWithEnvironment(fixture, hostile, control, "fetch", "-q", fixture.RemotePath, "refs/tags/v1.0.0:refs/tags/v1.0.0");
-        RunWithEnvironment(fixture, hostile, control, "checkout", "-q", "refs/tags/v1.0.0", "--", ".github/agents", ".github/standards");
+        fixture.RunWithEnvironment(hostile, fixture.Root, "init", "-q", control);
+        fixture.RunWithEnvironment(hostile, control, "fetch", "-q", fixture.RemotePath, "refs/tags/v1.0.0:refs/tags/v1.0.0");
+        fixture.RunWithEnvironment(hostile, control, "checkout", "-q", "refs/tags/v1.0.0", "--", ".github/agents", ".github/standards");
         if (!File.Exists(marker))
         {
             Assert.Skip("Filter drivers do not run in this environment, so their neutralization cannot be demonstrated.");
@@ -907,31 +907,6 @@ public sealed class GitSourceProviderIntegrationTests
     }
 
     /// <summary>
-    ///     Builds an environment in which the user's global git configuration defines a filter driver
-    ///     named <c>pwn</c> whose smudge command writes a marker file, and asks for line-ending
-    ///     conversion.
-    /// </summary>
-    /// <param name="fixture">The fixture.</param>
-    /// <param name="marker">The file the smudge command writes.</param>
-    /// <returns>The environment variables.</returns>
-    private static Dictionary<string, string?> CreateHostileFilterEnvironment(GitRepositoryFixture fixture, string marker)
-    {
-        var config = Path.Combine(fixture.Root, "hostile-filter.gitconfig");
-        var command = $"echo ran >> \\\"{marker.Replace('\\', '/')}\\\" && cat";
-        File.WriteAllText(
-            config,
-            $"[core]\n\tautocrlf = true\n[filter \"pwn\"]\n\tsmudge = \"{command}\"\n\tclean = cat\n\trequired = false\n" +
-            "[protocol \"file\"]\n\tallow = always\n");
-        return new Dictionary<string, string?>
-        {
-            ["GIT_CONFIG_GLOBAL"] = config,
-            ["GIT_CONFIG_NOSYSTEM"] = "1",
-            ["GIT_CONFIG_COUNT"] = null,
-            ["GIT_CONFIG_PARAMETERS"] = null
-        };
-    }
-
-    /// <summary>
     ///     Gets a set of package files with a marker, plus files that are not part of the layout.
     /// </summary>
     /// <param name="marker">Text for the agents file, so versions can be told apart.</param>
@@ -947,85 +922,4 @@ public sealed class GitSourceProviderIntegrationTests
         ["README.md"] = "not part of the layout",
         ["src/app.txt"] = "not part of the layout"
     };
-
-    /// <summary>
-    ///     Builds an environment in which every new repository gets a post-checkout hook that writes a
-    ///     marker file: through a template directory and through a global <c>core.hooksPath</c>.
-    /// </summary>
-    /// <param name="fixture">The fixture.</param>
-    /// <param name="marker">The file the hook writes.</param>
-    /// <returns>The environment variables.</returns>
-    private static Dictionary<string, string?> CreateHostileEnvironment(GitRepositoryFixture fixture, string marker)
-    {
-        var hook = "#!/bin/sh\necho ran > \"" + marker.Replace('\\', '/') + "\"\n";
-        var template = Path.Combine(fixture.Root, "hostile-template");
-        var hooks = Path.Combine(template, "hooks");
-        Directory.CreateDirectory(hooks);
-        File.WriteAllText(Path.Combine(hooks, "post-checkout"), hook);
-        var hooksPath = Path.Combine(fixture.Root, "hostile-hooks");
-        Directory.CreateDirectory(hooksPath);
-        File.WriteAllText(Path.Combine(hooksPath, "post-checkout"), hook);
-        if (!OperatingSystem.IsWindows())
-        {
-            foreach (var file in new[] { Path.Combine(hooks, "post-checkout"), Path.Combine(hooksPath, "post-checkout") })
-            {
-                File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            }
-        }
-
-        var config = Path.Combine(fixture.Root, "hostile.gitconfig");
-        File.WriteAllText(
-            config,
-            $"[core]\n\thooksPath = {hooksPath.Replace('\\', '/')}\n[protocol \"file\"]\n\tallow = always\n");
-        return new Dictionary<string, string?>
-        {
-            ["GIT_CONFIG_GLOBAL"] = config,
-            ["GIT_CONFIG_NOSYSTEM"] = "1",
-            ["GIT_TEMPLATE_DIR"] = template,
-            ["GIT_CONFIG_COUNT"] = null,
-            ["GIT_CONFIG_PARAMETERS"] = null
-        };
-    }
-
-    /// <summary>
-    ///     Runs plain git with an environment, for the control of the hook test.
-    /// </summary>
-    /// <param name="fixture">The fixture, for the git runner.</param>
-    /// <param name="environment">The environment to apply.</param>
-    /// <param name="folder">The working directory.</param>
-    /// <param name="arguments">The arguments.</param>
-    private static void RunWithEnvironment(
-        GitRepositoryFixture fixture, Dictionary<string, string?> environment, string folder, params string[] arguments)
-    {
-        var startInfo = new System.Diagnostics.ProcessStartInfo("git")
-        {
-            WorkingDirectory = folder,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        foreach (var (name, value) in environment)
-        {
-            if (value is null)
-            {
-                startInfo.Environment.Remove(name);
-            }
-            else
-            {
-                startInfo.Environment[name] = value;
-            }
-        }
-
-        using var process = System.Diagnostics.Process.Start(startInfo)!;
-        var error = process.StandardError.ReadToEndAsync();
-        process.StandardOutput.ReadToEnd();
-        process.WaitForExit();
-        Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error.Result} ({fixture.Root})");
-    }
 }

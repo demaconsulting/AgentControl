@@ -229,7 +229,8 @@ that it has none yet and how to create one (`AgentControl-SourceEditorViewModel-
 `-GitTestDefaultProvider`, `-GitTagPreview`, `-GitTagPreviewNoMatch`, `-GitTagPreviewNoTags`).
 The outcome of a failure is chosen from `PackageSourceAccessException.Kind` - *Sign-in needed*, *Repository not
 found*, *Timed out*, otherwise *Repository unreachable* - with the provider's message; a `GitRemoteException` of kind
-`GitTooOld` is *Git is too old* with its message (git 2.29 or newer is required); any other `InvalidOperationException`
+`GitTooOld` is *Git is too old* with its message (the minimum supported Git version is required); any other
+`InvalidOperationException`
 is *Connection failed*; and a cancelled test is the neutral *Test canceled*
 (`AgentControl-SourceEditorViewModel-GitTestFailureReasons`, `-GitTestGitTooOld`, `-GitTestOtherFailure`,
 `-GitTestCancel`, `-GitTestCancelAndStale`). A result of a test whose inputs

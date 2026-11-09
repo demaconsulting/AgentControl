@@ -213,7 +213,7 @@ public class GitCredentialClientIntegrationTests
             // Not installed: skipped below
         }
 
-        Assert.Skip("git is not installed, so the credential protocol cannot be exercised.");
+        AgentPackageManagement.GitRepositoryFixture.SkipOrFail("git is not installed, so the credential protocol cannot be exercised.");
     }
 
     /// <summary>

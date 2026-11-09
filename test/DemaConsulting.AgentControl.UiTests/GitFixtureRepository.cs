@@ -101,14 +101,22 @@ internal sealed class GitFixtureRepository : IDisposable
     };
 
     /// <summary>
-    ///     Creates the fixture, or skips the calling test when no git executable can be run.
+    ///     Creates the fixture, or skips the calling test when no git executable can be run - or fails
+    ///     it when the environment variable <c>CI</c> is set, so that Git evidence a pipeline requires
+    ///     is never silently skipped.
     /// </summary>
     /// <returns>The fixture.</returns>
     public static GitFixtureRepository CreateOrSkip()
     {
         if (!IsGitAvailable())
         {
-            Assert.Skip("git is not installed, so a Git package source cannot be exercised against a real repository.");
+            const string reason = "git is not installed, so a Git package source cannot be exercised against a real repository.";
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")))
+            {
+                Assert.Fail($"{reason} The environment variable CI is set, so the test cannot be skipped.");
+            }
+
+            Assert.Skip(reason);
         }
 
         return new GitFixtureRepository();
@@ -153,6 +161,150 @@ internal sealed class GitFixtureRepository : IDisposable
         Push();
         return commit;
     }
+
+    /// <summary>
+    ///     Publishes a version whose tag holds a package layout that a safe reader must refuse, and
+    ///     leaves the repository's branch where it was, so later versions do not inherit the hostile
+    ///     entry.
+    /// </summary>
+    /// <param name="version">The version, for example <c>1.2.0</c>.</param>
+    /// <param name="kind">What is wrong with the layout: <c>symbolic-link</c> (a link in a managed
+    ///     folder, staged without creating a link on disk, which needs no privilege), <c>submodule</c>
+    ///     or <c>case-collision</c> (two files whose names differ only in letter case).</param>
+    /// <returns>The id of the commit the new tag points to.</returns>
+    public string PublishHostileVersion(string version, string kind)
+    {
+        var good = Git(_workPath, "rev-parse", "HEAD").Trim();
+        CommitVersion($"hostile {kind}", "# Release Notes\n\nHostile fixture package.\n");
+        switch (kind)
+        {
+            case "symbolic-link":
+                StageEntry("120000", Git(_workPath, ["hash-object", "-w", "--stdin"], "../../../outside.txt", null).Trim(),
+                    ".github/agents/evil.md");
+                break;
+            case "submodule":
+                StageEntry("160000", good, ".github/skills/sub");
+                break;
+            case "case-collision":
+                StageEntry("100644", Git(_workPath, ["hash-object", "-w", "--stdin"], "first", null).Trim(), ".github/agents/A.md");
+                StageEntry("100644", Git(_workPath, ["hash-object", "-w", "--stdin"], "second", null).Trim(), ".github/agents/a.md");
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown kind of hostile layout.");
+        }
+
+        Git(_workPath, "commit", "-q", "--allow-empty", "-m", "hostile " + kind);
+        var commit = Git(_workPath, "rev-parse", "HEAD").Trim();
+        Git(_workPath, "tag", "release/" + version);
+        Git(_workPath, "reset", "-q", "--hard", good);
+        Push();
+        return commit;
+    }
+
+    /// <summary>
+    ///     Publishes a version that is a perfectly good package whose content a careless reader would change:
+    ///     a file with carriage returns and one with an identifier, in folders whose attributes select the
+    ///     <c>pwn</c> filter, expand identifiers and convert line endings.
+    /// </summary>
+    /// <param name="version">The version, for example <c>1.3.0</c>.</param>
+    /// <returns>The id of the commit the new tag points to.</returns>
+    public string PublishVersionWithConversionAttributes(string version)
+    {
+        Write(".github/standards/crlf.md", CrlfContent);
+        Write(".github/agents/ident.md", IdentContent);
+        Write("README.md", "Not part of the package layout.\n");
+        Write("docs/guide.md", "Not part of the package layout either.\n");
+        CommitVersion("attributes " + version, "# Release Notes\n\nAttributes fixture package.\n");
+        Write(".github/agents/.gitattributes", "* filter=pwn ident\n");
+        Write(".github/standards/.gitattributes", "* text eol=lf filter=pwn\n");
+        Git(_workPath, "add", "-A");
+        Git(_workPath, "commit", "-q", "-m", "attributes");
+        var commit = Git(_workPath, "rev-parse", "HEAD").Trim();
+        Git(_workPath, "tag", "release/" + version);
+        Push();
+        return commit;
+    }
+
+    /// <summary>
+    ///     The content of the file with carriage returns published by
+    ///     <see cref="PublishVersionWithConversionAttributes"/>.
+    /// </summary>
+    public const string CrlfContent = "one\r\ntwo\r\nthree\r\n";
+
+    /// <summary>
+    ///     The content of the file with an identifier published by
+    ///     <see cref="PublishVersionWithConversionAttributes"/>.
+    /// </summary>
+    public const string IdentContent = "$Id$ stays literal\n";
+
+    /// <summary>
+    ///     Builds an environment in which the user's own git configuration would run code for any repository: a
+    ///     post-checkout hook installed into every new repository (through a template directory and a global
+    ///     hooks path), and a <c>pwn</c> filter driver (selected by attributes) whose smudge command writes a
+    ///     marker; plus the isolation the application runs under (no prompts, no credential helper).
+    /// </summary>
+    /// <param name="hookMarker">The file the hook writes.</param>
+    /// <param name="filterMarker">The file the filter's smudge command writes.</param>
+    /// <returns>The environment variables, for <see cref="AgentControlTestContext.LaunchEnvironment"/>.</returns>
+    public IReadOnlyDictionary<string, string> CreateHostileEnvironment(string hookMarker, string filterMarker)
+    {
+        var hook = "#!/bin/sh\necho ran > \"" + hookMarker.Replace('\\', '/') + "\"\n";
+        var template = Path.Combine(Root, "hostile-template");
+        Directory.CreateDirectory(Path.Combine(template, "hooks"));
+        File.WriteAllText(Path.Combine(template, "hooks", "post-checkout"), hook);
+        var hooksPath = Path.Combine(Root, "hostile-hooks");
+        Directory.CreateDirectory(hooksPath);
+        File.WriteAllText(Path.Combine(hooksPath, "post-checkout"), hook);
+        var smudge = $"echo ran >> \\\"{filterMarker.Replace('\\', '/')}\\\" && cat";
+        var config = Path.Combine(Root, "hostile.gitconfig");
+        File.WriteAllText(
+            config,
+            $"[core]\n\thooksPath = {hooksPath.Replace('\\', '/')}\n\tautocrlf = true\n" +
+            $"[filter \"pwn\"]\n\tsmudge = \"{smudge}\"\n\tclean = cat\n\trequired = false\n");
+        return new Dictionary<string, string>(IsolationEnvironment)
+        {
+            ["GIT_CONFIG_GLOBAL"] = config,
+            ["GIT_TEMPLATE_DIR"] = template
+        };
+    }
+
+    /// <summary>
+    ///     Shows that the environment of <see cref="CreateHostileEnvironment"/> really runs code: a plain
+    ///     <c>git checkout</c> of a tag under it writes the hook's and the filter's markers (which are removed
+    ///     again), so a test that then finds no marker has shown something.
+    /// </summary>
+    /// <param name="environment">The hostile environment.</param>
+    /// <param name="hookMarker">The file the hook writes.</param>
+    /// <param name="filterMarker">The file the filter writes.</param>
+    /// <param name="tag">A tag of the repository whose layout is selected by the attributes, for example
+    ///     <c>release/1.3.0</c>.</param>
+    /// <returns><see langword="true"/> when both the hook and the filter ran for the plain git.</returns>
+    public bool HostileEnvironmentRunsCodeForPlainGit(
+        IReadOnlyDictionary<string, string> environment, string hookMarker, string filterMarker, string tag)
+    {
+        var control = Path.Combine(Root, "control");
+        Git(Root, ["init", "-q", control], null, environment);
+        Git(control, ["fetch", "-q", BarePath, $"refs/tags/{tag}:refs/tags/{tag}"], null, environment);
+        Git(control, ["checkout", "-q", $"refs/tags/{tag}", "--", ".github/agents", ".github/standards"], null, environment);
+        var ran = File.Exists(hookMarker) && File.Exists(filterMarker);
+        File.Delete(hookMarker);
+        File.Delete(filterMarker);
+        return ran;
+    }
+
+    /// <summary>
+    ///     Stages one tree entry without touching the working folder.
+    /// </summary>
+    /// <param name="mode">The git file mode, for example <c>120000</c> for a symbolic link.</param>
+    /// <param name="objectId">The object the entry points to.</param>
+    /// <param name="path">The repository path of the entry.</param>
+    private void StageEntry(string mode, string objectId, string path) =>
+        // cspell:ignore ignorecase precomposeunicode protectntfs protecthfs
+        Git(
+            _workPath,
+            "-c", "core.ignorecase=false", "-c", "core.precomposeunicode=false",
+            "-c", "core.protectNTFS=false", "-c", "core.protectHFS=false",
+            "update-index", "--add", "--cacheinfo", $"{mode},{objectId},{path}");
 
     /// <summary>
     ///     Gets the commit a tag points to in the bare repository.
@@ -255,11 +407,26 @@ internal sealed class GitFixtureRepository : IDisposable
     /// <param name="arguments">The git arguments.</param>
     /// <returns>The standard output.</returns>
     /// <exception cref="InvalidOperationException">Thrown when git fails or takes too long.</exception>
-    private string Git(string folder, params string[] arguments)
+    private string Git(string folder, params string[] arguments) => Git(folder, arguments, null, null);
+
+    /// <summary>
+    ///     Runs git in a folder with the user's configuration replaced, a fixed identity, no signing
+    ///     and no credential helper.
+    /// </summary>
+    /// <param name="folder">The working directory.</param>
+    /// <param name="arguments">The git arguments.</param>
+    /// <param name="input">Text for standard input, or <see langword="null"/>.</param>
+    /// <param name="environment">Variables that replace the isolation environment's for this run (a
+    ///     control that shows a hostile environment really runs code), or <see langword="null"/>.</param>
+    /// <returns>The standard output.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when git fails or takes too long.</exception>
+    private string Git(
+        string folder, string[] arguments, string? input, IReadOnlyDictionary<string, string>? environment)
     {
         var startInfo = new ProcessStartInfo("git")
         {
             WorkingDirectory = folder,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -283,12 +450,14 @@ internal sealed class GitFixtureRepository : IDisposable
             startInfo.ArgumentList.Add(argument);
         }
 
-        foreach (var (name, value) in IsolationEnvironment)
+        foreach (var (name, value) in environment ?? IsolationEnvironment)
         {
             startInfo.Environment[name] = value;
         }
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("git did not start.");
+        process.StandardInput.Write(input ?? string.Empty);
+        process.StandardInput.Close();
         var error = process.StandardError.ReadToEndAsync();
         var output = process.StandardOutput.ReadToEndAsync();
         if (!process.WaitForExit(TimeSpan.FromSeconds(60)))

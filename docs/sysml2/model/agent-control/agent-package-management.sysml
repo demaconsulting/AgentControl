@@ -19,5 +19,12 @@ package AgentControl {
         part gitRepositoryAddress : GitRepositoryAddress;
         part gitTagPattern : GitTagPattern;
         part nuGetCaching : NuGetCaching;
+
+        // Relationships of the Git repository source (the other edges are in the design's architecture diagram):
+        // the registry creates the provider; the provider uses the address, the tag pattern and the content identity
+        connect packageSourceRegistry to gitSourceProvider;
+        connect gitSourceProvider to gitRepositoryAddress;
+        connect gitSourceProvider to gitTagPattern;
+        connect gitSourceProvider to packageContentIdentity;
     }
 }

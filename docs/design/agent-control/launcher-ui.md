@@ -377,7 +377,7 @@ default) and, only if the user answers Yes, applies the selection again with `ac
 replaces the files and records the new identity. An Upgrade or the restore of missing agent files before launch
 never asks: it refuses and reports through `ErrorOccurred`, and the message names the card menu's **Change
 package...** as the way to accept the change - it no longer suggests deleting the repo's pin file
-(`AgentControl-LauncherUI-ContentChangeProtection`, `AgentControl-LauncherUI-ChangePackage`).
+(`AgentControl-LauncherUI-ContentChangeRefusal`, `AgentControl-LauncherUI-ChangePackage`).
 
 **Change package.** A repo that already has a pin is offered **Change package...** in the card menu's *Agent files*
 group (`ChangePackageMenuItem`, shown while `HasPinnedPackage`; the group is shown whenever a package is pinned,
@@ -417,7 +417,7 @@ amber **Tag moved** chip (`TagMovedChip`, `RepoCardStatus.TagMoved`, which outra
 up-to-date cue); the chip's tooltip names the tag and both commits, its click only opens **Change package...**, and
 nothing is ever applied by it (`AgentControl-LauncherUI-TagMovedWarning`). A git older than the supported version
 makes the editor's test say *Git is too old* and the background check set the card's source problem to the same
-explanation (without a sign-in hint) (`AgentControl-LauncherUI-GitSourceSetup`).
+explanation (without a sign-in hint) (`AgentControl-LauncherUI-GitTooOld`).
 
 `ViewModelBase` supplies a minimal hand-rolled `INotifyPropertyChanged` implementation (not a
 source-generator package, to keep the dependency surface minimal) used by every view model in
@@ -605,7 +605,7 @@ given, and `Interactive` equal to the `allowPrompt` switch that already decides 
 sign-in dialog. The same switch therefore keeps Git quiet for the background upgrade check and the restore
 before launch -
 a missing sign-in is reported as a source authentication failure, which the card shows as "sign-in needed" - and lets Git
-show its own credential UI for work the user started (`AgentControl-LauncherUI-GitSourceSetup`,
+show its own credential UI for work the user started (`AgentControl-LauncherUI-GitSourcePrompts`,
 `AgentControl-System-GitSignIn`).
 
 **Git source in the Settings editor and on the card.** The Settings window's one Add menu offers "Git repository" as
@@ -631,5 +631,5 @@ source's tag pattern re-maps a pinned version to another tag, which is reported 
 different commit. The way to accept the change is the card menu's "Change package...", which opens the Select Package
 dialog on the repo's own source, package and version; choosing the pinned version again asks for confirmation before
 the changed content replaces the files (`AgentControl-LauncherUI-ChangePackage`,
-`AgentControl-LauncherUI-ContentChangeProtection`). The Select Package dialog never replaces a choice the
+`AgentControl-LauncherUI-ContentChangeConfirmation`). The Select Package dialog never replaces a choice the
 user made while the sources were loading with the repo's own source and package.

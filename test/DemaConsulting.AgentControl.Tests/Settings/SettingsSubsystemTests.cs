@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Settings;
 
 namespace DemaConsulting.AgentControl.Tests.Settings;
@@ -170,6 +171,74 @@ public class SettingsSubsystemTests
                 () => Assert.Equal(colors, reloaded.RecentRepos.Select(repo => repo.CardColor)),
                 () => Assert.Equal(loaded.CollapsedGroups, reloaded.CollapsedGroups),
                 () => Assert.DoesNotContain("Chartreuse", json, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a Git source the user configured is kept for the next session with the other
+    ///     sources and settings - its address, tag pattern, sub-folder and single package name, the
+    ///     type written by name and nothing secret-like in the file - and that an address which
+    ///     embeds a credential is refused when saved, without repeating it and without touching the
+    ///     file the earlier session wrote.
+    /// </summary>
+    [Fact]
+    public void Settings_GitSource_SurvivesSessionsAndAddressWithCredentialIsRefusedWithoutChangingTheFile()
+    {
+        // Arrange: a Git source next to a zip source, with another setting that must be kept
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var firstSession = new AppSettings
+            {
+                GitExecutablePath = "git-kept",
+                Sources =
+                [
+                    new PackageSourceDefinition { Alias = "Zips", Type = PackageSourceType.Zip, Location = @"C:\zips" },
+                    new PackageSourceDefinition
+                    {
+                        Alias = "Repo",
+                        Type = PackageSourceType.Git,
+                        Location = "git@example.invalid:org/agents.git",
+                        TagPattern = "release/{version}",
+                        Subfolder = "packaging/agents",
+                        PackageIds = ["contoso-agents"]
+                    }
+                ]
+            };
+
+            // Act: one session saves, a later session loads
+            SettingsStore.Save(firstSession, configDir);
+            var laterSession = SettingsStore.Load(configDir);
+            var savedFile = Path.Combine(configDir, "settings.json");
+            var savedText = File.ReadAllText(savedFile);
+
+            // Assert: the Git source came back whole, next to the other source and the other setting
+            var git = Assert.Single(laterSession.Sources, source => source.Type == PackageSourceType.Git);
+            Assert.Multiple(
+                () => Assert.Equal(["Zips", "Repo"], laterSession.Sources.Select(source => source.Alias)),
+                () => Assert.Equal("Repo", git.Alias),
+                () => Assert.Equal("git@example.invalid:org/agents.git", git.Location),
+                () => Assert.Equal("release/{version}", git.TagPattern),
+                () => Assert.Equal("packaging/agents", git.Subfolder),
+                () => Assert.Equal(["contoso-agents"], git.PackageIds),
+                () => Assert.Equal("git-kept", laterSession.GitExecutablePath),
+                () => Assert.Contains("\"Type\": \"Git\"", savedText, StringComparison.Ordinal),
+                () => Assert.DoesNotContain("password", savedText, StringComparison.OrdinalIgnoreCase),
+                () => Assert.DoesNotContain("token", savedText, StringComparison.OrdinalIgnoreCase));
+
+            // Act: a later session tries to keep an address that embeds a credential
+            git.Location = "https://user:SentinelSecretValue@example.invalid/org/agents.git";
+            var refusal = Assert.Throws<InvalidOperationException>(() => SettingsStore.Save(laterSession, configDir));
+
+            // Assert: refused without repeating the secret, and the saved file and folder are unchanged
+            Assert.Multiple(
+                () => Assert.DoesNotContain("SentinelSecretValue", refusal.Message, StringComparison.Ordinal),
+                () => Assert.Equal(savedText, File.ReadAllText(savedFile)),
+                () => Assert.Equal(["settings.json"], Directory.GetFileSystemEntries(configDir).Select(Path.GetFileName)));
         }
         finally
         {

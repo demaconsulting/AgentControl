@@ -15,7 +15,7 @@ repaired, how look-alike names are given one spelling) are logic of their own, w
 observable behavior of persisting application-wide preferences (package sources, git/agent
 tool overrides, recent repos, shell preference, color theme) and the user's own organizing choices (repo groups,
 card colors, collapsed sections) (`AgentControl-Settings-Persistence`,
-`AgentControl-Settings-PackageSources`, `AgentControl-Settings-Appearance`,
+`AgentControl-Settings-PackageSources`, `AgentControl-Settings-GitSourcePersistence`, `AgentControl-Settings-Appearance`,
 `AgentControl-Settings-RepoOrganization`). The subsystem contains two units: `SettingsStore` and `RepoGroupName`.
 
 ### Interfaces
@@ -108,6 +108,19 @@ with the `Logging` subsystem's `LoggingSetup.Initialize` so a `--config-dir` sta
 (used by FlaUI end-to-end tests for hermetic isolation) redirects both settings and log
 files consistently rather than duplicating path-resolution logic.
 
-A Git package source is persisted like the others: its repository address, tag pattern and optional sub-folder are plain
-fields of the source and an address that embeds a credential is refused at save
-(`AgentControl-SettingsStore-GitSourceRoundTrip`, within `AgentControl-Settings-PackageSources`).
+A Git package source is persisted like the others, as one entry of the `Sources` list, and the settings file holds
+exactly the fields of the `AgentPackageManagement` source definition (see the *AgentPackageManagement* design,
+*Source model*): `Type` is written by name (`Git`); `Location` is the repository address (an `https` or `ssh` address or
+a local path); `TagPattern` is the tag pattern (for example `v{version}`); `Subfolder` is the optional folder of the
+repository that holds the package layout (`null` or empty for the top); and `PackageIds` holds **exactly one** package
+id, the name of the one package the repository delivers - a Git source never lists several. The source reads back as it
+was written (the fields round-trip unchanged), and the file has no member that could hold a credential. The store
+guards the file at its boundary: `Save` refuses a source whose address embeds a credential (user information with a
+password or token, or a query string or fragment; an ssh user name alone is allowed) before anything is written, with
+a message that does not repeat the address, so a secret pasted into the address never reaches the file. `Load` reads
+the fields as they are and does not repair or reject a Git source; the rules a user can break (address form, tag
+pattern, sub-folder, exactly one package id) are enforced where the user edits the source - the source editor and the
+Settings window refuse to save a source that breaks them - and again when a provider is created for it, which stops a
+hand-edited source that breaks them from being used instead of reaching git
+(`AgentControl-SettingsStore-GitSourceRoundTrip`, `AgentControl-SettingsStore-GitSourceRefusesCredential`, within
+`AgentControl-Settings-GitSourcePersistence`; `AgentControl-System-GitSourceSettings`).

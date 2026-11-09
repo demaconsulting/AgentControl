@@ -238,6 +238,136 @@ public sealed class PackageContentIntegrityTests
     }
 
     /// <summary>
+    ///     Selecting a package from a NuGet-package folder source for a never-pinned repository must record
+    ///     the SHA-256 of the <c>.nupkg</c> file in the repo's pin file (schema 3), so that a version
+    ///     republished in the feed can be told apart later.
+    /// </summary>
+    [Fact]
+    public void SelectPackage_FromNuGetFolderSource_RecordsSha256OfNupkgInPinFile()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        const string packageName = "contoso-agents";
+        var feedDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-feed-" + Guid.NewGuid());
+
+        try
+        {
+            // Arrange: a NuGet folder feed with one package, and a never-pinned repo (the feed is the only source)
+            var nupkg = NuGetFixturePackageBuilder.Create(feedDirectory, packageName, "1.0.0", "from feed");
+            using var context = new AgentControlTestContext(
+                nuGetFeedPath: feedDirectory, nuGetPackageIds: [packageName]);
+            var mainWindow = context.Launch();
+
+            // Act: choose the package in the Select Package dialog
+            GitSourceTests.OpenCardMenuItem(mainWindow, "SelectPackageMenuItem").AsMenuItem().Invoke();
+            var dialog = context.WaitForWindowWithDescendant("SelectPackageNameList", TimeSpan.FromSeconds(15));
+            Assert.NotNull(dialog);
+            GitSourceTests.SelectListItem(dialog, "SelectPackageNameList", packageName);
+            var confirm = GitSourceTests.Find(dialog, "SelectPackageConfirmButton").AsButton();
+            Assert.True(Retry.WhileFalse(
+                () => confirm.IsEnabled, TimeSpan.FromSeconds(15), TimeSpan.FromMilliseconds(200)).Result);
+            confirm.Invoke();
+            Assert.NotNull(context.WaitForWindow(
+                title => title.StartsWith("Release Notes", StringComparison.Ordinal), TimeSpan.FromSeconds(30)));
+
+            // Assert: the files came from the NuGet package, and the pin names the identity of the .nupkg file
+            Assert.Equal("from feed", File.ReadAllText(Path.Combine(context.RepoPath, ".github", "agents", "feed.md")));
+            using var pin = JsonDocument.Parse(File.ReadAllText(Path.Combine(context.RepoPath, ".agentcontrol.json")));
+            Assert.Equal(Sha256Identity(nupkg), pin.RootElement.GetProperty("ContentIdentity").GetString());
+            Assert.Equal(3, pin.RootElement.GetProperty("SchemaVersion").GetInt32());
+        }
+        finally
+        {
+            TryDelete(feedDirectory);
+        }
+    }
+
+    /// <summary>
+    ///     A NuGet package version republished in the feed with different content must not be re-synced at
+    ///     launch: the launch tells the user the agent files were not synced, extracts nothing and leaves the
+    ///     pin file exactly as it was - and the launch itself continues.
+    /// </summary>
+    [Fact]
+    public void LaunchButton_Click_NuGetPinnedVersionRepublished_ExplainsAndSyncsNothing()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        const string packageName = "contoso-agents";
+        var feedDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-feed-" + Guid.NewGuid());
+
+        try
+        {
+            // Arrange: a repo pinned to 1.0.0 with the identity of the original .nupkg, whose managed folders
+            // are missing, and a feed whose 1.0.0 package has since been republished
+            var identity = Sha256Identity(NuGetFixturePackageBuilder.Create(feedDirectory, packageName, "1.0.0", "original"));
+            NuGetFixturePackageBuilder.Create(feedDirectory, packageName, "1.0.0", "republished with other content");
+            using var context = new AgentControlTestContext(
+                pinnedPackageName: packageName,
+                pinnedPackageVersion: "1.0.0",
+                nuGetFeedPath: feedDirectory,
+                nuGetPackageIds: [packageName],
+                pinnedSource: "Feed",
+                pinnedContentIdentity: identity);
+            var mainWindow = context.Launch();
+
+            // Act / Assert: the launch explains the refusal, applies nothing and goes on
+            AssertLaunchRefusesRepublishedPin(context, mainWindow);
+        }
+        finally
+        {
+            TryDelete(feedDirectory);
+        }
+    }
+
+    /// <summary>
+    ///     Clicks Launch on a repo whose pinned version was republished, and checks that the refusal is explained
+    ///     in plain language, that nothing was extracted and the pin is untouched, and that the launch went on.
+    /// </summary>
+    /// <param name="context">The running test context, whose repo has the pin and no managed folders.</param>
+    /// <param name="mainWindow">The main window.</param>
+    private static void AssertLaunchRefusesRepublishedPin(AgentControlTestContext context, Window mainWindow)
+    {
+        var pinPath = Path.Combine(context.RepoPath, ".agentcontrol.json");
+        var pinBefore = File.ReadAllText(pinPath);
+
+        // Act: launch the agent tool, which first tries to restore the missing agent files
+        var launchButton = Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("LaunchButton"))?.AsButton(),
+            timeout: TimeSpan.FromSeconds(10),
+            interval: TimeSpan.FromMilliseconds(200)).Result;
+        Assert.NotNull(launchButton);
+        launchButton.Invoke();
+
+        // Assert: the refusal is explained, nothing was extracted, and the pin is untouched
+        var messageWindow = context.WaitForWindowWithDescendant("MessageText", TimeSpan.FromSeconds(30));
+        Assert.NotNull(messageWindow);
+        var message = messageWindow.FindFirstDescendant(cf => cf.ByAutomationId("MessageText"))?.Name;
+        Assert.NotNull(message);
+        Assert.Contains("not synced", message, StringComparison.Ordinal);
+        Assert.Contains("now contains different files", message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));
+        Assert.Equal(pinBefore, File.ReadAllText(pinPath));
+
+        // Assert: the warning did not stop the launch - the configured agent tool was invoked in the repo
+        var invocation = ArgLoggerLog.WaitForInvocation(
+            context.ArgLoggerOutputFile,
+            record => record.Arguments.Contains(TestSettingsWriter.AgentToolMarkerArgument),
+            TimeSpan.FromSeconds(30));
+        Assert.NotNull(invocation);
+        Assert.True(PathsEqual(invocation.WorkingDirectory, context.RepoPath));
+        Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));
+        Assert.Equal(pinBefore, File.ReadAllText(pinPath));
+    }
+
+    /// <summary>
     ///     Compares two filesystem paths for equality, tolerating Windows' case-insensitivity and
     ///     a trailing directory separator difference.
     /// </summary>

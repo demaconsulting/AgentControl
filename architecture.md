@@ -25,8 +25,9 @@ day as a quick-launch utility for AI-assisted development sessions.
 - Reading/writing a per-repo `.agentcontrol.json` pin file (package name,
   pinned semantic version, and whether the user has declined the AGENTS.md
   template offer for this repo)
-- Fetching agent package zip files from a configurable filesystem path (local
-  drive, mapped drive, or UNC path)
+- Fetching agent packages from the sources the user configures: a folder of
+  zip files, a folder or server of NuGet packages, or a Git repository (local
+  drive, mapped drive, UNC path, https/ssh address)
 - Detecting when a newer agent package version is available and prompting the
   user to upgrade
 - Blind-delete-and-replace sync of the four known agent folders
@@ -90,12 +91,12 @@ day as a quick-launch utility for AI-assisted development sessions.
 - Application-level logging (error message boxes are sufficient)
 - Non-Windows installers for v1 (code stays cross-platform-capable via
   Avalonia, but only an MSI is produced initially)
-- Package sources are of four kinds: a folder of zip packages, a folder of
-  NuGet packages (local/mapped/UNC), a NuGet-package server, and a Git
-  repository (one repository = one package; its SemVer tags matching a
-  configurable tag pattern are the versions). Other kinds (for example plain
-  HTTP downloads) are not supported. AgentControl never stores credentials:
-  servers and Git use the user's own credential helper, SSH keys or ssh-agent
+- Package source kinds other than a folder of zip packages, a folder of NuGet
+  packages (local/mapped/UNC), a NuGet-package server and a Git repository (one
+  repository = one package; its SemVer tags matching a configurable tag pattern
+  are the versions), for example plain HTTP downloads. AgentControl never stores
+  credentials: servers and Git use the user's own credential helper, SSH keys or
+  ssh-agent
 
 ## Technology Stack
 
@@ -111,7 +112,8 @@ day as a quick-launch utility for AI-assisted development sessions.
   at each repo's root for the version pin
 - **External services**: only the package sources the user configures — a NuGet
   server or a remote Git repository (reached through the user's own `git`,
-  version 2.29 or newer); the folder sources need no service
+  at least the minimum supported Git version, stated in the requirements and the
+  user guide); the folder sources need no service
 
 ## Software Structure
 
@@ -145,10 +147,19 @@ AgentControl
 │       PathEllipsisText (card path control),
 │       ThemePreferenceDisplayNameConverter (theme picker text)
 ├── GitIntegration - git status check (gates pull offer on clean working tree),
-│                     git pull, configurable git executable path override
-├── AgentPackageManagement - resolves available package versions and fetches
-│                             agent package zips from the configured
-│                             filesystem path (local/mapped/UNC)
+│                     git pull, configurable git executable path override;
+│                     the user's own Git credential helper (saved package-feed
+│                     sign-ins); hardened git against remote repositories for
+│                     the Git package source (tag listing, one-tag shallow
+│                     fetch, tree listing, raw blob reading - never a checkout)
+├── AgentPackageManagement - resolves the available package versions of each
+│                             configured source and hands the chosen package's
+│                             content to RepoSync: a folder of zip packages, a
+│                             NuGet package folder or server, or a Git
+│                             repository (its SemVer tags matching a tag
+│                             pattern are the versions; one tag is fetched
+│                             shallowly and its commit is the content
+│                             identity)
 ├── RepoSync
 │   ├── PackageZipExtractor - opens/validates the new zip, updates the pin
 │   │                         file, deletes the 4 known folders, extracts the
@@ -160,7 +171,8 @@ AgentControl
 │                            package's release-notes.md after a successful
 │                            upgrade
 ├── RepoConfig - reads/writes the per-repo .agentcontrol.json pin file
-│                (package name + pinned version + whether the user declined
+│                (source alias + package name + pinned version + content
+│                identity (sha256 or git commit) + whether the user declined
 │                the AGENTS.md template offer; no "latest"/unpinned mode)
 ├── AgentToolLauncher - detects installed shells (prefers highest available
 │                       PowerShell/pwsh, falls back to Windows PowerShell 5,

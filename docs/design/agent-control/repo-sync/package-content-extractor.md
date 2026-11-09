@@ -112,8 +112,8 @@ or `AGENTS.md` text, or `null` when absent, without copying anything to disk
 (`AgentControl-PackageContentExtractor-ReadReleaseNotes`,
 `AgentControl-PackageContentExtractor-ReadAgentsMdTemplate`).
 
-**DirectoryPackageContentReader.OpenLayoutRoot**: Opens a folder whose root is the package layout (a checked-out Git
-repository). It lists and reads only `PackageContentExtractor.LayoutPaths` -
+**DirectoryPackageContentReader.OpenLayoutRoot**: Opens a folder whose root is the package layout (the folder a Git
+package was written to; nothing is checked out). It lists and reads only `PackageContentExtractor.LayoutPaths` -
 `.github/agents|standards|templates|skills`,
 `release-notes.md`, `AGENTS.md` - so a `.git` folder, other `.github` content and every other file are never seen; a
 path
