@@ -314,6 +314,39 @@ public sealed class ZipFolderSourceProviderTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that the reader of an acquired zip reports the SHA-256 of the zip file as its
+    ///     content identity, and that a republished zip with different bytes reports another one.
+    /// </summary>
+    [Fact]
+    public async Task ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReportsSha256OfZipAsContentIdentity()
+    {
+        // Arrange: a zip, and its independently computed SHA-256
+        var folder = CreateTempDirectory();
+        var zipPath = CreateZip(folder, "contoso-agents-1.0.0.zip", (".github/agents/copilot.md", "original"));
+        var expected = "sha256:" + Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(
+                await File.ReadAllBytesAsync(zipPath, TestContext.Current.CancellationToken)));
+        var provider = CreateProvider("Zips", folder);
+        var package = Assert.Single(await provider.ListVersionsAsync("contoso-agents", CancellationToken.None));
+
+        // Act: acquire it, then republish the same version with different content and acquire again
+        string? first;
+        using (var reader = await provider.AcquireAsync(package, CancellationToken.None))
+        {
+            first = reader.ContentIdentity;
+        }
+
+        File.Delete(zipPath);
+        CreateZip(folder, "contoso-agents-1.0.0.zip", (".github/agents/copilot.md", "republished"));
+        using var republished = await provider.AcquireAsync(package, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expected, first);
+        Assert.StartsWith("sha256:", republished.ContentIdentity, StringComparison.Ordinal);
+        Assert.NotEqual(expected, republished.ContentIdentity);
+    }
+
+    /// <summary>
     ///     Test that a package discovered at another source is refused.
     /// </summary>
     [Fact]

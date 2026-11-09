@@ -17,9 +17,11 @@ version-comparison/upgrade-detection behavior
 `LauncherUI` uses it to populate the package-selection window and compute the upgrade-available
 badge. It also provides the package-authenticity behavior
 (`AgentControl-AgentPackageManagement-SignedPackages`, `AgentControl-AgentPackageManagement-SignaturePlatformSupport`,
-which support `AgentControl-System-PackageAuthenticity`). The subsystem contains seven units: `PackageSource`,
+which support `AgentControl-System-PackageAuthenticity`). It also provides the content identity of a
+delivered package (`AgentControl-AgentPackageManagement-ContentIdentity`, which supports
+`AgentControl-System-PackageContentIntegrity`). The subsystem contains eight units: `PackageSource`,
 `PackageVersion`, `PackageVersionCache`, `PackageSourceRegistry`, `ZipFolderSourceProvider`,
-`NuGetSourceProvider` and `SignatureVerificationSupport`. The supporting types `PackageSourceDefinition`,
+`NuGetSourceProvider`, `SignatureVerificationSupport` and `PackageContentIdentity`. The supporting types `PackageSourceDefinition`,
 `PackageSourceType`,
 `PackageReference`, `IPackageSourceProvider`, `PackageSourceAccessException` (with its
 `PackageSourceFailureKind`) and the `DiscoveredPackage` record have no dedicated
@@ -46,6 +48,8 @@ unit documents and are folded into this subsystem-level description. The subsyst
   caller react
   (the connection test, the Select Package window, the card's background check) and whose message never
   contains a secret or more of the server's address than its scheme, host and port.
+- *Content identity.* The reader that `AcquireAsync` returns reports a `ContentIdentity` (see *Content identity*
+  below); `null` means the provider cannot name one, which is never a change.
 
 **SignatureVerificationSupport.IsSupported**: Tells whether package signatures can be verified here.
 
@@ -169,6 +173,27 @@ failure to a `PackageSourceAccessException` with a secret-free message
 `AgentControl-AgentPackageManagement-NuGetServerSecretSafety`). Listing a server's versions never downloads a
 package. Both hand a package's content to the
 `RepoSync` subsystem as an `IPackageContentReader`.
+
+**Content identity.** Nothing in a folder of zip files or a NuGet feed keeps a published version unchanged, so
+every package a zip or NuGet source delivers carries a *content identity*: `sha256:` followed by the lower-case
+hexadecimal SHA-256 of the package file (`AgentControl-AgentPackageManagement-ContentIdentity`). The decisions:
+
+- *Which bytes.* For a zip source, the zip file itself, hashed by `ZipPackageContentReader` from the one open handle
+  its entries are then read from, so the identity describes exactly the bytes that are extracted. For a NuGet
+  source, the single `.nupkg` file in the package's folder of the source's private cache, which is the copy this
+  machine unpacked (a machine whose cache holds other bytes for the same version reports a different identity,
+  which is the warning that is wanted); a folder with none or several, or a package file that is a link, is
+  refused rather than recorded under a guessed hash.
+- *Why not the unpacked files.* The package file is one stable thing to hash on every platform; hashing a tree
+  would depend on file order, attributes and line endings.
+- *The comparison.* `PackageContentIdentity.Compare(pinned, actual)` answers *not comparable* when either side is
+  missing, *same*, or *changed*; callers (the repo card) decide what to do. A missing identity is never a change,
+  so pins made before identities were recorded, and sources that report none, cause no warning.
+- *Reserved kind.* `PackageContentIdentity.FromGitCommit` formats `git-commit:` plus a commit hash for a source
+  that delivers a tag of a Git repository; no source in this build produces it, but the comparison already treats
+  identities of different kinds as different.
+- *Not a signature.* The identity detects a republished or altered package; it does not prove who published it
+  (see *Package authenticity* for that).
 
 **Package authenticity.** A NuGet source (folder or server) can require signed packages and optionally pin the
 publisher's certificate. The decisions, in the order a reader will ask about them:

@@ -6,7 +6,8 @@ The `AgentPackageManagement` subsystem is verified indirectly through its consti
 test suites (`PackageSourceTests.cs`, `PackageVersionTests.cs`, `PackageVersionCacheTests.cs`,
 `PackageSourceRegistryTests.cs`, `ZipFolderSourceProviderTests.cs`,
 `NuGetSourceProviderTests.cs`, `NuGetSourceProviderServerTests.cs`, `NuGetSourceProviderSignatureTests.cs`,
-`NuGetSourceProviderSignedPackageTests.cs` and `SignatureVerificationSupportTests.cs`), each of which is documented
+`NuGetSourceProviderSignedPackageTests.cs`, `SignatureVerificationSupportTests.cs` and
+`PackageContentIdentityTests.cs`), each of which is documented
 in its own unit-level verification
 design, plus `PackageSourceDefinitionTests.cs` and `PackageSourceServerLocationTests.cs`, which verify the
 supporting source model types and `PackageSourceAccessException` that have no unit of their own, and
@@ -37,8 +38,11 @@ no network. Otherwise standard test environment, with no external services or ha
 ### Acceptance Criteria
 
 - All unit tests for `PackageSource`, `PackageVersion`, `PackageVersionCache`,
-  `PackageSourceRegistry`, `ZipFolderSourceProvider`, `NuGetSourceProvider`, `SignatureVerificationSupport` and the
+  `PackageSourceRegistry`, `ZipFolderSourceProvider`, `NuGetSourceProvider`, `SignatureVerificationSupport`,
+  `PackageContentIdentity` and the
   source model types pass with zero failures.
+- A package a zip or NuGet source delivers reports the SHA-256 identity of its package file, and a zip republished
+  under the same version reports a different one.
 - Package discovery reflects only what is physically present in a source folder.
 - Upgrade detection produces a definite true/false answer for every input, including an
   unparsable pinned version or an empty source folder.
@@ -278,3 +282,14 @@ test-result files, where the check reports "supported" and a real offline certif
 the unit tests and covered by
 `AgentControl-NuGetSourceProvider-FailClosedWithoutVerification` and
 `AgentControl-NuGetSourceProvider-UnsupportedPlatformDoesNotAffectOpenSources`.
+
+**AgentPackageManagement_ContentIdentity_ZipAndNuGetSourcesReportTheBytesTheyDeliver**: Through the registry, a zip
+source and a NuGet folder source each acquire a package and report a `sha256:` content identity; the NuGet identity
+is the same on a second acquisition, and a zip replaced under the same version (the file deleted and written again
+with other content) reports an identity that compares as changed. The identity of each kind is verified against an
+independently computed SHA-256 at the unit level. This scenario is tested by
+`AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip`, covering
+`AgentControl-AgentPackageManagement-ContentIdentity` (children: `AgentControl-PackageContentIdentity-Sha256`,
+`AgentControl-PackageContentIdentity-Format`, `AgentControl-PackageContentIdentity-Compare`,
+`AgentControl-ZipFolderSourceProvider-ReportContentIdentity` and
+`AgentControl-NuGetSourceProvider-ReportContentIdentity`).

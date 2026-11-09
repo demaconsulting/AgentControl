@@ -38,6 +38,7 @@ input-files:
   - docs/verification/agent-control/agent-package-management/nuget-source-provider.md
   - docs/verification/agent-control/agent-package-management/package-version.md
   - docs/verification/agent-control/agent-package-management/package-version-cache.md
+  - docs/verification/agent-control/agent-package-management/package-content-identity.md
   - docs/verification/agent-control/package-credentials.md
   - docs/verification/agent-control/package-credentials/feed-origin.md
   - docs/verification/agent-control/package-credentials/session-credential-store.md

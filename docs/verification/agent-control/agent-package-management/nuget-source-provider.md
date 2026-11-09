@@ -89,6 +89,8 @@ fail-closed and generated-configuration tests need no network.
   relative cache base is refused); two sources with the same package ID and version each yield
   their own content.
 - Listing and acquiring leave the process-wide NuGet credential service unchanged.
+- The reader reports the SHA-256 identity of the package file, and a package folder whose package file cannot be
+  identified is refused.
 - Nothing is read from or written to a repo, including a repo `nuget.config`.
 - A server lists versions without downloading content and supplies a downloaded package's content.
 - A server that needs a sign-in is signed in to from the user's NuGet configuration without a question;
@@ -384,3 +386,11 @@ fingerprint stops a source that requires signatures at construction, with a mess
 and is irrelevant for a source that does not require them. This scenario is tested by
 `NuGetSourceProvider_Constructor_InvalidFingerprint_RefusesWhenSignaturesAreRequired`, covering
 `AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused`.
+
+**NuGetSourceProvider_ReportContentIdentity_IsTheSha256OfTheNupkg**: An acquired package's reader reports the
+`sha256:` identity of the package file, equal to a SHA-256 computed independently by the test over the `.nupkg` in
+the feed folder; a package folder in the private cache that holds a second package file cannot be identified and is
+refused with an error that says so. This scenario is tested by
+`NuGetSourceProvider_Acquire_ExistingPackage_ReportsSha256OfNupkgAsContentIdentity` and
+`NuGetSourceProvider_Acquire_AmbiguousPackageFile_ThrowsInvalidOperationException`, covering
+`AgentControl-NuGetSourceProvider-ReportContentIdentity`.

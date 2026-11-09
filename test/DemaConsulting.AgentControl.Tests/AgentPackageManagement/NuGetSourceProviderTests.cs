@@ -226,6 +226,59 @@ public sealed class NuGetSourceProviderTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that the reader of an acquired NuGet package reports the SHA-256 of the package
+    ///     file as its content identity.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_Acquire_ExistingPackage_ReportsSha256OfNupkgAsContentIdentity()
+    {
+        // Arrange: a feed holding a package, and the independently computed SHA-256 of its file
+        var feed = CreateTempDirectory();
+        var id = UniqueId();
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "agents v1");
+        var nupkg = Assert.Single(Directory.GetFiles(feed, "*.nupkg"));
+        var expected = "sha256:" + Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(
+                await File.ReadAllBytesAsync(nupkg, TestContext.Current.CancellationToken)));
+        var provider = CreateProvider("Feed", feed);
+        var package = Assert.Single(await provider.ListVersionsAsync(id, CancellationToken.None));
+
+        // Act
+        using var reader = await provider.AcquireAsync(package, CancellationToken.None);
+
+        // Assert: the identity names the very bytes of the package file
+        Assert.Equal(expected, reader.ContentIdentity);
+    }
+
+    /// <summary>
+    ///     Test that a package folder holding more than one package file cannot be identified and
+    ///     is refused, rather than recorded under an arbitrarily chosen file's hash.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_Acquire_AmbiguousPackageFile_ThrowsInvalidOperationException()
+    {
+        // Arrange: a package acquired once, so it sits in the private cache, with a second package file added beside it
+        var feed = CreateTempDirectory();
+        var id = UniqueId();
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "agents v1");
+        var provider = CreateProvider("Feed", feed);
+        var package = Assert.Single(await provider.ListVersionsAsync(id, CancellationToken.None));
+        string packageFolder;
+        using (var first = await provider.AcquireAsync(package, CancellationToken.None))
+        {
+            packageFolder = first.Description;
+        }
+
+        await File.WriteAllTextAsync(
+            Path.Combine(packageFolder, "other.nupkg"), "not the package", TestContext.Current.CancellationToken);
+
+        // Act / Assert: the identity cannot be established, so the package is refused
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, CancellationToken.None));
+        Assert.Contains("identity cannot be established", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that an acquired package can be applied to a repo through the shared extractor,
     ///     producing the same managed folders a zip package would.
     /// </summary>

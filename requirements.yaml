@@ -35,6 +35,7 @@ includes:
   - docs/reqstream/agent-control/agent-package-management/signature-verification-support.yaml
   - docs/reqstream/agent-control/agent-package-management/package-version.yaml
   - docs/reqstream/agent-control/agent-package-management/package-version-cache.yaml
+  - docs/reqstream/agent-control/agent-package-management/package-content-identity.yaml
   - docs/reqstream/agent-control/repo-sync.yaml
   - docs/reqstream/agent-control/repo-sync/git-ignore-ensurer.yaml
   - docs/reqstream/agent-control/repo-sync/package-content-extractor.yaml

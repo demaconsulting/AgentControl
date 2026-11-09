@@ -20,8 +20,11 @@ root.
 `Save`: `WriteIndented = true` so the on-disk file is human-readable, and
 `PropertyNameCaseInsensitive = true` so hand-edited camelCase names are accepted. Property
 names are written exactly as declared on `RepoPin` (PascalCase, as pin files always have been):
-`SchemaVersion`, `Source`, `PackageName`, `Version`, `AgentsMdTemplateDeclined`, followed by
-any unknown properties.
+`SchemaVersion`, `Source`, `PackageName`, `Version`, `AgentsMdTemplateDeclined`, `ContentIdentity` (omitted when
+null), followed by any unknown properties.
+
+**FirstSchemaWithSource**: `const int` — `2`, the first schema version whose pins name their source; only an older
+pin (no `Source`) is read as a pin to the legacy `Default` source, whatever the current schema is.
 
 **UnsupportedPinSchemaException** (same file): an `InvalidOperationException` subtype raised
 when a pin file declares a newer schema than the build supports; its message names the file and
@@ -35,14 +38,17 @@ tells the user to update AgentControl.
 - *Returns*: `RepoPin?`.
 - *Postconditions*: Returns `null` (not an exception) when no pin file exists yet — a
   never-synced repo is an expected, ordinary state (`AgentControl-RepoPinStore-Load`). A file
-  with a schema version older than the current one (including one with no schema version at all)
+  with a schema version older than 2 (including one with no schema version at all)
   and no source is returned with `Source` set to the legacy alias `Default`
-  (`AgentControl-RepoPinStore-LegacyV1`). A current-schema file that names no source is not
+  (`AgentControl-RepoPinStore-LegacyV1`). A file of schema 2 or later that names no source is not
   mapped to anything: `InvalidOperationException` is thrown, so a malformed pin is never
   resolved against a source it did not name (`AgentControl-RepoPinStore-RejectUnnamedSource`).
+  A pin of schema 1 or 2 has no `ContentIdentity` and is returned as such
+  (`AgentControl-RepoPinStore-LoadWithoutIdentity`); `ContentIdentity` is matched case-insensitively like every
+  property (`AgentControl-RepoPinStore-SaveContentIdentity`).
   A file declaring a schema version newer than
-  `RepoPin.CurrentSchemaVersion` is not interpreted: `UnsupportedPinSchemaException` is thrown
-  (`AgentControl-RepoPinStore-RejectNewerSchema`).
+  `RepoPin.CurrentSchemaVersion` (3) is not interpreted: `UnsupportedPinSchemaException` is thrown
+  (`AgentControl-RepoPinStore-RejectNewerSchema`, `AgentControl-RepoPinStore-SchemaVersion3`).
 
 **Save**: Writes the `RepoPin` for a repo, creating or overwriting `.agentcontrol.json`.
 
@@ -50,8 +56,10 @@ tells the user to update AgentControl.
 - *Returns*: `void`.
 - *Preconditions*: `repoRoot` must already exist.
 - *Postconditions*: The pin file reflects `pin` exactly (`AgentControl-RepoPinStore-Save`), with
-  `SchemaVersion` set to the current version and the source alias written
-  (`AgentControl-RepoPinStore-SourceAlias`). Before writing, any existing file is inspected: a
+  `SchemaVersion` set to the current version (3) and the source alias written
+  (`AgentControl-RepoPinStore-SourceAlias`, `AgentControl-RepoPinStore-SchemaVersion3`); the content identity is
+  written when the pin has one and omitted otherwise (`AgentControl-RepoPinStore-SaveContentIdentity`). Before
+  writing, any existing file is inspected: a
   newer schema aborts the save with `UnsupportedPinSchemaException` and leaves the file
   untouched (`AgentControl-RepoPinStore-RejectNewerSchema`); properties of the existing file
   that `RepoPin` does not model are merged into `RepoPin.ExtensionData` (the pin's own values
@@ -83,6 +91,8 @@ propagate.
 
 #### Callers
 
-- **RepoCardViewModel** — calls `Load` during `RefreshPin` and before applying a package, and
-  `Save` inside `ApplyPackageAndShowReleaseNotes` after a successful extraction.
+- **RepoCardViewModel** — calls `Load` during `RefreshPin`, before applying a package and when restoring missing
+  agent files before launch (to compare the recorded content identity), and `Save` inside
+  `ApplyPackageAndShowReleaseNotes` after a successful extraction - never from the restore at launch, which must not
+  rewrite a file under version control.
 - **MainWindowViewModel** — calls `Load` when a repo is added, to cache its pin.

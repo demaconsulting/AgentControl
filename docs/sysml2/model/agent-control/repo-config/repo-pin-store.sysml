@@ -1,6 +1,6 @@
 package AgentControl {
     part def RepoPinStore {
-        doc /* Loads/saves a repo's `.agentcontrol.json` pin file (pinned package name/version). */
+        doc /* Loads/saves a repo's `.agentcontrol.json` pin file (pinned package name, version, source alias and content identity). */
 
         comment sourceRef /* Source: src/DemaConsulting.AgentControl/RepoConfig/RepoPinStore.cs */
         comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/RepoConfig/RepoPinStoreTests.cs */

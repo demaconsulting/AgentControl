@@ -66,26 +66,39 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     /// </summary>
     /// <param name="packageFolder">The unpacked package folder.</param>
     /// <param name="contentRoot">The validated content root inside it.</param>
-    private DirectoryPackageContentReader(string packageFolder, string contentRoot)
+    /// <param name="contentIdentity">The identity the opener computed for the package, if any.</param>
+    private DirectoryPackageContentReader(string packageFolder, string contentRoot, string? contentIdentity)
     {
         Description = packageFolder;
         _contentRoot = contentRoot;
+        ContentIdentity = contentIdentity;
     }
 
     /// <inheritdoc />
     public string Description { get; }
 
     /// <summary>
+    ///     Gets the identity the opener supplied for this package (for a NuGet package, the
+    ///     SHA-256 of the unpacked <c>.nupkg</c>), or <see langword="null"/> when none was given.
+    ///     The reader only carries it: a folder reader does not hash anything itself because the
+    ///     folder has no single file whose bytes define the package.
+    /// </summary>
+    public string? ContentIdentity { get; }
+
+    /// <summary>
     ///     Opens an unpacked package folder for reading.
     /// </summary>
     /// <param name="packageFolder">The unpacked package folder (the one that contains
     ///     <c>content</c>).</param>
+    /// <param name="contentIdentity">The content identity of the package, as computed by the caller
+    ///     (see <see cref="IPackageContentReader.ContentIdentity"/>); <see langword="null"/> when
+    ///     the caller has none.</param>
     /// <returns>A reader over the folder's <c>content</c> sub-folder.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="packageFolder"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the folder has no <c>content</c>
     ///     sub-folder, or the package folder or the content root is itself a link.</exception>
-    public static DirectoryPackageContentReader Open(string packageFolder)
+    public static DirectoryPackageContentReader Open(string packageFolder, string? contentIdentity = null)
     {
         ArgumentNullException.ThrowIfNull(packageFolder);
 
@@ -113,7 +126,7 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
                 $"Package content folder '{contentRoot}' is a link, which is not allowed.");
         }
 
-        return new DirectoryPackageContentReader(packageFolder, contentRoot);
+        return new DirectoryPackageContentReader(packageFolder, contentRoot, contentIdentity);
     }
 
     /// <inheritdoc />

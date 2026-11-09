@@ -422,6 +422,20 @@ badge, offers no upgrade, and keeps its pin file unchanged. This scenario is tes
 `windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
 covering `AgentControl-System-SourcePinIntegrity`.
 
+**AgentControl_PackageContentIntegrity_RecordedOnSelectAndRepublishedVersionNotSyncedAtLaunch**: In the published
+application, selecting a package for a never-pinned repo writes a pin (schema version 3) whose content identity is
+the SHA-256 of the zip that was applied, computed independently by the test. In a second run a repo is pinned to
+1.0.0 with the identity of the original zip, its managed folders are missing, and the 1.0.0 zip has since been
+republished with other content; clicking Launch shows a message that the agent files were not synced because the
+package now contains different files than the copy the repo was set up with, no managed folder is created, and the
+pin file is byte for byte unchanged. The confirmation question for an explicit selection of the same version, the
+refusal of an Upgrade (which the card does not offer for an up-to-date repo), the silent adoption of an identity by a
+pin without one, and the NuGet case are specified by the child requirements and verified at the subsystem and unit
+levels only; they are not claimed as system-level evidence. This scenario is tested by
+`windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile` and
+`windows@LaunchButton_Click_PinnedVersionRepublished_ExplainsAndSyncsNothing`, covering
+`AgentControl-System-PackageContentIntegrity`.
+
 **AgentControl_UpgradeFromChip_ClickStartsTheUpgrade**: On a repo pinned to 1.0.0 with 1.1.0 at the source, the
 real application shows the upgrade chip as a button (invocable through UI Automation); invoking it runs the same
 flow as the card menu's Upgrade item - the release notes window opens and the four managed folders are on disk.

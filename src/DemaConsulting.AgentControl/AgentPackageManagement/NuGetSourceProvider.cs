@@ -412,7 +412,59 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         // redirecting every read to wherever it points
         RejectLinkedCacheFolders(packagesFolder, Path.GetFullPath(packageFolder), Alias);
 
-        return DirectoryPackageContentReader.Open(packageFolder);
+        // The identity pins down which bytes this machine unpacked for the version, so a package
+        // republished under the same version is noticed by the repo's pin later
+        return DirectoryPackageContentReader.Open(packageFolder, ComputePackageIdentity(packageFolder, package));
+    }
+
+    /// <summary>
+    ///     Computes the content identity of an unpacked package: the SHA-256 of the <c>.nupkg</c>
+    ///     file the NuGet library keeps next to the unpacked content.
+    /// </summary>
+    /// <param name="packageFolder">The unpacked package folder inside the private cache, already
+    ///     known not to be reached through a link.</param>
+    /// <param name="package">The package, used in messages.</param>
+    /// <returns>The <c>sha256:</c> identity of the package file.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the folder holds no <c>.nupkg</c>
+    ///     file or more than one (so it cannot be said which bytes the package is), the file is a
+    ///     link, or it cannot be read. Failing closed keeps a package whose identity cannot be
+    ///     established from being recorded as if it had been verified.</exception>
+    /// <remarks>
+    ///     The private cache keeps the copy that was unpacked first, so the identity describes what
+    ///     this machine unpacked; a machine whose cache holds different bytes for the same version
+    ///     reports a different identity, which is the warning that is wanted.
+    /// </remarks>
+    private static string ComputePackageIdentity(string packageFolder, DiscoveredPackage package)
+    {
+        try
+        {
+            var files = Directory.EnumerateFiles(packageFolder)
+                .Where(file => string.Equals(Path.GetExtension(file), ".nupkg", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (files.Count != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Package '{package.PackageName}' {package.Version.Original} has {files.Count} package files " +
+                    "in AgentControl's package cache, so its identity cannot be established. " +
+                    "Remove the package from the cache folder and try again.");
+            }
+
+            if (new FileInfo(files[0]).LinkTarget is not null)
+            {
+                throw new InvalidOperationException(
+                    $"The package file of '{package.PackageName}' {package.Version.Original} in AgentControl's " +
+                    "package cache is a link, which is not allowed.");
+            }
+
+            using var stream = new FileStream(files[0], FileMode.Open, FileAccess.Read, FileShare.Read);
+            return PackageContentIdentity.ComputeSha256(stream);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException(
+                $"The package file of '{package.PackageName}' {package.Version.Original} could not be read " +
+                $"from AgentControl's package cache: {ex.Message}", ex);
+        }
     }
 
     /// <summary>

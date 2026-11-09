@@ -108,6 +108,57 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
     }
 
     /// <summary>
+    ///     Test that, through the registry, zip and NuGet sources each report the identity of the
+    ///     package bytes they deliver, that the identity is stable across acquisitions, and that a
+    ///     zip republished under the same version is reported as a changed identity.
+    /// </summary>
+    [Fact]
+    public async Task AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip()
+    {
+        // Arrange: a zip source and a NuGet folder source, each with one package
+        var zipFolder = CreateTempDirectory();
+        var feed = CreateTempDirectory();
+        var id = UniqueId();
+        var zipPath = Path.Combine(zipFolder, "contoso-agents-1.0.0.zip");
+        WriteZip(zipPath, "original");
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0");
+        var registry = PackageSourceRegistry.Create(
+            [
+                new PackageSourceDefinition { Alias = "Zips", Type = PackageSourceType.Zip, Location = zipFolder },
+                Definition("Feed", feed, requireSigned: false)
+            ],
+            CreateTempDirectory());
+        var zips = registry.Resolve("Zips");
+        var nuget = registry.Resolve("Feed");
+        var zipPackage = Assert.Single(await zips.ListVersionsAsync("contoso-agents", CancellationToken.None));
+        var nugetPackage = Assert.Single(await nuget.ListVersionsAsync(id, CancellationToken.None));
+
+        // Act: acquire each twice, republishing the zip between the two zip acquisitions
+        string? zipFirst;
+        using (var reader = await zips.AcquireAsync(zipPackage, CancellationToken.None))
+        {
+            zipFirst = reader.ContentIdentity;
+        }
+
+        string? nugetFirst;
+        using (var reader = await nuget.AcquireAsync(nugetPackage, CancellationToken.None))
+        {
+            nugetFirst = reader.ContentIdentity;
+        }
+
+        File.Delete(zipPath);
+        WriteZip(zipPath, "republished");
+        using var zipAgain = await zips.AcquireAsync(zipPackage, CancellationToken.None);
+        using var nugetAgain = await nuget.AcquireAsync(nugetPackage, CancellationToken.None);
+
+        // Assert: both kinds name their bytes, the NuGet identity is stable, and only the zip changed
+        Assert.StartsWith("sha256:", zipFirst, StringComparison.Ordinal);
+        Assert.StartsWith("sha256:", nugetFirst, StringComparison.Ordinal);
+        Assert.Equal(ContentIdentityComparison.Same, PackageContentIdentity.Compare(nugetFirst, nugetAgain.ContentIdentity));
+        Assert.Equal(ContentIdentityComparison.Changed, PackageContentIdentity.Compare(zipFirst, zipAgain.ContentIdentity));
+    }
+
+    /// <summary>
     ///     Test that on a platform that cannot verify signatures a source whose settings require
     ///     them refuses to list or acquire (it never skips the check), while a source that does not
     ///     require them is unaffected.
@@ -675,6 +726,18 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
             RequireSignedPackages = requireSigned,
             SignerFingerprint = fingerprint
         };
+
+    /// <summary>
+    ///     Writes a minimal agent package zip whose agents file holds the given text.
+    /// </summary>
+    /// <param name="zipPath">The zip file to create.</param>
+    /// <param name="marker">The text of the agents file.</param>
+    private static void WriteZip(string zipPath, string marker)
+    {
+        using var archive = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create);
+        using var writer = new StreamWriter(archive.CreateEntry(".github/agents/copilot.md").Open());
+        writer.Write(marker);
+    }
 
     /// <summary>
     ///     Creates a unique temporary directory removed when the test ends.

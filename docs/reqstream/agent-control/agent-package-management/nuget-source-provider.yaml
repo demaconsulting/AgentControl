@@ -624,3 +624,17 @@ sections:
           publisher to every validly signed package, defeating the pin the user set.
         tests:
           - NuGetSourceProvider_Constructor_InvalidFingerprint_RefusesWhenSignaturesAreRequired
+
+      - id: AgentControl-NuGetSourceProvider-ReportContentIdentity
+        title: >-
+          The NuGetSourceProvider class shall report, as the content identity of a package it
+          supplies, the SHA-256 identity of the package file held in its private package cache,
+          and shall refuse to supply a package whose package file cannot be identified.
+        justification: |
+          A feed can serve different bytes under a version number that was already published; the
+          identity of the package file this source unpacked is what lets a repo's pin notice the
+          difference, and a package that cannot be identified must not be recorded as if it had
+          been.
+        tests:
+          - NuGetSourceProvider_Acquire_ExistingPackage_ReportsSha256OfNupkgAsContentIdentity
+          - NuGetSourceProvider_Acquire_AmbiguousPackageFile_ThrowsInvalidOperationException

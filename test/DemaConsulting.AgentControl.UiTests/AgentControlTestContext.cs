@@ -76,6 +76,9 @@ internal sealed class AgentControlTestContext : IDisposable
     /// <param name="customizeSettings">Edits the settings dictionary just before it is written, with
     ///     this context (whose <see cref="RootDirectory"/> and <see cref="RepoPath"/> are set), or
     ///     <see langword="null"/> for none; used to seed groups, collapsed groups and more repos.</param>
+    /// <param name="pinnedContentIdentity">The content identity (for example <c>sha256:...</c> of the
+    ///     zip) to record in the repo's pin file, which is then written as the current schema, or
+    ///     <see langword="null"/> to write a pin that records none.</param>
     public AgentControlTestContext(
         string? packageSourcePath = null,
         string? pinnedPackageName = null,
@@ -85,7 +88,8 @@ internal sealed class AgentControlTestContext : IDisposable
         string? pinnedSource = null,
         bool nuGetRequireSigned = false,
         string? nuGetServerIndexUrl = null,
-        Action<Dictionary<string, object?>, AgentControlTestContext>? customizeSettings = null)
+        Action<Dictionary<string, object?>, AgentControlTestContext>? customizeSettings = null,
+        string? pinnedContentIdentity = null)
     {
         var root = Directory.CreateTempSubdirectory("AgentControlUiTests-");
         RootDirectory = root.FullName;
@@ -112,7 +116,8 @@ internal sealed class AgentControlTestContext : IDisposable
 
         if (pinnedPackageName is not null && pinnedPackageVersion is not null)
         {
-            TestRepoPinWriter.Write(RepoPath, pinnedPackageName, pinnedPackageVersion, pinnedSource);
+            TestRepoPinWriter.Write(
+                RepoPath, pinnedPackageName, pinnedPackageVersion, pinnedSource, pinnedContentIdentity);
         }
 
         _shellCleaner = new LaunchedShellCleaner(argLoggerStubExe, LogCleanup);

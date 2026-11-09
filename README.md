@@ -48,7 +48,8 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   palette (or **Automatic**); the status bar keeps its fixed colors. Both are stored only in your own AgentControl
   settings - never in the repository or its `.agentcontrol.json` - so they are never shared through git
 - **Version-pinned agent packages**: every repo names an exact agent package name and
-  semantic version, and the source it came from, in its `.agentcontrol.json` pin file — there
+  semantic version, the source it came from and a content fingerprint (a SHA-256 of the package) in its
+  `.agentcontrol.json` pin file — there
   is no floating "latest" mode, so upgrades are always a deliberate, visible action
 - **Status chips**: each repo card shows an amber upgrade chip ("Upgrade to" and the version an upgrade
   would move to; click it to upgrade), an uncommitted-changes warning, a committed-agent-files
@@ -129,8 +130,11 @@ The cards, the card menu, Settings and the package-source editor are shown in th
 - A repo's pin names its source by alias, and a package is only ever taken from that source; a
   missing source is an error, never a fallback to another source with a package of the same name.
 - A version number is only a label: depending on the source, a published version can be overwritten with different
-  content (a shared folder by anyone who can write to it, some servers when redeploy is allowed). See the User
-  Guide's section "Version Immutability and Trust" for how to guard against it.
+  content (a shared folder by anyone who can write to it, some servers when redeploy is allowed). AgentControl
+  records a fingerprint of each package it applies and does not replace a repo's agent files with a package of the
+  same version whose content changed (an Upgrade or the restore at launch stops with a message; selecting that
+  version again asks for confirmation). The fingerprint detects a changed package; it does not prove who published
+  it. See the User Guide's section "Version Immutability and Trust" for how to guard against it.
 - AgentControl never reads or writes the target repo's `nuget.config`, and keeps its NuGet
   caches in its own folder under the user profile.
 

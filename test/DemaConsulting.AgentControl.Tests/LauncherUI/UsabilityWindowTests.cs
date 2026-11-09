@@ -674,6 +674,80 @@ public sealed class UsabilityWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that selecting the version a repo is pinned to, when its package was republished with other content,
+    ///     asks before changing anything: No leaves the repo and the pin as they were, Yes applies the package and
+    ///     records its new identity.
+    /// </summary>
+    [Fact]
+    public void MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a repo applied from 1.0.0 (identity recorded), whose zip is then republished with other content
+        var sourceDir = CreateTempDirectory();
+        CreateZip(sourceDir, "contoso-agents", "1.0.0", releaseNotes: "# Original");
+        var repo = CreateRepoDirectory("republished");
+        var (window, viewModel) = CreateWindow([new RecentRepo { Path = repo }], new AppSettings { PackageSourcePath = sourceDir });
+
+        try
+        {
+            var card = viewModel.RepoCards.Single();
+            var selection = new PackageReference("Default", "contoso-agents", "1.0.0");
+            await card.ApplySelectedPackageAsync(selection);
+            Dispatcher.UIThread.RunJobs();
+            CloseChildWindows(window);
+            var recorded = RepoPinStore.Load(repo)?.ContentIdentity;
+            Assert.NotNull(recorded);
+            File.Delete(Path.Combine(sourceDir, "contoso-agents-1.0.0.zip"));
+            CreateZip(sourceDir, "contoso-agents", "1.0.0", releaseNotes: "# Republished with other content");
+
+            // Act 1: select the same version again and answer No
+            await card.ApplySelectedPackageAsync(selection);
+            Dispatcher.UIThread.RunJobs();
+            var question = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+            DialogWindowTests.Click(question, "ConfirmationNoButton");
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert 1: the question was asked before anything changed, and No changed nothing
+            Assert.Empty(window.OwnedWindows);
+            Assert.Empty(window.OpenChildWindows);
+            Assert.Equal(recorded, RepoPinStore.Load(repo)?.ContentIdentity);
+
+            // Act 2: select it again and answer Yes
+            await card.ApplySelectedPackageAsync(selection);
+            Dispatcher.UIThread.RunJobs();
+            question = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+            DialogWindowTests.Click(question, "ConfirmationYesButton");
+            for (var attempt = 0; attempt < 100 && RepoPinStore.Load(repo)?.ContentIdentity == recorded; attempt++)
+            {
+                await Task.Delay(50, TestContext.Current.CancellationToken);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            // Assert 2: the changed package was applied and its identity recorded
+            var applied = RepoPinStore.Load(repo)?.ContentIdentity;
+            Assert.NotNull(applied);
+            Assert.NotEqual(recorded, applied);
+        }
+        finally
+        {
+            CloseChildWindows(window);
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Closes the release-notes windows a main window still has open.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    private static void CloseChildWindows(MainWindow window)
+    {
+        foreach (var child in window.OpenChildWindows.ToList())
+        {
+            child.Close();
+        }
+    }
+
+    /// <summary>
     ///     Test that an upgrade without an AGENTS.md question shows the release notes at once.
     /// </summary>
     [Fact]

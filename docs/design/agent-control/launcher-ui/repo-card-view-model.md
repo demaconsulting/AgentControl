@@ -305,7 +305,8 @@ It marks the card retired, advances `_upgradeCheckGeneration` and `_imageGenerat
 dropped, clears "checking", cancels the running operation (`CancelOperation`; the operation ends cancelled, which is
 never reported as an error), sets every event of the card (`ErrorOccurred`, `ReleaseNotesReady`,
 `AgentsMdTemplateOfferRequested`, `FavoriteChanged`, `GroupChanged`, `CardColorChanged`, `LaunchRecorded`,
-`NewGroupRequested`, `RemoveRequested`, `SelectPackageRequested`) to `null` so that nothing it still does can show an
+`NewGroupRequested`, `RemoveRequested`, `SelectPackageRequested`, `ContentChangeConfirmationRequested`) to `null`
+so that nothing it still does can show an
 error box, release notes or a prompt, and clears the picture, which disposes it
 (`AgentControl-RepoCardViewModel-RetiredCardReportsNothing`, `-RetireCancelsRunningWork`). A retired card ignores
 `RefreshCheap` and `RefreshUpgradeStatusAsync` (`-RetiredCardChecksNothing`), is never reused, and `Retire` is
@@ -370,7 +371,16 @@ is an informational side action only — it never blocks `Launch`.
   `PackageContentExtractor.Extract` over the reader the provider returns,
   without displaying release notes but still calling `MaybeOfferAgentsMdTemplate`; if this
   re-extraction attempt fails for any reason, `ErrorOccurred` is raised as a non-blocking
-  warning (`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`).
+  warning (`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`). Before it extracts, the content identity of
+  the reader is compared with the one the repo's pin recorded (`PackageContentIdentity.Compare`): when the version
+  the repo is pinned to now delivers different content, nothing is extracted, a warning is logged and
+  `ErrorOccurred` says in plain language that the agent files were not synced because the package may have been
+  republished, and the method returns `false` (`AgentControl-RepoCardViewModel-RefuseChangedContent`). A pin that
+  recorded no identity (or a reader that reports none) is not comparable and is synced without any warning. The
+  restore **never writes the pin**, whatever the outcome - recording an identity here would change a file under
+  version control every time the tool is launched, so such a pin adopts an identity only at the next Select Package
+  or Upgrade (`AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin`,
+  `AgentControl-RepoCardViewModel-AdoptMissingIdentity`).
 - Marked `internal` rather than `private` so it can be unit-tested directly, separated from
   `Launch`'s process-spawning side effect, mirroring `AgentToolLauncher.BuildProcessStartInfo`'s
   own precedent.
@@ -386,20 +396,33 @@ unconfigured source or a failing source is reported through `ErrorOccurred`.
 **ApplySelectedPackageAsync**: Resolves the exact user-selected package at the chosen source,
 then applies it via `ApplyPackageAndShowReleaseNotesAsync`.
 
-- *Parameters*: `PackageReference selection` (source alias, package name, version) and a
-  cancellation token.
+- *Parameters*: `PackageReference selection` (source alias, package name, version), a
+  cancellation token and `acceptContentChange` (default `false`).
 - *Postconditions*: On success, the pin and release notes are updated exactly as `Upgrade`
   (`AgentControl-RepoCardViewModel-ApplySelectedPackage`), the pin recording the selection's source;
   on a version no longer available at the source, raises `ErrorOccurred` without mutating the
-  existing pin; cancellation leaves the pin unchanged.
+  existing pin; cancellation leaves the pin unchanged. When the selection is the version the repo is pinned to
+  and its content differs from the recorded identity, nothing is changed and
+  `ContentChangeConfirmationRequested` is raised with the selection and a plain-language question; the view layer
+  calls this method again with `acceptContentChange: true` if the user agrees
+  (`AgentControl-RepoCardViewModel-ConfirmChangedContent`). With no subscriber there is nobody to ask, so the change
+  is refused with `ErrorOccurred` instead.
 
 **ApplyPackageAndShowReleaseNotesAsync** (private): Shared extract-and-pin sequence reused by
 `Upgrade` and `ApplySelectedPackageAsync`: first loads the repo's existing pin (a newer-schema pin
 aborts here with its actionable message while the repo is still untouched; a corrupt one is
-tolerated and replaced), acquires the package from its provider, extracts it
+tolerated and replaced), acquires the package from its provider, compares the acquired content's identity with the
+pin's when the pin is for this very package version (`ContentChangedSincePinned`; a different version, a pin
+without an identity and a reader without one are never a change) and, on a change, applies the requested
+`ContentChangeHandling` before anything is touched - `Refuse` (Upgrade: log a warning, `ErrorOccurred` saying the
+package may have been republished and that nothing was changed, return;
+`AgentControl-RepoCardViewModel-RefuseChangedContent`), `Ask` (Select Package: raise
+`ContentChangeConfirmationRequested`, return) or `Accept` (the user already confirmed: log and continue); then
+extracts it
 (blind-delete-and-replace), proactively ensures the repo's `.gitignore` covers the four managed
 agent folders (via `EnsureGitIgnoreCoversManagedFolders`, its own non-blocking step — see Error
-Handling), updates the loaded pin in place with the package's source alias, name and version and
+Handling), updates the loaded pin in place with the package's source alias, name, version and content
+identity (replacing any identity recorded before, `AgentControl-RepoCardViewModel-RecordContentIdentity`) and
 saves it (so `AgentsMdTemplateDeclined` and any unknown fields are preserved), refreshes
 pin/upgrade-status properties, calls `MaybeOfferAgentsMdTemplate` and finally raises
 `ReleaseNotesReady` with the new package's release notes. The offer is raised *before* the release notes so
@@ -520,7 +543,10 @@ background task, and a retired card raises nothing.
   spelling of groups that differ only in letter case.
 - **RepoImageLocator** (`LauncherUI`) — finds and decodes the repo's picture, enforcing every rule about what
   may be shown.
-- **RepoPinStore** (`RepoConfig` subsystem) — reads/writes the repo's pin.
+- **RepoPinStore** (`RepoConfig` subsystem) — reads/writes the repo's pin, including the recorded content
+  identity.
+- **PackageContentIdentity**, **IPackageContentReader.ContentIdentity** (`AgentPackageManagement`/`RepoSync`
+  subsystems) — the identity of the content a source delivered, and the comparison with the recorded one.
 - **PackageSourceRegistry**, **IPackageSourceProvider**, **PackageVersionCache**,
   **DiscoveredPackage**, **PackageSourceAccessException** (`AgentPackageManagement` subsystem) — source
   resolution at the pin's alias, package discovery, acquisition, upgrade-availability checks, and the

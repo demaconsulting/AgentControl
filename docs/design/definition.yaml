@@ -38,6 +38,7 @@ input-files:
   - docs/design/agent-control/agent-package-management/nuget-source-provider.md
   - docs/design/agent-control/agent-package-management/package-version.md
   - docs/design/agent-control/agent-package-management/package-version-cache.md
+  - docs/design/agent-control/agent-package-management/package-content-identity.md
   - docs/design/agent-control/package-credentials.md
   - docs/design/agent-control/package-credentials/feed-origin.md
   - docs/design/agent-control/package-credentials/session-credential-store.md

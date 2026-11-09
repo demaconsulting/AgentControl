@@ -45,9 +45,12 @@ namespace DemaConsulting.AgentControl.RepoConfig;
 internal sealed class RepoPin
 {
     /// <summary>
-    ///     The pin file schema version this build reads and writes.
+    ///     The pin file schema version this build reads and writes. Version 3 adds
+    ///     <see cref="ContentIdentity"/>; it is a new version rather than an additive field so an
+    ///     older AgentControl, which would carry a stale identity forward when it re-pins the repo
+    ///     to another version, refuses the file instead (see <see cref="RepoPinStore"/>).
     /// </summary>
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     /// <summary>
     ///     The source alias a pin written before pins named a source is resolved against: the alias
@@ -80,6 +83,20 @@ internal sealed class RepoPin
     /// </summary>
     public string Version { get; set; } = string.Empty;
 
+    /// <summary>
+    ///     Gets or sets the content identity of the package this pin was made from (for example
+    ///     <c>sha256:...</c> of the zip or <c>.nupkg</c> file), or <see langword="null"/> when none
+    ///     is recorded.
+    /// </summary>
+    /// <remarks>
+    ///     Recorded when a package is selected or upgraded, so a later sync of the same version can
+    ///     tell that the package was republished with different content. Absent in pins written
+    ///     before schema version 3 (and in a pin whose source reported no identity), which means
+    ///     "nothing to compare" rather than "changed"; the next select or upgrade records one. Not
+    ///     written when <see langword="null"/>.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContentIdentity { get; set; }
     /// <summary>
     ///     Gets or sets whether the user has already been offered, and declined, the package's
     ///     optional root-level <c>AGENTS.md</c> template for this repo.

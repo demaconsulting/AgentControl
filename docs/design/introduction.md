@@ -58,7 +58,8 @@ parts. The system has eleven subsystems: `LauncherUI`, `AgentPackageManagement`,
 `PackageCredentials` (credentials for package servers), `RepoSync`, `RepoConfig`, `AgentToolLauncher`,
 `GitIntegration`, `Settings`, `Logging`, `Startup` and `Utilities`, plus the top-level `Program` unit. Of
 the units, `GitCredentialClient` (in `GitIntegration`) and `SignatureVerificationSupport` (in
-`AgentPackageManagement`) belong to the package-authenticity and saved-sign-in features. `RepoGroupName` (in
+`AgentPackageManagement`) belong to the package-authenticity and saved-sign-in features, and
+`PackageContentIdentity` (in `AgentPackageManagement`) to the package-content-integrity feature. `RepoGroupName` (in
 `Settings`) is the unit holding the rules for the names of the user's repo groups, and `RepoImageLocator`,
 `RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in `LauncherUI`) belong to the repo-picture,
 repo-group and dialog features; `PathEllipsisText` and `ThemePreferenceDisplayNameConverter` are documented
@@ -73,14 +74,15 @@ supporting types of `LauncherUI`, not units.
     - **LauncherUI/** - main window, repo cards, package-selection, settings, package-source editor
       (including the signature options and "Forget saved sign-in") and sign-in windows
     - **AgentPackageManagement/** - package source model, source providers (zip folder, NuGet
-      folder and server) and registry, package discovery, version comparison, and the platform
+      folder and server) and registry, package discovery, version comparison, the content identity of a
+      delivered package, and the platform
       check for package-signature verification
     - **PackageCredentials/** - credentials for package servers: server origin, in-memory session
       store, per-operation credential callback, the contract of the user's own credential store,
       and log redaction
     - **RepoSync/** - package extraction (zip or unpacked NuGet package folder) and
       release-notes viewing
-    - **RepoConfig/** - per-repo pin file persistence (package, version and source alias)
+    - **RepoConfig/** - per-repo pin file persistence (package, version, source alias and content identity)
     - **AgentToolLauncher/** - shell detection and agent-tool process launching
     - **GitIntegration/** - git status/pull/branch queries and the user's Git credential helper
       (saved package-feed sign-ins)

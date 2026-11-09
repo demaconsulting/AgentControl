@@ -1435,3 +1435,34 @@ sections:
         tests:
           - RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
           - RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent
+
+      - id: AgentControl-LauncherUI-ContentChangeProtection
+        title: >-
+          The LauncherUI subsystem shall record the content identity of a package when it is
+          selected or upgraded to, shall not replace a repo's agent files with a package of the
+          pinned version whose content differs from the recorded identity when upgrading or when
+          restoring missing agent files before launch (telling the user in plain language,
+          changing nothing and never writing the pin during a launch), shall ask the user to
+          confirm before a selected package of that version replaces them, and shall apply a
+          package silently, recording its identity, when the pin recorded none or the source
+          reports none.
+        justification: |
+          A package republished under the version a repo is pinned to would silently change the
+          instructions an agent follows, so a changed copy must never be applied without the user
+          knowing; the launch-time restore must also never rewrite the pin, because that would
+          change a file under version control every time the agent tool is started. Pins made
+          before identities existed, and sources that cannot name an identity, must keep working
+          without warnings that mean nothing.
+        children:
+          - AgentControl-RepoCardViewModel-RecordContentIdentity
+          - AgentControl-RepoCardViewModel-RefuseChangedContent
+          - AgentControl-RepoCardViewModel-ConfirmChangedContent
+          - AgentControl-RepoCardViewModel-AdoptMissingIdentity
+          - AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin
+          - RepoCardViewModel_UpgradeCommand_SameVersionRepublished_RefusesWithoutChangingRepoOrPin
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SameVersionRepublished_RefusesWithoutExtractingOrWritingPin
+          - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing
+          - RepoCardViewModel_ApplySelectedPackage_PinWithoutIdentity_AdoptsIdentityWithoutWarning
+          - MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed

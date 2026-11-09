@@ -89,7 +89,8 @@ new section is collapsed) has no star to focus.)
   files are confirmed synced (`AgentControl-LauncherUI-Launch`), Upgrade only when a newer
   version exists at the source (`AgentControl-LauncherUI-Upgrade`) — and raises a view-model
   event (`LaunchRecorded`, `SelectPackageRequested`, `ReleaseNotesReady`,
-  `AgentsMdTemplateOfferRequested`, `ErrorOccurred`, `RemoveRequested`) reporting the outcome.
+  `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `ErrorOccurred`, `RemoveRequested`)
+  reporting the outcome.
   An asynchronous command ignores a second request while it runs and can be cancelled through
   `CancelOperationCommand` (`AgentControl-LauncherUI-OneOperationPerRepo`,
   `AgentControl-LauncherUI-CancelOperation`, `AgentControl-LauncherUI-OperationProgress`). The card also
@@ -352,6 +353,14 @@ model raises the offer before `ReleaseNotesReady`, `MainWindow` remembers the op
 it, so the question never covers the notes and the notes window - which has no owner - is not lost behind the
 modal question; the notes are not opened at all when the main window has closed meanwhile.
 
+A package version republished with different content (the same version, other bytes) is handled the same way:
+when a Select Package of the version the repo is pinned to would replace its agent files with changed content,
+`RepoCardViewModel` changes nothing and raises `ContentChangeConfirmationRequested` with the selection and a
+plain-language question; `MainWindow` shows it in the same modal `ConfirmationWindow` (the safe answer, No, is the
+default) and, only if the user answers Yes, applies the selection again with `acceptContentChange: true`, which
+replaces the files and records the new identity. An Upgrade or the restore of missing agent files before launch
+never asks: it refuses and reports through `ErrorOccurred` (`AgentControl-LauncherUI-ContentChangeProtection`).
+
 `ViewModelBase` supplies a minimal hand-rolled `INotifyPropertyChanged` implementation (not a
 source-generator package, to keep the dependency surface minimal) used by every view model in
 this subsystem. `RelayCommand` is a minimal hand-rolled `ICommand` used for every command
@@ -450,7 +459,8 @@ as a cancel, or opening the folder picker; all behavior
 lives in the view models above. `MainWindow`'s code-behind is the one exception: it owns
 dialog-orchestration, view-layer plumbing that requires a live Avalonia `Window` — subscribing
 to each `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`,
-`ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ErrorOccurred`) and deciding which
+`ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `ErrorOccurred`) and
+deciding which
 dialog/window to show and how to route the user's response back into the view model (e.g.
 calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the `ConfirmationWindow` shown
 for the AGENTS.md template offer). `AboutWindow` (opened via a

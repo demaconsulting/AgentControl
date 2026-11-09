@@ -797,3 +797,22 @@ application is the system scenario `AgentControl_AgentsMdOfferBeforeReleaseNotes
 the version without its build metadata, carries the full build version as its tooltip, and the shortening drops only
 the metadata. This scenario is tested by `AboutWindow_VersionRow_IsLabeledAndShortWithFullVersionInTooltip`, covering
 `AgentControl-LauncherUI-AboutVersionRow`.
+
+**LauncherUI_ContentChangeProtection_RepublishedVersionIsNeverAppliedUnnoticed**: A package version republished with
+other content is not applied silently: an Upgrade and the restore of missing agent files before launch refuse it and
+say so, and a Select Package of the pinned version raises the confirmation request. In the main window the request
+becomes a modal confirmation whose answer No changes nothing (the repo and the pin keep what they had) and whose
+answer Yes applies the changed package and records its new identity; a pin without an identity adopts one silently.
+This scenario is verified by the `RepoCardViewModel` unit tests (see their unit verification design), with
+`RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin`,
+`RepoCardViewModel_UpgradeCommand_SameVersionRepublished_RefusesWithoutChangingRepoOrPin`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SameVersionRepublished_RefusesWithoutExtractingOrWritingPin`,
+`RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing` and
+`RepoCardViewModel_ApplySelectedPackage_PinWithoutIdentity_AdoptsIdentityWithoutWarning` cited directly at the
+subsystem level, and by the headless window test
+`MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed` (the question is asked before
+anything changes; No changes nothing; Yes applies and records the new identity), covering
+`AgentControl-LauncherUI-ContentChangeProtection` (children: `AgentControl-RepoCardViewModel-RecordContentIdentity`,
+`-RefuseChangedContent`, `-ConfirmChangedContent`, `-AdoptMissingIdentity` and `-LaunchSyncNeverWritesPin`).
+The card offers "Select Package..." only to a repo that has no pin, so today the confirmation is reached through the
+view model and the headless window test rather than through the card's menu.

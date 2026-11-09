@@ -1,6 +1,6 @@
 package AgentControl {
     part def RepoCardViewModel {
-        doc /* Per-repo card view-model: pin/git status, badges, launch/pull/upgrade/select-package/favorite/remove actions, the signature shield for a pinned source that requires signed packages, and the user-specific group and card color. */
+        doc /* Per-repo card view-model: pin/git status, badges, launch/pull/upgrade/select-package/favorite/remove actions, the signature shield for a pinned source that requires signed packages, the refuse/confirm/adopt policy for a package version republished with different content, and the user-specific group and card color. */
 
         comment sourceRef /* Source: src/DemaConsulting.AgentControl/LauncherUI/RepoCardViewModel.cs; src/DemaConsulting.AgentControl/LauncherUI/RepoCardStatus.cs; src/DemaConsulting.AgentControl/LauncherUI/CardColorPalette.cs */
         comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/LauncherUI/RepoCardViewModelTests.cs; test/DemaConsulting.AgentControl.Tests/LauncherUI/RepoCardServerSourceTests.cs; test/DemaConsulting.AgentControl.Tests/LauncherUI/RepoCardSignatureTests.cs; test/DemaConsulting.AgentControl.Tests/LauncherUI/RepoCardImageTests.cs; test/DemaConsulting.AgentControl.Tests/LauncherUI/RepoCardColorTests.cs */

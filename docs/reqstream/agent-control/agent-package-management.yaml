@@ -434,3 +434,23 @@ sections:
           - AgentControl-NuGetSourceProvider-UnsupportedPlatformDoesNotAffectOpenSources
         tests:
           - AgentPackageManagementSubsystem_RequireSignedOnUnsupportedPlatform_SourceRefusesAndOthersWork
+
+      - id: AgentControl-AgentPackageManagement-ContentIdentity
+        title: >-
+          The AgentPackageManagement subsystem shall give every package a zip folder or a NuGet
+          source supplies a content identity that names exactly the bytes of the package file it
+          delivered, in a form that can be recorded and later compared, so that a package version
+          republished with different content is told apart from the copy that was recorded.
+        justification: |
+          Nothing in a folder of zip files or a NuGet feed keeps a published version unchanged;
+          the identity is the evidence a repo's pin needs to notice that the content behind a
+          version number is no longer what was applied. Both source types are covered because
+          either can be republished in place.
+        children:
+          - AgentControl-PackageContentIdentity-Sha256
+          - AgentControl-PackageContentIdentity-Format
+          - AgentControl-PackageContentIdentity-Compare
+          - AgentControl-ZipFolderSourceProvider-ReportContentIdentity
+          - AgentControl-NuGetSourceProvider-ReportContentIdentity
+        tests:
+          - AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip

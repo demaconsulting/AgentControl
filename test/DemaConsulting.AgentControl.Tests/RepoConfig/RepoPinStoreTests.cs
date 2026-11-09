@@ -218,11 +218,11 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
-    ///     Test that saving writes schema version 2 and the source alias, and that a pin
+    ///     Test that saving writes schema version 3 and the source alias, and that a pin
     ///     round-trips with its source.
     /// </summary>
     [Fact]
-    public void RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion2AndRoundTripsSource()
+    public void RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource()
     {
         // Arrange
         var repoRoot = CreateTempDirectory();
@@ -233,13 +233,109 @@ public class RepoPinStoreTests
             var loaded = RepoPinStore.Load(repoRoot);
             var json = File.ReadAllText(Path.Combine(repoRoot, ".agentcontrol.json"));
 
-            // Assert: the file declares schema 2 and the source, and the pin round-trips
-            Assert.Contains("\"SchemaVersion\": 2", json, StringComparison.Ordinal);
+            // Assert: the file declares schema 3 and the source, and the pin round-trips
+            Assert.Contains("\"SchemaVersion\": 3", json, StringComparison.Ordinal);
             Assert.Contains("\"Source\": \"Team Feed\"", json, StringComparison.Ordinal);
             Assert.NotNull(loaded);
-            Assert.Equal(2, loaded.SchemaVersion);
+            Assert.Equal(3, loaded.SchemaVersion);
             Assert.Equal("Team Feed", loaded.Source);
             Assert.Equal("1.2.3.4+b5", loaded.Version);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a recorded content identity round-trips through save and load, and is not
+    ///     written at all when the pin has none.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_SaveThenLoad_ContentIdentity_RoundTripsAndIsOmittedWhenAbsent()
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(repoRoot, ".agentcontrol.json");
+            var identity = "sha256:" + new string('a', 64);
+
+            // Act 1: save a pin that records an identity, then reload it
+            RepoPinStore.Save(
+                repoRoot,
+                new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0", ContentIdentity = identity });
+            var withIdentity = RepoPinStore.Load(repoRoot);
+            var jsonWithIdentity = File.ReadAllText(path);
+
+            // Act 2: save a pin that records none
+            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" });
+            var withoutIdentity = RepoPinStore.Load(repoRoot);
+            var jsonWithoutIdentity = File.ReadAllText(path);
+
+            // Assert: the identity is written and read back, and is absent when not recorded
+            Assert.Contains($"\"ContentIdentity\": \"{identity}\"", jsonWithIdentity, StringComparison.Ordinal);
+            Assert.Equal(identity, withIdentity?.ContentIdentity);
+            Assert.DoesNotContain("ContentIdentity", jsonWithoutIdentity, StringComparison.OrdinalIgnoreCase);
+            Assert.Null(withoutIdentity?.ContentIdentity);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that pin files written before identities existed (version 1 and version 2) still
+    ///     load, with no content identity, and are written back as schema version 3.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
+    [InlineData("""{ "SchemaVersion": 2, "Source": "Feed", "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
+    public void RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema3OnSave(string json)
+    {
+        // Arrange: a version 1 or version 2 pin file
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(repoRoot, ".agentcontrol.json");
+            File.WriteAllText(path, json);
+
+            // Act: load it, then save it back
+            var loaded = RepoPinStore.Load(repoRoot);
+            Assert.NotNull(loaded);
+            RepoPinStore.Save(repoRoot, loaded);
+
+            // Assert: no identity was invented, and the rewritten file is schema 3
+            Assert.Null(loaded.ContentIdentity);
+            Assert.Equal("contoso-agents", loaded.PackageName);
+            Assert.Contains("\"SchemaVersion\": 3", File.ReadAllText(path), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a hand-written camelCase <c>contentIdentity</c> is read.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_Load_CamelCaseContentIdentity_IsRead()
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(repoRoot, ".agentcontrol.json"),
+                """{ "schemaVersion": 3, "source": "Feed", "packageName": "p", "version": "1.0.0", "contentIdentity": "sha256:abc" }""");
+
+            // Act
+            var loaded = RepoPinStore.Load(repoRoot);
+
+            // Assert
+            Assert.Equal("sha256:abc", loaded?.ContentIdentity);
         }
         finally
         {
@@ -360,14 +456,15 @@ public class RepoPinStoreTests
         {
             File.WriteAllText(
                 Path.Combine(repoRoot, ".agentcontrol.json"),
-                """{ "SchemaVersion": 3, "Source": "Feed", "PackageName": "p", "Version": "1.0.0" }""");
+                """{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "Version": "1.0.0" }""");
 
             // Act
             var ex = Assert.Throws<UnsupportedPinSchemaException>(() => RepoPinStore.Load(repoRoot));
 
             // Assert: the message names the file's version and tells the user what to do
-            Assert.Equal(3, ex.SchemaVersion);
-            Assert.Contains("3", ex.Message, StringComparison.Ordinal);
+            Assert.Equal(4, ex.SchemaVersion);
+            Assert.Contains("4", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("up to 3", ex.Message, StringComparison.Ordinal);
             Assert.Contains("Update AgentControl", ex.Message, StringComparison.Ordinal);
         }
         finally

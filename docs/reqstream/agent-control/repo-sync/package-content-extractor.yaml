@@ -243,3 +243,19 @@ sections:
           message that does not name the package.
         tests:
           - ZipPackageContentReader_Open_InvalidPath_ThrowsInvalidOperationException
+
+      # ---- Content identity of the package that was read ----
+      - id: AgentControl-PackageContentExtractor-ReaderContentIdentity
+        title: >-
+          The package content readers shall report the content identity of the package they read:
+          a zip reader the SHA-256 identity of the zip, computed from the same open handle its
+          entries are read from and releasing that handle when opening fails, and a folder reader
+          the identity its opener supplied, or none when none was supplied.
+        justification: |
+          The identity recorded in a repo's pin must describe the bytes that were actually
+          extracted; a folder package has no single file to hash, so its source supplies the
+          identity, and a reader that cannot name one must say so rather than invent one.
+        tests:
+          - ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries
+          - ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle
+          - DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull

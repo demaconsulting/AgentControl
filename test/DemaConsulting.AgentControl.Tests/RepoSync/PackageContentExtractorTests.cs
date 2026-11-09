@@ -374,6 +374,70 @@ public sealed class PackageContentExtractorTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a zip reader reports the SHA-256 of the zip file as its content identity, and
+    ///     that the entries it reads come from the very bytes that were hashed.
+    /// </summary>
+    [Fact]
+    public void ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries()
+    {
+        // Arrange: a zip with one entry, and the independently computed SHA-256 of the file
+        var zipPath = Path.Combine(CreateTempDirectory(), "pkg-1.0.0.zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            using var writer = new StreamWriter(archive.CreateEntry("release-notes.md").Open());
+            writer.Write("the notes");
+        }
+
+        var expected = "sha256:" + Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(zipPath)));
+
+        // Act
+        using var reader = ZipPackageContentReader.Open(zipPath);
+
+        // Assert: the identity is the file's SHA-256 and the archive is readable after hashing
+        Assert.Equal(expected, reader.ContentIdentity);
+        Assert.Equal("the notes", reader.ReadText("release-notes.md"));
+    }
+
+    /// <summary>
+    ///     Test that a file that is not a zip releases its file handle when the open fails (the
+    ///     hash and the archive share one handle, which must not leak on the failure path).
+    /// </summary>
+    [Fact]
+    public void ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle()
+    {
+        // Arrange
+        var notAZip = Path.Combine(CreateTempDirectory(), "fake-1.0.0.zip");
+        File.WriteAllText(notAZip, "this is not a zip archive");
+
+        // Act
+        Assert.Throws<InvalidOperationException>(() => ZipPackageContentReader.Open(notAZip));
+
+        // Assert: nothing still holds the file open, so it can be deleted
+        File.Delete(notAZip);
+        Assert.False(File.Exists(notAZip));
+    }
+
+    /// <summary>
+    ///     Test that a folder reader carries the identity its opener supplied, and reports none
+    ///     when it was given none.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull()
+    {
+        // Arrange
+        var package = CreatePackageFolder(("release-notes.md", "notes"));
+
+        // Act
+        using var withIdentity = DirectoryPackageContentReader.Open(package, "sha256:abc");
+        using var withoutIdentity = DirectoryPackageContentReader.Open(package);
+
+        // Assert
+        Assert.Equal("sha256:abc", withIdentity.ContentIdentity);
+        Assert.Null(withoutIdentity.ContentIdentity);
+    }
+
+    /// <summary>
     ///     Test that an unpacked package folder that is itself a symbolic link is rejected when
     ///     opened.
     /// </summary>

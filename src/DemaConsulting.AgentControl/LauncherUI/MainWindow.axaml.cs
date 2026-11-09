@@ -289,14 +289,16 @@ internal sealed partial class MainWindow : Window
     /// <summary>
     ///     Subscribes to a repo card's <see cref="RepoCardViewModel.ErrorOccurred"/>,
     ///     <see cref="RepoCardViewModel.ReleaseNotesReady"/>,
-    ///     <see cref="RepoCardViewModel.RemoveRequested"/>, and
-    ///     <see cref="RepoCardViewModel.AgentsMdTemplateOfferRequested"/> events so failures show
+    ///     <see cref="RepoCardViewModel.RemoveRequested"/>,
+    ///     <see cref="RepoCardViewModel.AgentsMdTemplateOfferRequested"/>, and
+    ///     <see cref="RepoCardViewModel.ContentChangeConfirmationRequested"/> events so failures show
     ///     a message box, successful upgrades open a non-modal <see cref="ReleaseNotesViewer"/>
     ///     tracked by this window (see <see cref="ShowTrackedChildWindow"/>, so it closes when
     ///     this window does, rather than outliving it), a remove request shows a confirmation
-    ///     dialog before actually removing the card, and an AGENTS.md template offer shows a
+    ///     dialog before actually removing the card, an AGENTS.md template offer shows a
     ///     modal <see cref="ConfirmationWindow"/> before writing the template or recording a
-    ///     decline.
+    ///     decline, and a republished package version asks for confirmation before it replaces
+    ///     the copy the repo was set up with.
     /// </summary>
     /// <param name="card">The card to subscribe to.</param>
     private void AttachCardHandlers(RepoCardViewModel card)
@@ -326,6 +328,9 @@ internal sealed partial class MainWindow : Window
             }
         }
 
+        async void OnContentChangeConfirmationRequested(object? sender, ContentChangeConfirmationRequest request) =>
+            await ConfirmContentChangeAsync(card, request);
+
         // Runs after the view model has regrouped the list (its handler was attached when the card was created)
         card.FavoriteChanged += OnFavoriteChanged;
         card.ErrorOccurred += OnErrorOccurred;
@@ -334,6 +339,7 @@ internal sealed partial class MainWindow : Window
         card.SelectPackageRequested += OnSelectPackageRequested;
         card.NewGroupRequested += OnNewGroupRequested;
         card.AgentsMdTemplateOfferRequested += OnTemplateOfferRequested;
+        card.ContentChangeConfirmationRequested += OnContentChangeConfirmationRequested;
 
         _cardHandlerRemovers[card] = () =>
         {
@@ -344,6 +350,7 @@ internal sealed partial class MainWindow : Window
             card.SelectPackageRequested -= OnSelectPackageRequested;
             card.NewGroupRequested -= OnNewGroupRequested;
             card.AgentsMdTemplateOfferRequested -= OnTemplateOfferRequested;
+            card.ContentChangeConfirmationRequested -= OnContentChangeConfirmationRequested;
         };
     }
 
@@ -483,6 +490,27 @@ internal sealed partial class MainWindow : Window
                 // The removal was not saved, so the repo is still listed; say why
                 await new MessageBoxWindow($"The repo was not removed. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
             }
+        }
+    }
+
+    /// <summary>
+    ///     Shows the <see cref="ConfirmationWindow"/> asking whether a republished package version
+    ///     (same version, different content) may replace the copy <paramref name="card"/>'s repo was
+    ///     set up with, and applies the package with the user's confirmation only if they agree.
+    /// </summary>
+    /// <param name="card">The card whose Select Package found the change.</param>
+    /// <param name="request">The question and the selection to re-apply, as carried by
+    ///     <see cref="RepoCardViewModel.ContentChangeConfirmationRequested"/>.</param>
+    /// <remarks>
+    ///     The default (focused) answer is No, as for every <see cref="ConfirmationWindow"/>, so
+    ///     pressing Enter or closing the dialog leaves the repo untouched.
+    /// </remarks>
+    private async Task ConfirmContentChangeAsync(RepoCardViewModel card, ContentChangeConfirmationRequest request)
+    {
+        var confirmed = await new ConfirmationWindow(request.Message).ShowDialog<bool>(this);
+        if (confirmed)
+        {
+            await card.ApplySelectedPackageAsync(request.Selection, acceptContentChange: true);
         }
     }
 

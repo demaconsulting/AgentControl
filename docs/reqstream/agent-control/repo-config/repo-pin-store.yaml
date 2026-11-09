@@ -40,7 +40,7 @@ sections:
           A pin is only meaningful together with the source it came from, and a failed write
           must never leave a half-written pin file that loses the repo's pin.
         tests:
-          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion2AndRoundTripsSource
+          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource
           - RepoPinStore_Load_CamelCasePropertyNames_AreRead
           - RepoPinStore_Save_CorruptExistingFile_IsReplacedAndLeavesNoTemporaryFile
 
@@ -87,3 +87,39 @@ sections:
         tests:
           - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage
           - RepoPinStore_Save_ExistingNewerSchemaFile_ThrowsAndLeavesFileUnchanged
+
+      - id: AgentControl-RepoPinStore-SaveContentIdentity
+        title: >-
+          The RepoPinStore class shall write the content identity of a pin when it has one, read it
+          back (also when the property name was written by hand in a different letter case), and
+          write nothing for a pin that has none.
+        justification: |
+          The identity must persist with the pin to be of any use after the application restarts,
+          and a pin whose source reported no identity must not claim one.
+        tests:
+          - RepoPinStore_SaveThenLoad_ContentIdentity_RoundTripsAndIsOmittedWhenAbsent
+          - RepoPinStore_Load_CamelCaseContentIdentity_IsRead
+
+      - id: AgentControl-RepoPinStore-LoadWithoutIdentity
+        title: >-
+          The RepoPinStore class shall read a pin file written before identities were recorded
+          (schema version 1 or 2) as a pin with no content identity, and shall write it back in the
+          current schema version when it is saved.
+        justification: |
+          Repos pinned by an earlier version of the tool must keep working without a migration
+          step, and must not be treated as having a changed identity.
+        tests:
+          - RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema3OnSave
+          - RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource
+
+      - id: AgentControl-RepoPinStore-SchemaVersion3
+        title: >-
+          The RepoPinStore class shall write pin files as schema version 3 and shall refuse, with a
+          message naming the versions, to read or overwrite a pin file of any newer schema version.
+        justification: |
+          A tool version that does not know the content identity would carry a stale one forward
+          when it re-pins a repo, so the schema version is raised for it to refuse the file
+          instead of corrupting the pin.
+        tests:
+          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource
+          - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage

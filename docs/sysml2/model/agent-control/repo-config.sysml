@@ -2,9 +2,9 @@ package AgentControl {
     part def RepoConfigSubsystem {
         doc
         /*
-         * Persists each repo's pinned agent package name/version in a per-repo
-         * `.agentcontrol.json` pin file. The RepoPin data record has no dedicated test file
-         * and is folded into this subsystem-level description.
+         * Persists each repo's pinned agent package name, version, source alias and content
+         * identity in a per-repo `.agentcontrol.json` pin file. The RepoPin data record has no
+         * dedicated test file and is folded into this subsystem-level description.
          */
 
         comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/RepoConfig/ */

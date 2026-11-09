@@ -185,7 +185,12 @@ AgentControl
   file always names an exact version. *Reason:* upgrades between agent package
   versions can require manual migration steps (documented in release notes),
   so silently floating to the newest version would risk applying breaking
-  changes without the developer's awareness.
+  changes without the developer's awareness. The pin also records a *content
+  identity* (a SHA-256 of the zip or NuGet package) of what was applied, so a
+  package republished under the same version is noticed and not synced
+  silently; the launch-time restore only checks it and never writes the pin
+  (that would dirty the working tree), and pins without an identity adopt one
+  at the next Select Package or Upgrade.
 
 - **Blind delete of the four known folders** (`.github/agents`,
   `.github/standards`, `.github/templates`, `.github/skills`) rather than a

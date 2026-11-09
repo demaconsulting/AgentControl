@@ -34,6 +34,7 @@ flowchart TD
         ZipFolderSourceProvider
         NuGetSourceProvider
         SignatureVerificationSupport
+        PackageContentIdentity
     end
     subgraph PackageCredentials
         FeedOrigin
@@ -97,6 +98,9 @@ flowchart TD
     NuGetSourceProvider --> PackageCredentialCallback
     NuGetSourceProvider --> SecretRedactingLogger
     NuGetSourceProvider --> SignatureVerificationSupport
+    NuGetSourceProvider --> PackageContentIdentity
+    PackageContentExtractor --> PackageContentIdentity
+    RepoCardViewModel --> PackageContentIdentity
     SourceEditorViewModel --> SignatureVerificationSupport
     PackageCredentialCallback --> SessionCredentialStore
     PackageCredentialCallback --> FeedOrigin
@@ -130,7 +134,12 @@ independently testable helpers (currently safe path combination) consumed across
 genuine sync (Select Package, Upgrade, or Launch's best-effort re-extraction), `RepoCardViewModel`
 may also offer to place a package's optional root-level `AGENTS.md` template at the repo's root via
 a modal confirmation, never overwriting a pre-existing `AGENTS.md` and remembering a decline so the
-user is not re-prompted for that repo again (`AgentControl-System-AgentsMdTemplate`). See
+user is not re-prompted for that repo again (`AgentControl-System-AgentsMdTemplate`). Select Package and
+Upgrade record in the pin the content identity of the package they applied; an Upgrade, or the restore of
+missing agent files at launch, that finds the pinned version delivering different content than recorded applies
+nothing and says so, while a Select Package of that version asks the user to confirm first, and a pin with no
+identity adopts one silently the next time a package is selected or upgraded to - the launch-time restore never
+writes the pin (`AgentControl-System-PackageContentIntegrity`). See
 `docs/design/agent-control/{subsystem}.md` for each subsystem's own design, and
 `docs/design/agent-control/program.md` for `Program`'s design (which also documents Avalonia's `App`
 bootstrap responsibility, per program.sysml's documented exception for units without a dedicated
@@ -281,10 +290,14 @@ alias.
 - *Type*: File.
 - *Role*: Provider/Consumer (`RepoConfig` reads and writes it).
 - *Contract*: Records the pinned package name, exact version and the alias of the source it came
-  from for that repo, plus a schema version; a missing file means the repo has no pin yet, a pin
-  without a source is read as a pin to the source named `Default`, and a pin from a newer schema
-  is neither interpreted nor overwritten (`AgentControl-System-SourcePinIntegrity`).
-- *Constraints*: No "latest"/unpinned mode is supported (mandatory version pinning).
+  from for that repo, the content identity of the package that was applied (a SHA-256 of the zip or
+  `.nupkg`, absent when none is known), plus a schema version (3); a missing file means the repo has
+  no pin yet, a pin without a source is read as a pin to the source named `Default`, a pin without an
+  identity is read as such (it adopts one the next time a package is selected or upgraded to), and a
+  pin from a newer schema is neither interpreted nor overwritten
+  (`AgentControl-System-SourcePinIntegrity`, `AgentControl-System-PackageContentIntegrity`).
+- *Constraints*: No "latest"/unpinned mode is supported (mandatory version pinning). The restore of
+  missing agent files at launch never writes the file.
 
 **Configured Git Executable**: The git executable used for status/pull/branch queries.
 
@@ -368,7 +381,10 @@ Open Concerns #3 (local customizations inside the four managed folders are silen
 on the next sync/upgrade); this is a disclosed, accepted trade-off, not a defect. Package sources are
 untrusted input: pins are bound to their source alias and never resolved elsewhere
 (`AgentControl-System-SourcePinIntegrity`), NuGet content is read from a private per-source cache
-that rejects links and path traversal, and no secret is ever stored (see
+that rejects links and path traversal, a package version republished with different content is
+detected by the content identity recorded in the pin and is not synced silently
+(`AgentControl-System-PackageContentIntegrity`; the identity detects a changed package, it does not prove who
+published it), and no secret is ever stored (see
 `docs/design/agent-control/agent-package-management.md` and `repo-sync.md`). **Credentials for package
 servers** are the other accepted risk area and are controlled as follows (`AgentControl-System-CredentialSafety`,
 `AgentControl-System-CredentialSessionScope`, `AgentControl-System-SavedSignInLifecycle` and

@@ -122,3 +122,11 @@ skip where links cannot be created), covering `AgentControl-RepoSync-RefuseLinke
 `AgentControl-PackageContentExtractor-RefuseNonFolderRepoComponent` and
 `AgentControl-PackageContentExtractor-RefuseLinkedDestinationFile`, whose unit tests are
 described in the `PackageContentExtractor` unit verification design).
+
+**RepoSync_ContentIdentity_ReadersReportTheIdentityOfWhatTheyRead**: A zip reader reports the SHA-256 identity of the
+zip, computed from the handle its entries are read from, and a folder reader reports the identity its opener
+supplied (or none). This scenario is verified by the `PackageContentExtractor` unit tests (see their unit
+verification design), with `ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries` and
+`DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull` cited directly at the
+subsystem level, covering `AgentControl-RepoSync-ContentIdentity` (child:
+`AgentControl-PackageContentExtractor-ReaderContentIdentity`).

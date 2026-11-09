@@ -40,10 +40,10 @@ defaulted to `false` rather than throwing, covering
 
 **RepoConfig_SourcePin_RecordsAliasMapsLegacyPreservesFieldsAndRejectsNewerSchema**: The pin's
 source alias survives a save-then-load round trip; a pin written before sources existed loads as
-a pin to `Default` (a current-schema pin that names no source is rejected rather than mapped);
+a pin to `Default` (a pin of schema 2 or later that names no source is rejected rather than mapped);
 unknown properties survive a rewrite; and a pin from a newer schema is
 rejected without being interpreted or overwritten. These are verified by the `RepoPinStore` unit
-tests, with `RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion2AndRoundTripsSource`,
+tests, with `RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource`,
 `RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource`,
 `RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault`,
 `RepoPinStore_Save_UnknownProperties_ArePreserved`, and
@@ -52,3 +52,14 @@ cited directly at the subsystem level, covering `AgentControl-RepoConfig-SourceP
 `AgentControl-RepoPinStore-SourceAlias`, `AgentControl-RepoPinStore-LegacyV1`,
 `AgentControl-RepoPinStore-RejectUnnamedSource`,
 `AgentControl-RepoPinStore-PreserveUnknownFields`, `AgentControl-RepoPinStore-RejectNewerSchema`).
+
+**RepoConfig_ContentIdentityPin_RecordsOmitsAdoptsAndRefusedByOlderVersions**: The content identity of the applied
+package survives a save-then-load round trip and is not written when the pin has none; pins written before
+identities were recorded load with no identity; pins are written as schema version 3 and a pin file of a newer
+version is refused. These are verified by the `RepoPinStore` unit tests, with
+`RepoPinStore_SaveThenLoad_ContentIdentity_RoundTripsAndIsOmittedWhenAbsent`,
+`RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema3OnSave` and
+`RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage` cited directly at the
+subsystem level, covering `AgentControl-RepoConfig-ContentIdentityPin` (children:
+`AgentControl-RepoPinStore-SaveContentIdentity`, `AgentControl-RepoPinStore-LoadWithoutIdentity` and
+`AgentControl-RepoPinStore-SchemaVersion3`).

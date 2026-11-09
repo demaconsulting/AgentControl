@@ -441,9 +441,9 @@ sections:
 
       - id: AgentControl-System-PinFile
         title: >-
-          The tool shall persist each repo's pinned agent package name, exact version, and
-          package source, so that upgrades are an explicit user action rather than an
-          automatic version float.
+          The tool shall persist each repo's pinned agent package name, exact version,
+          package source and content identity, so that upgrades are an explicit user action
+          rather than an automatic version float.
         tags: [system]
         justification: |
           Per architecture.md's "Mandatory version pinning" decision, package upgrades can
@@ -644,6 +644,32 @@ sections:
           # unconfigured source shows an error and offers no upgrade from another source.
           - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
           - windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
+
+      - id: AgentControl-System-PackageContentIntegrity
+        title: >-
+          The tool shall record in each repo's pin a content identity (a fingerprint of the
+          package that was applied); shall not replace a repo's agent files, when upgrading or
+          restoring missing agent files at launch, with a package of the same version whose
+          content differs from the recorded identity, telling the user in plain language and
+          changing nothing; shall let the user who explicitly selects that version again
+          confirm the replacement; and shall record an identity, without any warning, for a pin
+          that has none.
+        tags: [system, security]
+        justification: |
+          A package version is meant to be immutable, but a folder of zip files or a package feed
+          does not enforce it: a package republished under the same version would silently change
+          the instructions an agent follows in every repo pinned to that version (a supply-chain
+          risk as well as an honest mistake). Recording what was applied makes a republished
+          version detectable and puts the decision to accept it with the user, while pins made
+          before identities existed must keep working without nagging.
+        children:
+          - AgentControl-AgentPackageManagement-ContentIdentity
+          - AgentControl-RepoSync-ContentIdentity
+          - AgentControl-RepoConfig-ContentIdentityPin
+          - AgentControl-LauncherUI-ContentChangeProtection
+        tests:
+          - windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile
+          - windows@LaunchButton_Click_PinnedVersionRepublished_ExplainsAndSyncsNothing
 
       - id: AgentControl-System-Settings
         title: >-

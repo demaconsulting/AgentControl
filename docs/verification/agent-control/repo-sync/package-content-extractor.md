@@ -37,6 +37,8 @@ skipped). Junction tests run on Windows only (they skip elsewhere) and need no p
 - A zip package given an invalid or unsupported path is reported as an `InvalidOperationException`
   rather than a path exception.
 - Release notes and the AGENTS.md template are read from a folder package, or reported absent.
+- A zip reader reports the SHA-256 identity of the zip it reads from the same handle its entries are read from and
+  releases the handle when opening fails; a folder reader reports the identity its opener supplied, or none.
 - A repo whose `.github` folder, a managed folder, or a folder on a destination path is a symbolic
   link or junction is refused with nothing deleted or written (the link target is unchanged and
   other managed folders survive), a linked managed folder is not reported as existing, and a repo
@@ -134,6 +136,16 @@ is tested by
 `AgentControl-PackageContentExtractor-ReadAgentsMdTemplate`. The null-argument test
 `PackageContentExtractor_Extract_NullArguments_ThrowsArgumentNullException` is a defensive test that no
 requirement cites.
+
+**PackageContentExtractor_ReaderContentIdentity_ZipHashedFromTheReadHandleAndFolderCarriesSuppliedIdentity**: A zip
+reader reports the SHA-256 identity of the zip file (compared with a hash computed independently by the test) and
+still reads its entries afterwards, because the hash and the archive share one handle; a file that is not a zip
+releases that handle when opening fails (the file can be deleted straight away); a folder reader reports the
+identity its opener supplied, or none when none was supplied. This scenario is tested by
+`ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries`,
+`ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle` and
+`DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull`, covering
+`AgentControl-PackageContentExtractor-ReaderContentIdentity`.
 
 **PackageContentExtractor_ZipOpenFailure_InvalidPathIsReportedAsInvalidOperation**: Opening a zip
 package with an invalid path (an argument the operating system rejects as a path) throws

@@ -46,6 +46,11 @@ invocations are not parallelized with other tests using real process launches).
   read as a pin to Default; the pin records the source alias and keeps its other fields; a pin naming
   an unconfigured source gives an error state and no upgrade, and nothing is extracted from any other
   source; a pin from a newer schema stops an apply before the repo is touched.
+- The pin records the content identity of the package that was applied; an Upgrade, or the restore of missing agent
+  files before launch, that finds the pinned version delivering content that differs from the recorded identity applies
+  nothing and leaves the pin unchanged, a Select Package of that version asks first and applies it, recording the new
+  identity, only after the user confirmed, a pin or a source without an identity is never treated as changed, and the
+  launch-time restore never writes the pin.
 - A NuGet folder source can be selected from, upgraded from, and applied to a repo.
 - A background upgrade check never opens the sign-in dialog and explains on the card what to do; a check the
   user starts may ask once, and the credential is then remembered for the session.
@@ -512,3 +517,31 @@ source is cancelled by retiring: it ends, the card is idle, nothing was reported
 `RepoCardViewModel_Retire_OperationRunning_IsCancelledAndNothingIsReported`). A refresh and an upgrade check on a
 retired card read no source and offer no upgrade (`AgentControl-RepoCardViewModel-RetiredCardChecksNothing`, tested by
 `RepoCardViewModel_Retire_LaterRefresh_DoesNothing`).
+
+**RepoCardViewModel_ContentIdentity_RecordedRefusedConfirmedAndAdopted**: Applying a package (Select Package, or
+Upgrade to a newer version) writes the SHA-256 of the zip, computed independently by the test, into the pin. Using
+real zip sources, after the 1.0.0 zip is republished with other content: an Upgrade that finds it as the latest
+version raises an error saying the files "now contain different files" and that nothing was changed, extracts nothing
+and leaves the pin file byte for byte unchanged; the restore of missing managed folders before launch returns
+`false` with an error saying the agent files were not synced, creates no folder and leaves the pin file byte for byte
+unchanged; selecting the same version raises `ContentChangeConfirmationRequested` (carrying the selection and a
+question naming the package), raises no error and changes nothing, and selecting it with the user's confirmation
+applies the changed content and records its new identity; selecting it with nobody subscribed to the confirmation is
+refused with the same error. A pin written without an identity applies silently and has an identity recorded; an
+Upgrade to a newer version records the new version's identity without a warning; the restore at launch of such a pin,
+and of an unchanged package, extracts and leaves the pin file untouched; a source whose reader reports no identity
+is applied without any warning and the pin then records none. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin`,
+`RepoCardViewModel_UpgradeCommand_NewerVersion_RecordsNewIdentityWithoutWarning`,
+`RepoCardViewModel_UpgradeCommand_SameVersionRepublished_RefusesWithoutChangingRepoOrPin`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SameVersionRepublished_RefusesWithoutExtractingOrWritingPin`,
+`RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing`,
+`RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedAndAccepted_AppliesAndRecordsNewIdentity`,
+`RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedWithoutSubscriber_IsRefused`,
+`RepoCardViewModel_ApplySelectedPackage_PinWithoutIdentity_AdoptsIdentityWithoutWarning`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutIdentity_SyncsSilentlyAndNeverWritesPin`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UnchangedContent_SyncsAndNeverWritesPin` and
+`RepoCardViewModel_ApplySelectedPackage_SourceReportsNoIdentity_IsNeverTreatedAsChanged` (in
+`RepoCardContentIdentityTests.cs`), covering `AgentControl-RepoCardViewModel-RecordContentIdentity`,
+`AgentControl-RepoCardViewModel-RefuseChangedContent`, `AgentControl-RepoCardViewModel-ConfirmChangedContent`,
+`AgentControl-RepoCardViewModel-AdoptMissingIdentity` and `AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin`.

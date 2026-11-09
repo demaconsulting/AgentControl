@@ -77,6 +77,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private const string AgentsMdFileName = "AGENTS.md";
 
     /// <summary>
+    ///     What a user can do about a republished package version that was refused: ask for a new
+    ///     version, or - when the change is trusted - start the repo's package selection over, which
+    ///     records the package's current content.
+    /// </summary>
+    private const string ContentChangeAdvice =
+        "Ask the package's maintainer to publish the changed files as a new version. If you trust the change, " +
+        "you can instead delete this repo's .agentcontrol.json file and select the package again.";
+
+    /// <summary>
     ///     The shared recent-repos settings entry this card represents. Held by reference (not
     ///     copied) so that mutations here (favorite toggle, launch timestamp, refreshed pin
     ///     fields) are visible immediately to <see cref="MainWindowViewModel"/>'s settings
@@ -1726,6 +1735,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RemoveRequested = null;
         SelectPackageRequested = null;
         AgentsMdTemplateOfferRequested = null;
+        ContentChangeConfirmationRequested = null;
 
         // The picture is disposed here, once the view has been told it is gone
         RepoImage = null;
@@ -1752,6 +1762,41 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see cref="DeclineAgentsMdTemplate"/>.
     /// </summary>
     public event EventHandler<string>? AgentsMdTemplateOfferRequested;
+
+    /// <summary>
+    ///     Raised by <see cref="ApplySelectedPackageAsync"/> when the user selects the version the
+    ///     repo is already pinned to but the source now delivers different content for it (a
+    ///     republished package). Nothing in the repo has been changed at that point; the view layer
+    ///     shows the request's message in a modal <see cref="ConfirmationWindow"/> and, if the user
+    ///     agrees, calls <see cref="ApplySelectedPackageAsync"/> again with the request's selection
+    ///     and <c>acceptContentChange: true</c>. Does not itself show any dialog - that is a
+    ///     view-layer concern, like <see cref="AgentsMdTemplateOfferRequested"/>.
+    /// </summary>
+    public event EventHandler<ContentChangeConfirmationRequest>? ContentChangeConfirmationRequested;
+
+    /// <summary>
+    ///     What to do when a package version that the repo is already pinned to is delivered with
+    ///     different content than the pin recorded.
+    /// </summary>
+    private enum ContentChangeHandling
+    {
+        /// <summary>
+        ///     Stop and tell the user; used by Upgrade, which never replaces a version with a changed
+        ///     copy of itself.
+        /// </summary>
+        Refuse,
+
+        /// <summary>
+        ///     Stop and ask the user to confirm through <see cref="ContentChangeConfirmationRequested"/>;
+        ///     used by Select Package, the deliberate way to accept a republished version.
+        /// </summary>
+        Ask,
+
+        /// <summary>
+        ///     Go ahead: the user has already confirmed.
+        /// </summary>
+        Accept
+    }
 
     /// <summary>
     ///     Re-reads the repo's pin file, git working-tree status, and upgrade availability from
@@ -2078,6 +2123,30 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             using var reader = await provider.AcquireAsync(pinnedPackage, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+
+            // The re-sync restores what the pin was made from, so a republished version is
+            // refused here rather than quietly replacing the agent files. Only the check is done
+            // at launch: the pin is never written (recording an identity here would dirty the
+            // working tree on every launch), so a pin without an identity is simply synced
+            var recordedPin = LoadPinForComparison();
+            if (ContentChangedSincePinned(recordedPin, pinnedPackage, reader))
+            {
+                if (_logger.IsEnabled(LogLevel.Warning))
+                {
+                    _logger.LogWarning(
+                        "Not re-syncing repo '{RepoName}' before launch: package '{PackageName} {Version}' from source '{Source}' changed content ({Pinned} -> {Actual})",
+                        RepoName, pinnedPackage.PackageName, pinnedPackage.Version, pinnedPackage.SourceAlias,
+                        PackageContentIdentity.Describe(recordedPin?.ContentIdentity),
+                        PackageContentIdentity.Describe(reader.ContentIdentity));
+                }
+
+                ErrorOccurred?.Invoke(
+                    this,
+                    $"The agent files were not synced. {DescribeContentChange(pinnedPackage)} " +
+                    $"Launching without them. {ContentChangeAdvice}");
+                return false;
+            }
+
             await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
             MaybeOfferAgentsMdTemplate(reader);
             return true;
@@ -2261,7 +2330,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
 
         await ApplyPackageAndShowReleaseNotesAsync(
-            provider, latest, $"Upgraded to {latest.Version}.", "Upgrade", cancellationToken);
+            provider, latest, $"Upgraded to {latest.Version}.", "Upgrade", ContentChangeHandling.Refuse, cancellationToken);
     }
 
     /// <summary>
@@ -2274,18 +2343,23 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     the source's discovered versions.</param>
     /// <param name="cancellationToken">Cancels reading the source; a copy into the repo that has
     ///     started is not interrupted.</param>
+    /// <param name="acceptContentChange">When <see langword="true"/>, the user has already confirmed
+    ///     (through <see cref="ContentChangeConfirmationRequested"/>) that the selected version may
+    ///     replace a copy of the same version whose content differs; otherwise such a change asks
+    ///     for that confirmation first.</param>
     /// <returns>A task that completes when the package has been applied or the failure has been
     ///     reported.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="selection"/> is
     ///     <see langword="null"/>.</exception>
-    public Task ApplySelectedPackageAsync(PackageReference selection, CancellationToken cancellationToken = default)
+    public Task ApplySelectedPackageAsync(
+        PackageReference selection, CancellationToken cancellationToken = default, bool acceptContentChange = false)
     {
         ArgumentNullException.ThrowIfNull(selection);
 
         return RunOperationAsync(
             "Applying agent package...",
             cancellable: true,
-            token => ApplySelectedPackageCoreAsync(selection, token),
+            token => ApplySelectedPackageCoreAsync(selection, acceptContentChange, token),
             cancellationToken);
     }
 
@@ -2293,10 +2367,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Performs the package application for <see cref="ApplySelectedPackageAsync"/>.
     /// </summary>
     /// <param name="selection">The package the user selected.</param>
+    /// <param name="acceptContentChange">Whether a changed copy of the pinned version is already
+    ///     accepted.</param>
     /// <param name="cancellationToken">Cancels reading the source.</param>
     /// <returns>A task that completes when the package has been applied or the failure has been
     ///     reported.</returns>
-    private async Task ApplySelectedPackageCoreAsync(PackageReference selection, CancellationToken cancellationToken)
+    private async Task ApplySelectedPackageCoreAsync(
+        PackageReference selection, bool acceptContentChange, CancellationToken cancellationToken)
     {
         var packageName = selection.PackageId;
         var version = selection.Version;
@@ -2363,7 +2440,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
 
         await ApplyPackageAndShowReleaseNotesAsync(
-            provider, selected, $"Package selected: {packageName} {version}.", "Select Package", cancellationToken);
+            provider,
+            selected,
+            $"Package selected: {packageName} {version}.",
+            "Select Package",
+            acceptContentChange ? ContentChangeHandling.Accept : ContentChangeHandling.Ask,
+            cancellationToken);
     }
 
     /// <summary>
@@ -2372,7 +2454,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     user-selected version): acquires the package from its source, extracts it
     ///     (blind-delete-and-replace), proactively ensures the repo's <c>.gitignore</c> covers the
     ///     managed agent folders, rewrites the pin file (recording the package's source alias and
-    ///     keeping any existing pin's other fields), refreshes this card's pin/upgrade-status
+    ///     content identity and keeping any existing pin's other fields), refreshes this card's pin/upgrade-status
     ///     properties, offers the package's AGENTS.md template when it applies (see
     ///     <see cref="AgentsMdTemplateOfferRequested"/>) and then raises <see cref="ReleaseNotesReady"/>
     ///     with the new package's release notes.
@@ -2396,6 +2478,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="successMessage">The <see cref="StatusMessage"/> text to set on success.</param>
     /// <param name="failureVerb">A short verb phrase (e.g. <c>"Upgrade"</c>, <c>"Select Package"</c>)
     ///     used to prefix any <see cref="ErrorOccurred"/> message raised on failure.</param>
+    /// <param name="contentChange">What to do when the repo is already pinned to this very package
+    ///     version but the source now delivers different content for it (a republished package);
+    ///     see <see cref="ContentChangeHandling"/>. A pin that recorded no content identity is
+    ///     never a change: the identity is simply recorded.</param>
     /// <param name="cancellationToken">Cancels acquiring the package.</param>
     /// <returns>A task that completes when the package has been applied or the failure has been
     ///     reported.</returns>
@@ -2404,6 +2490,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         DiscoveredPackage package,
         string successMessage,
         string failureVerb,
+        ContentChangeHandling contentChange,
         CancellationToken cancellationToken)
     {
         if (_logger.IsEnabled(LogLevel.Information))
@@ -2429,16 +2516,27 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             using var reader = await provider.AcquireAsync(package, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+
+            // A republished version must be noticed before anything in the repo is touched
+            if (ContentChangedSincePinned(existingPin, package, reader) &&
+                !ResolveContentChange(existingPin, package, reader, contentChange, failureVerb))
+            {
+                return;
+            }
+
             await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
             EnsureGitIgnoreCoversManagedFolders();
 
             // Preserve a prior AGENTS.md template decline (and any unknown fields) across
             // re-pinning by updating the loaded pin in place: those fields are orthogonal to the
-            // selected package/version and must never be silently reset.
+            // selected package/version and must never be silently reset. The content identity
+            // is recorded here (and only on Select Package / Upgrade, never on the launch
+            // re-sync), replacing whatever the previous pin recorded - including nothing.
             var pin = existingPin ?? new RepoPin();
             pin.Source = package.SourceAlias;
             pin.PackageName = package.PackageName;
             pin.Version = package.Version.ToString();
+            pin.ContentIdentity = reader.ContentIdentity;
             RepoPinStore.Save(RepoPath, pin);
 
             var releaseNotes = PackageContentExtractor.ReadReleaseNotes(reader) ?? string.Empty;
@@ -2487,6 +2585,114 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             ErrorOccurred?.Invoke(this, $"Package source is unreachable: {SecretRedactor.SafeMessage(ex)}");
         }
+    }
+
+    /// <summary>
+    ///     Reads the repo's pin for a content-identity comparison, tolerating an unreadable file.
+    /// </summary>
+    /// <returns>The pin, or <see langword="null"/> when there is none or it cannot be read (in
+    ///     which case there is no recorded identity to compare against).</returns>
+    private RepoPin? LoadPinForComparison()
+    {
+        try
+        {
+            return RepoPinStore.Load(RepoPath);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    ///     Determines whether a package that is about to be applied or re-synced is the very version
+    ///     the repo is pinned to, yet its content is no longer what the pin recorded - that is,
+    ///     whether the version was republished.
+    /// </summary>
+    /// <param name="pin">The repo's current pin, or <see langword="null"/> when there is none.</param>
+    /// <param name="package">The package that was acquired.</param>
+    /// <param name="reader">The acquired package's content, which names its identity.</param>
+    /// <returns><see langword="true"/> only when the pin names the same source, package and version
+    ///     and both identities are known and differ. A different version, a pin without an
+    ///     identity (a pin made before identities were recorded) and a source that reports no
+    ///     identity are never a change.</returns>
+    private static bool ContentChangedSincePinned(RepoPin? pin, DiscoveredPackage package, IPackageContentReader reader) =>
+        pin is not null &&
+        string.Equals(pin.Source, package.SourceAlias, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(pin.PackageName, package.PackageName, StringComparison.OrdinalIgnoreCase) &&
+        IsVersion(package, pin.Version) &&
+        PackageContentIdentity.Compare(pin.ContentIdentity, reader.ContentIdentity) == ContentIdentityComparison.Changed;
+
+    /// <summary>
+    ///     Describes, for the user, that a package version now delivers different content than the
+    ///     copy the repo was set up with.
+    /// </summary>
+    /// <param name="package">The package whose content changed.</param>
+    /// <returns>A plain-language sentence naming the package and its source; it deliberately
+    ///     contains no hashes.</returns>
+    private static string DescribeContentChange(DiscoveredPackage package) =>
+        $"{package.PackageName} {package.Version} from source '{package.SourceAlias}' now contains different files " +
+        "than the copy this repo was set up with, although the version number is the same. " +
+        "The package may have been republished.";
+
+    /// <summary>
+    ///     Applies the policy for a package version whose content changed since the pin was made:
+    ///     refuses it, asks the user to confirm, or lets it through when the user already did.
+    /// </summary>
+    /// <param name="pin">The repo's current pin (carries the identity that was recorded).</param>
+    /// <param name="package">The package that was acquired.</param>
+    /// <param name="reader">The acquired package's content.</param>
+    /// <param name="contentChange">The policy requested by the caller.</param>
+    /// <param name="failureVerb">The action name used in the refusal message.</param>
+    /// <returns><see langword="true"/> when the package may be applied; <see langword="false"/>
+    ///     when it was refused or the user was asked (nothing in the repo has been changed).</returns>
+    /// <remarks>
+    ///     The refusal is both logged and reported to the user, because a republished version can
+    ///     be an attack on the supply chain as well as an honest mistake and the user needs to
+    ///     know either way. Asking needs somebody to ask: without a subscriber to
+    ///     <see cref="ContentChangeConfirmationRequested"/> the change is refused instead.
+    /// </remarks>
+    private bool ResolveContentChange(
+        RepoPin? pin,
+        DiscoveredPackage package,
+        IPackageContentReader reader,
+        ContentChangeHandling contentChange,
+        string failureVerb)
+    {
+        if (_logger.IsEnabled(LogLevel.Warning))
+        {
+            _logger.LogWarning(
+                "Package '{PackageName} {Version}' from source '{SourceAlias}' changed content for repo '{RepoName}' ({Pinned} -> {Actual}); handling: {Handling}",
+                package.PackageName, package.Version, package.SourceAlias, RepoName,
+                PackageContentIdentity.Describe(pin?.ContentIdentity),
+                PackageContentIdentity.Describe(reader.ContentIdentity),
+                contentChange);
+        }
+
+        if (contentChange == ContentChangeHandling.Accept)
+        {
+            return true;
+        }
+
+        var handler = ContentChangeConfirmationRequested;
+        if (contentChange == ContentChangeHandling.Ask && handler is not null)
+        {
+            StatusMessage = "Waiting for your confirmation of the changed package.";
+            var selection = new PackageReference(package.SourceAlias, package.PackageName, package.Version.ToString());
+            handler(
+                this,
+                new ContentChangeConfirmationRequest(
+                    selection,
+                    $"{DescribeContentChange(package)}\n\n" +
+                    $"Replace the agent files in '{RepoName}' with the changed package?\n\n" +
+                    "Choose Yes only if you trust the change."));
+            return false;
+        }
+
+        ErrorOccurred?.Invoke(
+            this,
+            $"{failureVerb} stopped. {DescribeContentChange(package)} Nothing was changed. {ContentChangeAdvice}");
+        return false;
     }
 
     /// <summary>

@@ -15,7 +15,12 @@ repo's `.gitignore` covers the four managed folders immediately after a successf
 subsystem-level description. The subsystem provides the observable behavior of syncing a
 repo's agent files to a package's contents. It contains four units: `PackageContentExtractor`,
 `PackageZipExtractor`, `ReleaseNotesViewerViewModel`, and `GitIgnoreEnsurer`; the content
-reader types are folded into the `PackageContentExtractor` unit.
+reader types are folded into the `PackageContentExtractor` unit. Every reader also reports the content identity of
+the package it reads (`AgentControl-RepoSync-ContentIdentity`, which supports
+`AgentControl-System-PackageContentIntegrity`): a zip reader hashes the zip and reads its entries from the one open
+handle, so the identity recorded in a pin is always that of the bytes that were extracted; a folder reader carries
+the identity its source supplied. The subsystem only reports the identity - what a difference means is decided by
+the `LauncherUI` card.
 
 ### Interfaces
 

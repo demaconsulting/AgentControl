@@ -147,3 +147,19 @@ sections:
           - PackageContentExtractor_Extract_DirectoryPackageIntoFreshRepo_CreatesManagedFoldersOnly
           - PackageContentExtractor_Extract_ZipAndDirectoryWithSameContent_ProduceIdenticalRepoTrees
           - PackageContentExtractor_Extract_TraversalPathFromReader_ThrowsBeforeDeletingManagedFolders
+
+      - id: AgentControl-RepoSync-ContentIdentity
+        title: >-
+          The RepoSync subsystem shall expose, for a package it reads, the content identity that
+          the package's source supplied or computed for it, and for a zip package shall compute it
+          from the very bytes that are extracted, so that what is recorded is always what was
+          applied.
+        justification: |
+          An identity taken in a separate look at the package file could describe different bytes
+          than the ones extracted if the file were replaced in between; computing it from the one
+          open handle that is also read closes that window.
+        children:
+          - AgentControl-PackageContentExtractor-ReaderContentIdentity
+        tests:
+          - ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries
+          - DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull

@@ -537,14 +537,15 @@ Sources are saved in your per-user `settings.json` (in AgentControl's folder und
 profile) as alias, kind, location, package IDs and - for a server - the insecure-HTTP choice and - for a
 NuGet source - whether signed packages are required and the optional publisher fingerprint (a fingerprint is
 public information, not a secret). Each
-repo's `.agentcontrol.json` pin records the package name, exact version and **the alias of its
-source**. AgentControl never reads or writes a repo's own `nuget.config`, and keeps its NuGet caches
+repo's `.agentcontrol.json` pin records the package name, exact version, **the alias of its
+source** and a content fingerprint of the package that was applied (see *Version Immutability and Trust*).
+AgentControl never reads or writes a repo's own `nuget.config`, and keeps its NuGet caches
 in its own folder under your user profile.
 
 | Item | Stored? |
 | :--- | :--- |
 | Alias, kind, location, feed address, package IDs, insecure-HTTP choice, signature options | Yes, in `settings.json` |
-| Package name, exact version and source alias of a repo | Yes, in the repo's `.agentcontrol.json` |
+| Package name, version, source alias and content fingerprint of a repo | Yes, in the repo's `.agentcontrol.json` |
 | The user name and password or token you type in the sign-in dialog | **Never by AgentControl** - memory only |
 | The same sign-in, when you tick **Remember on this computer** | Only by **your Git credential helper** |
 | Secrets in the log, the settings, a pin file or the repo | **Never** - the log redacts them |
@@ -572,13 +573,18 @@ name in another place from being installed under your repo's pin.
 ## Version Immutability and Trust
 
 A pin names a package, a version and a source, but a version number is only a label: whether the content behind
-`contoso-agents 1.1.0` can change later depends on the source, and AgentControl does not compare a package with the
-one you installed earlier.
+`contoso-agents 1.1.0` can change later depends on the source. AgentControl therefore also records a **content
+identity** in the pin - for a zip package, a SHA-256 fingerprint of the zip file; for a NuGet package, the same
+fingerprint of the package file in AgentControl's private cache for that source - and uses it to notice when a version
+you already applied has been **republished** with different content (see *Republished Versions* below). The
+fingerprint detects a changed package; it does not tell you who published it.
 
 - **Zip-package folders and NuGet-package folders** - anyone with write access to the folder can overwrite
   `contoso-agents-1.1.0.zip` or `contoso-agents.1.1.0.nupkg` in place. For a NuGet folder this can also make
   machines differ: AgentControl keeps a private package cache for each source and uses the copy it unpacked first,
-  so a machine that already has 1.1.0 keeps the old content while one that did not gets the new content.
+  so a machine that already has 1.1.0 keeps the old content while one that did not gets the new content - and
+  because the fingerprint describes the copy a machine unpacked, the second machine reports a changed package,
+  which is the warning you want.
 - **NuGet-package servers** - nuget.org, JFrog Artifactory and Azure Artifacts normally refuse to overwrite a
   version that is already published, but some servers can be configured to allow a redeploy, or a delete followed
   by a push of the same version.
@@ -592,6 +598,27 @@ To keep a version trustworthy:
 - For NuGet sources, use **Require signed packages** with a pinned publisher fingerprint (see *Requiring Signed
   Packages*), so a package that was not signed by your publisher is refused. A signature does not stop the
   publisher itself from signing different content under the same version, so the rules above still apply.
+
+### Republished Versions
+
+When AgentControl is about to apply or restore the exact version your repo is pinned to and finds that its content
+no longer matches the fingerprint in the pin, it does **not** quietly replace your agent files:
+
+- **Upgrade** and the **restore of missing agent files when you launch** stop, change nothing and tell you in a
+  message that the package "now contains different files than the copy this repo was set up with, although the
+  version number is the same" and may have been republished. The launch still starts your tool, without the files.
+  The right fix is for the package's maintainer to publish the changed files as a **new version**. If you trust the
+  change and want the new content anyway, delete the repo's `.agentcontrol.json` file and select the package again;
+  the new content's fingerprint is then recorded.
+- **Select Package** of that same version asks you to confirm first (a question that names the package and
+  defaults to **No**); only **Yes** replaces the agent files and records the new fingerprint.
+- A pin made before fingerprints existed, or by a source that cannot provide one, has nothing to compare, so you are
+  **never warned** about it: the fingerprint is simply recorded the next time you select a package or upgrade. The
+  restore at launch never writes the pin, so it never changes a file in your working tree.
+
+Fingerprints are recorded in the pin file with **schema version 3**. An older AgentControl refuses to read or change
+such a pin (it tells you to update), so keep the same AgentControl version across the people who share a repo's pin.
+Pins made by earlier versions still load.
 
 # Selecting and Upgrading Agent Packages
 
@@ -641,7 +668,9 @@ upgrade chip, which you can also click to start the upgrade). Upgrading:
 3. Extracts the new files into those same four folders.
 4. Ensures your `.gitignore` covers the four managed folders (adding them if not already
    covered), so they are far less likely to be committed by accident.
-5. Rewrites the `.agentcontrol.json` pin to the new package name and version.
+5. Rewrites the `.agentcontrol.json` pin to the new package name, version and content fingerprint. (If the
+   version is the one you are already pinned to but its content changed, the upgrade stops before step 2 - see
+   *Republished Versions*.)
 6. Offers the package's `AGENTS.md` template if applicable (see
    [AGENTS.md Template Offer](#agentsmd-template-offer) below). This question comes first.
 7. Shows the new package's `release-notes.md` (when the package includes one) in a
@@ -679,7 +708,9 @@ as an informational side action:
   during this check; upgrading always remains a separate, deliberate action. If this
   re-extraction attempt fails (for example, the package source is unreachable, or the pinned
   version is no longer available), a non-blocking warning is shown, but the tool is still
-  launched. If you cancel the wait, the tool is launched as well. A successful re-extraction
+  launched. If you cancel the wait, the tool is launched as well. If the pinned version has been republished with
+  different content (see *Republished Versions*), nothing is re-extracted and a warning says so. This re-extraction never
+  rewrites the pin file. A successful re-extraction
   here also offers the package's `AGENTS.md` template if
   applicable, consistent with Select Package and Upgrade (see
   [AGENTS.md Template Offer](#agentsmd-template-offer) below).

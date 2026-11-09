@@ -29,7 +29,7 @@ N/A - standard test environment. Symbolic-link tests need the ability to create 
 - All unit tests pass with zero failures.
 - Listing returns only the named package's zips, labeled with the source alias, and the distinct
   sorted package names; zip names with a fourth version segment or metadata are not packages.
-- Acquisition returns a reader over the zip's root.
+- Acquisition returns a reader over the zip's root, reporting the SHA-256 identity of the zip file.
 - A missing source folder, a source location that is a file, and a folder that disappeared after
   listing are reported as `DirectoryNotFoundException`.
 - An already canceled token throws `OperationCanceledException` before any work, and a cancellation
@@ -102,3 +102,9 @@ filter, as the other symbolic-link tests of the repository are. This scenario is
 or null definition is rejected by the constructor. This scenario is tested by
 `ZipFolderSourceProvider_Constructor_InvalidDefinition_Throws`, covering
 `AgentControl-ZipFolderSourceProvider-ValidateDefinition`.
+
+**ZipFolderSourceProvider_ReportContentIdentity_IsTheSha256OfTheZip**: An acquired package's reader reports the
+`sha256:` identity of the zip file, equal to a SHA-256 computed independently by the test, and a zip deleted and
+written again with other content under the same name reports a different identity. This scenario is tested by
+`ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReportsSha256OfZipAsContentIdentity`, covering
+`AgentControl-ZipFolderSourceProvider-ReportContentIdentity`.
