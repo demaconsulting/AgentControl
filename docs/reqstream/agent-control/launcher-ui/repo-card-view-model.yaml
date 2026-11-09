@@ -89,7 +89,7 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-CancelOperation
         title: >-
-          The RepoCardViewModel class shall let the user cancel a cancellable operation without
+          The RepoCardViewModel class shall let the user cancel a cancelable operation without
           reporting an error or changing the repo's pin.
         justification: |
           A source that never answers must not trap the user in a wait they cannot leave, and

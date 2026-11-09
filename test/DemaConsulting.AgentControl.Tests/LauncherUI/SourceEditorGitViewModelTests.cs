@@ -676,7 +676,7 @@ public class SourceEditorGitViewModelTests
     }
 
     /// <summary>
-    ///     Test that cancelling a running Git test ends it with a neutral "canceled" result and no
+    ///     Test that canceling a running Git test ends it with a neutral "canceled" result and no
     ///     preview, and that the progress text speaks of the repository.
     /// </summary>
     [Fact]

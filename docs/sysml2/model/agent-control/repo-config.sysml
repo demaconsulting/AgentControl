@@ -1,4 +1,6 @@
 package AgentControl {
+    private import SoftwareItemMetadata::*;
+
     part def RepoConfigSubsystem {
         doc
         /*
@@ -7,10 +9,13 @@ package AgentControl {
          * dedicated test file and is folded into this subsystem-level description.
          */
 
-        comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/RepoConfig/ */
-        comment designRef /* Design: docs/design/agent-control/repo-config.md */
-        comment verificationRef /* Verification: docs/verification/agent-control/repo-config.md */
-        comment reqRef /* Requirements: docs/reqstream/agent-control/repo-config.yaml */
+        metadata info : SoftwareInfo {
+            description = "Persists each repo's pinned agent package name, version, source alias and content identity in a per-repo `.agentcontrol.json` pin file. The RepoPin data record has no dedicated test file and is folded into this subsystem-level description.";
+            testFiles = ("test/DemaConsulting.AgentControl.Tests/RepoConfig/");
+            designFiles = ("docs/design/agent-control/repo-config.md");
+            verificationFiles = ("docs/verification/agent-control/repo-config.md");
+            requirementFiles = ("docs/reqstream/agent-control/repo-config.yaml");
+        }
 
         part repoPinStore : RepoPinStore;
     }

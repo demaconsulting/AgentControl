@@ -1,5 +1,5 @@
 ---
-# Spell-Checking
+# Spell-Checking with TextLint
 #
 # PURPOSE:
 # - Maintain professional documentation and code quality
@@ -12,119 +12,112 @@
 version: "0.2"
 language: en
 
+# The files to spell-check
+files:
+  - "**/*.{md,yaml,yml,json,cs,cpp,hpp,h,txt}"
+# Include hidden paths such as .github/ and .*.yaml
+enableGlobDot: true
+
 # Project-specific technical terms and tool names
 words:
-  - agentcontrol
   - abbrevref
+  - agentcontrol
+  - AGENTCONTROL
   - apikey
-  - askpass
-  - cacheinfo
-  - fsmonitor
-  - LOCALAPPDATA
-  - NOSYSTEM
-  - NTFS
-  - pathspec
-  - pathspecs
-  - publickey
-  - refspec
-  - ARGLOGGER
-  - arglogger
-  - ARGLOGGERSTUB
+  - argb
   - Argb
-  - Avalonia
+  - ARGB
+  - arglogger
+  - ARGLOGGER
+  - ARGLOGGERSTUB
+  - ASKPASS
+  - askpass
   - axaml
-  - Blockquotes
+  - cacheinfo
+  - Cancellable
+  - conhost
   - contoso
+  - Contoso
+  - CONTOSO
+  - Dema
+  - DEMA
+  - demaconsulting
   - dwmapi
   - esac
   - fabrikam
   - favorited
   - favoriting
-  - unfavorited
-  - unfavorites
-  - unfavoriting
-  - findstr
+  - Favoriting
+  - fileserver
+  - flaui
   - flyouts
+  - fsmonitor
   - gitdir
   - gpgsign
   - headlessly
   - IHDR
-  - mklink
-  - Skia
+  - inlines
+  - Inlines
   - instnace
-  - HMAC
   - libsecret
   - lsfiles
-  - metacharacters
   - LTRB
+  - mklink
   - Mvvm
   - MVVM
+  - Mvvm's
+  - ncipollo
+  - nestings
+  - netstandard
   - Newtonsoft
+  - NOSYSTEM
+  - ntlm
   - NTLM
   - osxkeychain
-  - Postconditions
+  - pathspec
+  - pathspecs
+  - PATHSPECS
+  - refspec
+  - renderable
+  - Reprompt
+  - rescanned
+  - Rescanning
+  - revparsehead
+  - ROOTOWNER
+  - sarif
+  - Sarif
+  - SARIF
+  - serilog
+  - Serilog
+  - Serilog's
+  - Setext
+  - shopt
+  - slnx
+  - sonarscanner
+  - thirdparty
   - timestamper
+  - Unchosen
+  - unconfigured
+  - Unconfigured
+  - unfavorited
+  - unfavorites
+  - Unfavorites
+  - unfavoriting
+  - unidirectionality
+  - Unredacted
+  - unreordered
   - unticked
   - unticking
   - urlmatch
-  - Inlines
-  - inlines
-  - renderable
-  - ROOTOWNER
-  - buildmark
-  - buildtransitive
-  - cascadia
-  - conhost
-  - contentfiles
-  - dcterms
-  - DEMA
-  - Dema
-  - demaconsulting
-  - doctitle
-  - docversion
-  - errorlevel
-  - fileassert
-  - finalizer
-  - flaui
-  - xunit
-  - nameof
-  - pagetitle
-  - Pandoc
-  - parameterless
-  - Qube
-  - reqstream
-  - Reprompt
-  - Rescanning
-  - rescanned
-  - rethrowing
-  - revparsehead
-  - reviewmark
-  - SARIF
-  - sarifmark
-  - Serilog
-  - setlocal
-  - slnx
-  - snupkg
-  - sonarmark
-  - sysml
-  - sysml2tools
   - venv
-  - unconfigured
-  - unredacted
-  - unreordered
-  - versionmark
-  - Weasyprint
-  - wixproj
-  - wixpublish
-  - wixtoolset
   - wixext
-  - worktree
+  - wixproj
+  - wixproj's
+  - wixpublish
   - worktrees
-  - Worktree
   - Worktrees
   - yamlfix
 
-# Exclude common build artifacts, dependencies, and vendored third-party code
 ignorePaths:
   - "**/.git/**"
   - "**/node_modules/**"

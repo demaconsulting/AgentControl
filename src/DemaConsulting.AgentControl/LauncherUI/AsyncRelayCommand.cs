@@ -23,7 +23,7 @@ using System.Windows.Input;
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     An <see cref="ICommand"/> that runs an asynchronous, cancellable operation without
+///     An <see cref="ICommand"/> that runs an asynchronous, cancelable operation without
 ///     blocking the UI thread and refuses to start a second run while one is in progress.
 /// </summary>
 /// <remarks>

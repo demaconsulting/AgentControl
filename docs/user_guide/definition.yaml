@@ -2,6 +2,7 @@
 resource-path:
   - docs/user_guide
   - docs/template
+  - docs/images
 input-files:
   - docs/user_guide/title.txt
   - docs/user_guide/introduction.md
@@ -11,3 +12,5 @@ template: template.html
 embed-resources: true
 table-of-contents: true
 number-sections: true
+filters:
+  - docs/filters/canvasnet.lua

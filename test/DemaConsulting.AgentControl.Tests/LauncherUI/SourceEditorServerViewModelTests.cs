@@ -362,7 +362,7 @@ public class SourceEditorServerViewModelTests
 
     /// <summary>
     ///     Test that while a test runs the dialog shows progress naming the package and offers
-    ///     Cancel, that cancelling ends it with a neutral "canceled" result, and that the test can
+    ///     Cancel, that canceling ends it with a neutral "canceled" result, and that the test can
     ///     be run again afterwards.
     /// </summary>
     [Fact]

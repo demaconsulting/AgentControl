@@ -109,7 +109,7 @@ a pin, loading selects that package and version in the preferred source; when th
 newest stays selected; when the source's package list does not offer the package, when the source could not be read and
 when the alias names no configured source nothing is selected; and a package chosen by the user before the load ends is
 not replaced by the preference, nor is the preference applied when the user switched to another source and back to the
-preferred one while the sources were loading; cancelling the load while the preferred package's versions are read
+preferred one while the sources were loading; canceling the load while the preferred package's versions are read
 cancels that read too (its provider never answers, so the load would not end otherwise) and the cancellation surfaces
 to the caller. This scenario is tested by
 `SelectPackageWindowViewModel_Constructor_PreferredSourceAlias_SelectsThatSourceOrFirst`,

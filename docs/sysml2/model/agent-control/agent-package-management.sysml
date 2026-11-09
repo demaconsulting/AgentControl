@@ -1,11 +1,16 @@
 package AgentControl {
+    private import SoftwareItemMetadata::*;
+
     part def AgentPackageManagementSubsystem {
         doc /* Package source configuration model, per-source providers (zip folder, NuGet folder and server, Git repository), alias-to-provider resolution, version parsing/comparison, per-source version caching, a Git repository source (tags as versions, hardened shallow fetch of one tag), per-source signed-package enforcement with an optional publisher pin, the content identity of delivered packages, and the platform check for signature verification. */
 
-        comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/AgentPackageManagement/ */
-        comment designRef /* Design: docs/design/agent-control/agent-package-management.md */
-        comment verificationRef /* Verification: docs/verification/agent-control/agent-package-management.md */
-        comment reqRef /* Requirements: docs/reqstream/agent-control/agent-package-management.yaml */
+        metadata info : SoftwareInfo {
+            description = "Package source configuration model, per-source providers (zip folder, NuGet folder and server, Git repository), alias-to-provider resolution, version parsing/comparison, per-source version caching, a Git repository source (tags as versions, hardened shallow fetch of one tag), per-source signed-package enforcement with an optional publisher pin, the content identity of delivered packages, and the platform check for signature verification.";
+            testFiles = ("test/DemaConsulting.AgentControl.Tests/AgentPackageManagement/");
+            designFiles = ("docs/design/agent-control/agent-package-management.md");
+            verificationFiles = ("docs/verification/agent-control/agent-package-management.md");
+            requirementFiles = ("docs/reqstream/agent-control/agent-package-management.yaml");
+        }
 
         part packageSource : PackageSource;
         part packageVersion : PackageVersion;

@@ -240,7 +240,7 @@ public sealed class PackageCredentialCallbackTests
     }
 
     /// <summary>
-    ///     Test that cancelling the operation while the dialog is open abandons the question and
+    ///     Test that canceling the operation while the dialog is open abandons the question and
     ///     throws a cancellation, which is not a decline.
     /// </summary>
     [Fact]

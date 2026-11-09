@@ -35,12 +35,12 @@ The provider is stateless beyond these two fields and thread-safe.
 #### Key Methods
 
 **ListPackageIdsAsync**: Lists the distinct package names found in the folder, sorted
-case-insensitively, by running `PackageSource.EnumeratePackageNames` as cancellable background work
+case-insensitively, by running `PackageSource.EnumeratePackageNames` as cancelable background work
 (see `RunCancellableAsync` below) so a slow share never blocks the caller
 (`AgentControl-ZipFolderSourceProvider-ListPackageNames`).
 
 **ListVersionsAsync**: Lists the versions of one named package, by running
-`PackageSource.EnumeratePackages` as cancellable background work and stamping each result with the
+`PackageSource.EnumeratePackages` as cancelable background work and stamping each result with the
 source alias. Zip names with a fourth version segment or build metadata are not packages, because
 `PackageSource` parses names strictly (`AgentControl-ZipFolderSourceProvider-ListAndAcquire`).
 

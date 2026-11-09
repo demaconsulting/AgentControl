@@ -620,7 +620,7 @@ sections:
       - id: AgentControl-SourceEditorViewModel-GitEditor
         title: >-
           The SourceEditorViewModel class shall present a Git repository source in an editor titled
-          and labelled for a Git repository, with the repository address explained by examples of an
+          and labeled for a Git repository, with the repository address explained by examples of an
           https, an SSH and a local-path address.
         justification: |
           A Git source is one repository that delivers one package whose versions are its tags; the

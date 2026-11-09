@@ -12,6 +12,12 @@ has AgentControl ensure the repo's `.github/agents`, `.github/standards`,
 preferred agentic CLI tool (for example, GitHub Copilot CLI) in that repo's working
 directory.
 
+The figure below shows how the pieces fit together: the developer works in the launcher window, whose view-models
+coordinate the subsystems that fetch a package version from a package source, extract its agent folders into the
+repo and record the pin, and launch the agentic CLI tool, with git run as the user's own subprocess.
+
+![Architecture: the launcher syncs agent packages into a repo, then launches the agentic CLI tool](architecture.svg)
+
 ## Scope
 
 This user guide covers:
@@ -86,7 +92,7 @@ Each repo card shows:
   most-recently-launched sort order, and click it again to unpin it; it is a gold filled star when favorited and an
   outline otherwise) and
   the repo's name (its folder name) right beside it
-- On the same line at the right, the **Launch** button, labelled with your agent tool (see *Launching*), and a
+- On the same line at the right, the **Launch** button, labeled with your agent tool (see *Launching*), and a
   "..." menu
 - Below the first line, the repo's **picture tile** (see *Giving a Repo a Card Icon*) beside a row of **chips** —
   small rounded labels, each with a hover tooltip that explains it in full (see *Reading the Chips* below) —

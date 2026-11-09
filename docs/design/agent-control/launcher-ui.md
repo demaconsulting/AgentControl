@@ -146,7 +146,7 @@ definition, and tests a server's or a Git repository's connection.
 - *Role*: Provider (to the `PackageCredentials` subsystem).
 - *Contract*: Returns the answer the user gave in the sign-in dialog - the credential they typed and whether
   they ticked "Remember on this computer" - or no answer when the user
-  cancels or the dialog is closed; cancelling the supplied token closes the dialog
+  cancels or the dialog is closed; canceling the supplied token closes the dialog
   (`AgentControl-LauncherUI-SignIn`, `AgentControl-LauncherUI-SignInCancelsWithOperation`,
   `AgentControl-LauncherUI-RememberSignIn`).
 - *Constraints*: See *Sign-in dialog* in the design below.
@@ -187,7 +187,7 @@ package" chip when nothing is pinned, a branch chip, and color-coded status chip
 changes, committed agent files, folder missing, and a red chip for a source problem with the actual problem in
 its tooltip - "Sign-in needed" when the pinned server needs a sign-in, otherwise "Package source problem"
 (`SourceProblemChipText`)); the outcome of the last Launch/Pull/Upgrade action (`StatusMessage`) is shown
-under the repo path; a repo whose folder is missing offers no upgrade; the Launch button is labelled with a
+under the repo path; a repo whose folder is missing offers no upgrade; the Launch button is labeled with a
 short name of the configured agent tool
 (falling back to plain "Launch" for a long or unknown name) and Git Pull is an item of the card's "..." menu
 (`AgentControl-LauncherUI-RepoCardChips`). A lightweight `RefreshCheap` path (branch
@@ -334,7 +334,7 @@ Upgrade, Refresh, or the editor's Test connection - the `PackageCredentials` sub
 `ICredentialPrompt`, which `AvaloniaCredentialPrompt` implements
 (`AgentControl-LauncherUI-SignIn`, `AgentControl-LauncherUI-SignInPlacement`). The NuGet library asks on worker
 threads while a window can only be shown
-on the UI thread, so each question is marshalled with `Dispatcher.UIThread.InvokeAsync` and the caller awaits
+on the UI thread, so each question is marshaled with `Dispatcher.UIThread.InvokeAsync` and the caller awaits
 asynchronously, which means an operation started from a UI-thread command cannot deadlock against its own
 dialog. Questions are serialized with a `SemaphoreSlim` gate, so if two sources need a sign-in at once the
 second dialog appears after the first is answered rather than on top of it. The dialog
@@ -350,7 +350,7 @@ a tooltip that explains why (and is never acted on), so the option is discoverab
 be kept. Ticking it changes the note to "Saved by your Git credential helper on this computer - AgentControl does
 not store it.", so the dialog always states who keeps the secret
 (`AgentControl-LauncherUI-RememberSignIn`). Sign in is enabled only when both fields are filled; Cancel,
-Escape and closing the window all answer "no credential". Cancelling the question's token (the operation was
+Escape and closing the window all answer "no credential". Canceling the question's token (the operation was
 cancelled or timed out) closes the dialog as a cancel. The typed password is handed to the caller and never
 logged.
 

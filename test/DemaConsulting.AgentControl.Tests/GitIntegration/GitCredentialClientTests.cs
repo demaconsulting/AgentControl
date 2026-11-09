@@ -551,7 +551,7 @@ public class GitCredentialClientTests
     }
 
     /// <summary>
-    ///     Test that cancelling the caller's token while git hangs stops the process and surfaces as
+    ///     Test that canceling the caller's token while git hangs stops the process and surfaces as
     ///     a cancellation.
     /// </summary>
     [Fact]

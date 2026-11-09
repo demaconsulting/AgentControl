@@ -646,7 +646,7 @@ public sealed class GitRemoteClientTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that cancelling stops the command promptly and kills the process.
+    ///     Test that canceling stops the command promptly and kills the process.
     /// </summary>
     [Fact]
     public async Task GitRemoteClient_ListTags_Cancelled_KillsProcessAndThrowsOperationCanceled()

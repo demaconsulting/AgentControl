@@ -17,6 +17,8 @@ makes sure the repo's `.github/agents`, `.github/standards`, `.github/templates`
 then launches the developer's preferred agentic CLI tool (for example, GitHub Copilot CLI)
 in that repo's working directory.
 
+![Architecture: the launcher syncs agent packages into a repo, then launches the agentic CLI tool][architecture]
+
 ## Screenshots
 
 ![AgentControl main window, dark theme: app bar, then repo cards in sections with status bars][shot-main-dark]
@@ -234,7 +236,7 @@ every subsequent sync.
 
 ### Launching
 
-Click **Launch** (labelled with your agent tool, for example **Launch Copilot**) to start your
+Click **Launch** (labeled with your agent tool, for example **Launch Copilot**) to start your
 configured agentic CLI tool in the repo's working directory.
 Launch is never blocked by agent-package sync state — before launching, AgentControl makes a
 best-effort attempt to sync the four managed agent folders for a pinned repo (silently
@@ -350,3 +352,4 @@ By contributing to this project, you agree that your contributions will be licen
 [link-quality]: https://sonarcloud.io/dashboard?id=demaconsulting_AgentControl
 [link-security]: https://sonarcloud.io/dashboard?id=demaconsulting_AgentControl
 [link-guide]: https://github.com/demaconsulting/AgentControl/blob/main/docs/user_guide/introduction.md
+[architecture]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/images/architecture.png

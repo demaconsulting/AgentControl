@@ -1,4 +1,6 @@
 package AgentControl {
+    private import SoftwareItemMetadata::*;
+
     doc
     /*
      * AgentControl is a Windows desktop launcher application that keeps proprietary
@@ -10,10 +12,14 @@ package AgentControl {
     part def AgentControlSystem {
         doc /* The AgentControl system as a whole. */
 
-        comment testRef /* Test: test/DemaConsulting.AgentControl.UiTests/ (all files) */
-        comment designRef /* Design: docs/design/agent-control.md */
-        comment verificationRef /* Verification: docs/verification/agent-control.md */
-        comment reqRef /* Requirements: docs/reqstream/agent-control.yaml */
+        // Note - test/DemaConsulting.AgentControl.UiTests/: all files
+        metadata info : SoftwareInfo {
+            description = "The AgentControl system as a whole.";
+            testFiles = ("test/DemaConsulting.AgentControl.UiTests/");
+            designFiles = ("docs/design/agent-control.md");
+            verificationFiles = ("docs/verification/agent-control.md");
+            requirementFiles = ("docs/reqstream/agent-control.yaml");
+        }
 
         part program : Program;
         part launcherUi : LauncherUISubsystem;

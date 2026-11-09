@@ -441,7 +441,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     ///     keeps the newest version when the preferred version is no longer listed. The version
     ///     read the preference starts is cancelled with <paramref name="cancellationToken"/>.
     /// </remarks>
-    /// <param name="cancellationToken">The token of <see cref="LoadAsync"/>: cancelling it
+    /// <param name="cancellationToken">The token of <see cref="LoadAsync"/>: canceling it
     ///     cancels the version read of the preferred package as well.</param>
     /// <returns>A task that completes when the selection (and the version load it starts) is
     ///     done.</returns>

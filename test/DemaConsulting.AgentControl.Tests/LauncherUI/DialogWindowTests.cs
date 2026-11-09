@@ -328,7 +328,7 @@ public class DialogWindowTests
     });
 
     /// <summary>
-    ///     Test that "Add NuGet-Package Folder" shows the package ID section and that cancelling the
+    ///     Test that "Add NuGet-Package Folder" shows the package ID section and that canceling the
     ///     editor adds nothing.
     /// </summary>
     [Fact]

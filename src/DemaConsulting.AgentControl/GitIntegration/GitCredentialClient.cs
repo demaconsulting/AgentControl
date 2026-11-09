@@ -58,7 +58,7 @@ namespace DemaConsulting.AgentControl.GitIntegration;
 ///     <b>Bounded.</b> A lookup normally takes under a second, but a miss can take a few seconds
 ///     and a stuck helper could take forever, so each invocation has a time limit (ten seconds by
 ///     default); on a timeout the whole process tree is killed and the call reports "nothing"
-///     rather than failing the operation that asked. Cancelling the token kills the process tree
+///     rather than failing the operation that asked. Canceling the token kills the process tree
 ///     too.
 ///     </para>
 ///     <para>

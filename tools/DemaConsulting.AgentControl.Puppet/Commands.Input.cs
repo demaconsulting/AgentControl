@@ -29,7 +29,7 @@ namespace DemaConsulting.AgentControl.Puppet;
 /// </content>
 /// <remarks>
 ///     These commands move the real cursor and send real mouse events. Targets are physical screen pixels (read them
-///     from <c>find</c>) or elements (found by AutomationId, then aimed at the centre of their bounds). Before anything is
+///     from <c>find</c>) or elements (found by AutomationId, then aimed at the center of their bounds). Before anything is
 ///     sent, <see cref="Guard"/> checks that the topmost window at the target pixel belongs to the instance.
 /// </remarks>
 internal static partial class Commands
@@ -55,7 +55,7 @@ internal static partial class Commands
     }
 
     /// <summary>
-    ///     Drags a control (for example a splitter) by a screen offset, pressing at the centre of its bounds.
+    ///     Drags a control (for example a splitter) by a screen offset, pressing at the center of its bounds.
     /// </summary>
     /// <param name="parsed">The parsed command: the AutomationId, dx and dy in physical screen pixels.</param>
     /// <returns>The exit code.</returns>
@@ -188,11 +188,11 @@ internal static partial class Commands
     }
 
     /// <summary>
-    ///     Gets the centre of an element's bounds.
+    ///     Gets the center of an element's bounds.
     /// </summary>
     /// <param name="element">The element.</param>
     /// <param name="id">Its AutomationId, for messages.</param>
-    /// <returns>The centre pixel.</returns>
+    /// <returns>The center pixel.</returns>
     private static ScreenPoint CenterOf(AutomationElement element, string id) => BoundsOf(element, id).Center;
 
     /// <summary>

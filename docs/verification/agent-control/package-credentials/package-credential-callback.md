@@ -30,7 +30,7 @@ N/A - standard test environment.
 - A failing look-up of the user's credential store leads to the prompt without the remember option, even when the
   store reports a helper as available.
 - Several challenges (index, version list, package file) of one operation cause one question and the same answer; a
-  decline is remembered as well; cancelling during the question surfaces as a cancellation rather than a decline.
+  decline is remembered as well; canceling during the question surfaces as a cancellation rather than a decline.
 - A prompted credential is stored only after `CommitAsync`, and handed to the user's credential store only when the
   user ticked Remember; a refusing or failing store never fails the operation and the credential stays in the session.
 - `RejectAsync` forgets exactly the credential that was offered (not a newer one) from the session and, only when it
@@ -113,7 +113,7 @@ reopen it and the decline is reported. This scenario is tested by
 `PackageCredentialCallback_GetCredential_UserDeclines_NullIsMemoizedAndNotAskedAgain`, covering
 `AgentControl-PackageCredentialCallback-DeclineMemoized`.
 
-**PackageCredentialCallback_CancellationStopsWaiting**: Cancelling the token while the dialog is open throws
+**PackageCredentialCallback_CancellationStopsWaiting**: Canceling the token while the dialog is open throws
 `OperationCanceledException` and is not reported as a decline. This scenario is tested by
 `PackageCredentialCallback_GetCredential_CancelledWhilePrompting_ThrowsOperationCanceled`, covering
 `AgentControl-PackageCredentialCallback-CancellationStopsWaiting`.

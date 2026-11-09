@@ -320,7 +320,7 @@ internal sealed class SessionCredentialStore
     /// </remarks>
     /// <param name="origin">The feed origin.</param>
     /// <param name="rejected">The credential the feed rejected.</param>
-    /// <returns><see langword="true"/> when the remembered credential equalled
+    /// <returns><see langword="true"/> when the remembered credential equaled
     ///     <paramref name="rejected"/> and has been removed.</returns>
     /// <exception cref="ArgumentNullException">Thrown when either argument is
     ///     <see langword="null"/>.</exception>

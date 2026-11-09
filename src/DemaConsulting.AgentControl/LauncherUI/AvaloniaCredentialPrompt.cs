@@ -33,7 +33,7 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 /// <remarks>
 ///     <para>
 ///     The NuGet library asks for credentials on worker threads, while a window can only be created
-///     and shown on the UI thread, so each question is marshalled with
+///     and shown on the UI thread, so each question is marshaled with
 ///     <see cref="Dispatcher.InvokeAsync{TResult}(Func{Task{TResult}}, DispatcherPriority)"/>. The
 ///     caller awaits asynchronously and never blocks the UI thread, so an operation started from a
 ///     UI-thread command cannot deadlock against its own dialog. Questions are serialized with a
@@ -43,7 +43,7 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     <para>
 ///     The dialog is modal over the top-most open window (the Settings window, the Select Package
 ///     window or the main window), so it is always in front of whatever started the operation.
-///     Cancelling the question's token (the operation was cancelled or timed out) closes the dialog
+///     Canceling the question's token (the operation was cancelled or timed out) closes the dialog
 ///     and surfaces as a cancellation. The typed password is handed to the caller and never
 ///     logged. Thread-safe.
 ///     </para>
@@ -116,7 +116,7 @@ internal sealed class AvaloniaCredentialPrompt : ICredentialPrompt
         var answer = new TaskCompletionSource<CredentialPromptAnswer?>(TaskCreationOptions.RunContinuationsAsynchronously);
         viewModel.Completed += (_, given) => answer.TrySetResult(given);
 
-        // A cancelled operation withdraws the question: cancelling the view model closes the window
+        // A cancelled operation withdraws the question: canceling the view model closes the window
         using var registration = cancellationToken.Register(() => Dispatcher.UIThread.Post(viewModel.Cancel));
 
         var owner = _getOwner();

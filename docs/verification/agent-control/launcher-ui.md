@@ -380,7 +380,7 @@ questions one at a time. This scenario is tested by
 `AvaloniaCredentialPrompt_PromptAsync_TwoQuestionsAtOnce_AreShownOneAtATime`, covering
 `AgentControl-LauncherUI-SignInPlacement`.
 
-**LauncherUI_SignInCancelsWithOperation_TokenCancellationClosesDialog**: Cancelling the question's token closes
+**LauncherUI_SignInCancelsWithOperation_TokenCancellationClosesDialog**: Canceling the question's token closes
 the open dialog and throws a cancellation. This scenario is tested by
 `AvaloniaCredentialPrompt_PromptAsync_TokenCancelled_ClosesDialogAndThrows`, covering
 `AgentControl-LauncherUI-SignInCancelsWithOperation`.
@@ -470,7 +470,7 @@ scenario is tested by `AsyncRelayCommand_ExecuteAsync_WhileRunning_DoesNotRunOpe
 `AgentControl-LauncherUI-OneOperationPerRepo`.
 
 **LauncherUI_CancelOperation_CancellationIsNotAnErrorAndLeavesPinUnchanged**: The asynchronous command treats
-cancellation as no error, and cancelling a package apply that is waiting on a slow source raises no error and
+cancellation as no error, and canceling a package apply that is waiting on a slow source raises no error and
 leaves the pin unchanged. This scenario is tested by
 `AsyncRelayCommand_Cancel_Running_SignalsTokenAndIsNotAnError` and
 `RepoCardViewModel_ApplySelectedPackageAsync_CancelledWhileRunning_ReportsNoErrorAndKeepsPinUnchanged`,
@@ -544,7 +544,7 @@ the unit level, which this scenario discloses rather than hides.
 **LauncherUI_AddSourceMenu_OneAddButtonOffersEverySourceType**: The Settings window has one `AddSourceButton`
 whose menu holds the zip-package folder, NuGet-package folder, NuGet-package server and Git repository items (each
 with an icon) under their stable AutomationIds, in that order; choosing an item opens the matching editor (zip: no
-package IDs section; NuGet folder: with it, and cancelling it adds nothing; server: feed-address controls; Git: the
+package IDs section; NuGet folder: with it, and canceling it adds nothing; server: feed-address controls; Git: the
 Git sections), and saving the zip editor adds and
 selects the source. This scenario is tested by `SettingsWindow_AddZipSourceClicked_ShowsEditorAndSavingAddsSource`,
 `SettingsWindow_AddNuGetFolderClickedThenCancelled_AddsNothing`,

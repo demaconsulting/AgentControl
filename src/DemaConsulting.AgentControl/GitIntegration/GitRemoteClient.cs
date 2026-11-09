@@ -258,7 +258,7 @@ internal sealed record GitRemoteOptions(
 ///     <para>
 ///     <b>Bounded.</b> Every operation has a time limit; output is read up to a cap counted in
 ///     bytes and the rest drained, standard error is capped and used only to classify the failure,
-///     and cancelling or timing out kills the whole process tree and waits for it to end; a process
+///     and canceling or timing out kills the whole process tree and waits for it to end; a process
 ///     that cannot be confirmed to have ended is reported as
 ///     <see cref="GitFailureKind.ProcessNotStopped"/>. Failures become
 ///     <see cref="GitRemoteException"/> with a classified <see cref="GitRemoteException.Kind"/> and a

@@ -199,7 +199,7 @@ public class CredentialPromptWindowTests
         });
 
     /// <summary>
-    ///     Test that a user cancelling the dialog is reported as no credential.
+    ///     Test that a user canceling the dialog is reported as no credential.
     /// </summary>
     [Fact]
     public void AvaloniaCredentialPrompt_PromptAsync_UserCancels_ReturnsNull() => HeadlessTestApp.RunAsync(async () =>
@@ -225,7 +225,7 @@ public class CredentialPromptWindowTests
     });
 
     /// <summary>
-    ///     Test that cancelling the question's token closes the open dialog and surfaces as a
+    ///     Test that canceling the question's token closes the open dialog and surfaces as a
     ///     cancellation, not as a decline.
     /// </summary>
     [Fact]

@@ -33,7 +33,7 @@ namespace DemaConsulting.AgentControl.PackageCredentials;
 ///     One instance serves exactly one operation (a version listing, a download). That lifetime is
 ///     what makes the memoization safe: the NuGet library may challenge several URLs of the feed
 ///     (its service index, its version list, a package file) and may retry, but the user is asked
-///     at most once for the operation, and a "no" - the user cancelling, or nothing being
+///     at most once for the operation, and a "no" - the user canceling, or nothing being
 ///     available - is remembered too, so a retry cannot re-open the dialog. The answer is shared
 ///     by concurrent challenges rather than computed twice.
 ///     </para>

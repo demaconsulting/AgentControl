@@ -24,7 +24,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
 /// <summary>
 ///     Unit tests for <see cref="AsyncRelayCommand"/>, the command that runs the view models'
-///     asynchronous, cancellable operations without blocking the UI thread.
+///     asynchronous, cancelable operations without blocking the UI thread.
 /// </summary>
 public class AsyncRelayCommandTests
 {
@@ -91,7 +91,7 @@ public class AsyncRelayCommandTests
     }
 
     /// <summary>
-    ///     Test that cancelling signals the token the operation received, and that the resulting
+    ///     Test that canceling signals the token the operation received, and that the resulting
     ///     cancellation is not reported as an error.
     /// </summary>
     [Fact]
@@ -112,7 +112,7 @@ public class AsyncRelayCommandTests
     }
 
     /// <summary>
-    ///     Test that cancelling when nothing runs does nothing.
+    ///     Test that canceling when nothing runs does nothing.
     /// </summary>
     [Fact]
     public void AsyncRelayCommand_Cancel_NotRunning_DoesNothing()

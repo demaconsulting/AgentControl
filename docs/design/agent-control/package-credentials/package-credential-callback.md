@@ -105,7 +105,7 @@ learns from the credential store whether a helper applies (`IsAvailableAsync`) a
 the remember choice is offered only when it can be honored; the prompt is also told which server and which configured
 source the credential is for (`AgentControl-PackageCredentialCallback-PromptNamesServerAndSource`,
 `AgentControl-PackageCredentialCallback-PromptReportsRememberPossible`). Waiting is bound to the caller's token, so
-cancelling the operation stops the wait even while a dialog is open
+canceling the operation stops the wait even while a dialog is open
 (`AgentControl-PackageCredentialCallback-CancellationStopsWaiting`).
 
 **CommitAsync()**: Keeps a credential that came from the prompt in the session store, but only when the operation

@@ -2440,7 +2440,7 @@ public sealed class RepoCardViewModelTests : IDisposable
 
     /// <summary>
     ///     Test that while a package is being applied the card is busy, its other actions are
-    ///     disabled, a second apply is ignored, and cancelling stops the operation without raising
+    ///     disabled, a second apply is ignored, and canceling stops the operation without raising
     ///     an error or changing the pin.
     /// </summary>
     [Fact]
@@ -2456,7 +2456,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Act: start applying; the call returns while the source is still being read
         var running = card.ApplySelectedPackageAsync(selection, TestContext.Current.CancellationToken);
 
-        // Assert: busy with a cancellable operation, other actions disabled
+        // Assert: busy with a cancelable operation, other actions disabled
         Assert.False(running.IsCompleted);
         Assert.True(card.IsBusy);
         Assert.True(card.CanCancelOperation);
@@ -2583,7 +2583,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that cancelling a running package apply stops it without raising an error and
+    ///     Test that canceling a running package apply stops it without raising an error and
     ///     without changing the repo's pin.
     /// </summary>
     [Fact]
@@ -2610,7 +2610,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that cancelling the wait for the pre-launch sync still launches the agent tool, per
+    ///     Test that canceling the wait for the pre-launch sync still launches the agent tool, per
     ///     the rule that sync state never blocks a launch.
     /// </summary>
     [Fact]
@@ -2677,7 +2677,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that cancelling an upgrade check surfaces the cancellation and keeps the card's
+    ///     Test that canceling an upgrade check surfaces the cancellation and keeps the card's
     ///     previous upgrade state.
     /// </summary>
     [Fact]

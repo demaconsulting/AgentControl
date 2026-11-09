@@ -638,7 +638,7 @@ public sealed class SelectPackageWindowViewModelTests
     }
 
     /// <summary>
-    ///     Test that cancelling the load while the preferred package's versions are being read cancels
+    ///     Test that canceling the load while the preferred package's versions are being read cancels
     ///     that read as well, and the cancellation surfaces to the caller.
     /// </summary>
     [Fact]
@@ -672,7 +672,7 @@ public sealed class SelectPackageWindowViewModelTests
     }
 
     /// <summary>
-    ///     Test that cancelling the load after the user chose another package cancels nothing of the
+    ///     Test that canceling the load after the user chose another package cancels nothing of the
     ///     user's read: the registration made for the preferred read cancels exactly the read it was
     ///     made for, never the newer one.
     /// </summary>

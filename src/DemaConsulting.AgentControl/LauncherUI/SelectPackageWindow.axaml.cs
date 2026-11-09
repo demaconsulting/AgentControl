@@ -32,7 +32,7 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 /// </summary>
 /// <remarks>
 ///     All list population/selection logic lives in <see cref="SelectPackageWindowViewModel"/>;
-///     this code-behind only starts the (asynchronous, cancellable) loading of the sources when
+///     this code-behind only starts the (asynchronous, cancelable) loading of the sources when
 ///     the window opens, cancels it when the window closes, wires the "Cancel" button (which has no
 ///     bindable command, matching <see cref="ConfirmationWindow"/>'s "No" button) and closes the
 ///     window with the selected <see cref="PackageReference"/> once
