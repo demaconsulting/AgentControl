@@ -222,9 +222,12 @@ internal sealed partial class GitRepositoryAddress
             return false;
         }
 
-        // A bare ssh user name (git@host) is not a secret; anything else in front of '@' may be
+        // A bare ssh user name (git@host) is not a secret; anything else in front of '@' may be,
+        // including a percent-encoded separator that git would decode into user:password
+        var userInfo = authority[..at];
         return !scheme.Groups[1].Value.Equals("ssh", StringComparison.OrdinalIgnoreCase) ||
-               authority[..at].Contains(':', StringComparison.Ordinal);
+               userInfo.Contains(':', StringComparison.Ordinal) ||
+               userInfo.Contains('%', StringComparison.Ordinal);
     }
 
     /// <summary>

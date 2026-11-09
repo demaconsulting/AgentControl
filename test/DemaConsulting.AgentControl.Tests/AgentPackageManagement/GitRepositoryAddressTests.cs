@@ -261,6 +261,7 @@ public sealed class GitRepositoryAddressTests
     [InlineData("https://user:pw@host.example/org/repo.git")]
     [InlineData("https://token@host.example/org/repo.git")]
     [InlineData("ssh://user:pw@host.example/org/repo.git")]
+    [InlineData("ssh://user%3Asecret@host.example/org/repo.git")]
     [InlineData("https://host.example/org/repo.git?token=abc")]
     [InlineData("https://host.example/org/repo.git#frag")]
     public void GitRepositoryAddress_TryParse_EmbeddedCredential_IsRefused(string text)
