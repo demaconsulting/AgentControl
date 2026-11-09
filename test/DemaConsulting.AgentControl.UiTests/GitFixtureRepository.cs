@@ -217,7 +217,10 @@ internal sealed class GitFixtureRepository : IDisposable
         CommitVersion("attributes " + version, "# Release Notes\n\nAttributes fixture package.\n");
         Write(".github/agents/.gitattributes", "* filter=pwn ident\n");
         Write(".github/standards/.gitattributes", "* text eol=lf filter=pwn\n");
-        Git(_workPath, "add", "-A");
+
+        // Stage only the attribute files: re-adding the others would let git renormalize them under the
+        // new attributes, so the committed bytes would depend on file timestamps
+        Git(_workPath, "add", "--", ".github/agents/.gitattributes", ".github/standards/.gitattributes");
         Git(_workPath, "commit", "-q", "-m", "attributes");
         var commit = Git(_workPath, "rev-parse", "HEAD").Trim();
         Git(_workPath, "tag", "release/" + version);
