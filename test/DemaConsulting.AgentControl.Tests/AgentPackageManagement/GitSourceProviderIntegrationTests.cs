@@ -531,6 +531,120 @@ public sealed class GitSourceProviderIntegrationTests
     }
 
     /// <summary>
+    ///     Test that a reader that is still open keeps its commit folder: while it is held, other
+    ///     acquisitions that take the cache beyond its limit prune the other old folders but never
+    ///     the held one, which stays complete and readable; and once the reader is disposed a later
+    ///     prune may remove the folder.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_ReaderHeldWhileOthersExceedLimit_KeepsHeldFolderUntilDisposed()
+    {
+        // Arrange: four commits, a cache that keeps two, and the oldest one held by an open reader
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        foreach (var version in new[] { "1.0.0", "1.1.0", "1.2.0", "1.3.0" })
+        {
+            fixture.Commit(Layout("m" + version), "v" + version);
+            fixture.Tag("v" + version);
+        }
+
+        fixture.Push();
+        var provider = new GitSourceProvider(
+            fixture.CreateDefinition(), fixture.CreateOptions() with { MaxCachedCommits = 2 });
+        var packages = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken))
+            .OrderBy(p => p.Version).ToList();
+        string Folder(int index) => Path.Combine(provider.RepositoryCacheFolder, packages[index].Revision!);
+        var start = DateTime.UtcNow.AddHours(-1);
+        var held = await provider.AcquireAsync(packages[0], TestContext.Current.CancellationToken);
+        try
+        {
+            Directory.SetLastWriteTimeUtc(Folder(0), start);
+
+            // Act: three other commits are acquired and released, each pruning the cache
+            for (var index = 1; index < packages.Count; index++)
+            {
+                using var other = await provider.AcquireAsync(packages[index], TestContext.Current.CancellationToken);
+                Directory.SetLastWriteTimeUtc(Folder(index), start.AddMinutes(index));
+            }
+
+            // Assert: the held folder is intact and readable though it is the oldest beyond the limit,
+            // while the old folder that no reader holds was pruned
+            Assert.True(GitSourceProvider.IsCacheFolderLeased(Folder(0)));
+            Assert.True(File.Exists(Path.Combine(Folder(0), GitSourceProvider.MarkerFileName)));
+            Assert.Equal("m1.0.0", held.ReadText(".github/agents/copilot.md"));
+            Assert.Equal(6, held.ListFiles().Count);
+            Assert.False(Directory.Exists(Folder(1)));
+            Assert.True(Directory.Exists(Folder(2)));
+            Assert.True(Directory.Exists(Folder(3)));
+        }
+        finally
+        {
+            held.Dispose();
+        }
+
+        // Act: the reader is gone; a cache hit prunes again
+        (await provider.AcquireAsync(packages[3], TestContext.Current.CancellationToken)).Dispose();
+
+        // Assert: nothing holds the old folder any more, so it is pruned
+        Assert.False(GitSourceProvider.IsCacheFolderLeased(Folder(0)));
+        Assert.False(Directory.Exists(Folder(0)));
+        Assert.Equal(
+            new[] { packages[2].Revision!, packages[3].Revision! }.Order(),
+            Directory.EnumerateDirectories(provider.RepositoryCacheFolder).Select(Path.GetFileName).Order());
+    }
+
+    /// <summary>
+    ///     Test that a reader gives its lease back exactly once: disposing it again does not release
+    ///     the lease of another reader of the same commit, and the folder is free once both are
+    ///     disposed.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_ReaderDisposedTwice_ReleasesItsLeaseOnlyOnce()
+    {
+        // Arrange: two readers of the same commit
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("shared"), "one");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+        var folder = Path.Combine(provider.RepositoryCacheFolder, package.Revision!);
+        var first = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+        var second = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Act: the first reader is disposed twice
+        first.Dispose();
+        first.Dispose();
+
+        // Assert: the second reader still holds the folder, and releasing it frees the folder
+        Assert.True(GitSourceProvider.IsCacheFolderLeased(folder));
+        second.Dispose();
+        Assert.False(GitSourceProvider.IsCacheFolderLeased(folder));
+    }
+
+    /// <summary>
+    ///     Test that an acquisition that fails leaves no lease behind, because no reader exists to
+    ///     release it.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_Refused_LeavesNoLease()
+    {
+        // Arrange: a tag without any package layout, which is refused after the fetch
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(new Dictionary<string, string> { ["readme.txt"] = "no layout" }, "base");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, TestContext.Current.CancellationToken));
+
+        // Assert
+        Assert.False(GitSourceProvider.IsCacheFolderLeased(Path.Combine(provider.RepositoryCacheFolder, package.Revision!)));
+    }
+
+    /// <summary>
     ///     Test that an old temporary folder left by a killed acquisition is swept, and that a cache
     ///     folder without a marker (an incomplete write) is replaced rather than trusted.
     /// </summary>

@@ -43,6 +43,26 @@ two repositories never share a folder and a commit is never fetched twice; the m
 without a marker that names its commit is incomplete and is replaced, not trusted; temporary folders are
 `{CacheRoot}/{addressKey}/.tmp-{guid}`; the client's work folders are `{CacheRoot}/.work`.
 
+**Threat model of the cache folders**: AgentControl's own cache folders under the user's profile are trusted local
+state. A process that can plant links or files there already runs with the user's privileges, so link redirection
+inside the owned cache is out of scope and is not mitigated.
+
+**Reader leases** (`-CachePruningSparesOpenReaders`, `-CacheReleasesCommitWhenReaderDisposed`): a process-wide,
+thread-safe registry (the private static class `CacheLeases`) counts, by full normalized path of the commit folder
+(compared ignoring case on Windows and macOS), the readers of this process that hold each folder. `AcquireAsync` takes
+the lease before it looks at the folder - so no acquisition in the process can prune the folder between the marker check
+and the reader being returned - and hands it to the reader it returns: the returned reader is a private wrapper
+(`LeasedPackageContentReader`) that delegates to the layout reader and, when it is disposed, disposes the layout reader
+and releases the lease, exactly once however often `Dispose` is called. An acquisition that fails releases its lease
+itself, because no reader exists to do so. The registry is shared by every provider instance, so two sources over the
+same cache protect each other's readers. Taking a lease, releasing it and the pruning decision happen under one lock, and
+a prune deletes a folder under that lock, so a reader cannot take a folder between the check and the deletion (a lease
+taken while a deletion runs waits, then finds the folder gone and fetches it again). **Residual risk**: only readers of
+this process are known. Another process that prunes the same cache (a second AgentControl instance with the same cache
+root) does not know of them and can delete a folder an open reader is using; the only protection there is that pruning
+orders folders by last-write time, which every acquisition of a commit refreshes, so a recently acquired folder is among
+the newest (a reader held for a long time is not protected). The leases also do not outlive the process.
+
 #### Key Methods
 
 **Constructor**: Validates the definition - Git type, alias, `GetGitSettingsProblem` - and throws
@@ -142,8 +162,10 @@ works (`-MinimumGitVersion`, `-GitTooOldReportedUnwrapped`; the version is check
 `-MinimumGitVersionCheckedOnce`).
 
 The reader is `DirectoryPackageContentReader.OpenLayoutRoot(root[/subfolder], "git-commit:{commit}")`
-(`-ReportContentIdentity`). After a successful acquisition the oldest cached commits beyond `MaxCachedCommits` are
-deleted, never the one just used; failures are logged and ignored (`-CachePruning`).
+(`-ReportContentIdentity`), wrapped with the lease described above. After a successful acquisition the oldest cached
+commits beyond `MaxCachedCommits` are deleted, never the one just used and never one a reader holds (so the cache can
+temporarily hold more while readers are open, `-CachePruningSparesOpenReaders`); failures are logged and ignored
+(`-CachePruning`).
 
 **Failure translation**: `GitRemoteException` kinds become `PackageSourceAccessException` - `AuthenticationRequired` ->
 `AuthenticationFailed` ("Sign-in needed ..."), `HostKeyUnverified` -> `Unreachable` (with the hint to connect once with

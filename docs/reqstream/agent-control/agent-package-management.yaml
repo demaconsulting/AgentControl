@@ -573,10 +573,11 @@ sections:
           The AgentPackageManagement subsystem shall supply the package layout of a listed version
           of a Git source from the tag of that version, with the exact bytes of its files, reusing
           a copy already supplied for the same commit and refusing a tag that holds no package
-          layout.
+          layout, while keeping each copy intact for as long as a caller still reads it.
         justification: |
           Applying a package must deliver what the tag holds, and nothing else, without fetching it
-          again each time; a repository without a package must not be mistaken for an empty one.
+          again each time; a repository without a package must not be mistaken for an empty one; a
+          cache that is pruned under a reader would not deliver what the tag holds.
         children:
           - AgentControl-GitSourceProvider-AcquireOnlyFromOwnSource
           - AgentControl-GitSourceProvider-AcquireRequiresTagAndCommit
@@ -595,6 +596,8 @@ sections:
           - AgentControl-GitSourceProvider-CacheTrustsOnlyCompleteFolders
           - AgentControl-GitSourceProvider-CacheSweepsTemporaryFolders
           - AgentControl-GitSourceProvider-CachePruning
+          - AgentControl-GitSourceProvider-CachePruningSparesOpenReaders
+          - AgentControl-GitSourceProvider-CacheReleasesCommitWhenReaderDisposed
         tests:
           - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag
           - AgentPackageManagementSubsystem_GitSource_HostileLayoutIsRefusedAndNothingIsCached

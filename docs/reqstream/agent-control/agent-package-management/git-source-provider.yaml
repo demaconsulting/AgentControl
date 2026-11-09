@@ -311,6 +311,31 @@ sections:
         tests:
           - GitSourceProvider_Acquire_PrunesOldestCommitsBeyondTheLimit
 
+      - id: AgentControl-GitSourceProvider-CachePruningSparesOpenReaders
+        title: >-
+          The GitSourceProvider class shall not remove the cached commit that a reader it returned
+          reads while that reader has not been disposed, even when other acquisitions take the
+          cache beyond the configured number of commits.
+        justification: |
+          A caller that keeps a reader while it acquires another version must still be able to read
+          the first package; a folder pruned under an open reader would make an acquisition that
+          succeeded fail later, or deliver a package that is partly gone.
+        tests:
+          - GitSourceProvider_Acquire_ReaderHeldWhileOthersExceedLimit_KeepsHeldFolderUntilDisposed
+
+      - id: AgentControl-GitSourceProvider-CacheReleasesCommitWhenReaderDisposed
+        title: >-
+          The GitSourceProvider class shall make a cached commit removable by pruning again once
+          every reader it returned for that commit has been disposed (however often each is
+          disposed), and when an acquisition fails.
+        justification: |
+          A commit that stayed held after its readers were gone would never be pruned, and a
+          reader that released twice would free a commit another reader still uses.
+        tests:
+          - GitSourceProvider_Acquire_ReaderHeldWhileOthersExceedLimit_KeepsHeldFolderUntilDisposed
+          - GitSourceProvider_Acquire_ReaderDisposedTwice_ReleasesItsLeaseOnlyOnce
+          - GitSourceProvider_Acquire_Refused_LeavesNoLease
+
       # ---- Layout validation ----
       - id: AgentControl-GitSourceProvider-RejectLinksAndSubmodulesInLayout
         title: >-

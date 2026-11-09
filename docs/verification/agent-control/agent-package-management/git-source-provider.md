@@ -45,6 +45,9 @@ does not run at all the test is skipped rather than reported as proof.
 - When the `.git` folder cannot be removed (the removal fails or silently leaves it) the acquisition fails with an
   actionable message, no cache folder of the commit exists or is marked complete, no temporary folder is left, a
   leftover temporary folder is never served, and a later acquisition succeeds.
+- A reader that has not been disposed keeps its commit's folder complete and readable while other acquisitions take the
+  cache beyond its limit; the folder is prunable again once every reader of it is disposed (however often each is
+  disposed) and when an acquisition fails.
 - With the version check on, an old git is refused as `GitTooOld` before anything is listed or fetched, and a new one is
   checked once.
 - No hook runs, git failures become the provider's failure kinds without leaking text, cancellation stops the work, old
@@ -168,6 +171,19 @@ scenario is tested by
 and `GitSourceProvider_Acquire_LeftoverTemporaryFolderWithGit_IsNeverServedAndIsSweptWhenStale`, covering
 `AgentControl-GitSourceProvider-FailClosedWhenGitFolderRemains` and
 `AgentControl-GitSourceProvider-LeftoverTemporaryFolderNeverUsed`.
+
+**GitSourceProvider_Acquire_ReaderLeases**: with four commits and a cache that keeps two, a reader of the oldest commit
+is kept open while the other three are acquired and released: the open reader's folder keeps its marker, lists six files
+and reads its text although it is the oldest beyond the limit, while the old commit that no reader holds is pruned;
+after the reader is disposed, a cache hit prunes again and the folder is gone, leaving the two newest. Two readers of
+one commit, the first disposed twice, leave the commit held until the second is disposed. A tag without any layout is
+refused and leaves no lease. Only readers of the same process are known to the registry; another process pruning the
+same cache is a documented residual risk (see the design), not a tested behavior. This scenario is tested by
+`GitSourceProvider_Acquire_ReaderHeldWhileOthersExceedLimit_KeepsHeldFolderUntilDisposed`,
+`GitSourceProvider_Acquire_ReaderDisposedTwice_ReleasesItsLeaseOnlyOnce` and
+`GitSourceProvider_Acquire_Refused_LeavesNoLease`, covering
+`AgentControl-GitSourceProvider-CachePruningSparesOpenReaders` and
+`AgentControl-GitSourceProvider-CacheReleasesCommitWhenReaderDisposed`.
 
 **GitSourceProvider_EnforceMinimumGitVersion**: with `EnforceMinimumGitVersion` and a stub git that answers
 `git version 2.20.1`, listing, previewing and acquiring each throw the `GitRemoteException` of kind `GitTooOld` itself

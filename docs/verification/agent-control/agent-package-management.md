@@ -327,7 +327,9 @@ cache and extractor rules by their own units. This scenario is tested by
 formatting and listing requirements and the `AgentControl-GitSourceProvider-List*`, `-ResolveAnnotatedTags` and
 `-TagPreview` requirements), `AgentControl-AgentPackageManagement-GitSourceAcquire` (children: the
 `AgentControl-GitSourceProvider-Acquire*`, `-Subfolder`, `-ExcludeGitFolder`, `-Cache*` and related requirements; also
-tested by the hostile-layout scenario below, which acquires the ordinary tag of the same repository) and
+tested by the hostile-layout scenario below, which acquires the ordinary tag of the same repository; the
+`-CachePruningSparesOpenReaders` and `-CacheReleasesCommitWhenReaderDisposed` requirements are verified by the unit
+tests of `GitSourceProvider`) and
 `AgentControl-AgentPackageManagement-GitSourceContentIdentity` (children:
 `AgentControl-GitSourceProvider-ReportContentIdentity`, `-TagMovedBetweenListAndFetch`, `-MovedTagReportedAsNewRevision`
 and `AgentControl-PackageVersionCache-ReportPinnedListing`).

@@ -164,6 +164,11 @@ internal interface IGitTagPreview
 ///     two simultaneous acquisitions of the same commit are safe (the one that loses the final
 ///     rename uses the winner's folder).
 ///     </para>
+///     <para>
+///     <b>Readers hold their folder</b>: a reader returned by <see cref="AcquireAsync"/> holds a lease
+///     on its commit folder until it is disposed, so no acquisition of this process prunes the folder
+///     while the reader is in use; another process pruning the same cache is not stopped.
+///     </para>
 /// </remarks>
 internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
 {
@@ -369,34 +374,58 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
 
         var target = new GitRemoteTarget(_address.Value, ToTransport(_address.Kind));
         var final = Path.Combine(_repositoryFolder, commit);
+
+        // The lease comes first: from here until the reader is disposed no acquisition in this
+        // process prunes this commit's folder, so a reader that was handed out never loses its
+        // files to another acquisition. A folder that does not exist yet is harmless to lease.
+        var lease = CacheLeases.Acquire(final);
         try
         {
-            if (!IsCompleteCacheFolder(final, commit))
+            try
             {
-                // Nothing is fetched that this source would not list: the tag and the commit it was
-                // given must be what the repository offers now, under the same pattern
-                await RequireListedAsync(package, cancellationToken);
-                await EnsureSupportedGitAsync(cancellationToken);
-                await FetchIntoCacheAsync(target, package.Location, commit, final, cancellationToken);
+                if (!IsCompleteCacheFolder(final, commit))
+                {
+                    // Nothing is fetched that this source would not list: the tag and the commit it was
+                    // given must be what the repository offers now, under the same pattern
+                    await RequireListedAsync(package, cancellationToken);
+                    await EnsureSupportedGitAsync(cancellationToken);
+                    await FetchIntoCacheAsync(target, package.Location, commit, final, cancellationToken);
+                }
+                else
+                {
+                    // Used now: the newest folders are the ones kept when the cache is pruned
+                    TryTouch(final);
+                }
             }
-            else
+            catch (GitRemoteException ex)
             {
-                // Used now: the newest folders are the ones kept when the cache is pruned
-                TryTouch(final);
+                throw Translate(ex);
             }
-        }
-        catch (GitRemoteException ex)
-        {
-            throw Translate(ex);
-        }
 
-        var layoutRoot = _subfolder is null
-            ? final
-            : Path.Combine(final, _subfolder.Replace('/', Path.DirectorySeparatorChar));
-        var reader = DirectoryPackageContentReader.OpenLayoutRoot(layoutRoot, PackageContentIdentity.FromGitCommit(commit));
-        await Task.Run(() => Prune(commit), CancellationToken.None);
-        return reader;
+            var layoutRoot = _subfolder is null
+                ? final
+                : Path.Combine(final, _subfolder.Replace('/', Path.DirectorySeparatorChar));
+            var reader = DirectoryPackageContentReader.OpenLayoutRoot(layoutRoot, PackageContentIdentity.FromGitCommit(commit));
+            await Task.Run(() => Prune(commit), CancellationToken.None);
+
+            // The reader owns the lease from here on: it is released when the reader is disposed
+            return new LeasedPackageContentReader(reader, lease);
+        }
+        catch
+        {
+            // No reader was handed out, so nothing else would ever release the lease
+            lease.Dispose();
+            throw;
+        }
     }
+
+    /// <summary>
+    ///     Tells whether a commit's cache folder is held by a reader of this process that has not
+    ///     been disposed yet; exposed so tests can observe the leases.
+    /// </summary>
+    /// <param name="folder">The cache folder of the commit.</param>
+    /// <returns><see langword="true"/> while at least one reader holds the folder.</returns>
+    internal static bool IsCacheFolderLeased(string folder) => CacheLeases.IsLeased(folder);
 
     /// <summary>
     ///     Refuses a package that this source would not list now, so a caller cannot make the source
@@ -950,8 +979,15 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
 
     /// <summary>
     ///     Removes the oldest cached commits of this repository beyond the configured number,
-    ///     never the one just used. Failures are logged and ignored.
+    ///     never the one just used and never one that a reader still holds. Failures are logged and
+    ///     ignored.
     /// </summary>
+    /// <remarks>
+    ///     A folder held by a reader of this process (see <see cref="CacheLeases"/>) is skipped, so
+    ///     the cache can hold more than the configured number while readers are open. Only readers
+    ///     of this process are known: another process pruning the same cache is not stopped (the
+    ///     folder times still keep the recently used commits).
+    /// </remarks>
     /// <param name="keepCommit">The commit just used.</param>
     private void Prune(string keepCommit)
     {
@@ -963,9 +999,11 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
                 .OrderByDescending(folder => folder.LastWriteTimeUtc)
                 .ToList();
             var keep = Math.Max(_options.MaxCachedCommits, 1);
-            foreach (var folder in folders.Skip(keep).Where(f => f.Name != keepCommit))
+            foreach (var path in folders.Skip(keep).Where(f => f.Name != keepCommit).Select(f => f.FullName))
             {
-                DeleteDirectory(folder.FullName);
+                // Decided and deleted under the registry's lock, so a reader cannot take the folder
+                // between the check and the deletion; a folder a reader holds is left alone
+                CacheLeases.DeleteUnlessLeased(path, () => DeleteDirectory(path));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -1068,4 +1106,180 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
             ex),
         _ => new InvalidOperationException($"Source '{Alias}': {ex.Message}", ex)
     };
+
+    /// <summary>
+    ///     The process-wide registry of cache folders that a reader still holds, so that pruning
+    ///     never removes the files of a reader that was handed out.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     Keyed by the full normalized path of the commit folder (compared without regard to case
+    ///     where the file system usually ignores it), with a count of the readers holding it: every
+    ///     provider instance of the process shares it, so two sources, or two providers of the same
+    ///     source, that share a cache folder protect each other's readers. Thread-safe: one lock
+    ///     guards the counts, and a prune decides and deletes under it, so a reader cannot take a
+    ///     folder between the check and the deletion (taking a lease waits for a deletion in
+    ///     progress and then finds the folder gone, which sends the acquisition to the fetch).
+    ///     </para>
+    ///     <para>
+    ///     The registry only knows the readers of this process. Another process that prunes the same
+    ///     cache is not stopped; the folder times, which pruning orders by, are the only protection
+    ///     there.
+    ///     </para>
+    /// </remarks>
+    private static class CacheLeases
+    {
+        /// <summary>
+        ///     Guards <see cref="Counts"/> and serializes the pruning decisions.
+        /// </summary>
+        private static readonly object Gate = new();
+
+        /// <summary>
+        ///     The number of readers holding each folder; a folder with no reader has no entry.
+        /// </summary>
+        private static readonly Dictionary<string, int> Counts = new(
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+        /// <summary>
+        ///     Takes a lease on a commit folder.
+        /// </summary>
+        /// <param name="folder">The commit folder (it need not exist yet).</param>
+        /// <returns>The lease; disposing it releases it, and only the first disposal counts.</returns>
+        public static IDisposable Acquire(string folder)
+        {
+            var key = ToKey(folder);
+            lock (Gate)
+            {
+                Counts[key] = Counts.GetValueOrDefault(key) + 1;
+            }
+
+            return new Lease(key);
+        }
+
+        /// <summary>
+        ///     Tells whether any reader holds a folder.
+        /// </summary>
+        /// <param name="folder">The commit folder.</param>
+        /// <returns><see langword="true"/> while at least one lease on it is open.</returns>
+        public static bool IsLeased(string folder)
+        {
+            lock (Gate)
+            {
+                return Counts.ContainsKey(ToKey(folder));
+            }
+        }
+
+        /// <summary>
+        ///     Runs a deletion only when no reader holds the folder, deciding and deleting under the
+        ///     registry's lock.
+        /// </summary>
+        /// <param name="folder">The commit folder about to be deleted.</param>
+        /// <param name="delete">Deletes the folder; it must not take a lease (the lock is held).</param>
+        public static void DeleteUnlessLeased(string folder, Action delete)
+        {
+            var key = ToKey(folder);
+            lock (Gate)
+            {
+                if (!Counts.ContainsKey(key))
+                {
+                    delete();
+                }
+            }
+        }
+
+        /// <summary>
+        ///     Gives a folder the key it is registered under.
+        /// </summary>
+        /// <param name="folder">The folder.</param>
+        /// <returns>The full path without a trailing separator.</returns>
+        private static string ToKey(string folder) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+
+        /// <summary>
+        ///     One reader's claim on a folder, released exactly once however often it is disposed.
+        /// </summary>
+        private sealed class Lease(string key) : IDisposable
+        {
+            /// <summary>
+            ///     Set to 1 by the first disposal.
+            /// </summary>
+            private int _released;
+
+            /// <inheritdoc />
+            public void Dispose()
+            {
+                // Only the first disposal gives the count back, or one reader could release the
+                // lease of another
+                if (Interlocked.Exchange(ref _released, 1) != 0)
+                {
+                    return;
+                }
+
+                lock (Gate)
+                {
+                    var count = Counts.GetValueOrDefault(key) - 1;
+                    if (count > 0)
+                    {
+                        Counts[key] = count;
+                    }
+                    else
+                    {
+                        Counts.Remove(key);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    ///     The reader <see cref="AcquireAsync"/> returns: the layout reader of the commit folder,
+    ///     plus the lease that keeps the folder from being pruned until the reader is disposed.
+    /// </summary>
+    /// <remarks>
+    ///     Delegates every call to the layout reader, so what is read, listed and identified is
+    ///     exactly what that reader does. Disposal releases the reader and then the lease, exactly
+    ///     once however often it is called (and even when the inner reader throws). Not thread-safe,
+    ///     like the reader it wraps.
+    /// </remarks>
+    /// <param name="inner">The layout reader of the commit folder.</param>
+    /// <param name="lease">The lease on the commit folder; owned by this reader from now on.</param>
+    private sealed class LeasedPackageContentReader(IPackageContentReader inner, IDisposable lease) : IPackageContentReader
+    {
+        /// <summary>
+        ///     Set to 1 by the first disposal.
+        /// </summary>
+        private int _disposed;
+
+        /// <inheritdoc />
+        public string Description => inner.Description;
+
+        /// <inheritdoc />
+        public string? ContentIdentity => inner.ContentIdentity;
+
+        /// <inheritdoc />
+        public IReadOnlyList<string> ListFiles() => inner.ListFiles();
+
+        /// <inheritdoc />
+        public Stream OpenRead(string relativePath) => inner.OpenRead(relativePath);
+
+        /// <inheritdoc />
+        public string? ReadText(string relativePath) => inner.ReadText(relativePath);
+
+        /// <inheritdoc />
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                inner.Dispose();
+            }
+            finally
+            {
+                lease.Dispose();
+            }
+        }
+    }
 }

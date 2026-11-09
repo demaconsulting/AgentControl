@@ -257,7 +257,8 @@ hexadecimal SHA-256 of the package file (`AgentControl-AgentPackageManagement-Co
   tag and commit when the fetch starts.
 - *Cache.* `{CacheRoot}/{addressKey}/{commit}` with a completeness marker, written to a temporary folder and renamed;
   the five most recently used commits per repository are kept. The key is a hash of the address, so two sources never
-  share a folder, and a commit never needs fetching twice.
+  share a folder, and a commit never needs fetching twice. A commit folder that a returned reader still holds is not
+  pruned.
 - *Moved tags.* If the tag no longer points to the listed commit when it is fetched the acquisition is refused; a
   later listing shows the new commit as the pinned version's revision, which the card compares with the pin.
 - *User-started versus background.* `GitSourceOptions.Interactive` is the `allowPrompt` switch of the card: only work
