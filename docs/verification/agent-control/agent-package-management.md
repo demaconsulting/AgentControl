@@ -6,8 +6,9 @@ The `AgentPackageManagement` subsystem is verified indirectly through its consti
 test suites (`PackageSourceTests.cs`, `PackageVersionTests.cs`, `PackageVersionCacheTests.cs`,
 `PackageSourceRegistryTests.cs`, `ZipFolderSourceProviderTests.cs`,
 `NuGetSourceProviderTests.cs`, `NuGetSourceProviderServerTests.cs`, `NuGetSourceProviderSignatureTests.cs`,
-`NuGetSourceProviderSignedPackageTests.cs`, `SignatureVerificationSupportTests.cs` and
-`PackageContentIdentityTests.cs`), each of which is documented
+`NuGetSourceProviderSignedPackageTests.cs`, `SignatureVerificationSupportTests.cs`,
+`PackageContentIdentityTests.cs`, `GitRepositoryAddressTests.cs`, `GitTagPatternTests.cs`, `GitSourceProviderTests.cs` and
+`GitSourceProviderIntegrationTests.cs`), each of which is documented
 in its own unit-level verification
 design, plus `PackageSourceDefinitionTests.cs` and `PackageSourceServerLocationTests.cs`, which verify the
 supporting source model types and `PackageSourceAccessException` that have no unit of their own, and
@@ -39,8 +40,11 @@ no network. Otherwise standard test environment, with no external services or ha
 
 - All unit tests for `PackageSource`, `PackageVersion`, `PackageVersionCache`,
   `PackageSourceRegistry`, `ZipFolderSourceProvider`, `NuGetSourceProvider`, `SignatureVerificationSupport`,
-  `PackageContentIdentity` and the
+  `PackageContentIdentity`, `GitSourceProvider`, `GitRepositoryAddress`, `GitTagPattern` and the
   source model types pass with zero failures.
+- A Git source lists the tags that match its pattern as versions with their commits, delivers the layout of a chosen
+  tag (and nothing else) from a cache keyed by repository and commit, refuses links and submodules in the layout,
+  names the commit as the identity, and shows a moved tag as a different revision.
 - A package a zip or NuGet source delivers reports the SHA-256 identity of its package file, and a zip republished
   under the same version reports a different one.
 - Package discovery reflects only what is physically present in a source folder.
@@ -293,3 +297,18 @@ independently computed SHA-256 at the unit level. This scenario is tested by
 `AgentControl-PackageContentIdentity-Format`, `AgentControl-PackageContentIdentity-Compare`,
 `AgentControl-ZipFolderSourceProvider-ReportContentIdentity` and
 `AgentControl-NuGetSourceProvider-ReportContentIdentity`).
+
+**AgentPackageManagement_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag**: Against a real local bare repository, the
+registry resolves a Git source, the version cache lists `v1.0.0` (annotated) and `v1.1.0` and reports that a newer
+version is available and the listing entry of the pinned version with its commit; acquiring the pinned version delivers
+its content with the identity `git-commit:{commit}`; after the maintainer moves `v1.0.0` to another commit a new
+session lists the pinned version at the other commit, which compares as changed against the identity that was
+reported. The rules of the address, the pattern, the layout checks, the cache and the failure kinds are verified by
+the unit tests of `GitRepositoryAddress`, `GitTagPattern` and `GitSourceProvider`, and the settings, registry, version
+cache and extractor rules by their own units. This scenario is tested by
+`AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag`, covering
+`AgentControl-AgentPackageManagement-GitSource` (children: every `AgentControl-GitRepositoryAddress-*`,
+`AgentControl-GitTagPattern-*` and `AgentControl-GitSourceProvider-*` requirement,
+`AgentControl-PackageSourceRegistry-GitSourceResolved`, `AgentControl-PackageVersionCache-ReportPinnedListing` and
+`AgentControl-AgentPackageManagement-GitSourceDefinition`, whose tests are the `PackageSourceDefinition_Git*` tests of
+`PackageSourceDefinitionTests.cs`).

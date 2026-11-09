@@ -18,6 +18,15 @@ words:
   - abbrevref
   - apikey
   - askpass
+  - cacheinfo
+  - fsmonitor
+  - LOCALAPPDATA
+  - NOSYSTEM
+  - NTFS
+  - pathspec
+  - pathspecs
+  - publickey
+  - refspec
   - ARGLOGGER
   - arglogger
   - ARGLOGGERSTUB

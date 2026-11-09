@@ -29,7 +29,11 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     including when no version was found.</param>
 /// <param name="Latest">The highest-versioned discovered package whether or not it is newer than
 ///     the pin, or <see langword="null"/> if none was found.</param>
-internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? Latest);
+/// <param name="Pinned">The discovered package whose version is the pinned version, from the same
+///     listing, or <see langword="null"/> when the source no longer lists it (or the pin does not
+///     parse). Lets a caller compare <see cref="DiscoveredPackage.Revision"/> to see that a Git
+///     tag now points elsewhere without another call to the source.</param>
+internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? Latest, DiscoveredPackage? Pinned = null);
 
 /// <summary>
 ///     Session-scoped cache of what each configured package source offers, keyed by
@@ -193,7 +197,9 @@ internal sealed class PackageVersionCache
             return new UpgradeCheck(true, latest);
         }
 
-        return new UpgradeCheck(latest.Version.CompareTo(pinned) > 0, latest);
+        // The listing entry of the pinned version itself, so a revision change can be seen
+        var pinnedPackage = versions.FirstOrDefault(package => package.Version.CompareTo(pinned) == 0);
+        return new UpgradeCheck(latest.Version.CompareTo(pinned) > 0, latest, pinnedPackage);
     }
 
     /// <summary>

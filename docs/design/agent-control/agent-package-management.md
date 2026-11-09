@@ -19,9 +19,13 @@ badge. It also provides the package-authenticity behavior
 (`AgentControl-AgentPackageManagement-SignedPackages`, `AgentControl-AgentPackageManagement-SignaturePlatformSupport`,
 which support `AgentControl-System-PackageAuthenticity`). It also provides the content identity of a
 delivered package (`AgentControl-AgentPackageManagement-ContentIdentity`, which supports
-`AgentControl-System-PackageContentIntegrity`). The subsystem contains eight units: `PackageSource`,
+`AgentControl-System-PackageContentIntegrity`). It also provides the Git repository source - the tags of a repository
+that match a pattern as the versions of one package, fetched shallow into a cache keyed by repository and commit
+(`AgentControl-AgentPackageManagement-GitSource`, which supports `AgentControl-System-GitSources` and
+`AgentControl-System-GitSourceSafety`). The subsystem contains eleven units: `PackageSource`,
 `PackageVersion`, `PackageVersionCache`, `PackageSourceRegistry`, `ZipFolderSourceProvider`,
-`NuGetSourceProvider`, `SignatureVerificationSupport` and `PackageContentIdentity`. The supporting types `PackageSourceDefinition`,
+`NuGetSourceProvider`, `SignatureVerificationSupport`, `PackageContentIdentity`, `GitSourceProvider`,
+`GitRepositoryAddress` and `GitTagPattern`. The supporting types  `PackageSourceDefinition`,
 `PackageSourceType`,
 `PackageReference`, `IPackageSourceProvider`, `PackageSourceAccessException` (with its
 `PackageSourceFailureKind`) and the `DiscoveredPackage` record have no dedicated
@@ -34,7 +38,7 @@ unit documents and are folded into this subsystem-level description. The subsyst
 **IPackageSourceProvider**: The contract every kind of package source implements.
 
 - *Type*: In-process .NET interface.
-- *Role*: Provider (implemented by `ZipFolderSourceProvider` and `NuGetSourceProvider`;
+- *Role*: Provider (implemented by `ZipFolderSourceProvider`, `NuGetSourceProvider` and `GitSourceProvider`;
   consumed through `PackageSourceRegistry` and `PackageVersionCache`).
 - *Contract*: Asynchronous, cancellable operations to list a source's package IDs, list one
   package's versions (each stamped with the source alias), and make one discovered package's
@@ -124,8 +128,10 @@ plus **PackageVersionCache.Invalidate**.
 ### Design
 
 **Source model.** A configured source is a `PackageSourceDefinition`: a unique case-insensitive
-`Alias`, a `Type` (`Zip` or `NuGet`, persisted by name), a `Location`, the `PackageIds` a NuGet
-source offers, and the trust options `AllowInsecureHttp`, `RequireSignedPackages` and
+`Alias`, a `Type` (`Zip`, `NuGet` or `Git`, persisted by name), a `Location`, the `PackageIds` a NuGet
+source offers (a Git source has exactly one: the package its repository delivers), the Git-only `TagPattern` and
+`Subfolder` (`AgentControl-AgentPackageManagement-GitSourceDefinition`), and the trust options
+`AllowInsecureHttp`, `RequireSignedPackages` and
 `SignerFingerprint`. Whether a location is a folder or a server is derived from the location text
 (an absolute `http`/`https` URI is a server; anything else is a folder) rather than persisted, so
 the two can never disagree. The definition deliberately has no password, token or other secret
@@ -150,7 +156,11 @@ signer (`AgentControl-AgentPackageManagement-SourceFingerprintNormalization`,
 `PackageReference` is the identity a repo pin records: source alias, package ID and the exact
 version text — a package ID is never unique across sources, so a package is only ever identified
 together with its source. `DiscoveredPackage` is a package version found at a source, carrying
-its alias and a provider-defined location.
+its alias, a provider-defined location (the tag name for a Git source) and an optional `Revision`: the
+revision of the content known when the version was listed (the commit of a Git tag), which lets a later listing show
+that a tag was moved and lets an acquisition refuse content that is not that commit. `PackageVersionCache`
+passes the listing entry of the pinned version on in `UpgradeCheck.Pinned` so a caller can compare revisions without
+another call (`AgentControl-PackageVersionCache-ReportPinnedListing`).
 
 **Providers.** `ZipFolderSourceProvider` adapts the unchanged static `PackageSource` scan to the
 provider contract (`AgentControl-AgentPackageManagement-ZipFolderSource`); it reports an unusable folder as
@@ -189,11 +199,37 @@ hexadecimal SHA-256 of the package file (`AgentControl-AgentPackageManagement-Co
 - *The comparison.* `PackageContentIdentity.Compare(pinned, actual)` answers *not comparable* when either side is
   missing, *same*, or *changed*; callers (the repo card) decide what to do. A missing identity is never a change,
   so pins made before identities were recorded, and sources that report none, cause no warning.
-- *Reserved kind.* `PackageContentIdentity.FromGitCommit` formats `git-commit:` plus a commit hash for a source
-  that delivers a tag of a Git repository; no source in this build produces it, but the comparison already treats
-  identities of different kinds as different.
+- *Git.* `PackageContentIdentity.FromGitCommit` formats `git-commit:` plus the commit a tag pointed to, which
+  `GitSourceProvider` reports as the identity of what it delivered; the comparison treats identities of different
+  kinds as different.
 - *Not a signature.* The identity detects a republished or altered package; it does not prove who published it
   (see *Package authenticity* for that).
+
+**Git repository source.** `GitSourceProvider` (with `GitRepositoryAddress` and `GitTagPattern`, over the hardened
+`GitRemoteClient` of the `GitIntegration` subsystem) makes one configured repository one package. The decisions:
+
+- *One source, one package.* The package ID is the single entry of `PackageIds`, so the cache keys, the package list
+  and the pin keep their existing meaning; the user picks the name.
+- *Tags are versions.* The tags that match the tag pattern (a literal prefix and suffix around `{version}`, strict
+  semantic versions only) are listed with one remote query, no clone. The commit of a tag is the version's
+  `Revision`; an annotated tag is peeled to its commit because the tag object changes whenever a tag is re-created.
+- *Nothing from the repository runs.* The temporary repository is created from an empty template, hooks are disabled,
+  submodules and filters are off and only the transport of the configured address is allowed - all enforced by
+  `GitRemoteClient` per command. The user's own credential helper and ssh keys supply the sign-in; AgentControl
+  stores none and the address may not contain one.
+- *Only the layout is read.* The tree of the fetched commit is examined *before* anything is checked out: a symbolic
+  link, a submodule or a `.git` entry in the layout (the four managed folders, `release-notes.md`, `AGENTS.md`, below
+  the optional sub-folder) is refused; only the layout paths are checked out, `.git` is deleted, and the result is read
+  through `DirectoryPackageContentReader.OpenLayoutRoot`, which lists and reads only those paths. Links elsewhere in the
+  repository are never checked out and so never matter.
+- *Cache.* `{CacheRoot}/{addressKey}/{commit}` with a completeness marker, written to a temporary folder and renamed;
+  the five most recently used commits per repository are kept. The key is a hash of the address, so two sources never
+  share a folder, and a commit never needs fetching twice.
+- *Moved tags.* If the tag no longer points to the listed commit when it is fetched the acquisition is refused; a
+  later listing shows the new commit as the pinned version's revision, which the card compares with the pin.
+- *User-started versus background.* `GitSourceOptions.Interactive` is the `allowPrompt` switch of the card: only work
+  the user started lets git show its credential UI; a missing sign-in in the background is
+  `PackageSourceFailureKind.AuthenticationFailed`, which the card already shows as "sign-in needed".
 
 **Package authenticity.** A NuGet source (folder or server) can require signed packages and optionally pin the
 publisher's certificate. The decisions, in the order a reader will ask about them:

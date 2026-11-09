@@ -4,7 +4,8 @@
 
 The `GitIntegration` subsystem is verified indirectly through its constituent units' test
 suites (`GitClientTests.cs`, `CommittedAgentFilesCacheTests.cs` and `GitCredentialClientTests.cs` /
-`GitCredentialClientIntegrationTests.cs`), each documented in its
+`GitCredentialClientIntegrationTests.cs`) and `GitRemoteClientTests.cs` /
+`GitRemoteClientIntegrationTests.cs`), each documented in its
 own unit-level verification design, plus `GitIntegrationSubsystemTests.cs`, which drives the saved-sign-in capability
 through its contract with the real git and a throw-away credential helper. `GitClientTests` uses `GitStub`, a fake git executable
 script that records its invocation arguments and returns configured output/exit codes, so
@@ -77,3 +78,13 @@ the `GitCredentialClient` unit verification design) and covered by the children
 `AgentControl-GitCredentialClient-FillApproveReject`, `AgentControl-GitCredentialClient-HelperAvailability`,
 `AgentControl-GitCredentialClient-NeverInteractive`, `AgentControl-GitCredentialClient-BoundedTime`,
 `AgentControl-GitCredentialClient-UnavailableIsNotAnError` and `AgentControl-GitCredentialClient-SecretsNeverLogged`.
+
+**GitIntegration_RemoteGit_SubsystemTestRunsTheRealGitAgainstALocalRepository**: Through the client, with the user's git
+configuration replaced and no network, tags of a local bare repository are listed without a clone (an annotated tag
+resolves to its commit), one tag is initialized and fetched shallow, its tree is listed, and the same address given with
+a transport that is not allowed (https for a local path) is refused by git. The exact command lines, the prompt rules
+of background and interactive work, trace-variable removal, time limits, cancellation, output limits, redaction and
+failure classification are verified against a stub git by the `GitRemoteClient` unit tests (see the `GitRemoteClient`
+unit verification design). This scenario is tested by
+`GitIntegrationSubsystem_RemoteClient_ListsFetchesOneTagAndRefusesOtherTransports`, covering
+`AgentControl-GitIntegration-RemoteGit` (children: every `AgentControl-GitRemoteClient-*` requirement).

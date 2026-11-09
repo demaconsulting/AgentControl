@@ -57,9 +57,16 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     private const char PackagePathSeparator = '/';
 
     /// <summary>
-    ///     Absolute path of the content root (<c>{packageFolder}/content</c>).
+    ///     Absolute path of the content root (<c>{packageFolder}/content</c>, or the folder itself
+    ///     for a layout-root reader).
     /// </summary>
     private readonly string _contentRoot;
+
+    /// <summary>
+    ///     Whether this reader exposes only the package layout (<see cref="PackageContentExtractor.LayoutPaths"/>)
+    ///     of a folder that holds other things too (a checked-out Git repository).
+    /// </summary>
+    private readonly bool _layoutOnly;
 
     /// <summary>
     ///     Initializes a reader for a package folder whose content root has been validated.
@@ -67,11 +74,13 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     /// <param name="packageFolder">The unpacked package folder.</param>
     /// <param name="contentRoot">The validated content root inside it.</param>
     /// <param name="contentIdentity">The identity the opener computed for the package, if any.</param>
-    private DirectoryPackageContentReader(string packageFolder, string contentRoot, string? contentIdentity)
+    /// <param name="layoutOnly">Whether only the package layout of the root is exposed.</param>
+    private DirectoryPackageContentReader(string packageFolder, string contentRoot, string? contentIdentity, bool layoutOnly)
     {
         Description = packageFolder;
         _contentRoot = contentRoot;
         ContentIdentity = contentIdentity;
+        _layoutOnly = layoutOnly;
     }
 
     /// <inheritdoc />
@@ -126,7 +135,41 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
                 $"Package content folder '{contentRoot}' is a link, which is not allowed.");
         }
 
-        return new DirectoryPackageContentReader(packageFolder, contentRoot, contentIdentity);
+        return new DirectoryPackageContentReader(packageFolder, contentRoot, contentIdentity, layoutOnly: false);
+    }
+
+    /// <summary>
+    ///     Opens a folder whose root <em>is</em> the package layout - for example a Git repository
+    ///     checked out to disk - for reading, exposing only the layout paths.
+    /// </summary>
+    /// <param name="layoutRoot">The folder that holds <c>.github/...</c>, <c>release-notes.md</c>
+    ///     and <c>AGENTS.md</c> directly (the repository root or the configured sub-folder).</param>
+    /// <param name="contentIdentity">The identity of the content, as computed by the caller (for
+    ///     a Git tag, <c>git-commit:{sha}</c>); <see langword="null"/> when it has none.</param>
+    /// <returns>A reader that lists and reads only the four managed folders under <c>.github</c>
+    ///     and the two root files. Everything else in the folder (including a <c>.git</c> folder
+    ///     and any link that is not part of the layout) is never listed, read or inspected.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="layoutRoot"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the folder does not exist or is
+    ///     itself a link. A link inside the layout is refused when the layout is listed or read,
+    ///     exactly as for <see cref="Open"/>.</exception>
+    public static DirectoryPackageContentReader OpenLayoutRoot(string layoutRoot, string? contentIdentity = null)
+    {
+        ArgumentNullException.ThrowIfNull(layoutRoot);
+
+        if (!Directory.Exists(layoutRoot))
+        {
+            throw new InvalidOperationException($"Package folder '{layoutRoot}' does not exist.");
+        }
+
+        if (IsLink(new DirectoryInfo(layoutRoot)))
+        {
+            throw new InvalidOperationException(
+                $"Package folder '{layoutRoot}' is a link, which is not allowed.");
+        }
+
+        return new DirectoryPackageContentReader(layoutRoot, layoutRoot, contentIdentity, layoutOnly: true);
     }
 
     /// <inheritdoc />
@@ -135,7 +178,14 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
         var results = new List<string>();
         try
         {
-            Walk(new DirectoryInfo(_contentRoot), string.Empty, results);
+            if (_layoutOnly)
+            {
+                ListLayout(results);
+            }
+            else
+            {
+                Walk(new DirectoryInfo(_contentRoot), string.Empty, results);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -144,6 +194,60 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
         }
 
         return results;
+    }
+
+    /// <summary>
+    ///     Collects the files of the package layout only: the managed folders (links anywhere in
+    ///     them are refused) and the root files that exist.
+    /// </summary>
+    /// <param name="results">Receives the relative file paths.</param>
+    /// <exception cref="InvalidOperationException">Thrown when a layout path is, or passes
+    ///     through, a link.</exception>
+    private void ListLayout(List<string> results)
+    {
+        foreach (var folder in PackageContentExtractor.LayoutFolders)
+        {
+            RejectLinksAlongPath(folder);
+            var path = Path.Combine(_contentRoot, folder.Replace(PackagePathSeparator, Path.DirectorySeparatorChar));
+            if (Directory.Exists(path))
+            {
+                Walk(new DirectoryInfo(path), folder, results);
+            }
+        }
+
+        foreach (var file in PackageContentExtractor.LayoutRootFiles)
+        {
+            RejectLinksAlongPath(file);
+            if (File.Exists(Path.Combine(_contentRoot, file)))
+            {
+                results.Add(file);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     In a layout-root reader, refuses a path that is not part of the package layout.
+    /// </summary>
+    /// <param name="relativePath">The requested package-relative path.</param>
+    /// <exception cref="InvalidOperationException">Thrown when this is a layout-root reader and
+    ///     the path is neither a layout root file nor below a managed folder.</exception>
+    private void RequireLayoutPath(string relativePath)
+    {
+        if (!_layoutOnly)
+        {
+            return;
+        }
+
+        var normalized = relativePath.Replace('\\', PackagePathSeparator).TrimStart(PackagePathSeparator);
+        var inLayout = !normalized.Split(PackagePathSeparator).Any(part => part is "." or "..") &&
+                       (PackageContentExtractor.LayoutRootFiles.Contains(normalized, StringComparer.Ordinal) ||
+                        PackageContentExtractor.LayoutFolders.Any(
+                            folder => normalized.StartsWith(folder + PackagePathSeparator, StringComparison.Ordinal)));
+        if (!inLayout)
+        {
+            throw new InvalidOperationException(
+                $"Package file '{relativePath}' in '{Description}' is not part of the agent package layout.");
+        }
     }
 
     /// <inheritdoc />
@@ -206,6 +310,7 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     ///     or the file or any directory leading to it is a link.</exception>
     private string ResolveFile(string relativePath)
     {
+        RequireLayoutPath(relativePath);
         string path;
         try
         {

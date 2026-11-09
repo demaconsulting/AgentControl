@@ -74,6 +74,11 @@ path.
   without creating or changing any file and without repeating the location in the message
   (`AgentControl-SettingsStore-NoSecretsPersisted`).
 
+**Git sources**: A Git source is saved and loaded like any other source - its `TagPattern` and `Subfolder` are plain fields,
+the type is written by name - and `Save` refuses a source whose address embeds a credential (the type-aware
+`GetCredentialProblem`: user information on an https address, a password in an ssh address, a query or fragment; an ssh
+user name is allowed) before anything is written (`AgentControl-SettingsStore-GitSourceRoundTrip`).
+
 #### Error Handling
 
 `Load` throws `InvalidOperationException` when the settings file exists but cannot be read or

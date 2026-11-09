@@ -165,3 +165,16 @@ package with an invalid path (an argument the operating system rejects as a path
   during extraction; a no-follow open is not portable across Windows, Linux and macOS in .NET). Winning
   such a race depends on operating-system scheduling, so no unit test can reproduce it reliably; the tests above
   verify that a link present before the operation starts is always refused.
+
+**PackageContentExtractor_LayoutRoot_ReadsOnlyLayoutIgnoresUnrelatedLinksRefusesLayoutLinks**: A folder shaped like a
+checked-out repository is read through `OpenLayoutRoot`: only the layout is listed (no `.git`, workflows, README or
+sources), the supplied identity is carried, the package extracts and its notes and template are read, paths outside the
+layout (including `.github/agents/../../.git/config`) are refused, a missing or linked root is refused, an unrelated
+junction or symbolic link is ignored and the same kind of link inside the layout is refused. This scenario is tested by
+`DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity`,
+`DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused`,
+`DirectoryPackageContentReader_OpenLayoutRoot_MissingFolderOrLink_ThrowsInvalidOperationException`,
+`DirectoryPackageContentReader_OpenLayoutRoot_JunctionOutsideLayoutIgnoredInsideLayoutRefused` and
+`DirectoryPackageContentReader_OpenLayoutRoot_SymlinkOutsideLayoutIgnoredInsideLayoutRefused`, covering
+`AgentControl-PackageContentExtractor-ReadLayoutRoot`, `AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout`
+and `AgentControl-PackageContentExtractor-ExcludeGitFolder`.

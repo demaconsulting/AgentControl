@@ -20,7 +20,12 @@ the package it reads (`AgentControl-RepoSync-ContentIdentity`, which supports
 `AgentControl-System-PackageContentIntegrity`): a zip reader hashes the zip and reads its entries from the one open
 handle, so the identity recorded in a pin is always that of the bytes that were extracted; a folder reader carries
 the identity its source supplied. The subsystem only reports the identity - what a difference means is decided by
-the `LauncherUI` card.
+the `LauncherUI` card. A Git package is delivered as a checked-out folder whose root *is* the package layout, so
+`DirectoryPackageContentReader.OpenLayoutRoot` reads such a folder: it lists and reads only the four managed folders and
+the two root files, never `.git`, other `.github` content or any other file, and - unlike the `content`-folder mode,
+which refuses a link anywhere - it neither inspects nor refuses a link that is not part of the layout while still
+refusing one that is (`AgentControl-RepoSync-LayoutRoot`, which supports `AgentControl-System-GitSourceSafety`). The list
+of layout paths has one source of truth, `PackageContentExtractor.LayoutPaths`, shared with the Git source provider.
 
 ### Interfaces
 

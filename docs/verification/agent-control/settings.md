@@ -85,3 +85,8 @@ what was loaded writes a file that reads back the same and holds no unknown colo
 `AgentControl-SettingsStore-UnknownCardColorIsAutomatic`, and the `AgentControl-RepoGroupName-*` requirements of the
 `RepoGroupName` unit, whose own tests are in its unit verification design). The `SettingsStore` unit tests
 verify each of these rules separately (`SettingsStoreOrganizingTests.cs`).
+
+**Settings_GitSource_RoundTripsThroughTheSettingsFile**: A Git source with its address, tag pattern, sub-folder and package
+ID round-trips through the settings file and an address with a credential is refused at save. This scenario is tested by
+`SettingsStore_SaveThenLoad_GitSource_RoundTripsAndRefusesCredentials`, covering `AgentControl-Settings-PackageSources`
+(child: `AgentControl-SettingsStore-GitSourceRoundTrip`).

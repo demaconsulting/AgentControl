@@ -77,6 +77,12 @@ alias never is) and list the configured definitions in order. `Definitions` retu
 immutable list of clones on every access, so a caller that changes what it gets back — or the list
 itself — cannot affect the registry (`AgentControl-PackageSourceRegistry-DefinitionsAreASnapshot`).
 
+**Git sources**: `Create` takes an optional `GitSourceOptions` (the git executable, the cache root, and
+whether the work was
+started by the user) and resolves a `Git` source to a `GitSourceProvider` built with it, or with the defaults; the provider
+validates its source when it is created, so an invalid Git source fails when it is resolved, not when the registry is built
+(`AgentControl-PackageSourceRegistry-GitSourceResolved`).
+
 #### Error Handling
 
 `UnknownSourceException` for an unconfigured alias; `ArgumentException` for a blank alias passed

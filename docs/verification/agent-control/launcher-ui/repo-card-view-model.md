@@ -540,8 +540,21 @@ is applied without any warning and the pin then records none. This scenario is t
 `RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedWithoutSubscriber_IsRefused`,
 `RepoCardViewModel_ApplySelectedPackage_PinWithoutIdentity_AdoptsIdentityWithoutWarning`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutIdentity_SyncsSilentlyAndNeverWritesPin`,
-`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UnchangedContent_SyncsAndNeverWritesPin` and
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UnchangedContent_SyncsAndNeverWritesPin`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AgentsMdOfferDeclined_NeverWritesPin` (a package carrying an
+`AGENTS.md` template whose offer, raised by the restore, is declined leaves the pin file byte for byte unchanged and
+not marked declined, while declining the offer raised by an explicit apply is still recorded, per
+`RepoCardViewModel_ApplySelectedPackage_AgentsMdOfferDeclined_RecordsDeclineInPin`) and
 `RepoCardViewModel_ApplySelectedPackage_SourceReportsNoIdentity_IsNeverTreatedAsChanged` (in
 `RepoCardContentIdentityTests.cs`), covering `AgentControl-RepoCardViewModel-RecordContentIdentity`,
 `AgentControl-RepoCardViewModel-RefuseChangedContent`, `AgentControl-RepoCardViewModel-ConfirmChangedContent`,
 `AgentControl-RepoCardViewModel-AdoptMissingIdentity` and `AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin`.
+
+**RepoCardViewModel_GitSourceOptions_PromptOnlyForUserStartedWork**: With a Git source configured and a stub as the git
+executable (from the startup override), the registry built for work the user started runs git without
+`core.askPass=` and with `GCM_INTERACTIVE` left alone, and the registry built for background work runs it with
+`GCM_INTERACTIVE=never` and `core.askPass=`, both with `GIT_TERMINAL_PROMPT=0`; the Git cache root is a `git-cache`
+folder inside the isolated configuration directory when one is given, and the default (none) otherwise. This scenario is
+tested by `RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork` and
+`RepoCardViewModel_GetGitCacheRoot_UsesConfigDirectoryWhenGiven`, covering
+`AgentControl-RepoCardViewModel-GitSourceOptions`.

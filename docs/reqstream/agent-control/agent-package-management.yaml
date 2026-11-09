@@ -454,3 +454,76 @@ sections:
           - AgentControl-NuGetSourceProvider-ReportContentIdentity
         tests:
           - AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip
+
+      - id: AgentControl-AgentPackageManagement-GitSourceDefinition
+        title: >-
+          The AgentPackageManagement subsystem shall describe a Git source by its repository
+          address, a tag pattern, an optional sub-folder of the repository and exactly one package
+          ID, persisting the type by name; shall check these settings as a whole (address, pattern,
+          sub-folder and package ID), the sub-folder as a relative path of folder names that cannot
+          leave the repository; and shall judge the address of a Git source by the rules of Git
+          addresses - allowing an ssh user name and never a password, token or query string -
+          without repeating it in a message.
+        justification: |
+          A Git source is persisted in the settings file and later handed to git, so every rule
+          that keeps an address, a pattern or a path from being dangerous or secret-bearing must
+          hold wherever the description is used, including a settings file edited by hand.
+        tests:
+          - PackageSourceDefinition_GitFields_AreClonedAndCompared
+          - PackageSourceDefinition_GitSource_SerializesByNameAndRoundTrips
+          - PackageSourceDefinition_GetCredentialProblem_GitSource_IsTypeAware
+          - PackageSourceDefinition_GetGitSettingsProblem_ChecksAddressPatternSubfolderAndPackageId
+          - PackageSourceDefinition_GetSubfolderProblem_AppliesFolderRules
+
+      - id: AgentControl-AgentPackageManagement-GitSource
+        title: >-
+          The AgentPackageManagement subsystem shall offer the tags of a Git repository that match
+          a configured pattern as the versions of one package, listed without cloning, and shall
+          supply the package layout of a chosen version by fetching exactly its tag shallow into a
+          cache keyed by repository and commit, refusing links, submodules and a missing layout,
+          naming the commit as the content identity, and showing the commit of every version so a
+          moved tag can be noticed.
+        justification: |
+          Many organizations keep agent packages in a Git repository and tag releases; reading them
+          directly spares a build and publishing step, while the commit of a tag gives the pin an
+          identity that cannot change unless the tag is moved.
+        children:
+          - AgentControl-GitRepositoryAddress-AcceptHttps
+          - AgentControl-GitRepositoryAddress-AcceptSsh
+          - AgentControl-GitRepositoryAddress-AcceptLocalPath
+          - AgentControl-GitRepositoryAddress-RejectEmbeddedCredentials
+          - AgentControl-GitRepositoryAddress-RejectDangerousTransports
+          - AgentControl-GitRepositoryAddress-RejectOptionLikeValues
+          - AgentControl-GitRepositoryAddress-CacheKeyStable
+          - AgentControl-GitRepositoryAddress-NeverEchoesInput
+          - AgentControl-GitTagPattern-RequireSinglePlaceholder
+          - AgentControl-GitTagPattern-RejectInvalidRefNames
+          - AgentControl-GitTagPattern-ExtractStrictVersion
+          - AgentControl-GitTagPattern-FormatTag
+          - AgentControl-GitTagPattern-ListingPrefix
+          - AgentControl-GitTagPattern-VetServerTagNames
+          - AgentControl-GitSourceProvider-ValidateDefinition
+          - AgentControl-GitSourceProvider-ListPackageId
+          - AgentControl-GitSourceProvider-ListVersionsByPattern
+          - AgentControl-GitSourceProvider-ResolveAnnotatedTags
+          - AgentControl-GitSourceProvider-TagPreview
+          - AgentControl-GitSourceProvider-AcquireShallowTag
+          - AgentControl-GitSourceProvider-CacheByAddressAndCommit
+          - AgentControl-GitSourceProvider-TagMovedBetweenListAndFetch
+          - AgentControl-GitSourceProvider-RejectLinksAndSubmodulesInLayout
+          - AgentControl-GitSourceProvider-Subfolder
+          - AgentControl-GitSourceProvider-ExcludeGitFolder
+          - AgentControl-GitSourceProvider-ReportContentIdentity
+          - AgentControl-GitSourceProvider-AcquireOnlyFromOwnSource
+          - AgentControl-GitSourceProvider-FailureClassification
+          - AgentControl-GitSourceProvider-CachePruning
+          - AgentControl-GitSourceProvider-CancellationObserved
+          - AgentControl-GitSourceProvider-InteractiveFlagHonored
+          - AgentControl-GitSourceProvider-HostileHooksNeverRun
+          - AgentControl-PackageSourceRegistry-GitSourceResolved
+          - AgentControl-PackageVersionCache-ReportPinnedListing
+          - AgentControl-AgentPackageManagement-GitSourceDefinition
+        tests:
+          # Subsystem test with a real local repository: the registry, the version cache and the
+          # provider together list tags, acquire the commit of a tag and see a moved tag.
+          - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag

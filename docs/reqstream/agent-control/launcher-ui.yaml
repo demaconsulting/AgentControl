@@ -1466,3 +1466,18 @@ sections:
           - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing
           - RepoCardViewModel_ApplySelectedPackage_PinWithoutIdentity_AdoptsIdentityWithoutWarning
           - MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed
+
+      - id: AgentControl-LauncherUI-GitSourceSetup
+        title: >-
+          The LauncherUI subsystem shall set up Git package sources so that git is run with the
+          configured git executable, may show its credential UI only for work the user started and
+          never for background work such as the upgrade check or the restore before launch, and
+          keeps what it fetches inside the isolated configuration directory when one is given.
+        justification: |
+          A sign-in window that opens by itself, or a test that writes into the real user profile,
+          would be a defect; the card is where the difference between user-started and background
+          work is known.
+        children:
+          - AgentControl-RepoCardViewModel-GitSourceOptions
+        tests:
+          - RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork

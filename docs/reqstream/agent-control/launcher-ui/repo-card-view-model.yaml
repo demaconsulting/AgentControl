@@ -848,10 +848,27 @@ sections:
       - id: AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin
         title: >-
           The RepoCardViewModel class shall, when it restores missing agent files before launch,
-          leave the repo's pin file unchanged whether or not the pin recorded an identity.
+          leave the repo's pin file unchanged whether or not the pin recorded an identity, including
+          when the user declines the offer of the package's AGENTS.md template that the restore
+          raises.
         justification: |
           The pin file is usually tracked by the repo's version control; rewriting it every time
           the agent tool is launched would leave the working tree changed and block pulling.
         tests:
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutIdentity_SyncsSilentlyAndNeverWritesPin
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UnchangedContent_SyncsAndNeverWritesPin
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AgentsMdOfferDeclined_NeverWritesPin
+
+      - id: AgentControl-RepoCardViewModel-GitSourceOptions
+        title: >-
+          The RepoCardViewModel class shall build the package source registry so that a Git source
+          runs git with the configured or overridden git executable, lets git show its credential UI
+          only for work the user started and never for background work, and keeps what it fetches
+          in a git-cache folder inside the isolated configuration directory when one was given.
+        justification: |
+          The upgrade check and the launch-time restore run without the user asking and must never
+          open a sign-in window; the actions the user starts may. Automated tests must never touch
+          the real user profile.
+        tests:
+          - RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork
+          - RepoCardViewModel_GetGitCacheRoot_UsesConfigDirectoryWhenGiven

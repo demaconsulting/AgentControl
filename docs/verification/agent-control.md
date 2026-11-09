@@ -422,18 +422,22 @@ badge, offers no upgrade, and keeps its pin file unchanged. This scenario is tes
 `windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
 covering `AgentControl-System-SourcePinIntegrity`.
 
-**AgentControl_PackageContentIntegrity_RecordedOnSelectAndRepublishedVersionNotSyncedAtLaunch**: In the published
+**AgentControl_PackageContentIntegrity_RecordedOnSelectRefusedAtLaunchAndAdoptedOnUpgrade**: In the published
 application, selecting a package for a never-pinned repo writes a pin (schema version 3) whose content identity is
 the SHA-256 of the zip that was applied, computed independently by the test. In a second run a repo is pinned to
 1.0.0 with the identity of the original zip, its managed folders are missing, and the 1.0.0 zip has since been
 republished with other content; clicking Launch shows a message that the agent files were not synced because the
 package now contains different files than the copy the repo was set up with, no managed folder is created, and the
-pin file is byte for byte unchanged. The confirmation question for an explicit selection of the same version, the
-refusal of an Upgrade (which the card does not offer for an up-to-date repo), the silent adoption of an identity by a
-pin without one, and the NuGet case are specified by the child requirements and verified at the subsystem and unit
-levels only; they are not claimed as system-level evidence. This scenario is tested by
-`windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile` and
-`windows@LaunchButton_Click_PinnedVersionRepublished_ExplainsAndSyncsNothing`, covering
+pin file is byte for byte unchanged. In a third run a repo whose pin has no identity (as written before identities
+existed) is upgraded from 1.0.0 to 1.1.0 with the upgrade chip: the release notes open, no message is shown, and the
+pin now holds the SHA-256 of the 1.1.0 zip. The refusal of an Upgrade and the confirmation question for an explicit
+selection of the same version are rules of the repo card, specified by the child requirements and verified at the
+subsystem and unit levels; the application offers an Upgrade only for a newer version and Select Package only for
+a repo that is not pinned yet, so there is no end-to-end path to them and they are not claimed as system-level
+evidence (the system requirement does not state them). The NuGet case is likewise verified at the subsystem and
+unit levels only. This scenario is tested by `windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile`,
+`windows@LaunchButton_Click_PinnedVersionRepublished_ExplainsAndSyncsNothing` and
+`windows@UpgradeChip_Click_PinWithoutIdentity_AdoptsIdentityOfNewVersionWithoutWarning`, covering
 `AgentControl-System-PackageContentIntegrity`.
 
 **AgentControl_UpgradeFromChip_ClickStartsTheUpgrade**: On a repo pinned to 1.0.0 with 1.1.0 at the source, the
@@ -592,3 +596,31 @@ tested by `windows@MainSettingsSourceEditorAndAbout_LightTheme_RenderLegibly`,
 `windows@CredentialPrompt_LightTheme_RendersLegibly` and `windows@CredentialPrompt_DarkTheme_RendersLegibly`,
 covering `AgentControl-System-WindowsLegible`. The 3:1 contrast of the status bars and the favorite star, which its
 child requirement adds, is verified in the `LauncherUI` subsystem tests only.
+
+**AgentControl_GitSources_ThroughTheRealGitAgainstALocalRepository**: Through the registry, the version cache and the
+provider, with the real git against a local repository, the tags that match the pattern are listed as versions with
+their commits, the pinned version is acquired with the identity `git-commit:{commit}`, and a moved tag is seen as another
+commit; a Git source round-trips through the settings file and an address with a credential is refused at save. The
+scenarios that drive the application's windows (adding the source in Settings, selecting a version from it) belong to the
+editor and its end-to-end tests, which are added with the editor; until then the evidence for this requirement is at the
+subsystem level and is not claimed as end-to-end. This scenario is tested by
+`AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag` and
+`SettingsStore_SaveThenLoad_GitSource_RoundTripsAndRefusesCredentials`, covering `AgentControl-System-GitSources`.
+
+**AgentControl_GitSourceSafety_HostileRepositoryExecutesAndEscapesNothing**: With the real git against a hostile local
+repository and a user environment that installs a post-checkout hook into every new repository (a template directory and
+a global hooks path), the hook never runs when a package is fetched; a tag whose layout holds a symbolic link, a
+submodule, a link in place of `.github`, a managed folder or `release-notes.md` is refused before anything is cached; and
+git itself refuses a transport other than the one of the address. This scenario is tested by
+`GitSourceProvider_Acquire_HostileHooksAndTemplate_NeverRun`,
+`GitSourceProvider_Acquire_LinkOrSubmoduleInLayout_IsRefusedAndNothingCached` and
+`GitIntegrationSubsystem_RemoteClient_ListsFetchesOneTagAndRefusesOtherTransports`, covering
+`AgentControl-System-GitSourceSafety`.
+
+**AgentControl_GitSignIn_OnlyUserStartedWorkMayPrompt**: The registry the card builds for work the user started lets git
+show its credential UI, and the one for background work runs git with every prompt switched off; a git that needs a
+sign-in is reported as a source authentication failure naming the source, never with git's own text. The card's
+"sign-in needed" notice for a Git source is shown through the existing source authentication path and is verified in the
+application's windows with the card changes. This scenario is tested by
+`RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork` and
+`GitSourceProvider_GitFailure_IsTranslatedToFailureKind`, covering `AgentControl-System-GitSignIn`.

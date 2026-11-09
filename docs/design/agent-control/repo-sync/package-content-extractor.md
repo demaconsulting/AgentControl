@@ -108,6 +108,16 @@ or `AGENTS.md` text, or `null` when absent, without copying anything to disk
 (`AgentControl-PackageContentExtractor-ReadReleaseNotes`,
 `AgentControl-PackageContentExtractor-ReadAgentsMdTemplate`).
 
+**DirectoryPackageContentReader.OpenLayoutRoot**: Opens a folder whose root is the package layout (a checked-out Git
+repository). It lists and reads only `PackageContentExtractor.LayoutPaths` - `.github/agents|standards|templates|skills`,
+`release-notes.md`, `AGENTS.md` - so a `.git` folder, other `.github` content and every other file are never seen; a path
+outside the layout (including one that climbs out with `..`) is refused; the root must exist and not be a link; a link in
+the layout (in a managed folder, in place of `.github` or a managed folder, or as a root file) is refused exactly as in
+the `content` mode, while a link that is not part of the layout is neither inspected nor refused
+(`AgentControl-PackageContentExtractor-ReadLayoutRoot`, `AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout`,
+`AgentControl-PackageContentExtractor-ExcludeGitFolder`). `LayoutFolders`, `LayoutRootFiles` and `LayoutPaths` expose the
+single list of layout paths to the Git source provider.
+
 #### Error Handling
 
 `ArgumentNullException` for null arguments; `InvalidOperationException` for a package that cannot

@@ -84,3 +84,15 @@ sections:
         tests:
           - PackageVersionCache_InvalidateSingleSource_LeavesOtherSourcesCached
           - PackageVersionCache_InvalidateDuringInFlightFetch_DoesNotCacheStaleResult
+
+      - id: AgentControl-PackageVersionCache-ReportPinnedListing
+        title: >-
+          The PackageVersionCache class shall include in the upgrade check the discovered package
+          of the pinned version from the same listing, with the revision its source reported, or
+          none when the source does not list it or the pin does not parse.
+        justification: |
+          A Git tag that was moved is seen as a different revision of the pinned version; handing
+          the pinned listing entry to the caller lets it compare revisions without another call to
+          a source that may be slow.
+        tests:
+          - PackageVersionCache_IsNewerVersionAvailable_PinnedVersionListed_ReturnsPinnedPackageWithRevision

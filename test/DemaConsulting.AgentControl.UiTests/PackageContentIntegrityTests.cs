@@ -157,6 +157,71 @@ public sealed class PackageContentIntegrityTests
     }
 
     /// <summary>
+    ///     Upgrading a repo whose pin predates content identities must not warn: the upgrade is
+    ///     applied and the pin adopts the SHA-256 of the newly applied package.
+    /// </summary>
+    [Fact]
+    public void UpgradeChip_Click_PinWithoutIdentity_AdoptsIdentityOfNewVersionWithoutWarning()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        const string packageName = "contoso-agents";
+        var sourceDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-source-" + Guid.NewGuid());
+
+        try
+        {
+            // Arrange: a repo pinned to 1.0.0 with no identity recorded (a pin from before
+            // identities existed), and a source that now also offers 1.1.0
+            FixturePackageBuilder.Create(sourceDirectory, packageName, "1.0.0", "# v1.0.0\n");
+            var newerZip = FixturePackageBuilder.Create(sourceDirectory, packageName, "1.1.0", "# v1.1.0\n");
+            using var context = new AgentControlTestContext(
+                packageSourcePath: sourceDirectory,
+                pinnedPackageName: packageName,
+                pinnedPackageVersion: "1.0.0",
+                pinnedSource: "Default");
+            var pinPath = Path.Combine(context.RepoPath, ".agentcontrol.json");
+            using (var before = JsonDocument.Parse(File.ReadAllText(pinPath)))
+            {
+                Assert.False(before.RootElement.TryGetProperty("ContentIdentity", out _));
+            }
+
+            var mainWindow = context.Launch();
+            var chip = Retry.WhileNull(
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeAvailableBadge"))?.AsButton(),
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200)).Result;
+            Assert.NotNull(chip);
+
+            // Act: upgrade
+            chip.Invoke();
+
+            // Assert: applied (release notes open) with no refusal, and the pin now records the
+            // identity of the zip that was applied
+            Assert.NotNull(context.WaitForWindow(
+                title => title.StartsWith("Release Notes", StringComparison.Ordinal),
+                TimeSpan.FromSeconds(15)));
+            Assert.Null(context.WaitForWindowWithDescendant("MessageText", TimeSpan.FromSeconds(2)));
+            Assert.True(Retry.WhileFalse(
+                () =>
+                {
+                    using var pin = JsonDocument.Parse(File.ReadAllText(pinPath));
+                    return pin.RootElement.TryGetProperty("ContentIdentity", out var identity) &&
+                           identity.GetString() == Sha256Identity(newerZip);
+                },
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200)).Result);
+        }
+        finally
+        {
+            TryDelete(sourceDirectory);
+        }
+    }
+
+    /// <summary>
     ///     Computes the <c>sha256:</c> content identity of a file independently of the application.
     /// </summary>
     /// <param name="path">The file to hash.</param>

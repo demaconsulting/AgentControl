@@ -39,7 +39,8 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     mechanisms at the moment of use and never persist them here. A reflection test guards that
 ///     property. <see cref="AllowInsecureHttp"/> is enforced for server sources;
 ///     <see cref="RequireSignedPackages"/> and <see cref="SignerFingerprint"/> are enforced for
-///     NuGet sources (folder and server) and ignored by zip sources. Mutable with public
+///     NuGet sources (folder and server) and ignored by zip sources. <see cref="TagPattern"/> and
+///     <see cref="Subfolder"/> belong to Git sources and are ignored by the others. Mutable with public
 ///     getters/setters so
 ///     <see cref="System.Text.Json.JsonSerializer"/> round-trips it without custom converters. Not
 ///     thread-safe.
@@ -78,9 +79,25 @@ internal sealed partial class PackageSourceDefinition
     /// <summary>
     ///     Gets or sets the package IDs offered from a NuGet source (a NuGet feed cannot be
     ///     enumerated cheaply, so the user names the packages of interest); unused by zip
-    ///     sources, which discover their packages from the folder contents.
+    ///     sources, which discover their packages from the folder contents. A Git source holds
+    ///     exactly one entry: the name of the single package its repository delivers.
     /// </summary>
     public List<string> PackageIds { get; set; } = [];
+
+    /// <summary>
+    ///     Gets or sets the pattern that turns the tags of a Git source's repository into package
+    ///     versions (for example <c>v{version}</c>); see <see cref="GitTagPattern"/>. Unused by
+    ///     other source types.
+    /// </summary>
+    public string? TagPattern { get; set; }
+
+    /// <summary>
+    ///     Gets or sets the folder inside a Git source's repository that holds the agent package
+    ///     layout (<c>.github/...</c>, <c>release-notes.md</c>, <c>AGENTS.md</c>), written with
+    ///     <c>/</c> separators relative to the repository root; <see langword="null"/> or empty
+    ///     when the layout is at the top. Unused by other source types.
+    /// </summary>
+    public string? Subfolder { get; set; }
 
     /// <summary>
     ///     Gets or sets whether a plain <c>http</c> server location is permitted. Defaults to
@@ -137,6 +154,15 @@ internal sealed partial class PackageSourceDefinition
     ///     access tokens and signed-URL secrets travel.</returns>
     public string? GetCredentialProblem()
     {
+        // A Git address is not a URI in every accepted form (user@host:path), so it has its own check
+        if (Type == PackageSourceType.Git)
+        {
+            return GitRepositoryAddress.EmbedsCredential(Location)
+                ? $"The location of source '{Alias}' must not contain a user name, password, token or query string; " +
+                  "AgentControl never stores credentials. Sign in through your Git credential helper or SSH keys."
+                : null;
+        }
+
         if (string.IsNullOrWhiteSpace(Location) ||
             !Uri.TryCreate(Location.Trim(), UriKind.Absolute, out var uri))
         {
@@ -275,6 +301,105 @@ internal sealed partial class PackageSourceDefinition
     }
 
     /// <summary>
+    ///     Gets the pattern of a Git package ID: a letter or digit followed by letters, digits,
+    ///     dots, underscores or hyphens.
+    /// </summary>
+    /// <returns>The compiled pattern.</returns>
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._-]*\z", RegexOptions.CultureInvariant)]
+    private static partial Regex GitPackageIdPattern();
+
+    /// <summary>
+    ///     The longest package ID of a Git source.
+    /// </summary>
+    private const int MaxGitPackageIdLength = 100;
+
+    /// <summary>
+    ///     The longest sub-folder path of a Git source.
+    /// </summary>
+    private const int MaxSubfolderLength = 200;
+
+    /// <summary>
+    ///     Checks the settings of a Git source: a usable repository address, a valid tag pattern,
+    ///     a safe sub-folder and exactly one valid package ID.
+    /// </summary>
+    /// <remarks>
+    ///     Every message avoids repeating the address, pattern or sub-folder text, so a secret
+    ///     pasted into one of them cannot reach an error display or a log. A hand-edited settings
+    ///     file that fails this check stops the source from being used (see
+    ///     <see cref="GitSourceProvider"/>) rather than reaching git.
+    /// </remarks>
+    /// <returns><see langword="null"/> when the source is not a Git source or its settings are
+    ///     acceptable; otherwise a message the user can act on.</returns>
+    public string? GetGitSettingsProblem()
+    {
+        if (Type != PackageSourceType.Git)
+        {
+            return null;
+        }
+
+        var problem = GitRepositoryAddress.GetProblem(Location) ??
+                      GitTagPattern.GetProblem(TagPattern) ??
+                      GetSubfolderProblem(Subfolder);
+        if (problem is not null)
+        {
+            return problem;
+        }
+
+        return PackageIds is { Count: 1 } && IsValidGitPackageId(PackageIds[0])
+            ? null
+            : "A Git source delivers exactly one package: enter a package name of letters, digits, dots, " +
+              "underscores and hyphens (at most 100 characters).";
+    }
+
+    /// <summary>
+    ///     Determines whether a name is acceptable as the package ID of a Git source.
+    /// </summary>
+    /// <param name="packageId">The candidate; may be <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> for 1-100 letters, digits, dots, underscores and hyphens,
+    ///     starting with a letter or digit.</returns>
+    public static bool IsValidGitPackageId(string? packageId) =>
+        !string.IsNullOrEmpty(packageId) &&
+        packageId.Length <= MaxGitPackageIdLength &&
+        GitPackageIdPattern().IsMatch(packageId);
+
+    /// <summary>
+    ///     Checks the sub-folder of a Git source.
+    /// </summary>
+    /// <param name="subfolder">The sub-folder text; <see langword="null"/> or empty means the top of the
+    ///     repository.</param>
+    /// <returns><see langword="null"/> when the text is empty or a relative path of
+    ///     <c>/</c>-separated folder names with no empty, <c>.</c>, <c>..</c> or <c>.git</c> name,
+    ///     no leading or trailing separator, no backslash, no drive or wildcard characters and no
+    ///     control characters; otherwise a message that never repeats the text.</returns>
+    public static string? GetSubfolderProblem(string? subfolder)
+    {
+        if (string.IsNullOrEmpty(subfolder))
+        {
+            return null;
+        }
+
+        const string Problem = "The folder inside the repository must be a relative path of folder names separated " +
+                               "by '/', without '..', '.git', a drive, wildcards or a leading or trailing '/'.";
+        if (subfolder.Length > MaxSubfolderLength || subfolder.Any(char.IsControl) ||
+            subfolder.IndexOfAny(['\\', ':', '*', '?', '"', '<', '>', '|', '[', ']']) >= 0)
+        {
+            return Problem;
+        }
+
+        foreach (var component in subfolder.Split('/'))
+        {
+            if (component.Length == 0 || component is "." or ".." ||
+                component.EndsWith('.') || component.EndsWith(' ') || component.StartsWith(' ') ||
+                component.StartsWith('-') || component.Equals(".git", StringComparison.OrdinalIgnoreCase))
+            {
+                return Problem;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     ///     Gets the pattern of characters an alias may contain: a letter or digit followed by any
     ///     number of letters, digits, spaces, dots, underscores or hyphens (length and trailing
     ///     characters are checked separately by <see cref="IsValidAlias"/>).
@@ -338,6 +463,8 @@ internal sealed partial class PackageSourceDefinition
         Type = Type,
         Location = Location,
         PackageIds = [.. PackageIds],
+        TagPattern = TagPattern,
+        Subfolder = Subfolder,
         AllowInsecureHttp = AllowInsecureHttp,
         RequireSignedPackages = RequireSignedPackages,
         SignerFingerprint = SignerFingerprint
@@ -361,6 +488,8 @@ internal sealed partial class PackageSourceDefinition
                Type == other.Type &&
                string.Equals(Location, other.Location, StringComparison.Ordinal) &&
                PackageIds.SequenceEqual(other.PackageIds, StringComparer.Ordinal) &&
+               string.Equals(TagPattern, other.TagPattern, StringComparison.Ordinal) &&
+               string.Equals(Subfolder, other.Subfolder, StringComparison.Ordinal) &&
                AllowInsecureHttp == other.AllowInsecureHttp &&
                RequireSignedPackages == other.RequireSignedPackages &&
                string.Equals(SignerFingerprint, other.SignerFingerprint, StringComparison.Ordinal);

@@ -165,6 +165,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     private bool _isRetired;
 
+    /// <summary>
+    ///     Whether the AGENTS.md template offer that is currently open was raised by the re-sync
+    ///     that runs before a launch, which never writes the pin.
+    /// </summary>
+    private bool _agentsMdOfferFromLaunchResync;
+
     private bool _isMissing;
     private bool _isUpgradeAvailable;
     private string? _latestAvailableVersion;
@@ -1352,8 +1358,27 @@ internal sealed class RepoCardViewModel : ViewModelBase
         // Work the user did not ask for (the background upgrade check) shares the session
         // credentials but is never allowed to open the sign-in dialog
         var credentials = allowPrompt ? _credentials : _credentials?.WithoutPrompt();
-        return PackageSourceRegistry.Create(settings.GetEffectiveSources(), GetNuGetRootBase(_startupOptions), credentials);
+
+        // A Git source follows the same rule: only work the user started may let git show its
+        // credential UI; the background check never prompts and reports "sign-in needed" instead
+        var git = new GitSourceOptions(
+            () => ResolveGitExecutablePath(settings), GetGitCacheRoot(_startupOptions), Interactive: allowPrompt);
+        return PackageSourceRegistry.Create(
+            settings.GetEffectiveSources(), GetNuGetRootBase(_startupOptions), credentials, git);
     }
+
+    /// <summary>
+    ///     Gets the folder under which Git sources keep the packages they fetch: a <c>git-cache</c>
+    ///     folder inside the test-isolation configuration directory when one was supplied at
+    ///     startup, otherwise <see langword="null"/> for the per-user default.
+    /// </summary>
+    /// <param name="startupOptions">The startup overrides, or <see langword="null"/>.</param>
+    /// <returns>The override cache folder, or <see langword="null"/> for the default. Never a
+    ///     repo.</returns>
+    internal static string? GetGitCacheRoot(Startup.StartupOptions? startupOptions) =>
+        string.IsNullOrWhiteSpace(startupOptions?.ConfigDirectory)
+            ? null
+            : Path.Combine(Path.GetFullPath(startupOptions.ConfigDirectory), "git-cache");
 
     /// <summary>
     ///     Gets the folder under which NuGet sources keep their private package caches: a
@@ -2148,7 +2173,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             }
 
             await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
-            MaybeOfferAgentsMdTemplate(reader);
+            MaybeOfferAgentsMdTemplate(reader, fromLaunchResync: true);
             return true;
         }
         catch (InvalidOperationException ex)
@@ -2705,6 +2730,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <param name="reader">The content of the package that was just successfully applied
     ///     (extracted) to this repo.</param>
+    /// <param name="fromLaunchResync"><see langword="true"/> when the offer follows the re-sync
+    ///     that runs before a launch, which never writes the pin: a decline of such an offer is
+    ///     then not persisted (see <see cref="DeclineAgentsMdTemplate"/>).</param>
     /// <remarks>
     ///     Called only from call sites that already have a <paramref name="reader"/> in hand
     ///     immediately after a successful <see cref="PackageContentExtractor.Extract"/> call
@@ -2715,7 +2743,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see cref="EnsureGitIgnoreCoversManagedFolders"/>'s precedent, so a pin-read or
     ///     package-read failure here can never disrupt an already-successful sync.
     /// </remarks>
-    private void MaybeOfferAgentsMdTemplate(IPackageContentReader reader)
+    private void MaybeOfferAgentsMdTemplate(IPackageContentReader reader, bool fromLaunchResync = false)
     {
         try
         {
@@ -2736,6 +2764,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return;
             }
 
+            // Remembered so that a decline of this offer does not write the pin (the launch re-sync
+            // never does); set just before the handlers run, replaced by every later offer
+            _agentsMdOfferFromLaunchResync = fromLaunchResync;
             AgentsMdTemplateOfferRequested?.Invoke(this, template);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException)
@@ -2855,6 +2886,21 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </remarks>
     public void DeclineAgentsMdTemplate()
     {
+        // The launch re-sync never writes the pin (a write would dirty the working tree on a
+        // launch), so a decline of the offer that re-sync raised is not remembered; the offer
+        // can only return when a later re-sync happens, which needs the managed folders gone
+        if (_agentsMdOfferFromLaunchResync)
+        {
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    "AGENTS.md template offered during a launch re-sync was declined for repo '{RepoName}'; the pin was not written",
+                    RepoName);
+            }
+
+            return;
+        }
+
         try
         {
             var pin = RepoPinStore.Load(RepoPath) ?? new RepoPin

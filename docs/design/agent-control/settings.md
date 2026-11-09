@@ -107,3 +107,7 @@ startup (`App.OnFrameworkInitializationCompleted`) to load settings, and again w
 with the `Logging` subsystem's `LoggingSetup.Initialize` so a `--config-dir` startup override
 (used by FlaUI end-to-end tests for hermetic isolation) redirects both settings and log
 files consistently rather than duplicating path-resolution logic.
+
+A Git package source is persisted like the others: its repository address, tag pattern and optional sub-folder are plain
+fields of the source and an address that embeds a credential is refused at save
+(`AgentControl-SettingsStore-GitSourceRoundTrip`, within `AgentControl-Settings-PackageSources`).

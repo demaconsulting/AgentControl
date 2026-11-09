@@ -539,3 +539,13 @@ Avalonia's default `ShutdownMode.OnLastWindowClose`, keeping the process alive a
 slow process-kill fallbacks in automated UI tests that close the main window. Both the
 tracked-window-open and forced-close events are logged (`Debug`/`Information`) via
 `MainWindow`'s `_logger`.
+
+**Git package sources.** The card builds its package source registry with Git options (`RepoCardViewModel.CreateSourceRegistry`):
+the configured or overridden git executable, a cache folder inside the isolated configuration directory when one was
+given, and `Interactive` equal to the `allowPrompt` switch that already decides whether a NuGet server may open the
+sign-in dialog. The same switch therefore keeps Git quiet for the background upgrade check and the restore
+before launch -
+a missing sign-in is reported as a source authentication failure, which the card shows as "sign-in needed" - and lets Git
+show its own credential UI for work the user started (`AgentControl-LauncherUI-GitSourceSetup`,
+`AgentControl-System-GitSignIn`). The Settings editor and the card presentation of Git sources are not part of this
+description yet.

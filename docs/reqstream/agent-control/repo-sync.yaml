@@ -163,3 +163,21 @@ sections:
         tests:
           - ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries
           - DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull
+
+      - id: AgentControl-RepoSync-LayoutRoot
+        title: >-
+          The RepoSync subsystem shall be able to read a package from a folder whose root is the
+          package layout - a checked-out Git repository - seeing only the managed agent folders and
+          the two root files, never the repository's metadata or other content, and refusing any
+          link that is part of the layout while ignoring links that are not.
+        justification: |
+          A Git package is delivered as a checked-out folder rather than a zip or a NuGet package;
+          the same extraction rules must apply to it, and what a repository holds besides the
+          package must not influence or leak into the repos that are synced.
+        children:
+          - AgentControl-PackageContentExtractor-ReadLayoutRoot
+          - AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout
+          - AgentControl-PackageContentExtractor-ExcludeGitFolder
+        tests:
+          - DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity
+          - DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused

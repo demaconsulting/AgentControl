@@ -82,3 +82,10 @@ receives no calls. This scenario is tested by
 `PackageSourceRegistry_PinToSourceB_SamePackageIdAtBothSources_OnlyBIsContacted`, and
 `PackageSourceRegistry_PinToRemovedSource_ThrowsAndContactsNoOtherSource`, covering
 `AgentControl-PackageSourceRegistry-NoCrossSourceFallback`.
+
+**PackageSourceRegistry_Create_GitSource_ResolvesGitProviderAndFailsClosedWhenInvalid**: The default factory resolves a
+valid Git source to a `GitSourceProvider` built with the given options, a Git source whose address is a remote-helper
+form fails with an `InvalidOperationException` when it is resolved (not when the registry is built), and an alias that is
+not configured is still an error. This scenario is tested by
+`PackageSourceRegistry_Create_GitSource_ResolvesGitProviderAndFailsClosedWhenInvalid`, covering
+`AgentControl-PackageSourceRegistry-GitSourceResolved`.

@@ -189,6 +189,43 @@ public class PackageSourceRegistryTests
     }
 
     /// <summary>
+    ///     Test that the default factory builds the Git provider for a valid Git source, passes the
+    ///     options on, and fails closed (at resolve time, not at construction of the registry) for a
+    ///     Git source whose settings are not valid.
+    /// </summary>
+    [Fact]
+    public void PackageSourceRegistry_Create_GitSource_ResolvesGitProviderAndFailsClosedWhenInvalid()
+    {
+        // Arrange
+        var registry = PackageSourceRegistry.Create(
+            [
+                new PackageSourceDefinition
+                {
+                    Alias = "Repo",
+                    Type = PackageSourceType.Git,
+                    Location = "https://example.invalid/org/repo.git",
+                    TagPattern = "v{version}",
+                    PackageIds = ["contoso-agents"]
+                },
+                new PackageSourceDefinition
+                {
+                    Alias = "Bad",
+                    Type = PackageSourceType.Git,
+                    Location = "ext::sh -c calc",
+                    TagPattern = "v{version}",
+                    PackageIds = ["contoso-agents"]
+                }
+            ],
+            git: new GitSourceOptions(() => "git", Path.Combine(Path.GetTempPath(), "agentcontrol_registry_test_git")));
+
+        // Act / Assert
+        var provider = Assert.IsType<GitSourceProvider>(registry.Resolve("Repo"));
+        Assert.Equal("Repo", provider.Alias);
+        Assert.Throws<InvalidOperationException>(() => registry.Resolve("Bad"));
+        Assert.Throws<UnknownSourceException>(() => registry.Resolve("Missing"));
+    }
+
+    /// <summary>
     ///     Test that resolving a NuGet server source through the default factory yields a NuGet
     ///     provider for a valid https address, and fails with a clear error for plain http that
     ///     was not explicitly allowed.

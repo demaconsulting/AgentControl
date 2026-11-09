@@ -254,6 +254,7 @@ reviews:
       - "src/**/LauncherUI/CardColorPalette.cs"
       - "test/**/LauncherUI/RepoCardViewModelTests.cs"
       - "test/**/LauncherUI/RepoCardContentIdentityTests.cs"
+      - "test/**/LauncherUI/RepoCardGitSourceTests.cs"
       - "test/**/LauncherUI/RepoCardColorTests.cs"
       - "test/**/LauncherUI/RepoCardImageTests.cs"
       - "test/**/LauncherUI/TestPng.cs"
@@ -381,6 +382,50 @@ reviews:
       - "docs/verification/agent-control/agent-package-management/package-content-identity.md"
       - "src/**/AgentPackageManagement/PackageContentIdentity.cs"
       - "test/**/AgentPackageManagement/PackageContentIdentityTests.cs"
+
+  - id: AgentControl-AgentPackageManagement-GitRepositoryAddress
+    title: Review of Agent Control GitRepositoryAddress unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-package-management.md
+      - docs/reqstream/agent-control/agent-package-management.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-package-management/git-repository-address.yaml"
+      - "docs/design/agent-control/agent-package-management/git-repository-address.md"
+      - "docs/verification/agent-control/agent-package-management/git-repository-address.md"
+      - "src/**/AgentPackageManagement/GitRepositoryAddress.cs"
+      - "test/**/AgentPackageManagement/GitRepositoryAddressTests.cs"
+
+  - id: AgentControl-AgentPackageManagement-GitTagPattern
+    title: Review of Agent Control GitTagPattern unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-package-management.md
+      - docs/reqstream/agent-control/agent-package-management.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-package-management/git-tag-pattern.yaml"
+      - "docs/design/agent-control/agent-package-management/git-tag-pattern.md"
+      - "docs/verification/agent-control/agent-package-management/git-tag-pattern.md"
+      - "src/**/AgentPackageManagement/GitTagPattern.cs"
+      - "test/**/AgentPackageManagement/GitTagPatternTests.cs"
+
+  - id: AgentControl-AgentPackageManagement-GitSourceProvider
+    title: Review of Agent Control GitSourceProvider unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-package-management.md
+      - docs/reqstream/agent-control/agent-package-management.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-package-management/git-source-provider.yaml"
+      - "docs/design/agent-control/agent-package-management/git-source-provider.md"
+      - "docs/verification/agent-control/agent-package-management/git-source-provider.md"
+      - "src/**/AgentPackageManagement/GitSourceProvider.cs"
+      - "test/**/AgentPackageManagement/GitSourceProviderTests.cs"
+      - "test/**/AgentPackageManagement/GitSourceProviderIntegrationTests.cs"
+      - "test/**/AgentPackageManagement/GitRepositoryFixture.cs"
 
   - id: AgentControl-AgentPackageManagement-PackageVersionCache
     title: Review of Agent Control PackageVersionCache unit implementation
@@ -717,6 +762,22 @@ reviews:
       - "test/**/GitIntegration/GitCredentialClientTests.cs"
       - "test/**/GitIntegration/GitCredentialClientIntegrationTests.cs"
       - "test/**/GitIntegration/GitCredentialStub.cs"
+
+  - id: AgentControl-GitIntegration-GitRemoteClient
+    title: Review of Agent Control GitRemoteClient unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/git-integration.md
+      - docs/reqstream/agent-control/git-integration.yaml
+    paths:
+      - "docs/reqstream/agent-control/git-integration/git-remote-client.yaml"
+      - "docs/design/agent-control/git-integration/git-remote-client.md"
+      - "docs/verification/agent-control/git-integration/git-remote-client.md"
+      - "src/**/GitIntegration/GitRemoteClient.cs"
+      - "test/**/GitIntegration/GitRemoteClientTests.cs"
+      - "test/**/GitIntegration/GitRemoteClientIntegrationTests.cs"
+      - "test/**/GitIntegration/GitRemoteStub.cs"
 
   - id: AgentControl-GitIntegration-CommittedAgentFilesCache
     title: Review of Agent Control CommittedAgentFilesCache unit implementation

@@ -96,3 +96,39 @@ sections:
           - GitIntegrationSubsystem_SavedSignIn_KeptInOneSessionFoundInAnotherAndRemovedOnRequest
           - GitIntegrationSubsystem_SavedSignIn_ValueWithLineBreakIsNeverStoredButEqualsIs
           - GitIntegrationSubsystem_SavedSignIn_NoHelperConfigured_ReportsUnavailableAndNothingSaved
+
+      - id: AgentControl-GitIntegration-RemoteGit
+        title: >-
+          The GitIntegration subsystem shall run git against a remote repository whose content and
+          answers are untrusted - listing its tags without a clone, fetching exactly one tag
+          shallow, reading the tree of a commit and checking out only named paths - with every
+          protection command-scoped (no hooks, only the transport of the address, no submodules or
+          large-file filters, no trace output), without any prompt for work the user did not start,
+          within a time and output limit that stops the whole process tree, and reporting failures
+          classified and redacted.
+        justification: |
+          Package sources in Git repositories make the repository, and the remote that serves it,
+          the source of what lands on a developer's machine; none of it may run code or leak
+          secrets, and a stuck or silent git must never hang the application.
+        children:
+          - AgentControl-GitRemoteClient-ListTagsWithoutClone
+          - AgentControl-GitRemoteClient-PeeledTags
+          - AgentControl-GitRemoteClient-ShallowFetchExactTag
+          - AgentControl-GitRemoteClient-ListLayoutTree
+          - AgentControl-GitRemoteClient-NoHooks
+          - AgentControl-GitRemoteClient-TransportAllowList
+          - AgentControl-GitRemoteClient-NoSubmodulesNoLfs
+          - AgentControl-GitRemoteClient-NoPromptInBackground
+          - AgentControl-GitRemoteClient-InteractiveWhenUserStarted
+          - AgentControl-GitRemoteClient-SshBatchMode
+          - AgentControl-GitRemoteClient-CommandScopedConfiguration
+          - AgentControl-GitRemoteClient-NoTraceVariables
+          - AgentControl-GitRemoteClient-TimeoutAndCancel
+          - AgentControl-GitRemoteClient-OutputBoundedAndRedacted
+          - AgentControl-GitRemoteClient-SecretFreeArguments
+          - AgentControl-GitRemoteClient-FailureClassification
+        tests:
+          # Subsystem test with the real git executable and a local repository, every isolation
+          # in force; the exact arguments, environment, limits and redaction are verified against
+          # a stub git by the GitRemoteClient unit tests (the children).
+          - GitIntegrationSubsystem_RemoteClient_ListsFetchesOneTagAndRefusesOtherTransports

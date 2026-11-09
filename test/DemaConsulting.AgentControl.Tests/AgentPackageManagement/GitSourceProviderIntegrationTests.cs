@@ -1,0 +1,713 @@
+// Copyright (c) DEMA Consulting
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.RepoSync;
+using DemaConsulting.AgentControl.Tests.PackageCredentials;
+
+namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
+
+/// <summary>
+///     Tests of <see cref="GitSourceProvider"/> against real Git repositories: a local bare
+///     repository plays the remote, so the real git semantics (peeled tags, shallow fetch of one
+///     tag, refusal of links, hook neutralization) are proven on every platform without a network.
+///     The tests are skipped when git is not installed.
+/// </summary>
+[Collection("RealProcess")]
+public sealed class GitSourceProviderIntegrationTests
+{
+    /// <summary>
+    ///     The package ID every fixture source offers.
+    /// </summary>
+    private const string PackageId = "contoso-agents";
+
+    /// <summary>
+    ///     Test that listing resolves lightweight and annotated tags to the commit they point to (never
+    ///     the annotated tag object), skips tags that are not strict versions under the pattern, and
+    ///     offers no versions for another package ID.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_ListVersions_LightweightAndAnnotatedTags_ResolveToCommitsAndFilterByPattern()
+    {
+        // Arrange: one lightweight tag, one annotated tag on another commit, and tags that are not versions
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("one"), "one");
+        fixture.Tag("v1.0.0");
+        var first = fixture.Resolve("v1.0.0");
+        fixture.Commit(Layout("two"), "two");
+        fixture.Tag("v1.1.0", annotated: true);
+        fixture.Tag("v2.0.0-beta.1");
+        foreach (var other in new[] { "latest", "v1.2", "v1.2.3+build", "x1.0.0", "V1.0.1", "v1.2.3.4" })
+        {
+            fixture.Tag(other);
+        }
+
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+
+        // Act
+        var versions = await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken);
+
+        // Assert: three versions, resolved to commits
+        Assert.Equal(["1.0.0", "1.1.0", "2.0.0-beta.1"], versions.Select(v => v.Version.ToString()).Order());
+        var lightweight = versions.Single(v => v.Location == "v1.0.0");
+        Assert.Equal(first, lightweight.Revision);
+        var annotated = versions.Single(v => v.Location == "v1.1.0");
+        Assert.Equal(fixture.Resolve("v1.1.0"), annotated.Revision);
+        Assert.NotEqual(fixture.TagObject("v1.1.0"), annotated.Revision);
+        Assert.All(versions, v =>
+        {
+            Assert.Equal("Repo", v.SourceAlias);
+            Assert.Equal(PackageId, v.PackageName);
+        });
+
+        // Assert: a different package ID has no versions, and the single ID is the configured one
+        Assert.Empty(await provider.ListVersionsAsync("other-package", TestContext.Current.CancellationToken));
+        Assert.Equal([PackageId], await provider.ListPackageIdsAsync(TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that a repository without tags, or with none matching, offers no versions rather than an
+    ///     error.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_ListVersions_NoMatchingTags_ReturnsEmpty()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("one"), "one");
+        fixture.Tag("latest");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+
+        // Act / Assert
+        Assert.Empty(await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that two tags naming the same version keep the smallest tag name and log a warning.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_ListVersions_TwoTagsSameVersion_KeepsSmallestTagAndWarns()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("one"), "one");
+        fixture.Tag("v1.0.0");
+        fixture.Tag("v01.0.0");
+        fixture.Push();
+        var logger = new ListLogger();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions(logger: logger));
+
+        // Act
+        var versions = await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal("v01.0.0", Assert.Single(versions).Location);
+        Assert.Contains(logger.Snapshot(), line => line.Contains("same version", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     Test that the tag preview separates the tags that are versions from the others, with a few
+    ///     sample names of the others.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Preview_SeparatesMatchingFromOtherTags()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("one"), "one");
+        foreach (var tag in new[] { "v1.0.0", "v1.1.0", "latest", "nightly", "v2", "x1.0.0", "y", "z", "w" })
+        {
+            fixture.Tag(tag);
+        }
+
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+
+        // Act
+        var preview = await ((IGitTagPreview)provider).PreviewAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(9, preview.TotalTags);
+        Assert.Equal(["1.1.0", "1.0.0"], preview.Matching.Select(m => m.Version.ToString()));
+        Assert.Equal(7, preview.NonMatchingCount);
+        Assert.Equal(5, preview.NonMatchingSamples.Count);
+    }
+
+    /// <summary>
+    ///     Test that acquiring a tag delivers exactly the package layout: the managed folders and the
+    ///     root files, no <c>.git</c> folder, none of the repository's other files, and the identity
+    ///     of the commit; and that the cache folder is named by the commit.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var commit = fixture.Commit(Layout("marker-1"), "one");
+        fixture.Tag("v1.0.0", annotated: true);
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Assert: the layout, nothing else
+        var files = reader.ListFiles().Order().ToList();
+        Assert.Equal(
+            [
+                ".github/agents/copilot.md", ".github/skills/skill.md", ".github/standards/style.md",
+                ".github/templates/template.md", "AGENTS.md", "release-notes.md"
+            ],
+            files);
+        Assert.Equal("marker-1", reader.ReadText(".github/agents/copilot.md"));
+        Assert.Equal("# Release notes marker-1", reader.ReadText("release-notes.md"));
+        Assert.Equal("git-commit:" + commit, reader.ContentIdentity);
+        Assert.Throws<InvalidOperationException>(() => reader.ReadText("README.md"));
+
+        // Assert: the cache folder is named by the commit, holds no .git and leaves no temporary folder
+        var cacheFolder = Path.Combine(provider.RepositoryCacheFolder, commit);
+        Assert.True(File.Exists(Path.Combine(cacheFolder, GitSourceProvider.MarkerFileName)));
+        Assert.False(Directory.Exists(Path.Combine(cacheFolder, ".git")));
+        Assert.False(File.Exists(Path.Combine(cacheFolder, "README.md")));
+        Assert.Empty(Directory.EnumerateDirectories(provider.RepositoryCacheFolder, ".tmp-*"));
+
+        // Assert: the content extracts into a repo
+        var repo = Path.Combine(fixture.Root, "target");
+        Directory.CreateDirectory(repo);
+        PackageContentExtractor.Extract(reader, repo);
+        Assert.Equal(
+            "marker-1",
+            await File.ReadAllTextAsync(Path.Combine(repo, ".github", "agents", "copilot.md"), TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that a second acquisition of the same commit uses the cache without contacting the
+    ///     remote, so the cache is keyed by repository and commit.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_SecondTime_UsesCacheWithoutRemote()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("cached"), "one");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+        (await provider.AcquireAsync(package, TestContext.Current.CancellationToken)).Dispose();
+
+        // Act: the remote disappears
+        GitSourceProvider.DeleteDirectory(fixture.RemotePath);
+        using var again = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal("cached", again.ReadText(".github/agents/copilot.md"));
+    }
+
+    /// <summary>
+    ///     Test that a tag that was moved is seen at listing as a different commit, that acquiring the
+    ///     old listing entry is refused because the fetched tag is no longer that commit, and that the
+    ///     new listing entry is acquired into its own cache folder.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_MovedTag_ShowsNewRevisionAndRefusesStaleListing()
+    {
+        // Arrange: v1.0.0 at commit A, acquired
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var first = fixture.Commit(Layout("original"), "A");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var listedBefore = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+        (await provider.AcquireAsync(listedBefore, TestContext.Current.CancellationToken)).Dispose();
+
+        // Act: the maintainer moves the tag to commit B
+        var second = fixture.Commit(Layout("republished"), "B");
+        fixture.Tag("v1.0.0", force: true);
+        fixture.Push();
+        var listedAfter = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Assert: the listing shows the new commit, so a caller can compare it with the pinned one
+        Assert.Equal(first, listedBefore.Revision);
+        Assert.Equal(second, listedAfter.Revision);
+
+        // Assert: the stale entry is refused (the tag no longer points where it was listed)
+        var stale = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(listedBefore with { Revision = "0123456789abcdef0123456789abcdef01234567" }, TestContext.Current.CancellationToken));
+        Assert.Contains("changed while it was being fetched", stale.Message, StringComparison.Ordinal);
+
+        // Assert: the new entry is acquired into its own folder, and the old commit's folder is kept
+        using var reader = await provider.AcquireAsync(listedAfter, TestContext.Current.CancellationToken);
+        Assert.Equal("republished", reader.ReadText(".github/agents/copilot.md"));
+        Assert.Equal("git-commit:" + second, reader.ContentIdentity);
+        Assert.True(Directory.Exists(Path.Combine(provider.RepositoryCacheFolder, first)));
+        Assert.True(Directory.Exists(Path.Combine(provider.RepositoryCacheFolder, second)));
+        Assert.Empty(Directory.EnumerateDirectories(provider.RepositoryCacheFolder, ".tmp-*"));
+    }
+
+    /// <summary>
+    ///     Test that a link, a submodule or a link in place of a managed folder inside the layout is
+    ///     refused, nothing is cached, and the message names the problem.
+    /// </summary>
+    [Theory]
+    [InlineData("symlink-file", "a symbolic link")]
+    [InlineData("symlink-folder", "a symbolic link")]
+    [InlineData("symlink-release-notes", "a symbolic link")]
+    [InlineData("symlink-github", "a symbolic link")]
+    [InlineData("submodule", "a submodule")]
+    public async Task GitSourceProvider_Acquire_LinkOrSubmoduleInLayout_IsRefusedAndNothingCached(string kind, string expected)
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var files = Layout("evil");
+        switch (kind)
+        {
+            case "symlink-folder":
+                files.Remove(".github/skills/skill.md");
+                break;
+            case "symlink-release-notes":
+                files.Remove("release-notes.md");
+                break;
+            case "symlink-github":
+                files.Clear();
+                files["README.md"] = "readme";
+                break;
+        }
+
+        var head = fixture.Commit(files, "base");
+        switch (kind)
+        {
+            case "symlink-file":
+                fixture.AddSymbolicLink(".github/agents/evil.md", "../../../outside.txt");
+                break;
+            case "symlink-folder":
+                fixture.AddSymbolicLink(".github/skills", "../../outside");
+                break;
+            case "symlink-release-notes":
+                fixture.AddSymbolicLink("release-notes.md", "/etc/passwd");
+                break;
+            case "symlink-github":
+                fixture.AddSymbolicLink(".github", "../outside");
+                break;
+            default:
+                fixture.AddSubmodule(".github/agents/sub", head);
+                break;
+        }
+
+        fixture.CommitStaged("with " + kind);
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, TestContext.Current.CancellationToken));
+
+        // Assert: refused for the right reason, with nothing left in the cache
+        Assert.Contains(expected, failure.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(provider.RepositoryCacheFolder, package.Revision!)));
+        Assert.Empty(Directory.EnumerateDirectories(provider.RepositoryCacheFolder, ".tmp-*"));
+    }
+
+    /// <summary>
+    ///     Test that links and other content outside the package layout are never checked out and so
+    ///     never matter: a repository with a symbolic link in <c>docs</c> acquires normally.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_SymbolicLinkOutsideLayout_IsIgnored()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("fine"), "base");
+        fixture.AddSymbolicLink("docs/link", "../../../outside.txt");
+        fixture.AddSymbolicLink(".github/workflows", "../outside");
+        fixture.CommitStaged("links outside the layout");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal("fine", reader.ReadText(".github/agents/copilot.md"));
+        Assert.DoesNotContain(reader.ListFiles(), file => file.Contains("link", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     Test that a layout in a sub-folder is read from that sub-folder, and that a missing, linked
+    ///     or layout-less sub-folder is refused.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_Subfolder_ReadsLayoutFromThatFolder()
+    {
+        // Arrange: the layout lives under packaging/agents, with other files at the top
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var files = Layout("sub").ToDictionary(pair => "packaging/agents/" + pair.Key, pair => pair.Value);
+        files[".github/agents/other.md"] = "top-level, not the package";
+        fixture.Commit(files, "one");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(
+            fixture.CreateDefinition(subfolder: "packaging/agents"), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal("sub", reader.ReadText(".github/agents/copilot.md"));
+        Assert.DoesNotContain(".github/agents/other.md", reader.ListFiles());
+    }
+
+    /// <summary>
+    ///     Test that a sub-folder that does not exist in the tag, that is a link, or that holds no
+    ///     layout is refused with a message that says why.
+    /// </summary>
+    [Theory]
+    [InlineData("missing", "does not exist")]
+    [InlineData("linked", "a symbolic link")]
+    [InlineData("empty", "no agent package layout")]
+    public async Task GitSourceProvider_Acquire_BadSubfolder_IsRefused(string subfolder, string expected)
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(new Dictionary<string, string> { ["empty/readme.txt"] = "no layout here", ["x.txt"] = "x" }, "base");
+        fixture.AddSymbolicLink("linked", "empty");
+        fixture.CommitStaged("link");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(subfolder: subfolder), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, TestContext.Current.CancellationToken));
+
+        // Assert
+        Assert.Contains(expected, failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a tag without any package layout is refused.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_TagWithoutLayout_IsRefused()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(new Dictionary<string, string> { ["README.md"] = "no layout" }, "base");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, TestContext.Current.CancellationToken));
+
+        // Assert
+        Assert.Contains("no agent package layout", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that hooks never run: a hostile template directory and a hostile global
+    ///     <c>core.hooksPath</c> that would run a post-checkout hook for a plain git are both
+    ///     neutralized, so the marker the hook would write never appears.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_HostileHooksAndTemplate_NeverRun()
+    {
+        // Arrange: a repository, and a user environment that installs a post-checkout hook everywhere
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("hooked"), "one");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var marker = Path.Combine(fixture.Root, "hook-ran.txt");
+        var hostile = CreateHostileEnvironment(fixture, marker);
+
+        // Control: plain git with the same hostile environment does run the hook, so the test is meaningful
+        var control = Path.Combine(fixture.Root, "control");
+        RunWithEnvironment(fixture, hostile, fixture.Root, "init", "-q", control);
+        RunWithEnvironment(fixture, hostile, control, "fetch", "-q", fixture.RemotePath, "refs/tags/v1.0.0:refs/tags/v1.0.0");
+        RunWithEnvironment(fixture, hostile, control, "checkout", "-q", "refs/tags/v1.0.0", "--", ".github");
+        if (!File.Exists(marker))
+        {
+            Assert.Skip("Hooks do not run in this environment, so the neutralization cannot be demonstrated.");
+        }
+
+        File.Delete(marker);
+        var options = fixture.CreateOptions() with { ExtraEnvironment = hostile };
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), options);
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Assert: acquired, and no hook ran
+        Assert.Equal("hooked", reader.ReadText(".github/agents/copilot.md"));
+        Assert.False(File.Exists(marker));
+    }
+
+    /// <summary>
+    ///     Test that cancelling stops the acquisition with an <see cref="OperationCanceledException"/>.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_AlreadyCancelled_ThrowsOperationCanceled()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("one"), "one");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act / Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.AcquireAsync(package, cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.ListVersionsAsync(PackageId, cancellation.Token));
+    }
+
+    /// <summary>
+    ///     Test that a repository that does not exist is reported as not found, in the provider's own
+    ///     failure type, with no path or git text beyond a short summary.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_ListVersions_RepositoryMissing_ReportsNotFound()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var definition = fixture.CreateDefinition();
+        definition.Location = Path.Combine(fixture.Root, "no-such-repository.git");
+        var provider = new GitSourceProvider(definition, fixture.CreateOptions());
+
+        // Act
+        var failure = await Assert.ThrowsAsync<PackageSourceAccessException>(
+            () => provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken));
+
+        // Assert
+        Assert.Equal(PackageSourceFailureKind.NotFound, failure.Kind);
+    }
+
+    /// <summary>
+    ///     Test that only the most recently used commits are kept, the one just used among them.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_PrunesOldestCommitsBeyondTheLimit()
+    {
+        // Arrange: four tags on four commits, a cache that keeps two
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var commits = new List<string>();
+        foreach (var version in new[] { "1.0.0", "1.1.0", "1.2.0", "1.3.0" })
+        {
+            commits.Add(fixture.Commit(Layout("m" + version), "v" + version));
+            fixture.Tag("v" + version);
+        }
+
+        fixture.Push();
+        var provider = new GitSourceProvider(
+            fixture.CreateDefinition(), fixture.CreateOptions() with { MaxCachedCommits = 2 });
+        var packages = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken))
+            .OrderBy(p => p.Version).ToList();
+
+        // Act: acquire in order, giving each folder a clearly later time than the last
+        var start = DateTime.UtcNow.AddHours(-1);
+        for (var index = 0; index < packages.Count; index++)
+        {
+            using var reader = await provider.AcquireAsync(packages[index], TestContext.Current.CancellationToken);
+            Directory.SetLastWriteTimeUtc(
+                Path.Combine(provider.RepositoryCacheFolder, packages[index].Revision!), start.AddMinutes(index));
+        }
+
+        // The last acquisition pruned before its own folder got its time; one more cache hit prunes again
+        (await provider.AcquireAsync(packages[^1], TestContext.Current.CancellationToken)).Dispose();
+
+        // Assert: only the two newest remain
+        var remaining = Directory.EnumerateDirectories(provider.RepositoryCacheFolder)
+            .Select(Path.GetFileName).Order().ToList();
+        Assert.Equal(new[] { commits[2], commits[3] }.Order(), remaining);
+    }
+
+    /// <summary>
+    ///     Test that an old temporary folder left by a killed acquisition is swept, and that a cache
+    ///     folder without a marker (an incomplete write) is replaced rather than trusted.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_SweepsStaleTemporaryFolderAndReplacesUnmarkedCacheFolder()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var commit = fixture.Commit(Layout("fresh"), "one");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+        var stale = Path.Combine(provider.RepositoryCacheFolder, ".tmp-leftover");
+        Directory.CreateDirectory(stale);
+        Directory.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddDays(-2));
+        var unmarked = Path.Combine(provider.RepositoryCacheFolder, commit);
+        Directory.CreateDirectory(Path.Combine(unmarked, ".github", "agents"));
+        await File.WriteAllTextAsync(
+            Path.Combine(unmarked, ".github", "agents", "copilot.md"), "poisoned", TestContext.Current.CancellationToken);
+
+        // Act
+        using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(Directory.Exists(stale));
+        Assert.Equal("fresh", reader.ReadText(".github/agents/copilot.md"));
+    }
+
+    /// <summary>
+    ///     Test that a package this source did not report is refused: another alias, another package, a
+    ///     missing revision, or a tag that does not match the pattern or the version.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_PackageNotReportedBySource_IsRefused()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("one"), "one");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var good = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act / Assert
+        foreach (var bad in new[]
+                 {
+                     good with { SourceAlias = "Other" },
+                     good with { PackageName = "other-package" },
+                     good with { Revision = null },
+                     good with { Revision = "not-a-commit" },
+                     good with { Location = "v9.9.9" },
+                     good with { Location = "--upload-pack=calc" }
+                 })
+        {
+            await Assert.ThrowsAsync<ArgumentException>(
+                () => provider.AcquireAsync(bad, TestContext.Current.CancellationToken));
+        }
+    }
+
+    /// <summary>
+    ///     Gets a set of package files with a marker, plus files that are not part of the layout.
+    /// </summary>
+    /// <param name="marker">Text for the agents file, so versions can be told apart.</param>
+    /// <returns>The files by repository path.</returns>
+    private static Dictionary<string, string> Layout(string marker) => new()
+    {
+        [".github/agents/copilot.md"] = marker,
+        [".github/standards/style.md"] = "standards",
+        [".github/templates/template.md"] = "templates",
+        [".github/skills/skill.md"] = "skills",
+        ["release-notes.md"] = "# Release notes " + marker,
+        ["AGENTS.md"] = "# Agents template",
+        ["README.md"] = "not part of the layout",
+        ["src/app.txt"] = "not part of the layout"
+    };
+
+    /// <summary>
+    ///     Builds an environment in which every new repository gets a post-checkout hook that writes a
+    ///     marker file: through a template directory and through a global <c>core.hooksPath</c>.
+    /// </summary>
+    /// <param name="fixture">The fixture.</param>
+    /// <param name="marker">The file the hook writes.</param>
+    /// <returns>The environment variables.</returns>
+    private static Dictionary<string, string?> CreateHostileEnvironment(GitRepositoryFixture fixture, string marker)
+    {
+        var hook = "#!/bin/sh\necho ran > \"" + marker.Replace('\\', '/') + "\"\n";
+        var template = Path.Combine(fixture.Root, "hostile-template");
+        var hooks = Path.Combine(template, "hooks");
+        Directory.CreateDirectory(hooks);
+        File.WriteAllText(Path.Combine(hooks, "post-checkout"), hook);
+        var hooksPath = Path.Combine(fixture.Root, "hostile-hooks");
+        Directory.CreateDirectory(hooksPath);
+        File.WriteAllText(Path.Combine(hooksPath, "post-checkout"), hook);
+        if (!OperatingSystem.IsWindows())
+        {
+            foreach (var file in new[] { Path.Combine(hooks, "post-checkout"), Path.Combine(hooksPath, "post-checkout") })
+            {
+                File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+        }
+
+        var config = Path.Combine(fixture.Root, "hostile.gitconfig");
+        File.WriteAllText(
+            config,
+            $"[core]\n\thooksPath = {hooksPath.Replace('\\', '/')}\n[protocol \"file\"]\n\tallow = always\n");
+        return new Dictionary<string, string?>
+        {
+            ["GIT_CONFIG_GLOBAL"] = config,
+            ["GIT_CONFIG_NOSYSTEM"] = "1",
+            ["GIT_TEMPLATE_DIR"] = template,
+            ["GIT_CONFIG_COUNT"] = null,
+            ["GIT_CONFIG_PARAMETERS"] = null
+        };
+    }
+
+    /// <summary>
+    ///     Runs plain git with an environment, for the control of the hook test.
+    /// </summary>
+    /// <param name="fixture">The fixture, for the git runner.</param>
+    /// <param name="environment">The environment to apply.</param>
+    /// <param name="folder">The working directory.</param>
+    /// <param name="arguments">The arguments.</param>
+    private static void RunWithEnvironment(
+        GitRepositoryFixture fixture, Dictionary<string, string?> environment, string folder, params string[] arguments)
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo("git")
+        {
+            WorkingDirectory = folder,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        foreach (var (name, value) in environment)
+        {
+            if (value is null)
+            {
+                startInfo.Environment.Remove(name);
+            }
+            else
+            {
+                startInfo.Environment[name] = value;
+            }
+        }
+
+        using var process = System.Diagnostics.Process.Start(startInfo)!;
+        var error = process.StandardError.ReadToEndAsync();
+        process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error.Result} ({fixture.Root})");
+    }
+}

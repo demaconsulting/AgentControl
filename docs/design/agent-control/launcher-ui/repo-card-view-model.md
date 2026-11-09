@@ -380,7 +380,10 @@ is an informational side action only — it never blocks `Launch`.
   restore **never writes the pin**, whatever the outcome - recording an identity here would change a file under
   version control every time the tool is launched, so such a pin adopts an identity only at the next Select Package
   or Upgrade (`AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin`,
-  `AgentControl-RepoCardViewModel-AdoptMissingIdentity`).
+  `AgentControl-RepoCardViewModel-AdoptMissingIdentity`). That includes the AGENTS.md template offer the restore may
+  raise: the card remembers that the open offer came from the restore, and a decline of such an offer is not
+  persisted (the offer can only return when a later restore happens), whereas declining the offer raised by an
+  explicit apply is recorded in the pin as before.
 - Marked `internal` rather than `private` so it can be unit-tested directly, separated from
   `Launch`'s process-spawning side effect, mirroring `AgentToolLauncher.BuildProcessStartInfo`'s
   own precedent.
@@ -492,6 +495,14 @@ the source the repo is pinned to when it has one
 **EvaluatePinnedSource** (private): Part of the cheap refresh. A pin naming a source that is not
 configured sets `SourceProblem` and never looks elsewhere. An unreachable or failing source is
 reported by the background upgrade check as "no upgrade offered".
+
+**CreateSourceRegistry**: Besides the credential context, the registry is given the Git options: the git executable
+(the setting, else the `--git-path` override, else `git`), the cache root (`GetGitCacheRoot`: a `git-cache`
+folder inside the
+`--config-dir` when one was given, so automated tests never touch the real profile) and `Interactive = allowPrompt`.
+Work the user started (Select Package, Upgrade) is therefore interactive; the background upgrade check and the restore
+before launch are not, and a missing Git sign-in there is a source authentication failure, which the card already
+presents as "sign-in needed" (`AgentControl-RepoCardViewModel-GitSourceOptions`, `AgentControl-LauncherUI-GitSourceSetup`).
 
 #### Error Handling
 

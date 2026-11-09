@@ -44,6 +44,40 @@ public class GitIntegrationSubsystemTests
     private static readonly FeedOrigin Origin = FeedOrigin.Create(new Uri("https://127.0.0.1:59997/v3/index.json"));
 
     /// <summary>
+    ///     Test the remote Git capability as a whole through its client, against a real local
+    ///     repository with every isolation in force: tags are listed without a clone, one tag is
+    ///     fetched shallow and its tree read, and a transport other than the one allowed is refused.
+    /// </summary>
+    [Fact]
+    public async Task GitIntegrationSubsystem_RemoteClient_ListsFetchesOneTagAndRefusesOtherTransports()
+    {
+        // Arrange
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        var commit = fixture.Commit(
+            new Dictionary<string, string> { [".github/agents/copilot.md"] = "x", ["release-notes.md"] = "notes" }, "one");
+        fixture.Tag("v1.0.0", annotated: true);
+        fixture.Push();
+        var client = new GitRemoteClient(new GitRemoteOptions(
+            () => "git", Path.Combine(fixture.Root, "work"), ExtraEnvironment: fixture.IsolationEnvironment));
+        var target = new GitRemoteTarget(fixture.RemotePath, GitTransport.File);
+        var repository = Path.Combine(fixture.Root, "fetched");
+
+        // Act
+        var tags = await client.ListTagsAsync(target, "refs/tags/*", TestContext.Current.CancellationToken);
+        await client.InitRepositoryAsync(repository, TestContext.Current.CancellationToken);
+        var fetched = await client.FetchTagAsync(target, repository, "v1.0.0", TestContext.Current.CancellationToken);
+        var entries = await client.ListTreeAsync(
+            repository, fetched, [".github/agents"], recursive: true, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(commit, Assert.Single(tags).CommitSha);
+        Assert.Equal(commit, fetched);
+        Assert.Equal(".github/agents/copilot.md", Assert.Single(entries).Path);
+        await Assert.ThrowsAsync<GitRemoteException>(() => client.ListTagsAsync(
+            new GitRemoteTarget(fixture.RemotePath, GitTransport.Https), "refs/tags/*", TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
     ///     Test that a sign-in kept by one session is found by another and removed on request: it
     ///     lives in the user's helper, not in the instance that kept it, and nothing is ever asked
     ///     of the user along the way.

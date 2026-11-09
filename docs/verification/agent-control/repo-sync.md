@@ -130,3 +130,20 @@ verification design), with `ZipPackageContentReader_Open_ValidZip_ReportsSha256O
 `DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull` cited directly at the
 subsystem level, covering `AgentControl-RepoSync-ContentIdentity` (child:
 `AgentControl-PackageContentExtractor-ReaderContentIdentity`).
+
+**RepoSync_LayoutRoot_ReadsOnlyTheLayoutOfACheckedOutFolder**: A folder shaped like a checked-out repository - the
+layout plus `.git`, `.github/workflows`, a README and source files - is opened with `OpenLayoutRoot`: only the four
+managed folders and the two root files are listed, the identity supplied by the opener is reported, the package extracts
+into a repo without the workflows folder or any `.git`, and release notes and the `AGENTS.md` template are read; a path
+outside the layout, including one that climbs out of it to `.git`, is refused; a missing folder or a link as the root is
+refused; a link outside the layout (a junction or symbolic link in `docs`) is ignored while the same kind of link in a
+managed folder, in place of `.github`, or as `release-notes.md` is refused. This scenario is tested by
+`DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity`,
+`DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused`,
+`DirectoryPackageContentReader_OpenLayoutRoot_MissingFolderOrLink_ThrowsInvalidOperationException`,
+`DirectoryPackageContentReader_OpenLayoutRoot_JunctionOutsideLayoutIgnoredInsideLayoutRefused` and
+`DirectoryPackageContentReader_OpenLayoutRoot_SymlinkOutsideLayoutIgnoredInsideLayoutRefused` (the symbolic-link cases
+skip where the operating system does not let the test create links; the junction case runs on Windows, the symbolic-link
+cases on Linux and macOS), covering `AgentControl-RepoSync-LayoutRoot` (children:
+`AgentControl-PackageContentExtractor-ReadLayoutRoot`, `AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout`
+and `AgentControl-PackageContentExtractor-ExcludeGitFolder`).

@@ -74,3 +74,9 @@ repopulating the cache, so the next query fetches again. This scenario is tested
 `PackageVersionCache_InvalidateSingleSource_LeavesOtherSourcesCached` and
 `PackageVersionCache_InvalidateDuringInFlightFetch_DoesNotCacheStaleResult`, covering
 `AgentControl-PackageVersionCache-InvalidateBySource`.
+
+**PackageVersionCache_PinnedListing_CarriesRevisionOfThePinnedVersion**: With a fake source that reports a revision per
+version, the upgrade check returns the latest version and the listing entry of the pinned version with its revision, from
+one listing call; a pinned version the source does not list, and a pin that does not parse, give no pinned entry. This
+scenario is tested by `PackageVersionCache_IsNewerVersionAvailable_PinnedVersionListed_ReturnsPinnedPackageWithRevision`,
+covering `AgentControl-PackageVersionCache-ReportPinnedListing`.

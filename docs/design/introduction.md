@@ -59,7 +59,9 @@ parts. The system has eleven subsystems: `LauncherUI`, `AgentPackageManagement`,
 `GitIntegration`, `Settings`, `Logging`, `Startup` and `Utilities`, plus the top-level `Program` unit. Of
 the units, `GitCredentialClient` (in `GitIntegration`) and `SignatureVerificationSupport` (in
 `AgentPackageManagement`) belong to the package-authenticity and saved-sign-in features, and
-`PackageContentIdentity` (in `AgentPackageManagement`) to the package-content-integrity feature. `RepoGroupName` (in
+`PackageContentIdentity` (in `AgentPackageManagement`) to the package-content-integrity feature. `GitSourceProvider`,
+`GitRepositoryAddress` and `GitTagPattern` (in `AgentPackageManagement`) and `GitRemoteClient` (in `GitIntegration`)
+belong to the Git repository source feature. `RepoGroupName` (in
 `Settings`) is the unit holding the rules for the names of the user's repo groups, and `RepoImageLocator`,
 `RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in `LauncherUI`) belong to the repo-picture,
 repo-group and dialog features; `PathEllipsisText` and `ThemePreferenceDisplayNameConverter` are documented
@@ -74,7 +76,7 @@ supporting types of `LauncherUI`, not units.
     - **LauncherUI/** - main window, repo cards, package-selection, settings, package-source editor
       (including the signature options and "Forget saved sign-in") and sign-in windows
     - **AgentPackageManagement/** - package source model, source providers (zip folder, NuGet
-      folder and server) and registry, package discovery, version comparison, the content identity of a
+      folder and server, Git repository) and registry, package discovery, version comparison, the content identity of a
       delivered package, and the platform
       check for package-signature verification
     - **PackageCredentials/** - credentials for package servers: server origin, in-memory session

@@ -39,6 +39,9 @@ input-files:
   - docs/design/agent-control/agent-package-management/package-version.md
   - docs/design/agent-control/agent-package-management/package-version-cache.md
   - docs/design/agent-control/agent-package-management/package-content-identity.md
+  - docs/design/agent-control/agent-package-management/git-repository-address.md
+  - docs/design/agent-control/agent-package-management/git-tag-pattern.md
+  - docs/design/agent-control/agent-package-management/git-source-provider.md
   - docs/design/agent-control/package-credentials.md
   - docs/design/agent-control/package-credentials/feed-origin.md
   - docs/design/agent-control/package-credentials/session-credential-store.md
@@ -56,6 +59,7 @@ input-files:
   - docs/design/agent-control/git-integration.md
   - docs/design/agent-control/git-integration/git-client.md
   - docs/design/agent-control/git-integration/committed-agent-files-cache.md
+  - docs/design/agent-control/git-integration/git-remote-client.md
   - docs/design/agent-control/settings.md
   - docs/design/agent-control/settings/settings-store.md
   - docs/design/agent-control/logging.md

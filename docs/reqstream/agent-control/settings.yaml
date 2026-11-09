@@ -51,8 +51,10 @@ sections:
           - AgentControl-SettingsStore-LegacySourceMigration
           - AgentControl-SettingsStore-NoSecretsPersisted
           - AgentControl-SettingsStore-AtomicSave
+          - AgentControl-SettingsStore-GitSourceRoundTrip
         tests:
           - SettingsStore_SaveThenLoad_RoundTripsAllFields
+          - SettingsStore_SaveThenLoad_GitSource_RoundTripsAndRefusesCredentials
           - SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource
           - SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties
 

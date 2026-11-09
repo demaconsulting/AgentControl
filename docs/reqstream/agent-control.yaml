@@ -648,12 +648,11 @@ sections:
       - id: AgentControl-System-PackageContentIntegrity
         title: >-
           The tool shall record in each repo's pin a content identity (a fingerprint of the
-          package that was applied); shall not replace a repo's agent files, when upgrading or
-          restoring missing agent files at launch, with a package of the same version whose
-          content differs from the recorded identity, telling the user in plain language and
-          changing nothing; shall let the user who explicitly selects that version again
-          confirm the replacement; and shall record an identity, without any warning, for a pin
-          that has none.
+          package that was applied); shall not replace a repo's agent files, when restoring
+          missing agent files at launch, with a package of the same version whose content
+          differs from the recorded identity, telling the user in plain language and changing
+          nothing; and shall record an identity, without any warning, when the user upgrades a
+          repo whose pin has none.
         tags: [system, security]
         justification: |
           A package version is meant to be immutable, but a folder of zip files or a package feed
@@ -661,16 +660,89 @@ sections:
           the instructions an agent follows in every repo pinned to that version (a supply-chain
           risk as well as an honest mistake). Recording what was applied makes a republished
           version detectable and puts the decision to accept it with the user, while pins made
-          before identities existed must keep working without nagging.
+          before identities existed must keep working without nagging. The refusal of an Upgrade
+          and the confirmation of an explicit Select Package of the same version are rules of the
+          repo card (see its requirements); the application offers neither action for a repo that
+          is up to date and already pinned, so they have no end-to-end scenario.
         children:
           - AgentControl-AgentPackageManagement-ContentIdentity
           - AgentControl-RepoSync-ContentIdentity
           - AgentControl-RepoConfig-ContentIdentityPin
           - AgentControl-LauncherUI-ContentChangeProtection
+          - AgentControl-AgentPackageManagement-GitSource
         tests:
           - windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile
           - windows@LaunchButton_Click_PinnedVersionRepublished_ExplainsAndSyncsNothing
+          - windows@UpgradeChip_Click_PinWithoutIdentity_AdoptsIdentityOfNewVersionWithoutWarning
 
+      - id: AgentControl-System-GitSources
+        title: >-
+          The tool shall support a Git repository as a package source in which the tags that match
+          a configured pattern are the versions of one package, listed without cloning the
+          repository, with the repository's address, pattern and sub-folder kept in the user's
+          settings and never holding a credential.
+        tags: [system]
+        justification: |
+          Many organizations keep their agent packages in a Git repository and tag releases;
+          reading them directly spares a build and publishing step. The user's sign-in stays with
+          the user's own Git setup, so the settings never hold a secret.
+        children:
+          - AgentControl-AgentPackageManagement-GitSource
+          - AgentControl-Settings-PackageSources
+          - AgentControl-LauncherUI-GitSourceSetup
+        tests:
+          # The non-UI behavior, end to end through the registry, the version cache, the provider
+          # and the real git against a local repository, and the settings round trip. The scenarios
+          # that drive the application's windows (adding the source in Settings, selecting a
+          # version of it) are added with the editor and its end-to-end tests.
+          - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag
+          - SettingsStore_SaveThenLoad_GitSource_RoundTripsAndRefusesCredentials
+
+      - id: AgentControl-System-GitSourceSafety
+        title: >-
+          The tool shall, when it fetches a package from a Git repository, never run code that
+          comes from the repository or the remote (hooks, submodules, filters, remote helpers),
+          use only the transport of the configured address, read only the package layout of the
+          chosen tag and refuse a layout that holds links or submodules, so that a hostile
+          repository cannot execute anything or reach outside the package.
+        tags: [system, security]
+        justification: |
+          A repository, and the server that hosts it, are not trusted; fetching a package must be
+          as safe as reading a file, or a package source in Git would let whoever controls it run
+          programs on every developer's machine.
+        children:
+          - AgentControl-GitIntegration-RemoteGit
+          - AgentControl-RepoSync-LayoutRoot
+          - AgentControl-AgentPackageManagement-GitSource
+        tests:
+          # End to end through the provider and the real git against a hostile local repository:
+          # hooks from the user's template and global configuration never run, a link or a
+          # submodule in the layout is refused before anything is cached, and a transport other
+          # than the one allowed is refused by git itself.
+          - GitSourceProvider_Acquire_HostileHooksAndTemplate_NeverRun
+          - GitSourceProvider_Acquire_LinkOrSubmoduleInLayout_IsRefusedAndNothingCached
+          - GitIntegrationSubsystem_RemoteClient_ListsFetchesOneTagAndRefusesOtherTransports
+
+      - id: AgentControl-System-GitSignIn
+        title: >-
+          The tool shall let only work the user started ask the user to sign in to a Git
+          repository, through the user's own Git sign-in (credential manager or SSH keys), shall
+          never prompt for work it started itself (the upgrade check, the restore before launch)
+          and shall report that a sign-in is needed instead.
+        tags: [system]
+        justification: |
+          A sign-in window that opens by itself, or a background check that waits for input, would
+          be a defect; the user's own tools already know how to sign in, so the tool never needs to
+          store or ask for a secret itself.
+        children:
+          - AgentControl-GitIntegration-RemoteGit
+          - AgentControl-LauncherUI-GitSourceSetup
+        tests:
+          # The card sets up git for user-started and for background work, and a missing sign-in
+          # is reported as a sign-in failure of the source. The scenarios in the application's
+          # windows (the card's "sign-in needed" notice) are added with the card changes.
+          - RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork
+          - GitSourceProvider_GitFailure_IsTranslatedToFailureKind
       - id: AgentControl-System-Settings
         title: >-
           The tool shall let the user configure the package sources, a git executable

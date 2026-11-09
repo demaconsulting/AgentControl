@@ -36,6 +36,9 @@ includes:
   - docs/reqstream/agent-control/agent-package-management/package-version.yaml
   - docs/reqstream/agent-control/agent-package-management/package-version-cache.yaml
   - docs/reqstream/agent-control/agent-package-management/package-content-identity.yaml
+  - docs/reqstream/agent-control/agent-package-management/git-repository-address.yaml
+  - docs/reqstream/agent-control/agent-package-management/git-tag-pattern.yaml
+  - docs/reqstream/agent-control/agent-package-management/git-source-provider.yaml
   - docs/reqstream/agent-control/repo-sync.yaml
   - docs/reqstream/agent-control/repo-sync/git-ignore-ensurer.yaml
   - docs/reqstream/agent-control/repo-sync/package-content-extractor.yaml
@@ -50,6 +53,7 @@ includes:
   - docs/reqstream/agent-control/git-integration/git-client.yaml
   - docs/reqstream/agent-control/git-integration/git-credential-client.yaml
   - docs/reqstream/agent-control/git-integration/committed-agent-files-cache.yaml
+  - docs/reqstream/agent-control/git-integration/git-remote-client.yaml
   - docs/reqstream/agent-control/settings.yaml
   - docs/reqstream/agent-control/settings/settings-store.yaml
   - docs/reqstream/agent-control/settings/repo-group-name.yaml

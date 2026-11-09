@@ -300,6 +300,56 @@ public sealed class RepoCardContentIdentityTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that declining the AGENTS.md template offer raised by the launch re-sync does not
+    ///     write the pin, because the launch re-sync never writes the pin.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AgentsMdOfferDeclined_NeverWritesPin()
+    {
+        // Arrange: a pinned repo whose package carries an AGENTS.md template and whose managed
+        // folders are missing; the offer that the re-sync raises is declined at once
+        var (repo, sourceDir, card) = CreateRepoWithSource();
+        CreateZip(sourceDir, "1.0.0", "v1", includeAgentsMd: true);
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+        var pinBefore = File.ReadAllBytes(PinPath(repo));
+        Directory.Delete(Path.Combine(repo, ".github"), recursive: true);
+        var offers = 0;
+        card.AgentsMdTemplateOfferRequested += (_, _) =>
+        {
+            offers++;
+            card.DeclineAgentsMdTemplate();
+        };
+
+        // Act
+        var result = card.EnsureAgentFilesSyncedBeforeLaunch();
+
+        // Assert: the offer was made and declined, and the pin file is byte-for-byte unchanged
+        Assert.True(result);
+        Assert.Equal(1, offers);
+        Assert.Equal(pinBefore, File.ReadAllBytes(PinPath(repo)));
+        Assert.False(RepoPinStore.Load(repo)?.AgentsMdTemplateDeclined);
+    }
+
+    /// <summary>
+    ///     Test that declining the AGENTS.md template offer raised by an explicit apply is still
+    ///     remembered in the pin, as before.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_AgentsMdOfferDeclined_RecordsDeclineInPin()
+    {
+        // Arrange
+        var (repo, sourceDir, card) = CreateRepoWithSource();
+        CreateZip(sourceDir, "1.0.0", "v1", includeAgentsMd: true);
+        card.AgentsMdTemplateOfferRequested += (_, _) => card.DeclineAgentsMdTemplate();
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert
+        Assert.True(RepoPinStore.Load(repo)?.AgentsMdTemplateDeclined);
+    }
+
+    /// <summary>
     ///     Test that a source that reports no identity is never treated as a change, even when the
     ///     pin recorded one: there is nothing to compare, so the package is applied.
     /// </summary>
@@ -385,17 +435,23 @@ public sealed class RepoCardContentIdentityTests : IDisposable
     ///     Creates a package zip of <c>contoso-agents</c> whose agents file holds the given marker.
     /// </summary>
     /// <returns>The zip's path.</returns>
-    private static string CreateZip(string sourceDir, string version, string marker)
+    private static string CreateZip(string sourceDir, string version, string marker, bool includeAgentsMd = false)
     {
         var zipPath = Path.Combine(sourceDir, $"contoso-agents-{version}.zip");
         using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
-        foreach (var (name, content) in new[]
-                 {
-                     (".github/agents/copilot.md", marker),
-                     (".github/standards/style.md", "standards"),
-                     (".github/templates/template.md", "templates"),
-                     (".github/skills/skill.md", "skills")
-                 })
+        var entries = new List<(string Name, string Content)>
+        {
+            (".github/agents/copilot.md", marker),
+            (".github/standards/style.md", "standards"),
+            (".github/templates/template.md", "templates"),
+            (".github/skills/skill.md", "skills")
+        };
+        if (includeAgentsMd)
+        {
+            entries.Add(("AGENTS.md", "# Agents template"));
+        }
+
+        foreach (var (name, content) in entries)
         {
             using var writer = new StreamWriter(archive.CreateEntry(name).Open());
             writer.Write(content);

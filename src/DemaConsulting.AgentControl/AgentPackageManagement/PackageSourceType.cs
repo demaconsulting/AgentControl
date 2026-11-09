@@ -30,7 +30,9 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     network folder or a remote server is derived from its location (see
 ///     <see cref="PackageSourceLocationKind"/>), so the two can never disagree. Serialized by name
 ///     (<c>"Zip"</c>, <c>"NuGet"</c>) so the settings file stays readable and stable if members
-///     are ever reordered.
+///     are ever reordered. A <see cref="Git"/> source is one repository whose tags are the package
+///     versions; its address is validated by <see cref="GitRepositoryAddress"/>, not by
+///     <see cref="PackageSourceLocationKind"/>.
 /// </remarks>
 [JsonConverter(typeof(JsonStringEnumConverter<PackageSourceType>))]
 internal enum PackageSourceType
@@ -44,7 +46,14 @@ internal enum PackageSourceType
     ///     NuGet packages (<c>.nupkg</c>) held in a local/network folder feed or on a NuGet
     ///     server, whose agent content lives under the package's <c>content</c> folder.
     /// </summary>
-    NuGet
+    NuGet,
+
+    /// <summary>
+    ///     One Git repository (an <c>https</c> or <c>ssh</c> address, or a local path) in which
+    ///     the tags that match a configured pattern are the versions of a single package, whose
+    ///     agent files are at the top of the repository or in a configured sub-folder.
+    /// </summary>
+    Git
 }
 
 /// <summary>

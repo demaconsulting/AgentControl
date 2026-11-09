@@ -8,10 +8,13 @@ The `GitIntegration` subsystem spans `GitClient.cs` (invokes the configured git 
 for status, pull, branch, and committed-files queries), `CommittedAgentFilesCache.cs`
 (caches the committed-agent-files-changed check keyed by HEAD commit hash) and
 `GitCredentialClient.cs` (keeps, finds and removes a package feed's sign-in in the user's own Git
-credential helper). It provides the observable git-derived status/actions surfaced on
+credential helper) and `GitRemoteClient.cs` (runs hardened git against untrusted remote repositories for the Git
+package source). It provides the observable git-derived status/actions surfaced on
 each repo card and the saved sign-ins of package servers
 (`AgentControl-GitIntegration-SavedSignIns`, which supports `AgentControl-System-CredentialSafety`).
-The subsystem contains three units: `GitClient`, `CommittedAgentFilesCache` and `GitCredentialClient`.
+It also provides the safe use of a remote repository as a package source (`AgentControl-GitIntegration-RemoteGit`, which
+supports `AgentControl-System-GitSourceSafety` and `AgentControl-System-GitSignIn`). The subsystem contains four units:
+`GitClient`, `CommittedAgentFilesCache`, `GitCredentialClient` and `GitRemoteClient`.
 
 ### Interfaces
 
@@ -111,3 +114,14 @@ dependency between the subsystems points from `GitIntegration` to `PackageCreden
 Why Git's credential helper, the `--get-urlmatch` availability check, the origin-scoped generic-provider override, the
 never-interactive environment, the time limit with process-tree kill and the neutral working folder are explained in
 the *GitCredentialClient Design*.
+
+`GitRemoteClient` is a fourth, deliberately separate unit because its threat model differs from both neighbors: the repository
+and the server behind it are untrusted, so every command is hardened by command-scoped configuration and environment (no
+hooks, one transport, no submodules or filters, no trace output), run asynchronously from a neutral folder with a time and
+output limit that kills the whole process tree, and reported through classified, redacted failures. It shares only the
+git executable setting with `GitClient` and `GitCredentialClient`; none of their code was changed. The user's own
+credential helper, proxy and CA settings are left in force, so sign-in is whatever the user already has - and
+it may show its
+UI only when the work was started by the user (the same `allowPrompt` switch the package sources use). The full command
+lines, the environment and the reasoning are in the *GitRemoteClient Design*; its only caller is `GitSourceProvider`
+(`AgentPackageManagement`), so the dependency points from `AgentPackageManagement` to `GitIntegration`.

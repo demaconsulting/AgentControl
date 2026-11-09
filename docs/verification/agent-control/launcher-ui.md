@@ -816,3 +816,9 @@ anything changes; No changes nothing; Yes applies and records the new identity),
 `-RefuseChangedContent`, `-ConfirmChangedContent`, `-AdoptMissingIdentity` and `-LaunchSyncNeverWritesPin`).
 The card offers "Select Package..." only to a repo that has no pin, so today the confirmation is reached through the
 view model and the headless window test rather than through the card's menu.
+
+**LauncherUI_GitSourceSetup_PromptOnlyForUserStartedWork**: The registry the card builds for work the user started lets
+git show its credential UI, the registry for background work never does, and Git packages are cached inside the isolated
+configuration directory. This scenario is tested by
+`RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork`, covering
+`AgentControl-LauncherUI-GitSourceSetup` (child: `AgentControl-RepoCardViewModel-GitSourceOptions`).

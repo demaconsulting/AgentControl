@@ -740,6 +740,64 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
     }
 
     /// <summary>
+    ///     Test the Git source through the subsystem's own parts, against a real local repository:
+    ///     the registry resolves the source, the cache lists tag versions with their commits and
+    ///     reports the pinned version's listing entry, a moved tag shows as a different revision on
+    ///     the next listing, and an acquired package reports the commit as its content identity (and
+    ///     compares as changed against the identity of the original commit).
+    /// </summary>
+    [Fact]
+    public async Task AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag()
+    {
+        // Arrange: v1.0.0 and v1.1.0 in a local bare repository
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var files = new Dictionary<string, string>
+        {
+            [".github/agents/copilot.md"] = "one",
+            ["release-notes.md"] = "notes"
+        };
+        var first = fixture.Commit(files, "one");
+        fixture.Tag("v1.0.0", annotated: true);
+        files[".github/agents/copilot.md"] = "two";
+        fixture.Commit(files, "two");
+        fixture.Tag("v1.1.0");
+        fixture.Push();
+        var registry = PackageSourceRegistry.Create([fixture.CreateDefinition()], git: fixture.CreateOptions());
+
+        // Act: the version cache lists versions through the registry
+        var cache = new PackageVersionCache();
+        var check = await cache.IsNewerVersionAvailableAsync(
+            registry, "Repo", "contoso-agents", "1.0.0", TestContext.Current.CancellationToken);
+
+        // Assert: the newer version is offered, and the pinned one carries its commit
+        Assert.True(check.IsNewerAvailable);
+        Assert.Equal("1.1.0", check.Latest?.Version.ToString());
+        Assert.Equal(first, check.Pinned?.Revision);
+
+        // Act: the pinned version is acquired
+        using var reader = await registry.Resolve("Repo").AcquireAsync(check.Pinned!, TestContext.Current.CancellationToken);
+
+        // Assert: the content identity is the commit
+        Assert.Equal(PackageContentIdentity.FromGitCommit(first), reader.ContentIdentity);
+        Assert.Equal("one", reader.ReadText(".github/agents/copilot.md"));
+
+        // Act: the maintainer moves v1.0.0 and a new session lists again
+        files[".github/agents/copilot.md"] = "moved";
+        fixture.Commit(files, "moved");
+        fixture.Tag("v1.0.0", force: true);
+        fixture.Push();
+        var later = await new PackageVersionCache().IsNewerVersionAvailableAsync(
+            registry, "Repo", "contoso-agents", "1.0.0", TestContext.Current.CancellationToken);
+
+        // Assert: the pinned version is now at another commit, which compares as changed
+        Assert.NotEqual(check.Pinned!.Revision, later.Pinned?.Revision);
+        Assert.Equal(
+            ContentIdentityComparison.Changed,
+            PackageContentIdentity.Compare(
+                reader.ContentIdentity, PackageContentIdentity.FromGitCommit(later.Pinned!.Revision!)));
+    }
+
+    /// <summary>
     ///     Creates a unique temporary directory removed when the test ends.
     /// </summary>
     /// <returns>The directory path.</returns>

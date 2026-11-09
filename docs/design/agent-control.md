@@ -517,3 +517,9 @@ an unwanted or repeated file write.
   plain file of the repo's root; otherwise there is no picture (`AgentControl-System-RecentRepos`).
 - Modal dialogs: every dialog is modal and keyboard-operable through one shared behavior, so the window behind a
   dialog can neither be used nor reached with the keyboard (`AgentControl-System-DialogKeyboard`).
+- Git repository sources: a Git repository can be a package source - its tags that match a pattern are the versions of one
+  package, fetched shallow into a cache keyed by repository and commit, with the commit as the pin's content identity
+  (`AgentControl-System-GitSources`). Fetching never runs anything from the repository or the remote - no hooks,
+  submodules, filters or remote helpers, one transport, only the package layout read, links and submodules refused
+  (`AgentControl-System-GitSourceSafety`) - and the sign-in is the user's own Git sign-in, offered only for work the user
+  started (`AgentControl-System-GitSignIn`).

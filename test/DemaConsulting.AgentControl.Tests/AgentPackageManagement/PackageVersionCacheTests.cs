@@ -35,6 +35,39 @@ public sealed class PackageVersionCacheTests : IDisposable
     private readonly List<string> _tempPaths = [];
 
     /// <summary>
+    ///     Test that the upgrade check carries the discovered package of the pinned version from the same
+    ///     listing - with its revision - so a caller can see that a tag was moved without another call.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_IsNewerVersionAvailable_PinnedVersionListed_ReturnsPinnedPackageWithRevision()
+    {
+        // Arrange: 1.0.0 (pinned) and 1.1.0, each with a revision
+        var provider = new FakePackageSourceProvider("Repo", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
+        provider.Revisions["1.0.0"] = new string('a', 40);
+        provider.Revisions["1.1.0"] = new string('b', 40);
+        var registry = CreateRegistry(provider);
+        var cache = new PackageVersionCache();
+
+        // Act
+        var check = await cache.IsNewerVersionAvailableAsync(
+            registry, "Repo", "contoso-agents", "1.0.0", CancellationToken.None);
+        var missing = await cache.IsNewerVersionAvailableAsync(
+            registry, "Repo", "contoso-agents", "0.9.0", CancellationToken.None);
+        var unparsable = await cache.IsNewerVersionAvailableAsync(
+            registry, "Repo", "contoso-agents", "not-a-version", CancellationToken.None);
+
+        // Assert
+        Assert.True(check.IsNewerAvailable);
+        Assert.Equal("1.1.0", check.Latest?.Version.ToString());
+        Assert.Equal("1.0.0", check.Pinned?.Version.ToString());
+        Assert.Equal(new string('a', 40), check.Pinned?.Revision);
+        Assert.Equal(new string('b', 40), check.Latest?.Revision);
+        Assert.Null(missing.Pinned);
+        Assert.Null(unparsable.Pinned);
+        Assert.Equal(1, provider.ListVersionsCalls);
+    }
+
+    /// <summary>
     ///     Test that a cache hit returns the previously-observed result even after the source
     ///     directory has since been deleted, rather than re-enumerating the filesystem.
     /// </summary>
