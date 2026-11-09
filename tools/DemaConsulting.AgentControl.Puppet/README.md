@@ -161,6 +161,8 @@ without it.
   to start with a particular group collapsed, list it in `CollapsedGroups` in the settings file before `launch`.
 - **Repo card** (repeated, one per list item): `RepoNameText`, `RepoStatusAccent` (the status bar; its name is the
   status in words), `RepoAvatarText`, `RepoAvatarImage`, `UpgradeAvailableBadge` (a button: click it to upgrade),
+  `TagMovedChip` (a button, with `TagMovedBadge`: a Git tag that now names another commit; click it to open
+  Change package), `PackageSourceIcon` and `PackageSourceAliasText` (the source's icon and alias in the package chip),
   CommittedAgentFilesBadge, DirtyWorkingTreeBadge, MissingRepoBadge, RepoPathText (a text control whose name is the
   full path; the path is shortened to fit, a long folder name in the middle), RepoPinnedVersionText,
   `CurrentBranchText`, `GroupChipText` (a favorite's group), `FavoriteToggleButton` (accessible name `Favorite`; a
@@ -168,7 +170,8 @@ without it.
   `LaunchButton`,
   `MoreActionsButton`.
 - **Card menu** (pop-up of `MoreActionsButton`): `PullButton` (Git Pull), `RefreshMenuItem`, `SelectPackageMenuItem`
-  (only for a repo that has no package yet), `UpgradeMenuItem` (only while an upgrade is available),
+  (only for a repo that has no package yet), `ChangePackageMenuItem` (Change package..., only for a repo that has a
+  package: it opens Select Package on the current choice), `UpgradeMenuItem` (only while an upgrade is available),
   `MoveToGroupMenuItem` (its submenu, built when the menu opens: one `MoveToGroupItem` per group - find it by
   name, for example `menu MoveToGroupMenuItem/Work` - then `NewGroupMenuItem`, and `RemoveFromGroupMenuItem` for a
   grouped repo), `CardColorMenuItem`, `RemoveMenuItem`.
@@ -179,13 +182,17 @@ without it.
   `GroupNameErrorText`, `GroupNameHintText`, `GroupNameCancelButton`, `GroupNameAcceptButton`.
 - **Settings** (`AgentControl Settings`): the package sources `SourcesList` (rows with `SourceAliasText`,
   `SourceLocationText`, `SourceStatusText`), `AddSourceButton` (opens the Add menu), its items
-  `AddZipSourceButton`, `AddNuGetFolderSourceButton`, `AddNuGetServerSourceButton`, `EditSourceButton`,
+  `AddZipSourceButton`, `AddNuGetFolderSourceButton`, `AddNuGetServerSourceButton`, `AddGitSourceButton`,
+  `EditSourceButton`,
   `RemoveSourceButton`, `SourcesEmptyText`; the Appearance section (`AppearanceHeadingText`, `ThemeComboBox`, named
   `Theme`) and the Tools section (`ToolsHeadingText`),
   `GitExecutablePathTextBox`, `AgentToolComboBox`, `CustomAgentCommandTextBox`, `ShellPreferenceComboBox`,
   `SettingsErrorTextBlock`, `SaveSettingsButton`. The **source editor** has `SourceAliasTextBox`,
   `SourceLocationTextBox`, `SourceBrowseButton`, `SourceEditorSaveButton`, `SourceEditorCancelButton` (and, for NuGet
-  sources, the package ID, sign-in, signature and test-connection controls).
+  sources, the package ID, sign-in, signature and test-connection controls; for a Git repository
+  `SourceGitPackageIdTextBox`, `SourceTagPatternTextBox` with `SourceTagPatternErrorText`, `SourceSubfolderTextBox`,
+  `SourceGitSignInHelpText`, `SourceTestConnectionButton`, `SourceTestResultTitleText`, `SourceTestResultDetailText`
+  and the tag preview `SourceTagPreviewSummaryText` and `SourceTagPreviewList`).
 - **Select Package** (`Select Package`): `SelectPackageSourceList`, `SelectPackageNameList`,
   `SelectPackageVersionList`, `SelectPackageCancelButton`, `SelectPackageConfirmButton` (and the inline error and retry
   controls).
@@ -265,7 +272,7 @@ differ slightly from the screen.
 ## Fixture
 
 ```text
-agentcontrol-puppet fixture <dir> [--packages zip|nupkg|both] [--repo] [--pin <name>@<version>]
+agentcontrol-puppet fixture <dir> [--packages zip|nupkg|both|git|all] [--repo] [--pin <name>@<version>]
 ```
 
 Creates a ready-to-use sandbox in a new (or empty) folder for manual exploration, and prints the paths it created:
@@ -276,14 +283,35 @@ Creates a ready-to-use sandbox in a new (or empty) folder for manual exploration
   `{name}.{version}.nupkg` with the same files under `content\` and a minimal `{name}.nuspec`; `both` writes both.
   Zip packages are offered by a `Default` zip source and `.nupkg` packages by a NuGet folder source named `NuGet`
   (both pointing at this folder).
+- `<dir>\git-source.git\` (`--packages git`, or `all` for zip, nupkg and git) - a **bare** git repository that is a
+  `Git` package source named `Git` (tag pattern `release/{version}`, package `contoso-agents`). The package layout (the
+  same files as the zip, at the repository root) is committed once per version of `contoso-agents` and tagged
+  `release/1.0.0` (lightweight) and `release/1.1.0` (**annotated**), so both tag kinds are exercised. It is built
+  locally with `git` from the PATH (a scratch work repository that is deleted afterwards, then a push into the bare
+  repository) with a fixed author identity, signing off, no user or system git configuration and no prompts. Nothing
+  touches the network: the source's address is the local path. `--packages git` writes no package files into
+  `<dir>\packages\`. To get a "moved tag" for a screenshot, move the tag after the first sync, for example
+  `git --git-dir <dir>\git-source.git tag -f release/1.0.0 "release/1.1.0^{commit}"`.
 - `<dir>\repo\` (with `--repo`, implied by `--pin`) - a git repository (`git` from the PATH: `git init -b main` and one
-  commit). `--pin contoso-agents@1.0.0` also commits an `.agentcontrol.json` pin (current schema, naming the `Default`
-  source, or `NuGet` with `--packages nupkg`), so the card shows a pinned version and
+  commit). `--pin contoso-agents@1.0.0` also commits an `.agentcontrol.json` pin (schema 2, naming the `Default`
+  source, else `NuGet` with `--packages nupkg`, else `Git` with `--packages git`; no content identity is written), so
+  the card shows a pinned version and
   an upgrade badge; without a pin the repo is "never synced" and its card offers `SelectPackageMenuItem`.
-- `<dir>\config\settings.json` - the application's settings: `Sources` (the zip and/or NuGet source above, the NuGet
-  one naming the sample package IDs it offers) and, with a repo, `RecentRepos` with the
+- `<dir>\config\settings.json` - the application's settings: `Sources` (the zip, NuGet and/or Git source above, the
+  NuGet one naming the sample package IDs it offers, the Git one its `contoso-agents` package) and, with a repo,
+  `RecentRepos` with the
   repo (and its pin). Nothing else is written, so every other setting keeps its default and the file loads in any
   version of the application. Start the application on it with `launch --config-dir <dir>\config`.
+
+A Git package source fixture, with the tag moved after the first sync (the safety rules are the same: local paths only):
+
+```powershell
+& $puppet fixture "$env:TEMP\acp-git" --packages git --repo
+& $puppet launch --config-dir "$env:TEMP\acp-git\config"
+# ... select Git / contoso-agents / 1.0.0 on the card, pull, then move the tag to the other commit:
+git --git-dir "$env:TEMP\acp-git\git-source.git" tag -f release/1.0.0 "release/1.1.0^{commit}"
+# ... relaunch: the card shows TagMovedChip; card menu > ChangePackageMenuItem, same version, Yes accepts the change
+```
 
 ## Exit codes
 

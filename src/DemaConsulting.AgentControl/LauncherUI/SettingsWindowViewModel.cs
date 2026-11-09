@@ -175,6 +175,7 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
         AddZipSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.Zip, null));
         AddNuGetFolderSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.NuGet, null));
         AddNuGetServerSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.NuGet, null, server: true));
+        AddGitSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.Git, null));
         EditSourceCommand = new RelayCommand(
             () => RequestEditor(_selectedSource!.Definition.Type, _selectedSource), () => _selectedSource is not null);
         RemoveSourceCommand = new RelayCommand(
@@ -358,6 +359,12 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand AddNuGetServerSourceCommand { get; }
 
     /// <summary>
+    ///     Gets the command bound to the "Git repository" item of the Add menu: opens the editor
+    ///     for a new source whose package versions are the tags of a Git repository.
+    /// </summary>
+    public RelayCommand AddGitSourceCommand { get; }
+
+    /// <summary>
     ///     Gets the command bound to the "Edit" button; executable while a source is selected.
     /// </summary>
     public RelayCommand EditSourceCommand { get; }
@@ -522,7 +529,8 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
             Theme = Theme
         };
 
-        var problem = sources.Select(source => source.GetCredentialProblem()).FirstOrDefault(p => p is not null);
+        var problem = sources.Select(source => source.GetCredentialProblem() ?? source.GetGitSettingsProblem())
+            .FirstOrDefault(p => p is not null);
         if (problem is not null)
         {
             ErrorMessage = problem;

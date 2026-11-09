@@ -4,21 +4,30 @@
 
 #### Purpose
 
-`SelectPackageWindowViewModel` backs the "Select Package..." dialog. The dialog has three
+`SelectPackageWindowViewModel` backs the "Select Package..." and "Change package..." dialog. The dialog has three
 columns: the configured package sources, the packages of the selected source, and the versions
 of the selected package (descending, defaulting to the latest), per architecture.md's "Initial
 package selection" decision. It lets a repo with no existing pin acquire its first pinned
-package, and confirming reports the full package reference - source alias, package name and
+package, and lets a repo that already has a pin choose another package or version - or the same
+version again, which is the user's explicit way to accept content that changed behind it. Confirming reports the full
+package reference - source alias, package name and
 version - so the pin records which source the package came from
-(`AgentControl-SelectPackageWindowViewModel-SourceScoped`). Sources are shown side by side rather
+(`AgentControl-SelectPackageWindowViewModel-SourceScoped`). For a pinned repo the dialog is given the pin's source,
+package and version and opens on them
+(`AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage`). Sources are shown side by side rather
 than merged into one list because the same package name can exist in several sources and the
 user must see which one they are choosing from.
 
 #### Data Model
 
 **Sources**: `IReadOnlyList<SelectPackageSourceViewModel>` — One row per configured source, in
-configured order, each with its alias, kind icon and label, and its own state: loading, loaded
+configured order, each with its alias, kind icon and label (the Git logo and "Git repository" for a Git source, from
+`PackageSourceIcons`), and its own state: loading, loaded
 with a package list, failed with a message, or empty.
+
+**Preferred package and version** (constructor arguments, not properties): the alias of the source to start on, and
+the package name and version to select once that source has been read. They are the pin of a repo being changed;
+`null` means no preference.
 
 **SelectedSource**: `SelectPackageSourceViewModel?` — The source whose packages the second column
 shows. Setting it clears the package and version selection.
@@ -54,7 +63,7 @@ all selected.
 **Constructor**: Lists every source of the registry without reading any of them.
 
 - *Parameters*: `PackageSourceRegistry registry`, `PackageVersionCache cache`, and an optional
-  alias of the source to start on.
+  alias of the source to start on, with an optional preferred package name and version.
 - *Preconditions*: `registry` and `cache` are not null.
 - *Postconditions*: `Sources` holds one row per configured source; the preferred source (or the
   first when none or an unknown alias is given) is selected; nothing has been read yet, so
@@ -69,7 +78,20 @@ all selected.
   (`AgentControl-SelectPackageWindowViewModel-ListPackages`,
   `AgentControl-SelectPackageWindowViewModel-AsyncLoading`,
   `AgentControl-SelectPackageWindowViewModel-SourceFailureIsolation`). A cancelled token
-  surfaces as `OperationCanceledException`.
+  surfaces as `OperationCanceledException`. When a preferred package was given, `LoadAsync` ends by selecting it
+  (`ApplyPreferredSelectionAsync`): only if the user has not changed the source or the package since the dialog opened
+  (a flag set by the `SelectedSource` and `SelectedPackageName` setters, not by the preference itself; returning to
+  the preferred source does not count as not having changed), the selected source is the
+  preferred one and was read without error, and it offers the package (compared ignoring case); then
+  `SelectedPackageName` is set, the version read is awaited and the preferred version is selected if it is still
+  listed, otherwise the newest stays selected; a choice the user makes meanwhile is never overridden. The version read
+  that the preference starts is cancelled with the token passed to `LoadAsync` (a registration on that token
+  cancels the current version read, ignoring one already replaced), and the cancellation then surfaces from
+  `LoadAsync` as well. An unknown or
+  failed source, or a package the source no longer offers, selects nothing
+  (`AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage`, `-PreselectNewestWhenVersionGone`,
+  `-PreselectNothingWhenSourceFailed`, `-PreselectNothingWhenNotOffered`, `-PreselectNothingWhenSourceUnknown`,
+  `-PreselectKeepsUserChoice`, `-PreselectCancelled`).
 
 **SelectedPackageName (setter)**: Starts the background read of the versions of the chosen package
 at the selected source.
@@ -130,8 +152,9 @@ already prevent that call.
 
 #### Callers
 
-- **RepoCardViewModel** — constructs this view model (via `SelectPackageRequested`) when the
-  user chooses "Select Package..." for a repo with no existing pin, and subscribes to
+- **RepoCardViewModel** — constructs this view model (via `SelectPackageRequested`, handled by `MainWindow`) when the
+  user chooses "Select Package..." for a repo with no existing pin (no preference) or "Change package..." for a
+  pinned repo (the pin's source, package and version as the preference), and subscribes to
   `Confirmed` to apply the chosen package (`ApplySelectedPackageAsync`).
 - **SelectPackageWindow** (code-behind) — starts `LoadAsync` when the window opens and
   cancels it when the window closes.

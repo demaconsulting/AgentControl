@@ -5,10 +5,13 @@
 # - Define requirements for the AgentControl GitIntegration subsystem
 # - GitIntegration spans GitClient.cs (invokes the configured git executable for status,
 #   pull, branch, and committed-files queries), CommittedAgentFilesCache.cs (caches the
-#   committed-agent-files-changed check keyed by HEAD commit hash) and GitCredentialClient.cs
+#   committed-agent-files-changed check keyed by HEAD commit hash), GitCredentialClient.cs
 #   (keeps, finds and removes a package feed's sign-in in the user's own Git credential helper)
+#   and GitRemoteClient.cs (runs git against a remote repository whose content and answers are
+#   untrusted: lists its tags, fetches one tag, reads the tree and the raw blobs of a commit)
 # - Subsystem requirements describe the observable git-derived status/actions surfaced on
-#   each repo card, and the use of the user's Git credential helper for saved sign-ins
+#   each repo card, the use of the user's Git credential helper for saved sign-ins, and the
+#   safe, bounded use of git against a remote repository
 
 sections:
   - title: GitIntegration Subsystem Requirements
@@ -96,3 +99,137 @@ sections:
           - GitIntegrationSubsystem_SavedSignIn_KeptInOneSessionFoundInAnotherAndRemovedOnRequest
           - GitIntegrationSubsystem_SavedSignIn_ValueWithLineBreakIsNeverStoredButEqualsIs
           - GitIntegrationSubsystem_SavedSignIn_NoHelperConfigured_ReportsUnavailableAndNothingSaved
+
+      - id: AgentControl-GitIntegration-RemoteGit
+        title: >-
+          The GitIntegration subsystem shall run git against a remote repository whose content and
+          answers are untrusted - listing its tags without a clone, fetching exactly one tag
+          shallow, reading the tree of a commit and the raw content of listed blobs.
+        justification: |
+          Package sources in Git repositories make the repository, and the remote that serves it,
+          the source of what lands on a developer's machine; the operations a package source needs
+          must be available without a clone or a checkout.
+        children:
+          - AgentControl-GitRemoteClient-ListTagsWithoutClone
+          - AgentControl-GitRemoteClient-ListTagsLiteralArguments
+          - AgentControl-GitRemoteClient-ListTagsKeepsWellFormedTags
+          - AgentControl-GitRemoteClient-PeeledTags
+          - AgentControl-GitRemoteClient-ShallowFetchExactTag
+          - AgentControl-GitRemoteClient-FetchIntoHooklessRepository
+          - AgentControl-GitRemoteClient-ReportFetchedCommit
+          - AgentControl-GitRemoteClient-SafeTagNames
+          - AgentControl-GitRemoteClient-IgnoreHostileServerTagNames
+          - AgentControl-GitRemoteClient-RefuseUnsafeTagNameBeforeGit
+          - AgentControl-GitRemoteClient-ListLayoutTree
+          - AgentControl-GitRemoteClient-ListLayoutTreeRejectsEmptyPaths
+          - AgentControl-GitRemoteClient-AcceptOnlyFullCommitId
+          - AgentControl-GitRemoteClient-ReadBlobsWithoutCheckout
+          - AgentControl-GitRemoteClient-ReadBlobsRawBytes
+          - AgentControl-GitRemoteClient-ReadBlobsVerifyAnswers
+          - AgentControl-GitRemoteClient-ReadBlobsBounded
+        tests:
+          # Subsystem test with the real git executable and a local repository: tags are listed
+          # without a clone, one tag is fetched shallow and its tree read.
+          - GitIntegrationSubsystem_RemoteClient_ListsFetchesOneTagAndRefusesOtherTransports
+          - GitIntegrationSubsystem_RemoteClient_ReadsRawBlobsWithoutCheckoutFiltersOrConversion
+
+      - id: AgentControl-GitIntegration-RemoteGitNoCodeExecution
+        title: >-
+          The GitIntegration subsystem shall run git against a remote repository so that nothing
+          from the repository, the remote or the user's configuration can run code: no hooks, only
+          the transport of the address, no submodules, no filter programs and no trace output.
+        justification: |
+          A repository, and the remote that serves it, are not trusted; none of it may run code on
+          the machine, and every protection must be scoped to the command so that the user's own
+          git configuration is neither relied on nor changed.
+        children:
+          - AgentControl-GitRemoteClient-NoHooks
+          - AgentControl-GitRemoteClient-TransportAllowList
+          - AgentControl-GitRemoteClient-NoSubmodules
+          - AgentControl-GitRemoteClient-NoContentFilters
+          - AgentControl-GitRemoteClient-SshBatchMode
+          - AgentControl-GitRemoteClient-SshNonOpenSshUntouched
+          - AgentControl-GitRemoteClient-CommandScopedConfiguration
+          - AgentControl-GitRemoteClient-NoTraceVariables
+          - AgentControl-GitRemoteClient-NeutralWorkingFolder
+        tests:
+          - GitIntegrationSubsystem_RemoteClient_ListsFetchesOneTagAndRefusesOtherTransports
+          - GitIntegrationSubsystem_RemoteClient_ReadsRawBlobsWithoutCheckoutFiltersOrConversion
+
+      - id: AgentControl-GitIntegration-RemoteGitNoBackgroundPrompt
+        title: >-
+          The GitIntegration subsystem shall run git against a remote repository for work the
+          application started itself without any prompt: git cannot ask for a credential, and
+          reports that a sign-in is needed instead.
+        justification: |
+          A sign-in window that opens by itself, or a background check that waits for input, would
+          be a defect.
+        children:
+          - AgentControl-GitRemoteClient-NoPromptInBackground
+        tests:
+          - GitIntegrationSubsystem_RemoteClient_BackgroundWorkNeverPromptsWhileUserStartedWorkMay
+          - GitIntegrationSubsystem_RemoteClient_PrivateRepositorySignInIsOnlyRequestedForUserStartedWork
+
+      - id: AgentControl-GitIntegration-RemoteGitSignIn
+        title: >-
+          The GitIntegration subsystem shall leave the user's own sign-in (the credential manager,
+          the askpass program, the SSH agent) free to ask the user when git runs against a remote
+          repository for work the user started.
+        justification: |
+          The user's own tools already know how to sign in; work the user started is the moment a
+          sign-in is expected.
+        children:
+          - AgentControl-GitRemoteClient-InteractiveWhenUserStarted
+        tests:
+          - GitIntegrationSubsystem_RemoteClient_BackgroundWorkNeverPromptsWhileUserStartedWorkMay
+          - GitIntegrationSubsystem_RemoteClient_PrivateRepositorySignInIsOnlyRequestedForUserStartedWork
+
+      - id: AgentControl-GitIntegration-RemoteGitBounded
+        title: >-
+          The GitIntegration subsystem shall run git against a remote repository within a time and
+          output limit, stopping the whole process tree on a timeout or a cancellation and never
+          hiding a process that could not be stopped.
+        justification: |
+          A stuck or silent git, or a hostile server that streams without end, must never hang the
+          application or fill its memory.
+        children:
+          - AgentControl-GitRemoteClient-TimeoutAndCancel
+          - AgentControl-GitRemoteClient-TimeoutReportedAsTimedOut
+          - AgentControl-GitRemoteClient-CancellationReportedAsCancellation
+          - AgentControl-GitRemoteClient-UnstoppedProcessReported
+          - AgentControl-GitRemoteClient-OutputBoundedInBytes
+        tests:
+          - GitIntegrationSubsystem_RemoteClient_OldGitIsRefusedAndHungGitIsStoppedAtTheTimeLimit
+
+      - id: AgentControl-GitIntegration-RemoteGitFailureReporting
+        title: >-
+          The GitIntegration subsystem shall report a failure of git against a remote repository
+          classified (sign-in needed, not found, unreachable, host key, timed out, git missing)
+          in one fixed sentence that repeats neither the address nor git's text, and shall keep
+          the address and arguments out of its logs.
+        justification: |
+          Git's error text commonly repeats an address, a host or a local path that must not reach
+          messages and logs, and the caller needs the class of the failure to act on it.
+        children:
+          - AgentControl-GitRemoteClient-FailureMessagesFixed
+          - AgentControl-GitRemoteClient-SecretFreeLogs
+          - AgentControl-GitRemoteClient-RefuseUnsafeCommandLineValues
+          - AgentControl-GitRemoteClient-FailureClassification
+          - AgentControl-GitRemoteClient-MissingGitExplained
+        tests:
+          - GitIntegrationSubsystem_RemoteClient_FailuresAreClassifiedAndTheirMessagesNeverRepeatThePath
+
+      - id: AgentControl-GitIntegration-RemoteGitMinimumVersion
+        title: >-
+          The GitIntegration subsystem shall refuse a git that is older than the minimum it
+          supports with a message that says what to do, before running any other command.
+        justification: |
+          An old git fails with an error that means nothing to the user; saying what is wrong and
+          what to do is what makes the failure fixable.
+        children:
+          - AgentControl-GitRemoteClient-MinimumGitVersion
+          - AgentControl-GitRemoteClient-MinimumGitVersionMessage
+          - AgentControl-GitRemoteClient-UnreadableVersionNotBlocked
+          - AgentControl-GitRemoteClient-MinimumGitVersionCheckedOnce
+        tests:
+          - GitIntegrationSubsystem_RemoteClient_OldGitIsRefusedAndHungGitIsStoppedAtTheTimeLimit

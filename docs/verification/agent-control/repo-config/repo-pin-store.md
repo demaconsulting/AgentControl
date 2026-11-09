@@ -14,10 +14,13 @@ N/A - standard test environment.
 
 - All unit tests pass with zero failures.
 - A pin file without a source (the original schema) loads as a pin to the Default source, and
-  saving writes the current schema version and the source alias.
+  saving writes the current schema version (3) and the source alias.
+- A recorded content identity round-trips and is omitted when the pin has none; a pin of schema 1 or 2 loads with no
+  identity and is written back as schema 3; a hand-written camelCase identity is read.
 - Unknown properties survive a rewrite, with or without the caller having loaded the pin first.
-- A pin file from a newer schema is neither interpreted nor overwritten, and a save replaces the
-  file atomically (no temporary file remains).
+- A pin file from a newer schema is neither interpreted nor overwritten - also when a property this build knows has
+  another type in it (an identity that is an object or a number) - and a save replaces the file atomically (no
+  temporary file remains). A current-schema file with such a type mismatch is corrupt and is replaced by a save.
 - A repo with no pin file returns none rather than throwing.
 - A saved pin's values are returned unchanged by a subsequent load.
 - A null repo root path or a null pin value is rejected.
@@ -53,7 +56,7 @@ covering `AgentControl-RepoPinStore-Load` and `AgentControl-RepoPinStore-Save`.
 schema version and the source alias (with version text containing a fourth segment and metadata
 preserved) and loading returns them; camelCase property names written by hand are read; saving
 over a corrupt file replaces it and leaves no temporary file. This scenario is tested by
-`RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion2AndRoundTripsSource`,
+`RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource`,
 `RepoPinStore_Load_CamelCasePropertyNames_AreRead`, and
 `RepoPinStore_Save_CorruptExistingFile_IsReplacedAndLeavesNoTemporaryFile`, covering
 `AgentControl-RepoPinStore-SourceAlias`.
@@ -76,9 +79,38 @@ save of a freshly built pin over the existing file. This scenario is tested by
 `AgentControl-RepoPinStore-PreserveUnknownFields`.
 
 **RepoPinStore_RejectNewerSchema_NeitherInterpretedNorOverwritten**: Loading a pin file that
-declares a newer schema throws `UnsupportedPinSchemaException` whose message names the version and
+declares a newer schema (here version 4) throws `UnsupportedPinSchemaException` whose message names the version and
 tells the user to update; saving over such a file throws the same exception and leaves the file
 byte-for-byte unchanged with no other file created. This scenario is tested by
 `RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage`
 and `RepoPinStore_Save_ExistingNewerSchemaFile_ThrowsAndLeavesFileUnchanged`, covering
 `AgentControl-RepoPinStore-RejectNewerSchema`.
+
+**RepoPinStore_RejectNewerSchema_IncompatibleKnownPropertyType**: A schema 4 file whose `ContentIdentity` is an object
+or a number, whose `PackageName` is a list, or whose `AgentsMdTemplateDeclined` is text (and one that spells
+`schemaVersion` in lower case) is reported on load as `UnsupportedPinSchemaException` - never as an unreadable file -
+and a save over it throws the same exception and leaves the file byte-for-byte unchanged. The schema probe reads a
+version given as text or as a number beyond `int` as newer, reports none for a document without a usable version, and
+rejects text that is not JSON; a schema 3 file with a mistyped property is corrupt: loading reports it as
+unreadable, and saving replaces it. This scenario is tested by
+`RepoPinStore_Load_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsUnsupportedPinSchemaException`,
+`RepoPinStore_Save_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsAndLeavesFileUnchanged`,
+`RepoPinStore_ProbeSchemaVersion_TextOrOversizedOrDifferentlyCasedVersion_IsReadAsNewer`,
+`RepoPinStore_ProbeSchemaVersion_NoUsableVersion_ReturnsNullAndInvalidJsonThrows` and
+`RepoPinStore_CurrentSchemaWithIncompatibleKnownPropertyType_IsCorruptAndReplacedOnSave`, covering
+`AgentControl-RepoPinStore-RejectNewerSchema` and `AgentControl-RepoPinStore-SchemaVersion3`.
+
+**RepoPinStore_ContentIdentity_RoundTripsIsOmittedWhenAbsentAndOlderPinsLoadWithout**: A pin saved with a content
+identity writes it (property `ContentIdentity`) and loads it back, a pin saved without one writes no such property,
+a hand-written camelCase `contentIdentity` is read, and pin files of schema 1 and 2 load with no identity and are
+rewritten as schema 3 when saved. This scenario is tested by
+`RepoPinStore_SaveThenLoad_ContentIdentity_RoundTripsAndIsOmittedWhenAbsent`,
+`RepoPinStore_Load_CamelCaseContentIdentity_IsRead` and
+`RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema3OnSave`, covering
+`AgentControl-RepoPinStore-SaveContentIdentity` and `AgentControl-RepoPinStore-LoadWithoutIdentity`.
+
+**RepoPinStore_SchemaVersion3_WrittenAndNewerRefused**: Saving writes `"SchemaVersion": 3`, and a pin file of
+version 4 is refused on load with a message that names version 4 and the supported version 3. This scenario is
+tested by `RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource` and
+`RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage`, covering
+`AgentControl-RepoPinStore-SchemaVersion3`.

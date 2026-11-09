@@ -162,7 +162,7 @@ public class SettingsWindowServerSourceTests
     }
 
     /// <summary>
-    ///     Test that the settings window offers one Add button whose menu holds the three source
+    ///     Test that the settings window offers one Add button whose menu holds the four source
     ///     types (each with its icon and a description), and that the server editor
     ///     window shows the feed-address field with examples, the insecure-HTTP checkbox, the test
     ///     button, and no Browse button.
@@ -176,12 +176,12 @@ public class SettingsWindowServerSourceTests
         settingsWindow.Show();
         try
         {
-            // Assert: one Add button with a menu of all three actions (items, not separate buttons)
+            // Assert: one Add button with a menu of all four actions (items, not separate buttons)
             var addButton = settingsWindow.FindControl<Button>("AddSourceButton");
             Assert.NotNull(addButton);
             var menu = Assert.IsType<MenuFlyout>(addButton.Flyout);
             Assert.Equal(
-                ["AddZipSourceButton", "AddNuGetFolderSourceButton", "AddNuGetServerSourceButton"],
+                ["AddZipSourceButton", "AddNuGetFolderSourceButton", "AddNuGetServerSourceButton", "AddGitSourceButton"],
                 menu.Items.OfType<MenuItem>().Select(item => item.Name));
             Assert.All(menu.Items.OfType<MenuItem>(), item => Assert.NotNull(item.Icon));
             Assert.IsType<MenuItem>(settingsWindow.FindControl<Control>("AddZipSourceButton"));

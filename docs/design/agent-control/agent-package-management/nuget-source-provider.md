@@ -49,7 +49,8 @@ signatures cannot be verified (`AgentControl-NuGetSourceProvider-RequireSigned`,
 `AgentControl-NuGetSourceProvider-ListPackageIds`,
 `AgentControl-NuGetSourceProvider-CancellationHonoredBeforeSideEffects`,
 `AgentControl-NuGetSourceProvider-AcquireToPrivateCache`, `AgentControl-NuGetSourceProvider-PrivateCachePerSource`,
-`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`, `AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder`,
+`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`,
+`AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder`,
 `AgentControl-NuGetSourceProvider-ServerUnknownPackageIsEmpty`, `AgentControl-NuGetSourceProvider-ServerAcquire` and
 `AgentControl-NuGetSourceProvider-AcquireOnlyFromOwnSource`; location and cache-root rules satisfy
 `AgentControl-NuGetSourceProvider-ValidateLocation`, `AgentControl-NuGetSourceProvider-RejectNonNuGetDefinition`,
@@ -162,7 +163,14 @@ same-version package from another source (`AgentControl-NuGetSourceProvider-Priv
 is a link, so nothing is written outside the private root. It also refuses (`InvalidOperationException`) a
 package whose folder, or any folder between the private cache and it, is a symbolic link or junction, because
 a link there still lies lexically inside the cache while redirecting every read
-(`AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder`). A package with no `content` folder
+(`AgentControl-NuGetSourceProvider-RejectLinkedCacheFolder`). Last, it computes the package's content identity,
+the `sha256:` hash of the single `.nupkg` file the library keeps in the package folder, and hands it to the
+reader (`AgentControl-NuGetSourceProvider-ReportContentIdentity`); a package folder with no `.nupkg`, with more
+than one, or whose package file is a link, is refused (`InvalidOperationException`) because it cannot be said
+which bytes the package is (`AgentControl-NuGetSourceProvider-RefuseUnidentifiablePackage`). The identity describes the
+copy this machine unpacked into its private cache, so a
+machine whose cache holds different bytes for the same version reports a different identity - the warning that is
+wanted. A package with no `content` folder
 is rejected by the reader (`AgentControl-NuGetSourceProvider-RejectPackageWithoutContent`). A signature failure is
 reported as `SignatureRejected` and nothing is returned for the
 package (`AgentControl-NuGetSourceProvider-RequireSigned`,
@@ -201,7 +209,8 @@ content differs, so a changed pin is written into the same root and applies to p
 machine's and any in a parent folder of the root); without the clear, a signer configured elsewhere would widen
 what the source accepts (with a pin) or a list naming only other signers would narrow it (without one). With the
 clear, the source's own description is the only authority
-(`AgentControl-NuGetSourceProvider-GeneratedSignerConfiguration`, `AgentControl-NuGetSourceProvider-SignerTrustIsolated`,
+(`AgentControl-NuGetSourceProvider-GeneratedSignerConfiguration`,
+`AgentControl-NuGetSourceProvider-SignerTrustIsolated`,
 `AgentControl-NuGetSourceProvider-SignerPin`, `AgentControl-NuGetSourceProvider-ChangedPinAppliesToCachedPackages`).
 A source
 that does not require signatures gets neither the section nor the signature requirement

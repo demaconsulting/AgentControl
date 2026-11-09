@@ -815,17 +815,20 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that SelectPackageCommand cannot execute when a pin already exists.
+    ///     Test that SelectPackageCommand can execute when a pin already exists: it is the card
+    ///     menu's "Change package...".
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CannotExecute()
+    public void RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CanExecuteAsChangePackage()
     {
         // Arrange: an already-pinned card
         var repoRoot = CreateTempDirectory();
         var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", new AppSettings());
 
         // Act / Assert
-        Assert.False(card.SelectPackageCommand.CanExecute(null));
+        Assert.True(card.SelectPackageCommand.CanExecute(null));
+        Assert.True(card.HasPinnedPackage);
+        Assert.True(card.HasAgentFileActions);
     }
 
     /// <summary>

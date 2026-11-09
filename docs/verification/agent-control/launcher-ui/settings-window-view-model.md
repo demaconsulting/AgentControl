@@ -7,8 +7,11 @@
 view-model class directly against real `AppSettings` values and an injected folder-exists check
 (so no real folders are needed and a check can be made slow or failing on purpose). The server-source
 behavior is in `SettingsWindowServerSourceTests.cs`, which also drives the headless Settings and editor
-windows; the provider factory that the editor's connection test uses is replaced by a fake there. The window
-is exercised by the headless Avalonia tests in `DialogWindowTests.cs` and, end to end with the
+windows; the provider factory that the editor's connection test uses is replaced by a fake there. The Git-source
+behavior (the Add menu's fourth item, the row of a Git source, the removal warning and the refusal of unusable Git
+settings) is in `SettingsWindowGitSourceTests.cs`, with a folder check that records what it is asked so a remote
+repository can be shown never to be asked about. The window is exercised by the headless Avalonia tests in
+`DialogWindowTests.cs` and, end to end with the
 editor dialogs, by the FlaUI tests.
 
 #### Test Environment
@@ -32,6 +35,10 @@ N/A - standard test environment.
   that cannot be examined shows as missing and pending checks are abandoned on dispose; a server source is
   shown as "Not checked" without any check.
 - A NuGet server source can be added and edited through the server editor.
+- A Git repository source can be added through the Git editor, is listed with the Git icon and kind name, as "Not
+  checked" (without any folder check) when its address is remote and with its folder status when it is a local path, is
+  saved with its address, tag pattern, folder and package name, and a Git source with unusable settings is refused on
+  save with a message.
 - Add, edit and remove change the list as documented, and a removal's warning names the repos
   pinned to the source.
 - A new source's alias must differ from every configured alias, ignoring case.
@@ -96,6 +103,34 @@ tested by
 `SettingsWindowViewModel_AddNuGetFolderSource_EditorSaved_KeepsPackageIds` and
 `SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor`, covering
 `AgentControl-SettingsWindowViewModel-AddSource`.
+
+**SettingsWindowViewModel_AddGitSource_RequestsTheGitEditorAndListsTheSourceAsNotChecked**: The Git add command
+requests an editor in Git mode for a new source (titled "Add Git Repository"); saving that editor with an https address,
+a tag pattern, a folder and a package name lists the source with the Git icon and the kind name "Git repository", as
+"Not checked" - the folder check is never asked about it - and saving the settings passes the source to the owner with
+its address, tag pattern, folder and package name; a Git source on a local path gets the folder status instead (found
+or not found). Removing a Git source warns, like any source, by name and by how many repos are pinned to it, and
+saving settings that hold a Git source whose tag pattern has no version placeholder, whose address embeds a credential,
+whose folder inside the repository leaves the repository or whose package name has characters a name may not have (as
+a hand-edited settings file could) is refused, one test per field: the owner's callback is not invoked, the window does
+not report saved and the explanation is shown, without repeating the address, the folder or the name that was
+rejected.
+This scenario is tested by
+`SettingsWindowViewModel_AddGitSourceCommand_RequestsGitEditor`,
+`SettingsWindowViewModel_SaveGitSource_ListsItAsNotCheckedAndPersistsIt`,
+`SettingsWindowViewModel_SaveGitSource_PersistsAddressPatternFolderAndPackageName`,
+`SettingsWindowViewModel_GitSourceWithLocalPath_ShowsFolderStatus`,
+`SettingsWindowViewModel_RemoveGitSource_WarnsAboutPinnedRepos`,
+`SettingsWindowViewModel_Save_GitSourceWithBadTagPattern_IsRefusedWithErrorMessage`,
+`SettingsWindowViewModel_Save_GitSourceWithBadAddress_IsRefusedWithErrorMessage`,
+`SettingsWindowViewModel_Save_GitSourceWithBadSubfolder_IsRefusedWithErrorMessage` and
+`SettingsWindowViewModel_Save_GitSourceWithBadPackageName_IsRefusedWithErrorMessage`, covering
+`AgentControl-SettingsWindowViewModel-AddGitSourceMenu`, `-GitSourceRowStatus`, `-GitSourceLocalFolderStatus`,
+`-GitSourcePersisted`, `-RefuseInvalidGitSource` (tag pattern), `-RefuseInvalidGitAddress`,
+`-RefuseInvalidGitSubfolder`, `-RefuseInvalidGitPackageName` and, for the
+removal warning, `-RemoveSource` (each prefixed `AgentControl-SettingsWindowViewModel`). The window's menu item for
+Git (the fourth item, with the Git icon) is shown by `SettingsWindow_AddGitSourceButton_IsInTheAddMenuAndOpensGitEditor`
+in the same test file, cited by the `LauncherUI` subsystem requirement `AgentControl-LauncherUI-AddSourceMenu`.
 
 **SettingsWindowViewModel_EditSource_ReplacesTheSourceInPlace**: An edit replaces the source in place keeping its
 alias, and editing a listed server opens the server editor whose connection test goes through the supplied provider

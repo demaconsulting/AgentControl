@@ -74,6 +74,18 @@ path.
   without creating or changing any file and without repeating the location in the message
   (`AgentControl-SettingsStore-NoSecretsPersisted`).
 
+**Git sources**: A Git source is saved and loaded like any other source, as one entry of `Sources` with these fields:
+`Type` (written by name, `Git`), `Location` (the repository address), `TagPattern`, an optional `Subfolder` and
+`PackageIds` with **exactly one** package id (the name of the one package the repository delivers). The fields
+round-trip unchanged. The definition of each field and the rules for it belong to `PackageSourceDefinition` (see the
+*AgentPackageManagement* design, *Source model*). `Save` refuses a source whose address embeds a credential (the
+type-aware `GetCredentialProblem`: user information on an https address, a password in an ssh address, a query or
+fragment; an ssh user name is allowed) before anything is written, with a message that does not repeat the address
+(`AgentControl-SettingsStore-GitSourceRoundTrip`). `Load` reads the fields as they are: it neither repairs nor rejects
+a Git source, so a hand-edited source with, for example, two package ids is loaded unchanged and is stopped later,
+where the user edits it (the source editor and the Settings window validate every field before a save) and when a
+provider is created for it.
+
 #### Error Handling
 
 `Load` throws `InvalidOperationException` when the settings file exists but cannot be read or

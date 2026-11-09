@@ -45,7 +45,7 @@ internal static class Program
         REAL INPUT  key <chord> [--to <id>] | hover <id> [--wait <ms>] [--shot <path.png>]
                     click-at <x> <y> [--right] [--double] [--shift|--ctrl] | drag-element <id> <dx> <dy>
                     wheel <notches> [--ctrl] [--on <id> | --at x,y]    (coordinates are physical screen pixels)
-        SANDBOX     fixture <dir> [--packages zip|nupkg|both] [--repo] [--pin <name>@<version>]
+        SANDBOX     fixture <dir> [--packages zip|nupkg|both|git|all] [--repo] [--pin <name>@<version>]
 
         Exit codes: 0 ok, 1 not found, 2 timeout, 3 not running, 4 launch failed, 5 usage, 6 disabled, 7 no focus,
                     8 no effect, 9 read-only, 10 dialog open, 11 obscured (input refused), 99 error.

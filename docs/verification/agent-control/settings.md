@@ -26,6 +26,9 @@ temporary configuration directory.
 - The default configuration directory resolves under the user's application-data folder.
 - Package sources round-trip with every field, a legacy single package-folder path migrates to a
   `Default` zip source, and no secret-like property is ever persisted.
+- A Git source (address, tag pattern, sub-folder, single package name, type by name) survives a later session next to
+  the other sources, and an address that embeds a credential is refused without repeating it and without changing the
+  saved file.
 - Each theme choice is still chosen in a later session; a missing, unknown or wrongly typed theme value reads as the
   system default without failing the load.
 - A repo's group and card color and the collapsed sections survive sessions, are stored in the settings file and
@@ -85,3 +88,19 @@ what was loaded writes a file that reads back the same and holds no unknown colo
 `AgentControl-SettingsStore-UnknownCardColorIsAutomatic`, and the `AgentControl-RepoGroupName-*` requirements of the
 `RepoGroupName` unit, whose own tests are in its unit verification design). The `SettingsStore` unit tests
 verify each of these rules separately (`SettingsStoreOrganizingTests.cs`).
+
+**Settings_GitSource_SurvivesSessionsAndAddressWithCredentialIsRefusedWithoutChangingTheFile**: Through the subsystem's
+public surface (`SettingsStore.Save` and `SettingsStore.Load` with `AppSettings` and the Git source description of the
+`AgentPackageManagement` subsystem) against a real configuration folder, one session saves a Git source - its address,
+tag pattern, sub-folder and single package name, next to a zip source and another setting - and a later session loads
+it: the Git source comes back whole, in its place in the list, with the type written by name and no secret-like word in
+the file, and the other source and setting are kept; the later session then tries to keep an address that embeds a
+password, which is refused without repeating the secret, and the file the earlier session wrote and the folder's
+contents are unchanged. The Git source description itself - what it holds, that it has exactly one package ID, and the
+rules of the address - is the `AgentPackageManagement` subsystem's (see its design and verification design); the store
+persists what it is given and refuses a credential in the address. This scenario is tested by
+`Settings_GitSource_SurvivesSessionsAndAddressWithCredentialIsRefusedWithoutChangingTheFile` in
+`SettingsSubsystemTests.cs`, covering `AgentControl-Settings-GitSourcePersistence` (children:
+`AgentControl-SettingsStore-GitSourceRoundTrip` and `AgentControl-SettingsStore-GitSourceRefusesCredential`, whose unit
+tests are `SettingsStore_SaveThenLoad_GitSource_RoundTripsByNameWithoutSecretLikeProperties` and
+`SettingsStore_Save_GitSourceAddressWithCredential_IsRefusedWithoutChangingTheFile`).

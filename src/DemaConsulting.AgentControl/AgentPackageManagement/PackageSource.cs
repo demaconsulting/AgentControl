@@ -32,8 +32,12 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 /// <param name="SourceAlias">Alias of the configured source that reported the package, or an empty
 ///     string when the package was found by the alias-agnostic static scan in
 ///     <see cref="PackageSource"/>; source providers always stamp it.</param>
+/// <param name="Revision">The exact revision of the content known when the version was listed,
+///     or <see langword="null"/> when the source has no such notion: for a Git source the commit
+///     the tag pointed to (40 or 64 lower-case hexadecimal digits), which lets a later listing
+///     show that a tag was moved and lets an acquire refuse content that is not that commit.</param>
 internal sealed record DiscoveredPackage(
-    string PackageName, PackageVersion Version, string Location, string SourceAlias = "");
+    string PackageName, PackageVersion Version, string Location, string SourceAlias = "", string? Revision = null);
 
 /// <summary>
 ///     Enumerates agent package zip files at a configured filesystem source path and resolves

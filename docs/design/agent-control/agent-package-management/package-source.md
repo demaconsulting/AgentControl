@@ -16,10 +16,14 @@ verification is performed here.
 function of its parameters plus the filesystem at the moment of the call.
 
 **DiscoveredPackage** (record, same file): `PackageName: string`, `Version: PackageVersion`,
-`Location: string`, `SourceAlias: string = ""` — describes one package version discovered at a
-source. For this static scan `Location` is the zip file path and `SourceAlias` stays empty (the
-scan knows nothing of aliases); `ZipFolderSourceProvider` stamps the alias, and other source
-kinds use `Location` for a provider-defined locator.
+`Location: string`, `SourceAlias: string = ""`, `Revision: string? = null` — describes one package version
+discovered at a source. For this static scan `Location` is the zip file path, `SourceAlias` stays empty (the
+scan knows nothing of aliases) and `Revision` is `null`; `ZipFolderSourceProvider` stamps the alias, and other
+source kinds use `Location` for a provider-defined locator (the version text for a NuGet folder, the tag name for a
+Git source). `Revision` is the exact revision of the content known when the version was listed: `null` for every
+source that has no such notion (the static zip scan, zip folders, NuGet), and for a Git source the commit the tag
+pointed to (40 or 64 lower-case hexadecimal digits). It lets a later listing show that a tag was moved, and lets
+`GitSourceProvider.AcquireAsync` refuse a package that the repository does not list at that commit.
 
 #### Key Methods
 

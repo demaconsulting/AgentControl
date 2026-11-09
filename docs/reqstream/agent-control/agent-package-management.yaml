@@ -434,3 +434,251 @@ sections:
           - AgentControl-NuGetSourceProvider-UnsupportedPlatformDoesNotAffectOpenSources
         tests:
           - AgentPackageManagementSubsystem_RequireSignedOnUnsupportedPlatform_SourceRefusesAndOthersWork
+
+      - id: AgentControl-AgentPackageManagement-ContentIdentity
+        title: >-
+          The AgentPackageManagement subsystem shall give every package a zip folder or a NuGet
+          source supplies a content identity that names exactly the bytes of the package file it
+          delivered, so that a package version republished with different content is told apart
+          from the copy that was recorded.
+        justification: |
+          Nothing in a folder of zip files or a NuGet feed keeps a published version unchanged;
+          the identity is the evidence a repo's pin needs to notice that the content behind a
+          version number is no longer what was applied. Both source types are covered because
+          either can be republished in place. For a NuGet package the identity describes the copy
+          held on this machine, so a republish of a version already held is not noticed until the
+          copy is cleared.
+        children:
+          - AgentControl-PackageContentIdentity-Sha256
+          - AgentControl-PackageContentIdentity-Sha256StreamOpen
+          - AgentControl-PackageContentIdentity-Sha256RejectNull
+          - AgentControl-ZipFolderSourceProvider-ReportContentIdentity
+          - AgentControl-NuGetSourceProvider-ReportContentIdentity
+          - AgentControl-NuGetSourceProvider-RefuseUnidentifiablePackage
+        tests:
+          - AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip
+
+      - id: AgentControl-AgentPackageManagement-ContentIdentityComparable
+        title: >-
+          The AgentPackageManagement subsystem shall express a content identity in a form that
+          can be recorded and later compared, and shall tell whether two identities describe the
+          same content, changed content, or cannot be compared.
+        justification: |
+          The identity is only useful if what was recorded can be compared with what a source
+          delivers now, whichever kind of source produced either, and an identity of another
+          kind or a damaged one must never be mistaken for a change.
+        children:
+          - AgentControl-PackageContentIdentity-Format
+          - AgentControl-PackageContentIdentity-FormatRejectMalformed
+          - AgentControl-PackageContentIdentity-Describe
+          - AgentControl-PackageContentIdentity-DescribeNone
+          - AgentControl-PackageContentIdentity-Compare
+          - AgentControl-PackageContentIdentity-CompareSame
+          - AgentControl-PackageContentIdentity-CompareChanged
+          - AgentControl-PackageContentIdentity-CompareDifferentKinds
+        tests:
+          - AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip
+          - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag
+
+      - id: AgentControl-AgentPackageManagement-GitSourceDefinition
+        title: >-
+          The AgentPackageManagement subsystem shall describe a Git source by its repository
+          address, a tag pattern, an optional sub-folder of the repository and exactly one package
+          ID, persisting the type of the source by name.
+        justification: |
+          A Git source is persisted in the settings file and later handed to git, so the same
+          description must read back unchanged wherever it is used.
+        children:
+          - AgentControl-PackageSourceRegistry-GitSourceResolved
+        tests:
+          - AgentPackageManagementSubsystem_GitSourceDefinition_IsPersistedByNameAndReadBackEquivalent
+
+      - id: AgentControl-AgentPackageManagement-GitSourceSettingsChecked
+        title: >-
+          The AgentPackageManagement subsystem shall check the settings of a Git source as a whole
+          (address, tag pattern, sub-folder and package ID), the sub-folder as a relative path of
+          folder names that cannot leave the repository, and shall refuse a source whose settings
+          are invalid when it is resolved, without repeating the address in a message.
+        justification: |
+          Every rule that keeps a pattern, a path or a package name from being dangerous must hold
+          wherever the description is used, including a settings file edited by hand.
+        children:
+          - AgentControl-GitSourceProvider-ValidateDefinition
+          - AgentControl-GitSourceProvider-ValidateDefinitionMessageNeverRepeatsAddress
+          - AgentControl-GitSourceProvider-RejectBadSubfolder
+          - AgentControl-GitTagPattern-RequireSinglePlaceholder
+          - AgentControl-GitTagPattern-RejectInvalidRefNames
+          - AgentControl-PackageSourceRegistry-GitSourceInvalidFailsWhenResolved
+        tests:
+          - AgentPackageManagementSubsystem_GitSourceDefinition_SettingsAreCheckedAsAWholeAndInvalidSourceIsRefusedWhenResolved
+
+      - id: AgentControl-AgentPackageManagement-GitSourceAddressRules
+        title: >-
+          The AgentPackageManagement subsystem shall judge the address of a Git source by the rules
+          of Git addresses - accepting https, ssh, user@host:path and local path forms, allowing an
+          ssh user name but never a password, token or query string, and refusing other transports,
+          remote-helper forms and option-like text - without repeating the address in a message.
+        justification: |
+          An address is untrusted text (a settings file can be edited by hand) that ends up on a git
+          command line, and a secret in it would be stored in the settings file.
+        children:
+          - AgentControl-GitRepositoryAddress-AcceptHttps
+          - AgentControl-GitRepositoryAddress-AcceptSsh
+          - AgentControl-GitRepositoryAddress-AcceptScpLikeSsh
+          - AgentControl-GitRepositoryAddress-AcceptLocalPath
+          - AgentControl-GitRepositoryAddress-RejectEmbeddedCredentials
+          - AgentControl-GitRepositoryAddress-RecognizeEmbeddedCredentials
+          - AgentControl-GitRepositoryAddress-RejectDangerousTransports
+          - AgentControl-GitRepositoryAddress-RejectOptionLikeValues
+          - AgentControl-GitRepositoryAddress-RejectControlCharacters
+          - AgentControl-GitRepositoryAddress-RejectMalformedParts
+          - AgentControl-GitRepositoryAddress-RejectTooLong
+          - AgentControl-GitRepositoryAddress-CacheKeyFormat
+          - AgentControl-GitRepositoryAddress-CacheKeyStable
+          - AgentControl-GitRepositoryAddress-CacheKeyDistinguishesRepositories
+          - AgentControl-GitRepositoryAddress-NeverEchoesInput
+        tests:
+          - AgentPackageManagementSubsystem_GitSourceAddress_FollowsTheRulesOfGitAddresses
+
+      - id: AgentControl-AgentPackageManagement-GitSource
+        title: >-
+          The AgentPackageManagement subsystem shall offer the tags of a Git repository that match
+          a configured pattern as the versions of one package, listed without cloning, and shall
+          say of each version which commit its tag points to.
+        justification: |
+          Many organizations keep agent packages in a Git repository and tag releases; reading them
+          directly spares a build and publishing step.
+        children:
+          - AgentControl-GitTagPattern-ExtractStrictVersion
+          - AgentControl-GitTagPattern-FormatTag
+          - AgentControl-GitTagPattern-FormatRefusesUnsafeTag
+          - AgentControl-GitTagPattern-ListingPrefix
+          - AgentControl-GitTagPattern-VetServerTagNames
+          - AgentControl-GitSourceProvider-ListPackageId
+          - AgentControl-GitSourceProvider-ListVersionsNoVersionsForOtherPackage
+          - AgentControl-GitSourceProvider-ListVersionsByPattern
+          - AgentControl-GitSourceProvider-ListVersionsWithoutClone
+          - AgentControl-GitSourceProvider-ListVersionsOnlyOverAddressTransport
+          - AgentControl-GitSourceProvider-ListVersionsEmptyWhenNoMatch
+          - AgentControl-GitSourceProvider-ListVersionsDuplicateVersionKeepsSmallestTag
+          - AgentControl-GitSourceProvider-ResolveAnnotatedTags
+          - AgentControl-GitSourceProvider-TagPreview
+        tests:
+          # Subsystem test with a real local repository: the registry, the version cache and the
+          # provider together list tag versions with their commits.
+          - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag
+
+      - id: AgentControl-AgentPackageManagement-GitSourceAcquire
+        title: >-
+          The AgentPackageManagement subsystem shall supply the package layout of a listed version
+          of a Git source from the tag of that version, with the exact bytes of its files, reusing
+          a copy already supplied for the same commit and refusing a tag that holds no package
+          layout, while keeping each copy intact for as long as a caller still reads it.
+        justification: |
+          Applying a package must deliver what the tag holds, and nothing else, without fetching it
+          again each time; a repository without a package must not be mistaken for an empty one; a
+          cache that is pruned under a reader would not deliver what the tag holds.
+        children:
+          - AgentControl-GitSourceProvider-AcquireOnlyFromOwnSource
+          - AgentControl-GitSourceProvider-AcquireRequiresTagAndCommit
+          - AgentControl-GitSourceProvider-AcquireOnlyListedVersions
+          - AgentControl-GitSourceProvider-AcquireShallowTag
+          - AgentControl-GitSourceProvider-AcquireOnlyLayout
+          - AgentControl-GitSourceProvider-AcquireExactBlobBytes
+          - AgentControl-GitSourceProvider-Subfolder
+          - AgentControl-GitSourceProvider-RejectTagWithoutLayout
+          - AgentControl-GitSourceProvider-ExcludeGitFolder
+          - AgentControl-GitSourceProvider-RejectGitEntryInLayout
+          - AgentControl-GitSourceProvider-FailClosedWhenGitFolderRemains
+          - AgentControl-GitSourceProvider-LeftoverTemporaryFolderNeverUsed
+          - AgentControl-GitSourceProvider-CacheByAddressAndCommit
+          - AgentControl-GitSourceProvider-CacheSeparatesRepositories
+          - AgentControl-GitSourceProvider-CacheTrustsOnlyCompleteFolders
+          - AgentControl-GitSourceProvider-CacheSweepsTemporaryFolders
+          - AgentControl-GitSourceProvider-CachePruning
+          - AgentControl-GitSourceProvider-CachePruningSparesOpenReaders
+          - AgentControl-GitSourceProvider-CacheReleasesCommitWhenReaderDisposed
+        tests:
+          - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag
+          - AgentPackageManagementSubsystem_GitSource_HostileLayoutIsRefusedAndNothingIsCached
+
+      - id: AgentControl-AgentPackageManagement-GitSourceContentIdentity
+        title: >-
+          The AgentPackageManagement subsystem shall name the commit of a Git version's tag as the
+          content identity of the package it supplies, and shall show a moved tag as another commit
+          for the same version, so that a moved tag can be noticed.
+        justification: |
+          A tag is mutable; the commit it pointed to when the package was applied is the identity
+          that cannot change unless the tag is moved.
+        children:
+          - AgentControl-GitSourceProvider-ReportContentIdentity
+          - AgentControl-GitSourceProvider-TagMovedBetweenListAndFetch
+          - AgentControl-GitSourceProvider-MovedTagReportedAsNewRevision
+          - AgentControl-PackageVersionCache-ReportPinnedListing
+        tests:
+          - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag
+
+      - id: AgentControl-AgentPackageManagement-GitSourceNoRepositoryCode
+        title: >-
+          The AgentPackageManagement subsystem shall never run code that the user's git
+          configuration or the repository would run for a Git source (hooks, filter programs)
+          while it lists or fetches a package.
+        justification: |
+          A repository, and the server that hosts it, are not trusted; fetching a package must not
+          let whoever controls them run programs on the machine.
+        children:
+          - AgentControl-GitSourceProvider-HostileHooksNeverRun
+          - AgentControl-GitSourceProvider-NoRepositoryFilters
+        tests:
+          - AgentPackageManagementSubsystem_GitSource_HooksOfTheUsersConfigurationNeverRun
+
+      - id: AgentControl-AgentPackageManagement-GitSourceLayoutSafety
+        title: >-
+          The AgentPackageManagement subsystem shall refuse a package from a Git source whose
+          layout holds a link, a submodule, an entry of the wrong kind, an unsafe name or names
+          that would collide on a case-insensitive file system, leaving nothing of it in the
+          cache, and shall ignore links that are not part of the layout.
+        justification: |
+          A link could redirect a write or a read to any file on the machine, and colliding names
+          would make the delivered files depend on the machine's file system.
+        children:
+          - AgentControl-GitSourceProvider-RejectLinksAndSubmodulesInLayout
+          - AgentControl-GitSourceProvider-IgnoreLinksOutsideLayout
+          - AgentControl-GitSourceProvider-RejectLayoutEntryOfWrongKind
+          - AgentControl-GitSourceProvider-RejectUnsafeEntryNames
+          - AgentControl-GitSourceProvider-RejectFoldedPathCollisions
+        tests:
+          - AgentPackageManagementSubsystem_GitSource_HostileLayoutIsRefusedAndNothingIsCached
+
+      - id: AgentControl-AgentPackageManagement-GitSourceSignIn
+        title: >-
+          The AgentPackageManagement subsystem shall let git show its sign-in only for work the
+          user started, and shall run work it started itself so that git can never prompt.
+        justification: |
+          A sign-in window that opens by itself, or a background check that waits for input, would
+          be a defect; the source must pass on who started the work.
+        children:
+          - AgentControl-GitSourceProvider-InteractiveFlagHonored
+        tests:
+          - AgentPackageManagementSubsystem_GitSource_OnlyUserStartedWorkMayPrompt
+
+      - id: AgentControl-AgentPackageManagement-GitSourceFailureReporting
+        title: >-
+          The AgentPackageManagement subsystem shall report why a Git source cannot be used in a
+          failure the caller can act on (not found, unreachable, sign-in needed, host key, timed
+          out, git missing, git too old, cancelled), without repeating the address or git's own
+          text.
+        justification: |
+          The user can only fix a source if told what is wrong, and git's text commonly repeats an
+          address or a path that must not reach messages and logs.
+        children:
+          - AgentControl-GitSourceProvider-FailureClassification
+          - AgentControl-GitSourceProvider-UntrustedHostKeyHint
+          - AgentControl-GitSourceProvider-FailureMessagesNeverRepeatGitOutput
+          - AgentControl-GitSourceProvider-CancellationObserved
+          - AgentControl-GitSourceProvider-MinimumGitVersion
+          - AgentControl-GitSourceProvider-GitTooOldReportedUnwrapped
+          - AgentControl-GitSourceProvider-MinimumGitVersionCheckedOnce
+        tests:
+          - AgentPackageManagementSubsystem_GitSource_FailuresAreClassifiedAndNeverRepeatTheAddress
+          - AgentPackageManagementSubsystem_GitSource_TooOldGitIsRefusedWithAdviceBeforeAnyTagIsListed

@@ -35,13 +35,13 @@
                         VerticalAlignment="Center" />
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
                 <!-- One Add button opens a menu of the source types that can be added. To offer
-                     another type (for example a Git repository), add one more MenuItem below:
+                     another type, add one more MenuItem below:
                      nothing else about the layout changes. Each item shows its type's icon (the
                      same icon the sources list uses) and a one-line description. -->
                 <Button Name="AddSourceButton"
                          AutomationProperties.AutomationId="AddSourceButton"
                          Classes="actionButton primary"
-                         ToolTip.Tip="Add a package source: a zip-package folder, a NuGet-package folder or a NuGet-package server">
+                         ToolTip.Tip="Add a package source: a zip-package folder, a NuGet-package folder, a NuGet-package server or a Git repository">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <materialIcons:MaterialIcon Kind="Plus" Width="16" Height="16" />
                         <TextBlock Text="Add" VerticalAlignment="Center" />
@@ -91,6 +91,20 @@
                                     </StackPanel>
                                 </MenuItem.Header>
                             </MenuItem>
+                            <MenuItem Name="AddGitSourceButton"
+                                       AutomationProperties.AutomationId="AddGitSourceButton"
+                                       Command="{Binding AddGitSourceCommand}"
+                                       ToolTip.Tip="Add a Git repository whose tags are agent package versions">
+                                <MenuItem.Icon>
+                                    <materialIcons:MaterialIcon Kind="Git" Width="20" Height="20" />
+                                </MenuItem.Icon>
+                                <MenuItem.Header>
+                                    <StackPanel MinWidth="290" Margin="0,4">
+                                        <TextBlock Text="Git repository" FontWeight="SemiBold" />
+                                        <TextBlock Text="Packages are tags of a Git repository" FontSize="12" Opacity="0.7" />
+                                    </StackPanel>
+                                </MenuItem.Header>
+                            </MenuItem>
                         </MenuFlyout>
                     </Button.Flyout>
                 </Button>
@@ -124,7 +138,7 @@
                 <TextBlock Name="SourcesEmptyText"
                             AutomationProperties.AutomationId="SourcesEmptyText"
                             IsVisible="{Binding HasNoSources}"
-                            Text="No package sources yet. Use Add (above) to add a zip-package folder, a NuGet-package folder or a NuGet-package server."
+                            Text="No package sources yet. Use Add (above) to add a zip-package folder, a NuGet-package folder, a NuGet-package server or a Git repository."
                             TextWrapping="Wrap" TextAlignment="Center"
                             Opacity="0.65" MaxWidth="360"
                             HorizontalAlignment="Center" VerticalAlignment="Center" />

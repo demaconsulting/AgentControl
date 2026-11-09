@@ -138,7 +138,7 @@ internal sealed class PackageSourceRegistry
     }
 
     /// <summary>
-    ///     Creates a registry whose providers are the built-in zip-folder and NuGet providers.
+    ///     Creates a registry whose providers are the built-in zip-folder, NuGet and Git providers.
     /// </summary>
     /// <param name="definitions">The configured sources.</param>
     /// <param name="nugetRootBase">Folder under which NuGet sources keep their private caches, or
@@ -148,6 +148,9 @@ internal sealed class PackageSourceRegistry
     ///     or <see langword="null"/> when they have none (a server source then only uses what
     ///     NuGet itself supplies). Pass a context without a prompt for work that must not open a
     ///     dialog.</param>
+    /// <param name="git">How Git sources run git and where they cache what they fetch, including
+    ///     whether the work was started by the user (<see cref="GitSourceOptions.Interactive"/>),
+    ///     or <see langword="null"/> for <see cref="GitSourceOptions.Default"/>.</param>
     /// <returns>The registry.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="definitions"/> is
     ///     <see langword="null"/>.</exception>
@@ -155,11 +158,13 @@ internal sealed class PackageSourceRegistry
     public static PackageSourceRegistry Create(
         IEnumerable<PackageSourceDefinition> definitions,
         string? nugetRootBase = null,
-        PackageCredentialContext? credentials = null) =>
+        PackageCredentialContext? credentials = null,
+        GitSourceOptions? git = null) =>
         new(definitions, definition => definition.Type switch
         {
             PackageSourceType.Zip => new ZipFolderSourceProvider(definition),
             PackageSourceType.NuGet => new NuGetSourceProvider(definition, nugetRootBase, credentials),
+            PackageSourceType.Git => new GitSourceProvider(definition, git ?? GitSourceOptions.Default),
             _ => throw new InvalidOperationException(
                 $"Package source '{definition.Alias}' has an unsupported type '{definition.Type}'.")
         });

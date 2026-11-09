@@ -8,31 +8,43 @@ The `AgentPackageManagement` subsystem models the agent package sources a user h
 and discovers what each one offers. It spans `PackageSource.cs` (discovers packages/versions at
 a zip source folder), `PackageVersion.cs` (parses/compares version strings),
 `PackageVersionCache.cs` (caches per-source results), the source providers behind the
-`IPackageSourceProvider` contract (`ZipFolderSourceProvider.cs`, `NuGetSourceProvider.cs`) and
+`IPackageSourceProvider` contract (`ZipFolderSourceProvider.cs`, `NuGetSourceProvider.cs`, `GitSourceProvider.cs`) and
 `PackageSourceRegistry.cs` (resolves a source alias to its provider) and
-`SignatureVerificationSupport.cs` (tells whether the platform can verify package signatures). It provides the
+`SignatureVerificationSupport.cs` (tells whether the platform can verify package signatures), with
+`PackageContentIdentity.cs`, `GitRepositoryAddress.cs` and `GitTagPattern.cs` supporting them. It provides the
 package-discovery (`AgentControl-AgentPackageManagement-DiscoverPackages`) and
 version-comparison/upgrade-detection behavior
 (`AgentControl-AgentPackageManagement-UpgradeDetection`) shared by the rest of the application:
 `LauncherUI` uses it to populate the package-selection window and compute the upgrade-available
 badge. It also provides the package-authenticity behavior
 (`AgentControl-AgentPackageManagement-SignedPackages`, `AgentControl-AgentPackageManagement-SignaturePlatformSupport`,
-which support `AgentControl-System-PackageAuthenticity`). The subsystem contains seven units: `PackageSource`,
+which support `AgentControl-System-PackageAuthenticity`). It also provides the content identity of a
+delivered package (`AgentControl-AgentPackageManagement-ContentIdentity` and `-ContentIdentityComparable`, which support
+`AgentControl-System-PackageContentIntegrity`). It also provides the Git repository source - the tags of a repository
+that match a pattern as the versions of one package, fetched shallow into a cache keyed by repository and commit
+(`AgentControl-AgentPackageManagement-GitSource`, `-GitSourceDefinition`, `-GitSourceSettingsChecked`,
+`-GitSourceAddressRules`, `-GitSourceAcquire`, `-GitSourceContentIdentity`, `-GitSourceNoRepositoryCode`,
+`-GitSourceLayoutSafety`, `-GitSourceSignIn` and `-GitSourceFailureReporting`, which support
+`AgentControl-System-GitSources`, `AgentControl-System-GitSourceSafety` and the other Git system requirements). The
+subsystem contains eleven units: `PackageSource`,
 `PackageVersion`, `PackageVersionCache`, `PackageSourceRegistry`, `ZipFolderSourceProvider`,
-`NuGetSourceProvider` and `SignatureVerificationSupport`. The supporting types `PackageSourceDefinition`,
+`NuGetSourceProvider`, `SignatureVerificationSupport`, `PackageContentIdentity`, `GitSourceProvider`,
+`GitRepositoryAddress` and `GitTagPattern`. The supporting types  `PackageSourceDefinition`,
 `PackageSourceType`,
 `PackageReference`, `IPackageSourceProvider`, `PackageSourceAccessException` (with its
 `PackageSourceFailureKind`) and the `DiscoveredPackage` record have no dedicated
 unit documents and are folded into this subsystem-level description. The subsystem depends on the
 `PackageCredentials` subsystem (session credentials and the sign-in prompt, consumed by
-`NuGetSourceProvider`) and on the *NuGetCaching* OTS item.
+`NuGetSourceProvider`), on the `GitIntegration` subsystem (`GitRemoteClient`, which runs every git command of
+`GitSourceProvider`), on `RepoSync` (the layout reader and the single list of layout paths) and on the *NuGetCaching*
+OTS item.
 
 ### Interfaces
 
 **IPackageSourceProvider**: The contract every kind of package source implements.
 
 - *Type*: In-process .NET interface.
-- *Role*: Provider (implemented by `ZipFolderSourceProvider` and `NuGetSourceProvider`;
+- *Role*: Provider (implemented by `ZipFolderSourceProvider`, `NuGetSourceProvider` and `GitSourceProvider`;
   consumed through `PackageSourceRegistry` and `PackageVersionCache`).
 - *Contract*: Asynchronous, cancellable operations to list a source's package IDs, list one
   package's versions (each stamped with the source alias), and make one discovered package's
@@ -46,6 +58,10 @@ unit documents and are folded into this subsystem-level description. The subsyst
   caller react
   (the connection test, the Select Package window, the card's background check) and whose message never
   contains a secret or more of the server's address than its scheme, host and port.
+- *Content identity.* The reader that `AcquireAsync` returns reports a `ContentIdentity` (see *Content identity*
+  below) in the form of its source: `sha256:{hex}` (the SHA-256 of the zip or `.nupkg` file) for a zip folder or
+  NuGet source and `git-commit:{hex}` (the commit a tag pointed to) for a Git source; identities of different forms
+  never compare as the same content. `null` means the provider cannot name one, which is never a change.
 
 **SignatureVerificationSupport.IsSupported**: Tells whether package signatures can be verified here.
 
@@ -120,19 +136,39 @@ plus **PackageVersionCache.Invalidate**.
 ### Design
 
 **Source model.** A configured source is a `PackageSourceDefinition`: a unique case-insensitive
-`Alias`, a `Type` (`Zip` or `NuGet`, persisted by name), a `Location`, the `PackageIds` a NuGet
-source offers, and the trust options `AllowInsecureHttp`, `RequireSignedPackages` and
-`SignerFingerprint`. Whether a location is a folder or a server is derived from the location text
+`Alias`, a `Type` (`Zip`, `NuGet` or `Git`), a `Location`, the `PackageIds` a NuGet
+source offers, the Git-only `TagPattern` and `Subfolder`, and the trust options
+`AllowInsecureHttp`, `RequireSignedPackages` and
+`SignerFingerprint`. The `Type` is persisted by member name, so the settings file stays readable and stable if
+members are ever reordered (`AgentControl-AgentPackageManagement-SourceDefinitions`); the name of the Git member is
+`Git`. A source of each type is described as follows (`AgentControl-AgentPackageManagement-GitSourceDefinition`):
+
+- *Zip*: `Location` is a folder holding `{name}-{version}.zip` files; `PackageIds` is unused, the packages are
+  discovered from the folder.
+- *NuGet*: `Location` is a feed folder (local, mapped drive or UNC) or the V3 service index address of a server;
+  `PackageIds` names the packages of interest.
+- *Git*: `Location` is the repository address (an `https` or `ssh` address or a local path, never carrying a
+  credential); `TagPattern` is the pattern whose `{version}` part turns a tag into a version (for example
+  `v{version}`; see `GitTagPattern`); `Subfolder` is the optional folder of the repository that holds the package
+  layout, with `/` separators relative to the repository root, empty for the top; `PackageIds` has **exactly one**
+  entry, the name of the one package the repository delivers, chosen by the user, so the cache keys, the package list
+  and the pin keep their existing meaning. A definition that breaks any of these rules is refused by
+  `GetGitSettingsProblem` (without repeating the address, pattern or sub-folder), by the settings and editor dialogs
+  before it is saved, and by `GitSourceProvider` before any git runs.
+
+`TagPattern` and `Subfolder` are ignored by the other source types. Whether a location is a folder or a server is
+derived from the location text
 (an absolute `http`/`https` URI is a server; anything else is a folder) rather than persisted, so
 the two can never disagree. The definition deliberately has no password, token or other secret
 member, and a test guards that property; credentials are obtained from the user (or from NuGet's
 own configuration) when needed and never persisted. `GetCredentialProblem` flags a location that embeds a
-credential (URL user information, or a server URL with a query string or fragment) so the settings save
+credential (URL user information, or a server URL with a query string or fragment; for a Git source, the type-aware
+address check of `GitRepositoryAddress`) so the settings save
 paths can refuse it without repeating it in any message, and `GetServerLocationProblem` judges a server
 address: an absolute `https` address (`http` only when `AllowInsecureHttp` is set, which is enforced) of a V3
 service index, so ending in `index.json`, with no credential - NuGet treats an address that does not end in
 `.json` as the older V2 protocol, which AgentControl does not rely on
-(`AgentControl-AgentPackageManagement-SourceDefinitions`, `AgentControl-AgentPackageManagement-SourceLocationKind`,
+(`AgentControl-AgentPackageManagement-SourceLocationKind`,
 `AgentControl-AgentPackageManagement-SourceNoSecrets`,
 `AgentControl-AgentPackageManagement-SourceCredentialBearingLocation`,
 `AgentControl-AgentPackageManagement-SourceServerAddress`). `RequireSignedPackages` and `SignerFingerprint`
@@ -146,7 +182,11 @@ signer (`AgentControl-AgentPackageManagement-SourceFingerprintNormalization`,
 `PackageReference` is the identity a repo pin records: source alias, package ID and the exact
 version text — a package ID is never unique across sources, so a package is only ever identified
 together with its source. `DiscoveredPackage` is a package version found at a source, carrying
-its alias and a provider-defined location.
+its alias, a provider-defined location (the tag name for a Git source) and an optional `Revision`: the
+revision of the content known when the version was listed (the commit of a Git tag), which lets a later listing show
+that a tag was moved and lets an acquisition refuse content that is not that commit. `PackageVersionCache`
+passes the listing entry of the pinned version on in `UpgradeCheck.Pinned` so a caller can compare revisions without
+another call (`AgentControl-PackageVersionCache-ReportPinnedListing`).
 
 **Providers.** `ZipFolderSourceProvider` adapts the unchanged static `PackageSource` scan to the
 provider contract (`AgentControl-AgentPackageManagement-ZipFolderSource`); it reports an unusable folder as
@@ -169,6 +209,74 @@ failure to a `PackageSourceAccessException` with a secret-free message
 `AgentControl-AgentPackageManagement-NuGetServerSecretSafety`). Listing a server's versions never downloads a
 package. Both hand a package's content to the
 `RepoSync` subsystem as an `IPackageContentReader`.
+
+**Content identity.** Nothing in a folder of zip files or a NuGet feed keeps a published version unchanged, so
+every package a zip or NuGet source delivers carries a *content identity*: `sha256:` followed by the lower-case
+hexadecimal SHA-256 of the package file (`AgentControl-AgentPackageManagement-ContentIdentity`). The decisions:
+
+- *Which bytes.* For a zip source, the zip file itself, hashed by `ZipPackageContentReader` from the one open handle
+  its entries are then read from, so the identity describes exactly the bytes that are extracted. For a NuGet
+  source, the single `.nupkg` file in the package's folder of the source's private cache, which is the copy this
+  machine unpacked (a machine whose cache holds other bytes for the same version reports a different identity,
+  which is the warning that is wanted); a folder with none or several, or a package file that is a link, is
+  refused rather than recorded under a guessed hash.
+- *Why not the unpacked files.* The package file is one stable thing to hash on every platform; hashing a tree
+  would depend on file order, attributes and line endings.
+- *The comparison.* `PackageContentIdentity.Compare(pinned, actual)` answers *not comparable* when either side is
+  missing, *same*, or *changed*; callers (the repo card) decide what to do. A missing identity is never a change,
+  so pins made before identities were recorded, and sources that report none, cause no warning.
+- *Git.* `PackageContentIdentity.FromGitCommit` formats `git-commit:` plus the commit a tag pointed to, which
+  `GitSourceProvider` reports as the identity of what it delivered; the comparison treats identities of different
+  kinds as different.
+- *Not a signature.* The identity detects a republished or altered package; it does not prove who published it
+  (see *Package authenticity* for that).
+
+**Git repository source.** `GitSourceProvider` (with `GitRepositoryAddress` and `GitTagPattern`, over the hardened
+`GitRemoteClient` of the `GitIntegration` subsystem) makes one configured repository one package. The decisions:
+
+- *One source, one package.* The package ID is the single entry of `PackageIds`, so the cache keys, the package list
+  and the pin keep their existing meaning; the user picks the name.
+- *Tags are versions.* The tags that match the tag pattern (a literal prefix and suffix around `{version}`, strict
+  semantic versions only) are listed with one remote query, no clone. The commit of a tag is the version's
+  `Revision`; an annotated tag is peeled to its commit because the tag object changes whenever a tag is re-created.
+- *Nothing from the repository runs.* The temporary repository is created from an empty template, hooks are disabled,
+  submodules and filters are off and only the transport of the configured address is allowed - all enforced by
+  `GitRemoteClient` per command. The user's own credential helper and ssh keys supply the sign-in; AgentControl
+  stores none and the address may not contain one.
+- *Only the layout is read.* The tree of the fetched commit is examined *before* anything is written: a symbolic
+  link, a submodule or a `.git` entry in the layout (the four managed folders, `release-notes.md`, `AGENTS.md`, below
+  the optional sub-folder) is refused, so is a managed folder that is not a folder or a root file that is not a file, so
+  is a name that is not safe on every file system, and so are two entries whose names differ only in letter case or
+  Unicode form (a case-insensitive or normalizing file system would merge them, and the cache may be read on one
+  whatever system wrote it). The validated blobs are then written by AgentControl itself, byte for byte, with no
+  checkout - a checkout would run whatever filter driver the repository's attributes select from the user's own git
+  configuration and would convert the content - `.git` is deleted and verified gone - if it cannot be removed the
+  acquisition fails and nothing is published - and the result is read
+  through `DirectoryPackageContentReader.OpenLayoutRoot`, which lists and reads only those paths. Links elsewhere in the
+  repository are never written and so never matter. A package is fetched only if the repository lists its version at its
+  tag and commit when the fetch starts.
+- *Cache.* `{CacheRoot}/{addressKey}/{commit}` with a completeness marker, written to a temporary folder and renamed;
+  the five most recently used commits per repository are kept. The key is a hash of the address, so two sources never
+  share a folder, and a commit never needs fetching twice. A commit folder that a returned reader still holds is not
+  pruned.
+- *Moved tags.* If the tag no longer points to the listed commit when it is fetched the acquisition is refused; a
+  later listing shows the new commit as the pinned version's revision, which the card compares with the pin.
+- *User-started versus background.* `GitSourceOptions.Interactive` is the `allowPrompt` switch of the card: only work
+  the user started lets git show its credential UI; a missing sign-in in the background is
+  `PackageSourceFailureKind.AuthenticationFailed`, which the card already shows as "sign-in needed".
+- *Git version.* The fetch needs the minimum supported Git version (the `MinimumGitVersion` constant; its value is
+  stated in the requirements and the user guide) because it relies on `fetch --no-write-fetch-head`. When the
+  application sets `GitSourceOptions.EnforceMinimumGitVersion`
+  the provider checks the git in use before the first listing or fetch and throws the client's `GitRemoteException` of
+  kind `GitTooOld` unchanged, so the UI can recognize it and explain how to update git or choose another one.
+
+**Prerequisite: git.** The Git source needs a git executable of at least the minimum supported Git version on the
+machine (the configured executable of Settings, else `git` on the path; the value of the minimum is the
+`MinimumGitVersion` constant and is stated in the requirements and the user guide). The subsystem and unit tests that
+depend on a real git (the Git source with a real repository fixture, and `GitRemoteClient` against real git) therefore
+have a test-environment prerequisite too: locally they are skipped when git is absent, but in continuous integration
+(the environment variable `CI` is set) they **fail** when git is missing, so the evidence a requirement needs is never
+silently skipped (see the verification design of this subsystem).
 
 **Package authenticity.** A NuGet source (folder or server) can require signed packages and optionally pin the
 publisher's certificate. The decisions, in the order a reader will ask about them:

@@ -6,7 +6,10 @@ The `AgentPackageManagement` subsystem is verified indirectly through its consti
 test suites (`PackageSourceTests.cs`, `PackageVersionTests.cs`, `PackageVersionCacheTests.cs`,
 `PackageSourceRegistryTests.cs`, `ZipFolderSourceProviderTests.cs`,
 `NuGetSourceProviderTests.cs`, `NuGetSourceProviderServerTests.cs`, `NuGetSourceProviderSignatureTests.cs`,
-`NuGetSourceProviderSignedPackageTests.cs` and `SignatureVerificationSupportTests.cs`), each of which is documented
+`NuGetSourceProviderSignedPackageTests.cs`, `SignatureVerificationSupportTests.cs`,
+`PackageContentIdentityTests.cs`, `GitRepositoryAddressTests.cs`, `GitTagPatternTests.cs`, `GitSourceProviderTests.cs`
+and
+`GitSourceProviderIntegrationTests.cs`), each of which is documented
 in its own unit-level verification
 design, plus `PackageSourceDefinitionTests.cs` and `PackageSourceServerLocationTests.cs`, which verify the
 supporting source model types and `PackageSourceAccessException` that have no unit of their own, and
@@ -26,6 +29,11 @@ supported platform rather than a fake.
 
 ### Test Environment
 
+The Git source subsystem tests need a git executable (of at least the minimum supported version, see the
+`AgentPackageManagement` design) on the machine: they build real local repositories, and a few use a stub that stands
+in for git. When git is absent the tests are skipped on a developer machine and **failed** when the environment
+variable `CI` is set, so a pipeline can never pass with the Git evidence silently missing.
+
 The server tests need loopback networking (an in-process Kestrel server on a fresh port per test) and the
 `Microsoft.AspNetCore.App` shared framework (part of the .NET runtime, referenced by the test project). The
 real-signed-package tests need access to nuget.org on first use and an operating system whose trust store holds the
@@ -37,8 +45,20 @@ no network. Otherwise standard test environment, with no external services or ha
 ### Acceptance Criteria
 
 - All unit tests for `PackageSource`, `PackageVersion`, `PackageVersionCache`,
-  `PackageSourceRegistry`, `ZipFolderSourceProvider`, `NuGetSourceProvider`, `SignatureVerificationSupport` and the
+  `PackageSourceRegistry`, `ZipFolderSourceProvider`, `NuGetSourceProvider`, `SignatureVerificationSupport`,
+  `PackageContentIdentity`, `GitSourceProvider`, `GitRepositoryAddress`, `GitTagPattern` and the
   source model types pass with zero failures.
+- A Git source lists the tags that match its pattern as versions with their commits, delivers the layout of a chosen
+  tag (and nothing else) from a cache keyed by repository and commit, refuses links, submodules and colliding names
+  in the layout leaving nothing in the cache, runs no hook or filter of the user's configuration, names the commit
+  as the identity and shows a moved tag as a different revision.
+- A Git source is described by its address, tag pattern, optional sub-folder and exactly one package ID and persisted
+  with its type by name; an invalid description, an address that carries a credential or names another transport
+  is refused when the source is resolved, never repeating the address.
+- Work the application starts itself never lets git prompt, work the user starts may; a failure is reported in the
+  failure type the caller acts on, and an old git is refused with advice.
+- A package a zip or NuGet source delivers reports the SHA-256 identity of its package file, and a zip republished
+  under the same version reports a different one.
 - Package discovery reflects only what is physically present in a source folder.
 - Upgrade detection produces a definite true/false answer for every input, including an
   unparsable pinned version or an empty source folder.
@@ -278,3 +298,91 @@ test-result files, where the check reports "supported" and a real offline certif
 the unit tests and covered by
 `AgentControl-NuGetSourceProvider-FailClosedWithoutVerification` and
 `AgentControl-NuGetSourceProvider-UnsupportedPlatformDoesNotAffectOpenSources`.
+
+**AgentPackageManagement_ContentIdentity_ZipAndNuGetSourcesReportTheBytesTheyDeliver**: Through the registry, a zip
+source and a NuGet folder source each acquire a package and report a `sha256:` content identity; the NuGet identity
+is the same on a second acquisition, and a zip replaced under the same version (the file deleted and written again
+with other content) reports an identity that compares as changed. Each reported identity is asserted to equal the
+SHA-256 of the exact delivered file bytes, computed independently of the production hashing code. For a NuGet package
+the identity describes the copy held on this machine: a version already held is not re-read from the feed, so a
+republish of it in the feed is not noticed until the copy is cleared - the behavior is documented, not a defect. This
+scenario is tested by `AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip`,
+covering `AgentControl-AgentPackageManagement-ContentIdentity` (children: the SHA-256 computation requirements,
+`AgentControl-ZipFolderSourceProvider-ReportContentIdentity`, `AgentControl-NuGetSourceProvider-ReportContentIdentity`
+and `AgentControl-NuGetSourceProvider-RefuseUnidentifiablePackage`) and
+`AgentControl-AgentPackageManagement-ContentIdentityComparable` (children: the `AgentControl-PackageContentIdentity-*`
+format, description and comparison requirements; the same test and the Git scenario below, whose identities are of
+another kind).
+
+**AgentPackageManagement_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag**: Against a real local bare repository, the
+registry resolves a Git source, the version cache lists `v1.0.0` (annotated) and `v1.1.0` and reports that a newer
+version is available and the listing entry of the pinned version with its commit; acquiring the pinned version delivers
+its content with the identity `git-commit:{commit}`; after the maintainer moves `v1.0.0` to another commit a new
+session lists the pinned version at the other commit, which compares as changed against the identity that was
+reported. The rules of the address, the pattern, the layout checks, the cache and the failure kinds are verified by
+the unit tests of `GitRepositoryAddress`, `GitTagPattern` and `GitSourceProvider`, and the settings, registry, version
+cache and extractor rules by their own units. This scenario is tested by
+`AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag`, covering
+`AgentControl-AgentPackageManagement-GitSource` (the versions: children `AgentControl-GitTagPattern-*` extraction,
+formatting and listing requirements and the `AgentControl-GitSourceProvider-List*`, `-ResolveAnnotatedTags` and
+`-TagPreview` requirements), `AgentControl-AgentPackageManagement-GitSourceAcquire` (children: the
+`AgentControl-GitSourceProvider-Acquire*`, `-Subfolder`, `-ExcludeGitFolder`, `-Cache*` and related requirements; also
+tested by the hostile-layout scenario below, which acquires the ordinary tag of the same repository; the
+`-CachePruningSparesOpenReaders` and `-CacheReleasesCommitWhenReaderDisposed` requirements are verified by the unit
+tests of `GitSourceProvider`) and
+`AgentControl-AgentPackageManagement-GitSourceContentIdentity` (children:
+`AgentControl-GitSourceProvider-ReportContentIdentity`, `-TagMovedBetweenListAndFetch`, `-MovedTagReportedAsNewRevision`
+and `AgentControl-PackageVersionCache-ReportPinnedListing`).
+
+**AgentPackageManagement_GitSourceDefinition_PersistedByNameCheckedAsAWholeAndRefusedWhenInvalid**: A Git source is
+described by its address, tag pattern, optional sub-folder and exactly one package ID, serialized with its type by name
+and read back as an equivalent description holding nothing secret-like; the settings are checked as a whole, and a
+source with a wrong address, pattern, sub-folder (a traversal, a `.git` folder), no package ID or two is refused when
+the registry resolves it, with a message that does not repeat the address while the valid one resolves. This scenario
+is tested by `AgentPackageManagementSubsystem_GitSourceDefinition_IsPersistedByNameAndReadBackEquivalent`, covering
+`AgentControl-AgentPackageManagement-GitSourceDefinition` (child:
+`AgentControl-PackageSourceRegistry-GitSourceResolved`), and by
+`AgentPackageManagementSubsystem_GitSourceDefinition_SettingsAreCheckedAsAWholeAndInvalidSourceIsRefusedWhenResolved`,
+covering `AgentControl-AgentPackageManagement-GitSourceSettingsChecked` (children: the
+`AgentControl-GitSourceProvider-ValidateDefinition*` and `-RejectBadSubfolder` requirements, the two
+`AgentControl-GitTagPattern-` validation requirements and
+`AgentControl-PackageSourceRegistry-GitSourceInvalidFailsWhenResolved`). The unit-level tests of the same rules are the
+`PackageSourceDefinition_Git*` tests of `PackageSourceDefinitionTests.cs`.
+
+**AgentPackageManagement_GitSourceAddress_FollowsTheRulesOfGitAddresses**: Through the registry, the https, ssh,
+`user@host:path` and local forms of an address are accepted (an ssh user name is no credential), while an address that
+carries a password, a token or a query string, an `http`, `ext::` or option-like address is refused when the source is
+resolved, with a message that never repeats the address. This scenario is tested by
+`AgentPackageManagementSubsystem_GitSourceAddress_FollowsTheRulesOfGitAddresses`, covering
+`AgentControl-AgentPackageManagement-GitSourceAddressRules` (children: every `AgentControl-GitRepositoryAddress-*`
+requirement).
+
+**AgentPackageManagement_GitSource_HostileLayoutAndHooksAreRefusedOrNeverRun**: Through the registry and with the real
+git against a local repository, a tag whose layout holds a symbolic link, a submodule or two files whose names differ
+only in letter case is refused with a message that names the problem, nothing of it is left in the cache (neither a
+folder named by its commit nor a temporary one) and the ordinary tag of the same repository is still supplied; and
+with a user environment that installs a post-checkout hook into every new repository (shown, with plain git, to
+really run it; the scenario is skipped when it cannot be shown) listing and fetching a package runs no hook and
+supplies it normally. The link and the submodule are staged with plumbing commands, so no privilege is needed on any
+platform. This scenario is tested by
+`AgentPackageManagementSubsystem_GitSource_HostileLayoutIsRefusedAndNothingIsCached` (the three kinds of layout),
+covering `AgentControl-AgentPackageManagement-GitSourceLayoutSafety` (children: the
+`AgentControl-GitSourceProvider-Reject*` and `-IgnoreLinksOutsideLayout` requirements) and
+`AgentControl-AgentPackageManagement-GitSourceAcquire`, and by
+`AgentPackageManagementSubsystem_GitSource_HooksOfTheUsersConfigurationNeverRun`, covering
+`AgentControl-AgentPackageManagement-GitSourceNoRepositoryCode` (children:
+`AgentControl-GitSourceProvider-HostileHooksNeverRun` and `-NoRepositoryFilters`).
+
+**AgentPackageManagement_GitSource_SignInAndFailureReporting**: With a stub standing in for git, the same listing
+started by the application itself runs git with every prompt switched off, and started by the user leaves the
+credential manager free (git never reads a terminal in either case); this scenario is tested by
+`AgentPackageManagementSubsystem_GitSource_OnlyUserStartedWorkMayPrompt`, covering
+`AgentControl-AgentPackageManagement-GitSourceSignIn` (child: `AgentControl-GitSourceProvider-InteractiveFlagHonored`).
+With the real git, a repository that is not there is reported as "not found" without the path, a git that cannot be
+started points to Settings and a cancelled request stops with a cancellation; with a stub that reports an old git, the
+listing is refused with advice before any other command ran. This part is tested by
+`AgentPackageManagementSubsystem_GitSource_FailuresAreClassifiedAndNeverRepeatTheAddress` and
+`AgentPackageManagementSubsystem_GitSource_TooOldGitIsRefusedWithAdviceBeforeAnyTagIsListed`, covering
+`AgentControl-AgentPackageManagement-GitSourceFailureReporting` (children: the
+`AgentControl-GitSourceProvider-Failure*`, `-UntrustedHostKeyHint`, `-CancellationObserved` and `-MinimumGitVersion*`
+requirements).

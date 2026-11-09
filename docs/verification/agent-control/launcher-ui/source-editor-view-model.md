@@ -3,8 +3,14 @@
 #### Verification Approach
 
 `SourceEditorViewModel` is verified with unit tests defined in `SourceEditorViewModelTests.cs` (folder
-sources), `SourceEditorServerViewModelTests.cs` (server sources and the connection test) and
-`SourceEditorSignatureViewModelTests.cs` (the signature options and "Forget saved sign-in").
+sources), `SourceEditorServerViewModelTests.cs` (server sources and the connection test),
+`SourceEditorSignatureViewModelTests.cs` (the signature options and "Forget saved sign-in") and
+`SourceEditorGitViewModelTests.cs` (Git repository sources: defaults, validation, save, the connection test and the tag
+preview). The Git connection test runs against a `FakeGitSourceProvider` (in `FakeGitSourceProvider.cs`), an in-memory
+provider that answers like a Git source does - it implements `IGitTagPreview` and returns a prepared preview, fails
+with a given exception or waits at a gate - so every outcome is reached without git, a repository or a network; the
+default provider factory of a Git source is checked with the real `GitSourceProvider` and the real git against a local
+bare repository (`GitRepositoryFixture`; the test is skipped when git is not installed).
 No Avalonia `Window` is constructed; the tests drive the view model's properties and commands
 directly and observe its validation messages, test results and `Saved` event, with the alias-exists
 callback supplied by the test. The platform answer for signature verification is injected, so both the supported
@@ -15,9 +21,10 @@ through the provider factory: it can be gated (to hold a test in the "running" s
 change-while-running rules are checked), return versions, return none, or throw a
 `PackageSourceAccessException` of a given failure kind or another exception, so every outcome of the test is
 reached without a network. The editor window is exercised by the headless Avalonia tests in
-`DialogWindowTests.cs`, `SettingsWindowServerSourceTests.cs` and `SourceEditorSignatureWindowTests.cs` and end to
-end by the FlaUI tests, which add a
-zip source, a NuGet folder source and a NuGet server (with its sign-in) through the dialogs.
+`DialogWindowTests.cs`, `SettingsWindowServerSourceTests.cs`, `SourceEditorSignatureWindowTests.cs` and
+`SourceEditorGitWindowTests.cs` and end to end by the FlaUI tests, which add a
+zip source, a NuGet folder source and a NuGet server (with its sign-in) through the dialogs, and a Git repository
+(against a real local repository).
 
 #### Test Environment
 
@@ -48,6 +55,17 @@ N/A - standard test environment.
   unless insecure HTTP is ticked, ending in `index.json`, no embedded credential) with a credential store and a Git
   credential helper that applies to it - the helper is never asked about any other address - asks for confirmation
   naming the server before doing anything, forgets only after the view confirms, and reports every outcome in words.
+- A Git source's editor has its own title and labels, the defaults (tag pattern `v{version}`, package name = alias), the
+  examples and the sign-in note; an address that is blank, not https, SSH or a local path, or that embeds a credential,
+  a tag pattern without the version placeholder exactly once, a folder that is not relative and a package name that is
+  not valid each show an inline message and block saving and testing; a folder typed with backslashes is saved with
+  slashes; an existing Git source keeps its alias.
+- The Git connection test lists the repository's tags through the provider, shows the matching ones newest first
+  (at most
+  ten) with how many of the tags match, shows "No matching tags" with sample tag names and a case/prefix hint when none
+  does (or says the repository has no tags yet), reports each failure with its own headline (including "Git is too
+  old"), can be cancelled as a neutral result, and never shows the result - or keeps the preview - of inputs that
+  changed.
 
 #### Test Scenarios
 
@@ -193,3 +211,77 @@ in words, and does nothing when the action is not available. This scenario is te
 `AgentControl-SourceEditorViewModel-ForgetSavedSignIn`, `-ForgetAcceptableAddressOnly`,
 `-ForgetUnavailableExplained`, `-ForgetChecking`, `-ForgetConfirmation`, `-ForgetResultForgotten`,
 `-ForgetResultNothingSaved` and `-ForgetResultNotRemoved` (each prefixed `AgentControl-SourceEditorViewModel`).
+
+**SourceEditorViewModel_GitEditor_DefaultsValidationAndSave**: A new Git editor has the Git title and the "Repository
+URL" label, the examples for https, SSH and a local path, the tag pattern `v{version}` with its help (which names the
+examples `release/V{version}` and `ver{version}` and says upper and lower case matter) and the sign-in note that says
+AgentControl never stores credentials; an existing Git source loads its fields and keeps its alias read-only; an empty
+package name defaults to the alias, and an alias that is not a valid package name asks for a name; an address that is
+blank, not https, SSH or a local path, or that embeds a credential, a pattern that is not usable, a folder that is
+absolute or climbs out of the repository and a package name with invalid characters each report their problem and block
+saving (and the connection test), while a valid https or SSH address and a local path are accepted; Save needs an
+alias and
+an address, builds the Git definition for a new source and keeps the alias of an existing one while applying the edits,
+and a folder typed with backslashes is saved with slashes. This scenario is tested by
+`SourceEditorViewModel_Constructor_NewGit_HasGitTitleLabelAndDefaults`,
+`SourceEditorViewModel_Constructor_ExistingGit_LoadsFieldsAndKeepsAliasReadOnly`,
+`SourceEditorViewModel_GitPackageId_Empty_DefaultsToTheAlias`,
+`SourceEditorViewModel_GitPackageId_AliasIsNotAValidName_RequiresAName`,
+`SourceEditorViewModel_GitPackageId_AliasTypedButNotAValidName_ExplainsAndSuggestsAName`,
+`SourceEditorViewModel_GitPackageId_InvalidCharacters_ReportsProblemAndBlocksSave`,
+`SourceEditorViewModel_GitLocation_Invalid_ReportsProblemAndBlocksSaveAndTest`,
+`SourceEditorViewModel_GitLocation_Valid_IsAcceptedAndAllowsSave`,
+`SourceEditorViewModel_GitLocation_LocalPath_IsAccepted`,
+`SourceEditorViewModel_TagPattern_Invalid_ReportsProblemLiveAndBlocksSaveAndTest`,
+`SourceEditorViewModel_Subfolder_Invalid_ReportsProblemAndBlocksSave`,
+`SourceEditorViewModel_Subfolder_WindowsStyle_IsNormalizedWhenSaved`,
+`SourceEditorViewModel_CanSave_Git_NeedsAliasAndAddress`,
+`SourceEditorViewModel_Save_NewGit_BuildsTheGitDefinition` and
+`SourceEditorViewModel_Save_ExistingGit_KeepsAliasAndAppliesEdits`,
+`SourceEditorViewModel_GitSignInHelpText_ExplainsWhoSignsInAndWhenPromptsAppear` and
+`SourceEditorViewModel_TagPatternHelpText_GivesExamplesAndSaysCaseMatters`, covering
+`AgentControl-SourceEditorViewModel-GitEditor`, `-GitEditorDefaults`, `-GitSubfolderNormalized`, `-GitSaveNew`,
+`-GitSaveExisting`, `-GitSaveGate`, `-GitValidation` (address), `-GitValidationTagPattern`, `-GitValidationSubfolder`,
+`-GitValidationPackageName`, `-GitSignInNote` and `-GitTagPatternHelp` (the help texts are asserted as text; the window
+showing them is verified in the `LauncherUI` subsystem tests), each prefixed
+`AgentControl-SourceEditorViewModel`. The sign-in note is checked as text: whether Git Credential Manager really shows
+its dialog from the application's hidden-console git is not verifiable by an automated test and is a manual check.
+
+**SourceEditorViewModel_GitTestConnection_TagPreviewAndOutcomes**: The test is available for a Git source
+without an alias
+when the package name is given; the default provider of a Git source is a real Git provider (tested against a local
+repository, with the tags that match listed and the others counted); a prepared preview of three tags with two matches
+shows "Connection OK", the newest version and "2 of 3 tags match the pattern. 1 other tag does not match.";
+more than ten
+matches list only the newest ten; a repository where no tag matches reports "No matching tags", names a few of the
+tags it
+does have and says the fixed parts are case-sensitive; a repository with no tags says it has none yet;
+a provider that has
+no preview falls back to its list of versions; changing the pattern after a test clears the result and the preview; each
+failure kind of the provider gets its own headline and the provider's message ("Sign-in needed", "Repository not found",
+"Repository unreachable", "Timed out"), any other failure is "Connection failed" and
+a git that is too old is "Git is too
+old"; cancelling a running test ends with a neutral "canceled" result; and a test still running when any input of the
+test (the address, the tag pattern, the folder or the package name, one theory case each) is edited shows neither a
+result nor a preview, even when the provider ignores cancellation. This scenario is tested by
+`SourceEditorViewModel_CanTestConnection_Git_DoesNotNeedAnAliasWhenThePackageNameIsGiven`,
+`SourceEditorViewModel_TestConnection_Git_DefaultProviderFactory_UsesGitProvider`,
+`SourceEditorViewModel_TestConnection_Git_ShowsMatchingTagsAndSummary`,
+`SourceEditorViewModel_TestConnection_Git_ManyTags_ListsTheNewestTen`,
+`SourceEditorViewModel_TestConnection_Git_NoTagMatches_ShowsSampleTagsAndCaseHint`,
+`SourceEditorViewModel_TestConnection_Git_NoTagsAtAll_SaysTheRepositoryHasNoTagsYet`,
+`SourceEditorViewModel_TestConnection_Git_ProviderWithoutPreview_FallsBackToItsVersions`,
+`SourceEditorViewModel_TagPattern_ChangedAfterTest_ClearsResultAndPreview`,
+`SourceEditorViewModel_TestConnection_Git_ProviderFails_ReportsHeadlineAndMessage`,
+`SourceEditorViewModel_TestConnection_Git_OtherFailure_ReportsConnectionFailed`,
+`SourceEditorViewModel_TestConnection_Git_GitTooOld_ReportsGitIsTooOld`,
+`SourceEditorViewModel_TestConnection_Git_CancelWhileRunning_StopsWithCanceledResult` and
+`SourceEditorViewModel_TestConnection_Git_EditedWhileTesting_StaleResultIsNotShown` (a theory over the four inputs),
+covering
+`AgentControl-SourceEditorViewModel-GitTestConnection`, `-GitTestRuns`, `-GitTestDefaultProvider`,
+`-GitTestFailureReasons`, `-GitTestGitTooOld`, `-GitTestOtherFailure`, `-GitTestCancel`, `-GitTestCancelAndStale`,
+`-GitTagPreview`, `-GitTagPreviewNoMatch`, `-GitTagPreviewNoTags` and `-GitTagPreviewCleared` (each prefixed
+`AgentControl-SourceEditorViewModel`). The default provider test proves a Git provider (not a NuGet one) is used;
+that the default is interactive and enforces the minimum git version is the factory's design (`CreateDefaultProvider`)
+and is not asserted by this unit's tests; the owner-supplied equivalent is verified in the `MainWindowViewModel`
+tests.

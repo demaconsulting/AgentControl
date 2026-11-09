@@ -374,6 +374,353 @@ public sealed class PackageContentExtractorTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a zip reader reports the SHA-256 of the zip file as its content identity, and
+    ///     that the entries it reads come from the very bytes that were hashed.
+    /// </summary>
+    [Fact]
+    public void ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries()
+    {
+        // Arrange: a zip with one entry, and the independently computed SHA-256 of the file
+        var zipPath = Path.Combine(CreateTempDirectory(), "pkg-1.0.0.zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            using var writer = new StreamWriter(archive.CreateEntry("release-notes.md").Open());
+            writer.Write("the notes");
+        }
+
+        var expected = "sha256:" + Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(zipPath)));
+
+        // Act
+        using var reader = ZipPackageContentReader.Open(zipPath);
+
+        // Assert: the identity is the file's SHA-256 and the archive is readable after hashing
+        Assert.Equal(expected, reader.ContentIdentity);
+        Assert.Equal("the notes", reader.ReadText("release-notes.md"));
+    }
+
+    /// <summary>
+    ///     Test that a file that is not a zip releases its file handle when the open fails (the
+    ///     hash and the archive share one handle, which must not leak on the failure path).
+    /// </summary>
+    [Fact]
+    public void ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle()
+    {
+        // Arrange
+        var notAZip = Path.Combine(CreateTempDirectory(), "fake-1.0.0.zip");
+        File.WriteAllText(notAZip, "this is not a zip archive");
+
+        // Act
+        Assert.Throws<InvalidOperationException>(() => ZipPackageContentReader.Open(notAZip));
+
+        // Assert: nothing still holds the file open, so it can be deleted
+        File.Delete(notAZip);
+        Assert.False(File.Exists(notAZip));
+    }
+
+    /// <summary>
+    ///     Test that a layout-root reader lists and reads only the package layout - the managed folders
+    ///     and the two root files - and never the <c>.git</c> folder, other <c>.github</c> content or
+    ///     unrelated files, carries the supplied identity, and extracts like any other package.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity()
+    {
+        // Arrange: a checked-out repository shape: layout plus everything a repo holds
+        var root = CreateLayoutRoot(
+            (".github/agents/copilot.md", "agents"),
+            (".github/standards/style.md", "standards"),
+            (".github/workflows/ci.yml", "not layout"),
+            ("release-notes.md", "notes"),
+            ("AGENTS.md", "template"),
+            ("README.md", "not layout"),
+            ("src/app.cs", "not layout"),
+            (".git/config", "[core]"));
+        var identity = "git-commit:" + new string('a', 40);
+
+        // Act
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root, identity);
+        var files = reader.ListFiles().Order().ToList();
+        var repo = CreateTempDirectory();
+        PackageContentExtractor.Extract(reader, repo);
+
+        // Assert
+        Assert.Equal(
+            [".github/agents/copilot.md", ".github/standards/style.md", "AGENTS.md", "release-notes.md"], files);
+        Assert.Equal(identity, reader.ContentIdentity);
+        Assert.Equal("notes", PackageContentExtractor.ReadReleaseNotes(reader));
+        Assert.Equal("template", PackageContentExtractor.ReadAgentsMdTemplate(reader));
+        Assert.Equal("agents", File.ReadAllText(Path.Combine(repo, ".github", "agents", "copilot.md")));
+        Assert.False(Directory.Exists(Path.Combine(repo, ".github", "workflows")));
+        Assert.False(Directory.Exists(Path.Combine(repo, ".git")));
+    }
+
+    /// <summary>
+    ///     Test that a layout-root reader refuses to read anything outside the layout, including a
+    ///     path that starts in the layout and climbs out of it to the <c>.git</c> folder.
+    /// </summary>
+    [Theory]
+    [InlineData("README.md")]
+    [InlineData(".git/config")]
+    [InlineData(".github/workflows/ci.yml")]
+    [InlineData(".github/agents/../../.git/config")]
+    [InlineData(".github/agents/../../README.md")]
+    [InlineData("..\\.git\\config")]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused(string path)
+    {
+        // Arrange
+        var root = CreateLayoutRoot(
+            (".github/agents/copilot.md", "agents"), (".github/workflows/ci.yml", "x"), ("README.md", "x"), (".git/config", "[core]"));
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(() => reader.ReadText(path));
+        Assert.Throws<InvalidOperationException>(() => reader.OpenRead(path));
+    }
+
+    /// <summary>
+    ///     Test that a layout-root reader does not open a folder that does not exist or that is a link.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_MissingFolderOrLink_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var real = CreateLayoutRoot((".github/agents/real.md", "real"));
+        var link = Path.Combine(CreateTempDirectory(), "linked-root");
+        TryCreateDirectorySymlinkOrSkip(link, real);
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(
+            () => DirectoryPackageContentReader.OpenLayoutRoot(Path.Combine(CreateTempDirectory(), "missing")));
+        Assert.Throws<InvalidOperationException>(() => DirectoryPackageContentReader.OpenLayoutRoot(link));
+        Assert.Throws<ArgumentNullException>(() => DirectoryPackageContentReader.OpenLayoutRoot(null!));
+    }
+
+    /// <summary>
+    ///     Test that a link that is not part of the layout (here a directory junction in
+    ///     <c>docs</c>) is neither inspected nor refused by a layout-root reader, while the same link
+    ///     inside the layout is refused.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_JunctionOutsideLayoutIgnoredInsideLayoutRefused()
+    {
+        // Arrange
+        var outsideDir = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(outsideDir, "payload.md"), "payload");
+        var root = CreateLayoutRoot((".github/agents/copilot.md", "agents"), ("docs/readme.md", "x"));
+        CreateJunctionOrSkip(Path.Combine(root, "docs", "linked"), outsideDir);
+
+        // Act: the unrelated link does not matter
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
+        var files = reader.ListFiles();
+
+        // Assert
+        Assert.Equal([".github/agents/copilot.md"], files);
+
+        // Act / Assert: the same kind of link inside the layout is refused
+        CreateJunctionOrSkip(Path.Combine(root, ".github", "skills"), outsideDir);
+        Assert.Throws<InvalidOperationException>(() => reader.ListFiles());
+    }
+
+    /// <summary>
+    ///     Test that a symbolic link outside the layout is ignored and a symbolic link in a managed
+    ///     folder, as <c>.github</c> itself, or as a root file is refused, wherever the operating system
+    ///     lets a test create one.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_SymlinkOutsideLayoutIgnoredInsideLayoutRefused()
+    {
+        // Arrange
+        var outsideFile = Path.Combine(CreateTempDirectory(), "outside.txt");
+        File.WriteAllText(outsideFile, "outside");
+        var root = CreateLayoutRoot((".github/agents/copilot.md", "agents"), ("docs/readme.md", "x"));
+        TryCreateFileSymlinkOrSkip(Path.Combine(root, "docs", "link.txt"), outsideFile);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
+
+        // Assert: ignored
+        Assert.Equal([".github/agents/copilot.md"], reader.ListFiles());
+
+        // Act / Assert: a file link inside the layout and a link as a root file are refused
+        TryCreateFileSymlinkOrSkip(Path.Combine(root, ".github", "agents", "link.md"), outsideFile);
+        Assert.Throws<InvalidOperationException>(() => reader.ListFiles());
+        File.Delete(Path.Combine(root, ".github", "agents", "link.md"));
+        TryCreateFileSymlinkOrSkip(Path.Combine(root, "release-notes.md"), outsideFile);
+        Assert.Throws<InvalidOperationException>(() => reader.ListFiles());
+        Assert.Throws<InvalidOperationException>(() => reader.ReadText("release-notes.md"));
+    }
+
+    /// <summary>
+    ///     Test that a junction standing in for <c>.github</c> itself is refused by a layout-root
+    ///     reader (Windows).
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_JunctionReplacingGitHubFolder_IsRefused()
+    {
+        // Arrange: .github is a junction to a folder that holds a perfectly ordinary managed folder
+        var outsideGitHub = CreateTempDirectory();
+        Directory.CreateDirectory(Path.Combine(outsideGitHub, "agents"));
+        File.WriteAllText(Path.Combine(outsideGitHub, "agents", "evil.md"), "outside");
+        var root = CreateLayoutRoot(("release-notes.md", "notes"));
+        CreateJunctionOrSkip(Path.Combine(root, ".github"), outsideGitHub);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
+
+        // Act / Assert: neither listing nor reading follows the link
+        Assert.Throws<InvalidOperationException>(() => reader.ListFiles());
+        Assert.Throws<InvalidOperationException>(() => reader.OpenRead(".github/agents/evil.md"));
+    }
+
+    /// <summary>
+    ///     Test that a symbolic link standing in for <c>.github</c> itself is refused by a
+    ///     layout-root reader.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_SymlinkReplacingGitHubFolder_IsRefused()
+    {
+        // Arrange: .github is a symbolic link to a folder that holds a perfectly ordinary managed folder
+        var outsideGitHub = CreateTempDirectory();
+        Directory.CreateDirectory(Path.Combine(outsideGitHub, "agents"));
+        File.WriteAllText(Path.Combine(outsideGitHub, "agents", "evil.md"), "outside");
+        var root = CreateLayoutRoot(("release-notes.md", "notes"));
+        TryCreateDirectorySymlinkOrSkip(Path.Combine(root, ".github"), outsideGitHub);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
+
+        // Act / Assert: neither listing nor reading follows the link
+        Assert.Throws<InvalidOperationException>(() => reader.ListFiles());
+        Assert.Throws<InvalidOperationException>(() => reader.OpenRead(".github/agents/evil.md"));
+    }
+
+    /// <summary>
+    ///     Test that a symbolic link standing in for a managed folder (<c>.github/standards</c>) is
+    ///     refused by a layout-root reader, while an unrelated sibling folder is still listed.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_SymlinkReplacingManagedFolder_IsRefused()
+    {
+        // Arrange: a good layout in which one managed folder is a link to a folder outside it
+        var outsideDir = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(outsideDir, "payload.md"), "payload");
+        var root = CreateLayoutRoot((".github/agents/copilot.md", "agents"));
+        TryCreateDirectorySymlinkOrSkip(Path.Combine(root, ".github", "standards"), outsideDir);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
+
+        // Act / Assert: the linked managed folder is refused, with the reason in the message
+        var failure = Assert.Throws<InvalidOperationException>(() => reader.ListFiles());
+        Assert.Contains("link", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that a junction standing in for a managed folder (<c>.github/standards</c>) is
+    ///     refused by a layout-root reader (Windows).
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_JunctionReplacingManagedFolder_IsRefused()
+    {
+        // Arrange: a good layout in which one managed folder is a junction to a folder outside it
+        var outsideDir = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(outsideDir, "payload.md"), "payload");
+        var root = CreateLayoutRoot((".github/agents/copilot.md", "agents"));
+        CreateJunctionOrSkip(Path.Combine(root, ".github", "standards"), outsideDir);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
+
+        // Act / Assert
+        var failure = Assert.Throws<InvalidOperationException>(() => reader.ListFiles());
+        Assert.Contains("link", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that a symbolic link to a file inside a managed folder is refused by a layout-root
+    ///     reader.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_SymlinkFileInManagedFolder_IsRefused()
+    {
+        // Arrange
+        var outsideFile = Path.Combine(CreateTempDirectory(), "outside.txt");
+        File.WriteAllText(outsideFile, "outside");
+        var root = CreateLayoutRoot((".github/agents/copilot.md", "agents"));
+        TryCreateFileSymlinkOrSkip(Path.Combine(root, ".github", "agents", "link.md"), outsideFile);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
+
+        // Act / Assert
+        var failure = Assert.Throws<InvalidOperationException>(() => reader.ListFiles());
+        Assert.Contains("link", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that a symbolic link standing in for a root file (<c>release-notes.md</c>) is refused
+    ///     by a layout-root reader, both when listing and when reading it.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_SymlinkAsRootFile_IsRefused()
+    {
+        // Arrange
+        var outsideFile = Path.Combine(CreateTempDirectory(), "outside.txt");
+        File.WriteAllText(outsideFile, "outside");
+        var root = CreateLayoutRoot((".github/agents/copilot.md", "agents"));
+        TryCreateFileSymlinkOrSkip(Path.Combine(root, "release-notes.md"), outsideFile);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(() => reader.ListFiles());
+        Assert.Throws<InvalidOperationException>(() => reader.ReadText("release-notes.md"));
+    }
+
+    /// <summary>
+    ///     Test that a layout-root reader carries the identity its opener supplied, and reports none
+    ///     when it was given none.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenLayoutRoot_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull()
+    {
+        // Arrange
+        var root = CreateLayoutRoot((".github/agents/copilot.md", "agents"));
+        var identity = "git-commit:" + new string('b', 40);
+
+        // Act
+        using var withIdentity = DirectoryPackageContentReader.OpenLayoutRoot(root, identity);
+        using var withoutIdentity = DirectoryPackageContentReader.OpenLayoutRoot(root);
+
+        // Assert
+        Assert.Equal(identity, withIdentity.ContentIdentity);
+        Assert.Null(withoutIdentity.ContentIdentity);
+    }
+
+    /// <summary>
+    ///     Test that a folder reader reports no identity when its opener supplied none.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_Open_WithoutIdentity_ReportsNone()
+    {
+        // Arrange
+        var package = CreatePackageFolder(("release-notes.md", "notes"));
+
+        // Act
+        using var reader = DirectoryPackageContentReader.Open(package);
+
+        // Assert: none - never an identity the reader made up
+        Assert.Null(reader.ContentIdentity);
+    }
+
+    /// <summary>
+    ///     Test that a folder reader carries the identity its opener supplied, and reports none
+    ///     when it was given none.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull()
+    {
+        // Arrange
+        var package = CreatePackageFolder(("release-notes.md", "notes"));
+
+        // Act
+        using var withIdentity = DirectoryPackageContentReader.Open(package, "sha256:abc");
+        using var withoutIdentity = DirectoryPackageContentReader.Open(package);
+
+        // Assert
+        Assert.Equal("sha256:abc", withIdentity.ContentIdentity);
+        Assert.Null(withoutIdentity.ContentIdentity);
+    }
+
+    /// <summary>
     ///     Test that an unpacked package folder that is itself a symbolic link is rejected when
     ///     opened.
     /// </summary>
@@ -808,6 +1155,25 @@ public sealed class PackageContentExtractorTests : IDisposable
         // A nuspec beside content, as in a real unpacked package, must be ignored by the reader
         File.WriteAllText(Path.Combine(package, "pkg.nuspec"), "<package />");
         return package;
+    }
+
+    /// <summary>
+    ///     Creates a folder whose root is a package layout (as a checked-out repository is), with
+    ///     the given files.
+    /// </summary>
+    /// <param name="files">Relative <c>/</c>-separated paths and contents.</param>
+    /// <returns>The folder, removed when the test class is disposed.</returns>
+    private string CreateLayoutRoot(params (string Path, string Content)[] files)
+    {
+        var root = CreateTempDirectory();
+        foreach (var (path, text) in files)
+        {
+            var full = Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, text);
+        }
+
+        return root;
     }
 
     /// <summary>

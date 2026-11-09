@@ -47,6 +47,21 @@ internal interface IPackageContentReader : IDisposable
     string Description { get; }
 
     /// <summary>
+    ///     Gets the content identity of the package this reader delivers (see
+    ///     <see cref="DemaConsulting.AgentControl.AgentPackageManagement.PackageContentIdentity"/>),
+    ///     or <see langword="null"/> when the implementation cannot name one.
+    /// </summary>
+    /// <remarks>
+    ///     Lets a repo's pin record which bytes a package version delivered, so a later sync of the
+    ///     same version can detect that the package was republished. The identity describes the
+    ///     very content this reader reads (a zip reader hashes and reads one open handle), never a
+    ///     separate look at the source. A default implementation returns <see langword="null"/> so
+    ///     readers that predate identities keep working; <see langword="null"/> means "nothing to
+    ///     compare", never "changed".
+    /// </remarks>
+    string? ContentIdentity => null;
+
+    /// <summary>
     ///     Lists every file in the package content.
     /// </summary>
     /// <returns>Relative file paths using <c>/</c> separators; directories are not listed.</returns>

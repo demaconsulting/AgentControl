@@ -143,3 +143,15 @@ built-in names as no group, and the overlong name cut to 40 characters. The rule
 and no color; after the loaded settings are saved the file does not contain `Chartreuse` and holds exactly one color
 entry. This scenario is tested by `SettingsStore_Load_UnknownCardColorName_ReadsAsAutomaticAndIsNotSavedBack`,
 covering `AgentControl-SettingsStore-UnknownCardColorIsAutomatic`.
+
+**SettingsStore_GitSource_RoundTripsByNameWithoutSecretLikeProperties**: A Git source with an ssh-style address, a tag
+pattern, a sub-folder and one package ID is saved and loaded unchanged and written with its type by name, with no
+secret-like property name in the file. This scenario is tested by
+`SettingsStore_SaveThenLoad_GitSource_RoundTripsByNameWithoutSecretLikeProperties`, covering
+`AgentControl-SettingsStore-GitSourceRoundTrip`.
+
+**SettingsStore_GitSource_AddressWithCredentialIsRefusedWithoutChangingTheFile**: After a Git source was saved,
+changing its address to one with a user and password stops the next save with a message that does not repeat the
+secret and leaves the saved file as it was. This scenario is tested by
+`SettingsStore_Save_GitSourceAddressWithCredential_IsRefusedWithoutChangingTheFile`, covering
+`AgentControl-SettingsStore-GitSourceRefusesCredential`.

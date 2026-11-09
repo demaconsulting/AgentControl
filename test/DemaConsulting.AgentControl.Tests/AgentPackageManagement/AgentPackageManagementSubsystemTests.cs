@@ -20,9 +20,12 @@
 
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoSync;
+using DemaConsulting.AgentControl.Tests.GitIntegration;
 using DemaConsulting.AgentControl.Tests.PackageCredentials;
 using DemaConsulting.NuGet.Caching;
 
@@ -106,6 +109,75 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
         Assert.Equal(PackageSourceFailureKind.SignatureRejected, refusal.Kind);
         Assert.Contains("is not validly signed", refusal.Message, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    ///     Test that, through the registry, zip and NuGet sources each report the identity of the
+    ///     package bytes they deliver, that the identity is stable across acquisitions, and that a
+    ///     zip republished under the same version is reported as a changed identity.
+    /// </summary>
+    [Fact]
+    public async Task AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip()
+    {
+        // Arrange: a zip source and a NuGet folder source, each with one package
+        var zipFolder = CreateTempDirectory();
+        var feed = CreateTempDirectory();
+        var id = UniqueId();
+        var zipPath = Path.Combine(zipFolder, "contoso-agents-1.0.0.zip");
+        WriteZip(zipPath, "original");
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0");
+        var registry = PackageSourceRegistry.Create(
+            [
+                new PackageSourceDefinition { Alias = "Zips", Type = PackageSourceType.Zip, Location = zipFolder },
+                Definition("Feed", feed, requireSigned: false)
+            ],
+            CreateTempDirectory());
+        var zips = registry.Resolve("Zips");
+        var nuget = registry.Resolve("Feed");
+        var zipPackage = Assert.Single(await zips.ListVersionsAsync("contoso-agents", CancellationToken.None));
+        var nugetPackage = Assert.Single(await nuget.ListVersionsAsync(id, CancellationToken.None));
+
+        // Act: acquire each twice, republishing the zip between the two zip acquisitions
+        string? zipFirst;
+        using (var reader = await zips.AcquireAsync(zipPackage, CancellationToken.None))
+        {
+            zipFirst = reader.ContentIdentity;
+        }
+
+        string? nugetFirst;
+        using (var reader = await nuget.AcquireAsync(nugetPackage, CancellationToken.None))
+        {
+            nugetFirst = reader.ContentIdentity;
+        }
+
+        var expectedZipFirst = Sha256Identity(await File.ReadAllBytesAsync(zipPath, TestContext.Current.CancellationToken));
+        var expectedNuGet = Sha256Identity(await File.ReadAllBytesAsync(
+            Assert.Single(Directory.GetFiles(feed, "*.nupkg", SearchOption.AllDirectories)), TestContext.Current.CancellationToken));
+        File.Delete(zipPath);
+        WriteZip(zipPath, "republished");
+        var expectedZipRepublished = Sha256Identity(await File.ReadAllBytesAsync(zipPath, TestContext.Current.CancellationToken));
+        using var zipAgain = await zips.AcquireAsync(zipPackage, CancellationToken.None);
+        using var nugetAgain = await nuget.AcquireAsync(nugetPackage, CancellationToken.None);
+
+        // Assert: each identity is exactly the SHA-256 of the delivered file's bytes, computed here
+        // independently of the production hashing code
+        Assert.Equal(expectedZipFirst, zipFirst);
+        Assert.Equal(expectedNuGet, nugetFirst);
+        Assert.Equal(expectedZipRepublished, zipAgain.ContentIdentity);
+        Assert.NotEqual(expectedZipFirst, expectedZipRepublished);
+
+        // Assert: the NuGet identity is stable, and only the zip changed
+        Assert.Equal(ContentIdentityComparison.Same, PackageContentIdentity.Compare(nugetFirst, nugetAgain.ContentIdentity));
+        Assert.Equal(ContentIdentityComparison.Changed, PackageContentIdentity.Compare(zipFirst, zipAgain.ContentIdentity));
+    }
+
+    /// <summary>
+    ///     Computes the expected <c>sha256:</c> identity of some bytes directly with the platform's
+    ///     hash, so a test does not rely on the code it checks.
+    /// </summary>
+    /// <param name="bytes">The bytes of the delivered file.</param>
+    /// <returns><c>sha256:</c> followed by the lower-case hexadecimal digest.</returns>
+    private static string Sha256Identity(byte[] bytes) =>
+        "sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
 
     /// <summary>
     ///     Test that on a platform that cannot verify signatures a source whose settings require
@@ -675,6 +747,418 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
             RequireSignedPackages = requireSigned,
             SignerFingerprint = fingerprint
         };
+
+    /// <summary>
+    ///     Writes a minimal agent package zip whose agents file holds the given text.
+    /// </summary>
+    /// <param name="zipPath">The zip file to create.</param>
+    /// <param name="marker">The text of the agents file.</param>
+    private static void WriteZip(string zipPath, string marker)
+    {
+        using var archive = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create);
+        using var writer = new StreamWriter(archive.CreateEntry(".github/agents/copilot.md").Open());
+        writer.Write(marker);
+    }
+
+    /// <summary>
+    ///     Test the Git source through the subsystem's own parts, against a real local repository:
+    ///     the registry resolves the source, the cache lists tag versions with their commits and
+    ///     reports the pinned version's listing entry, a moved tag shows as a different revision on
+    ///     the next listing, and an acquired package reports the commit as its content identity (and
+    ///     compares as changed against the identity of the original commit).
+    /// </summary>
+    [Fact]
+    public async Task AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag()
+    {
+        // Arrange: v1.0.0 and v1.1.0 in a local bare repository
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var files = new Dictionary<string, string>
+        {
+            [".github/agents/copilot.md"] = "one",
+            ["release-notes.md"] = "notes"
+        };
+        var first = fixture.Commit(files, "one");
+        fixture.Tag("v1.0.0", annotated: true);
+        files[".github/agents/copilot.md"] = "two";
+        fixture.Commit(files, "two");
+        fixture.Tag("v1.1.0");
+        fixture.Push();
+        var registry = PackageSourceRegistry.Create([fixture.CreateDefinition()], git: fixture.CreateOptions());
+
+        // Act: the version cache lists versions through the registry
+        var cache = new PackageVersionCache();
+        var check = await cache.IsNewerVersionAvailableAsync(
+            registry, "Repo", "contoso-agents", "1.0.0", TestContext.Current.CancellationToken);
+
+        // Assert: the newer version is offered, and the pinned one carries its commit
+        Assert.True(check.IsNewerAvailable);
+        Assert.Equal("1.1.0", check.Latest?.Version.ToString());
+        Assert.Equal(first, check.Pinned?.Revision);
+
+        // Act: the pinned version is acquired
+        using var reader = await registry.Resolve("Repo").AcquireAsync(check.Pinned!, TestContext.Current.CancellationToken);
+
+        // Assert: the content identity is the commit
+        Assert.Equal(PackageContentIdentity.FromGitCommit(first), reader.ContentIdentity);
+        Assert.Equal("one", reader.ReadText(".github/agents/copilot.md"));
+
+        // Act: the maintainer moves v1.0.0 and a new session lists again
+        files[".github/agents/copilot.md"] = "moved";
+        fixture.Commit(files, "moved");
+        fixture.Tag("v1.0.0", force: true);
+        fixture.Push();
+        var later = await new PackageVersionCache().IsNewerVersionAvailableAsync(
+            registry, "Repo", "contoso-agents", "1.0.0", TestContext.Current.CancellationToken);
+
+        // Assert: the pinned version is now at another commit, which compares as changed
+        Assert.NotEqual(check.Pinned!.Revision, later.Pinned?.Revision);
+        Assert.Equal(
+            ContentIdentityComparison.Changed,
+            PackageContentIdentity.Compare(
+                reader.ContentIdentity, PackageContentIdentity.FromGitCommit(later.Pinned!.Revision!)));
+    }
+
+    /// <summary>
+    ///     Test that a Git source the user configured is described by its address, tag pattern,
+    ///     sub-folder and exactly one package ID, written by the name of its type and nothing
+    ///     secret-like, and read back as an equivalent description.
+    /// </summary>
+    [Fact]
+    public void AgentPackageManagementSubsystem_GitSourceDefinition_IsPersistedByNameAndReadBackEquivalent()
+    {
+        // Arrange
+        var original = ValidGitDefinition();
+
+        // Act
+        var json = JsonSerializer.Serialize(original);
+        var loaded = JsonSerializer.Deserialize<PackageSourceDefinition>(json)!;
+
+        // Assert: the type by name, every Git field kept, no property that could hold a secret
+        Assert.Multiple(
+            () => Assert.Contains("\"Type\":\"Git\"", json, StringComparison.Ordinal),
+            () => Assert.Equal(PackageSourceType.Git, loaded.Type),
+            () => Assert.Equal("git@example.invalid:org/agents.git", loaded.Location),
+            () => Assert.Equal("release/{version}", loaded.TagPattern),
+            () => Assert.Equal("packaging/agents", loaded.Subfolder),
+            () => Assert.Equal(["contoso-agents"], loaded.PackageIds),
+            () => Assert.True(original.IsEquivalentTo(loaded)),
+            () => Assert.DoesNotContain("password", json, StringComparison.OrdinalIgnoreCase),
+            () => Assert.DoesNotContain("token", json, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    ///     Test that the settings of a Git source are checked as a whole - the address, the tag pattern,
+    ///     the sub-folder (a relative path of folder names that cannot leave the repository) and the
+    ///     single package ID - and that a source with any of them wrong is refused when it is resolved,
+    ///     with a message that does not repeat the address, while a valid one is resolved.
+    /// </summary>
+    [Theory]
+    [InlineData("address")]
+    [InlineData("pattern")]
+    [InlineData("subfolder-traversal")]
+    [InlineData("subfolder-git-folder")]
+    [InlineData("no-package-id")]
+    [InlineData("two-package-ids")]
+    public void AgentPackageManagementSubsystem_GitSourceDefinition_SettingsAreCheckedAsAWholeAndInvalidSourceIsRefusedWhenResolved(
+        string wrong)
+    {
+        // Arrange: a valid source with one part made wrong
+        var valid = ValidGitDefinition();
+        var invalid = ValidGitDefinition();
+        invalid.Alias = "Broken";
+        switch (wrong)
+        {
+            case "address":
+                invalid.Location = "http://sentinel-host.invalid/org/agents.git";
+                break;
+            case "pattern":
+                invalid.TagPattern = "release/";
+                break;
+            case "subfolder-traversal":
+                invalid.Subfolder = "../outside";
+                break;
+            case "subfolder-git-folder":
+                invalid.Subfolder = "packaging/.git";
+                break;
+            case "no-package-id":
+                invalid.PackageIds = [];
+                break;
+            default:
+                invalid.PackageIds = ["one", "two"];
+                break;
+        }
+
+        var options = new GitSourceOptions(() => "git", CreateTempDirectory());
+        var registry = PackageSourceRegistry.Create([valid, invalid], git: options);
+
+        // Act
+        var refusal = Assert.Throws<InvalidOperationException>(() => registry.Resolve("Broken"));
+        var provider = registry.Resolve("Repo");
+
+        // Assert: the whole description is judged, the wrong source is refused without repeating its address
+        Assert.Multiple(
+            () => Assert.Null(valid.GetGitSettingsProblem()),
+            () => Assert.NotNull(invalid.GetGitSettingsProblem()),
+            () => Assert.NotNull(provider),
+            () => Assert.DoesNotContain("sentinel-host", refusal.Message, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     Test that the address of a Git source is judged by the rules of Git addresses: the https, ssh,
+    ///     <c>user@host:path</c> and local forms are accepted (an ssh user name is no credential), while an
+    ///     address that carries a password, token or query string, another transport, a remote-helper
+    ///     form or an option-like text is refused when the source is resolved, without the message
+    ///     repeating the address.
+    /// </summary>
+    [Theory]
+    [InlineData("https://example.invalid/org/agents.git", true)]
+    [InlineData("ssh://git@example.invalid/org/agents.git", true)]
+    [InlineData("git@example.invalid:org/agents.git", true)]
+    [InlineData("local-path", true)]
+    [InlineData("https://user:SentinelSecretValue@example.invalid/org/agents.git", false)]
+    [InlineData("https://SentinelSecretValue@example.invalid/org/agents.git", false)]
+    [InlineData("ssh://user:SentinelSecretValue@example.invalid/org/agents.git", false)]
+    [InlineData("https://example.invalid/org/agents.git?token=SentinelSecretValue", false)]
+    [InlineData("http://example.invalid/SentinelSecretValue.git", false)]
+    [InlineData("ext::sh -c SentinelSecretValue", false)]
+    [InlineData("-uSentinelSecretValue", false)]
+    public void AgentPackageManagementSubsystem_GitSourceAddress_FollowsTheRulesOfGitAddresses(string address, bool acceptable)
+    {
+        // Arrange: a source with the address (a fully qualified path stands for the local form)
+        var definition = ValidGitDefinition();
+        definition.Location = address == "local-path" ? Path.Combine(CreateTempDirectory(), "agents.git") : address;
+        var registry = PackageSourceRegistry.Create(
+            [definition], git: new GitSourceOptions(() => "git", CreateTempDirectory()));
+
+        // Act
+        var problem = definition.GetGitSettingsProblem();
+        var refusal = Record.Exception(() => registry.Resolve("Repo"));
+
+        // Assert: accepted exactly when the rules allow it, and a refusal never repeats the address
+        Assert.Equal(acceptable, problem is null);
+        Assert.Equal(acceptable, refusal is null);
+        Assert.DoesNotContain("SentinelSecretValue", problem ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("SentinelSecretValue", refusal?.Message ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test, through the registry and with the real git, that a tag whose layout holds a symbolic link, a
+    ///     submodule or names that collide on a case-insensitive file system is refused with a message that
+    ///     names the problem, that nothing of it is left in the cache, and that the layout of an ordinary tag
+    ///     of the same repository is still supplied.
+    /// </summary>
+    [Theory]
+    [InlineData("symbolic-link", "a symbolic link")]
+    [InlineData("submodule", "a submodule")]
+    [InlineData("case-collision", "differ only in letter case or Unicode form")]
+    public async Task AgentPackageManagementSubsystem_GitSource_HostileLayoutIsRefusedAndNothingIsCached(string kind, string expected)
+    {
+        // Arrange: an ordinary tag v1.0.0 and a hostile tag v1.1.0 in one repository
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var files = new Dictionary<string, string>
+        {
+            [".github/agents/copilot.md"] = "good",
+            ["release-notes.md"] = "notes"
+        };
+        var good = fixture.Commit(files, "good");
+        fixture.Tag("v1.0.0");
+        switch (kind)
+        {
+            case "symbolic-link":
+                fixture.AddSymbolicLink(".github/agents/evil.md", "../../../outside.txt");
+                break;
+            case "submodule":
+                fixture.AddSubmodule(".github/skills/sub", good);
+                break;
+            default:
+                fixture.AddFile(".github/agents/A.md", "first");
+                fixture.AddFile(".github/agents/a.md", "second");
+                break;
+        }
+
+        fixture.CommitStaged("hostile " + kind);
+        fixture.Tag("v1.1.0");
+        fixture.Push();
+        var registry = PackageSourceRegistry.Create([fixture.CreateDefinition()], git: fixture.CreateOptions());
+        var provider = (GitSourceProvider)registry.Resolve("Repo");
+        var packages = (await provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken))
+            .ToDictionary(package => package.Version.ToString());
+
+        // Act
+        var refusal = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(packages["1.1.0"], TestContext.Current.CancellationToken));
+        using var ordinary = await provider.AcquireAsync(packages["1.0.0"], TestContext.Current.CancellationToken);
+
+        // Assert: refused for the right reason with nothing of the hostile tag in the cache, the ordinary tag supplied
+        Assert.Multiple(
+            () => Assert.Contains(expected, refusal.Message, StringComparison.Ordinal),
+            () => Assert.False(Directory.Exists(Path.Combine(provider.RepositoryCacheFolder, packages["1.1.0"].Revision!))),
+            () => Assert.Empty(Directory.EnumerateDirectories(provider.RepositoryCacheFolder, ".tmp-*")),
+            () => Assert.Equal("good", ordinary.ReadText(".github/agents/copilot.md")));
+    }
+
+    /// <summary>
+    ///     Test, through the registry and with the real git, that code which the user's own Git configuration
+    ///     would run for a repository - a post-checkout hook installed into every new repository by a template
+    ///     directory and a global hooks path - never runs while a package is listed and fetched, and that the
+    ///     package is supplied normally.
+    /// </summary>
+    [Fact]
+    public async Task AgentPackageManagementSubsystem_GitSource_HooksOfTheUsersConfigurationNeverRun()
+    {
+        // Arrange: a repository, and a user environment that installs a post-checkout hook everywhere
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(
+            new Dictionary<string, string> { [".github/agents/copilot.md"] = "hooked", ["release-notes.md"] = "notes" }, "one");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var marker = Path.Combine(fixture.Root, "hook-ran.txt");
+        var hostile = fixture.CreateHostileHooksEnvironment(marker);
+
+        // Control: plain git with the same environment does run the hook, so the test is meaningful
+        var control = Path.Combine(fixture.Root, "control");
+        fixture.RunWithEnvironment(hostile, fixture.Root, "init", "-q", control);
+        fixture.RunWithEnvironment(hostile, control, "fetch", "-q", fixture.RemotePath, "refs/tags/v1.0.0:refs/tags/v1.0.0");
+        fixture.RunWithEnvironment(hostile, control, "checkout", "-q", "refs/tags/v1.0.0", "--", ".github");
+        if (!File.Exists(marker))
+        {
+            Assert.Skip("Hooks do not run in this environment, so their neutralization cannot be demonstrated.");
+        }
+
+        File.Delete(marker);
+        var registry = PackageSourceRegistry.Create(
+            [fixture.CreateDefinition()], git: fixture.CreateOptions() with { ExtraEnvironment = hostile });
+        var provider = registry.Resolve("Repo");
+
+        // Act
+        var package = Assert.Single(await provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken));
+        using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Assert: supplied, and no hook ran
+        Assert.Equal("hooked", reader.ReadText(".github/agents/copilot.md"));
+        Assert.False(File.Exists(marker));
+    }
+
+    /// <summary>
+    ///     Test, through the registry and with the real git, that a Git source that cannot be used reports
+    ///     why in the failure type its callers act on, without repeating the address or git's own text: a
+    ///     repository that is not there is "not found", a git that cannot be started points to Settings, and a
+    ///     cancelled request stops with a cancellation.
+    /// </summary>
+    [Fact]
+    public async Task AgentPackageManagementSubsystem_GitSource_FailuresAreClassifiedAndNeverRepeatTheAddress()
+    {
+        // Arrange: a source whose repository does not exist, and the same with a git that cannot be started
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var definition = fixture.CreateDefinition();
+        definition.Location = Path.Combine(fixture.Root, "sentinel-missing-repository.git");
+        var registry = PackageSourceRegistry.Create([definition], git: fixture.CreateOptions());
+        var noGit = PackageSourceRegistry.Create(
+            [definition], git: fixture.CreateOptions() with { ResolveGitExecutable = () => Path.Combine(fixture.Root, "no-git") });
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        // Act
+        var missing = await Assert.ThrowsAsync<PackageSourceAccessException>(
+            () => registry.Resolve("Repo").ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken));
+        var unavailable = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => noGit.Resolve("Repo").ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken));
+        var stopped = await Record.ExceptionAsync(
+            () => registry.Resolve("Repo").ListVersionsAsync("contoso-agents", cancelled.Token));
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(PackageSourceFailureKind.NotFound, missing.Kind),
+            () => Assert.DoesNotContain("sentinel-missing-repository", missing.Message, StringComparison.Ordinal),
+            () => Assert.Contains("Settings", unavailable.Message, StringComparison.Ordinal),
+            () => Assert.IsAssignableFrom<OperationCanceledException>(stopped));
+    }
+
+    /// <summary>
+    ///     Test, through the registry and with a stub standing in for git, that a Git source lets git show its
+    ///     sign-in only for work the user started: the same listing started by the application itself runs git
+    ///     with every prompt switched off, and started by the user it leaves the credential manager free.
+    /// </summary>
+    [Fact]
+    public async Task AgentPackageManagementSubsystem_GitSource_OnlyUserStartedWorkMayPrompt()
+    {
+        // Arrange: a stub git that records its environment, and two registries over one source
+        var stub = GitRemoteStub.Create();
+        try
+        {
+            var definition = ValidGitDefinition();
+            definition.Location = "https://example.invalid/org/agents.git";
+            var folder = CreateTempDirectory();
+            var background = PackageSourceRegistry.Create(
+                [definition], git: new GitSourceOptions(() => stub.Path, Path.Combine(folder, "background")));
+            var userStarted = PackageSourceRegistry.Create(
+                [definition], git: new GitSourceOptions(() => stub.Path, Path.Combine(folder, "user"), Interactive: true));
+
+            // Act
+            await background.Resolve("Repo").ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
+            await userStarted.Resolve("Repo").ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
+            var listings = stub.ReadInvocations().Where(invocation => invocation.Command == "ls-remote").ToList();
+
+            // Assert: the application's own work cannot prompt, the user's can (git still never reads a terminal)
+            Assert.Equal(2, listings.Count);
+            Assert.Multiple(
+                () => Assert.Equal("never", listings[0].Environment["GCM_INTERACTIVE"]),
+                () => Assert.Equal("0", listings[0].Environment["GIT_TERMINAL_PROMPT"]),
+                () => Assert.NotEqual("never", listings[1].Environment["GCM_INTERACTIVE"]),
+                () => Assert.Equal("0", listings[1].Environment["GIT_TERMINAL_PROMPT"]));
+        }
+        finally
+        {
+            stub.Delete();
+        }
+    }
+
+    /// <summary>
+    ///     Test, through the registry and with a stub standing in for git, that a git older than the supported
+    ///     minimum is refused with advice for every use of the source - listing, previewing and fetching - before
+    ///     any other git command runs.
+    /// </summary>
+    [Fact]
+    public async Task AgentPackageManagementSubsystem_GitSource_TooOldGitIsRefusedWithAdviceBeforeAnyTagIsListed()
+    {
+        // Arrange: a stub that reports an old git
+        var stub = GitRemoteStub.Create().Respond("version", "git version 2.20.1\n");
+        try
+        {
+            var registry = PackageSourceRegistry.Create(
+                [ValidGitDefinition()],
+                git: new GitSourceOptions(() => stub.Path, CreateTempDirectory(), EnforceMinimumGitVersion: true));
+            var provider = registry.Resolve("Repo");
+
+            // Act
+            var failure = await Assert.ThrowsAsync<GitRemoteException>(
+                () => provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken));
+
+            // Assert: refused with advice, and only the version was ever asked of git
+            Assert.Multiple(
+                () => Assert.Equal(GitFailureKind.GitTooOld, failure.Kind),
+                () => Assert.Contains("Settings > Git executable", failure.Message, StringComparison.Ordinal),
+                () => Assert.All(stub.ReadInvocations(), invocation => Assert.Equal("version", invocation.Command)));
+        }
+        finally
+        {
+            stub.Delete();
+        }
+    }
+
+    /// <summary>
+    ///     Creates a valid Git source description.
+    /// </summary>
+    /// <returns>The definition, with the alias <c>Repo</c>.</returns>
+    private static PackageSourceDefinition ValidGitDefinition() => new()
+    {
+        Alias = "Repo",
+        Type = PackageSourceType.Git,
+        Location = "git@example.invalid:org/agents.git",
+        TagPattern = "release/{version}",
+        Subfolder = "packaging/agents",
+        PackageIds = ["contoso-agents"]
+    };
 
     /// <summary>
     ///     Creates a unique temporary directory removed when the test ends.

@@ -1,0 +1,547 @@
+---
+# Software Unit Requirements for the GitSourceProvider Class
+#
+# GitSourceProvider is the package source provider for one Git repository whose tags that match a
+# pattern are the versions of a single package: it lists the versions without cloning, acquires
+# one tag into a cache, validates that the package layout holds no links, submodules or unsafe
+# names, and reports the commit as the content identity.
+#
+# The requirements state what an observer sees. How it is achieved - the shallow single-tag
+# fetch, the layout of the cache and its completeness mark, the validation order, the writing of
+# the blobs - is in the unit's design document. Each requirement states one outcome and is linked
+# to the tests that show it.
+
+sections:
+  - title: GitSourceProvider Unit Requirements
+    requirements:
+      # ---- Creation ----
+      - id: AgentControl-GitSourceProvider-ValidateDefinition
+        title: >-
+          The GitSourceProvider class shall refuse, when it is created, a source definition that is
+          not a Git source or whose repository address, tag pattern, sub-folder or single package
+          ID is not valid, before any git process is started.
+        justification: |
+          A settings file can be edited by hand; a source whose settings do not pass the same
+          checks as the editor must fail closed rather than hand a hostile address or path to
+          git.
+        tests:
+          - GitSourceProvider_Constructor_InvalidSettings_FailsClosed
+          - GitSourceProvider_Constructor_WrongTypeBlankAliasOrRelativeCache_ThrowsArgumentException
+
+      - id: AgentControl-GitSourceProvider-ValidateDefinitionMessageNeverRepeatsAddress
+        title: >-
+          The GitSourceProvider class shall not repeat the repository address in the message it
+          gives for a source definition it refuses.
+        justification: |
+          The address of a hand-edited definition may carry the very secret that made it
+          unacceptable, and the message is shown and logged.
+        tests:
+          - GitSourceProvider_Constructor_InvalidSettings_FailsClosed
+
+      # ---- Listing ----
+      - id: AgentControl-GitSourceProvider-ListPackageId
+        title: >-
+          The GitSourceProvider class shall offer exactly one package, the one named in the source
+          definition, without contacting the repository.
+        justification: |
+          One configured Git source is one repository delivering one package; knowing its name
+          needs no network, so the package list is instant and never fails.
+        tests:
+          - GitSourceProvider_SshAddress_AllowsOnlySsh_AndListPackageIdsNeedsNoGit
+
+      - id: AgentControl-GitSourceProvider-ListVersionsNoVersionsForOtherPackage
+        title: >-
+          The GitSourceProvider class shall offer no versions for any package ID other than the
+          one named in the source definition, without contacting the repository.
+        justification: |
+          A source serves one package; answering for another would offer content that was never
+          configured.
+        tests:
+          - GitSourceProvider_ListVersions_OtherPackageId_ReturnsEmptyWithoutRunningGit
+
+      - id: AgentControl-GitSourceProvider-ListVersionsByPattern
+        title: >-
+          The GitSourceProvider class shall list the versions of its package from the tags of the
+          repository, keeping only the tags that match the tag pattern and are strict semantic
+          versions.
+        justification: |
+          Tags are the versions of a Git package; a tag such as latest, v1.2, v01.2.3 or
+          v1.2.3+build is not one, and listing it would make the version list ambiguous.
+        tests:
+          - GitSourceProvider_ListVersions_LightweightAndAnnotatedTags_ResolveToCommitsAndFilterByPattern
+
+      - id: AgentControl-GitSourceProvider-ListVersionsWithoutClone
+        title: >-
+          The GitSourceProvider class shall list the versions of its package with a query of the
+          remote that does not clone the repository.
+        justification: |
+          Listing with one cheap query keeps the version list and the upgrade check fast and
+          independent of the size of the repository.
+        tests:
+          - GitSourceProvider_ListVersions_UsesPatternGlobAndAddressTransport
+
+      - id: AgentControl-GitSourceProvider-ListVersionsOnlyOverAddressTransport
+        title: >-
+          The GitSourceProvider class shall contact the repository only through the transport of
+          its address - https, ssh or a local path - and no other.
+        justification: |
+          An address that passed validation must not make git use another transport or a remote
+          helper.
+        tests:
+          - GitSourceProvider_ListVersions_UsesPatternGlobAndAddressTransport
+          - GitSourceProvider_SshAddress_AllowsOnlySsh_AndListPackageIdsNeedsNoGit
+
+      - id: AgentControl-GitSourceProvider-ListVersionsEmptyWhenNoMatch
+        title: >-
+          The GitSourceProvider class shall list no versions, and report no error, when the
+          repository has no tag that matches the tag pattern.
+        justification: |
+          A repository that has not published a version yet is not a failure.
+        tests:
+          - GitSourceProvider_ListVersions_NoMatchingTags_ReturnsEmpty
+
+      - id: AgentControl-GitSourceProvider-ListVersionsDuplicateVersionKeepsSmallestTag
+        title: >-
+          The GitSourceProvider class shall, when two tags name the same version, list the version
+          once, with the lexicographically smallest tag name, and log a warning.
+        justification: |
+          A version must name one tag, or the same version could mean two commits; the choice
+          must be deterministic and visible.
+        tests:
+          - GitSourceProvider_ListVersions_TwoTagsSameVersion_KeepsSmallestTagAndWarns
+
+      - id: AgentControl-GitSourceProvider-ResolveAnnotatedTags
+        title: >-
+          The GitSourceProvider class shall report for each version the commit its tag finally
+          points to - for an annotated tag the commit it is peeled to, never the tag object - as
+          the revision of the version.
+        justification: |
+          The revision is what a pin records and what a later listing is compared with; the tag
+          object changes whenever a tag is re-created even when it points at the same commit.
+        tests:
+          - GitSourceProvider_ListVersions_LightweightAndAnnotatedTags_ResolveToCommitsAndFilterByPattern
+
+      - id: AgentControl-GitSourceProvider-TagPreview
+        title: >-
+          The GitSourceProvider class shall be able to show how the tags of the repository sort
+          under the tag pattern: the total number of tags, the tags that are versions, the number
+          of the others and a few examples of them.
+        justification: |
+          A user who writes a tag pattern needs to see whether it finds their versions, and which
+          tags it skips, before relying on it.
+        tests:
+          - GitSourceProvider_Preview_SeparatesMatchingFromOtherTags
+
+      # ---- Acquiring ----
+      - id: AgentControl-GitSourceProvider-AcquireOnlyFromOwnSource
+        title: >-
+          The GitSourceProvider class shall refuse to acquire a package that was not discovered at
+          its own source or is for another package, before any git process is started.
+        justification: |
+          Acquisition must never be redirected to a source or package this provider does not
+          serve.
+        tests:
+          - GitSourceProvider_Acquire_PackageNotReportedBySource_IsRefused
+          - GitSourceProvider_Acquire_UnreportedPackage_IsRefusedWithoutRunningGit
+
+      - id: AgentControl-GitSourceProvider-AcquireRequiresTagAndCommit
+        title: >-
+          The GitSourceProvider class shall refuse to acquire a package that does not name a tag
+          that matches the tag pattern and a full commit id, before any git process is started.
+        justification: |
+          A tag or revision that is not well-formed must never reach a git command line.
+        tests:
+          - GitSourceProvider_Acquire_PackageNotReportedBySource_IsRefused
+          - GitSourceProvider_Acquire_UnreportedPackage_IsRefusedWithoutRunningGit
+
+      - id: AgentControl-GitSourceProvider-AcquireOnlyListedVersions
+        title: >-
+          The GitSourceProvider class shall refuse to fetch a package whose version, tag and commit
+          the repository does not list now, even when they are well-formed, before anything is
+          fetched.
+        justification: |
+          Acquisition must never be redirected to a tag or commit that the source did not report;
+          a caller that builds a package by hand, or a stale listing entry, must not make the
+          source fetch something it would not list.
+        tests:
+          - GitSourceProvider_Acquire_ListedTagAtOtherCommit_IsRefusedBeforeFetching
+          - GitSourceProvider_Acquire_VersionNotListed_IsRefusedBeforeFetching
+          - GitSourceProvider_Acquire_TagThatIsNotTheListedOneForTheVersion_IsRefusedBeforeFetching
+          - GitSourceProvider_MovedTag_ShowsNewRevisionAndRefusesStaleListing
+
+      - id: AgentControl-GitSourceProvider-AcquireShallowTag
+        title: >-
+          The GitSourceProvider class shall acquire a version by fetching only the tag of that
+          version, with no more history than that tag needs.
+        justification: |
+          Transferring one tag without its history keeps the transfer small and means nothing
+          else in a repository, which may be large or hostile, is fetched.
+        tests:
+          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder
+
+      - id: AgentControl-GitSourceProvider-AcquireOnlyLayout
+        title: >-
+          The GitSourceProvider class shall write only the package layout of a tag - the four
+          managed agent folders, release-notes.md and AGENTS.md - and deliver a reader of that
+          layout, so that nothing else in the repository is ever written to disk.
+        justification: |
+          A repository holds many things that are not the package, and some of them may be hostile;
+          only what is part of the package may reach the user's disk.
+        tests:
+          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder
+
+      - id: AgentControl-GitSourceProvider-AcquireExactBlobBytes
+        title: >-
+          The GitSourceProvider class shall deliver each file of the package layout with exactly the
+          bytes it has in the commit, whatever line-ending, identifier or conversion settings the
+          user's git configuration or the repository's attributes name.
+        justification: |
+          The bytes that were validated and identified by the commit are the bytes that must be
+          applied; a conversion would change them after the check, and the identity of the commit
+          would no longer describe what is on disk.
+        tests:
+          - GitSourceProvider_Acquire_UserAutocrlfSetting_DoesNotChangeDeliveredBytes
+          - GitSourceProvider_Acquire_HostileFilterSelectedByRepository_NeverRunsAndContentIsRaw
+
+      - id: AgentControl-GitSourceProvider-NoRepositoryFilters
+        title: >-
+          The GitSourceProvider class shall acquire a package without running any filter driver,
+          even when the repository's attributes select one that the user's own git configuration
+          defines.
+        justification: |
+          A filter driver is a program; letting a fetched repository choose which of the user's
+          programs run while its files are written would let a package source execute code on the
+          user's machine.
+        tests:
+          - GitSourceProvider_Acquire_HostileFilterSelectedByRepository_NeverRunsAndContentIsRaw
+
+      - id: AgentControl-GitSourceProvider-HostileHooksNeverRun
+        title: >-
+          The GitSourceProvider class shall acquire a package without running any hook, even when
+          the user's environment installs hooks into every new repository through a template
+          directory or a global hooks path.
+        justification: |
+          Code that runs because a repository was fetched would let a package source execute
+          programs on the user's machine.
+        tests:
+          - GitSourceProvider_Acquire_HostileHooksAndTemplate_NeverRun
+
+      - id: AgentControl-GitSourceProvider-ReportContentIdentity
+        title: >-
+          The GitSourceProvider class shall report the content identity of an acquired package as
+          the commit the tag pointed to, in the git-commit form.
+        justification: |
+          The commit names exactly what was delivered, so a repo's pin can tell a moved tag from
+          the version it was made from.
+        tests:
+          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder
+          - GitSourceProvider_MovedTag_ShowsNewRevisionAndRefusesStaleListing
+
+      # ---- Moved tags ----
+      - id: AgentControl-GitSourceProvider-TagMovedBetweenListAndFetch
+        title: >-
+          The GitSourceProvider class shall refuse to acquire a version when its tag no longer
+          points to the commit that was listed, saying that the list must be refreshed.
+        justification: |
+          A tag can be moved; the content a user confirmed is the commit that was listed, so
+          content from another commit must never be delivered in its place.
+        tests:
+          - GitSourceProvider_MovedTag_ShowsNewRevisionAndRefusesStaleListing
+
+      - id: AgentControl-GitSourceProvider-MovedTagReportedAsNewRevision
+        title: >-
+          The GitSourceProvider class shall report a tag that was moved as a different revision of
+          the same version the next time it lists.
+        justification: |
+          A caller compares the listed revision with the one it pinned to notice that a tag was
+          moved.
+        tests:
+          - GitSourceProvider_MovedTag_ShowsNewRevisionAndRefusesStaleListing
+
+      # ---- Cache ----
+      - id: AgentControl-GitSourceProvider-CacheByAddressAndCommit
+        title: >-
+          The GitSourceProvider class shall use again, without contacting the repository, a commit
+          it has already acquired.
+        justification: |
+          A commit never changes, so it is fetched once; a second use must work offline and be
+          instant.
+        tests:
+          - GitSourceProvider_Acquire_SecondTime_UsesCacheWithoutRemote
+
+      - id: AgentControl-GitSourceProvider-CacheSeparatesRepositories
+        title: >-
+          The GitSourceProvider class shall keep the commits of different repositories apart, so
+          that one source can never be served the content of another.
+        justification: |
+          Two repositories may be cached side by side; sharing a folder would let one of them
+          deliver the other's package.
+        tests:
+          - GitSourceProvider_RepositoryCacheFolder_DiffersForDifferentRepositories
+
+      - id: AgentControl-GitSourceProvider-CacheTrustsOnlyCompleteFolders
+        title: >-
+          The GitSourceProvider class shall use a cached commit only when its folder is complete,
+          and shall replace a folder that is not.
+        justification: |
+          A partial write left by a stopped or foreign process must never be delivered as a
+          package.
+        tests:
+          - GitSourceProvider_Acquire_SweepsStaleTemporaryFolderAndReplacesUnmarkedCacheFolder
+
+      - id: AgentControl-GitSourceProvider-CacheSweepsTemporaryFolders
+        title: >-
+          The GitSourceProvider class shall remove the temporary folders that a failed or stopped
+          acquisition left behind once they are old enough that no running acquisition can own
+          them.
+        justification: |
+          A killed process cannot clean up after itself; without a sweep the cache would collect
+          debris.
+        tests:
+          - GitSourceProvider_Acquire_SweepsStaleTemporaryFolderAndReplacesUnmarkedCacheFolder
+
+      - id: AgentControl-GitSourceProvider-CachePruning
+        title: >-
+          The GitSourceProvider class shall, after a successful acquisition, remove the least
+          recently used cached commits of the repository beyond the configured number, never the
+          one just used.
+        justification: |
+          Every moved or new tag adds a commit to the cache; without a limit the cache grows
+          without bound.
+        tests:
+          - GitSourceProvider_Acquire_PrunesOldestCommitsBeyondTheLimit
+
+      - id: AgentControl-GitSourceProvider-CachePruningSparesOpenReaders
+        title: >-
+          The GitSourceProvider class shall not remove the cached commit that a reader it returned
+          reads while that reader has not been disposed, even when other acquisitions take the
+          cache beyond the configured number of commits.
+        justification: |
+          A caller that keeps a reader while it acquires another version must still be able to read
+          the first package; a folder pruned under an open reader would make an acquisition that
+          succeeded fail later, or deliver a package that is partly gone.
+        tests:
+          - GitSourceProvider_Acquire_ReaderHeldWhileOthersExceedLimit_KeepsHeldFolderUntilDisposed
+
+      - id: AgentControl-GitSourceProvider-CacheReleasesCommitWhenReaderDisposed
+        title: >-
+          The GitSourceProvider class shall make a cached commit removable by pruning again once
+          every reader it returned for that commit has been disposed (however often each is
+          disposed), and when an acquisition fails.
+        justification: |
+          A commit that stayed held after its readers were gone would never be pruned, and a
+          reader that released twice would free a commit another reader still uses.
+        tests:
+          - GitSourceProvider_Acquire_ReaderHeldWhileOthersExceedLimit_KeepsHeldFolderUntilDisposed
+          - GitSourceProvider_Acquire_ReaderDisposedTwice_ReleasesItsLeaseOnlyOnce
+          - GitSourceProvider_Acquire_Refused_LeavesNoLease
+
+      # ---- Layout validation ----
+      - id: AgentControl-GitSourceProvider-RejectLinksAndSubmodulesInLayout
+        title: >-
+          The GitSourceProvider class shall refuse a tag whose package layout contains a symbolic
+          link or a submodule - also in place of .github, a managed folder, a root file or the
+          sub-folder - before anything is written or cached, saying what was found.
+        justification: |
+          A link in the layout could make a later copy read or write outside the package; checking
+          the tree before anything is written means a hostile repository never reaches the disk.
+        tests:
+          - GitSourceProvider_Acquire_LinkOrSubmoduleInLayout_IsRefusedAndNothingCached
+
+      - id: AgentControl-GitSourceProvider-IgnoreLinksOutsideLayout
+        title: >-
+          The GitSourceProvider class shall ignore a symbolic link that is not part of the package
+          layout.
+        justification: |
+          A link that is never written cannot matter, and refusing it would reject good packages
+          because of unrelated files.
+        tests:
+          - GitSourceProvider_Acquire_SymbolicLinkOutsideLayout_IsIgnored
+
+      - id: AgentControl-GitSourceProvider-RejectLayoutEntryOfWrongKind
+        title: >-
+          The GitSourceProvider class shall refuse a tag in which a managed agent folder is not a
+          folder, or a root file is not a file, before anything is written or cached.
+        justification: |
+          A file where a managed folder belongs would pass a check of files, and applying it would
+          delete the managed folder in the target repo and put nothing back.
+        tests:
+          - GitSourceProvider_Acquire_LayoutFolderAsFileOrRootFileAsFolder_IsRefusedAndNothingCached
+
+      - id: AgentControl-GitSourceProvider-RejectUnsafeEntryNames
+        title: >-
+          The GitSourceProvider class shall refuse a tag whose package layout has an entry whose
+          name is not safe on every file system - a Windows device name, a stream separator, a
+          trailing dot or space, a forbidden character - before anything is written or cached.
+        justification: |
+          The files are written by AgentControl itself, so nothing else checks their names; such a
+          name could address a device or an alternate data stream instead of a file.
+        tests:
+          - GitSourceProvider_Acquire_UnsafeEntryName_IsRefusedAndNothingCached
+          - GitSourceProvider_PathComponentRules_ClassifyUnsafeNamesAndGitFolderSpellings
+
+      - id: AgentControl-GitSourceProvider-RejectFoldedPathCollisions
+        title: >-
+          The GitSourceProvider class shall refuse a tag whose package layout holds two entries
+          whose names differ only in letter case or in Unicode form - two files, a file and a
+          folder, or two folders - on every operating system, before anything is written or
+          cached, saying that such names are not allowed.
+        justification: |
+          A file system that ignores case or normalizes Unicode treats such entries as one, so one
+          of them would silently replace the other; the cache may be read on such a file system
+          whatever system created it, so the layout is refused everywhere.
+        tests:
+          - GitSourceProvider_FindFoldedPathCollision_DetectsCaseAndUnicodeFormCollisions
+          - GitSourceProvider_Acquire_FoldedPathCollisionInLayout_IsRefusedAndNothingCached
+
+      - id: AgentControl-GitSourceProvider-Subfolder
+        title: >-
+          The GitSourceProvider class shall read the package layout from the configured
+          sub-folder of the repository when one is given.
+        justification: |
+          Agent packages are often one folder of a larger repository.
+        tests:
+          - GitSourceProvider_Acquire_Subfolder_ReadsLayoutFromThatFolder
+
+      - id: AgentControl-GitSourceProvider-RejectBadSubfolder
+        title: >-
+          The GitSourceProvider class shall refuse a sub-folder that does not exist in the tag, is
+          a link, or holds no layout, saying which.
+        justification: |
+          A missing or empty layout must be reported rather than synced as an empty package, which
+          would delete a repo's agent files.
+        tests:
+          - GitSourceProvider_Acquire_BadSubfolder_IsRefused
+
+      - id: AgentControl-GitSourceProvider-RejectTagWithoutLayout
+        title: >-
+          The GitSourceProvider class shall refuse a tag that holds no package layout at all.
+        justification: |
+          A tag without a layout is not a package; delivering it would delete a repo's agent files
+          and replace them with nothing.
+        tests:
+          - GitSourceProvider_Acquire_TagWithoutLayout_IsRefused
+
+      - id: AgentControl-GitSourceProvider-ExcludeGitFolder
+        title: >-
+          The GitSourceProvider class shall deliver a package that has no .git folder.
+        justification: |
+          The repository metadata is not part of the package, and a .git folder inside a delivered
+          tree could be used to attack tools that later run inside it.
+        tests:
+          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder
+
+      - id: AgentControl-GitSourceProvider-RejectGitEntryInLayout
+        title: >-
+          The GitSourceProvider class shall refuse a tag whose package layout has an entry that
+          names the .git folder, in any letter case or any of the spellings a file system treats
+          as the same name.
+        justification: |
+          Such an entry would become a repository's metadata folder when the package is applied.
+        tests:
+          - GitSourceProvider_PathComponentRules_ClassifyUnsafeNamesAndGitFolderSpellings
+
+      - id: AgentControl-GitSourceProvider-FailClosedWhenGitFolderRemains
+        title: >-
+          The GitSourceProvider class shall, when the .git folder of a fetched package cannot be
+          removed, fail the acquisition with a message the user can act on, publish nothing, and
+          succeed at a later acquisition once the folder can be removed.
+        justification: |
+          A package that still holds repository metadata would deliver exactly what the package
+          rules forbid; a locked file must stop the acquisition, not weaken it.
+        tests:
+          - GitSourceProvider_Acquire_GitFolderRemovalFails_IsRefusedNothingPublishedAndLaterAcquisitionSucceeds
+
+      - id: AgentControl-GitSourceProvider-LeftoverTemporaryFolderNeverUsed
+        title: >-
+          The GitSourceProvider class shall never use a temporary folder left behind by an
+          acquisition that could not clean up as a package, and shall remove it later.
+        justification: |
+          A half-cleaned folder that could be reused would deliver content that was never
+          validated.
+        tests:
+          - GitSourceProvider_Acquire_LeftoverTemporaryFolderWithGit_IsNeverServedAndIsSweptWhenStale
+
+      # ---- Failures ----
+      - id: AgentControl-GitSourceProvider-FailureClassification
+        title: >-
+          The GitSourceProvider class shall report a failure of git in the provider's own terms - a
+          sign-in that is needed, a repository or tag that is not found, a server that cannot be
+          reached, a time limit exceeded - and any other failure as an error with a safe message.
+        justification: |
+          The user needs to know what to do (sign in, check the address), and the background check
+          needs the sign-in case in particular to show "sign-in needed" instead of an error.
+        tests:
+          - GitSourceProvider_GitFailure_IsTranslatedToFailureKind
+          - GitSourceProvider_OtherFailures_AreReportedClearly
+          - GitSourceProvider_ListVersions_RepositoryMissing_ReportsNotFound
+
+      - id: AgentControl-GitSourceProvider-UntrustedHostKeyHint
+        title: >-
+          The GitSourceProvider class shall, for an ssh server whose host key is not trusted yet,
+          tell the user to connect once with ssh from a terminal and accept the host key.
+        justification: |
+          ssh cannot ask in the background and would otherwise fail with a message the user cannot
+          act on.
+        tests:
+          - GitSourceProvider_GitFailure_UntrustedHostKey_TellsHowToTrustIt
+
+      - id: AgentControl-GitSourceProvider-FailureMessagesNeverRepeatGitOutput
+        title: >-
+          The GitSourceProvider class shall never repeat git's own output or the repository address
+          in the message of a failure.
+        justification: |
+          git's text commonly contains the address, the host or a local path, and messages are
+          shown and logged.
+        tests:
+          - GitSourceProvider_GitFailure_IsTranslatedToFailureKind
+          - GitSourceProvider_OtherFailures_AreReportedClearly
+
+      - id: AgentControl-GitSourceProvider-CancellationObserved
+        title: >-
+          The GitSourceProvider class shall stop listing and acquiring when its token is
+          cancelled, with an operation-cancelled exception rather than a failure.
+        justification: |
+          A user who closes a dialog or leaves a screen must not wait for a slow remote, and
+          cancellation is not an error to report.
+        tests:
+          - GitSourceProvider_ListVersions_Cancelled_ThrowsOperationCanceled
+          - GitSourceProvider_Acquire_AlreadyCancelled_ThrowsOperationCanceled
+
+      - id: AgentControl-GitSourceProvider-InteractiveFlagHonored
+        title: >-
+          The GitSourceProvider class shall run git in the mode of its options: work the user
+          started leaves git's credential UI available, and background work never prompts.
+        justification: |
+          Only an action the user just took may open a sign-in window; a check that runs on its own
+          must fail quietly and let the card say that a sign-in is needed.
+        tests:
+          - GitSourceProvider_InteractiveFlag_IsHonored
+
+      # ---- Git version ----
+      - id: AgentControl-GitSourceProvider-MinimumGitVersion
+        title: >-
+          The GitSourceProvider class shall, when the application asks for it, refuse a git older
+          than the supported minimum before it lists, previews or fetches anything.
+        justification: |
+          An old git would fail in the middle of a fetch with a message the user cannot act on.
+        tests:
+          - GitSourceProvider_EnforceMinimumGitVersion_OldGit_IsRefusedAsGitTooOldBeforeAnyGitWork
+
+      - id: AgentControl-GitSourceProvider-GitTooOldReportedUnwrapped
+        title: >-
+          The GitSourceProvider class shall report the refusal of an old git as the git-too-old
+          failure itself - not wrapped and not prefixed with the source alias.
+        justification: |
+          The application recognizes that failure to tell the user how to update git.
+        tests:
+          - GitSourceProvider_EnforceMinimumGitVersion_OldGit_IsRefusedAsGitTooOldBeforeAnyGitWork
+
+      - id: AgentControl-GitSourceProvider-MinimumGitVersionCheckedOnce
+        title: >-
+          The GitSourceProvider class shall check the version of a new enough git once, before the
+          first listing, and not repeat the check for later work.
+        justification: |
+          Asking git for its version before every operation would slow every listing.
+        tests:
+          - GitSourceProvider_EnforceMinimumGitVersion_NewGit_IsCheckedOnceBeforeTheFirstListing

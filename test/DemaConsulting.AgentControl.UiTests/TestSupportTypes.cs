@@ -42,10 +42,20 @@ internal static class TestRepoPinWriter
     /// <param name="version">The pinned package version.</param>
     /// <param name="sourceAlias">The alias of the source the package came from, or
     ///     <see langword="null"/> to write a pin file in the older format that names no source.</param>
-    public static void Write(string repoPath, string packageName, string version, string? sourceAlias = null)
+    /// <param name="contentIdentity">The content identity to record, or <see langword="null"/> for a
+    ///     pin that records none; a pin that records one is written as schema version 3 and, if
+    ///     <paramref name="sourceAlias"/> is <see langword="null"/>, names the <c>Default</c> source.</param>
+    public static void Write(
+        string repoPath, string packageName, string version, string? sourceAlias = null, string? contentIdentity = null)
     {
         var pin = new Dictionary<string, object?> { ["PackageName"] = packageName, ["Version"] = version };
-        if (sourceAlias is not null)
+        if (contentIdentity is not null)
+        {
+            pin["SchemaVersion"] = 3;
+            pin["Source"] = sourceAlias ?? "Default";
+            pin["ContentIdentity"] = contentIdentity;
+        }
+        else if (sourceAlias is not null)
         {
             pin["SchemaVersion"] = 2;
             pin["Source"] = sourceAlias;

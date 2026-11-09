@@ -157,6 +157,8 @@ reviews:
       - "test/**/LauncherUI/ThemeResourceTests.cs"
       - "test/**/LauncherUI/CredentialPromptWindowTests.cs"
       - "test/**/LauncherUI/SourceEditorSignatureWindowTests.cs"
+      - "test/**/LauncherUI/SourceEditorGitWindowTests.cs"
+      - "test/**/LauncherUI/PackageSourceGitPresentationTests.cs"
       - "test/**/LauncherUI/DialogWindowTests.cs"
       - "test/**/LauncherUI/HeadlessTestApp.cs"
       - "test/**/LauncherUI/MainWindowTests.cs"
@@ -250,8 +252,12 @@ reviews:
       - "docs/verification/agent-control/launcher-ui/repo-card-view-model.md"
       - "src/**/LauncherUI/RepoCardViewModel.cs"
       - "src/**/LauncherUI/RepoCardStatus.cs"
+      - "src/**/LauncherUI/ContentChangeConfirmationRequest.cs"
       - "src/**/LauncherUI/CardColorPalette.cs"
       - "test/**/LauncherUI/RepoCardViewModelTests.cs"
+      - "test/**/LauncherUI/RepoCardContentIdentityTests.cs"
+      - "test/**/LauncherUI/RepoCardGitSourceTests.cs"
+      - "test/**/LauncherUI/RepoCardGitAwarenessTests.cs"
       - "test/**/LauncherUI/RepoCardColorTests.cs"
       - "test/**/LauncherUI/RepoCardImageTests.cs"
       - "test/**/LauncherUI/TestPng.cs"
@@ -288,6 +294,7 @@ reviews:
       - "src/**/LauncherUI/SettingsWindowViewModel.cs"
       - "test/**/LauncherUI/SettingsWindowViewModelTests.cs"
       - "test/**/LauncherUI/SettingsWindowServerSourceTests.cs"
+      - "test/**/LauncherUI/SettingsWindowGitSourceTests.cs"
 
   - id: AgentControl-LauncherUI-SourceEditorViewModel
     title: Review of Agent Control SourceEditorViewModel unit implementation
@@ -301,9 +308,12 @@ reviews:
       - "docs/design/agent-control/launcher-ui/source-editor-view-model.md"
       - "docs/verification/agent-control/launcher-ui/source-editor-view-model.md"
       - "src/**/LauncherUI/SourceEditorViewModel.cs"
+      - "src/**/LauncherUI/SourceEditorViewModel.Git.cs"
       - "test/**/LauncherUI/SourceEditorViewModelTests.cs"
       - "test/**/LauncherUI/SourceEditorServerViewModelTests.cs"
       - "test/**/LauncherUI/SourceEditorSignatureViewModelTests.cs"
+      - "test/**/LauncherUI/SourceEditorGitViewModelTests.cs"
+      - "test/**/AgentPackageManagement/FakeGitSourceProvider.cs"
 
   - id: AgentControl-LauncherUI-CredentialPromptViewModel
     title: Review of Agent Control CredentialPromptViewModel unit implementation
@@ -365,6 +375,64 @@ reviews:
       - "docs/verification/agent-control/agent-package-management/package-version.md"
       - "src/**/AgentPackageManagement/PackageVersion.cs"
       - "test/**/AgentPackageManagement/PackageVersionTests.cs"
+
+  - id: AgentControl-AgentPackageManagement-PackageContentIdentity
+    title: Review of Agent Control PackageContentIdentity unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-package-management.md
+      - docs/reqstream/agent-control/agent-package-management.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-package-management/package-content-identity.yaml"
+      - "docs/design/agent-control/agent-package-management/package-content-identity.md"
+      - "docs/verification/agent-control/agent-package-management/package-content-identity.md"
+      - "src/**/AgentPackageManagement/PackageContentIdentity.cs"
+      - "test/**/AgentPackageManagement/PackageContentIdentityTests.cs"
+
+  - id: AgentControl-AgentPackageManagement-GitRepositoryAddress
+    title: Review of Agent Control GitRepositoryAddress unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-package-management.md
+      - docs/reqstream/agent-control/agent-package-management.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-package-management/git-repository-address.yaml"
+      - "docs/design/agent-control/agent-package-management/git-repository-address.md"
+      - "docs/verification/agent-control/agent-package-management/git-repository-address.md"
+      - "src/**/AgentPackageManagement/GitRepositoryAddress.cs"
+      - "test/**/AgentPackageManagement/GitRepositoryAddressTests.cs"
+
+  - id: AgentControl-AgentPackageManagement-GitTagPattern
+    title: Review of Agent Control GitTagPattern unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-package-management.md
+      - docs/reqstream/agent-control/agent-package-management.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-package-management/git-tag-pattern.yaml"
+      - "docs/design/agent-control/agent-package-management/git-tag-pattern.md"
+      - "docs/verification/agent-control/agent-package-management/git-tag-pattern.md"
+      - "src/**/AgentPackageManagement/GitTagPattern.cs"
+      - "test/**/AgentPackageManagement/GitTagPatternTests.cs"
+
+  - id: AgentControl-AgentPackageManagement-GitSourceProvider
+    title: Review of Agent Control GitSourceProvider unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-package-management.md
+      - docs/reqstream/agent-control/agent-package-management.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-package-management/git-source-provider.yaml"
+      - "docs/design/agent-control/agent-package-management/git-source-provider.md"
+      - "docs/verification/agent-control/agent-package-management/git-source-provider.md"
+      - "src/**/AgentPackageManagement/GitSourceProvider.cs"
+      - "test/**/AgentPackageManagement/GitSourceProviderTests.cs"
+      - "test/**/AgentPackageManagement/GitSourceProviderIntegrationTests.cs"
+      - "test/**/AgentPackageManagement/GitRepositoryFixture.cs"
 
   - id: AgentControl-AgentPackageManagement-PackageVersionCache
     title: Review of Agent Control PackageVersionCache unit implementation
@@ -533,6 +601,7 @@ reviews:
       - "docs/verification/agent-control/repo-sync.md"
       - "src/**/RepoSync/ReleaseNotesViewer.axaml"
       - "src/**/RepoSync/ReleaseNotesViewer.axaml.cs"
+      - "test/**/RepoSync/RepoSyncSubsystemTests.cs"
 
   - id: AgentControl-RepoSync-PackageZipExtractor
     title: Review of Agent Control PackageZipExtractor unit implementation
@@ -604,6 +673,7 @@ reviews:
       - "docs/design/agent-control/repo-config.md"
       - "docs/verification/agent-control/repo-config.md"
       - "src/**/RepoConfig/RepoPin.cs"
+      - "test/**/RepoConfig/RepoConfigSubsystemTests.cs"
 
   - id: AgentControl-RepoConfig-RepoPinStore
     title: Review of Agent Control RepoPinStore unit implementation
@@ -670,6 +740,7 @@ reviews:
       - "docs/design/agent-control/git-integration.md"
       - "docs/verification/agent-control/git-integration.md"
       - "test/**/GitIntegration/GitIntegrationSubsystemTests.cs"
+      - "test/**/GitIntegration/GitHttpsServer.cs"
 
   - id: AgentControl-GitIntegration-GitClient
     title: Review of Agent Control GitClient unit implementation
@@ -701,6 +772,22 @@ reviews:
       - "test/**/GitIntegration/GitCredentialClientTests.cs"
       - "test/**/GitIntegration/GitCredentialClientIntegrationTests.cs"
       - "test/**/GitIntegration/GitCredentialStub.cs"
+
+  - id: AgentControl-GitIntegration-GitRemoteClient
+    title: Review of Agent Control GitRemoteClient unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/git-integration.md
+      - docs/reqstream/agent-control/git-integration.yaml
+    paths:
+      - "docs/reqstream/agent-control/git-integration/git-remote-client.yaml"
+      - "docs/design/agent-control/git-integration/git-remote-client.md"
+      - "docs/verification/agent-control/git-integration/git-remote-client.md"
+      - "src/**/GitIntegration/GitRemoteClient.cs"
+      - "test/**/GitIntegration/GitRemoteClientTests.cs"
+      - "test/**/GitIntegration/GitRemoteClientIntegrationTests.cs"
+      - "test/**/GitIntegration/GitRemoteStub.cs"
 
   - id: AgentControl-GitIntegration-CommittedAgentFilesCache
     title: Review of Agent Control CommittedAgentFilesCache unit implementation

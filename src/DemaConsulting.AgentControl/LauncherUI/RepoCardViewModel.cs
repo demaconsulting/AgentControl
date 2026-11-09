@@ -77,6 +77,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private const string AgentsMdFileName = "AGENTS.md";
 
     /// <summary>
+    ///     What a user can do about a republished package version that was refused: ask for a new
+    ///     version, or - when the change is trusted - choose the same version again with the card
+    ///     menu's "Change package...", which asks for confirmation and then records the package's
+    ///     current content.
+    /// </summary>
+    private const string ContentChangeAdvice =
+        "Ask the package's maintainer to publish the changed files as a new version. If you trust the change, " +
+        "you can instead accept it: use the card's \"...\" menu > Change package... and choose the same version again.";
+
+    /// <summary>
     ///     The shared recent-repos settings entry this card represents. Held by reference (not
     ///     copied) so that mutations here (favorite toggle, launch timestamp, refreshed pin
     ///     fields) are visible immediately to <see cref="MainWindowViewModel"/>'s settings
@@ -132,6 +142,23 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private const int MaxLaunchToolNameLength = 10;
 
     /// <summary>
+    ///     How many characters of a commit the card shows, the length git itself uses by default.
+    /// </summary>
+    private const int ShortCommitLength = 7;
+
+    /// <summary>
+    ///     The <c>git-commit:</c> identity the pin recorded for the pinned version, read from the
+    ///     pin file; <see langword="null"/> when none.
+    /// </summary>
+    private string? _pinnedContentIdentity;
+
+    /// <summary>
+    ///     The commit the pinned tag points to now when it differs from the recorded one, else
+    ///     <see langword="null"/>.
+    /// </summary>
+    private string? _movedTagCommit;
+
+    /// <summary>
     ///     Cancels the package operation currently running for this card (the one that holds
     ///     <see cref="IsBusy"/>), or <see langword="null"/> when none is running.
     /// </summary>
@@ -155,6 +182,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     still has running may report back or publish a result.
     /// </summary>
     private bool _isRetired;
+
+    /// <summary>
+    ///     Whether the AGENTS.md template offer that is currently open was raised by the re-sync
+    ///     that runs before a launch, which never writes the pin.
+    /// </summary>
+    private bool _agentsMdOfferFromLaunchResync;
 
     private bool _isMissing;
     private bool _isUpgradeAvailable;
@@ -262,8 +295,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
         PullCommand = new AsyncRelayCommand(PullAsync, ReportUnexpectedFailure, () => CanPull && !IsMissing && !IsBusy);
         UpgradeCommand = new AsyncRelayCommand(
             UpgradeAsync, ReportUnexpectedFailure, () => IsUpgradeAvailable && !IsMissing && !IsBusy);
-        SelectPackageCommand = new RelayCommand(
-            SelectPackage, () => IsPackageSelectionNeeded && !IsMissing && !IsBusy);
+        // Offered for a repo without a package ("Select Package...") and for a pinned one ("Change
+        // package..."): the user's way to choose another package or version and to accept content
+        // that changed behind a version they already use
+        SelectPackageCommand = new RelayCommand(SelectPackage, () => !IsMissing && !IsBusy);
         // Refresh stays available for a repo whose folder is missing: it is the only in-app way to
         // re-check once the folder (a remounted drive, a restored clone) is back
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, ReportUnexpectedFailure, () => !IsBusy);
@@ -780,6 +815,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public RepoCardStatus Status => this switch
     {
         { IsMissing: true } or { HasSourceProblem: true } or { LastActionFailed: true } => RepoCardStatus.Problem,
+        { IsPinnedTagMoved: true } => RepoCardStatus.TagMoved,
         { IsUpgradeAvailable: true } => RepoCardStatus.UpgradeAvailable,
         { IsPackageSelectionNeeded: true } => RepoCardStatus.NoPackage,
         { IsCheckingUpgrade: true } => RepoCardStatus.Checking,
@@ -789,11 +825,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets a value indicating whether the card menu's "Agent files" group has anything to offer:
-    ///     "Select Package..." (no package pinned yet) or "Upgrade to ..." (a newer version exists).
-    ///     When neither applies the group, its header and its separator are hidden rather than shown
-    ///     empty.
+    ///     "Select Package..." (no package pinned yet), "Change package..." (a package is pinned) or
+    ///     "Upgrade to ..." (a newer version exists). A repo whose folder is missing has none, so the
+    ///     group, its header and its separator are hidden rather than shown empty.
     /// </summary>
-    public bool HasAgentFileActions => IsPackageSelectionNeeded || IsUpgradeAvailable;
+    public bool HasAgentFileActions => IsPackageSelectionNeeded || IsUpgradeAvailable || HasPinnedPackage;
 
     /// <summary>
     ///     Gets the status in words, for the accent bar's accessible name so the status is never
@@ -806,6 +842,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RepoCardStatus.Problem => "Needs attention",
         RepoCardStatus.NoPackage => "No agent package",
         RepoCardStatus.Unknown => "Update check failed",
+        RepoCardStatus.TagMoved => "Tag moved",
         _ => "Checking for updates"
     };
 
@@ -819,6 +856,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RepoCardStatus.NoPackage => "No agent package is pinned for this repo.",
         RepoCardStatus.Checking => "Checking whether a newer agent package version is available...",
         RepoCardStatus.Unknown => "Update check failed: the package source could not be read, so it is not known whether a newer agent package version is available. Use Refresh in the card menu to try again.",
+        RepoCardStatus.TagMoved => PinnedTagMovedTooltip,
         _ when IsMissing => "Needs attention: this repo's folder could not be found on disk. Use Check again in the card menu once it is back.",
         _ when HasSourceProblem => $"Needs attention: {SourceProblem}",
         _ => "Needs attention: the last action failed."
@@ -1095,6 +1133,73 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public bool ShowUpToDateCue => HasPinnedPackage && Status == RepoCardStatus.UpToDate;
 
     /// <summary>
+    ///     Gets the commit a Git source's pinned version was set up from, as recorded in the pin
+    ///     (<c>git-commit:</c> identity), or <see langword="null"/> when the pin is not from a Git
+    ///     source or recorded none. Read from the pin file by <see cref="RefreshPin"/>; not part of
+    ///     the recent-repos settings.
+    /// </summary>
+    private string? PinnedContentIdentity => _pinnedContentIdentity;
+
+    /// <summary>
+    ///     Gets the commit of the pinned Git version shortened to seven characters, or
+    ///     <see langword="null"/> when the pin recorded none.
+    /// </summary>
+    public string? PinnedCommitShort
+    {
+        get
+        {
+            const string prefix = PackageContentIdentity.GitCommitPrefix;
+            var identity = PinnedContentIdentity?.Trim();
+            if (identity is null || !identity.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var commit = identity[prefix.Length..];
+            return commit.Length >= ShortCommitLength ? commit[..ShortCommitLength].ToLowerInvariant() : null;
+        }
+    }
+
+    /// <summary>
+    ///     Gets the tag the pinned version has in its Git source (the source's tag pattern applied to
+    ///     the pinned version), or <see langword="null"/> when the pin is not from a configured Git
+    ///     source.
+    /// </summary>
+    public string? PinnedTagName
+    {
+        get
+        {
+            if (PinnedSourceDefinition is not { Type: PackageSourceType.Git } source ||
+                !PackageVersion.TryParseStrict(PinnedPackageVersion, out var version) || version is null ||
+                !GitTagPattern.TryCreate(source.TagPattern, out var pattern, out _) || pattern is null)
+            {
+                return null;
+            }
+
+            return pattern.Format(version);
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether the tag of the pinned Git version now points to a
+    ///     different commit than the one the repo was set up from (a "moved tag"). Set by the
+    ///     background upgrade check; it never applies anything by itself.
+    /// </summary>
+    public bool IsPinnedTagMoved => _movedTagCommit is not null;
+
+    /// <summary>
+    ///     Gets the tooltip of the moved-tag chip: which tag moved, from which commit to which, and
+    ///     what the user can do, or an empty string when the tag has not moved.
+    /// </summary>
+    public string PinnedTagMovedTooltip => _movedTagCommit is null
+        ? string.Empty
+        : $"The tag {PinnedTagName ?? PinnedPackageVersion} of source '{PinnedSource}' now points to a different commit " +
+          $"({PinnedCommitShort ?? "unknown"} -> {_movedTagCommit[..Math.Min(ShortCommitLength, _movedTagCommit.Length)]}) " +
+          "than the one this repo's agent files came from. AgentControl keeps using the files you have and " +
+          "applies nothing by itself. If you trust the change, accept it with the \"...\" menu > Change package... " +
+          "and choose this version again; otherwise ask the maintainer to publish a new version instead of moving a tag.";
+
+    /// <summary>
     ///     Gets the part of <see cref="RepoPath"/> before its last directory separator (for example
     ///     <c>C:\work\clients</c>), or an empty string when the path has no separator. The card
     ///     shows it with an end ellipsis next to <see cref="RepoPathLeaf"/>, which is never
@@ -1198,9 +1303,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Gets the tooltip of the agent package chip: which package and version the agent files
     ///     came from and from which source (by alias and kind).
     /// </summary>
-    public string PackageChipTooltip =>
-        $"Agent files: {PackageChipText} from source '{PinnedSource ?? RepoPin.LegacySourceAlias}' " +
-        $"({PackageSourceIcons.GetShortName(PinnedSourceDefinition)}).";
+    public string PackageChipTooltip
+    {
+        get
+        {
+            var tooltip = $"Agent files: {PackageChipText} from source '{PinnedSource ?? RepoPin.LegacySourceAlias}' " +
+                          $"({PackageSourceIcons.GetShortName(PinnedSourceDefinition)})";
+
+            // A Git source is told apart by the tag and the commit the files came from
+            var tag = PinnedTagName;
+            var commit = PinnedCommitShort;
+            if (tag is not null)
+            {
+                tooltip += commit is null ? $", tag {tag}" : $", tag {tag} @ {commit}";
+            }
+
+            return tooltip + ".";
+        }
+    }
 
     /// <summary>
     ///     Gets the label of the Launch button: <c>Launch</c> followed by the configured agent
@@ -1343,8 +1463,28 @@ internal sealed class RepoCardViewModel : ViewModelBase
         // Work the user did not ask for (the background upgrade check) shares the session
         // credentials but is never allowed to open the sign-in dialog
         var credentials = allowPrompt ? _credentials : _credentials?.WithoutPrompt();
-        return PackageSourceRegistry.Create(settings.GetEffectiveSources(), GetNuGetRootBase(_startupOptions), credentials);
+
+        // A Git source follows the same rule: only work the user started may let git show its
+        // credential UI; the background check never prompts and reports "sign-in needed" instead
+        var git = new GitSourceOptions(
+            () => ResolveGitExecutablePath(settings), GetGitCacheRoot(_startupOptions), Interactive: allowPrompt,
+            EnforceMinimumGitVersion: true);
+        return PackageSourceRegistry.Create(
+            settings.GetEffectiveSources(), GetNuGetRootBase(_startupOptions), credentials, git);
     }
+
+    /// <summary>
+    ///     Gets the folder under which Git sources keep the packages they fetch: a <c>git-cache</c>
+    ///     folder inside the test-isolation configuration directory when one was supplied at
+    ///     startup, otherwise <see langword="null"/> for the per-user default.
+    /// </summary>
+    /// <param name="startupOptions">The startup overrides, or <see langword="null"/>.</param>
+    /// <returns>The override cache folder, or <see langword="null"/> for the default. Never a
+    ///     repo.</returns>
+    internal static string? GetGitCacheRoot(Startup.StartupOptions? startupOptions) =>
+        string.IsNullOrWhiteSpace(startupOptions?.ConfigDirectory)
+            ? null
+            : Path.Combine(Path.GetFullPath(startupOptions.ConfigDirectory), "git-cache");
 
     /// <summary>
     ///     Gets the folder under which NuGet sources keep their private package caches: a
@@ -1414,6 +1554,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowNoPackageChip));
         OnPropertyChanged(nameof(PackageChipText));
         OnPropertyChanged(nameof(PackageChipTooltip));
+        OnPropertyChanged(nameof(PinnedTagName));
+        OnPropertyChanged(nameof(PinnedCommitShort));
+        OnPropertyChanged(nameof(PinnedTagMovedTooltip));
         OnPropertyChanged(nameof(PinnedSourceIcon));
         OnPropertyChanged(nameof(PinnedSourceLabel));
         OnPropertyChanged(nameof(RequiresSignature));
@@ -1726,6 +1869,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RemoveRequested = null;
         SelectPackageRequested = null;
         AgentsMdTemplateOfferRequested = null;
+        ContentChangeConfirmationRequested = null;
 
         // The picture is disposed here, once the view has been told it is gone
         RepoImage = null;
@@ -1754,6 +1898,41 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public event EventHandler<string>? AgentsMdTemplateOfferRequested;
 
     /// <summary>
+    ///     Raised by <see cref="ApplySelectedPackageAsync"/> when the user selects the version the
+    ///     repo is already pinned to but the source now delivers different content for it (a
+    ///     republished package). Nothing in the repo has been changed at that point; the view layer
+    ///     shows the request's message in a modal <see cref="ConfirmationWindow"/> and, if the user
+    ///     agrees, calls <see cref="ApplySelectedPackageAsync"/> again with the request's selection
+    ///     and <c>acceptContentChange: true</c>. Does not itself show any dialog - that is a
+    ///     view-layer concern, like <see cref="AgentsMdTemplateOfferRequested"/>.
+    /// </summary>
+    public event EventHandler<ContentChangeConfirmationRequest>? ContentChangeConfirmationRequested;
+
+    /// <summary>
+    ///     What to do when a package version that the repo is already pinned to is delivered with
+    ///     different content than the pin recorded.
+    /// </summary>
+    private enum ContentChangeHandling
+    {
+        /// <summary>
+        ///     Stop and tell the user; used by Upgrade, which never replaces a version with a changed
+        ///     copy of itself.
+        /// </summary>
+        Refuse,
+
+        /// <summary>
+        ///     Stop and ask the user to confirm through <see cref="ContentChangeConfirmationRequested"/>;
+        ///     used by Select Package, the deliberate way to accept a republished version.
+        /// </summary>
+        Ask,
+
+        /// <summary>
+        ///     Go ahead: the user has already confirmed.
+        /// </summary>
+        Accept
+    }
+
+    /// <summary>
     ///     Re-reads the repo's pin file, git working-tree status, and upgrade availability from
     ///     the filesystem/git/package source, updating every bindable property.
     /// </summary>
@@ -1763,6 +1942,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     the single full-refresh entry point behind <see cref="RefreshCommand"/>, rather than
     ///     the split eager/lazy sequencing <see cref="MainWindowViewModel"/> uses at app launch.
     ///     It holds <see cref="IsBusy"/> while it runs so no other card action starts meanwhile.
+    ///     Because the user asked for it, a Git source is read again rather than answered from the
+    ///     session's cached listing, so a tag that was moved since the last listing is noticed.
     /// </remarks>
     /// <param name="cancellationToken">Cancels the package-source part of the refresh.</param>
     /// <returns>A task that completes when every property is current; a failing source is
@@ -1773,7 +1954,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             RefreshCheap();
 
             // The user asked for this refresh, so a server that needs a sign-in may ask for it
-            await RefreshUpgradeStatusAsync(token, allowPrompt: true);
+            await RefreshUpgradeStatusAsync(token, allowPrompt: true, relistGitSource: true);
             RefreshDirtyStatus();
         }, cancellationToken);
 
@@ -1815,6 +1996,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
             SetSourceProblem(null, needsSignIn: false);
+
+            // A tag-moved warning belongs to a repo that can be checked: a missing folder
+            // has no package chip to carry it, and nothing is known about it once it returns
+            SetMovedTag(null);
 
             // The repo just disappeared (or was already missing): any previously-cached Git
             // status is no longer trustworthy, so invalidate it rather than let it linger and
@@ -2078,8 +2263,32 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             using var reader = await provider.AcquireAsync(pinnedPackage, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+
+            // The re-sync restores what the pin was made from, so a republished version is
+            // refused here rather than quietly replacing the agent files. Only the check is done
+            // at launch: the pin is never written (recording an identity here would dirty the
+            // working tree on every launch), so a pin without an identity is simply synced
+            var recordedPin = LoadPinForComparison();
+            if (ContentChangedSincePinned(recordedPin, pinnedPackage, reader))
+            {
+                if (_logger.IsEnabled(LogLevel.Warning))
+                {
+                    _logger.LogWarning(
+                        "Not re-syncing repo '{RepoName}' before launch: package '{PackageName} {Version}' from source '{Source}' changed content ({Pinned} -> {Actual})",
+                        RepoName, pinnedPackage.PackageName, pinnedPackage.Version, pinnedPackage.SourceAlias,
+                        PackageContentIdentity.Describe(recordedPin?.ContentIdentity),
+                        PackageContentIdentity.Describe(reader.ContentIdentity));
+                }
+
+                ErrorOccurred?.Invoke(
+                    this,
+                    $"The agent files were not synced. {DescribeContentChange(pinnedPackage)} " +
+                    $"Launching without them. {ContentChangeAdvice}");
+                return false;
+            }
+
             await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
-            MaybeOfferAgentsMdTemplate(reader);
+            MaybeOfferAgentsMdTemplate(reader, fromLaunchResync: true);
             return true;
         }
         catch (InvalidOperationException ex)
@@ -2261,7 +2470,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
 
         await ApplyPackageAndShowReleaseNotesAsync(
-            provider, latest, $"Upgraded to {latest.Version}.", "Upgrade", cancellationToken);
+            provider, latest, $"Upgraded to {latest.Version}.", "Upgrade", ContentChangeHandling.Refuse, cancellationToken);
     }
 
     /// <summary>
@@ -2274,18 +2483,23 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     the source's discovered versions.</param>
     /// <param name="cancellationToken">Cancels reading the source; a copy into the repo that has
     ///     started is not interrupted.</param>
+    /// <param name="acceptContentChange">When <see langword="true"/>, the user has already confirmed
+    ///     (through <see cref="ContentChangeConfirmationRequested"/>) that the selected version may
+    ///     replace a copy of the same version whose content differs; otherwise such a change asks
+    ///     for that confirmation first.</param>
     /// <returns>A task that completes when the package has been applied or the failure has been
     ///     reported.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="selection"/> is
     ///     <see langword="null"/>.</exception>
-    public Task ApplySelectedPackageAsync(PackageReference selection, CancellationToken cancellationToken = default)
+    public Task ApplySelectedPackageAsync(
+        PackageReference selection, CancellationToken cancellationToken = default, bool acceptContentChange = false)
     {
         ArgumentNullException.ThrowIfNull(selection);
 
         return RunOperationAsync(
             "Applying agent package...",
             cancellable: true,
-            token => ApplySelectedPackageCoreAsync(selection, token),
+            token => ApplySelectedPackageCoreAsync(selection, acceptContentChange, token),
             cancellationToken);
     }
 
@@ -2293,10 +2507,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Performs the package application for <see cref="ApplySelectedPackageAsync"/>.
     /// </summary>
     /// <param name="selection">The package the user selected.</param>
+    /// <param name="acceptContentChange">Whether a changed copy of the pinned version is already
+    ///     accepted.</param>
     /// <param name="cancellationToken">Cancels reading the source.</param>
     /// <returns>A task that completes when the package has been applied or the failure has been
     ///     reported.</returns>
-    private async Task ApplySelectedPackageCoreAsync(PackageReference selection, CancellationToken cancellationToken)
+    private async Task ApplySelectedPackageCoreAsync(
+        PackageReference selection, bool acceptContentChange, CancellationToken cancellationToken)
     {
         var packageName = selection.PackageId;
         var version = selection.Version;
@@ -2363,7 +2580,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
 
         await ApplyPackageAndShowReleaseNotesAsync(
-            provider, selected, $"Package selected: {packageName} {version}.", "Select Package", cancellationToken);
+            provider,
+            selected,
+            $"Package selected: {packageName} {version}.",
+            "Select Package",
+            acceptContentChange ? ContentChangeHandling.Accept : ContentChangeHandling.Ask,
+            cancellationToken);
     }
 
     /// <summary>
@@ -2372,7 +2594,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     user-selected version): acquires the package from its source, extracts it
     ///     (blind-delete-and-replace), proactively ensures the repo's <c>.gitignore</c> covers the
     ///     managed agent folders, rewrites the pin file (recording the package's source alias and
-    ///     keeping any existing pin's other fields), refreshes this card's pin/upgrade-status
+    ///     content identity and keeping any existing pin's other fields), refreshes this card's pin/upgrade-status
     ///     properties, offers the package's AGENTS.md template when it applies (see
     ///     <see cref="AgentsMdTemplateOfferRequested"/>) and then raises <see cref="ReleaseNotesReady"/>
     ///     with the new package's release notes.
@@ -2396,6 +2618,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="successMessage">The <see cref="StatusMessage"/> text to set on success.</param>
     /// <param name="failureVerb">A short verb phrase (e.g. <c>"Upgrade"</c>, <c>"Select Package"</c>)
     ///     used to prefix any <see cref="ErrorOccurred"/> message raised on failure.</param>
+    /// <param name="contentChange">What to do when the repo is already pinned to this very package
+    ///     version but the source now delivers different content for it (a republished package);
+    ///     see <see cref="ContentChangeHandling"/>. A pin that recorded no content identity is
+    ///     never a change: the identity is simply recorded.</param>
     /// <param name="cancellationToken">Cancels acquiring the package.</param>
     /// <returns>A task that completes when the package has been applied or the failure has been
     ///     reported.</returns>
@@ -2404,6 +2630,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         DiscoveredPackage package,
         string successMessage,
         string failureVerb,
+        ContentChangeHandling contentChange,
         CancellationToken cancellationToken)
     {
         if (_logger.IsEnabled(LogLevel.Information))
@@ -2429,16 +2656,27 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             using var reader = await provider.AcquireAsync(package, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+
+            // A republished version must be noticed before anything in the repo is touched
+            if (ContentChangedSincePinned(existingPin, package, reader) &&
+                !ResolveContentChange(existingPin, package, reader, contentChange, failureVerb))
+            {
+                return;
+            }
+
             await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
             EnsureGitIgnoreCoversManagedFolders();
 
             // Preserve a prior AGENTS.md template decline (and any unknown fields) across
             // re-pinning by updating the loaded pin in place: those fields are orthogonal to the
-            // selected package/version and must never be silently reset.
+            // selected package/version and must never be silently reset. The content identity
+            // is recorded here (and only on Select Package / Upgrade, never on the launch
+            // re-sync), replacing whatever the previous pin recorded - including nothing.
             var pin = existingPin ?? new RepoPin();
             pin.Source = package.SourceAlias;
             pin.PackageName = package.PackageName;
             pin.Version = package.Version.ToString();
+            pin.ContentIdentity = reader.ContentIdentity;
             RepoPinStore.Save(RepoPath, pin);
 
             var releaseNotes = PackageContentExtractor.ReadReleaseNotes(reader) ?? string.Empty;
@@ -2447,7 +2685,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // the card never shows the old pin's upgrade state next to the new pin
             RefreshPin();
             EvaluatePinnedSource();
-            await RefreshUpgradeStatusAsync(CancellationToken.None);
+            await RefreshUpgradeStatusAsync(CancellationToken.None, relistGitSource: true);
             RaisePackageChipChanged();
             StatusMessage = successMessage;
 
@@ -2490,6 +2728,114 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Reads the repo's pin for a content-identity comparison, tolerating an unreadable file.
+    /// </summary>
+    /// <returns>The pin, or <see langword="null"/> when there is none or it cannot be read (in
+    ///     which case there is no recorded identity to compare against).</returns>
+    private RepoPin? LoadPinForComparison()
+    {
+        try
+        {
+            return RepoPinStore.Load(RepoPath);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    ///     Determines whether a package that is about to be applied or re-synced is the very version
+    ///     the repo is pinned to, yet its content is no longer what the pin recorded - that is,
+    ///     whether the version was republished.
+    /// </summary>
+    /// <param name="pin">The repo's current pin, or <see langword="null"/> when there is none.</param>
+    /// <param name="package">The package that was acquired.</param>
+    /// <param name="reader">The acquired package's content, which names its identity.</param>
+    /// <returns><see langword="true"/> only when the pin names the same source, package and version
+    ///     and both identities are known and differ. A different version, a pin without an
+    ///     identity (a pin made before identities were recorded) and a source that reports no
+    ///     identity are never a change.</returns>
+    private static bool ContentChangedSincePinned(RepoPin? pin, DiscoveredPackage package, IPackageContentReader reader) =>
+        pin is not null &&
+        string.Equals(pin.Source, package.SourceAlias, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(pin.PackageName, package.PackageName, StringComparison.OrdinalIgnoreCase) &&
+        IsVersion(package, pin.Version) &&
+        PackageContentIdentity.Compare(pin.ContentIdentity, reader.ContentIdentity) == ContentIdentityComparison.Changed;
+
+    /// <summary>
+    ///     Describes, for the user, that a package version now delivers different content than the
+    ///     copy the repo was set up with.
+    /// </summary>
+    /// <param name="package">The package whose content changed.</param>
+    /// <returns>A plain-language sentence naming the package and its source; it deliberately
+    ///     contains no hashes.</returns>
+    private static string DescribeContentChange(DiscoveredPackage package) =>
+        $"{package.PackageName} {package.Version} from source '{package.SourceAlias}' now contains different files " +
+        "than the copy this repo was set up with, although the version number is the same. " +
+        "The package may have been republished.";
+
+    /// <summary>
+    ///     Applies the policy for a package version whose content changed since the pin was made:
+    ///     refuses it, asks the user to confirm, or lets it through when the user already did.
+    /// </summary>
+    /// <param name="pin">The repo's current pin (carries the identity that was recorded).</param>
+    /// <param name="package">The package that was acquired.</param>
+    /// <param name="reader">The acquired package's content.</param>
+    /// <param name="contentChange">The policy requested by the caller.</param>
+    /// <param name="failureVerb">The action name used in the refusal message.</param>
+    /// <returns><see langword="true"/> when the package may be applied; <see langword="false"/>
+    ///     when it was refused or the user was asked (nothing in the repo has been changed).</returns>
+    /// <remarks>
+    ///     The refusal is both logged and reported to the user, because a republished version can
+    ///     be an attack on the supply chain as well as an honest mistake and the user needs to
+    ///     know either way. Asking needs somebody to ask: without a subscriber to
+    ///     <see cref="ContentChangeConfirmationRequested"/> the change is refused instead.
+    /// </remarks>
+    private bool ResolveContentChange(
+        RepoPin? pin,
+        DiscoveredPackage package,
+        IPackageContentReader reader,
+        ContentChangeHandling contentChange,
+        string failureVerb)
+    {
+        if (_logger.IsEnabled(LogLevel.Warning))
+        {
+            _logger.LogWarning(
+                "Package '{PackageName} {Version}' from source '{SourceAlias}' changed content for repo '{RepoName}' ({Pinned} -> {Actual}); handling: {Handling}",
+                package.PackageName, package.Version, package.SourceAlias, RepoName,
+                PackageContentIdentity.Describe(pin?.ContentIdentity),
+                PackageContentIdentity.Describe(reader.ContentIdentity),
+                contentChange);
+        }
+
+        if (contentChange == ContentChangeHandling.Accept)
+        {
+            return true;
+        }
+
+        var handler = ContentChangeConfirmationRequested;
+        if (contentChange == ContentChangeHandling.Ask && handler is not null)
+        {
+            StatusMessage = "Waiting for your confirmation of the changed package.";
+            var selection = new PackageReference(package.SourceAlias, package.PackageName, package.Version.ToString());
+            handler(
+                this,
+                new ContentChangeConfirmationRequest(
+                    selection,
+                    $"{DescribeContentChange(package)}\n\n" +
+                    $"Replace the agent files in '{RepoName}' with the changed package?\n\n" +
+                    "Choose Yes only if you trust the change."));
+            return false;
+        }
+
+        ErrorOccurred?.Invoke(
+            this,
+            $"{failureVerb} stopped. {DescribeContentChange(package)} Nothing was changed. {ContentChangeAdvice}");
+        return false;
+    }
+
+    /// <summary>
     ///     Decides whether to offer placing the just-applied package's optional root-level
     ///     <c>AGENTS.md</c> template into this repo's root, raising
     ///     <see cref="AgentsMdTemplateOfferRequested"/> when all three conditions hold: the repo
@@ -2499,6 +2845,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <param name="reader">The content of the package that was just successfully applied
     ///     (extracted) to this repo.</param>
+    /// <param name="fromLaunchResync"><see langword="true"/> when the offer follows the re-sync
+    ///     that runs before a launch, which never writes the pin: a decline of such an offer is
+    ///     then not persisted (see <see cref="DeclineAgentsMdTemplate"/>).</param>
     /// <remarks>
     ///     Called only from call sites that already have a <paramref name="reader"/> in hand
     ///     immediately after a successful <see cref="PackageContentExtractor.Extract"/> call
@@ -2509,7 +2858,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see cref="EnsureGitIgnoreCoversManagedFolders"/>'s precedent, so a pin-read or
     ///     package-read failure here can never disrupt an already-successful sync.
     /// </remarks>
-    private void MaybeOfferAgentsMdTemplate(IPackageContentReader reader)
+    private void MaybeOfferAgentsMdTemplate(IPackageContentReader reader, bool fromLaunchResync = false)
     {
         try
         {
@@ -2530,6 +2879,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return;
             }
 
+            // Remembered so that a decline of this offer does not write the pin (the launch re-sync
+            // never does); set just before the handlers run, replaced by every later offer
+            _agentsMdOfferFromLaunchResync = fromLaunchResync;
             AgentsMdTemplateOfferRequested?.Invoke(this, template);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException)
@@ -2649,6 +3001,21 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </remarks>
     public void DeclineAgentsMdTemplate()
     {
+        // The launch re-sync never writes the pin (a write would dirty the working tree on a
+        // launch), so a decline of the offer that re-sync raised is not remembered; the offer
+        // can only return when a later re-sync happens, which needs the managed folders gone
+        if (_agentsMdOfferFromLaunchResync)
+        {
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    "AGENTS.md template offered during a launch re-sync was declined for repo '{RepoName}'; the pin was not written",
+                    RepoName);
+            }
+
+            return;
+        }
+
         try
         {
             var pin = RepoPinStore.Load(RepoPath) ?? new RepoPin
@@ -2741,13 +3108,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     private void RefreshPin()
     {
-        var previous = (PinnedPackageName, PinnedPackageVersion, PinnedSource);
+        var previous = (PinnedPackageName, PinnedPackageVersion, PinnedSource, _pinnedContentIdentity);
         try
         {
             var pin = RepoPinStore.Load(RepoPath);
             PinnedPackageName = pin?.PackageName;
             PinnedPackageVersion = pin?.Version;
             PinnedSource = pin?.Source;
+            _pinnedContentIdentity = pin?.ContentIdentity;
         }
         catch (InvalidOperationException ex)
         {
@@ -2759,16 +3127,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
             PinnedPackageName = null;
             PinnedPackageVersion = null;
             PinnedSource = null;
+            _pinnedContentIdentity = null;
             StatusMessage = $"Failed to read pin file: {ex.Message}";
         }
 
         // A different pin makes everything learned about upgrades for the old one meaningless: drop
         // it and ignore any check still running for it (the caller starts a new one)
-        if ((PinnedPackageName, PinnedPackageVersion, PinnedSource) != previous)
+        if ((PinnedPackageName, PinnedPackageVersion, PinnedSource, _pinnedContentIdentity) != previous)
         {
             InvalidateUpgradeCheck();
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
+            SetMovedTag(null);
+            RaisePackageChipChanged();
         }
     }
 
@@ -2865,10 +3236,17 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     after settings change, which must never interrupt the user with a dialog: it uses a
     ///     remembered credential if there is one and otherwise reports that a sign-in is needed.
     ///     <see langword="true"/> when the user asked for the check.</param>
+    /// <param name="relistGitSource">Whether a Git source is read again instead of answered from
+    ///     the session's cached listing. <see langword="true"/> when the user asked for the check
+    ///     (a tag can be moved at any time, and the cached listing would still show the old
+    ///     commit) and after a package was applied; <see langword="false"/> (the default) for the
+    ///     background check, which may reuse the cache. Has no effect for other kinds of source,
+    ///     whose versions are immutable by convention.</param>
     /// <returns>A task that completes when the card's upgrade state is current.</returns>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is cancelled; the card keeps its previous upgrade state.</exception>
-    public async Task RefreshUpgradeStatusAsync(CancellationToken cancellationToken = default, bool allowPrompt = false)
+    public async Task RefreshUpgradeStatusAsync(
+        CancellationToken cancellationToken = default, bool allowPrompt = false, bool relistGitSource = false)
     {
         // A card that was removed from the list checks nothing any more
         if (_isRetired)
@@ -2886,6 +3264,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             IsUpgradeStatusUnknown = false;
             LatestAvailableVersion = null;
             IsCheckingUpgrade = false;
+            SetMovedTag(null);
             return;
         }
 
@@ -2893,6 +3272,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             IsUpgradeStatusUnknown = false;
             IsCheckingUpgrade = false;
+            SetMovedTag(null);
             return;
         }
 
@@ -2902,6 +3282,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
         IsCheckingUpgrade = true;
         try
         {
+            // A moved tag is only visible in a fresh listing: when the user asked, drop what the
+            // session learned about this Git source so the check below reads it again. The
+            // cache discards the entries of just this source, and a read that was already running
+            // for it cannot put its older answer back.
+            if (relistGitSource && PinnedSourceDefinition is { Type: PackageSourceType.Git })
+            {
+                _packageVersionCache.Invalidate(sourceAlias);
+            }
+
             var registry = CreateSourceRegistry(allowPrompt);
             var check = await _packageVersionCache.IsNewerVersionAvailableAsync(
                 registry, sourceAlias, pinnedPackageName, pinnedVersion, cancellationToken);
@@ -2910,6 +3299,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 LatestAvailableVersion = check.Latest?.Version.ToString();
                 IsUpgradeAvailable = check.IsNewerAvailable;
                 IsUpgradeStatusUnknown = false;
+
+                // A Git tag that now names another commit is shown, never applied
+                SetMovedTag(FindMovedTagCommit(check));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
@@ -2924,6 +3316,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 IsUpgradeStatusUnknown = true;
                 LatestAvailableVersion = null;
 
+                // Whether the tag moved is unknown too: a "Tag moved" warning from an earlier
+                // check must not stay up as if this check had confirmed it
+                SetMovedTag(null);
+
                 // A server that needs a sign-in is worth telling the user about, because the
                 // background check must not ask: the card says what to do instead
                 if (ex is PackageSourceAccessException { Kind: PackageSourceFailureKind.AuthenticationFailed } && !allowPrompt)
@@ -2931,6 +3327,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     SetSourceProblem(
                         $"{SecretRedactor.SafeMessage(ex)} Use the card's \"...\" menu > Refresh to sign in.",
                         needsSignIn: true);
+                }
+                else if (ex is GitRemoteException { Kind: GitFailureKind.GitTooOld })
+                {
+                    // Nothing can be checked until Git is updated: say so on the card
+                    SetSourceProblem(SecretRedactor.SafeMessage(ex), needsSignIn: false);
                 }
             }
         }
@@ -2941,6 +3342,77 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 IsCheckingUpgrade = false;
             }
         }
+    }
+
+    /// <summary>
+    ///     Sets the commit a moved tag now points to and notifies everything derived from it.
+    /// </summary>
+    /// <param name="commit">The commit the pinned tag points to now, or <see langword="null"/>
+    ///     when the tag has not moved (or the question does not apply).</param>
+    private void SetMovedTag(string? commit)
+    {
+        if (string.Equals(_movedTagCommit, commit, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _movedTagCommit = commit;
+        OnPropertyChanged(nameof(IsPinnedTagMoved));
+        OnPropertyChanged(nameof(PinnedTagMovedTooltip));
+        RaiseStatusChanged();
+    }
+
+    /// <summary>
+    ///     Finds out whether the tag of the pinned version of a Git source now points to another
+    ///     commit than the one the pin recorded.
+    /// </summary>
+    /// <param name="check">The result of the upgrade check, which carries the listing's entry for
+    ///     the pinned version.</param>
+    /// <returns>The commit the tag points to now when it differs from the recorded commit;
+    ///     <see langword="null"/> when the source is not a Git source, the pin did not record a
+    ///     valid <c>git-commit:</c> identity (an older pin adopts one the next time a package is
+    ///     applied, and an identity of another kind or shape is no commit to compare with - a
+    ///     tag did not move because of it), the listing does not show the pinned version, or the
+    ///     commit is the same.</returns>
+    /// <remarks>
+    ///     A pin does not record the tag, only the commit: the tag is derived from the source's
+    ///     tag pattern as it is configured now (see <see cref="PinnedTagName"/>). Editing the
+    ///     pattern therefore maps the pinned version to another tag, and when that tag names a
+    ///     different commit it is reported here like a moved tag - the files are not what the
+    ///     pin recorded - and the user accepts it with Change package.
+    /// </remarks>
+    private string? FindMovedTagCommit(UpgradeCheck check)
+    {
+        var revision = check.Pinned?.Revision;
+        if (PinnedSourceDefinition is not { Type: PackageSourceType.Git } ||
+            revision is null || !GitRemoteClient.ObjectIdPattern().IsMatch(revision) ||
+            !IsGitCommitIdentity(PinnedContentIdentity))
+        {
+            return null;
+        }
+
+        return PackageContentIdentity.Compare(PinnedContentIdentity, PackageContentIdentity.FromGitCommit(revision)) ==
+               ContentIdentityComparison.Changed
+            ? revision
+            : null;
+    }
+
+    /// <summary>
+    ///     Tells whether a pin's content identity is a well-formed <c>git-commit:</c> identity.
+    /// </summary>
+    /// <param name="identity">The identity the pin recorded, or <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> when it is the <c>git-commit:</c> prefix followed by 40 or
+    ///     64 hexadecimal digits; otherwise <see langword="false"/>.</returns>
+    private static bool IsGitCommitIdentity(string? identity)
+    {
+        var trimmed = identity?.Trim();
+        if (trimmed is null || !trimmed.StartsWith(PackageContentIdentity.GitCommitPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var commit = trimmed[PackageContentIdentity.GitCommitPrefix.Length..];
+        return (commit.Length == 40 || commit.Length == 64) && commit.All(Uri.IsHexDigit);
     }
 
     /// <summary>
@@ -3091,10 +3563,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <param name="settings">The current application settings.</param>
     /// <returns>The git executable path or command name to invoke.</returns>
-    private string ResolveGitExecutablePath(AppSettings settings) =>
+    private string ResolveGitExecutablePath(AppSettings settings) => ResolveGitExecutablePath(settings, _startupOptions);
+
+    /// <summary>
+    ///     Resolves the git executable path to use: the per-user setting if configured,
+    ///     otherwise the startup-time test override, otherwise <c>"git"</c> (PATH resolution).
+    /// </summary>
+    /// <param name="settings">The application settings.</param>
+    /// <param name="startupOptions">The startup overrides, or <see langword="null"/>.</param>
+    /// <returns>The git executable path or command name to invoke.</returns>
+    internal static string ResolveGitExecutablePath(AppSettings settings, Startup.StartupOptions? startupOptions) =>
         !string.IsNullOrWhiteSpace(settings.GitExecutablePath)
             ? settings.GitExecutablePath
-            : _startupOptions?.GitExecutableOverride ?? "git";
+            : startupOptions?.GitExecutableOverride ?? "git";
 
     /// <summary>
     ///     Resolves the agent tool command line to launch: a well-known command for the built-in

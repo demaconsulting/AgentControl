@@ -99,6 +99,28 @@ internal static class PackageContentExtractor
     ];
 
     /// <summary>
+    ///     Gets the managed agent folders as package-relative paths with <c>/</c> separators
+    ///     (<c>.github/agents</c>, <c>.github/standards</c>, <c>.github/templates</c>,
+    ///     <c>.github/skills</c>): the single source of truth for what a package layout contains
+    ///     besides its root files.
+    /// </summary>
+    internal static IReadOnlyList<string> LayoutFolders { get; } =
+        [.. ManagedFolders.Select(folder => folder.Replace(Path.DirectorySeparatorChar, '/'))];
+
+    /// <summary>
+    ///     Gets the files read from the root of a package: the release notes and the optional
+    ///     <c>AGENTS.md</c> template.
+    /// </summary>
+    internal static IReadOnlyList<string> LayoutRootFiles { get; } = [ReleaseNotesEntryName, AgentsMdEntryName];
+
+    /// <summary>
+    ///     Gets every path that makes up a package layout: <see cref="LayoutFolders"/> followed by
+    ///     <see cref="LayoutRootFiles"/>. A source that has to fetch a package out of a larger
+    ///     tree (a Git repository) takes exactly these paths and nothing else.
+    /// </summary>
+    internal static IReadOnlyList<string> LayoutPaths { get; } = [.. LayoutFolders, .. LayoutRootFiles];
+
+    /// <summary>
     ///     Validates every file path in the package, deletes the four managed folders under
     ///     <paramref name="repoRoot"/> if present, and copies the same four folders from the
     ///     package into the repo.

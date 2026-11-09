@@ -241,6 +241,58 @@ public sealed class UsabilityWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the card of a repo pinned to a Git source draws the Git icon and the source's alias
+    ///     in its package chip, and that the chip's tooltip names the tag and the first seven
+    ///     characters of the commit the files came from: the chip as the user sees it in the main window.
+    /// </summary>
+    [Fact]
+    public void MainWindow_PinnedGitSourceCard_ChipShowsGitIconAliasTagAndShortCommit() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: a Git source (a local folder, so nothing is fetched) and a repo pinned to its tag
+        var source = new PackageSourceDefinition
+        {
+            Alias = "Repo",
+            Type = PackageSourceType.Git,
+            Location = CreateTempDirectory(),
+            TagPattern = "release/{version}",
+            PackageIds = ["contoso-agents"]
+        };
+        var repo = CreateRepoDirectory("git-pinned");
+        RepoPinStore.Save(repo, new RepoPin
+        {
+            Source = "Repo",
+            PackageName = "contoso-agents",
+            Version = "1.2.3",
+            ContentIdentity = "git-commit:abcdef0123456789abcdef0123456789abcdef01"
+        });
+
+        // Act: the main window shows the repo's card
+        var (window, viewModel) = CreateWindow(
+            [new RecentRepo { Path = repo }], new AppSettings { Sources = [source] });
+
+        try
+        {
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the chip in the window carries the Git icon, the alias, the package and the tooltip
+            var chip = Assert.Single(window.GetVisualDescendantsOf<Border>("PackageChip"));
+            Assert.True(chip.IsVisible);
+            var icon = Assert.Single(chip.GetVisualDescendants().OfType<MaterialIcon>(), icon => icon.Name == "PackageSourceIcon");
+            Assert.Equal(Material.Icons.MaterialIconKind.Git, icon.Kind);
+            Assert.Equal("Repo", Assert.Single(chip.GetVisualDescendants().OfType<TextBlock>(), text => text.Name == "PackageSourceAliasText").Text);
+            Assert.Equal("contoso-agents 1.2.3", Assert.Single(chip.GetVisualDescendants().OfType<TextBlock>(), text => text.Name == "RepoPinnedVersionText").Text);
+            Assert.Equal(
+                "Agent files: contoso-agents 1.2.3 from source 'Repo' (git repository), tag release/1.2.3 @ abcdef0.",
+                ToolTip.GetTip(chip));
+            Assert.Equal(viewModel.RepoCards[0].PackageChipTooltip, ToolTip.GetTip(chip));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that a card's name ends in an ellipsis with a full-name tooltip, that its path keeps the
     ///     folder name readable (whole, or with a middle ellipsis that keeps its start and its end) and
     ///     gives way in the folder part first, with the full path as its tooltip and accessible name, and
@@ -672,6 +724,80 @@ public sealed class UsabilityWindowTests : IDisposable
             window.Close();
         }
     });
+
+    /// <summary>
+    ///     Test that selecting the version a repo is pinned to, when its package was republished with other content,
+    ///     asks before changing anything: No leaves the repo and the pin as they were, Yes applies the package and
+    ///     records its new identity.
+    /// </summary>
+    [Fact]
+    public void MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a repo applied from 1.0.0 (identity recorded), whose zip is then republished with other content
+        var sourceDir = CreateTempDirectory();
+        CreateZip(sourceDir, "contoso-agents", "1.0.0", releaseNotes: "# Original");
+        var repo = CreateRepoDirectory("republished");
+        var (window, viewModel) = CreateWindow([new RecentRepo { Path = repo }], new AppSettings { PackageSourcePath = sourceDir });
+
+        try
+        {
+            var card = viewModel.RepoCards.Single();
+            var selection = new PackageReference("Default", "contoso-agents", "1.0.0");
+            await card.ApplySelectedPackageAsync(selection);
+            Dispatcher.UIThread.RunJobs();
+            CloseChildWindows(window);
+            var recorded = RepoPinStore.Load(repo)?.ContentIdentity;
+            Assert.NotNull(recorded);
+            File.Delete(Path.Combine(sourceDir, "contoso-agents-1.0.0.zip"));
+            CreateZip(sourceDir, "contoso-agents", "1.0.0", releaseNotes: "# Republished with other content");
+
+            // Act 1: select the same version again and answer No
+            await card.ApplySelectedPackageAsync(selection);
+            Dispatcher.UIThread.RunJobs();
+            var question = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+            DialogWindowTests.Click(question, "ConfirmationNoButton");
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert 1: the question was asked before anything changed, and No changed nothing
+            Assert.Empty(window.OwnedWindows);
+            Assert.Empty(window.OpenChildWindows);
+            Assert.Equal(recorded, RepoPinStore.Load(repo)?.ContentIdentity);
+
+            // Act 2: select it again and answer Yes
+            await card.ApplySelectedPackageAsync(selection);
+            Dispatcher.UIThread.RunJobs();
+            question = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+            DialogWindowTests.Click(question, "ConfirmationYesButton");
+            for (var attempt = 0; attempt < 100 && RepoPinStore.Load(repo)?.ContentIdentity == recorded; attempt++)
+            {
+                await Task.Delay(50, TestContext.Current.CancellationToken);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            // Assert 2: the changed package was applied and its identity recorded
+            var applied = RepoPinStore.Load(repo)?.ContentIdentity;
+            Assert.NotNull(applied);
+            Assert.NotEqual(recorded, applied);
+        }
+        finally
+        {
+            CloseChildWindows(window);
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Closes the release-notes windows a main window still has open.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    private static void CloseChildWindows(MainWindow window)
+    {
+        foreach (var child in window.OpenChildWindows.ToList())
+        {
+            child.Close();
+        }
+    }
 
     /// <summary>
     ///     Test that an upgrade without an AGENTS.md question shows the release notes at once.

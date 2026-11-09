@@ -8,7 +8,8 @@ The `LauncherUI` subsystem is the Avalonia-based user interface a developer inte
 directly. It spans the recent-repos main window, per-repo cards, the package-selection
 window, the settings window, the package-source editor window and the sign-in dialog
 (`MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`, `SettingsWindowViewModel`,
-`SourceEditorViewModel`, `CredentialPromptViewModel`), plus their `.axaml` Views (`MainWindow`,
+`SourceEditorViewModel` (one class in two files: `SourceEditorViewModel.cs` and, for a Git repository source,
+`SourceEditorViewModel.Git.cs`), `CredentialPromptViewModel`), plus their `.axaml` Views (`MainWindow`,
 `AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`, `SettingsWindow`,
 `SourceEditorWindow`, `CredentialPromptWindow`, `GroupNameWindow`) and shared MVVM support types (`RelayCommand`,
 `AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
@@ -84,12 +85,15 @@ new section is collapsed) has no star to focus.)
 - *Role*: Provider.
 - *Contract*: Each command's `CanExecute` reflects the card's current state (e.g.
   `PullCommand` is only executable when the working tree is clean,
-  `AgentControl-LauncherUI-Pull`); `Execute` delegates to the relevant subsystem
+  `AgentControl-LauncherUI-Pull`; `SelectPackageCommand` for any repo that is present and not busy - "Select
+  Package..." without a pin, "Change package..." with one, `AgentControl-LauncherUI-ChangePackage`); `Execute`
+  delegates to the relevant subsystem
   (`GitIntegration`, `RepoSync`, `AgentToolLauncher`, `RepoConfig`) — Launch only once agent
   files are confirmed synced (`AgentControl-LauncherUI-Launch`), Upgrade only when a newer
   version exists at the source (`AgentControl-LauncherUI-Upgrade`) — and raises a view-model
   event (`LaunchRecorded`, `SelectPackageRequested`, `ReleaseNotesReady`,
-  `AgentsMdTemplateOfferRequested`, `ErrorOccurred`, `RemoveRequested`) reporting the outcome.
+  `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `ErrorOccurred`, `RemoveRequested`)
+  reporting the outcome.
   An asynchronous command ignores a second request while it runs and can be cancelled through
   `CancelOperationCommand` (`AgentControl-LauncherUI-OneOperationPerRepo`,
   `AgentControl-LauncherUI-CancelOperation`, `AgentControl-LauncherUI-OperationProgress`). The card also
@@ -119,16 +123,20 @@ selection.
 - *Constraints*: None beyond standard `ICommand` semantics.
 
 **SourceEditorViewModel.SaveCommand** / **TestConnectionCommand**: Accepts an edited package source
-definition, and tests a server source's connection.
+definition, and tests a server's or a Git repository's connection.
 
 - *Type*: In-process .NET `ICommand` (`TestConnectionCommand` is an `AsyncRelayCommand`).
 - *Role*: Provider.
 - *Contract*: `SaveCommand` is executable only while the alias, location and (for a NuGet source) package
   identifiers are valid - for a server, an `https` address ending in `index.json`, or `http` only while
-  "Allow insecure HTTP" is ticked; it raises `Saved` with the resulting source definition for the settings
+  "Allow insecure HTTP" is ticked; for a Git repository, an `https`, SSH or local-path address with no credential,
+  a tag pattern, an optional folder inside the repository and a package name; it raises `Saved` with the resulting
+  source definition for the settings
   view model to add to or replace in its list (`AgentControl-LauncherUI-PackageSourceValidation`,
-  `AgentControl-LauncherUI-AddPackageSource`, `AgentControl-LauncherUI-EditPackageSource`).
-  `TestConnectionCommand` lists the versions of the first package ID, with progress and a Cancel action, and
+  `AgentControl-LauncherUI-AddPackageSource`, `AgentControl-LauncherUI-EditPackageSource`,
+  `AgentControl-LauncherUI-GitSourceEditor`).
+  `TestConnectionCommand` lists the versions of the first package ID (for a Git repository, the repository's tags,
+  shown as a preview of which ones match the tag pattern), with progress and a Cancel action, and
   reports a plain-language result; it may open the sign-in dialog (`AgentControl-LauncherUI-TestConnection`).
 - *Constraints*: The alias of an existing source cannot be changed. The test saves nothing.
 
@@ -248,8 +256,13 @@ upgrade checks and picture loads still in flight, clears all its events (so noth
 box, release notes or a prompt), and disposes its picture; `MainWindow` detaches its per-card handlers when a card
 leaves `RepoCards` and forgets its bookkeeping for it.
 
-`SelectPackageWindowViewModel` backs the package-selection dialog opened from a card with no
-existing pin. It shows three columns - source, package, version. Selecting a source loads that
+`SelectPackageWindowViewModel` backs the package-selection dialog opened from a card's **Select Package...**
+(a repo with no pin) or **Change package...** (a repo with a pin). It shows three columns - source, package, version.
+For Change package it is given the pin's source, package and version and, once that source has been read, selects the
+package and its version (keeping the newest version when the pinned one is no longer listed, and selecting nothing
+when the source failed, does not offer the package or is not configured), so choosing the version the repo already
+uses again is one click; it never overrides a choice the user made while the source was loading
+(`AgentControl-LauncherUI-ChangePackage`). Selecting a source loads that
 source's package names from `PackageVersionCache` in the background, with a progress indicator
 and cancellation; a source that cannot be read shows its error inline, with a **Retry** button that reads
 only that source (or, when only a package's versions failed, only those) again, and never blocks the other
@@ -266,9 +279,11 @@ same package name can exist in several sources and the user must see which sourc
 construction and exposes `IsCustomAgentToolSelected` to drive the settings window's
 custom-command entry field visibility. It lists the configured package sources as
 `PackageSourceItemViewModel` rows (alias, kind icon from `PackageSourceIcons`, shortened
-location, and a folder-exists status computed on a background thread; a server source shows "Not checked"
-because it is never contacted merely to draw the list), offers one **Add** button whose menu lists the
-source types (zip-package folder, NuGet-package folder, NuGet-package server), with Edit and Remove (which act
+location, and a folder-exists status computed on a background thread; a server source and a Git source on a remote
+address show "Not checked" because they are never contacted merely to draw the list, while a Git source on a local
+path is a folder like any other) offers one **Add** button whose menu lists the
+source types (zip-package folder, NuGet-package folder, NuGet-package server, Git repository), with Edit and Remove
+(which act
 on the selected row) beside it on the list's header line, and also exposes the **Theme** choice (system
 default, light or dark) saved with the other settings, and asks the window to open a
 `SourceEditorViewModel` dialog for adding and editing; removal asks for confirmation and warns
@@ -284,7 +299,8 @@ the result in words (*Connection OK* with the version count and newest; *Sign-in
 *Package not found*; *Timed out*; *Server unreachable*; *Connection failed*), and shows example addresses for
 JFrog Artifactory and Azure Artifacts
 (`AgentControl-LauncherUI-TestConnection`, `AgentControl-LauncherUI-ServerSourceEditor`,
-`AgentControl-LauncherUI-InsecureHttpChoice`). For a NuGet source it also
+`AgentControl-LauncherUI-InsecureHttpChoice`). For a Git repository the editor is the same window with its own
+sections (see *Git repository sources* below). For a NuGet source it also
 offers the **Package signatures** section: a "Require signed packages" checkbox (off by default; disabled, with
 its tooltip shown even though it is disabled, where `SignatureVerificationSupport` says signatures cannot be
 verified) with help text that explains the limit of requiring signatures without a pinned publisher, and a
@@ -352,6 +368,57 @@ model raises the offer before `ReleaseNotesReady`, `MainWindow` remembers the op
 it, so the question never covers the notes and the notes window - which has no owner - is not lost behind the
 modal question; the notes are not opened at all when the main window has closed meanwhile.
 
+A package version republished with different content (the same version, other bytes) - or, for a Git source, a tag
+that now points to another commit - is handled the same way: when **Change package...** (or **Select Package...**)
+of the version the repo is pinned to would replace its agent files with changed content,
+`RepoCardViewModel` changes nothing and raises `ContentChangeConfirmationRequested` with the selection and a
+plain-language question; `MainWindow` shows it in the same modal `ConfirmationWindow` (the safe answer, No, is the
+default) and, only if the user answers Yes, applies the selection again with `acceptContentChange: true`, which
+replaces the files and records the new identity. An Upgrade or the restore of missing agent files before launch
+never asks: it refuses and reports through `ErrorOccurred`, and the message names the card menu's **Change
+package...** as the way to accept the change - it no longer suggests deleting the repo's pin file
+(`AgentControl-LauncherUI-ContentChangeRefusal`, `AgentControl-LauncherUI-ChangePackage`).
+
+**Change package.** A repo that already has a pin is offered **Change package...** in the card menu's *Agent files*
+group (`ChangePackageMenuItem`, shown while `HasPinnedPackage`; the group is shown whenever a package is pinned,
+`HasAgentFileActions`). It is the same `SelectPackageCommand` as **Select Package...**, which is now executable for
+any present, idle repo; `MainWindow` opens `SelectPackageWindow` with a view model that is given the pin's source
+alias, package and version, so the dialog opens on the current choice, and applies the confirmed selection through
+`ApplySelectedPackageAsync` like any other. Choosing the current version again is the user's explicit way to accept
+changed content (the confirmation above); choosing another version or package pins it as usual. Requesting the
+dialog never touches the pin.
+
+**Git repository sources.** A Git source is added from the Add menu's fourth item (`AddGitSourceButton`, the Git
+icon, "Packages are tags of a Git repository"). Its editor (`SourceEditorViewModel`, with the Git part in
+`SourceEditorViewModel.Git.cs`) is the same window as for the other kinds, with titled sections: *Source* (alias,
+immutable once the source is saved; the repository URL with examples for https, `git@host:org/repo.git` and a local
+path, and a note that a credential is never accepted in it), *Package* (the package name, the alias when left empty),
+*Versions* (the tag pattern, starting as `v{version}`, with live validation and help text with examples such as
+`release/V{version}` and `ver{version}` and the note that the fixed parts are case-sensitive), *Location in repo*
+(an optional folder, backslashes saved as slashes), *Sign-in* (a note that AgentControl uses the user's own Git
+credential helper or SSH keys, never stores credentials, and that checks it runs in the background never prompt) and
+the *Connection test*. The test lists the repository's tags without cloning (through `IGitTagPreview` of
+`GitSourceProvider`, created by `MainWindowViewModel.CreateConnectionTestProvider` as an interactive provider that
+enforces the minimum git version), with progress and Cancel, and shows a preview: "N of M tags match the pattern", the
+matching tags (version and tag name, newest first, at most ten); when none matches, *No matching tags* with a few
+tag names the repository does have (only names the provider found safe to show) and a hint about the prefix and
+capitalization. The headlines are *Connection OK*, *No matching tags*, *Sign-in needed*, *Repository not found*,
+*Repository unreachable*, *Timed out*, *Git is too old* and *Connection failed*; a result that was running when an
+input changed is never shown. Save refuses a Git source whose settings the application would refuse, and
+`SettingsWindowViewModel.Save` re-checks every Git source (so a hand-edited settings file is stopped with a message)
+(`AgentControl-LauncherUI-GitSourceEditor`, `AgentControl-LauncherUI-GitSignInGuidance`). Everywhere a source is shown
+it carries the Git icon and the name "Git repository" (`PackageSourceIcons`); `PackageSourceItemViewModel.IsRemote`
+makes a remote Git source "Not checked" like a server and a Git source on a local path show its folder status
+(`AgentControl-LauncherUI-GitSourcePresentation`). On a repo card the package chip shows the Git icon and the alias;
+its tooltip adds the tag (the source's tag pattern applied to the pinned version) and the first seven characters of
+the commit the pin recorded as its `git-commit:` identity. When the background check finds that the tag of the pinned
+version now points to a different commit (`UpgradeCheck.Pinned.Revision` against that identity) the card shows the
+amber **Tag moved** chip (`TagMovedChip`, `RepoCardStatus.TagMoved`, which outranks "upgrade available" and hides the
+up-to-date cue); the chip's tooltip names the tag and both commits, its click only opens **Change package...**, and
+nothing is ever applied by it (`AgentControl-LauncherUI-TagMovedWarning`). A git older than the supported version
+makes the editor's test say *Git is too old* and the background check set the card's source problem to the same
+explanation (without a sign-in hint) (`AgentControl-LauncherUI-GitTooOld`).
+
 `ViewModelBase` supplies a minimal hand-rolled `INotifyPropertyChanged` implementation (not a
 source-generator package, to keep the dependency surface minimal) used by every view model in
 this subsystem. `RelayCommand` is a minimal hand-rolled `ICommand` used for every command
@@ -398,8 +465,9 @@ tile, left-aligned under the star and as tall as the chip row plus the path row,
 path. The tile shows the repo's own `icon.png`/`logo.png` when it has one (see `RepoCardViewModel`), otherwise
 the repo name's initials on a color chosen by a deterministic hash of the repo path, otherwise a folder glyph.
 The **...** menu is grouped: *Repository* (**Git Pull**, with its enablement rules and its explanatory tooltip
-shown even while it is disabled, and **Refresh**), *Agent files* (**Select Package...** or **Upgrade to
-x.y.z**, whichever applies; the group is hidden when neither does), *Organize* (**Move to group** and
+shown even while it is disabled, and **Refresh**), *Agent files* (**Select Package...** when no package is pinned,
+**Change package...** when one is, and **Upgrade to x.y.z** when a newer version exists; the group is hidden when
+none applies) and *Organize* (**Move to group** and
 **Card color...**) and **Remove from list**. The upgrade
 chip is a button that runs the same `UpgradeCommand` as the menu's Upgrade item
 (`AgentControl-RepoCardViewModel-UpgradeFromChip`).
@@ -438,7 +506,8 @@ letters on every palette color use whichever of white and near-black reads bette
 at least 4.5:1 (`ThemeResourceTests` checks every entry in both themes).
 
 **Settings window package-source actions.** One **Add** button opens a menu with the source types that can be
-added (zip-package folder, NuGet-package folder, NuGet-package server), each with its type's icon (the one
+added (zip-package folder, NuGet-package folder, NuGet-package server, Git repository), each with its type's icon
+(the one
 the sources list uses) and a one-line description; another source type is added as one more menu item
 (`AgentControl-LauncherUI-AddSourceMenu`).
 The `.axaml` Views other than `MainWindow`
@@ -450,7 +519,8 @@ as a cancel, or opening the folder picker; all behavior
 lives in the view models above. `MainWindow`'s code-behind is the one exception: it owns
 dialog-orchestration, view-layer plumbing that requires a live Avalonia `Window` — subscribing
 to each `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`,
-`ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ErrorOccurred`) and deciding which
+`ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `ErrorOccurred`) and
+deciding which
 dialog/window to show and how to route the user's response back into the view model (e.g.
 calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the `ConfirmationWindow` shown
 for the AGENTS.md template offer). `AboutWindow` (opened via a
@@ -529,3 +599,40 @@ Avalonia's default `ShutdownMode.OnLastWindowClose`, keeping the process alive a
 slow process-kill fallbacks in automated UI tests that close the main window. Both the
 tracked-window-open and forced-close events are logged (`Debug`/`Information`) via
 `MainWindow`'s `_logger`.
+
+**Git package sources.** The card builds its package source registry with Git options
+(`RepoCardViewModel.CreateSourceRegistry`):
+the configured or overridden git executable, a cache folder inside the isolated configuration directory when one was
+given, and `Interactive` equal to the `allowPrompt` switch that already decides whether a NuGet server may open the
+sign-in dialog. The same switch therefore keeps Git quiet for the background upgrade check and the restore
+before launch -
+a missing sign-in is reported as a source authentication failure, which the card shows as "sign-in needed" - and lets
+Git
+show its own credential UI for work the user started (`AgentControl-LauncherUI-GitSourcePrompts`,
+`AgentControl-System-GitSignIn`).
+
+**Git source in the Settings editor and on the card.** The Settings window's one Add menu offers "Git repository" as
+its fourth item (`AgentControl-LauncherUI-AddSourceMenu`). It opens the `SourceEditorViewModel` in Git mode: the
+repository address, the package name (the alias when left empty), the tag pattern (default `v{version}`) and an optional
+folder inside the repository, each explained by examples and validated while the user types with the same rules the
+settings save applies, a sign-in note, and a connection test that lists the repository's tags and previews which of
+them match the pattern (`AgentControl-LauncherUI-GitSourceEditor`, `AgentControl-LauncherUI-GitSignInGuidance`). The
+test's provider is the owner's (`MainWindowViewModel.CreateConnectionTestProvider`): the configured git, interactive,
+refusing a git that is too old. A Git source is listed with the Git icon and the kind name "Git repository": "Not
+checked" when its address is remote, the folder status when it is a local path; the Select Package list and the repo
+card use the same icon, and the card's package chip tooltip names the tag the pinned version has under the source's
+current tag pattern and the first seven characters of the commit the files came from
+(`AgentControl-LauncherUI-GitSourcePresentation`).
+
+**Tag moved and Change package.** A Git pin records the commit of the content it was set up from as a `git-commit:`
+identity, not the tag. When a check finds that the tag of the pinned version now points to another commit, the card
+shows an amber "Tag moved" chip, explains what happened and applies nothing; because a tag can move at any time, the
+card's Refresh command, which the user starts, reads the Git source again instead of reusing the session's cached
+listing, while the background check may use the cache, and a warning is cleared again whenever a later check fails or
+the repo's folder is missing, since the state is then unknown (`AgentControl-LauncherUI-TagMovedWarning`). Editing a
+source's tag pattern re-maps a pinned version to another tag, which is reported the same way when that tag names a
+different commit. The way to accept the change is the card menu's "Change package...", which opens the Select Package
+dialog on the repo's own source, package and version; choosing the pinned version again asks for confirmation before
+the changed content replaces the files (`AgentControl-LauncherUI-ChangePackage`,
+`AgentControl-LauncherUI-ContentChangeConfirmation`). The Select Package dialog never replaces a choice the
+user made while the sources were loading with the repo's own source and package.

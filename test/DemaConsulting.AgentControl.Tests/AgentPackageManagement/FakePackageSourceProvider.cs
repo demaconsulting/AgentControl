@@ -103,6 +103,12 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     /// </summary>
     public Exception? ListVersionsException { get; set; }
 
+    /// <summary>
+    ///     Gets the revision (for example a Git commit) the fake reports per version text, for
+    ///     versions that should carry one; other versions are listed without a revision.
+    /// </summary>
+    public Dictionary<string, string> Revisions { get; } = [];
+
     /// <inheritdoc />
     public Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken)
     {
@@ -133,7 +139,8 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
         return _packages
             .Where(p => string.Equals(p.PackageId, packageId, StringComparison.Ordinal))
             .Select(p => new DiscoveredPackage(
-                p.PackageId, ParseVersion(p.Version), p.Version, Alias))
+                p.PackageId, ParseVersion(p.Version), p.Version, Alias,
+                Revisions.TryGetValue(p.Version, out var revision) ? revision : null))
             .ToList();
     }
 

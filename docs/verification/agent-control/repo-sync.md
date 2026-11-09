@@ -2,10 +2,13 @@
 
 ### Verification Approach
 
-The `RepoSync` subsystem is verified indirectly through its constituent units' test suites
+The `RepoSync` subsystem is verified through its constituent units' test suites
 (`PackageContentExtractorTests.cs`, `PackageZipExtractorTests.cs`,
 `ReleaseNotesViewerViewModelTests.cs`, and `GitIgnoreEnsurerTests.cs`), each documented in its own
-unit-level verification design. `ReleaseNotesViewerViewModelTests.cs` also directly exercises
+unit-level verification design, and - for the content identity a reader reports and the layout-root form a Git package
+is delivered in - by `RepoSyncSubsystemTests.cs`, whose tests use the readers and the extractor together against real
+temporary folders and a real zip, the way the application drives them. `ReleaseNotesViewerViewModelTests.cs` also
+directly exercises
 `ReleaseNotesViewer`'s internal `BuildBlockTextBlock` rendering helper (via `InternalsVisibleTo`),
 constructing `MarkdownBlock` values and asserting on the resulting `TextBlock`'s `Run` styling,
 without constructing the `Window` itself. End-to-end window display is covered only by the FlaUI
@@ -40,6 +43,12 @@ account may not create them).
   without disturbing any pre-existing `.gitignore` content.
 - An optional root-level AGENTS.md template is readable without extraction, and is never
   written as part of the managed-folder extraction itself.
+- The content identity a reader reports is the identity its source supplied (or, for a zip, that of exactly the bytes
+  read and applied - the zip is hashed and read through one handle, which Windows also protects from replacement
+  while it is held), and none when none was supplied.
+- A folder whose root is the package layout is read and applied as a package: only the four managed folders and the two
+  root files are seen and written, never the folder's metadata or other content; a link in the layout is refused before
+  the repo is touched and a link outside it is ignored.
 
 ### Test Scenarios
 
@@ -122,3 +131,54 @@ skip where links cannot be created), covering `AgentControl-RepoSync-RefuseLinke
 `AgentControl-PackageContentExtractor-RefuseNonFolderRepoComponent` and
 `AgentControl-PackageContentExtractor-RefuseLinkedDestinationFile`, whose unit tests are
 described in the `PackageContentExtractor` unit verification design).
+
+**RepoSync_ContentIdentity_ReadersReportTheIdentityOfWhatTheyRead**: With the reader and the extractor together against
+real folders and a real zip, a folder reader (an unpacked package folder or a layout root) reports exactly the identity
+its opener supplied - a NuGet-style `sha256:` identity or a Git `git-commit:` identity - and none when it was supplied
+none, never computing one of its own. This scenario is tested by
+`RepoSync_ContentIdentity_FolderReadersReportTheSuppliedIdentityOrNone` in `RepoSyncSubsystemTests.cs`, covering
+`AgentControl-RepoSync-ContentIdentity` (children: `AgentControl-PackageContentExtractor-FolderReaderIdentity` and
+`AgentControl-PackageContentExtractor-FolderReaderNoIdentity`).
+
+**RepoSync_ContentIdentityOfAppliedBytes_ZipIdentityDescribesTheBytesThatAreApplied**: A zip is read by the zip reader
+and applied to a repo by the extractor: the identity the reader reports equals the SHA-256 of the zip file computed
+independently by the test; on Windows, replacing the file while the reader holds the zip fails (file locks are
+advisory on Linux and macOS, so no replacement is attempted there - the single handle is what keeps the identity
+describing the bytes that are read); the file applied to the repo is the one that was in the zip; and the same
+zip republished with other content reports another identity and applies the other content to another repo - what is
+recorded is always what was applied. This scenario is tested by
+`RepoSync_ContentIdentity_ZipIdentityDescribesTheBytesThatAreApplied`, covering
+`AgentControl-RepoSync-ContentIdentityOfAppliedBytes` (children:
+`AgentControl-PackageContentExtractor-ReaderContentIdentity` and
+`AgentControl-PackageContentExtractor-ZipReaderReleasesHandleOnFailure`, whose unit tests are
+`ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries` and
+`ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle`).
+
+**RepoSync_LayoutRoot_OnlyTheLayoutIsSeenReadAndApplied**: A folder shaped like a repository - the layout plus `.git`,
+`.github/workflows`, a README and source files - is opened with `OpenLayoutRoot` with a commit identity: only the four
+managed folders and the two root files are listed, a path outside the layout (the README, `.git/config`, a file of
+`.github/workflows`) is refused, the identity supplied by the opener is reported, release notes and the `AGENTS.md`
+template are read, and applying the folder with the extractor writes only the four managed folders into the repo - no
+workflows folder, no README, no `.git`. This scenario is tested by
+`RepoSync_LayoutRoot_OnlyTheLayoutIsSeenReadAndApplied`,
+covering `AgentControl-RepoSync-LayoutRoot` (children: `ReadLayoutRoot`, `LayoutRootIdentity` and
+`RefuseMissingOrLinkedLayoutRoot`) and `AgentControl-RepoSync-LayoutRootOnlyLayout`
+(children: `RefuseOutsideLayoutPaths`
+and `ExcludeGitFolder`; each child prefixed `AgentControl-PackageContentExtractor-`). The unit tests of the missing or
+linked root are `DirectoryPackageContentReader_OpenLayoutRoot_MissingFolderOrLink_ThrowsInvalidOperationException` and
+the others in `PackageContentExtractorTests.cs`.
+
+**RepoSync_LayoutRoot_LinkInTheLayoutIsRefusedWhileLinkOutsideItIsIgnored**: A directory link (a junction on Windows,
+which needs no privilege, a symbolic link elsewhere; skipped where the operating system does not let the test create
+one) in `docs`, outside the layout, is no obstacle: the folder is applied to a repo that held an old file, which is
+replaced. When a managed folder of the package is then replaced by a link to a folder outside, applying it again is
+refused with an `InvalidOperationException` before the repo is touched (the repo's files are as they were) and the link
+target is untouched. The link in place of `.github` itself, in place of a root file and the symbolic-link cases are
+verified by the unit tests
+(`DirectoryPackageContentReader_OpenLayoutRoot_JunctionOutsideLayoutIgnoredInsideLayoutRefused`,
+`..._SymlinkOutsideLayoutIgnoredInsideLayoutRefused`, `..._JunctionReplacingGitHubFolder_IsRefused`,
+`..._SymlinkReplacingGitHubFolder_IsRefused`, `..._SymlinkReplacingManagedFolder_IsRefused` and the root-file cases).
+This scenario is tested by `RepoSync_LayoutRoot_LinkInTheLayoutIsRefusedWhileLinkOutsideItIsIgnored`, covering
+`AgentControl-RepoSync-LayoutRootRefusesLinks` (children: `RefuseLinkInManagedFolder`, `RefuseLinkInPlaceOfGitHub`,
+`RefuseLinkInPlaceOfManagedFolder` and `RefuseLinkAsRootFile`) and `AgentControl-RepoSync-LayoutRootIgnoresOtherLinks`
+(child: `IgnoreLinksOutsideLayout`; each child prefixed `AgentControl-PackageContentExtractor-`).

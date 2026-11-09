@@ -7,7 +7,8 @@
 #   the RepoPin.cs data record, which is folded into this subsystem-level description as it
 #   has no dedicated test file
 # - Subsystem requirements describe the observable behavior of persisting a repo's pinned
-#   package name/version/source and whether the user has declined the AGENTS.md template offer
+#   package name/version/source and the content identity of what was applied, and whether the
+#   user has declined the AGENTS.md template offer
 
 sections:
   - title: RepoConfig Subsystem Requirements
@@ -62,8 +63,48 @@ sections:
           - AgentControl-RepoPinStore-PreserveUnknownFields
           - AgentControl-RepoPinStore-RejectNewerSchema
         tests:
-          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion2AndRoundTripsSource
+          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource
           - RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource
           - RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault
           - RepoPinStore_Save_UnknownProperties_ArePreserved
           - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage
+
+      - id: AgentControl-RepoConfig-ContentIdentityPin
+        title: >-
+          The RepoConfig subsystem shall record in a repo's pin the content identity of the
+          package that was applied, in whatever form its source gave it, and shall omit it when
+          none is known.
+        justification: |
+          The identity is what lets a later sync notice a republished package version, so it must
+          survive across sessions with the pin; a pin whose source reported none must not claim one.
+        children:
+          - AgentControl-RepoPinStore-SaveContentIdentity
+        tests:
+          - RepoConfig_ContentIdentityPin_SurvivesSessionsIsNeverInventedAndIsAdoptedOnTheNextApply
+
+      - id: AgentControl-RepoConfig-LegacyPinWithoutIdentity
+        title: >-
+          The RepoConfig subsystem shall read a pin written before identities were recorded as a
+          pin with no identity, and shall record an identity in it when the next package is
+          applied.
+        justification: |
+          A pin without an identity must keep working (it adopts an identity the next time a
+          package is applied) instead of raising a false alarm or needing a migration step.
+        children:
+          - AgentControl-RepoPinStore-LoadWithoutIdentity
+        tests:
+          - RepoConfig_ContentIdentityPin_SurvivesSessionsIsNeverInventedAndIsAdoptedOnTheNextApply
+
+      - id: AgentControl-RepoConfig-PinSchemaVersion
+        title: >-
+          The RepoConfig subsystem shall write pins in a schema version that an older version of
+          the tool refuses to interpret or overwrite, and shall itself refuse, with advice, to read
+          or overwrite a pin of a newer schema version.
+        justification: |
+          A tool version that does not know the content identity must not re-pin the repo to
+          another version while carrying the old identity forward, which would raise a false
+          alarm - so it has to refuse the file instead.
+        children:
+          - AgentControl-RepoPinStore-SchemaVersion3
+        tests:
+          - RepoConfig_NewerSchemaPin_IsRefusedWithAdviceAndNeverOverwritten

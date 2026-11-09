@@ -37,7 +37,8 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   initials (or the repo's own root `icon.png`/`logo.png`), its path, and labeled chips for the pinned agent
   package (name, version and source, with a small check mark when it is the newest), an available upgrade, and
   the current git branch; **Launch** sits on the card and everything else (Git Pull, Refresh - **Check again**
-  for a repo whose folder is missing - Select Package/Upgrade, Move to group, Card color, Remove) in its grouped
+  for a repo whose folder is missing - Select Package/Change package/Upgrade, Move to group, Card color, Remove) in
+  its grouped
   "..." menu; a long path is shortened to fit - the folder part first, then the middle of a very long folder
   name - so the start and the end of the repo's folder name stay visible
 - **Repo groups and card colors (just for you)**: put repos into groups of your own (**Move to group** in a
@@ -48,14 +49,18 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   palette (or **Automatic**); the status bar keeps its fixed colors. Both are stored only in your own AgentControl
   settings - never in the repository or its `.agentcontrol.json` - so they are never shared through git
 - **Version-pinned agent packages**: every repo names an exact agent package name and
-  semantic version, and the source it came from, in its `.agentcontrol.json` pin file — there
-  is no floating "latest" mode, so upgrades are always a deliberate, visible action
+  semantic version, the source it came from and a content identity (a SHA-256 of the package, or the commit of a
+  Git tag) in its `.agentcontrol.json` pin file — there
+  is no floating "latest" mode, so upgrades are always a deliberate, visible action. A published version whose
+  content later changes (a republished zip or NuGet package, a Git tag moved to another commit) is noticed and
+  never applied silently; you accept it on purpose with **Change package...** in the card's "..." menu
 - **Status chips**: each repo card shows an amber upgrade chip ("Upgrade to" and the version an upgrade
   would move to; click it to upgrade), an uncommitted-changes warning, a committed-agent-files
   warning (advisory only — flags when the managed folders were accidentally committed to
   git), a missing-folder indicator when the path no longer exists on disk, a
-  package-source-problem indicator when the pinned source is not configured, and a sign-in-needed indicator
-  when the pinned server needs a sign-in. Separately,
+  package-source-problem indicator when the pinned source is not configured, a sign-in-needed indicator
+  when the pinned server or Git repository needs a sign-in, and an amber **Tag moved** chip when the Git tag
+  of the pinned version now names another commit. Separately,
   AgentControl proactively ensures the repo's `.gitignore` covers the four managed
   folders immediately after every "Select Package..."/Upgrade, making an accidental commit
   much less likely in the first place
@@ -66,15 +71,28 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   and never blocks the launch: repos with committed agent files skip it entirely, repos with
   no pin launch anyway, and a failed re-extraction only surfaces a warning
 - **Git integration**: pull the latest commits for a repo with **Git Pull** in its card's "..." menu (enabled
-  only when the working tree is clean), with a configurable git executable override
+  only when the working tree is clean), with a configurable git executable override. A Git repository package
+  source needs Git 2.29 or newer
 - **Configurable agent tool**: choose GitHub Copilot CLI, Cursor, Claude Code, or a custom
   command line, plus a shell/terminal preference
 - **Multiple package sources**: configure any number of agent package sources, each with its
   own alias — a folder of zip packages, a folder of NuGet packages (local drive, mapped
-  drive, or UNC share), or a **NuGet-package server** such as JFrog Artifactory or Azure Artifacts.
+  drive, or UNC share), a **NuGet-package server** such as JFrog Artifactory or Azure Artifacts, or a
+  **Git repository**.
   A repo's pin records the alias of the source it came from and is only
   ever resolved against that source: if the source is removed or renamed, AgentControl shows a
   package source problem for the repo instead of quietly using another source
+- **Git repository source**: one Git repository is one package, and its **tags are the versions** - the tags that
+  match a configurable tag pattern (default `v{version}`, for example `v1.2.3`; also `release/V{version}` or
+  `ver{version}`; the version part is a strict SemVer such as `1.2.3` or `1.2.3-beta.1`, and the fixed parts of the
+  pattern are case-sensitive). The repository is given as `https://host/org/repo.git`, `git@host:org/repo.git`,
+  `ssh://git@host/org/repo.git` or a local or UNC path, and the package layout (`.github/` folders,
+  `release-notes.md`, `AGENTS.md`) may sit in an optional subfolder. **Test connection** lists the tags without
+  cloning and shows which ones match. Sign-in is whatever your own Git setup already does (Git Credential Manager or
+  another credential helper for https, your SSH keys or ssh-agent for SSH); AgentControl never stores credentials.
+  Only work you start (**Test connection**, **Select Package...**, **Change package...**, **Upgrade** and the card's
+  **Refresh**) may open your own sign-in; background checks never prompt - a repo whose Git source needs a sign-in
+  shows a red **Sign-in needed** chip until you choose **Refresh** in its "..." menu
 - **Protected package servers**: a server source is added with its feed address (https; plain http only
   after an explicit "Allow insecure HTTP" tick), can be checked with **Test connection** before it is saved,
   and asks you to sign in only when the server needs it. Credentials are used for the current session
@@ -129,8 +147,24 @@ The cards, the card menu, Settings and the package-source editor are shown in th
 - A repo's pin names its source by alias, and a package is only ever taken from that source; a
   missing source is an error, never a fallback to another source with a package of the same name.
 - A version number is only a label: depending on the source, a published version can be overwritten with different
-  content (a shared folder by anyone who can write to it, some servers when redeploy is allowed). See the User
-  Guide's section "Version Immutability and Trust" for how to guard against it.
+  content (a shared folder by anyone who can write to it, some servers when redeploy is allowed). AgentControl
+  records a fingerprint of each package it applies and does not replace a repo's agent files with a package of the
+  same version whose content changed (an Upgrade or the restore at launch stops with a message; choosing that
+  version again with **Change package...** asks for confirmation). The fingerprint detects a changed package; it
+  does not prove who published it. For a NuGet package it describes the copy cached on this computer, so a server-side
+  republish of a version this computer already has cached is not noticed until that cached copy is cleared. See the
+  User Guide's section "Version Immutability and Trust" for how to guard
+  against it.
+- **Git repository sources.** AgentControl runs your own `git` with a hardened command line: no hooks, no
+  submodules, no Git LFS, no remote helpers (such as `ext::`), and only `https`, `ssh` or a local path (never plain
+  `http` or `git://`). Only the package layout is read, straight from the fetched commit - nothing is checked out, so no
+  filter or line-ending conversion can change a file: the four managed folders, `release-notes.md` and
+  `AGENTS.md`; a symbolic link or submodule inside it is refused, nothing else in the repository is read, and the
+  `.git` folder is never copied into your repo. The pin records the **commit** the tag pointed to. A tag that is
+  **moved** to another commit afterwards is flagged with a **Tag moved** chip, and the pinned version is not re-applied
+  with the changed content until you accept it with **Change package...** (an upgrade to a different, newer version
+  stays available), so never move a tag - publish a new version instead. For SSH, connect
+  once with `ssh` so the host key is trusted; AgentControl never accepts a host key on your behalf.
 - AgentControl never reads or writes the target repo's `nuget.config`, and keeps its NuGet
   caches in its own folder under the user profile.
 
@@ -145,6 +179,10 @@ AgentControl is distributed as a Windows MSI installer, built from
    [releases][link-build] for this repository.
 2. Run the installer and follow the prompts.
 3. Launch **AgentControl** from the Start menu.
+
+A Git repository package source also needs [Git](https://git-scm.com/downloads) **2.29 or newer** on the machine
+(AgentControl says "Git is too old" otherwise; **Settings > Git executable path override** can point to a newer
+one). The other source kinds need no Git.
 
 The installed application is **self-contained and single-file** — it bundles its own copy of
 the .NET 10 runtime, so the target machine needs no pre-installed runtime.
@@ -167,6 +205,11 @@ columns: the configured package sources, the packages of the selected source, an
 available versions (defaulting to the latest). Choosing one extracts it into the repo and pins it
 together with the source's alias. If a source is a server that needs a sign-in, a sign-in dialog opens
 when you choose it; if reading a source fails, a **Retry** button appears beside the message.
+
+A repo that already has a package shows **Change package...** in its "..." menu instead. It opens the same dialog
+preselected on the current source, package and version; choosing another version or package simply changes it, and
+choosing the **same** version whose content has changed (a moved Git tag, a republished zip or NuGet package) asks for
+confirmation first (the default is **No**) before replacing the agent files and recording the new identity.
 
 ### Upgrading
 
@@ -237,10 +280,13 @@ Both are personal ways to organize the list and are stored **only in your own Ag
 The Settings window lets you configure:
 
 - **Package sources** — a list of the configured sources (alias, kind, location and whether the
-  folder can be found; a server shows **Not checked** because AgentControl contacts it only when it is
-  needed). Use **Add** (a menu of **Zip-package folder**, **NuGet-package folder** and **NuGet-package server**)
+  folder can be found; a server or remote Git repository shows **Not checked** because AgentControl contacts it
+  only when it is
+  needed). Use **Add** (a menu of **Zip-package folder**, **NuGet-package folder**, **NuGet-package server** and
+  **Git repository**)
   to add a source, and **Edit** or **Remove** to change one; a NuGet source also lists the package
-  IDs it offers, a server can be checked with **Test connection** before it is saved, and a NuGet source can
+  IDs it offers, a server or a Git repository can be checked with **Test connection** before it is saved, and a NuGet
+  source can
   **Require signed packages** (optionally pinned to a publisher's certificate fingerprint). An alias cannot
   be changed once created, because repo pins refer to it. A single
   package source folder configured in an earlier version appears as a zip source named `Default`.
@@ -264,12 +310,12 @@ third-party dependencies and their licenses.
 
 ## Authoring agent packages
 
-Agent packages are either plain zip files or NuGet packages (served from a folder or a NuGet
-server) following a naming and content
+Agent packages are plain zip files, NuGet packages (served from a folder or a NuGet
+server) or tagged Git repositories following a naming and content
 convention that AgentControl's package sources and extractor understand. See the
 [**Authoring Agent Packages**](docs/user_guide/introduction.md#authoring-agent-packages)
 section of the [User Guide][link-guide] for the full, source-verified guide to naming,
-versioning, and structuring a package zip or NuGet package.
+versioning, and structuring a package zip, NuGet package or Git repository.
 
 ## Contributing
 

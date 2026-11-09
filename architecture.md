@@ -25,8 +25,9 @@ day as a quick-launch utility for AI-assisted development sessions.
 - Reading/writing a per-repo `.agentcontrol.json` pin file (package name,
   pinned semantic version, and whether the user has declined the AGENTS.md
   template offer for this repo)
-- Fetching agent package zip files from a configurable filesystem path (local
-  drive, mapped drive, or UNC path)
+- Fetching agent packages from the sources the user configures: a folder of
+  zip files, a folder or server of NuGet packages, or a Git repository (local
+  drive, mapped drive, UNC path, https/ssh address)
 - Detecting when a newer agent package version is available and prompting the
   user to upgrade
 - Blind-delete-and-replace sync of the four known agent folders
@@ -90,8 +91,12 @@ day as a quick-launch utility for AI-assisted development sessions.
 - Application-level logging (error message boxes are sufficient)
 - Non-Windows installers for v1 (code stays cross-platform-capable via
   Avalonia, but only an MSI is produced initially)
-- Version 1 supports only a filesystem-based package source (UNC/local/mapped
-  drive); other source types (HTTP, package feeds) are explicitly deferred
+- Package source kinds other than a folder of zip packages, a folder of NuGet
+  packages (local/mapped/UNC), a NuGet-package server and a Git repository (one
+  repository = one package; its SemVer tags matching a configurable tag pattern
+  are the versions), for example plain HTTP downloads. AgentControl never stores
+  credentials: servers and Git use the user's own credential helper, SSH keys or
+  ssh-agent
 
 ## Technology Stack
 
@@ -105,7 +110,10 @@ day as a quick-launch utility for AI-assisted development sessions.
   `Environment.SpecialFolder.ApplicationData` (`%APPDATA%\AgentControl\`) for
   AgentControl's own settings/recent-repos state; per-repo `.agentcontrol.json`
   at each repo's root for the version pin
-- **External services**: none — filesystem-based package source only
+- **External services**: only the package sources the user configures — a NuGet
+  server or a remote Git repository (reached through the user's own `git`,
+  at least the minimum supported Git version, stated in the requirements and the
+  user guide); the folder sources need no service
 
 ## Software Structure
 
@@ -139,10 +147,19 @@ AgentControl
 │       PathEllipsisText (card path control),
 │       ThemePreferenceDisplayNameConverter (theme picker text)
 ├── GitIntegration - git status check (gates pull offer on clean working tree),
-│                     git pull, configurable git executable path override
-├── AgentPackageManagement - resolves available package versions and fetches
-│                             agent package zips from the configured
-│                             filesystem path (local/mapped/UNC)
+│                     git pull, configurable git executable path override;
+│                     the user's own Git credential helper (saved package-feed
+│                     sign-ins); hardened git against remote repositories for
+│                     the Git package source (tag listing, one-tag shallow
+│                     fetch, tree listing, raw blob reading - never a checkout)
+├── AgentPackageManagement - resolves the available package versions of each
+│                             configured source and hands the chosen package's
+│                             content to RepoSync: a folder of zip packages, a
+│                             NuGet package folder or server, or a Git
+│                             repository (its SemVer tags matching a tag
+│                             pattern are the versions; one tag is fetched
+│                             shallowly and its commit is the content
+│                             identity)
 ├── RepoSync
 │   ├── PackageZipExtractor - opens/validates the new zip, updates the pin
 │   │                         file, deletes the 4 known folders, extracts the
@@ -154,7 +171,8 @@ AgentControl
 │                            package's release-notes.md after a successful
 │                            upgrade
 ├── RepoConfig - reads/writes the per-repo .agentcontrol.json pin file
-│                (package name + pinned version + whether the user declined
+│                (source alias + package name + pinned version + content
+│                identity (sha256 or git commit) + whether the user declined
 │                the AGENTS.md template offer; no "latest"/unpinned mode)
 ├── AgentToolLauncher - detects installed shells (prefers highest available
 │                       PowerShell/pwsh, falls back to Windows PowerShell 5,
@@ -185,7 +203,17 @@ AgentControl
   file always names an exact version. *Reason:* upgrades between agent package
   versions can require manual migration steps (documented in release notes),
   so silently floating to the newest version would risk applying breaking
-  changes without the developer's awareness.
+  changes without the developer's awareness. The pin also records a *content
+  identity* of what was applied — a SHA-256 of the zip or NuGet package, or
+  `git-commit:<sha>` for a Git source — so a package republished under the same
+  version, or a Git tag moved to another commit, is noticed and not synced
+  silently: pin = source alias + package + version + content identity. The
+  launch-time restore only checks it and never writes the pin (that would
+  dirty the working tree), and pins without an identity adopt one at the next
+  Select Package or Upgrade. A moved tag is flagged on the repo's card (a
+  "Tag moved" chip) but nothing is applied automatically; accepting the new
+  content is an explicit **Change package...** of the same version, which asks
+  for confirmation and records the new identity.
 
 - **Blind delete of the four known folders** (`.github/agents`,
   `.github/standards`, `.github/templates`, `.github/skills`) rather than a
@@ -333,7 +361,9 @@ to this document's own Purpose statement. The following closes that gap:
 
 - **"Select Package..." action** replaces "Upgrade" in the repo card's "..."
   menu whenever `PinnedPackageName` is unset (the two are mutually
-  exclusive — a repo is either never-pinned or already-pinned, never both).
+  exclusive — a repo is either never-pinned or already-pinned, never both;
+  a pinned repo has **Change package...** instead, which opens the same
+  dialog preselected on the current choice).
   It opens a small modal dialog that:
   1. Enumerates the distinct package base names discoverable at the
      configured source directory (see the name/version splitting algorithm
@@ -401,9 +431,9 @@ amends the "Ensure-synced-before-launch" bullet above:
 
 ## Open Concerns
 
-1. 🟢 **LOW** Package source scaling: only a filesystem path is supported for
-   v1; HTTP(S)/authenticated/package-feed sources are explicitly deferred to a
-   future release and will need their own design pass when prioritized.
+1. 🟢 **LOW** Package source scaling: sources are read on demand and cached per
+   source (or, for Git, per repository and commit); very large catalogs or
+   repositories are bounded by size and time limits rather than paged.
 2. 🟢 **LOW** Cross-platform distribution: Avalonia code is kept
    platform-portable, but only a Windows MSI is planned for v1 — packaging for
    macOS/Linux is deferred until there is customer demand.

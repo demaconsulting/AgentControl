@@ -7,9 +7,11 @@
 The `RepoConfig` subsystem spans `RepoPinStore.cs` (loads/saves a repo's
 `.agentcontrol.json` pin file) and the `RepoPin.cs` data record, which is folded into this
 subsystem-level description as it has no dedicated test file. It provides the observable
-behavior of persisting a repo's pinned package name, version and source alias and whether the
+behavior of persisting a repo's pinned package name, version, source alias and content identity and whether the
 user has declined the AGENTS.md template offer for this repo
-(`AgentControl-RepoConfig-PinPersistence`, `AgentControl-RepoConfig-SourcePin`). The subsystem
+(`AgentControl-RepoConfig-PinPersistence`, `AgentControl-RepoConfig-SourcePin`,
+`AgentControl-RepoConfig-ContentIdentityPin`, `AgentControl-RepoConfig-LegacyPinWithoutIdentity`,
+`AgentControl-RepoConfig-PinSchemaVersion`). The subsystem
 contains one unit: `RepoPinStore`.
 
 ### Interfaces
@@ -21,8 +23,9 @@ contains one unit: `RepoPinStore`.
 - *Contract*: Returns a `RepoPin` when `.agentcontrol.json` exists at the repo root, `null`
   when it does not (`AgentControl-RepoPinStore-Load`). A pin written before pins named a source
   is returned as a pin to the source named `Default`
-  (`AgentControl-RepoPinStore-LegacyV1`); a current-schema pin that names no source is rejected
-  with `InvalidOperationException` (`AgentControl-RepoPinStore-RejectUnnamedSource`).
+  (`AgentControl-RepoPinStore-LegacyV1`); a pin of schema 2 or later that names no source is rejected
+  with `InvalidOperationException` (`AgentControl-RepoPinStore-RejectUnnamedSource`); a pin written before
+  identities were recorded is returned with no `ContentIdentity` (`AgentControl-RepoPinStore-LoadWithoutIdentity`).
 - *Constraints*: Rejects a null repo root path with `ArgumentNullException`, and a pin file
   from a newer schema with `UnsupportedPinSchemaException`
   (`AgentControl-RepoPinStore-RejectNewerSchema`).
@@ -32,19 +35,38 @@ contains one unit: `RepoPinStore`.
 - *Type*: In-process .NET static method.
 - *Role*: Provider.
 - *Contract*: Overwrites any existing `.agentcontrol.json` with the given `RepoPin`'s values
-  (`AgentControl-RepoPinStore-Save`), writing the current schema version and the source alias
-  (`AgentControl-RepoPinStore-SourceAlias`) and keeping unknown properties of the existing file
-  (`AgentControl-RepoPinStore-PreserveUnknownFields`).
+  (`AgentControl-RepoPinStore-Save`), writing the current schema version (3) and the source alias
+  (`AgentControl-RepoPinStore-SourceAlias`, `AgentControl-RepoPinStore-SchemaVersion3`), the content identity when
+  the pin has one (`AgentControl-RepoPinStore-SaveContentIdentity`) and keeping unknown properties of the existing
+  file (`AgentControl-RepoPinStore-PreserveUnknownFields`).
 - *Constraints*: Rejects a null `RepoPin` value with `ArgumentNullException`, and never
   overwrites a file written by a newer schema (`AgentControl-RepoPinStore-RejectNewerSchema`).
 
 ### Design
 
 The `RepoConfig` subsystem contains only the `RepoPinStore` unit; `RepoPin` is a plain,
-mutable data record with `SchemaVersion`, `Source`, `PackageName`, `Version`, and
-`AgentsMdTemplateDeclined` properties plus a JSON extension-data dictionary that retains
+mutable data record with `SchemaVersion`, `Source`, `PackageName`, `Version`,
+`AgentsMdTemplateDeclined` and `ContentIdentity` properties plus a JSON extension-data dictionary that retains
 properties this build does not know, serialized as JSON by `RepoPinStore` with no custom
-converters. `Source` is the alias of the package source the pin came from, so a pin is only ever
+converters. `ContentIdentity` is the fingerprint of the package that was applied, written only when known, so that a
+later sync of the same version can tell it was republished
+(`AgentControl-RepoConfig-ContentIdentityPin`, `AgentControl-System-PackageContentIntegrity`). It has two forms,
+which the store keeps as opaque text (identities of different forms never compare as the same content; that rule is
+`PackageContentIdentity`'s, not the store's): `sha256:<hex>` for a zip or NuGet
+source (the SHA-256 of the delivered zip or `.nupkg` file; for NuGet it describes the copy cached on this machine) and
+`git-commit:<commit id>` for a Git source (the commit the tag pointed to; the tag itself is not stored, see
+*RepoPinStore Design*). It needed a new
+schema version (3) rather than an additive field: the store carries properties it does not know forward when it
+rewrites a pin, so a build that predates the identity, re-pinning a repo to another version, would keep the old
+identity next to the new version and the next build would raise a false "content changed" alarm; a raised schema
+version makes such a build refuse the file with the existing "update AgentControl" message instead. Pins of
+schema 1 and 2 still load (with no identity) and are rewritten as schema 3 when next saved. Schema compatibility
+therefore reads: a pin of an older schema is read (a pin without an identity adopts one on the next deliberate
+apply - Select Package or Upgrade - never at launch, which does not write the pin); a pin of the current schema is
+read and written; a pin of a newer schema is neither interpreted nor overwritten, whatever the types of its
+properties (`AgentControl-RepoPinStore-RejectNewerSchema`, `AgentControl-System-IdentityAdoptedOnUpgrade`). `Source`
+is the alias of
+the package source the pin came from, so a pin is only ever
 resolved at that source (`AgentControl-System-SourcePinIntegrity`). `AgentsMdTemplateDeclined` is
 a `bool` defaulting to `false`, so a legacy pin file written before this field existed
 deserializes with it implicitly `false` ("not yet declined") with no migration code required

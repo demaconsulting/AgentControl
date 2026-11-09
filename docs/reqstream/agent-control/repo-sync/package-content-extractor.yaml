@@ -243,3 +243,145 @@ sections:
           message that does not name the package.
         tests:
           - ZipPackageContentReader_Open_InvalidPath_ThrowsInvalidOperationException
+
+      # ---- Content identity of the package that was read ----
+      - id: AgentControl-PackageContentExtractor-ReaderContentIdentity
+        title: >-
+          The zip package reader shall report the SHA-256 content identity of the zip, computed
+          from the same open handle its entries are read from.
+        justification: |
+          The identity recorded in a repo's pin must describe the bytes that were actually
+          extracted; an identity taken in a separate look at the file could describe other bytes if
+          the file were replaced in between.
+        tests:
+          - ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries
+
+      - id: AgentControl-PackageContentExtractor-ZipReaderReleasesHandleOnFailure
+        title: >-
+          The zip package reader shall release the file handle it holds when opening the zip fails.
+        justification: |
+          The identity and the entries share one handle; a handle that leaks on a failed open would
+          keep the user's package file locked.
+        tests:
+          - ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle
+
+      - id: AgentControl-PackageContentExtractor-FolderReaderIdentity
+        title: >-
+          The folder package reader shall report the content identity its opener supplied.
+        justification: |
+          A folder package has no single file to hash, so its source supplies the identity (the
+          SHA-256 of the unpacked package file, or the commit of a Git tag), and the reader must
+          pass it on unchanged.
+        tests:
+          - DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull
+
+      - id: AgentControl-PackageContentExtractor-FolderReaderNoIdentity
+        title: >-
+          The folder package reader shall report no content identity when its opener supplied none.
+        justification: |
+          A reader that cannot name an identity must say so rather than invent one; "none" means
+          there is nothing to compare, never a changed package.
+        tests:
+          - DirectoryPackageContentReader_Open_WithoutIdentity_ReportsNone
+
+      # ---- Package layout in the root of a folder (Git packages) ----
+      - id: AgentControl-PackageContentExtractor-ReadLayoutRoot
+        title: >-
+          The folder package reader shall be able to read a folder whose root is the package layout
+          (for example the files of a Git package), listing and reading only the four managed agent
+          folders and the two root files.
+        justification: |
+          A folder that holds a package holds many things that are not the package; the extractor
+          must see only the layout.
+        tests:
+          - DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity
+
+      - id: AgentControl-PackageContentExtractor-LayoutRootIdentity
+        title: >-
+          The folder package reader, when reading a layout root, shall report the content identity
+          its opener supplied, or none when none was supplied.
+        justification: |
+          A Git package is identified by the commit it was fetched at, which only its opener knows.
+        tests:
+          - DirectoryPackageContentReader_OpenLayoutRoot_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull
+
+      - id: AgentControl-PackageContentExtractor-RefuseMissingOrLinkedLayoutRoot
+        title: >-
+          The folder package reader shall refuse to open a layout root that does not exist or that
+          is a link.
+        justification: |
+          A link in place of the layout folder could make the extractor read content from
+          anywhere; a missing folder is a failed fetch that must be reported, not read as empty.
+        tests:
+          - DirectoryPackageContentReader_OpenLayoutRoot_MissingFolderOrLink_ThrowsInvalidOperationException
+
+      - id: AgentControl-PackageContentExtractor-RefuseOutsideLayoutPaths
+        title: >-
+          The folder package reader, when reading a layout root, shall refuse any path outside the
+          layout, including a path that starts in the layout and climbs out of it.
+        justification: |
+          The extractor must not be talked into reading the repository's other files or its
+          metadata.
+        tests:
+          - DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused
+
+      - id: AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout
+        title: >-
+          The folder package reader, when reading a layout root, shall neither inspect nor refuse a
+          link that is not part of the layout.
+        justification: |
+          A link that is not copied cannot hurt, and refusing it would reject good packages because
+          of unrelated files.
+        tests:
+          - windows@DirectoryPackageContentReader_OpenLayoutRoot_JunctionOutsideLayoutIgnoredInsideLayoutRefused
+          - ubuntu@DirectoryPackageContentReader_OpenLayoutRoot_SymlinkOutsideLayoutIgnoredInsideLayoutRefused
+
+      - id: AgentControl-PackageContentExtractor-RefuseLinkInManagedFolder
+        title: >-
+          The folder package reader, when reading a layout root, shall refuse a link to a file
+          inside a managed folder.
+        justification: |
+          A link inside what is copied could redirect a read outside the package.
+        tests:
+          - ubuntu@DirectoryPackageContentReader_OpenLayoutRoot_SymlinkFileInManagedFolder_IsRefused
+
+      - id: AgentControl-PackageContentExtractor-RefuseLinkInPlaceOfGitHub
+        title: >-
+          The folder package reader, when reading a layout root, shall refuse a link standing in
+          place of the .github folder itself.
+        justification: |
+          A linked .github folder would make every managed folder below it come from outside the
+          package.
+        tests:
+          - windows@DirectoryPackageContentReader_OpenLayoutRoot_JunctionReplacingGitHubFolder_IsRefused
+          - ubuntu@DirectoryPackageContentReader_OpenLayoutRoot_SymlinkReplacingGitHubFolder_IsRefused
+
+      - id: AgentControl-PackageContentExtractor-RefuseLinkInPlaceOfManagedFolder
+        title: >-
+          The folder package reader, when reading a layout root, shall refuse a link standing in
+          place of a managed folder.
+        justification: |
+          A linked managed folder would make its content come from outside the package.
+        tests:
+          - windows@DirectoryPackageContentReader_OpenLayoutRoot_JunctionReplacingManagedFolder_IsRefused
+          - ubuntu@DirectoryPackageContentReader_OpenLayoutRoot_SymlinkReplacingManagedFolder_IsRefused
+
+      - id: AgentControl-PackageContentExtractor-RefuseLinkAsRootFile
+        title: >-
+          The folder package reader, when reading a layout root, shall refuse a link standing in
+          place of a root file (the release notes or the AGENTS.md template).
+        justification: |
+          A linked root file would read a file from outside the package into the synced repo.
+        tests:
+          - ubuntu@DirectoryPackageContentReader_OpenLayoutRoot_SymlinkAsRootFile_IsRefused
+
+      - id: AgentControl-PackageContentExtractor-ExcludeGitFolder
+        title: >-
+          The folder package reader, when reading a layout root, shall never list or read a .git
+          folder or any other path outside the layout.
+        justification: |
+          A repository's metadata is not part of a package and must not be copied into
+          another repository.
+        tests:
+          - DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity
+          - DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused

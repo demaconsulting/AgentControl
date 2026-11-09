@@ -15,7 +15,37 @@ repo's `.gitignore` covers the four managed folders immediately after a successf
 subsystem-level description. The subsystem provides the observable behavior of syncing a
 repo's agent files to a package's contents. It contains four units: `PackageContentExtractor`,
 `PackageZipExtractor`, `ReleaseNotesViewerViewModel`, and `GitIgnoreEnsurer`; the content
-reader types are folded into the `PackageContentExtractor` unit.
+reader types are folded into the `PackageContentExtractor` unit. Every reader also reports the content identity of
+the package it reads (`AgentControl-RepoSync-ContentIdentity` and `-ContentIdentityOfAppliedBytes`, which support
+`AgentControl-System-PackageContentIntegrity`): a zip reader hashes the zip and reads its entries from the one open
+handle, so the identity recorded in a pin is always that of the bytes that were extracted; a folder reader carries
+the identity its source supplied. The subsystem only reports the identity - what a difference means is decided by
+the `LauncherUI` card. A Git package is delivered as a folder of the provider's cache whose root *is* the package
+layout (the repository
+root, or the configured sub-folder): `GitSourceProvider` writes only the validated layout files into it, reading
+their bytes from the fetched commit with `git cat-file --batch`, and nothing is checked out.
+`DirectoryPackageContentReader.OpenLayoutRoot` reads such a folder: it lists and reads only the four managed
+folders and the two root files, never `.git`, other `.github` content or any other file, and - unlike the
+`content`-folder mode, which refuses a link anywhere - it neither inspects nor refuses a link that is not part of the
+layout while still refusing one that is (`AgentControl-RepoSync-LayoutRoot`, `-LayoutRootOnlyLayout`,
+`-LayoutRootRefusesLinks` and `-LayoutRootIgnoresOtherLinks`, which support `AgentControl-System-GitSourceLayoutOnly`
+and
+`AgentControl-System-GitSourceRefusesLinks`). The *layout root rule*: the root a reader reports must be an existing
+folder
+that is not a link, and a path outside the layout paths - including one that climbs out with `..` - is never read.
+Before anything is written the provider also verifies, with the same list of layout paths, that in the fetched commit
+the managed folders are folders and the root files are regular files, so a file or a link where a managed folder
+belongs is refused; the reader in turn refuses a link in the layout when it lists or reads it. The list of layout
+paths has one source of truth, `PackageContentExtractor.LayoutPaths`, shared with the Git source provider.
+
+**How the content identity reaches the extractor and the pin.** An identity belongs to the reader, not to a call: the
+provider's `AcquireAsync` returns one `IPackageContentReader` per acquisition - a zip reader that hashed the zip it
+reads, or a folder reader the source's provider opened with the identity of what it unpacked or fetched (for a Git
+package, `git-commit:<commit id>` of the commit whose blobs were written). The card passes that one reader to
+`PackageContentExtractor.Extract`, which reads every file from it, and records the same reader's `ContentIdentity` in
+the pin only after the extraction succeeded; before that it compares the identity with the one the pin recorded to
+decide whether a difference stops the sync. So the identity in the pin is, by construction, that of the content that
+was applied and never that of a second, separate read.
 
 ### Interfaces
 

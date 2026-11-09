@@ -6,8 +6,10 @@ The `LauncherUI` subsystem is verified by the combined unit tests of its ten uni
 (`MainWindowViewModelTests.cs` and `RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`, `RepoCardServerSourceTests.cs`
 and `RepoCardImageTests.cs`,
 `SelectPackageWindowViewModelTests.cs` and `SelectPackageRetryTests.cs`,
-`SettingsWindowViewModelTests.cs`, `SourceEditorViewModelTests.cs`,
-`SourceEditorServerViewModelTests.cs` and `SourceEditorSignatureViewModelTests.cs`,
+`SettingsWindowViewModelTests.cs`, `SettingsWindowGitSourceTests.cs`, `SourceEditorViewModelTests.cs`,
+`SourceEditorServerViewModelTests.cs`, `SourceEditorSignatureViewModelTests.cs` and `SourceEditorGitViewModelTests.cs`,
+`RepoCardGitAwarenessTests.cs` (the Git icon, tooltip, moved tag and Change package of the card) and
+`PackageSourceGitPresentationTests.cs` (the Git icon and names, and how a source row classifies a remote Git source),
 `CredentialPromptViewModelTests.cs`, `RepoImageLocatorTests.cs`, `RepoGroupHeaderViewModelTests.cs`,
 `GroupNameViewModelTests.cs` and `DialogBehaviorTests.cs`, the last four units each with its own verification
 document), plus
@@ -23,7 +25,9 @@ notes, `RepoGroupWindowTests.cs` for the group headers, the card menu's
 "Move to group" submenu, the group-name prompt and the card color palette pop-up,
 `SettingsWindowServerSourceTests.cs` for the Settings
 window, the source editor window and its connection test, `SourceEditorSignatureWindowTests.cs` for the signature
-section and "Forget saved sign-in" of the source editor, `RepoCardSignatureTests.cs` for the signature shield in the
+section and "Forget saved sign-in" of the source editor, `SourceEditorGitWindowTests.cs` for the Git editor's
+sections, tag pattern error, tag preview and Save (against a `FakeGitSourceProvider`, so no git or network is needed),
+`RepoCardSignatureTests.cs` for the signature shield in the
 main window's package chip, and `CredentialPromptWindowTests.cs` for the sign-in
 dialog, its "Remember on this computer" option and `AvaloniaCredentialPrompt`), and the end-to-end flows -
 adding a zip and a
@@ -112,6 +116,11 @@ executable.
 - The source editor offers the signature options for NuGet sources only (disabled with the reason where unsupported)
   and, for a server, "Forget saved sign-in" only after a confirmation; the repo card's package chip shows the signature
   shield only when the pinned source requires signed packages.
+- A Git repository can be added from the Add menu; its editor explains the address, tag pattern, folder and sign-in,
+  validates as the user types, lists the matching tags (or the tags that did not match, with a hint) after Test
+  connection and saves only an acceptable source; a Git source is shown with the Git icon, "Not checked" when remote;
+  a card pinned to one names the tag and commit, shows "Tag moved" without applying anything when the tag moved, and
+  offers Change package..., which opens on the pinned choice and asks before applying changed content.
 
 ### Test Scenarios
 
@@ -180,7 +189,7 @@ by `RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue`,
 `AgentControl-LauncherUI-Pull`.
 
 **LauncherUI_SelectPackage_BrowseAndApplyToUnpinnedRepo**: The select-package request is
-raised, the selection window populates versions descending and defaults to latest, confirming
+raised for a repo that has no pin, the selection window populates versions descending and defaults to latest, confirming
 raises the full package reference (source, package, version), and applying the selected package
 updates the pin, extracts the files, and raises release-notes-ready. This scenario is tested
 by `RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias`,
@@ -533,15 +542,21 @@ The `LauncherUI` subsystem has no end-to-end or window-level test that offers a 
 the unit level, which this scenario discloses rather than hides.
 
 **LauncherUI_AddSourceMenu_OneAddButtonOffersEverySourceType**: The Settings window has one `AddSourceButton`
-whose menu holds the zip-package folder, NuGet-package folder and NuGet-package server items (each with an icon)
-under their stable AutomationIds; choosing an item opens the matching editor (zip: no package IDs section; NuGet
-folder: with it, and cancelling it adds nothing; server: feed-address controls), and saving the zip editor adds and
+whose menu holds the zip-package folder, NuGet-package folder, NuGet-package server and Git repository items (each
+with an icon) under their stable AutomationIds, in that order; choosing an item opens the matching editor (zip: no
+package IDs section; NuGet folder: with it, and cancelling it adds nothing; server: feed-address controls; Git: the
+Git sections), and saving the zip editor adds and
 selects the source. This scenario is tested by `SettingsWindow_AddZipSourceClicked_ShowsEditorAndSavingAddsSource`,
-`SettingsWindow_AddNuGetFolderClickedThenCancelled_AddsNothing` and
-`SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls`, covering
-`AgentControl-LauncherUI-AddSourceMenu` (child: `AgentControl-SettingsWindowViewModel-AddSource`). The icons and
-descriptions of the three items are asserted end to end by
-`windows@SettingsWindow_AddMenu_OffersThreeSourceTypesWithIconAndDescription` (system verification).
+`SettingsWindow_AddNuGetFolderClickedThenCancelled_AddsNothing`,
+`SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls` and
+`SettingsWindow_AddGitSourceButton_IsInTheAddMenuAndOpensGitEditor`, covering
+`AgentControl-LauncherUI-AddSourceMenu` (children: `AgentControl-SettingsWindowViewModel-AddSource` and
+`-AddGitSourceMenu`, the latter shown by `SettingsWindowViewModel_AddGitSourceCommand_RequestsGitEditor`). The icons and
+descriptions of all four items are asserted end to end by
+`windows@SettingsWindow_AddMenu_OffersAllFourSourceTypesWithIconAndDescription` (system verification, which also checks
+the empty-list text names the four types), and the Git item's description, the kind name and status of a saved Git
+source in the list and the persisted settings by
+`windows@SettingsWindow_AddGitRepositoryViaDialog_TestsConnectionListsTagsAndPersistsIt`.
 
 **LauncherUI_Appearance_ThemeIsChosenInItsOwnSettingsSection**: The Settings view model offers the system default,
 light and dark choices in that order, starts from the saved theme (the system default when none was saved) and
@@ -797,3 +812,143 @@ application is the system scenario `AgentControl_AgentsMdOfferBeforeReleaseNotes
 the version without its build metadata, carries the full build version as its tooltip, and the shortening drops only
 the metadata. This scenario is tested by `AboutWindow_VersionRow_IsLabeledAndShortWithFullVersionInTooltip`, covering
 `AgentControl-LauncherUI-AboutVersionRow`.
+
+**LauncherUI_ContentChangeProtection_RepublishedVersionIsNeverAppliedUnnoticed**: A package version republished with
+other content is not applied silently: an Upgrade and the restore of missing agent files before launch refuse it and
+say so, and a Select Package of the pinned version raises the confirmation request. In the main window the request
+becomes a modal confirmation whose answer No changes nothing (the repo and the pin keep what they had) and whose
+answer Yes applies the changed package and records its new identity; a pin without an identity adopts one silently.
+This scenario is verified by the `RepoCardViewModel` unit tests (see their unit verification design), with
+`RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin`,
+`RepoCardViewModel_UpgradeCommand_SameVersionRepublished_RefusesWithoutChangingRepoOrPin`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SameVersionRepublished_RefusesWithoutExtractingOrWritingPin`,
+`RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing` and
+`RepoCardViewModel_ApplySelectedPackage_PinWithoutIdentity_AdoptsIdentityWithoutWarning` cited directly at the
+subsystem level, and by the headless window test
+`MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed` (the question is asked before
+anything changes; No changes nothing; Yes applies and records the new identity). The requirements are covered as
+follows: `AgentControl-LauncherUI-ContentChangeProtection` (the identity is recorded; child
+`AgentControl-RepoCardViewModel-RecordContentIdentity`) by the first test;
+`AgentControl-LauncherUI-ContentChangeRefusal`
+(children: `AgentControl-RepoCardViewModel-RefuseChangedContent`, `-RefuseChangedContentMessage` and
+`-LaunchSyncNeverWritesPin`) by the Upgrade and the launch-restore tests;
+`AgentControl-LauncherUI-ContentChangeConfirmation` (children: `-ConfirmChangedContent`, `-ApplyConfirmedContent` and
+`-RefuseChangeWithoutAsking`) by the confirmation-request test and the window test; and
+`AgentControl-LauncherUI-ContentChangeAdoption` (children: `-AdoptMissingIdentity` and
+`-IgnoreMissingSourceIdentity`) by
+the pin-without-identity test. As the evidence rules above say, these are view-model tests of the units that realize the
+behavior, except the headless window test: the behavior is observable only in the view-model layer the window is drawn
+from, so no window-level test exists for the refusal.
+The card offers "Change package..." to a repo that has a pin (and "Select Package..." only to one that has none), so the
+confirmation is reached through the card's menu: the Change package scenario below shows the dialog
+opening on the pinned
+choice, and the end-to-end scenarios of the system verification
+(`AgentControl_PackageContentIntegrity_MovedGitTagIs...`)
+take it through to the confirmation with a real Git repository.
+
+**LauncherUI_GitSourceSetup_PromptOnlyForUserStartedWork**: The registry the card builds for Git sources runs git with
+the configured git executable (or the one the owner supplies) and caches Git packages inside the isolated configuration
+directory; the registry for work the user started lets git show its credential UI, and the registry for background work
+never does; when the background check finds that the installed git is older than the supported version the
+card's source problem says so and does not ask the user to sign in, and no upgrade is offered.
+This scenario is tested by
+`RepoCardViewModel_CreateSourceRegistry_GitSource_RunsTheConfiguredOrOverriddenGit` (covering
+`AgentControl-LauncherUI-GitSourceSetup`, children `AgentControl-RepoCardViewModel-GitSourceOptions` and
+`-GitSourceCacheRoot`), `RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork` (covering
+`AgentControl-LauncherUI-GitSourcePrompts`, child `AgentControl-RepoCardViewModel-GitSourcePrompts`) and
+`RepoCardViewModel_RefreshUpgradeStatus_GitTooOld_ShowsSourceProblemWithoutSignIn` (covering
+`AgentControl-LauncherUI-GitTooOld`, children `AgentControl-RepoCardViewModel-GitTooOldProblem` and
+`-GitTooOldNoUpgrade`). These are view-model tests of the unit that realizes the behavior; the same prompt rule is shown
+end to end against a private Git server in the system verification (`GitSignInTests.cs`).
+
+**LauncherUI_GitSourceEditor_AddressPatternPreviewAndSave**: The Git editor window shows the Git sections (the package
+name box with the alias as its placeholder, the tag pattern box with `v{version}` and its help, the folder box, the
+sign-in note, the connection test and the Git examples under a "Repository URL" label) and hides the NuGet package
+list, the signature section and the server sign-in section; a tag pattern without the version placeholder shows its
+error under the box and disables Save, and fixing it removes both; clicking Test connection with a provider that
+answers lists the matching tags in the preview panel with their summary; and Save closes the window with the Git
+definition (address, pattern, folder, package name). This scenario is tested by
+`SourceEditorWindow_GitSource_ShowsGitSectionsAndHidesNuGetOnes`,
+`SourceEditorWindow_GitSource_BadTagPattern_ShowsErrorAndDisablesSave`,
+`SourceEditorWindow_GitSource_TestConnection_ShowsTagPreviewList` and
+`SourceEditorWindow_GitSource_Save_ClosesWithTheGitDefinition` (the windows,
+against a `FakeGitSourceProvider`, no git or
+network), and the settings view model's refusal of a Git source whose settings the application would not accept is
+shown by
+`SettingsWindowViewModel_Save_GitSourceWithBadTagPattern_IsRefusedWithErrorMessage` (unit evidence cited directly),
+covering
+`AgentControl-LauncherUI-GitSourceEditor` (children: `AgentControl-SourceEditorViewModel-GitEditor`,
+`-GitEditorDefaults`, `-GitSubfolderNormalized`, `-GitSaveNew`, `-GitSaveExisting`, `-GitSaveGate`, `-GitValidation`,
+`-GitValidationTagPattern`, `-GitValidationSubfolder`, `-GitValidationPackageName`, `-GitTagPatternHelp`,
+`AgentControl-SettingsWindowViewModel-RefuseInvalidGitSource`, `-RefuseInvalidGitAddress`, `-RefuseInvalidGitSubfolder`
+and `-RefuseInvalidGitPackageName`) with the first, second and fourth window test, and
+`AgentControl-LauncherUI-GitSourceConnectionTest` (children: `-GitTestConnection`, `-GitTestRuns`,
+`-GitTestDefaultProvider`, `-GitTestFailureReasons`, `-GitTestGitTooOld`, `-GitTestOtherFailure`, `-GitTestCancel`,
+`-GitTestCancelAndStale`, `-GitTagPreview`, `-GitTagPreviewNoMatch`, `-GitTagPreviewNoTags`, `-GitTagPreviewCleared`,
+each prefixed `AgentControl-SourceEditorViewModel`, and `AgentControl-MainWindowViewModel-GitConnectionTestProvider`,
+`-GitConnectionTestInteractive` and `-GitConnectionTestRefusesOldGit`) with the third window test.
+The real provider, the real git and the connection test against a repository are shown end to end in the system
+verification.
+
+**LauncherUI_GitSignInGuidance_EditorSaysWhoSignsIn**: The Git editor window shows the sign-in note under its own
+section: AgentControl uses the user's own Git sign-in, never stores credentials, may show Git's sign-in for the
+connection test and Select Package, and never prompts in the background. This scenario is tested by
+`SourceEditorWindow_GitSource_ShowsGitSectionsAndHidesNuGetOnes`, covering `AgentControl-LauncherUI-GitSignInGuidance`
+(child: `AgentControl-SourceEditorViewModel-GitSignInNote`).
+
+**LauncherUI_GitSourcePresentation_IconTypeNameStatusTagAndCommit**: A Git source has the Git icon and the
+type name "Git
+repository" (and the short name "git repository") in the lists that show sources; the Select Package source list shows
+the same icon and name; a Git source on a remote address is listed "Not checked" and never asks for its folder,
+while one
+on a local path gets the folder status, and the classification of the zip, NuGet folder and server kinds is unchanged;
+and a card pinned to a Git source shows the Git icon and the alias in its package chip. This scenario is tested by
+`PackageSourceIcons_GitSource_HasGitIconAndNames`,
+`SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName`
+and `RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias` (covering `AgentControl-LauncherUI-GitSourcePresentation`,
+child `AgentControl-RepoCardViewModel-GitSourceAwareness`),
+`PackageSourceItemViewModel_RemoteGitSource_IsNotCheckedAndNeverAsksTheFolder`,
+`PackageSourceItemViewModel_LocalGitSource_ChecksTheFolder` and
+`PackageSourceItemViewModel_OtherKinds_RemoteClassificationUnchanged` (covering
+`AgentControl-LauncherUI-GitSourceRowStatus`, children `AgentControl-SettingsWindowViewModel-GitSourceRowStatus`,
+`-GitSourceLocalFolderStatus` and `-GitSourcePersisted`) and
+`RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit` (the tag and the seven-character commit
+in the chip's tooltip, covering `AgentControl-LauncherUI-GitSourceCardTooltip`, child
+`AgentControl-RepoCardViewModel-GitSourceTooltip`), and by the headless main window test
+`MainWindow_PinnedGitSourceCard_ChipShowsGitIconAliasTagAndShortCommit`: the chip drawn for a repo pinned to a Git
+source holds the Git icon, the alias and the pinned package, and its tooltip names the tag and the short commit (the
+window-level evidence of both `AgentControl-LauncherUI-GitSourcePresentation` and
+`AgentControl-LauncherUI-GitSourceCardTooltip`; the source is a local folder, so nothing is fetched).
+The drawn icon is shown only as ink in the end-to-end test (`SettingsWindow_AddMenu_OffersAllFourSourceTypes...`).
+
+**LauncherUI_TagMovedWarning_ShownNeverApplied**: When a check finds the pinned Git version at another
+commit than the pin recorded, the card's status is "Tag moved" (it outranks "upgrade available", hides the up-to-date
+cue and uses the tooltip that names the tag, both commits and Change package...), and nothing is acquired, extracted or
+written; a card refresh the user starts reads the Git source again, so a tag moved after a listing was cached is shown,
+while a failed refresh clears the warning instead of leaving it up. This scenario is tested by
+`RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip` (covering
+`AgentControl-LauncherUI-TagMovedWarning`, children `AgentControl-RepoCardViewModel-TagMovedWarning`,
+`-TagMovedNeedsEvidence`, `-TagMovedClearedByNewPin` and `-TagMovedFollowsTagPattern`),
+`RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing` (covering
+`AgentControl-LauncherUI-TagMovedAppliesNothing`,
+child `-TagMovedAppliesNothing`),
+`RepoCardViewModel_RefreshAsync_GitSourceTagMovedAfterCachedListing_ListsAgainAndShowsTagMoved` (covering
+`AgentControl-LauncherUI-TagMovedFreshListing`, child `-TagMovedFreshListing`) and
+`RepoCardViewModel_RefreshAsync_FailsAfterTagMoved_ClearsTagMovedAndShowsCheckFailed` (covering
+`AgentControl-LauncherUI-TagMovedClearedWhenUnknown`, child `-TagMovedClearedWhenUnknown`; each child prefixed
+`AgentControl-RepoCardViewModel`). The chip itself is exercised end to end only
+(`TagMovedChip` in the system verification); no headless window test renders it.
+
+**LauncherUI_ChangePackage_PinnedRepoChoosesAgainOnTheCurrentChoice**: For a repo that has a pin the select-package
+command can execute and raises the request ("Change package..."); the main window opens the Select Package dialog on the
+pin's own source, package and version although a newer version exists; and choosing the pinned version again when its
+content changed asks for confirmation first, No changing nothing and Yes applying and recording the new identity. This
+scenario is tested by `RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CanExecuteAsChangePackage` (covering
+`AgentControl-LauncherUI-ChangePackage`, children `AgentControl-RepoCardViewModel-ChangePackage` and
+`-ChangePackageRequest`), `MainWindow_ChangePackageOnPinnedRepo_OpensSelectPackageOnThePinnedChoice` (also covering
+`AgentControl-LauncherUI-ChangePackageStartsOnCurrentChoice`, children:
+the `AgentControl-SelectPackageWindowViewModel-Preselect*`
+requirements: `-PreselectCurrentPackage`, `-PreselectNewestWhenVersionGone`, `-PreselectNothingWhenSourceFailed`,
+`-PreselectNothingWhenNotOffered`, `-PreselectNothingWhenSourceUnknown`, `-PreselectKeepsUserChoice` and
+`-PreselectCancelled`) and `MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed` (the
+confirmation, covered above).

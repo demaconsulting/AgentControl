@@ -58,7 +58,10 @@ parts. The system has eleven subsystems: `LauncherUI`, `AgentPackageManagement`,
 `PackageCredentials` (credentials for package servers), `RepoSync`, `RepoConfig`, `AgentToolLauncher`,
 `GitIntegration`, `Settings`, `Logging`, `Startup` and `Utilities`, plus the top-level `Program` unit. Of
 the units, `GitCredentialClient` (in `GitIntegration`) and `SignatureVerificationSupport` (in
-`AgentPackageManagement`) belong to the package-authenticity and saved-sign-in features. `RepoGroupName` (in
+`AgentPackageManagement`) belong to the package-authenticity and saved-sign-in features, and
+`PackageContentIdentity` (in `AgentPackageManagement`) to the package-content-integrity feature. `GitSourceProvider`,
+`GitRepositoryAddress` and `GitTagPattern` (in `AgentPackageManagement`) and `GitRemoteClient` (in `GitIntegration`)
+belong to the Git repository source feature. `RepoGroupName` (in
 `Settings`) is the unit holding the rules for the names of the user's repo groups, and `RepoImageLocator`,
 `RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in `LauncherUI`) belong to the repo-picture,
 repo-group and dialog features; `PathEllipsisText` and `ThemePreferenceDisplayNameConverter` are documented
@@ -73,17 +76,18 @@ supporting types of `LauncherUI`, not units.
     - **LauncherUI/** - main window, repo cards, package-selection, settings, package-source editor
       (including the signature options and "Forget saved sign-in") and sign-in windows
     - **AgentPackageManagement/** - package source model, source providers (zip folder, NuGet
-      folder and server) and registry, package discovery, version comparison, and the platform
+      folder and server, Git repository) and registry, package discovery, version comparison, the content identity of a
+      delivered package, and the platform
       check for package-signature verification
     - **PackageCredentials/** - credentials for package servers: server origin, in-memory session
       store, per-operation credential callback, the contract of the user's own credential store,
       and log redaction
-    - **RepoSync/** - package extraction (zip or unpacked NuGet package folder) and
+    - **RepoSync/** - package extraction (zip, unpacked NuGet package folder or a Git package's layout folder) and
       release-notes viewing
-    - **RepoConfig/** - per-repo pin file persistence (package, version and source alias)
+    - **RepoConfig/** - per-repo pin file persistence (package, version, source alias and content identity)
     - **AgentToolLauncher/** - shell detection and agent-tool process launching
-    - **GitIntegration/** - git status/pull/branch queries and the user's Git credential helper
-      (saved package-feed sign-ins)
+    - **GitIntegration/** - git status/pull/branch queries, the user's Git credential helper
+      (saved package-feed sign-ins) and hardened git against remote repositories (the Git package source)
     - **Settings/** - application-wide settings persistence (including the package sources and the user's repo
       groups, card colors and theme; `SettingsStore`, which repairs unusable stored values on load - an unknown card
       color reads as automatic) and the `RepoGroupName` unit, the rules for the names of the
@@ -95,7 +99,8 @@ supporting types of `LauncherUI`, not units.
 - **test/** - test projects
   - **DemaConsulting.AgentControl.Tests/** - unit, subsystem and headless-window tests, plus test support
     (an in-process NuGet V3 mock feed, a real signed-package fixture, stub and real git credential
-    helpers, fake credential prompt and remembered-credential store, list logger)
+    helpers, a stub git for the remote client and a real-repository fixture for the Git source,
+    fake credential prompt and remembered-credential store, list logger)
   - **DemaConsulting.AgentControl.UiTests/** - FlaUI end-to-end UI test project
 
 ## Document Conventions

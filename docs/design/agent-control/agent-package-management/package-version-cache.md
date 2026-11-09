@@ -65,6 +65,13 @@ using the cached descending list; the highest entry is the latest
 - *Postconditions*: A query already in flight for that source captured the old entry; it writes
   its result into that detached entry, so a stale answer never repopulates the cache.
 
+**UpgradeCheck.Pinned**: `IsNewerVersionAvailableAsync` also returns the listing entry of the pinned version -
+found in the
+same cached list, so with no further call - or none when the source no longer lists it or the pin does not
+parse. For a Git
+source it carries the commit the tag points to now, which the card compares with the pinned commit to notice a moved tag
+(`AgentControl-PackageVersionCache-ReportPinnedListing`).
+
 #### Error Handling
 
 Every method that queries a source on a cache miss propagates the provider's exceptions

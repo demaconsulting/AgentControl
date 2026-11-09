@@ -60,6 +60,22 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     private readonly PackageVersionCache _cache;
 
     /// <summary>
+    ///     The package to select once the preferred source has loaded, or <see langword="null"/>.
+    /// </summary>
+    private readonly string? _preferredPackageName;
+
+    /// <summary>
+    ///     The alias of the source the preferred package belongs to, or <see langword="null"/>.
+    /// </summary>
+    private readonly string? _preferredSourceAlias;
+
+    /// <summary>
+    ///     The version to select once the preferred package's versions have loaded, or
+    ///     <see langword="null"/>.
+    /// </summary>
+    private readonly string? _preferredVersion;
+
+    /// <summary>
     ///     Cancels the version load for the package selected most recently; replaced whenever the
     ///     selection changes.
     /// </summary>
@@ -102,6 +118,20 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     private bool _isLoadingVersions;
 
     /// <summary>
+    ///     Whether the user has changed the source or the package since the dialog opened. Once
+    ///     set, the preferred selection is never applied: it would override a choice the user made
+    ///     while the sources were loading, even one that happens to land on the preferred source
+    ///     again.
+    /// </summary>
+    private bool _userChangedSelection;
+
+    /// <summary>
+    ///     Whether the preferred selection itself is changing <see cref="SelectedPackageName"/>, so
+    ///     that change is not mistaken for the user's.
+    /// </summary>
+    private bool _applyingPreference;
+
+    /// <summary>
     ///     Backing field for <see cref="VersionsError"/>.
     /// </summary>
     private string? _versionsError;
@@ -115,16 +145,30 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     /// <param name="preferredSourceAlias">The alias of the source to start on (for example the
     ///     source the repo is already pinned to), or <see langword="null"/>/an unknown alias to
     ///     start on the first source.</param>
+    /// <param name="preferredPackageName">The package to select once the preferred source has
+    ///     loaded (for example the package the repo is pinned to), or <see langword="null"/> for
+    ///     none. Ignored when the source cannot be read or does not offer it, and never
+    ///     overrides a choice the user already made.</param>
+    /// <param name="preferredVersion">The version to select once that package's versions have
+    ///     loaded (the pinned version), or <see langword="null"/> to keep the newest. Ignored when
+    ///     the source no longer lists it.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry"/> or
     ///     <paramref name="cache"/> is <see langword="null"/>.</exception>
     public SelectPackageWindowViewModel(
-        PackageSourceRegistry registry, PackageVersionCache cache, string? preferredSourceAlias = null)
+        PackageSourceRegistry registry,
+        PackageVersionCache cache,
+        string? preferredSourceAlias = null,
+        string? preferredPackageName = null,
+        string? preferredVersion = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(cache);
 
         _registry = registry;
         _cache = cache;
+        _preferredPackageName = preferredPackageName;
+        _preferredSourceAlias = preferredSourceAlias;
+        _preferredVersion = preferredVersion;
         Sources = [.. registry.Definitions.Select(definition => new SelectPackageSourceViewModel(definition))];
         _isLoading = Sources.Count > 0;
         _selectedSource = Sources.FirstOrDefault(
@@ -169,6 +213,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
                 value.PropertyChanged += OnSelectedSourceChanged;
             }
 
+            _userChangedSelection = true;
             SelectedPackageName = null;
             OnPropertyChanged(nameof(PackageNames));
             OnPropertyChanged(nameof(SourceErrorMessage));
@@ -225,6 +270,12 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
             if (!SetField(ref _selectedPackageName, value))
             {
                 return;
+            }
+
+            // Only the preference itself sets the package without the user having chosen it
+            if (!_applyingPreference)
+            {
+                _userChangedSelection = true;
             }
 
             OnPropertyChanged(nameof(ShowVersionsHint));
@@ -371,10 +422,98 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         try
         {
             await Task.WhenAll(Sources.Select(source => LoadSourceAsync(source, cancellationToken)));
+            await ApplyPreferredSelectionAsync(cancellationToken);
         }
         finally
         {
             IsLoading = false;
+        }
+    }
+
+    /// <summary>
+    ///     Selects the preferred package and version (the ones a repo is pinned to) once the
+    ///     preferred source has loaded, so "Change package..." opens on the current choice.
+    /// </summary>
+    /// <remarks>
+    ///     Does nothing when no preference was given, when the user has changed the source or the
+    ///     package since the dialog opened (even if they came back to the preferred one: their
+    ///     choice stands), when the selected source failed or does not offer the package, and
+    ///     keeps the newest version when the preferred version is no longer listed. The version
+    ///     read the preference starts is cancelled with <paramref name="cancellationToken"/>.
+    /// </remarks>
+    /// <param name="cancellationToken">The token of <see cref="LoadAsync"/>: cancelling it
+    ///     cancels the version read of the preferred package as well.</param>
+    /// <returns>A task that completes when the selection (and the version load it starts) is
+    ///     done.</returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is cancelled while the preferred package's versions load.</exception>
+    private async Task ApplyPreferredSelectionAsync(CancellationToken cancellationToken)
+    {
+        if (_preferredPackageName is null || _userChangedSelection || _selectedPackageName is not null ||
+            _selectedSource is not { HasError: false, IsLoading: false } source ||
+            !string.Equals(source.Alias, _preferredSourceAlias, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var package = source.PackageNames.FirstOrDefault(
+            name => string.Equals(name, _preferredPackageName, StringComparison.OrdinalIgnoreCase));
+        if (package is null)
+        {
+            return;
+        }
+
+        // A load that is already cancelled starts nothing: no selection is made and no read begun
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _applyingPreference = true;
+        try
+        {
+            SelectedPackageName = package;
+        }
+        finally
+        {
+            _applyingPreference = false;
+        }
+
+        // The version read is cancelled by the same token as the rest of the load, but only the
+        // read this preference started: the exact source of its token is captured here (the setter
+        // has just created it), so a newer selection by the user, with its own read, is never
+        // cancelled by this registration
+        var preferredRead = _versionsCancellation;
+        using var cancelVersionRead = cancellationToken.Register(() => CancelVersionLoad(preferredRead));
+
+        await PendingVersionsLoad;
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // A newer selection by the user while the versions loaded must not be overridden
+        if (_userChangedSelection || _selectedPackageName != package || _preferredVersion is null)
+        {
+            return;
+        }
+
+        var version = AvailableVersions.FirstOrDefault(
+            text => string.Equals(text, _preferredVersion, StringComparison.OrdinalIgnoreCase));
+        if (version is not null)
+        {
+            SelectedVersion = version;
+        }
+    }
+
+    /// <summary>
+    ///     Cancels the given version load, ignoring one whose source was already replaced and
+    ///     released by a newer selection.
+    /// </summary>
+    /// <param name="read">The exact source of the token of the version load to cancel.</param>
+    private static void CancelVersionLoad(CancellationTokenSource read)
+    {
+        try
+        {
+            read.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Replaced by a newer selection, which is not the preferred read any more
         }
     }
 

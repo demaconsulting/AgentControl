@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using System.IO.Compression;
+using DemaConsulting.AgentControl.AgentPackageManagement;
 
 namespace DemaConsulting.AgentControl.RepoSync;
 
@@ -28,7 +29,11 @@ namespace DemaConsulting.AgentControl.RepoSync;
 /// </summary>
 /// <remarks>
 ///     Holds the zip open (shared-read) until disposed so a package is read consistently across
-///     the several reads a sync performs. Never writes to the zip. Not thread-safe.
+///     the several reads a sync performs. Never writes to the zip. The zip is opened once: its
+///     bytes are hashed to produce <see cref="ContentIdentity"/> and the archive is then built over
+///     the same rewound handle, so the identity always describes exactly the bytes that are
+///     extracted (there is no window in which the file could be swapped between hashing and
+///     reading). Not thread-safe.
 /// </remarks>
 internal sealed class ZipPackageContentReader : IPackageContentReader
 {
@@ -42,14 +47,22 @@ internal sealed class ZipPackageContentReader : IPackageContentReader
     /// </summary>
     /// <param name="archive">The opened archive; ownership transfers to this reader.</param>
     /// <param name="description">The zip path, used in messages.</param>
-    private ZipPackageContentReader(ZipArchive archive, string description)
+    /// <param name="contentIdentity">The SHA-256 identity of the zip's bytes.</param>
+    private ZipPackageContentReader(ZipArchive archive, string description, string contentIdentity)
     {
         _archive = archive;
         Description = description;
+        ContentIdentity = contentIdentity;
     }
 
     /// <inheritdoc />
     public string Description { get; }
+
+    /// <summary>
+    ///     Gets the <c>sha256:</c> identity of the zip file, computed from the same handle the
+    ///     archive reads.
+    /// </summary>
+    public string ContentIdentity { get; }
 
     /// <summary>
     ///     Opens a package zip for reading, wrapping any failure in a clear exception.
@@ -65,16 +78,24 @@ internal sealed class ZipPackageContentReader : IPackageContentReader
     {
         ArgumentNullException.ThrowIfNull(zipPath);
 
+        FileStream? stream = null;
         try
         {
-            return new ZipPackageContentReader(ZipFile.OpenRead(zipPath), zipPath);
+            // One handle for both purposes: hash the whole file, rewind, then let the archive
+            // read the same handle (shared-read, as ZipFile.OpenRead does)
+            stream = new FileStream(zipPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var identity = PackageContentIdentity.ComputeSha256(stream);
+            stream.Position = 0;
+            return new ZipPackageContentReader(new ZipArchive(stream, ZipArchiveMode.Read), zipPath, identity);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
                                        or ArgumentException or NotSupportedException
                                        or System.Security.SecurityException)
         {
-            // Also the path-related failures (an unsupported or invalid path), so the documented
+            // Release the handle when the archive could not be built over it; also the
+            // path-related failures (an unsupported or invalid path), so the documented
             // contract - every failure to open is an InvalidOperationException - holds
+            stream?.Dispose();
             throw new InvalidOperationException($"Failed to open package zip '{zipPath}': {ex.Message}", ex);
         }
     }

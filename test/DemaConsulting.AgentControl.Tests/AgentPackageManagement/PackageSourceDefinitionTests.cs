@@ -273,6 +273,189 @@ public class PackageSourceDefinitionTests
     }
 
     /// <summary>
+    ///     Test that the Git fields are copied by Clone and that IsEquivalentTo notices a change of the
+    ///     tag pattern or the sub-folder.
+    /// </summary>
+    [Fact]
+    public void PackageSourceDefinition_GitFields_AreClonedAndCompared()
+    {
+        // Arrange
+        var original = new PackageSourceDefinition
+        {
+            Alias = "Repo",
+            Type = PackageSourceType.Git,
+            Location = "https://example.invalid/org/repo.git",
+            TagPattern = "v{version}",
+            Subfolder = "packaging/agents",
+            PackageIds = ["contoso-agents"]
+        };
+
+        // Act
+        var copy = original.Clone();
+        var equivalentBefore = original.IsEquivalentTo(copy);
+        copy.TagPattern = "release/{version}";
+        var patternChanged = original.IsEquivalentTo(copy);
+        copy.TagPattern = original.TagPattern;
+        copy.Subfolder = null;
+        var subfolderChanged = original.IsEquivalentTo(copy);
+
+        // Assert
+        Assert.True(equivalentBefore);
+        Assert.False(patternChanged);
+        Assert.False(subfolderChanged);
+        Assert.Equal("packaging/agents", original.Subfolder);
+    }
+
+    /// <summary>
+    ///     Test that a Git source is serialized by name with its pattern and sub-folder, round-trips
+    ///     through JSON, and holds nothing secret-like.
+    /// </summary>
+    [Fact]
+    public void PackageSourceDefinition_GitSource_SerializesByNameAndRoundTrips()
+    {
+        // Arrange
+        var original = new PackageSourceDefinition
+        {
+            Alias = "Repo",
+            Type = PackageSourceType.Git,
+            Location = "git@example.invalid:org/repo.git",
+            TagPattern = "release/{version}",
+            Subfolder = "agents",
+            PackageIds = ["contoso-agents"]
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(original);
+        var loaded = JsonSerializer.Deserialize<PackageSourceDefinition>(json)!;
+
+        // Assert
+        Assert.Contains("\"Type\":\"Git\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"TagPattern\":\"release/{version}\"", json, StringComparison.Ordinal);
+        Assert.True(original.IsEquivalentTo(loaded));
+    }
+
+    /// <summary>
+    ///     Test that a Git source accepts an ssh user name in its address (which a URI-based check would
+    ///     reject) and a plain https address, but refuses user information on https, a password in an
+    ///     ssh URL, a query string, and never repeats the secret.
+    /// </summary>
+    [Theory]
+    [InlineData("ssh://git@example.invalid/org/repo.git", false)]
+    [InlineData("git@example.invalid:org/repo.git", false)]
+    [InlineData("https://example.invalid/org/repo.git", false)]
+    [InlineData("/srv/git/repo.git", false)]
+    [InlineData("https://user:SentinelSecretValue@example.invalid/org/repo.git", true)]
+    [InlineData("https://SentinelSecretValue@example.invalid/org/repo.git", true)]
+    [InlineData("ssh://user:SentinelSecretValue@example.invalid/org/repo.git", true)]
+    [InlineData("https://example.invalid/org/repo.git?token=SentinelSecretValue", true)]
+    public void PackageSourceDefinition_GetCredentialProblem_GitSource_IsTypeAware(string location, bool expectedProblem)
+    {
+        // Arrange
+        var definition = new PackageSourceDefinition { Alias = "Repo", Type = PackageSourceType.Git, Location = location };
+
+        // Act
+        var problem = definition.GetCredentialProblem();
+
+        // Assert
+        Assert.Equal(expectedProblem, problem is not null);
+        if (problem is not null)
+        {
+            Assert.DoesNotContain("SentinelSecretValue", problem, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the settings of a Git source are checked as a whole: address, tag pattern,
+    ///     sub-folder and exactly one package ID; and that other source types are not checked.
+    /// </summary>
+    [Fact]
+    public void PackageSourceDefinition_GetGitSettingsProblem_ChecksAddressPatternSubfolderAndPackageId()
+    {
+        // Arrange
+        PackageSourceDefinition Valid() => new()
+        {
+            Alias = "Repo",
+            Type = PackageSourceType.Git,
+            Location = "https://example.invalid/org/repo.git",
+            TagPattern = "v{version}",
+            Subfolder = "packaging/agents",
+            PackageIds = ["contoso-agents"]
+        };
+
+        // Act / Assert: valid, with and without a sub-folder
+        Assert.Null(Valid().GetGitSettingsProblem());
+        var top = Valid();
+        top.Subfolder = null;
+        Assert.Null(top.GetGitSettingsProblem());
+        top.Subfolder = string.Empty;
+        Assert.Null(top.GetGitSettingsProblem());
+
+        // Each part is checked
+        var badAddress = Valid();
+        badAddress.Location = "http://example.invalid/r.git";
+        Assert.NotNull(badAddress.GetGitSettingsProblem());
+        var badPattern = Valid();
+        badPattern.TagPattern = "v";
+        Assert.NotNull(badPattern.GetGitSettingsProblem());
+        var badFolder = Valid();
+        badFolder.Subfolder = "../up";
+        Assert.NotNull(badFolder.GetGitSettingsProblem());
+        var none = Valid();
+        none.PackageIds = [];
+        Assert.NotNull(none.GetGitSettingsProblem());
+        var two = Valid();
+        two.PackageIds = ["a", "b"];
+        Assert.NotNull(two.GetGitSettingsProblem());
+        var badId = Valid();
+        badId.PackageIds = ["not valid!"];
+        Assert.NotNull(badId.GetGitSettingsProblem());
+
+        // Other types are not Git settings
+        var zip = Valid();
+        zip.Type = PackageSourceType.Zip;
+        zip.TagPattern = null;
+        Assert.Null(zip.GetGitSettingsProblem());
+    }
+
+    /// <summary>
+    ///     Test the rules for the sub-folder of a Git source: relative, <c>/</c>-separated folder
+    ///     names, never a traversal, a <c>.git</c> folder, a drive, a wildcard or a separator at either
+    ///     end.
+    /// </summary>
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData("agents", true)]
+    [InlineData("packaging/agents", true)]
+    [InlineData("a b/c.d/e-f", true)]
+    [InlineData("..", false)]
+    [InlineData("../x", false)]
+    [InlineData("a/../b", false)]
+    [InlineData("./a", false)]
+    [InlineData("/abs", false)]
+    [InlineData("a/", false)]
+    [InlineData("a//b", false)]
+    [InlineData("a\\b", false)]
+    [InlineData("C:/x", false)]
+    [InlineData(".git", false)]
+    [InlineData("a/.GIT/b", false)]
+    [InlineData("a*", false)]
+    [InlineData("a?", false)]
+    [InlineData("-option", false)]
+    [InlineData("trailing.", false)]
+    [InlineData("a\nb", false)]
+    public void PackageSourceDefinition_GetSubfolderProblem_AppliesFolderRules(string? subfolder, bool acceptable)
+    {
+        // Arrange: a sub-folder text and whether the folder rules should accept it
+
+        // Act
+        var problem = PackageSourceDefinition.GetSubfolderProblem(subfolder);
+
+        // Assert: no problem exactly when the text is acceptable
+        Assert.Equal(acceptable, problem is null);
+    }
+
+    /// <summary>
     ///     Test that a certificate fingerprint is accepted as users copy it - any letter case,
     ///     separated by colons, spaces or hyphens - and normalized to 64 upper-case hexadecimal
     ///     characters.

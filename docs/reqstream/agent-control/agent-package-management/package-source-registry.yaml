@@ -102,3 +102,23 @@ sections:
           - PackageSourceRegistry_Resolve_MissingAliasWithSingleConfiguredSource_DoesNotFallBack
           - PackageSourceRegistry_PinToSourceB_SamePackageIdAtBothSources_OnlyBIsContacted
           - PackageSourceRegistry_PinToRemovedSource_ThrowsAndContactsNoOtherSource
+
+      - id: AgentControl-PackageSourceRegistry-GitSourceResolved
+        title: >-
+          The PackageSourceRegistry class shall resolve a Git source to the Git source provider,
+          created with the Git options it was given (or the defaults).
+        justification: |
+          The options carry whether the work was started by the user, which decides whether git
+          may prompt, and where fetched packages are kept; ignoring them would let background work
+          prompt or fill the wrong cache.
+        tests:
+          - PackageSourceRegistry_Create_GitSource_ResolvesGitProviderWithGivenOptionsOrDefaults
+
+      - id: AgentControl-PackageSourceRegistry-GitSourceInvalidFailsWhenResolved
+        title: >-
+          The PackageSourceRegistry class shall fail when it is resolved, not when the registry is
+          built, a Git source whose settings are not valid.
+        justification: |
+          A misconfigured source must not stop the other sources from being used.
+        tests:
+          - PackageSourceRegistry_Create_GitSourceWithInvalidSettings_FailsWhenResolvedNotWhenBuilt

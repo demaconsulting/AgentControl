@@ -5,12 +5,15 @@
 #### Purpose
 
 `SourceEditorViewModel` backs the dialog in which the user adds or edits one package source: a
-folder of zip packages, a folder of NuGet packages or a NuGet package server. It validates what the
+folder of zip packages, a folder of NuGet packages, a NuGet package server or a Git repository. It validates what the
 user types as they type it, keeps its Save command disabled while anything is invalid, and reports the
-resulting `PackageSourceDefinition` to the owner. A single view model serves all three kinds of
+resulting `PackageSourceDefinition` to the owner. A single view model serves all four kinds of
 source, since they differ only in details: a NuGet-package source additionally lists the package
 identifiers it offers, and a server is addressed by a web address rather than a folder, carries an
-"Allow insecure HTTP" choice and can be tested with **Test connection** before it is saved. A NuGet-package source
+"Allow insecure HTTP" choice and can be tested with **Test connection** before it is saved. A Git repository is
+addressed by a repository URL or path, delivers one package whose versions are the tags that match a tag pattern, and
+can be tested with **Test connection** too; its fields live in the second file of the class,
+`SourceEditorViewModel.Git.cs` (the class is `partial`). A NuGet-package source
 (folder or server) can also require signed packages, optionally pinned to one publisher's certificate; a server
 source can forget the sign-in saved for it. The unit requirements this view model satisfies are in
 `docs/reqstream/agent-control/launcher-ui/source-editor-view-model.yaml`, one observable behavior each, grouped as
@@ -19,13 +22,16 @@ package-ID rules), location tooltip (`-LocationTooltip`), server source (`-Serve
 insecure-HTTP and saved-settings rules),
 connection test
 (`-TestConnection` and its availability, progress, cancel, outcome and stale-result rules), package IDs, save,
-signature options (`-SignatureOptions`), signer fingerprint (`-SignerFingerprint`) and forgetting a saved sign-in
-(`-ForgetSavedSignIn`); together they provide `AgentControl-LauncherUI-PackageSourceValidation`,
+signature options (`-SignatureOptions`), signer fingerprint (`-SignerFingerprint`), forgetting a saved sign-in
+(`-ForgetSavedSignIn`) and the Git repository source (`-GitEditor`, `-GitValidation`, `-GitTestConnection`,
+`-GitTestFailureReasons`, `-GitTestCancelAndStale`, `-GitTagPreview` and `-GitSignInNote`); together they provide
+`AgentControl-LauncherUI-PackageSourceValidation`,
 `AgentControl-LauncherUI-PackageSourcePackageIds`, `AgentControl-LauncherUI-AddPackageSource`,
 `AgentControl-LauncherUI-EditPackageSource`, `AgentControl-LauncherUI-ServerSourceEditor`,
 `AgentControl-LauncherUI-InsecureHttpChoice`, `AgentControl-LauncherUI-ServerSourceSettingsKept`,
-`AgentControl-LauncherUI-TestConnection`, `AgentControl-LauncherUI-SignatureOptions` and
-`AgentControl-LauncherUI-ForgetSavedSignIn`.
+`AgentControl-LauncherUI-TestConnection`, `AgentControl-LauncherUI-SignatureOptions`,
+`AgentControl-LauncherUI-ForgetSavedSignIn`, `AgentControl-LauncherUI-GitSourceEditor` and
+`AgentControl-LauncherUI-GitSignInGuidance`.
 
 #### Data Model
 
@@ -78,8 +84,10 @@ mistaken for the dialog's own Cancel button, which is visible at the same time. 
 (`None`, `Succeeded`, `Failed`, `Canceled`) with a headline and an explanation.
 
 **_providerFactory**: `Func<PackageSourceDefinition, IPackageSourceProvider>` — creates the provider the
-test uses; by default a plain `NuGetSourceProvider` without credential facilities, supplied by the owner
-so that the test signs in through the application's session credentials and tests can use a fake.
+test uses; by default (`CreateDefaultProvider`) an interactive `GitSourceProvider` that enforces the minimum git
+version for a Git source and a plain `NuGetSourceProvider` without credential facilities for any other source. The
+owner supplies one so that the test signs in through the application's session credentials and uses the
+configured git executable, and tests can use a fake.
 
 **ShowSignatureOptions**: `bool` — `true` for a NuGet source (folder or server); a zip package carries no
 signature, so a zip source has no such section and always saves `RequireSignedPackages` as off.
@@ -124,6 +132,23 @@ secret the user may not be able to recreate from memory, and an accidental click
 
 **_credentials**: `PackageCredentialContext?` — the credential facilities used to forget a saved sign-in, and
 `_signaturesSupported` — the platform answer, injectable so tests can exercise both.
+
+**Git source fields** (`SourceEditorViewModel.Git.cs`): **IsGit** (`Type` is `Git`) and **ShowTestSection**
+(`IsServer || IsGit`) select what the window shows. **TagPattern** (default `DefaultTagPattern`, `v{version}`),
+**Subfolder** (the optional folder inside the repository) and **GitPackageId** (the package name; empty means the
+alias, shown as the placeholder `GitPackageIdPlaceholder`) are the editable values, each with a live error
+(**TagPatternError**, **SubfolderError**, **GitPackageIdError**) that stays `null` until the user has typed in the
+box. The repository address is the shared **Location** with **LocationLabel** "Repository URL", an example text
+(**GitLocationExamplesText**: `https://host/org/repo.git`, `git@host:org/repo.git` / `ssh://git@host/org/repo.git`
+and a local or UNC path) and **LocationHelp** that a password or token must not be in it. Help texts are constants
+the view binds: **TagPatternHelpText** (what `{version}` stands for, the examples `v{version}`,
+`release/V{version}` and `ver{version}`, and that the fixed parts are case-sensitive), **SubfolderHelpText**,
+**GitPackageIdHelpText** and **GitSignInHelpText** (AgentControl uses the user's own credential helper or SSH keys,
+never stores credentials, Test connection and Select Package may show Git's sign-in, background checks never prompt
+and the card says "Sign-in needed" instead, and SSH needs a key that works without a prompt and a known host).
+**TagPreviewItems** (the matching tags, each shown as `version   (tag name)`, newest first, at most ten),
+**TagPreviewSummary** (for example "2 of 4 tags match the pattern.", with "Showing the newest 10." and the number of
+other tags when they apply) and **HasTagPreview** hold the preview of the last test.
 
 #### Key Methods
 
@@ -174,6 +199,44 @@ requirements `-TestConnectionAvailability`, `-TestConnection`, `-TestConnectionP
 `-TestConnectionSuccess`, `-TestConnectionPackageNotFound`, `-TestConnectionFailureReasons` and
 `-TestConnectionOtherFailures`, each prefixed `AgentControl-SourceEditorViewModel`.
 
+**Git validation and saving** (`SourceEditorViewModel.Git.cs`): For a Git source the address is first judged by
+`PackageSourceDefinition.GetCredentialProblem` (a password or token in it has its own message) and then by
+`GitRepositoryAddress.GetProblem` (an https, SSH or local-path address); the tag pattern by
+`GitTagPattern.GetProblem` (the version placeholder exactly once, usable as a tag name); the folder, after
+backslashes are turned into slashes and a leading or trailing slash is dropped, by
+`PackageSourceDefinition.GetSubfolderProblem`; and the package name (the typed name, or the alias when empty) by
+`PackageSourceDefinition.IsValidGitPackageId`, with a message that asks for a name when the alias cannot be used as
+one. These are the same rules `PackageSourceDefinition.GetGitSettingsProblem` applies when settings are saved, so a
+source the dialog accepts is never refused later. `CanSave` additionally requires every Git field to be acceptable,
+and `CanTestConnection` for a Git source needs the address and those fields but no alias when the package name is
+given. The saved definition carries the trimmed address, the trimmed tag pattern, the normalized folder (or none),
+the single package name as the only package identifier, and the insecure-HTTP, signature and fingerprint settings
+switched off, which do not apply to Git (`AgentControl-SourceEditorViewModel-GitEditor`, `-GitEditorDefaults`,
+`-GitSubfolderNormalized`, `-GitSaveNew`, `-GitSaveExisting`, `-GitSaveGate`, `-GitValidation`,
+`-GitValidationTagPattern`, `-GitValidationSubfolder`, `-GitValidationPackageName`). The editor also shows the examples
+and the case-sensitivity note of the tag pattern and the sign-in note (`-GitTagPatternHelp`, `-GitSignInNote`).
+
+**TestGitConnectionAsync** (private, used by `TestConnectionAsync` for a Git source): Clears the previous result and
+preview, builds the definition from the dialog and creates the provider through the factory; by default
+(`CreateDefaultProvider`) a Git source gets a `GitSourceProvider` that is interactive (git may show its own sign-in,
+because the user started the test) and enforces the minimum git version, while the owner (`MainWindowViewModel`)
+supplies one with the configured git executable. It then asks the provider for a tag preview - `IGitTagPreview` when
+the provider offers it (no clone: tags are listed with `git ls-remote`), otherwise a preview made from its version
+list - and shows it: when at least one tag matches, the preview list and summary and *Connection OK* with the number
+of versions and the newest; when none matches, *No matching tags* with the tag names the repository does have (a few,
+safe names only) and a hint to check the prefix and the capitalization, or, when the repository has no tags at all,
+that it has none yet and how to create one (`AgentControl-SourceEditorViewModel-GitTestConnection`, `-GitTestRuns`,
+`-GitTestDefaultProvider`, `-GitTagPreview`, `-GitTagPreviewNoMatch`, `-GitTagPreviewNoTags`).
+The outcome of a failure is chosen from `PackageSourceAccessException.Kind` - *Sign-in needed*, *Repository not
+found*, *Timed out*, otherwise *Repository unreachable* - with the provider's message; a `GitRemoteException` of kind
+`GitTooOld` is *Git is too old* with its message (the minimum supported Git version is required); any other
+`InvalidOperationException`
+is *Connection failed*; and a cancelled test is the neutral *Test canceled*
+(`AgentControl-SourceEditorViewModel-GitTestFailureReasons`, `-GitTestGitTooOld`, `-GitTestOtherFailure`,
+`-GitTestCancel`, `-GitTestCancelAndStale`). A result of a test whose inputs
+changed (address, tag pattern, folder, package name) is not shown, and any change clears a showing result and the
+preview, so a stale "Connection OK" or tag list never sits beside an edited pattern (`-GitTagPreviewCleared`).
+
 **Save** (private, bound to `SaveCommand`): Raises `Saved` with the definition when `CanSave`.
 
 - *Postconditions*: `Saved` carries a copy of the edited source (so any value of it that the
@@ -214,7 +277,8 @@ availability: `-ForgetSavedSignIn`, `-ForgetAcceptableAddressOnly`, `-ForgetUnav
 The constructor throws `ArgumentNullException` for a null alias callback. Invalid input is never
 an exception: it is shown as an inline message and keeps `CanSave` false, and `Save` does nothing
 when invoked while invalid. A connection test never lets a failure escape: every anticipated failure
-(`PackageSourceAccessException`, other `InvalidOperationException`) becomes a result - a refused signature is
+(`PackageSourceAccessException`, other `InvalidOperationException`, and for a Git source the `GitTooOld` failure)
+becomes a result - a refused signature is
 reported as "Signature requirement not met" - and an unexpected one
 is reported by the command's error callback as "Connection failed"; a cancelled test is a neutral result, not
 an error. Forgetting a saved sign-in reports its outcome as text and never throws. Messages shown never repeat a
@@ -228,6 +292,10 @@ credential.
   source data type, its alias, credential, server-address and fingerprint validation and normalization, its
   location kind, the failure causes, the provider the connection test uses, and the platform answer for signature
   verification.
+- **GitRepositoryAddress**, **GitTagPattern**, **GitSourceProvider**, **GitSourceOptions**, **IGitTagPreview**,
+  **GitTagPreview** (`AgentPackageManagement` subsystem) and **GitRemoteException**, **GitFailureKind**
+  (`GitIntegration` subsystem) — the Git address and tag-pattern rules, the provider a Git connection test uses by
+  default, the tag preview it produces and the "git too old" failure.
 - **PackageCredentialContext**, **ForgetSignInResult**, **FeedOrigin**, **SecretRedactor**
   (`PackageCredentials` subsystem) — forgetting a saved sign-in and secret-free messages.
 - **RelayCommand**, **AsyncRelayCommand**, **ConnectionTestResultKind** (`LauncherUI` subsystem, shared
@@ -244,4 +312,7 @@ credential.
   form (with Save and Cancel kept in view below it) and scrolls newly shown progress, test results and forget
   results into view. The form is a stack of titled sections - Source, Packages (NuGet), Sign-in (server; holds
   "Forget saved sign-in" and **SignInHelpText**), Package signatures (NuGet) and Connection test (server; holds
-  "Test connection" and its "Cancel test") - so each action sits beside the thing it affects.
+  "Test connection" and its "Cancel test") - so each action sits beside the thing it affects. For a Git repository
+  the window shows Source (the repository URL with its examples), Package, Versions (the tag pattern and its help),
+  Location in repo, Sign-in (the note) and Connection test, whose result is followed by the summary and the list of
+  matching tags (`SourceTagPreviewPanel`); the NuGet package, signature and server sign-in sections are hidden.

@@ -1,0 +1,100 @@
+---
+# Software Unit Requirements for the GitTagPattern Class
+#
+# GitTagPattern turns the tags of a Git repository into package versions: it validates the
+# pattern a user writes (for example v{version}), matches a tag name to a strict semantic
+# version, formats a tag name from a version, derives the glob that narrows the remote listing,
+# and vets tag names that a server reports before they are used.
+
+sections:
+  - title: GitTagPattern Unit Requirements
+    requirements:
+      - id: AgentControl-GitTagPattern-RequireSinglePlaceholder
+        title: >-
+          The GitTagPattern class shall accept a pattern that contains the version placeholder,
+          written exactly {version} in lower case, once, with literal text around it, and shall
+          refuse a pattern with no placeholder, more than one, another spelling of it, or other
+          braces.
+        justification: |
+          The placeholder is what turns a tag name into a version; any ambiguity about where the
+          version is would make the versions of a source differ from what the user intended.
+        tests:
+          - GitTagPattern_TryCreate_ValidPattern_IsAccepted
+          - GitTagPattern_TryCreate_InvalidPattern_IsRefused
+
+      - id: AgentControl-GitTagPattern-RejectInvalidRefNames
+        title: >-
+          The GitTagPattern class shall refuse a pattern whose literal text uses characters other
+          than letters, digits and . _ / + - or that could not be part of a legal git tag name,
+          and shall never repeat the pattern in its message.
+        justification: |
+          A tag formatted from a version must always be a legal tag name that is safe to put in a
+          refspec, so the pattern is held to git's ref-name rules and to the characters
+          AgentControl accepts from a server.
+        tests:
+          - GitTagPattern_TryCreate_InvalidPattern_IsRefused
+          - GitTagPattern_TryCreate_TooLong_IsRefusedWithoutEchoing
+          - GitTagPattern_TryCreate_SecretLooking_IsRefusedWithoutEchoing
+
+      - id: AgentControl-GitTagPattern-ExtractStrictVersion
+        title: >-
+          The GitTagPattern class shall match a tag name to a version only when the name starts
+          with the pattern's prefix and ends with its suffix (compared case-sensitively) and the
+          text between them is a strict Semantic Versioning 2.0 version of exactly three numeric
+          parts without leading zeros and an optional prerelease whose numeric identifiers have no
+          leading zeros, with no build metadata, and shall treat every other tag as not a version.
+        justification: |
+          Tags such as latest, v1.2, v01.2.3 or v1.2.3+build are not package versions; matching only
+          strict versions keeps the version list well-ordered and unambiguous (v01.2.3 and v1.2.3
+          would otherwise be one version).
+        tests:
+          - GitTagPattern_TryMatch_VersionTag_ReturnsVersion
+          - GitTagPattern_TryMatch_NotAVersionTag_DoesNotMatch
+          - GitTagPattern_TryMatch_NotStrictSemVer_DoesNotMatch
+          - GitTagPattern_TryMatch_StrictSemVer_Matches
+
+      - id: AgentControl-GitTagPattern-FormatTag
+        title: >-
+          The GitTagPattern class shall build the tag name that stands for a version from the
+          pattern's prefix, the version text and the pattern's suffix.
+        justification: |
+          A pinned version must be turned back into the tag it came from to be shown to the user
+          and compared with the repository.
+        tests:
+          - GitTagPattern_TryMatch_VersionTag_ReturnsVersion
+
+      - id: AgentControl-GitTagPattern-FormatRefusesUnsafeTag
+        title: >-
+          The GitTagPattern class shall report that a version has no tag, instead of building a
+          name, when the tag built from the pattern and the version would not be a safe tag name of
+          at most 255 characters that the pattern reads back as the same version.
+        justification: |
+          A version with a very long prerelease, build metadata or a leading zero must not yield a
+          name that could never be listed or fetched, or that stands for another version.
+        tests:
+          - GitTagPattern_Format_PrereleaseAtAndOverTagLengthLimit_FormatsOrReturnsNull
+          - GitTagPattern_Format_LongPatternPlusVersion_FormatsAtLimitAndReturnsNullOverIt
+          - GitTagPattern_Format_VersionThatDoesNotRoundTrip_ReturnsNull
+          - GitTagPattern_Format_NullVersion_ThrowsArgumentNullException
+
+      - id: AgentControl-GitTagPattern-ListingPrefix
+        title: >-
+          The GitTagPattern class shall derive from a pattern the glob that narrows the remote tag
+          listing: refs/tags/, the literal text before the placeholder, and a wildcard.
+        justification: |
+          Narrowing the listing keeps the amount of data read from a repository with very many
+          tags small; matching is still done by the pattern itself.
+        tests:
+          - GitTagPattern_ListingGlob_UsesLiteralPrefix
+
+      - id: AgentControl-GitTagPattern-VetServerTagNames
+        title: >-
+          The GitTagPattern class shall accept a tag name reported by a server only when it
+          consists of letters, digits and . _ / + - and is a legal git ref name of at most 255
+          characters, and never when it could be read as an option.
+        justification: |
+          A server is untrusted; a tag name it reports is used in a refspec, so a name with other
+          characters (a leading hyphen, a space, a colon) must never get that far.
+        tests:
+          - GitTagPattern_IsSafeTagName_ChecksCharactersAndRefNameRules
+          - GitTagPattern_IsSafeTagName_TooLong_IsNotSafe

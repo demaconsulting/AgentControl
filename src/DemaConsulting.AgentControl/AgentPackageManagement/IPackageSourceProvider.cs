@@ -81,7 +81,14 @@ internal interface IPackageSourceProvider
     /// <param name="package">A package previously returned by <see cref="ListVersionsAsync"/> of
     ///     this same provider.</param>
     /// <param name="cancellationToken">Token to abandon the call.</param>
-    /// <returns>A reader over the package content that the caller must dispose.</returns>
+    /// <returns>A reader over the package content that the caller must dispose. Its
+    ///     <see cref="IPackageContentReader.ContentIdentity"/> names the content the source
+    ///     delivered, in the form of the source: <c>sha256:{hex}</c>, the SHA-256 of the zip or
+    ///     <c>.nupkg</c> file, for a zip folder or NuGet source, and <c>git-commit:{hex}</c>, the
+    ///     commit a tag pointed to, for a Git source. The caller can pin it and later compare it
+    ///     with <see cref="PackageContentIdentity.Compare"/>: identities of different forms never
+    ///     compare as the same content. A provider that cannot name one leaves it
+    ///     <see langword="null"/>.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="package"/> was discovered
     ///     at a different source (a package is never fetched from a source it did not come
     ///     from).</exception>

@@ -99,6 +99,84 @@ sections:
           - SettingsWindowViewModel_AddNuGetFolderSource_EditorSaved_KeepsPackageIds
           - SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor
 
+      - id: AgentControl-SettingsWindowViewModel-AddGitSourceMenu
+        title: >-
+          The SettingsWindowViewModel class shall let the user add a Git repository source, as the
+          fourth kind of source of the Add menu, by opening the source editor for a new Git source.
+        justification: |
+          Teams that keep their agent packages in a Git repository add it the same way as any other
+          source, from the one Add menu; the editor decides what a Git source needs.
+        tests:
+          - SettingsWindowViewModel_AddGitSourceCommand_RequestsGitEditor
+
+      - id: AgentControl-SettingsWindowViewModel-RefuseInvalidGitSource
+        title: >-
+          The SettingsWindowViewModel class shall refuse to save, showing an explanation, a Git
+          source whose tag pattern the application would not accept.
+        justification: |
+          A settings file edited by hand, or a source that predates a rule, must be stopped where the
+          user can correct it rather than fail later when the source is used.
+        tests:
+          - SettingsWindowViewModel_Save_GitSourceWithBadTagPattern_IsRefusedWithErrorMessage
+
+      - id: AgentControl-SettingsWindowViewModel-RefuseInvalidGitAddress
+        title: >-
+          The SettingsWindowViewModel class shall refuse to save, showing an explanation that does
+          not repeat the address, a Git source whose repository address the application would not
+          accept.
+        justification: |
+          An address that embeds a credential or cannot be reached by git must be stopped where the
+          user can correct it, and the explanation must not leak what was typed.
+        tests:
+          - SettingsWindowViewModel_Save_GitSourceWithBadAddress_IsRefusedWithErrorMessage
+
+      - id: AgentControl-SettingsWindowViewModel-RefuseInvalidGitSubfolder
+        title: >-
+          The SettingsWindowViewModel class shall refuse to save, showing an explanation, a Git
+          source whose folder inside the repository the application would not accept.
+        justification: |
+          A folder that leaves the repository must be stopped where the user can correct it.
+        tests:
+          - SettingsWindowViewModel_Save_GitSourceWithBadSubfolder_IsRefusedWithErrorMessage
+
+      - id: AgentControl-SettingsWindowViewModel-RefuseInvalidGitPackageName
+        title: >-
+          The SettingsWindowViewModel class shall refuse to save, showing an explanation, a Git
+          source whose package name the application would not accept.
+        justification: |
+          Repos pin to the package name, so a name the application would later refuse must be
+          stopped where the user can correct it.
+        tests:
+          - SettingsWindowViewModel_Save_GitSourceWithBadPackageName_IsRefusedWithErrorMessage
+
+      - id: AgentControl-SettingsWindowViewModel-GitSourceRowStatus
+        title: >-
+          The SettingsWindowViewModel class shall list a Git source on a remote address as not
+          checked, without contacting it.
+        justification: |
+          A remote repository may need the network and a sign-in, so it is contacted only when the
+          user asks (the editor's Test connection).
+        tests:
+          - SettingsWindowViewModel_SaveGitSource_ListsItAsNotCheckedAndPersistsIt
+
+      - id: AgentControl-SettingsWindowViewModel-GitSourceLocalFolderStatus
+        title: >-
+          The SettingsWindowViewModel class shall list a Git source on a local path with the status
+          of its folder.
+        justification: |
+          A local repository is a folder like any other and its presence can be shown without cost.
+        tests:
+          - SettingsWindowViewModel_GitSourceWithLocalPath_ShowsFolderStatus
+
+      - id: AgentControl-SettingsWindowViewModel-GitSourcePersisted
+        title: >-
+          The SettingsWindowViewModel class shall keep a saved Git source's address, tag pattern,
+          folder and package name in the settings it saves.
+        justification: |
+          What the user entered in the editor is the source that is configured.
+        tests:
+          - SettingsWindowViewModel_SaveGitSource_PersistsAddressPatternFolderAndPackageName
+
       - id: AgentControl-SettingsWindowViewModel-EditSource
         title: >-
           The SettingsWindowViewModel class shall let the user edit the selected source in place,
@@ -121,6 +199,7 @@ sections:
         tests:
           - SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource
           - SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves
+          - SettingsWindowViewModel_RemoveGitSource_WarnsAboutPinnedRepos
 
       - id: AgentControl-SettingsWindowViewModel-SaveResultingSources
         title: >-

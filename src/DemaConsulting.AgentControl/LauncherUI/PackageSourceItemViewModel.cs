@@ -63,9 +63,9 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
         Definition = definition;
         PinnedRepoCount = pinnedRepoCount;
 
-        // A server needs the network (and perhaps a sign-in) to be checked, so the row never does
-        // that on its own; the editor's "Test connection" is the way to check one
-        if (IsServer)
+        // A remote source needs the network (and perhaps a sign-in) to be checked, so the row never
+        // does that on its own; the editor's "Test connection" is the way to check one
+        if (IsRemote)
         {
             _isChecking = false;
         }
@@ -82,6 +82,16 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     /// </summary>
     public bool IsServer => Definition.Type == PackageSourceType.NuGet &&
                             Definition.LocationKind == PackageSourceLocationKind.Server;
+
+    /// <summary>
+    ///     Gets a value indicating whether the source is only reachable through the network: a NuGet
+    ///     server or a Git repository that is not a local path. Such a source has no folder to look
+    ///     for, so its row says "Not checked" instead of a folder status.
+    /// </summary>
+    public bool IsRemote => IsServer ||
+                            (Definition.Type == PackageSourceType.Git &&
+                             !(GitRepositoryAddress.TryParse(Definition.Location, out var address, out _) &&
+                               address?.Kind == GitAddressKind.Local));
 
     /// <summary>
     ///     Gets how many recent repos are pinned to this source.
@@ -127,13 +137,13 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     ///     Gets a value indicating whether the folder check finished and found the folder (always
     ///     <see langword="false"/> for a server, which has no folder).
     /// </summary>
-    public bool IsAvailable => !_isChecking && !IsServer && _folderFound;
+    public bool IsAvailable => !_isChecking && !IsRemote && _folderFound;
 
     /// <summary>
     ///     Gets a value indicating whether the folder check finished and did not find the folder
     ///     (always <see langword="false"/> for a server).
     /// </summary>
-    public bool IsMissing => !_isChecking && !IsServer && !_folderFound;
+    public bool IsMissing => !_isChecking && !IsRemote && !_folderFound;
 
     /// <summary>
     ///     Gets the short status text shown at the end of the row.
@@ -147,7 +157,7 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     {
         get
         {
-            if (IsServer)
+            if (IsRemote)
             {
                 return MaterialIconKind.HelpCircleOutline;
             }
@@ -168,15 +178,18 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     {
         get
         {
-            if (IsServer)
+            if (IsRemote)
             {
-                return "AgentControl contacts this server only when it is needed (selecting a package, " +
+                var what = Definition.Type == PackageSourceType.Git ? "repository" : "server";
+                return $"AgentControl contacts this {what} only when it is needed (selecting a package, " +
                        "checking for upgrades), so it is not checked here. Use Edit > Test connection to check it now.";
             }
 
             if (_isChecking)
             {
-                return "Checking whether the folder can be reached...";
+                return Definition.Type == PackageSourceType.Git
+                    ? "Checking whether the repository folder can be reached..."
+                    : "Checking whether the folder can be reached...";
             }
 
             return _folderFound
@@ -192,7 +205,7 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     /// <returns>The status text.</returns>
     private string GetStatusText()
     {
-        if (IsServer)
+        if (IsRemote)
         {
             return "Not checked";
         }
@@ -222,8 +235,8 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     {
         ArgumentNullException.ThrowIfNull(folderExists);
 
-        // A server has no folder to look for; its row is already in its final state
-        if (IsServer)
+        // A remote source has no folder to look for; its row is already in its final state
+        if (IsRemote)
         {
             return;
         }
