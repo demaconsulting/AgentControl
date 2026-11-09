@@ -48,7 +48,7 @@
 
   <!-- WMI, to read a running process's command line (instance validation) -->
   <ItemGroup>
-    <PackageReference Include="System.Management" Version="10.0.0" />
+    <PackageReference Include="System.Management" Version="10.0.14" />
   </ItemGroup>
 
   <!-- The unit tests cover argument, chord, registry and fixture logic directly -->

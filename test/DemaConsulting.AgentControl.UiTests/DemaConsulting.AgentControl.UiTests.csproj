@@ -50,7 +50,7 @@
     </PackageReference>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.5.2" />
-    <PackageReference Include="xunit.v3" Version="4.0.2" />
+    <PackageReference Include="xunit.v3" Version="4.0.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -86,7 +86,7 @@
   <!-- WMI (Win32_Process) access: lets LaunchedShellCleaner read process command lines/parent
        ids so it only ever terminates the shell this test's own launch spawned. -->
   <ItemGroup>
-    <PackageReference Include="System.Management" Version="10.0.0" />
+    <PackageReference Include="System.Management" Version="10.0.14" />
   </ItemGroup>
 
   <!-- Code Analysis Dependencies -->
