@@ -33,7 +33,7 @@ N/A - standard test environment.
   and nothing is saved.
 - The source list shows each source and a folder status without blocking the caller; a folder
   that cannot be examined shows as missing and pending checks are abandoned on dispose; a server source is
-  shown as "Not checked" without any check.
+  shown as an "Online source" without any check.
 - A NuGet server source can be added and edited through the server editor.
 - A Git repository source can be added through the Git editor, is listed with the Git icon and kind name, as "Not
   checked" (without any folder check) when its address is remote and with its folder status when it is a local path, is
@@ -85,13 +85,14 @@ no duplicate entries, and for matching the expected preset names for the OS the 
 sources are listed in order, an empty configuration reports no sources, a slow folder check shows
 a "checking" state and then its result while the constructor returns immediately, a missing or
 failing check shows as missing, disposing cancels pending checks, and a saved server source is listed as
-"Not checked" - with the server icon - without the folder check ever running for it. This scenario is tested by
+"Online source" - a neutral status with the cloud icon - without the folder check ever running for it. This
+scenario is tested by
 `SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder`,
 `SettingsWindowViewModel_Constructor_NoSources_ReportsHasNoSources`,
 `SettingsWindowViewModel_Constructor_FolderCheckSlow_ShowsCheckingThenResultWithoutBlocking`,
 `SettingsWindowViewModel_FolderCheck_MissingOrFailing_ShowsMissing`,
 `SettingsWindowViewModel_Dispose_CancelsPendingFolderChecks`, and
-`SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt`, covering
+`SettingsWindowViewModel_SaveServerSource_ListsItAsOnlineSourceAndPersistsIt`, covering
 `AgentControl-SettingsWindowViewModel-SourceList`.
 
 **SettingsWindowViewModel_AddSource_AddsEachKindOfSource**: The add commands
@@ -104,10 +105,10 @@ tested by
 `SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor`, covering
 `AgentControl-SettingsWindowViewModel-AddSource`.
 
-**SettingsWindowViewModel_AddGitSource_RequestsTheGitEditorAndListsTheSourceAsNotChecked**: The Git add command
+**SettingsWindowViewModel_AddGitSource_RequestsTheGitEditorAndListsTheSourceAsOnlineSource**: The Git add command
 requests an editor in Git mode for a new source (titled "Add Git Repository"); saving that editor with an https address,
 a tag pattern, a folder and a package name lists the source with the Git icon and the kind name "Git repository", as
-"Not checked" - the folder check is never asked about it - and saving the settings passes the source to the owner with
+"Online source" - the folder check is never asked about it - and saving the settings passes the source to the owner with
 its address, tag pattern, folder and package name; a Git source on a local path gets the folder status instead (found
 or not found). Removing a Git source warns, like any source, by name and by how many repos are pinned to it, and
 saving settings that hold a Git source whose tag pattern has no version placeholder, whose address embeds a credential,
@@ -117,7 +118,7 @@ not report saved and the explanation is shown, without repeating the address, th
 rejected.
 This scenario is tested by
 `SettingsWindowViewModel_AddGitSourceCommand_RequestsGitEditor`,
-`SettingsWindowViewModel_SaveGitSource_ListsItAsNotCheckedAndPersistsIt`,
+`SettingsWindowViewModel_SaveGitSource_ListsItAsOnlineSourceAndPersistsIt`,
 `SettingsWindowViewModel_SaveGitSource_PersistsAddressPatternFolderAndPackageName`,
 `SettingsWindowViewModel_GitSourceWithLocalPath_ShowsFolderStatus`,
 `SettingsWindowViewModel_RemoveGitSource_WarnsAboutPinnedRepos`,

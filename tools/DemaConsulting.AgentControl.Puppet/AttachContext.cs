@@ -31,7 +31,7 @@ namespace DemaConsulting.AgentControl.Puppet;
 ///     A FlaUI attachment to one running AgentControl process and its main window.
 /// </summary>
 /// <remarks>
-///     Every window title of AgentControl is shared by all its instances ("AgentControl", "AgentControl Settings", ...),
+///     Every window title of AgentControl is shared by all its instances ("Agent Control", "Agent Control Settings", ...),
 ///     so everything here is scoped to the process id of the instance, never to a title.
 /// </remarks>
 internal sealed class AttachContext : IDisposable
@@ -45,7 +45,7 @@ internal sealed class AttachContext : IDisposable
     /// <summary>
     ///     The title of AgentControl's main window.
     /// </summary>
-    internal const string MainWindowTitle = "AgentControl";
+    internal const string MainWindowTitle = "Agent Control";
 
     /// <summary>
     ///     The most windows <see cref="Roots"/> collects (a guard against a runaway tree).

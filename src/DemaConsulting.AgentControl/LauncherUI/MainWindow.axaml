@@ -9,7 +9,7 @@
         x:Class="DemaConsulting.AgentControl.LauncherUI.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Name="MainWindowRoot"
-        Title="AgentControl"
+        Title="Agent Control"
         Icon="/Assets/AppIcon.ico"
         Width="720" Height="480"
         MinWidth="560" MinHeight="320">
@@ -174,10 +174,20 @@
                                  Classes="iconGhost"
                                  Margin="0,0,15,0"
                                  IsVisible="{Binding IsUserGroup}"
-                                 ToolTip.Tip="Rename or remove this group">
+                                 ToolTip.Tip="Add a repository to this group, or rename or remove the group">
                             <materialIcons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
                             <Button.Flyout>
                                 <MenuFlyout>
+                                    <MenuItem Name="GroupAddRepoMenuItem"
+                                               AutomationProperties.AutomationId="GroupAddRepoMenuItem"
+                                               Header="Add repository..."
+                                               ToolTip.Tip="Choose a repository folder and add it to this group"
+                                               Command="{Binding AddRepoCommand}">
+                                        <MenuItem.Icon>
+                                            <materialIcons:MaterialIcon Kind="FolderPlus" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <Separator />
                                     <MenuItem Name="RenameGroupMenuItem"
                                                AutomationProperties.AutomationId="RenameGroupMenuItem"
                                                Header="Rename group..."

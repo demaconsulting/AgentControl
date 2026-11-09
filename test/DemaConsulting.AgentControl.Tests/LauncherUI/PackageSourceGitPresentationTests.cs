@@ -26,7 +26,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
 /// <summary>
 ///     Tests of how a Git source is presented: the icon and wording from
-///     <see cref="PackageSourceIcons"/>, and whether a Settings row for it is remote (not checked)
+///     <see cref="PackageSourceIcons"/>, and whether a Settings row for it is remote (an online source)
 ///     or has a folder status (<see cref="PackageSourceItemViewModel"/>).
 /// </summary>
 public class PackageSourceGitPresentationTests
@@ -50,15 +50,15 @@ public class PackageSourceGitPresentationTests
     }
 
     /// <summary>
-    ///     Test that a row for a Git source reached over https or ssh is remote and "Not checked", and
-    ///     that its folder check is a no-op.
+    ///     Test that a row for a Git source reached over https or ssh is remote and an "Online source"
+    ///     (a neutral cloud status, not a warning), and that its folder check is a no-op.
     /// </summary>
     /// <param name="location">The repository address.</param>
     [Theory]
     [InlineData("https://git.example.com/org/agents.git")]
     [InlineData("ssh://git@git.example.com/org/agents.git")]
     [InlineData("git@git.example.com:org/agents.git")]
-    public async Task PackageSourceItemViewModel_RemoteGitSource_IsNotCheckedAndNeverAsksTheFolder(string location)
+    public async Task PackageSourceItemViewModel_RemoteGitSource_IsOnlineSourceAndNeverAsksTheFolder(string location)
     {
         // Arrange
         var row = new PackageSourceItemViewModel(
@@ -71,8 +71,10 @@ public class PackageSourceGitPresentationTests
         // Assert
         Assert.True(row.IsRemote);
         Assert.False(row.IsServer);
-        Assert.Equal("Not checked", row.StatusText);
-        Assert.Equal(MaterialIconKind.HelpCircleOutline, row.StatusIcon);
+        Assert.Equal("Online source", row.StatusText);
+        Assert.Equal(MaterialIconKind.CloudOutline, row.StatusIcon);
+        Assert.False(row.IsAvailable);
+        Assert.False(row.IsMissing);
         Assert.False(row.IsChecking);
         Assert.False(asked);
     }

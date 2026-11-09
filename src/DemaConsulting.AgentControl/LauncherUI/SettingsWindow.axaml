@@ -10,10 +10,10 @@
         x:Class="DemaConsulting.AgentControl.LauncherUI.SettingsWindow"
         x:DataType="vm:SettingsWindowViewModel"
         Name="SettingsWindowRoot"
-        Title="AgentControl Settings"
+        Title="Agent Control Settings"
         Width="800" SizeToContent="Height"
-        MinWidth="500"
-        CanResize="False"
+        MinWidth="500" MinHeight="360"
+        CanResize="True"
         WindowStartupLocation="CenterOwner">
     <Window.Styles>
         <!-- Status colors for the sources list: found = green, not found = red (theme-aware
@@ -25,7 +25,12 @@
             <Setter Property="Foreground" Value="{DynamicResource StatusAccentProblem}" />
         </Style>
     </Window.Styles>
-    <StackPanel Margin="16" Spacing="12">
+    <!-- The settings scroll when the window is made shorter than its content (the window can be
+         resized); the error message and the Save button stay visible below them -->
+    <Grid Margin="16" RowDefinitions="*,Auto">
+    <ScrollViewer Grid.Row="0" Name="SettingsScrollViewer"
+                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Spacing="12" Margin="0,0,12,0">
 
         <!-- Package sources: where agent packages come from. Each repo is pinned to one source by
              its alias. Add opens a menu of the source types; Edit and Remove act on the selected
@@ -164,6 +169,21 @@
                                                     Text="{Binding Alias}" FontWeight="SemiBold" />
                                         <TextBlock Text="{Binding TypeName}" FontSize="11" Opacity="0.6"
                                                     VerticalAlignment="Center" />
+                                        <Border Name="SourceSignedOnlyBadge"
+                                                 AutomationProperties.AutomationId="SourceSignedOnlyBadge"
+                                                 AutomationProperties.AccessibilityView="Content"
+                                                 AutomationProperties.Name="Signed only"
+                                                 Classes="Chip"
+                                                 Height="18" CornerRadius="9" Padding="6,0"
+                                                 VerticalAlignment="Center"
+                                                 IsVisible="{Binding RequiresSignature}"
+                                                 ToolTip.Tip="{Binding SignatureTooltip}">
+                                            <StackPanel Orientation="Horizontal" Spacing="3">
+                                                <materialIcons:MaterialIcon Kind="ShieldCheck"
+                                                                              Width="12" Height="12" />
+                                                <TextBlock Text="Signed only" FontSize="11" />
+                                            </StackPanel>
+                                        </Border>
                                     </StackPanel>
                                     <TextBlock Name="SourceLocationText"
                                                 AutomationProperties.AutomationId="SourceLocationText"
@@ -259,6 +279,10 @@
                    Text="{Binding ShellPreference}"
                    HorizontalAlignment="Stretch" />
 
+    </StackPanel>
+    </ScrollViewer>
+
+    <StackPanel Grid.Row="1" Spacing="12" Margin="0,12,0,0">
         <TextBlock Name="SettingsErrorTextBlock"
                     AutomationProperties.AutomationId="SettingsErrorTextBlock"
                     Text="{Binding ErrorMessage}"
@@ -274,4 +298,5 @@
                  Command="{Binding SaveCommand}"
                  HorizontalAlignment="Right" />
     </StackPanel>
+    </Grid>
 </Window>

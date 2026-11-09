@@ -41,3 +41,22 @@ sections:
           - ReleaseNotesViewerViewModel_Blocks_BoldAndItalicSpans_ParseIntoSeparateRuns
           - ReleaseNotesViewerViewModel_Blocks_BlankLines_AreSkipped
           - ReleaseNotesViewerViewModel_Blocks_UnterminatedAsterisk_TreatedAsLiteralText
+
+      - id: AgentControl-ReleaseNotesViewerViewModel-Links
+        title: >-
+          The ReleaseNotesViewerViewModel class shall parse a Markdown link - [text](url), a
+          <url> autolink or a bare address - into a link run carrying the link text and the
+          address only when the address is an absolute http or https URL, shall show a
+          [text](url) link with any other scheme or a relative address as plain text with its
+          target visible and no address, and shall leave malformed link syntax as literal text.
+        justification: |
+          Release notes point readers to issues, changelogs and migration guides, so links must be
+          usable; but release notes come from packages, which are untrusted content, so only
+          ordinary web addresses may ever become something the user can click.
+        tests:
+          - ReleaseNotesViewerViewModel_Blocks_InlineLink_ParsesIntoLinkRun
+          - ReleaseNotesViewerViewModel_Blocks_LinkInBulletBoldAndWithTitle_AreLinks
+          - ReleaseNotesViewerViewModel_Blocks_LinkWithOtherSchemeOrRelativeTarget_IsPlainText
+          - ReleaseNotesViewerViewModel_Blocks_MalformedLink_StaysLiteralText
+          - ReleaseNotesViewerViewModel_Blocks_BareAndAngleAddresses_BecomeLinksWithoutTrailingPunctuation
+          - ReleaseNotesViewerViewModel_IsOpenableUrl_AllowsOnlyAbsoluteHttpAndHttps

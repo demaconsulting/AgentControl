@@ -18,9 +18,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Headless;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Threading;
 using DemaConsulting.AgentControl.RepoSync;
+using DemaConsulting.AgentControl.Tests.LauncherUI;
 
 namespace DemaConsulting.AgentControl.Tests.RepoSync;
 
@@ -239,4 +245,324 @@ public class ReleaseNotesViewerViewModelTests
         Assert.Equal(FontWeight.Normal, runs[0].FontWeight);
         Assert.Equal(FontWeight.Bold, runs[1].FontWeight);
     }
+
+    /// <summary>
+    ///     Test that <c>[text](url)</c> with an https or http address parses into a link run carrying
+    ///     the link text and the exact address, between the surrounding plain text.
+    /// </summary>
+    /// <param name="url">The address in the Markdown link.</param>
+    [Theory]
+    [InlineData("https://example.com/releases/1.2.3")]
+    [InlineData("http://example.com/path?query=1&other=2#frag")]
+    [InlineData("HTTPS://Example.com/Upper")]
+    [InlineData("https://en.wikipedia.org/wiki/Foo_(bar)")]
+    public void ReleaseNotesViewerViewModel_Blocks_InlineLink_ParsesIntoLinkRun(string url)
+    {
+        // Act
+        var viewModel = new ReleaseNotesViewerViewModel("my-repo", $"See [the notes]({url}) for details.");
+
+        // Assert: plain, link, plain
+        var block = Assert.Single(viewModel.Blocks);
+        Assert.Equal(3, block.Runs.Count);
+        Assert.Equal("See ", block.Runs[0].Text);
+        Assert.Null(block.Runs[0].Url);
+        Assert.Equal("the notes", block.Runs[1].Text);
+        Assert.Equal(url, block.Runs[1].Url);
+        Assert.Equal(" for details.", block.Runs[2].Text);
+        Assert.Null(block.Runs[2].Url);
+    }
+
+    /// <summary>
+    ///     Test that a link inside a bullet item, inside bold text and with a quoted title all become
+    ///     links, so links work in list items and paragraphs.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewerViewModel_Blocks_LinkInBulletBoldAndWithTitle_AreLinks()
+    {
+        // Act
+        var viewModel = new ReleaseNotesViewerViewModel(
+            "my-repo",
+            "- Fixed [#12](https://example.com/12)\n**[bold link](https://example.com/b)**\n[titled](https://example.com/t \"A title\")");
+
+        // Assert
+        Assert.True(viewModel.Blocks[0].IsBullet);
+        Assert.Equal("https://example.com/12", Assert.Single(viewModel.Blocks[0].Runs, run => run.Url is not null).Url);
+        var bold = Assert.Single(viewModel.Blocks[1].Runs);
+        Assert.True(bold.Bold);
+        Assert.Equal("https://example.com/b", bold.Url);
+        var titled = Assert.Single(viewModel.Blocks[2].Runs);
+        Assert.Equal("titled", titled.Text);
+        Assert.Equal("https://example.com/t", titled.Url);
+    }
+
+    /// <summary>
+    ///     Test that a link whose address is not an absolute http/https URL is never a link: it is
+    ///     shown as plain text with its target visible, and no run carries an address.
+    /// </summary>
+    /// <param name="target">The link target in the Markdown.</param>
+    [Theory]
+    [InlineData("file:///C:/Windows/System32/calc.exe")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("mailto:someone@example.com")]
+    [InlineData("ftp://example.com/file")]
+    [InlineData("CHANGELOG.md")]
+    [InlineData("../docs/readme.md")]
+    [InlineData("//example.com/protocol-relative")]
+    [InlineData("https:example.com")]
+    [InlineData("https://")]
+    public void ReleaseNotesViewerViewModel_Blocks_LinkWithOtherSchemeOrRelativeTarget_IsPlainText(string target)
+    {
+        // Act
+        var viewModel = new ReleaseNotesViewerViewModel("my-repo", $"Read [docs]({target}) now");
+
+        // Assert: nothing is a link, and the target stays visible
+        var block = Assert.Single(viewModel.Blocks);
+        Assert.All(block.Runs, run => Assert.Null(run.Url));
+        Assert.Equal($"Read docs ({target}) now", string.Concat(block.Runs.Select(run => run.Text)));
+    }
+
+    /// <summary>
+    ///     Test that malformed link syntax stays literal text.
+    /// </summary>
+    /// <param name="markdown">The malformed text.</param>
+    [Theory]
+    [InlineData("[text](https://example.com")]
+    [InlineData("[text] (https://example.com)")]
+    [InlineData("[text]https://example.com")]
+    [InlineData("[text(https://example.com)]")]
+    [InlineData("[a [b]](https://example.com)")]
+    [InlineData("[text]()")]
+    [InlineData("[text](https://example.com some words)")]
+    [InlineData("just [brackets] and (parens)")]
+    public void ReleaseNotesViewerViewModel_Blocks_MalformedLink_StaysLiteralText(string markdown)
+    {
+        // Act
+        var viewModel = new ReleaseNotesViewerViewModel("my-repo", markdown);
+
+        // Assert: no link run, and the text is exactly what was written (a bare address inside it
+        // may become a link, but the visible text is unchanged)
+        var block = Assert.Single(viewModel.Blocks);
+        Assert.Equal(markdown, string.Concat(block.Runs.Select(run => run.Text)));
+        Assert.DoesNotContain(block.Runs, run => run.Url is not null && run.Text != run.Url);
+    }
+
+    /// <summary>
+    ///     Test that a bare https/http address and an angle-bracket autolink become links, without
+    ///     the sentence punctuation that follows a bare address, and that other angle-bracket text
+    ///     stays literal.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewerViewModel_Blocks_BareAndAngleAddresses_BecomeLinksWithoutTrailingPunctuation()
+    {
+        // Act
+        var viewModel = new ReleaseNotesViewerViewModel(
+            "my-repo",
+            "Visit https://example.com/a, or (https://example.com/b) or <https://example.com/c> or <mailto:x@y.z> or xhttps://nope.example.");
+
+        // Assert
+        var block = Assert.Single(viewModel.Blocks);
+        var urls = block.Runs.Where(run => run.Url is not null).Select(run => run.Url).ToList();
+        Assert.Equal(["https://example.com/a", "https://example.com/b", "https://example.com/c"], urls);
+        Assert.Equal(
+            "Visit https://example.com/a, or (https://example.com/b) or https://example.com/c or <mailto:x@y.z> or xhttps://nope.example.",
+            string.Concat(block.Runs.Select(run => run.Text)));
+    }
+
+    /// <summary>
+    ///     Test that only absolute http/https addresses without whitespace are openable.
+    /// </summary>
+    /// <param name="url">The address to check.</param>
+    /// <param name="expected">Whether it may be opened.</param>
+    [Theory]
+    [InlineData("https://example.com", true)]
+    [InlineData("http://example.com/x", true)]
+    [InlineData("HTTP://EXAMPLE.COM", true)]
+    [InlineData("file:///C:/x", false)]
+    [InlineData("javascript:alert(1)", false)]
+    [InlineData("mailto:a@b.c", false)]
+    [InlineData("/relative", false)]
+    [InlineData("example.com", false)]
+    [InlineData("https://example.com/a b", false)]
+    [InlineData("https://example.com/\u0001", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void ReleaseNotesViewerViewModel_IsOpenableUrl_AllowsOnlyAbsoluteHttpAndHttps(string? url, bool expected)
+    {
+        // Act / Assert
+        Assert.Equal(expected, ReleaseNotesViewerViewModel.IsOpenableUrl(url));
+    }
+
+    /// <summary>
+    ///     Test that a link run renders as a focusable button styled as a link whose tooltip is the full
+    ///     address, inside the paragraph next to ordinary text.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewer_BuildBlockTextBlock_LinkRun_RendersFocusableLinkButtonWithAddressTooltip() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var block = new MarkdownBlock(
+            [new MarkdownRun("See ", false, false), new MarkdownRun("the notes", false, false, "https://example.com/n")],
+            HeadingLevel: 0,
+            IsBullet: true);
+
+        // Act
+        var textBlock = ReleaseNotesViewer.BuildBlockTextBlock(block, _ => Task.CompletedTask);
+
+        // Assert: bullet, text, then the link
+        var inlines = textBlock.Inlines!;
+        Assert.Equal(3, inlines.Count);
+        var button = Assert.IsType<Button>(Assert.IsType<InlineUIContainer>(inlines[2]).Child);
+        Assert.Contains("link", button.Classes);
+        Assert.True(button.Focusable);
+        Assert.True(button.IsTabStop);
+        Assert.Equal("https://example.com/n", ToolTip.GetTip(button)?.ToString());
+        Assert.Equal("the notes", Avalonia.Automation.AutomationProperties.GetName(button));
+    });
+
+    /// <summary>
+    ///     Test that a link run is plain text when nothing handles clicks, or when its address is not an
+    ///     openable http/https URL, so nothing clickable can open anything else.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewer_BuildBlockTextBlock_LinkRunWithoutHandlerOrWithUnsafeAddress_RendersPlainText() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var safe = new MarkdownBlock([new MarkdownRun("notes", false, false, "https://example.com/n")], 0, false);
+        var unsafeBlock = new MarkdownBlock([new MarkdownRun("notes", false, false, "javascript:alert(1)")], 0, false);
+
+        // Act
+        var withoutHandler = ReleaseNotesViewer.BuildBlockTextBlock(safe);
+        var withUnsafeAddress = ReleaseNotesViewer.BuildBlockTextBlock(unsafeBlock, _ => Task.CompletedTask);
+
+        // Assert
+        Assert.Equal("notes", Assert.IsType<Run>(Assert.Single(withoutHandler.Inlines!)).Text);
+        Assert.Equal("notes", Assert.IsType<Run>(Assert.Single(withUnsafeAddress.Inlines!)).Text);
+    });
+
+    /// <summary>
+    ///     Test that clicking a rendered link hands its exact address to the opener and nothing else
+    ///     opens, and that a rendered non-http link has no button at all.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewer_LinkClick_InvokesOpenerWithExactUrl_NonHttpLinkIsNotClickable() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange
+        var opened = new List<string>();
+        var viewModel = new ReleaseNotesViewerViewModel(
+            "my-repo",
+            "- [good](https://example.com/a?b=1&c=2)\n[bad](javascript:alert(1)) and [file](file:///C:/x.exe)");
+        var viewer = new ReleaseNotesViewer(viewModel, url =>
+        {
+            opened.Add(url);
+            return Task.CompletedTask;
+        });
+        viewer.Show();
+        try
+        {
+            var buttons = FindLinkButtons(viewer);
+
+            // Assert: only the http link is a button
+            var button = Assert.Single(buttons);
+
+            // Act
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Equal(["https://example.com/a?b=1&c=2"], opened);
+        }
+        finally
+        {
+            viewer.Close();
+        }
+
+        await Task.CompletedTask;
+    });
+
+    /// <summary>
+    ///     Test that pressing Enter on a focused link opens it, like a click.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewer_LinkFocusedEnterKey_InvokesOpener() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var opened = new List<string>();
+        var viewer = new ReleaseNotesViewer(
+            new ReleaseNotesViewerViewModel("my-repo", "[good](https://example.com/a)"),
+            url =>
+            {
+                opened.Add(url);
+                return Task.CompletedTask;
+            });
+        viewer.Show();
+        try
+        {
+            var button = Assert.Single(FindLinkButtons(viewer));
+            button.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            // Act
+            viewer.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+            viewer.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Equal(["https://example.com/a"], opened);
+        }
+        finally
+        {
+            viewer.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that opening a link passes an openable address to the opener and reports no problem,
+    ///     refuses any other address without calling the opener, and turns an opener failure into a
+    ///     message instead of an exception.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewer_OpenLinkAsync_OpensOnlyHttpAndReportsFailures() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange
+        var opened = new List<string>();
+        var fail = false;
+        var viewer = new ReleaseNotesViewer(
+            new ReleaseNotesViewerViewModel("my-repo", "notes"),
+            url =>
+            {
+                opened.Add(url);
+                return fail ? Task.FromException(new InvalidOperationException("no browser")) : Task.CompletedTask;
+            });
+
+        // Act / Assert: an https address is opened
+        Assert.Null(await viewer.OpenLinkAsync("https://example.com/x"));
+        Assert.Equal(["https://example.com/x"], opened);
+
+        // Act / Assert: other addresses are refused, and the opener is not called
+        foreach (var refused in new[] { "file:///C:/x.exe", "javascript:alert(1)", "mailto:a@b.c", "relative.md", string.Empty })
+        {
+            Assert.NotNull(await viewer.OpenLinkAsync(refused));
+        }
+
+        Assert.Single(opened);
+
+        // Act / Assert: a failing opener is reported, not thrown
+        fail = true;
+        var message = await viewer.OpenLinkAsync("https://example.com/y");
+        Assert.NotNull(message);
+        Assert.Contains("no browser", message, StringComparison.Ordinal);
+        Assert.Contains("https://example.com/y", message, StringComparison.Ordinal);
+    });
+
+    /// <summary>
+    ///     Finds the link buttons rendered into a release-notes window.
+    /// </summary>
+    /// <param name="viewer">The window.</param>
+    /// <returns>The link buttons, in order.</returns>
+    private static List<Button> FindLinkButtons(ReleaseNotesViewer viewer) =>
+        [.. viewer.FindControl<StackPanel>("ReleaseNotesPanel")!.Children
+            .OfType<TextBlock>()
+            .SelectMany(textBlock => textBlock.Inlines!.OfType<InlineUIContainer>())
+            .Select(container => container.Child)
+            .OfType<Button>()];
 }

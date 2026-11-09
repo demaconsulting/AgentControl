@@ -11,8 +11,8 @@
         Name="SourceEditorRoot"
         Title="{Binding Title}"
         Width="640" SizeToContent="Height"
-        MinWidth="500"
-        CanResize="False"
+        MinWidth="500" MinHeight="360"
+        CanResize="True"
         WindowStartupLocation="CenterOwner">
     <Window.Styles>
         <Style Selector="materialIcons|MaterialIcon.testOk">

@@ -23,6 +23,8 @@ N/A - standard test environment.
 - `**bold**` and `*italic*` inline spans parse into separate runs with the correct emphasis
   flags, and an unterminated marker is treated as literal text.
 - Blank lines between content lines are skipped rather than rendered as empty blocks.
+- Only absolute http/https addresses become link runs (in paragraphs, bullets and bold text); every other scheme and
+  relative target is plain text with no address, and malformed link syntax stays literal text.
 
 #### Test Scenarios
 
@@ -47,3 +49,18 @@ tested by `ReleaseNotesViewerViewModel_Blocks_HeadingLine_ParsesHeadingLevelAndT
 `ReleaseNotesViewerViewModel_Blocks_BlankLines_AreSkipped`, and
 `ReleaseNotesViewerViewModel_Blocks_UnterminatedAsterisk_TreatedAsLiteralText`, covering
 `AgentControl-ReleaseNotesViewerViewModel-MarkdownParsing`.
+
+**ReleaseNotesViewerViewModel_Links_OnlyHttpAndHttpsBecomeLinks**: `[text](url)` links with an https or http
+address (including one with balanced parentheses, a query, and a quoted title) parse into link runs carrying the
+text and the exact address - in paragraphs, bullet items and bold text; `<https://...>` and bare addresses
+become links without trailing punctuation; a `[text](url)` with a `file:`, `javascript:`, `mailto:`, `ftp:`,
+protocol-relative, relative or host-less target parses into plain text `text (url)` with no address anywhere; malformed
+bracket syntax keeps its text unchanged; and the address gate itself accepts only absolute http/https URLs without
+whitespace or control characters. This scenario is tested by
+`ReleaseNotesViewerViewModel_Blocks_InlineLink_ParsesIntoLinkRun`,
+`ReleaseNotesViewerViewModel_Blocks_LinkInBulletBoldAndWithTitle_AreLinks`,
+`ReleaseNotesViewerViewModel_Blocks_LinkWithOtherSchemeOrRelativeTarget_IsPlainText`,
+`ReleaseNotesViewerViewModel_Blocks_MalformedLink_StaysLiteralText`,
+`ReleaseNotesViewerViewModel_Blocks_BareAndAngleAddresses_BecomeLinksWithoutTrailingPunctuation` and
+`ReleaseNotesViewerViewModel_IsOpenableUrl_AllowsOnlyAbsoluteHttpAndHttps`, covering
+`AgentControl-ReleaseNotesViewerViewModel-Links`.

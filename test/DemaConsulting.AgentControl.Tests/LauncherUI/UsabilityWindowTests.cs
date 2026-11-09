@@ -473,6 +473,133 @@ public sealed class UsabilityWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that Settings is resizable with a minimum size, keeps its default opening width, and that
+    ///     widening it widens the text boxes and the source list with it, while a short window scrolls the
+    ///     settings and keeps the Save button in view.
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_Resizable_HasMinimumSizeAndWidensFieldsAndSourceList() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: one source with a long location
+        var longLocation = @"\\server\share\" + string.Join('\\', Enumerable.Repeat("a-rather-long-folder-name", 8));
+        var settings = new AppSettings
+        {
+            Sources = [new PackageSourceDefinition { Alias = "Long", Type = PackageSourceType.Zip, Location = longLocation }]
+        };
+        var window = new SettingsWindow(new SettingsWindowViewModel(settings, _ => { }, (_, _) => Task.FromResult(true)));
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            var git = window.FindControl<TextBox>("GitExecutablePathTextBox")!;
+            var list = window.FindControl<ListBox>("SourcesList")!;
+            var location = window.GetVisualDescendants().OfType<TextBlock>().First(text => text.Name == "SourceLocationText");
+
+            // Assert: resizable, with a minimum, no maximum width, and the default opening width
+            Assert.True(window.CanResize);
+            Assert.True(window.MinWidth >= 500);
+            Assert.True(window.MinHeight >= 360);
+            Assert.True(double.IsPositiveInfinity(window.MaxWidth));
+            Assert.Equal(800, window.Width);
+            var gitWidth = git.Bounds.Width;
+            var listWidth = list.Bounds.Width;
+            var locationWidth = location.Bounds.Width;
+
+            // Act: widen the window by 300 (as the user dragging its edge does)
+            window.Width += 300;
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the fields and the list took the extra width, and the row shows more of the location
+            Assert.True(git.Bounds.Width >= gitWidth + 250, $"git box {gitWidth} -> {git.Bounds.Width}");
+            Assert.True(list.Bounds.Width >= listWidth + 250, $"list {listWidth} -> {list.Bounds.Width}");
+            Assert.True(location.Bounds.Width >= locationWidth + 250, $"location {locationWidth} -> {location.Bounds.Width}");
+
+            // Act: the user makes it short (resizing by hand ends automatic sizing to the content)
+            window.SizeToContent = SizeToContent.Manual;
+            window.Height = window.MinHeight;
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the settings scroll, and the Save button stays inside the window
+            var scroll = window.FindControl<ScrollViewer>("SettingsScrollViewer")!;
+            var save = window.FindControl<Button>("SaveSettingsButton")!;
+            Assert.True(scroll.Extent.Height > scroll.Viewport.Height);
+            Assert.True(save.TranslatePoint(new Point(0, save.Bounds.Height), window)!.Value.Y <= window.ClientSize.Height);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the package-source editor is resizable for every kind of source - zip folder, NuGet
+    ///     folder, NuGet server and Git repository - with a minimum size, keeping its default opening width,
+    ///     and that widening it widens its text boxes, while a short window scrolls the form and keeps the
+    ///     Save button in view.
+    /// </summary>
+    /// <param name="kind">The kind of source: <c>zip</c>, <c>nuget-folder</c>, <c>nuget-server</c> or <c>git</c>.</param>
+    [Theory]
+    [InlineData("zip")]
+    [InlineData("nuget-folder")]
+    [InlineData("nuget-server")]
+    [InlineData("git")]
+    public void SourceEditorWindow_Resizable_HasMinimumSizeAndWidensFields(string kind) => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var editor = kind switch
+        {
+            "zip" => new SourceEditorViewModel(PackageSourceType.Zip, null, _ => false),
+            "nuget-folder" => new SourceEditorViewModel(PackageSourceType.NuGet, null, _ => false),
+            "nuget-server" => new SourceEditorViewModel(PackageSourceType.NuGet, null, _ => false, isServer: true),
+            _ => new SourceEditorViewModel(PackageSourceType.Git, null, _ => false)
+        };
+        editor.Location = "https://feeds.example.com/" + string.Join('/', Enumerable.Repeat("a-rather-long-path-segment", 8));
+        var window = new SourceEditorWindow(editor);
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            var alias = window.FindControl<TextBox>("SourceAliasTextBox")!;
+            var location = window.FindControl<TextBox>("SourceLocationTextBox")!;
+
+            // Assert: resizable, with a minimum, no maximum width, and the default opening width
+            Assert.True(window.CanResize);
+            Assert.True(window.MinWidth >= 500);
+            Assert.True(window.MinHeight >= 360);
+            Assert.True(double.IsPositiveInfinity(window.MaxWidth));
+            Assert.Equal(640, window.Width);
+            var aliasWidth = alias.Bounds.Width;
+            var locationWidth = location.Bounds.Width;
+
+            // Act: widen the window by 300
+            window.Width += 300;
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the fields took the extra width
+            Assert.True(alias.Bounds.Width >= aliasWidth + 250, $"alias {aliasWidth} -> {alias.Bounds.Width}");
+            Assert.True(location.Bounds.Width >= locationWidth + 250, $"location {locationWidth} -> {location.Bounds.Width}");
+
+            // Act: the user makes it short
+            window.SizeToContent = SizeToContent.Manual;
+            window.Height = window.MinHeight;
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the form scrolls (a zip-folder form is short enough to fit even at the minimum
+            // height) and Save stays inside the window
+            var scroll = window.FindControl<ScrollViewer>("SourceEditorScrollViewer")!;
+            var save = window.FindControl<Button>("SourceEditorSaveButton")!;
+            Assert.True(kind == "zip" || scroll.Extent.Height > scroll.Viewport.Height);
+            Assert.True(save.TranslatePoint(new Point(0, save.Bounds.Height), window)!.Value.Y <= window.ClientSize.Height);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that Settings opened as a modal dialog puts the visible keyboard focus on its first control,
     ///     that Tab and Shift+Tab cycle among the dialog's own controls only (the window behind never gets the
     ///     focus), and that the focus returns to where it was in the main window when Settings closes.

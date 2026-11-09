@@ -28,6 +28,35 @@ using DemaConsulting.AgentControl.Startup;
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
+///     What became of a repo that was asked to be added to a group (see
+///     <see cref="MainWindowViewModel.AddRepoToGroup"/>).
+/// </summary>
+internal enum AddRepoResult
+{
+    /// <summary>
+    ///     The repo was not added: its folder does not exist, or (for the plain add) it is already listed.
+    /// </summary>
+    NotAdded,
+
+    /// <summary>
+    ///     The repo was added as a new entry (in the requested group, if one was given).
+    /// </summary>
+    Added,
+
+    /// <summary>
+    ///     The repo was already listed, and its existing entry was moved into the requested group.
+    /// </summary>
+    MovedExisting,
+
+    /// <summary>
+    ///     The repo was already listed but could not be moved because the settings could not be
+    ///     saved; the failure has already been reported through
+    ///     <see cref="MainWindowViewModel.SettingsSaveFailed"/>.
+    /// </summary>
+    MoveFailed
+}
+
+/// <summary>
 ///     View model for the main launcher window: owns the recent-repos list and the settings
 ///     persistence lifecycle.
 /// </summary>
@@ -260,24 +289,95 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     empty, or whitespace.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
     ///     the repo was not added (the list, the cards and the file are unchanged).</exception>
-    public bool AddRepo(string repoPath)
+    public bool AddRepo(string repoPath) => AddRepoCore(repoPath, null) == AddRepoResult.Added;
+
+    /// <summary>
+    ///     Adds a repository to the recent-repos list straight into one of the user's groups, or, when
+    ///     the repository is already listed, moves its existing entry into that group.
+    /// </summary>
+    /// <remarks>
+    ///     The same add as <see cref="AddRepo"/> (same folder check, same pin loading, one save), with
+    ///     the group set on the new entry before it is saved, so the repo never shows up ungrouped in
+    ///     between. A group that is collapsed is expanded afterwards so the repo that was just added
+    ///     is visible. The group is a per-user setting and is never written to the repository.
+    /// </remarks>
+    /// <param name="repoPath">Absolute path to the repository root to add.</param>
+    /// <param name="groupName">The group to put the repo in; it must be a valid group name (see
+    ///     <see cref="RepoGroupName.Validate"/>). A name matching an existing group ignoring letter
+    ///     case joins that group under its own spelling.</param>
+    /// <returns>What became of the repo (see <see cref="AddRepoResult"/>).</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="repoPath"/> is null, empty or
+    ///     whitespace, or <paramref name="groupName"/> is not a valid group name.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
+    ///     the repo was not added (the list, the cards and the file are unchanged).</exception>
+    public AddRepoResult AddRepoToGroup(string repoPath, string groupName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoPath);
+
+        var requested = RepoGroupName.Normalize(groupName);
+        if (requested is null || RepoGroupName.Validate(requested) != RepoGroupNameProblem.None)
+        {
+            throw new ArgumentException("The group name is not valid.", nameof(groupName));
+        }
+
+        var target = RepoGroupName.Canonicalize(requested, GroupNames);
+        var result = AddRepoCore(repoPath, target);
+
+        // The repo that was just added or moved must be visible, so a collapsed group is opened
+        if (result is AddRepoResult.Added or AddRepoResult.MovedExisting && IsGroupCollapsed(target))
+        {
+            try
+            {
+                ToggleGroupCollapsed(target);
+            }
+            catch (InvalidOperationException)
+            {
+                // The repo is in its group; only remembering that the group is open failed
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    ///     The shared add: checks the folder, then either adds a new entry (in
+    ///     <paramref name="groupName"/> when given) or, for a repo already listed, moves its entry
+    ///     into <paramref name="groupName"/> when given.
+    /// </summary>
+    /// <param name="repoPath">Absolute path to the repository root.</param>
+    /// <param name="groupName">The already validated and canonical group to put the repo in, or
+    ///     <see langword="null"/> for none (the top-bar add).</param>
+    /// <returns>What became of the repo.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
+    ///     nothing was added.</exception>
+    private AddRepoResult AddRepoCore(string repoPath, string? groupName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoPath);
 
         if (!Directory.Exists(repoPath))
         {
-            return false;
+            return AddRepoResult.NotAdded;
         }
 
-        if (_settings.RecentRepos.Any(r => string.Equals(r.Path, repoPath, StringComparison.OrdinalIgnoreCase)))
+        // A repo that is already listed is not added twice; the group flow moves it instead
+        var existing = RepoCards.FirstOrDefault(
+            card => string.Equals(card.RepoPath, repoPath, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null || _settings.RecentRepos.Any(r => string.Equals(r.Path, repoPath, StringComparison.OrdinalIgnoreCase)))
         {
-            return false;
+            if (groupName is null || existing is null)
+            {
+                return AddRepoResult.NotAdded;
+            }
+
+            // A failed save is reported through SettingsSaveFailed by the card, and nothing moved
+            return existing.MoveToGroup(groupName) ? AddRepoResult.MovedExisting : AddRepoResult.MoveFailed;
         }
 
         var pin = TryLoadPin(repoPath);
         var recentRepo = new RecentRepo
         {
             Path = repoPath,
+            GroupName = groupName,
             PinnedPackageName = pin?.PackageName,
             PinnedPackageVersion = pin?.Version,
             PinnedSource = pin?.Source
@@ -305,7 +405,7 @@ internal sealed class MainWindowViewModel : ViewModelBase
         // The new card's upgrade check reads its package source, so it runs in the background
         // rather than delaying the card's appearance
         BeginSingleCardUpgradeRefresh(card);
-        return true;
+        return AddRepoResult.Added;
     }
 
     /// <summary>
@@ -792,6 +892,7 @@ internal sealed class MainWindowViewModel : ViewModelBase
         header.ToggleRequested += (_, _) => RunReportingSaveFailure(() => ToggleGroupCollapsed(header.Name));
         header.RenameRequested += (_, _) => GroupRenameRequested?.Invoke(this, header.Name);
         header.RemoveGroupRequested += (_, _) => GroupRemoveRequested?.Invoke(this, header.Name);
+        header.AddRepoRequested += (_, _) => GroupAddRepoRequested?.Invoke(this, header.Name);
         _headers[key] = header;
         return header;
     }
@@ -944,6 +1045,13 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     confirms and calls <see cref="RemoveGroup"/>.
     /// </summary>
     public event EventHandler<string>? GroupRemoveRequested;
+
+    /// <summary>
+    ///     Raised when the user asks to add a repository to a group from its header's menu (the
+    ///     group's name is the argument); the window shows the folder picker and calls
+    ///     <see cref="AddRepoToGroup"/>.
+    /// </summary>
+    public event EventHandler<string>? GroupAddRepoRequested;
 
     /// <summary>
     ///     Subscribes to a card's <see cref="RepoCardViewModel.FavoriteChanged"/>,

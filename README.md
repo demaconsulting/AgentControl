@@ -46,7 +46,8 @@ The cards, the card menu, Settings and the package-source editor are shown in th
 - **Repo groups and card colors (just for you)**: put repos into groups of your own (**Move to group** in a
   card's "..." menu, then an existing group or **New group...**) and the list becomes collapsible sections -
   **Favorites** first, your groups alphabetically, **Ungrouped** last - with the number of repos in each; the
-  collapsed state is remembered, rename or remove a group from its header's "..." menu, and the filter box still
+  collapsed state is remembered, add a repository to a group, rename it or remove it from the group header's "..."
+  menu, and the filter box still
   finds a repo inside a collapsed group. **Card color...** gives a repo's tile a color of your choice from a
   palette (or **Automatic**); the status bar keeps its fixed colors. Both are stored only in your own AgentControl
   settings - never in the repository or its `.agentcontrol.json` - so they are never shared through git
@@ -270,7 +271,8 @@ Both are personal ways to organize the list and are stored **only in your own Ag
   new group) or **Remove from group**. As soon as one repo is in a group the list shows sections with a header
   each - **Favorites** (a favorite is listed only there, and its card shows its group as a chip), then your groups
   alphabetically, then **Ungrouped** - with the number of repos; click a header to collapse or expand it (the choice
-  is remembered). A group's header has a "..." menu with **Rename group...** and **Remove group** (its repos stay
+  is remembered). A group's header has a "..." menu with **Add repository...** (choose a folder and it goes straight
+  into that group), **Rename group...** and **Remove group** (its repos stay
   in the list, ungrouped). With no groups at all there are no headers and the list looks as it always did.
   Typing in the filter box shows every match, expanding collapsed groups while you filter.
 - **Card color.** **Organize > Card color...** opens a palette of ten colors that work in the light and dark
@@ -282,9 +284,10 @@ Both are personal ways to organize the list and are stored **only in your own Ag
 The Settings window lets you configure:
 
 - **Package sources** — a list of the configured sources (alias, kind, location and whether the
-  folder can be found; a server or remote Git repository shows **Not checked** because AgentControl contacts it
-  only when it is
-  needed). Use **Add** (a menu of **Zip-package folder**, **NuGet-package folder**, **NuGet-package server** and
+  folder can be found; a server or remote Git repository shows a neutral **Online source** status because AgentControl
+  contacts it only when it
+  needs to, and a NuGet source that requires signed packages shows a **Signed only** badge). Use **Add** (a menu of
+  **Zip-package folder**, **NuGet-package folder**, **NuGet-package server** and
   **Git repository**)
   to add a source, and **Edit** or **Remove** to change one; a NuGet source also lists the package
   IDs it offers, a server or a Git repository can be checked with **Test connection** before it is saved, and a NuGet

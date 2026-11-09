@@ -10,6 +10,8 @@ and `RepoCardImageTests.cs`,
 `SourceEditorServerViewModelTests.cs`, `SourceEditorSignatureViewModelTests.cs` and `SourceEditorGitViewModelTests.cs`,
 `RepoCardGitAwarenessTests.cs` (the Git icon, tooltip, moved tag and Change package of the card) and
 `PackageSourceGitPresentationTests.cs` (the Git icon and names, and how a source row classifies a remote Git source),
+`PackageSourceStatusPresentationTests.cs` (the "Online source" status, the folder statuses and the "Signed only"
+badge of a source row, with the Settings window showing it),
 `CredentialPromptViewModelTests.cs`, `RepoImageLocatorTests.cs`, `RepoGroupHeaderViewModelTests.cs`,
 `GroupNameViewModelTests.cs` and `DialogBehaviorTests.cs`, the last four units each with its own verification
 document), plus
@@ -109,7 +111,7 @@ executable.
 - The AGENTS.md template offer fires at most once per repo, never overwrites an existing
   `AGENTS.md`, and a decline is honored on every subsequent sync for that repo.
 - A NuGet server source can be added, tested (with progress, Cancel and a plain-language result) and listed
-  as "Not checked"; the sign-in dialog shows which server receives the credential, masks the password, answers
+  as an "Online source"; the sign-in dialog shows which server receives the credential, masks the password, answers
   once, and is shown one at a time; background upgrade checks never open it.
 - The sign-in dialog's "Remember on this computer" option is off by default, enabled only when a credential helper
   can keep the sign-in and otherwise disabled with a tooltip that explains why, and the answer carries the choice.
@@ -118,9 +120,15 @@ executable.
   shield only when the pinned source requires signed packages.
 - A Git repository can be added from the Add menu; its editor explains the address, tag pattern, folder and sign-in,
   validates as the user types, lists the matching tags (or the tags that did not match, with a hint) after Test
-  connection and saves only an acceptable source; a Git source is shown with the Git icon, "Not checked" when remote;
+  connection and saves only an acceptable source; a Git source is shown with the Git icon, "Online source" when remote;
   a card pinned to one names the tag and commit, shows "Tag moved" without applying anything when the tag moved, and
   offers Change package..., which opens on the pinned choice and asks before applying changed content.
+- The Settings source list shows a remote source as a neutral "Online source" (cloud icon, no warning styling, a
+  tooltip saying when it is contacted), a "Signed only" badge only on NuGet sources that require signed packages
+  (its tooltip naming a pinned publisher by the start and end of the fingerprint only), and, like the source editor,
+  can be resized with its fields widening and a short window scrolling instead of clipping Save.
+- A group header's menu starts with "Add repository...", which uses the same folder picker as the top-bar add, puts
+  the repo in that group (moving an already listed repo into it, and saying so), and changes nothing when cancelled.
 
 ### Test Scenarios
 
@@ -256,10 +264,48 @@ cited directly at the subsystem level, covering `AgentControl-LauncherUI-SourceA
 
 **LauncherUI_PackageSources_ListedWithKindLocationAndStatus**: The settings view model lists the configured
 sources in order with their kind and location and whether their folder can be found, and a saved NuGet server
-is listed as "Not checked" without any folder check or network access. This scenario is tested by
-`SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder` and
-`SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt`, covering
+is listed as an "Online source" (a neutral status) without any folder check or network access; the status
+text, cloud icon and tooltip of a remote row are checked, and a local folder row keeps its folder statuses.
+This scenario is tested by
+`SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder`,
+`SettingsWindowViewModel_SaveServerSource_ListsItAsOnlineSourceAndPersistsIt`,
+`PackageSourceItemViewModel_ServerSource_ShowsNeutralOnlineSourceStatus` and
+`PackageSourceItemViewModel_LocalFolderSource_KeepsFolderStatuses`, covering
 `AgentControl-LauncherUI-PackageSources`.
+
+**LauncherUI_SourceSignedOnlyBadge_OnlyForSignedNuGetSources**: A NuGet source (folder or server) that requires
+signed packages is flagged for the "Signed only" badge and a source that does not, a zip folder and a Git
+repository are not; the badge's tooltip says signed packages are required and accepts any trusted signer, or with
+a pinned publisher names it by the first eight and last four digits of the fingerprint without the rest; and the
+Settings window shows the badge (`SourceSignedOnlyBadge`, with its tooltip) only on the signed rows next to the
+unchanged status text. This scenario is tested by
+`PackageSourceItemViewModel_RequiresSignature_OnlyForSignedNuGetSources`,
+`PackageSourceItemViewModel_SignatureTooltip_NoPinnedPublisher_SaysAnyTrustedSigner`,
+`PackageSourceItemViewModel_SignatureTooltip_PinnedPublisher_ShowsOnlyStartAndEndOfFingerprint` and
+`SettingsWindow_SourceRows_ShowSignedOnlyBadgeOnlyWhereRequiredAndOnlineSourceStatus`, covering
+`AgentControl-LauncherUI-SourceSignedOnlyBadge`. The badge colors are the neutral `Chip` resources, whose contrast
+`AppStyles_TextAndGraphicColors_MeetContrastInBothThemes` already checks in both themes.
+
+**LauncherUI_ResizableSourceDialogs_WidenFieldsAndScroll**: In the headless test application the Settings window and
+the source editor of each kind (zip folder, NuGet folder, NuGet server, Git repository) are resizable, have a minimum
+size, no maximum width and keep their default opening width; making the window 300 units wider makes the text boxes
+(and, in Settings, the source list and a long location) at least 250 units wider; and a window made as short as its
+minimum scrolls its form and keeps the Save button inside the window. This scenario is tested by
+`SettingsWindow_Resizable_HasMinimumSizeAndWidensFieldsAndSourceList` and
+`SourceEditorWindow_Resizable_HasMinimumSizeAndWidensFields`, covering
+`AgentControl-LauncherUI-ResizableSourceDialogs`. Dialog focus, Tab and Escape behavior is covered by the existing
+dialog tests, which pass unchanged.
+
+**LauncherUI_GroupAddRepository_HeaderMenuAddsRepoToGroup**: The "..." menu of a user group's header has
+"Add repository..." (`GroupAddRepoMenuItem`, with a tooltip) as its first item, then a separator, then the rename and
+remove items; choosing it with the folder picker answered by a path adds a new card in that group; a cancelled
+picker changes nothing and shows no message; an already listed repo is moved into the group and a message says it was
+already in the list; and the top-bar add still adds ungrouped through the same picker and still refuses a repo that
+is already listed. This scenario is tested by `MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator`,
+`MainWindow_HeaderMenuAddRepository_PickedFolderJoinsGroup_CancelChangesNothing`,
+`MainWindow_HeaderMenuAddRepository_AlreadyListedRepo_MovesIntoGroupAndSaysSo` and
+`MainWindow_AddRepoButton_UsesSamePickerAndAddsUngrouped`, covering `AgentControl-LauncherUI-GroupAddRepository`
+(children `AgentControl-RepoGroupHeaderViewModel-AddRepoRequest` and `AgentControl-MainWindowViewModel-AddRepoToGroup`).
 
 **LauncherUI_AddPackageSource_ZipNuGetFolderAndServerThroughDialogs**: The settings window offers an add
 command for each kind of source, each raising the editor request for a new source of that kind; saving the
@@ -899,7 +945,7 @@ connection test and Select Package, and never prompts in the background. This sc
 **LauncherUI_GitSourcePresentation_IconTypeNameStatusTagAndCommit**: A Git source has the Git icon and the
 type name "Git
 repository" (and the short name "git repository") in the lists that show sources; the Select Package source list shows
-the same icon and name; a Git source on a remote address is listed "Not checked" and never asks for its folder,
+the same icon and name; a Git source on a remote address is listed as an "Online source" and never asks for its folder,
 while one
 on a local path gets the folder status, and the classification of the zip, NuGet folder and server kinds is unchanged;
 and a card pinned to a Git source shows the Git icon and the alias in its package chip. This scenario is tested by
@@ -907,7 +953,7 @@ and a card pinned to a Git source shows the Git icon and the alias in its packag
 `SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName`
 and `RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias` (covering `AgentControl-LauncherUI-GitSourcePresentation`,
 child `AgentControl-RepoCardViewModel-GitSourceAwareness`),
-`PackageSourceItemViewModel_RemoteGitSource_IsNotCheckedAndNeverAsksTheFolder`,
+`PackageSourceItemViewModel_RemoteGitSource_IsOnlineSourceAndNeverAsksTheFolder`,
 `PackageSourceItemViewModel_LocalGitSource_ChecksTheFolder` and
 `PackageSourceItemViewModel_OtherKinds_RemoteClassificationUnchanged` (covering
 `AgentControl-LauncherUI-GitSourceRowStatus`, children `AgentControl-SettingsWindowViewModel-GitSourceRowStatus`,

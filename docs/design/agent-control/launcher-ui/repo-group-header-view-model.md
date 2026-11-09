@@ -5,13 +5,15 @@
 #### Purpose
 
 `RepoGroupHeaderViewModel` is the collapsible header row that starts a section of the main window's repo list: the
-section's name, how many repos match in it, and - for the user's own groups - the actions that rename or remove the
-group. Its single responsibility is to describe one section to the user and to assistive technology and to report
-what the user asked for (collapse or expand, rename, remove); it never changes any state itself. The
+section's name, how many repos match in it, and - for the user's own groups - the actions that add a repository to,
+rename or remove the group. Its single responsibility is to describe one section to the user and to assistive
+technology and to report what the user asked for (collapse or expand, add a repository, rename, remove); it never
+changes any state itself. The
 `RepoGroupKind` enumeration that accompanies it (`Favorites`, `Group`, `Ungrouped`) is part of this unit. Its
 behavior is specified by the unit requirements `AgentControl-RepoGroupHeaderViewModel-SectionKind`,
 `-DescribesSection`, `-AccessibleNameIsText`, `-UpdatesInPlace`, `-Toggle`, `-ToggleUnavailable`, `-ToggleExplained`,
-`-GroupActions`, `-RemoveGroupRequest` and `-RequiresName` (each prefixed `AgentControl-RepoGroupHeaderViewModel`), and
+`-GroupActions`, `-RemoveGroupRequest`, `-AddRepoRequest` and `-RequiresName` (each prefixed
+`AgentControl-RepoGroupHeaderViewModel`), and
 together with `MainWindowViewModel` (which decides which headers the list has) it provides
 `AgentControl-LauncherUI-RepoGroups`.
 
@@ -36,10 +38,10 @@ while toggling is disabled - that groups stay expanded while a filter is active 
 **CountTooltip** says `1 repo` or `{n} repos` (`AgentControl-RepoGroupHeaderViewModel-DescribesSection`,
 `-ToggleExplained`).
 
-**ToggleCommand**, **RenameCommand**, **RemoveGroupCommand** (`RelayCommand`) and the events **ToggleRequested**,
-**RenameRequested**, **RemoveGroupRequested**: each command only raises its event; `ToggleCommand` can execute only
-while `IsToggleEnabled` (`AgentControl-RepoGroupHeaderViewModel-Toggle`, `-ToggleUnavailable`, `-GroupActions`,
-`-RemoveGroupRequest`).
+**ToggleCommand**, **RenameCommand**, **RemoveGroupCommand**, **AddRepoCommand** (`RelayCommand`) and the events
+**ToggleRequested**, **RenameRequested**, **RemoveGroupRequested**, **AddRepoRequested**: each command only raises its
+event; `ToggleCommand` can execute only while `IsToggleEnabled` (`AgentControl-RepoGroupHeaderViewModel-Toggle`,
+`-ToggleUnavailable`, `-GroupActions`, `-RemoveGroupRequest`, `-AddRepoRequest`).
 
 #### Key Methods
 
@@ -67,6 +69,6 @@ simply ignored.
 #### Callers
 
 - **MainWindowViewModel** (`LauncherUI`) - creates one header per section, calls `Update` whenever the list is
-  recomputed and handles the three request events.
-- **MainWindow** (view) - binds each header row to it and shows the group-name prompt and the removal confirmation
-  for the requests the view model forwards.
+  recomputed and handles the four request events.
+- **MainWindow** (view) - binds each header row to it and shows the group-name prompt, the removal confirmation and the
+  folder picker for the requests the view model forwards.

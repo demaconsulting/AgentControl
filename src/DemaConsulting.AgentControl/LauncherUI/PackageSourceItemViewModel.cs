@@ -47,7 +47,7 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
 
     /// <summary>
     ///     Initializes a new <see cref="PackageSourceItemViewModel"/>: in the "checking" state for a
-    ///     folder source, and straight to "not checked" for a server (which is only contacted when
+    ///     folder source, and straight to "online source" for a server (which is only contacted when
     ///     needed, never merely to list it).
     /// </summary>
     /// <param name="definition">The source this row shows; the row keeps this instance, so the
@@ -86,7 +86,8 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     /// <summary>
     ///     Gets a value indicating whether the source is only reachable through the network: a NuGet
     ///     server or a Git repository that is not a local path. Such a source has no folder to look
-    ///     for, so its row says "Not checked" instead of a folder status.
+    ///     for, so its row says "Online source" (a neutral, informational status, not a warning)
+    ///     instead of a folder status.
     /// </summary>
     public bool IsRemote => IsServer ||
                             (Definition.Type == PackageSourceType.Git &&
@@ -159,7 +160,7 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
         {
             if (IsRemote)
             {
-                return MaterialIconKind.HelpCircleOutline;
+                return MaterialIconKind.CloudOutline;
             }
 
             if (_isChecking)
@@ -172,6 +173,25 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Gets a value indicating whether the source requires signed packages, so its row shows
+    ///     the "Signed only" badge. Only a NuGet source (folder or server) can require signatures;
+    ///     a zip-folder or Git source never shows the badge.
+    /// </summary>
+    public bool RequiresSignature =>
+        Definition is { Type: PackageSourceType.NuGet, RequireSignedPackages: true };
+
+    /// <summary>
+    ///     Gets the tooltip of the "Signed only" badge: that signed packages are required and, when
+    ///     the source is pinned to one publisher, that only that publisher is accepted, naming it
+    ///     by the start and end of its certificate fingerprint (never the whole fingerprint).
+    /// </summary>
+    public string SignatureTooltip =>
+        PackageSourceDefinition.TryNormalizeFingerprint(Definition.SignerFingerprint, out var fingerprint)
+            ? "Signed packages are required. Only packages signed by the pinned publisher " +
+              $"(certificate {NuGetSourceProvider.SummarizeFingerprint(fingerprint)}) are accepted."
+            : "Signed packages are required. Any validly signed package from a trusted publisher is accepted.";
+
+    /// <summary>
     ///     Gets the tooltip explaining the status.
     /// </summary>
     public string StatusTooltip
@@ -180,9 +200,8 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
         {
             if (IsRemote)
             {
-                var what = Definition.Type == PackageSourceType.Git ? "repository" : "server";
-                return $"AgentControl contacts this {what} only when it is needed (selecting a package, " +
-                       "checking for upgrades), so it is not checked here. Use Edit > Test connection to check it now.";
+                return "AgentControl contacts this source only when it needs it (selecting a package, " +
+                       "checking for upgrades, syncing at launch). Use Edit > Test connection to check it now.";
             }
 
             if (_isChecking)
@@ -207,7 +226,7 @@ internal sealed class PackageSourceItemViewModel : ViewModelBase
     {
         if (IsRemote)
         {
-            return "Not checked";
+            return "Online source";
         }
 
         if (_isChecking)

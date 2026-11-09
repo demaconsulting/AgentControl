@@ -143,13 +143,13 @@ public class CommandLineTests
     public void CommandLineParser_Parse_ScopeOptions_TakeValues()
     {
         // Arrange / Act
-        var parsed = CommandLineParser.Parse(["click", "LaunchButton", "--item", "my repo", "--window", "AgentControl Settings"]);
+        var parsed = CommandLineParser.Parse(["click", "LaunchButton", "--item", "my repo", "--window", "Agent Control Settings"]);
 
         // Assert
         Assert.Multiple(
             () => Assert.Equal(["LaunchButton"], parsed.Positional),
             () => Assert.Equal("my repo", parsed.GetOption("item")),
-            () => Assert.Equal("AgentControl Settings", parsed.GetOption("window")));
+            () => Assert.Equal("Agent Control Settings", parsed.GetOption("window")));
     }
 
     /// <summary>

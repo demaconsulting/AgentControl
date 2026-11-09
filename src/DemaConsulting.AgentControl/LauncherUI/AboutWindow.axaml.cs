@@ -25,7 +25,7 @@ using Avalonia.Markup.Xaml;
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     Modal "About AgentControl" window showing the app name, logo, a short mission
+///     Modal "About Agent Control" window showing the app name, logo, a short mission
 ///     tagline, a labeled "Version" row (<see cref="Program.Version"/> without its build metadata,
 ///     which is the row's tooltip), copyright, a short license summary, and a
 ///     scrollable list of this application's direct third-party runtime dependencies with their

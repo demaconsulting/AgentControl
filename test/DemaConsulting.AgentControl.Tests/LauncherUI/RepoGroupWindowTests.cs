@@ -340,6 +340,149 @@ public sealed class RepoGroupWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the header's "..." menu starts with "Add repository..." (with an AutomationId and
+    ///     a tooltip), followed by a separator and then the rename and remove items.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, _) = CreateWindow(("a", "Work", false));
+
+        try
+        {
+            var menuButton = window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton").Single(button => button.IsVisible);
+
+            // Act
+            var menu = OpenMenu(menuButton);
+            var items = menu.Items.OfType<Control>().ToList();
+
+            // Assert: Add repository..., separator, Rename group..., Remove group
+            Assert.Equal(4, items.Count);
+            var add = Assert.IsType<MenuItem>(items[0]);
+            Assert.Equal("GroupAddRepoMenuItem", AutomationProperties.GetAutomationId(add));
+            Assert.Equal("Add repository...", add.Header);
+            Assert.False(string.IsNullOrEmpty(ToolTip.GetTip(add)?.ToString()));
+            Assert.IsType<Separator>(items[1]);
+            Assert.Equal("RenameGroupMenuItem", Assert.IsType<MenuItem>(items[2]).Name);
+            Assert.Equal("RemoveGroupMenuItem", Assert.IsType<MenuItem>(items[3]).Name);
+            menu.Hide();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that choosing "Add repository..." and picking a folder adds the repo as a new card in
+    ///     that group, and that canceling the picker changes nothing.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenuAddRepository_PickedFolderJoinsGroup_CancelChangesNothing() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: a Work group and an ungrouped repo; the picker is answered by the test
+        var (window, viewModel) = CreateWindow(("a", "Work", false), ("c", null, false));
+        var fresh = CreateRepoDirectory("fresh");
+        string? answer = null;
+        window.RepoFolderPicker = () => Task.FromResult(answer);
+
+        try
+        {
+            // Act: cancel the picker
+            ClickHeaderAddRepository(window);
+
+            // Assert: nothing changed and no message appeared
+            Assert.Equal(2, viewModel.RepoCards.Count);
+            Assert.Empty(window.OwnedWindows);
+
+            // Act: pick a folder
+            answer = fresh;
+            ClickHeaderAddRepository(window);
+
+            // Assert: a new card, in Work, shown under the Work header
+            Assert.Equal(3, viewModel.RepoCards.Count);
+            Assert.Equal("Work", viewModel.RepoCards.Single(card => card.RepoName == "fresh").GroupName);
+            Assert.Equal(3, window.GetVisualDescendantsOf<TextBlock>("RepoNameText").Count());
+            Assert.Empty(window.OwnedWindows);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that picking a repo that is already listed (ungrouped) moves it into the group and
+    ///     tells the user it was already in the list, rather than adding a second entry.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenuAddRepository_AlreadyListedRepo_MovesIntoGroupAndSaysSo() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel) = CreateWindow(("a", "Work", false), ("c", null, false));
+        var loose = viewModel.RepoCards.Single(card => card.RepoName == "c");
+        window.RepoFolderPicker = () => Task.FromResult<string?>(loose.RepoPath);
+
+        try
+        {
+            // Act
+            ClickHeaderAddRepository(window);
+
+            // Assert: still two repos, "c" is in Work, and a message says it was already listed
+            Assert.Equal(2, viewModel.RepoCards.Count);
+            Assert.Equal("Work", loose.GroupName);
+            var message = Assert.Single(window.OwnedWindows.OfType<MessageBoxWindow>());
+            message.Close();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the top-bar add still adds the folder the picker returns, ungrouped, and refuses
+    ///     one that is already listed with a message.
+    /// </summary>
+    [Fact]
+    public void MainWindow_AddRepoButton_UsesSamePickerAndAddsUngrouped() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel) = CreateWindow(("a", "Work", false));
+        var fresh = CreateRepoDirectory("fresh");
+        var existing = viewModel.RepoCards.Single().RepoPath;
+        string answer = fresh;
+        window.RepoFolderPicker = () => Task.FromResult<string?>(answer);
+        var addButton = window.FindControl<Button>("AddRepoButton")!;
+
+        try
+        {
+            // Act: a new folder
+            addButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: added, in no group
+            Assert.Null(viewModel.RepoCards.Single(card => card.RepoName == "fresh").GroupName);
+            Assert.Empty(window.OwnedWindows);
+
+            // Act: a folder that is already listed
+            answer = existing;
+            addButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: refused with a message, and still in its group
+            Assert.Equal(2, viewModel.RepoCards.Count);
+            Assert.Equal("Work", viewModel.RepoCards.Single(card => card.RepoPath == existing).GroupName);
+            Assert.Single(window.OwnedWindows.OfType<MessageBoxWindow>()).Close();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that "Card color..." opens the palette pop-up with a swatch for every palette color and
     ///     "Automatic", each identified and explained; that choosing a swatch colors the tile (and a
     ///     picture's ring), marks the swatch as chosen and closes the pop-up; and that "Automatic"
@@ -528,6 +671,19 @@ public sealed class RepoGroupWindowTests : IDisposable
         window.Show();
         Dispatcher.UIThread.RunJobs();
         return (window, viewModel);
+    }
+
+    /// <summary>
+    ///     Opens the Work group header's menu and chooses "Add repository...".
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    private static void ClickHeaderAddRepository(MainWindow window)
+    {
+        var menuButton = window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton").Single(button => button.IsVisible);
+        var menu = OpenMenu(menuButton);
+        FindMenuItem(menu, "GroupAddRepoMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.Hide();
+        Dispatcher.UIThread.RunJobs();
     }
 
     /// <summary>

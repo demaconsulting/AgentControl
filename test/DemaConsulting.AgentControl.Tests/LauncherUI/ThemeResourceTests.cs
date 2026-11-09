@@ -176,7 +176,7 @@ public class ThemeResourceTests
         CheckText("IconGhost pressed", Opaque(palette, "IconGhostForegroundHover"), Over(Brush(palette, "IconGhostBackgroundPressed"), card));
 
         // Validation, caution and success text on the page and on a card
-        foreach (var semantic in new[] { "ErrorForeground", "WarningForeground", "SuccessForeground" })
+        foreach (var semantic in new[] { "ErrorForeground", "WarningForeground", "SuccessForeground", "LinkForeground" })
         {
             CheckText($"{semantic} on page", Opaque(palette, semantic), page);
             CheckText($"{semantic} on card", Opaque(palette, semantic), card);

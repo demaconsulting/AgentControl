@@ -257,6 +257,7 @@ sections:
           - AgentControl-LauncherUI-RepoGroups
           - AgentControl-LauncherUI-RepoGroupsFlatList
           - AgentControl-LauncherUI-RepoGroupCollapse
+          - AgentControl-LauncherUI-GroupAddRepository
         tests:
           - windows@RepoList_FavoritesAndGroups_SectionsAreFavoritesThenGroupsAlphabeticallyThenUngrouped
           - windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader
@@ -433,6 +434,7 @@ sections:
           - AgentControl-LauncherUI-Upgrade
           - AgentControl-RepoSync-Sync
           - AgentControl-RepoSync-ReleaseNotes
+          - AgentControl-RepoSync-ReleaseNotesLinks
           - AgentControl-RepoSync-GitIgnorePrevention
           - AgentControl-RepoSync-RefuseLinkedRepoFolders
           - AgentControl-AgentPackageManagement-UpgradeDetection
@@ -976,6 +978,8 @@ sections:
         children:
           - AgentControl-LauncherUI-Settings
           - AgentControl-LauncherUI-PackageSources
+          - AgentControl-LauncherUI-SourceSignedOnlyBadge
+          - AgentControl-LauncherUI-ResizableSourceDialogs
           - AgentControl-LauncherUI-AddPackageSource
           - AgentControl-LauncherUI-PackageSourceValidation
           - AgentControl-LauncherUI-PackageSourceLocationTooltip

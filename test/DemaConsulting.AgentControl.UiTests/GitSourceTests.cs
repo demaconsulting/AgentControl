@@ -100,7 +100,7 @@ public sealed class GitSourceTests
         Assert.True(WaitForText(settingsWindow, "SourceAliasText", "Repo"));
 
         // Assert: the list names the kind of the new source and, because the fixture repository is a
-        // local path, shows the status of its folder (a remote repository would read "Not checked")
+        // local path, shows the status of its folder (a remote repository would read "Online source")
         var sourcesList = Find(settingsWindow, "SourcesList");
         Assert.NotNull(sourcesList.FindFirstDescendant(cf => cf.ByName("Git repository")));
         Assert.True(WaitForText(settingsWindow, "SourceStatusText", "Folder found"));

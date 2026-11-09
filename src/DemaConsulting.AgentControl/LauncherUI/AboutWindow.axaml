@@ -4,7 +4,7 @@
         mc:Ignorable="d"
         x:Class="DemaConsulting.AgentControl.LauncherUI.AboutWindow"
         Name="AboutWindowRoot"
-        Title="About AgentControl"
+        Title="About Agent Control"
         Width="440" SizeToContent="Height"
         MaxHeight="600"
         MinWidth="280"

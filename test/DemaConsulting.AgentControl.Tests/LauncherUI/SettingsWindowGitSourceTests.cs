@@ -102,11 +102,11 @@ public class SettingsWindowGitSourceTests
 
     /// <summary>
     ///     Test that a Git source reached over the network is listed with the Git icon and kind name,
-    ///     is "Not checked" (neither a folder check nor a connection is made for it), and that a
+    ///     is an "Online source" (neither a folder check nor a connection is made for it), and that a
     ///     saved Git source is written to the settings with its pattern, folder and package name.
     /// </summary>
     [Fact]
-    public async Task SettingsWindowViewModel_SaveGitSource_ListsItAsNotCheckedAndPersistsIt()
+    public async Task SettingsWindowViewModel_SaveGitSource_ListsItAsOnlineSourceAndPersistsIt()
     {
         // Arrange: a folder check that must never be asked about a remote repository
         var asked = new List<string>();
@@ -131,12 +131,12 @@ public class SettingsWindowGitSourceTests
         await viewModel.WaitForStatusChecksAsync();
         viewModel.SaveCommand.Execute(null);
 
-        // Assert: listed as a Git repository that is not checked
+        // Assert: listed as a Git repository that is an online source
         var row = Assert.Single(viewModel.Sources);
         Assert.Equal(MaterialIconKind.Git, row.TypeIcon);
         Assert.Equal("Git repository", row.TypeName);
-        Assert.Equal("Not checked", row.StatusText);
-        Assert.Contains("repository", row.StatusTooltip, StringComparison.Ordinal);
+        Assert.Equal("Online source", row.StatusText);
+        Assert.Contains("Test connection", row.StatusTooltip, StringComparison.Ordinal);
         Assert.False(row.IsChecking);
         Assert.False(row.IsAvailable);
         Assert.False(row.IsMissing);

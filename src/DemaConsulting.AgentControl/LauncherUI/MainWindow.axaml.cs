@@ -249,6 +249,7 @@ internal sealed partial class MainWindow : Window
         viewModel.SettingsSaveFailed += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
         viewModel.GroupRenameRequested += async (_, name) => await ShowRenameGroupPrompt(viewModel, name);
         viewModel.GroupRemoveRequested += async (_, name) => await ConfirmAndRemoveGroup(viewModel, name);
+        viewModel.GroupAddRepoRequested += async (_, name) => await ShowNoticeAsync(await AddRepoAsync(viewModel, name));
 
         // The upgrade check reads package sources, which may be slow or unreachable, so it starts
         // in the background now that the window has its data rather than delaying the window
@@ -865,29 +866,78 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        var path = await BrowseForRepoPathAsync();
+        await ShowNoticeAsync(await AddRepoAsync(viewModel, groupName: null));
+    }
+
+    /// <summary>
+    ///     Shows a message box for a notice returned by <see cref="AddRepoAsync"/>, if there is one.
+    /// </summary>
+    /// <param name="notice">The notice, or <see langword="null"/> when there is nothing to tell.</param>
+    /// <returns>A task that completes when the message box was closed (or none was needed).</returns>
+    private async Task ShowNoticeAsync(string? notice)
+    {
+        if (notice is not null)
+        {
+            await new MessageBoxWindow(notice).ShowDialog(this);
+        }
+    }
+
+    /// <summary>
+    ///     Gets or sets how the user picks a repository folder; <see langword="null"/> uses the
+    ///     native folder-browse dialog. A seam so tests can answer with a path (or cancel) without
+    ///     a real dialog.
+    /// </summary>
+    internal Func<Task<string?>>? RepoFolderPicker { get; set; }
+
+    /// <summary>
+    ///     The add-repository flow shared by the top-bar "Add Repo" button and a group header's
+    ///     "Add repository..." menu item: asks the user for a folder, adds it through the view model,
+    ///     and says what the user needs to know about the outcome.
+    /// </summary>
+    /// <remarks>
+    ///     A cancelled picker changes nothing and says nothing. With a group, a repo that is already
+    ///     listed is moved into the group (and the notice says so); without one it is refused, as
+    ///     the top-bar add always did.
+    /// </remarks>
+    /// <param name="viewModel">The main view model that owns the repo list.</param>
+    /// <param name="groupName">The group to put the repo in, or <see langword="null"/> for the plain
+    ///     add.</param>
+    /// <returns>A message for the user, or <see langword="null"/> when the repo was added (or the
+    ///     picker was cancelled, or the failure was already reported).</returns>
+    internal async Task<string?> AddRepoAsync(MainWindowViewModel viewModel, string? groupName)
+    {
+        var path = await (RepoFolderPicker ?? BrowseForRepoPathAsync)();
         if (string.IsNullOrWhiteSpace(path))
         {
-            return;
+            return null;
         }
 
-        bool added;
+        AddRepoResult result;
         try
         {
-            added = viewModel.AddRepo(path);
+            if (groupName is null)
+            {
+                result = viewModel.AddRepo(path) ? AddRepoResult.Added : AddRepoResult.NotAdded;
+            }
+            else
+            {
+                result = viewModel.AddRepoToGroup(path, groupName);
+            }
         }
         catch (InvalidOperationException ex)
         {
             // The repo was not added because the list could not be saved; say why
-            await new MessageBoxWindow($"'{path}' could not be added. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
-            return;
+            return $"'{path}' could not be added. {SecretRedactor.SafeMessage(ex)}";
         }
 
-        if (!added)
+        return result switch
         {
-            await new MessageBoxWindow($"'{path}' could not be added: it does not exist or is already in the list.")
-                .ShowDialog(this);
-        }
+            AddRepoResult.NotAdded when groupName is null =>
+                $"'{path}' could not be added: it does not exist or is already in the list.",
+            AddRepoResult.NotAdded => $"'{path}' could not be added: it does not exist.",
+            AddRepoResult.MovedExisting => $"'{path}' is already in the list, so it was moved into the group \"{groupName}\".",
+            _ => null
+        };
     }
 
     /// <summary>

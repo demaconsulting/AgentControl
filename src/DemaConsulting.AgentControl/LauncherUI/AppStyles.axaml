@@ -37,6 +37,7 @@
                     <SolidColorBrush x:Key="ErrorForeground" Color="#FF8A80" />
                     <SolidColorBrush x:Key="WarningForeground" Color="#F2C14E" />
                     <SolidColorBrush x:Key="SuccessForeground" Color="#56D364" />
+                    <SolidColorBrush x:Key="LinkForeground" Color="#7CB7FF" />
                     <SolidColorBrush x:Key="LogoBackingBackground" Color="#FFFFFF" />
 
                     <!-- Status accent bar -->
@@ -139,6 +140,7 @@
                     <SolidColorBrush x:Key="ErrorForeground" Color="#B42318" />
                     <SolidColorBrush x:Key="WarningForeground" Color="#7A4A00" />
                     <SolidColorBrush x:Key="SuccessForeground" Color="#17692D" />
+                    <SolidColorBrush x:Key="LinkForeground" Color="#0A5FC4" />
                     <SolidColorBrush x:Key="LogoBackingBackground" Color="#FFFFFF" />
 
                     <SolidColorBrush x:Key="StatusAccentUpToDate" Color="#1A7F37" />
@@ -498,6 +500,30 @@
     </Style>
     <Style Selector="Button.chipButton:disabled">
         <Setter Property="Opacity" Value="0.55" />
+    </Style>
+
+    <!-- ===== Links: a flat button showing underlined link-colored text, used for Markdown links in the
+         release notes; keyboard focus draws a ring around the text ===== -->
+    <Style Selector="Button.link">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.link:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.link:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.link TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource LinkForeground}" />
+        <Setter Property="TextDecorations" Value="Underline" />
+    </Style>
+    <Style Selector="Button.link:focus-visible Border">
+        <Setter Property="BoxShadow" Value="{DynamicResource FocusRingShadow}" />
     </Style>
 
     <!-- ===== Action buttons: one height, radius and icon-plus-text layout ===== -->

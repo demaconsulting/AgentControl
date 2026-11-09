@@ -59,6 +59,18 @@ false), and an already-tracked path (rejected, returns false). This scenario is 
 `MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse`, covering
 `AgentControl-MainWindowViewModel-AddRepo`.
 
+**MainWindowViewModel_AddRepoToGroup_AddsOrMovesRepoIntoTheGroup**: `AddRepoToGroup` (tested in
+`RepoGroupingTests.cs`) puts a new repo in the requested group - spelled as the existing group when only the letter case
+differs - saves once and lists it in that group's section; moves the existing entry into the group when the repo is
+already listed (still two cards, not three); returns "not added" for a folder that does not exist; opens a collapsed
+target group; and refuses a blank or built-in section name with `ArgumentException`, adding nothing. This scenario is
+tested by `MainWindowViewModel_AddRepoToGroup_NewRepo_AddsCardInTheGroupAndPersistsIt`,
+`MainWindowViewModel_AddRepoToGroup_RepoAlreadyListed_MovesItIntoTheGroup`,
+`MainWindowViewModel_AddRepoToGroup_FolderMissing_AddsNothing`,
+`MainWindowViewModel_AddRepoToGroup_CollapsedGroup_ExpandsIt` and
+`MainWindowViewModel_AddRepoToGroup_InvalidGroupName_ThrowsAndAddsNothing`, covering
+`AgentControl-MainWindowViewModel-AddRepoToGroup`.
+
 **MainWindowViewModel_RemoveRepo_RemovesAndPersistsOnlyOnExplicitCall**: `RemoveRepo` is
 called directly, removing the card from both collections and persisting the update; a card's
 own `RemoveCommand` (raising `RemoveRequested`) is confirmed to not remove the card by itself.

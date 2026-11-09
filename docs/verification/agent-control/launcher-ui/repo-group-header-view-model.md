@@ -22,6 +22,7 @@ N/A - standard test environment (no window, no files and no processes are involv
 - The toggle command can execute only while toggling is enabled and raises its request when executed; while it
   cannot, no request is raised and its tooltip explains the filter.
 - The rename and remove commands raise exactly one request per execution and change nothing themselves.
+- The add-repository command raises exactly one request per execution and changes nothing itself.
 - A header without a name (blank or `null`) is refused.
 
 #### Test Scenarios
@@ -61,6 +62,10 @@ rename request and two removal requests are raised, so each command raises its o
 execution. This scenario is tested by `RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests`, covering
 `AgentControl-RepoGroupHeaderViewModel-GroupActions` (the rename request) and
 `AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest` (the removal requests).
+
+**RepoGroupHeaderViewModel_AddRepoRequest**: The add-repository command is executed twice and two requests are raised.
+This scenario is tested by `RepoGroupHeaderViewModel_AddRepoCommand_RaisesRequest`, covering
+`AgentControl-RepoGroupHeaderViewModel-AddRepoRequest`.
 
 **RepoGroupHeaderViewModel_RequiresName**: A blank name and a `null` name are refused. This scenario is tested by
 `RepoGroupHeaderViewModel_Constructor_BlankName_Throws`, covering `AgentControl-RepoGroupHeaderViewModel-RequiresName`.
