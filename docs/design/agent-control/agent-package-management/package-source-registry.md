@@ -53,9 +53,10 @@ build a new one when settings change. All members are thread-safe.
 
 **Create**: Builds a registry whose provider factory maps `PackageSourceType.Zip` to
 `ZipFolderSourceProvider` and `PackageSourceType.NuGet` to `NuGetSourceProvider`, passing through
-the base folder under which NuGet sources keep their private caches and the optional
+the base folder under which NuGet sources keep their private caches, the optional
 `PackageCredentialContext` that NuGet server sources use to sign in (a context without a prompt gives work
-that must not open a dialog, such as the background upgrade check).
+that must not open a dialog, such as the background upgrade check) and the optional `GitSourceOptions` that Git
+sources are built with (`PackageSourceType.Git` to `GitSourceProvider`).
 
 **Resolve**: Returns the provider that serves exactly the named source
 (`AgentControl-PackageSourceRegistry-ResolveAlias`).
@@ -77,11 +78,11 @@ alias never is) and list the configured definitions in order. `Definitions` retu
 immutable list of clones on every access, so a caller that changes what it gets back — or the list
 itself — cannot affect the registry (`AgentControl-PackageSourceRegistry-DefinitionsAreASnapshot`).
 
-**Git sources**: `Create` takes an optional `GitSourceOptions` (the git executable, the cache root, and
-whether the work was
-started by the user) and resolves a `Git` source to a `GitSourceProvider` built with it, or with the defaults; the provider
-validates its source when it is created, so an invalid Git source fails when it is resolved, not when the registry is built
-(`AgentControl-PackageSourceRegistry-GitSourceResolved`).
+**Git sources**: `Create` takes an optional `GitSourceOptions` (the git executable, the cache root, and whether the
+work was started by the user) and resolves a `Git` source to a `GitSourceProvider` built with it, or with the defaults
+(`AgentControl-PackageSourceRegistry-GitSourceResolved`); the provider validates its source when it is created, so an
+invalid Git source fails when it is resolved, not when the registry is built
+(`AgentControl-PackageSourceRegistry-GitSourceInvalidFailsWhenResolved`).
 
 #### Error Handling
 
@@ -97,7 +98,8 @@ duplicate alias, or a missing entry). Callers turn these into user-visible messa
   it is built from.
 - **PackageCredentialContext** (`PackageCredentials` subsystem) — handed to NuGet server providers by
   `Create`.
-- **ZipFolderSourceProvider**, **NuGetSourceProvider** — constructed by `Create`.
+- **ZipFolderSourceProvider**, **NuGetSourceProvider**, **GitSourceProvider** — constructed by `Create`;
+  **GitSourceOptions** (same subsystem) — the optional Git settings `Create` hands to every Git provider.
 
 #### Callers
 

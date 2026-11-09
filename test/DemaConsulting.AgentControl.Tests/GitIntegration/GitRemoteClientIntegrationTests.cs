@@ -21,12 +21,13 @@
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 
+// cspell:ignore ufeffbom
 namespace DemaConsulting.AgentControl.Tests.GitIntegration;
 
 /// <summary>
 ///     Integration tests of <see cref="GitRemoteClient"/> against the real git executable and local
 ///     bare repositories (no network, no credentials): listing, the shallow fetch of one tag, the tree
-///     listing and the path checkout, and the protections that must hold in real git - the transport
+///     listing and the raw reading of blobs, and the protections that must hold in real git - the transport
 ///     allow-list, and no trace output in messages. Skipped when git is not installed.
 /// </summary>
 [Collection("RealProcess")]
@@ -35,10 +36,10 @@ public sealed class GitRemoteClientIntegrationTests
     /// <summary>
     ///     Test the whole client sequence against a real repository: list the tags (an annotated tag
     ///     resolves to its commit), create the repository, fetch exactly one tag shallow, read its
-    ///     tree, and check out only the named path.
+    ///     tree, and read the bytes of one blob without a checkout.
     /// </summary>
     [Fact]
-    public async Task GitRemoteClient_RealGit_ListInitFetchListTreeCheckout_Sequence()
+    public async Task GitRemoteClient_RealGit_ListInitFetchListTreeReadBlobs_Sequence()
     {
         // Arrange
         using var fixture = GitRepositoryFixture.CreateOrSkip();
@@ -69,21 +70,106 @@ public sealed class GitRemoteClientIntegrationTests
         Assert.Equal("refs/tags/v1.0.0", fixture.Git(repository, "for-each-ref", "--format=%(refname)").Trim());
         Assert.True(File.Exists(Path.Combine(repository, ".git", "shallow")));
 
-        // Act: list the tree, check out one path
+        // Act: list the tree, read the blobs of one path
         var entries = await client.ListTreeAsync(
             repository, commit, [".github/agents", "release-notes.md"], recursive: true, TestContext.Current.CancellationToken);
-        await client.CheckoutPathsAsync(repository, commit, [".github/agents"], TestContext.Current.CancellationToken);
+        var agentFile = entries.Single(entry => entry.Path == ".github/agents/copilot.md");
+        using var content = new MemoryStream();
+        await client.ReadBlobsAsync(repository, [agentFile], _ => new NonClosingStream(content), 1024, TestContext.Current.CancellationToken);
 
-        // Assert: only the requested path is on disk
+        // Assert: both paths were listed, the blob's bytes are the file's, and nothing was written to the work folder
         Assert.Equal(
             [".github/agents/copilot.md", "release-notes.md"],
             entries.Select(entry => entry.Path).Order());
         Assert.All(entries, entry => Assert.Equal("100644", entry.Mode));
-        Assert.Equal(
-            "one",
-            await File.ReadAllTextAsync(Path.Combine(repository, ".github", "agents", "copilot.md"), TestContext.Current.CancellationToken));
+        Assert.Equal("one", System.Text.Encoding.UTF8.GetString(content.ToArray()));
+        Assert.False(File.Exists(Path.Combine(repository, ".github", "agents", "copilot.md")));
         Assert.False(File.Exists(Path.Combine(repository, "release-notes.md")));
         Assert.False(File.Exists(Path.Combine(repository, "README.md")));
+    }
+
+    /// <summary>
+    ///     Test that real git hands over the bytes of a blob exactly as they are in the commit - CRLF
+    ///     and LF line endings, a lone carriage return, a NUL byte and a byte-order mark - even when the
+    ///     user's configuration asks for line-ending conversion and the repository's attributes ask for
+    ///     conversion and identifier expansion, because no checkout (and so no conversion) is involved.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_RealGit_ReadBlobs_DeliversExactBlobBytesDespiteConversionSettings()
+    {
+        // Arrange: binary-ish content committed first, then attributes that would convert it on a checkout
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var content = "crlf\r\nlf\nlone\rcr\0nul $Id$ \ufeffbom\r\n";
+        fixture.Commit(new Dictionary<string, string> { ["crlf-content.txt"] = content }, "content");
+        fixture.Commit(
+            new Dictionary<string, string> { [".gitattributes"] = "* text eol=crlf ident\n" }, "attributes");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var config = Path.Combine(fixture.Root, "autocrlf.gitconfig");
+        await File.WriteAllTextAsync(config, "[core]\n\tautocrlf = true\n\teol = crlf\n", TestContext.Current.CancellationToken);
+        var environment = new Dictionary<string, string?>(fixture.IsolationEnvironment) { ["GIT_CONFIG_GLOBAL"] = config };
+        var client = new GitRemoteClient(new GitRemoteOptions(
+            () => "git", Path.Combine(fixture.Root, "client-work"), ExtraEnvironment: environment,
+            ListTimeout: TimeSpan.FromSeconds(60), FetchTimeout: TimeSpan.FromSeconds(120)));
+        var target = new GitRemoteTarget(fixture.RemotePath, GitTransport.File);
+        var repository = Path.Combine(fixture.Root, "fetched");
+        await client.InitRepositoryAsync(repository, TestContext.Current.CancellationToken);
+        var commit = await client.FetchTagAsync(target, repository, "v1.0.0", TestContext.Current.CancellationToken);
+        var entry = (await client.ListTreeAsync(repository, commit, ["crlf-content.txt"], recursive: true, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        using var received = new MemoryStream();
+        await client.ReadBlobsAsync(repository, [entry], _ => new NonClosingStream(received), 1024, TestContext.Current.CancellationToken);
+
+        // Assert: byte for byte what the commit holds (the blob git itself reports), not converted or expanded
+        Assert.Equal(System.Text.Encoding.UTF8.GetBytes(content), received.ToArray());
+        Assert.Equal(entry.Size!.Value, received.Length);
+    }
+
+    /// <summary>
+    ///     A stream wrapper that forwards writes but does not close the stream underneath, so a test
+    ///     can read what was written after the client disposes its destination.
+    /// </summary>
+    /// <param name="inner">The stream that receives the bytes and stays open.</param>
+    private sealed class NonClosingStream(Stream inner) : Stream
+    {
+        /// <inheritdoc />
+        public override bool CanRead => false;
+
+        /// <inheritdoc />
+        public override bool CanSeek => false;
+
+        /// <inheritdoc />
+        public override bool CanWrite => true;
+
+        /// <inheritdoc />
+        public override long Length => inner.Length;
+
+        /// <inheritdoc />
+        public override long Position
+        {
+            get => inner.Position;
+            set => throw new NotSupportedException();
+        }
+
+        /// <inheritdoc />
+        public override void Flush() => inner.Flush();
+
+        /// <inheritdoc />
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        /// <inheritdoc />
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        /// <inheritdoc />
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        /// <inheritdoc />
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+
+        /// <inheritdoc />
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            inner.WriteAsync(buffer, cancellationToken);
     }
 
     /// <summary>
@@ -111,8 +197,11 @@ public sealed class GitRemoteClientIntegrationTests
         var failure = await Assert.ThrowsAsync<GitRemoteException>(
             () => client.ListTagsAsync(target, "refs/tags/*", TestContext.Current.CancellationToken));
 
-        // Assert: git said the transport is not allowed, and nothing was run
-        Assert.Contains("not allowed", failure.Message, StringComparison.OrdinalIgnoreCase);
+        // Assert: git refused the transport (a failure with a fixed message that repeats neither the address nor
+        // git's text), and nothing was run
+        Assert.Equal(GitFailureKind.Other, failure.Kind);
+        Assert.Equal("git ls-remote failed (exit code 128).", failure.Message);
+        Assert.DoesNotContain("ext::", failure.Message, StringComparison.Ordinal);
         Assert.False(File.Exists(proof));
     }
 
@@ -152,6 +241,40 @@ public sealed class GitRemoteClientIntegrationTests
                 Environment.SetEnvironmentVariable(name, value);
             }
         }
+    }
+
+    /// <summary>
+    ///     Test that a repository created by the client has no hooks even when the user's environment
+    ///     names a template directory that installs one into every new repository: plain git with that
+    ///     template does install it (the control), the client's repository does not get it.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_RealGit_InitWithHostileTemplate_CreatesRepositoryWithoutHooks()
+    {
+        // Arrange: a template directory with a hook, named by the user's environment
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var template = Path.Combine(fixture.Root, "hostile-template");
+        Directory.CreateDirectory(Path.Combine(template, "hooks"));
+        await File.WriteAllTextAsync(
+            Path.Combine(template, "hooks", "post-checkout"), "#!/bin/sh\necho ran\n", TestContext.Current.CancellationToken);
+        var environment = new Dictionary<string, string?>(fixture.IsolationEnvironment) { ["GIT_TEMPLATE_DIR"] = template };
+        var client = new GitRemoteClient(new GitRemoteOptions(
+            () => "git", Path.Combine(fixture.Root, "client-work"), ExtraEnvironment: environment,
+            FetchTimeout: TimeSpan.FromSeconds(120)));
+
+        // Control: plain git given that template installs the hook, so the test is meaningful
+        var control = Path.Combine(fixture.Root, "control");
+        fixture.Git(fixture.Root, "init", "-q", "--template=" + template, control);
+        Assert.True(File.Exists(Path.Combine(control, ".git", "hooks", "post-checkout")));
+
+        // Act
+        var repository = Path.Combine(fixture.Root, "fetched");
+        await client.InitRepositoryAsync(repository, TestContext.Current.CancellationToken);
+
+        // Assert: a repository without the hook (it may have no hooks folder at all)
+        var hooks = Path.Combine(repository, ".git", "hooks");
+        Assert.False(Directory.Exists(hooks) && Directory.EnumerateFileSystemEntries(hooks).Any());
+        Assert.True(Directory.Exists(Path.Combine(repository, ".git")));
     }
 
     /// <summary>

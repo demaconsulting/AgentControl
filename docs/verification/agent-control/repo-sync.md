@@ -128,8 +128,9 @@ zip, computed from the handle its entries are read from, and a folder reader rep
 supplied (or none). This scenario is verified by the `PackageContentExtractor` unit tests (see their unit
 verification design), with `ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries` and
 `DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull` cited directly at the
-subsystem level, covering `AgentControl-RepoSync-ContentIdentity` (child:
-`AgentControl-PackageContentExtractor-ReaderContentIdentity`).
+subsystem level, covering `AgentControl-RepoSync-ContentIdentity` (children:
+`AgentControl-PackageContentExtractor-ReaderContentIdentity`, `AgentControl-PackageContentExtractor-ZipReaderReleasesHandleOnFailure`,
+`AgentControl-PackageContentExtractor-FolderReaderIdentity` and `AgentControl-PackageContentExtractor-FolderReaderNoIdentity`).
 
 **RepoSync_LayoutRoot_ReadsOnlyTheLayoutOfACheckedOutFolder**: A folder shaped like a checked-out repository - the
 layout plus `.git`, `.github/workflows`, a README and source files - is opened with `OpenLayoutRoot`: only the four
@@ -144,6 +145,6 @@ managed folder, in place of `.github`, or as `release-notes.md` is refused. This
 `DirectoryPackageContentReader_OpenLayoutRoot_JunctionOutsideLayoutIgnoredInsideLayoutRefused` and
 `DirectoryPackageContentReader_OpenLayoutRoot_SymlinkOutsideLayoutIgnoredInsideLayoutRefused` (the symbolic-link cases
 skip where the operating system does not let the test create links; the junction case runs on Windows, the symbolic-link
-cases on Linux and macOS), covering `AgentControl-RepoSync-LayoutRoot` (children:
-`AgentControl-PackageContentExtractor-ReadLayoutRoot`, `AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout`
-and `AgentControl-PackageContentExtractor-ExcludeGitFolder`).
+cases on Linux and macOS), covering `AgentControl-RepoSync-LayoutRoot` (children: every
+`AgentControl-PackageContentExtractor-*` requirement of the layout root, from `ReadLayoutRoot` to
+`RefuseLinkAsRootFile`, and `AgentControl-PackageContentExtractor-ExcludeGitFolder`).

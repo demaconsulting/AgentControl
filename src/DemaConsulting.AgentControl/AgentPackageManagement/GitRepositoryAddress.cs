@@ -318,7 +318,7 @@ internal sealed partial class GitRepositoryAddress
         var slash = rest.IndexOf('/', StringComparison.Ordinal);
         if (slash <= 0 || slash == rest.Length - 1)
         {
-            return "The repository address must include a host and a path, for example https://host/org/repo.git.";
+            return "The repository address must include a host and a path after the scheme, in the form https://<host>/<path>.";
         }
 
         var authority = rest[..slash];

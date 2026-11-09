@@ -4,6 +4,8 @@
 # PackageContentIdentity computes, formats and compares the content identity of an agent
 # package: the short text a repo's pin records to name exactly which bytes a package version
 # delivered, so that a version republished with different content can be told apart.
+#
+# Each requirement states one observable outcome and is linked to the test that shows it.
 
 sections:
   - title: PackageContentIdentity Unit Requirements
@@ -12,41 +14,112 @@ sections:
         title: >-
           The PackageContentIdentity class shall compute the identity of a stream's content as the
           SHA-256 hash of its bytes, written as lower-case hexadecimal after a short prefix naming
-          the algorithm, without closing the stream, and shall reject a null stream.
+          the algorithm.
         justification: |
           A cryptographic hash makes an accidental or deliberate change of a package file
-          detectable, and leaving the stream open lets the same handle that was hashed be read
-          afterwards, so the identity always describes the bytes that are used.
+          detectable, and the written form names the algorithm so identities of different kinds are
+          never mistaken for each other.
         tests:
           - PackageContentIdentity_ComputeSha256_KnownContent_ReturnsPrefixedLowerCaseHash
+
+      - id: AgentControl-PackageContentIdentity-Sha256StreamOpen
+        title: >-
+          The PackageContentIdentity class shall leave a stream open after computing its identity.
+        justification: |
+          The zip reader hashes and then reads the very same handle, so the identity always
+          describes the bytes that are used; closing the stream would force a second open of the
+          file, which could be replaced in between.
+        tests:
+          - PackageContentIdentity_ComputeSha256_Stream_StaysOpenAtEndAndHashesFromCurrentPosition
+
+      - id: AgentControl-PackageContentIdentity-Sha256RejectNull
+        title: >-
+          The PackageContentIdentity class shall reject a null stream when computing an identity.
+        justification: |
+          A missing stream is a programming error; failing at once keeps it from becoming an
+          identity of nothing.
+        tests:
           - PackageContentIdentity_ComputeSha256_NullStream_ThrowsArgumentNullException
 
       - id: AgentControl-PackageContentIdentity-Format
         title: >-
           The PackageContentIdentity class shall format a Git commit hash as a lower-case
-          identity of its own kind, shall refuse a value that is not a well-formed commit hash,
-          and shall describe an identity in a short form for messages, or as none when absent.
+          identity of its own kind.
         justification: |
           A source that delivers a tag of a Git repository names its content by the commit the tag
           points to; the identity form must be unambiguous (the kind is part of the text) so that
-          identities of different kinds are never mistaken for each other, and malformed values must
-          never reach a pin. Messages need a form that tells two identities apart without printing
-          a whole hash.
+          identities of different kinds are never mistaken for each other.
         tests:
           - PackageContentIdentity_FromGitCommit_ValidHash_ReturnsLowerCasePrefixedIdentity
+
+      - id: AgentControl-PackageContentIdentity-FormatRejectMalformed
+        title: >-
+          The PackageContentIdentity class shall refuse a value that is not a well-formed commit
+          hash, and a null value, when formatting a Git identity.
+        justification: |
+          A malformed value must never reach a pin, where it would be compared with every later
+          delivery of the version.
+        tests:
           - PackageContentIdentity_FromGitCommit_MalformedHash_ThrowsArgumentException
-          - PackageContentIdentity_Describe_LongAndMissingIdentities_ReturnsShortForm
+          - PackageContentIdentity_FromGitCommit_NullCommit_ThrowsArgumentNullException
+
+      - id: AgentControl-PackageContentIdentity-Describe
+        title: >-
+          The PackageContentIdentity class shall describe an identity in a short form that still
+          tells two identities apart, and shall never repeat an identity of an unrecognized shape
+          in full.
+        justification: |
+          Messages need a form that tells two identities apart without printing a whole hash, and
+          an unrecognized value must not be echoed.
+        tests:
+          - PackageContentIdentity_Describe_LongIdentity_ReturnsShortForm
+          - PackageContentIdentity_Describe_UnrecognizedShape_CutsAfterFirstColon
+
+      - id: AgentControl-PackageContentIdentity-DescribeNone
+        title: >-
+          The PackageContentIdentity class shall describe an absent identity as none.
+        justification: |
+          A pin made before identities were recorded has none, and a message about it must say so
+          plainly.
+        tests:
+          - PackageContentIdentity_Describe_MissingIdentity_ReturnsNone
 
       - id: AgentControl-PackageContentIdentity-Compare
         title: >-
-          The PackageContentIdentity class shall compare a recorded identity with the identity of
-          the content now delivered and report that there is nothing to compare when either is
-          missing, that they are the same when equal (without regard to the letter case of the
-          hash), and that the content changed when they differ, including when they are of
-          different kinds.
+          The PackageContentIdentity class shall report that there is nothing to compare when
+          either the recorded identity or the identity of the content now delivered is missing.
         justification: |
-          The decision to warn about a republished version rests entirely on this comparison: a
-          missing identity (a pin made before identities were recorded, or a source that reports
-          none) must never raise a false alarm, while any real difference must always be reported.
+          A missing identity (a pin made before identities were recorded, or a source that reports
+          none) must never raise a false alarm about a republished version.
         tests:
-          - PackageContentIdentity_Compare_PinnedAndActual_ReturnsExpectedOutcome
+          - PackageContentIdentity_Compare_EitherIdentityMissing_IsNotComparable
+
+      - id: AgentControl-PackageContentIdentity-CompareSame
+        title: >-
+          The PackageContentIdentity class shall report that two identities are the same when they
+          are equal, without regard to the letter case of the hash.
+        justification: |
+          A hand-edited pin that differs only in letter case must not be reported as changed
+          content.
+        tests:
+          - PackageContentIdentity_Compare_EqualIdentities_IsSameIgnoringCase
+
+      - id: AgentControl-PackageContentIdentity-CompareChanged
+        title: >-
+          The PackageContentIdentity class shall report that the content changed when two
+          identities of the same kind differ.
+        justification: |
+          Any real difference between the recorded and the delivered content must always be
+          reported, because it is the evidence that a version was republished.
+        tests:
+          - PackageContentIdentity_Compare_DifferentValues_IsChanged
+
+      - id: AgentControl-PackageContentIdentity-CompareDifferentKinds
+        title: >-
+          The PackageContentIdentity class shall report that the content changed when two
+          identities are of different kinds.
+        justification: |
+          The same version delivered by a different kind of source (a zip hash now, a Git commit
+          before) is not the content the pin was made from.
+        tests:
+          - PackageContentIdentity_Compare_DifferentKinds_IsChanged

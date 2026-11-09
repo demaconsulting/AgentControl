@@ -83,9 +83,16 @@ receives no calls. This scenario is tested by
 `PackageSourceRegistry_PinToRemovedSource_ThrowsAndContactsNoOtherSource`, covering
 `AgentControl-PackageSourceRegistry-NoCrossSourceFallback`.
 
-**PackageSourceRegistry_Create_GitSource_ResolvesGitProviderAndFailsClosedWhenInvalid**: The default factory resolves a
-valid Git source to a `GitSourceProvider` built with the given options, a Git source whose address is a remote-helper
-form fails with an `InvalidOperationException` when it is resolved (not when the registry is built), and an alias that is
-not configured is still an error. This scenario is tested by
-`PackageSourceRegistry_Create_GitSource_ResolvesGitProviderAndFailsClosedWhenInvalid`, covering
+**PackageSourceRegistry_Create_GitSource_ResolvesGitProviderWithGivenOptionsOrDefaults**: The default factory resolves a
+valid Git source to a `GitSourceProvider` built with the given options (the provider keeps its fetched packages under
+the cache root that was given, so the options demonstrably reach it) and, when no options are given, with the defaults
+(the per-user default cache root). This scenario is tested by
+`PackageSourceRegistry_Create_GitSource_ResolvesGitProviderWithGivenOptionsOrDefaults`, covering
 `AgentControl-PackageSourceRegistry-GitSourceResolved`.
+
+**PackageSourceRegistry_Create_GitSourceWithInvalidSettings_FailsWhenResolvedNotWhenBuilt**: A Git source whose address
+is
+a remote-helper form fails with an `InvalidOperationException` when it is resolved (not when the registry is built),
+the valid Git source beside it still resolves, and an alias that is not configured is still an error. This scenario is
+tested by `PackageSourceRegistry_Create_GitSourceWithInvalidSettings_FailsWhenResolvedNotWhenBuilt`, covering
+`AgentControl-PackageSourceRegistry-GitSourceInvalidFailsWhenResolved`.

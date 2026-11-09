@@ -22,7 +22,9 @@ using System.Diagnostics;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Tests.GitIntegration;
+using DemaConsulting.AgentControl.Tests.PackageCredentials;
 
+// cspell:ignore CONOUT ufeff gitx
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 
 /// <summary>
@@ -44,6 +46,11 @@ public sealed class GitSourceProviderTests : IDisposable
     ///     A sentinel SHA-1 object id.
     /// </summary>
     private const string Sha = "0123456789abcdef0123456789abcdef01234567";
+
+    /// <summary>
+    ///     A second sentinel SHA-1 object id.
+    /// </summary>
+    private const string OtherSha = "fedcba9876543210fedcba9876543210fedcba98";
 
     /// <summary>
     ///     The stubs to delete after a test.
@@ -240,6 +247,7 @@ public sealed class GitSourceProviderTests : IDisposable
         Assert.Contains(messagePart, failure.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("'Repo'", failure.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("Invalid username or password", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("example.invalid", failure.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -250,7 +258,8 @@ public sealed class GitSourceProviderTests : IDisposable
     public async Task GitSourceProvider_OtherFailures_AreReportedClearly()
     {
         // Arrange
-        var other = NewStub().Respond("ls-remote", standardError: "fatal: detected dubious ownership", exitCode: 128);
+        var other = NewStub().Respond(
+            "ls-remote", standardError: "fatal: detected dubious ownership in repository at '/srv/private/repo.git'", exitCode: 128);
         var slow = NewStub().Respond("ls-remote", sleepSeconds: 30);
 
         // Act
@@ -268,7 +277,8 @@ public sealed class GitSourceProviderTests : IDisposable
 
         // Assert
         Assert.IsNotType<PackageSourceAccessException>(unsafeFailure);
-        Assert.Contains("dubious ownership", unsafeFailure.Message, StringComparison.Ordinal);
+        Assert.Contains("owned by another user", unsafeFailure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("/srv/private", unsafeFailure.Message, StringComparison.Ordinal);
         Assert.Equal(PackageSourceFailureKind.TimedOut, timedOut.Kind);
         Assert.Contains("Settings", missing.Message, StringComparison.Ordinal);
     }
@@ -294,6 +304,78 @@ public sealed class GitSourceProviderTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that no versions are offered for a package ID other than the configured one, and that
+    ///     git is not run to find that out.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_ListVersions_OtherPackageId_ReturnsEmptyWithoutRunningGit()
+    {
+        // Arrange: a source for contoso-agents over a remote that does have tags
+        var stub = NewStub().Respond("ls-remote", $"{Sha}\trefs/tags/v1.0.0\n");
+        var provider = new GitSourceProvider(Definition(), new GitSourceOptions(() => stub.Path, NewFolder()));
+
+        // Act
+        var versions = await provider.ListVersionsAsync("some-other-package", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Empty(versions);
+        Assert.Empty(stub.ReadInvocations());
+    }
+
+    /// <summary>
+    ///     Test that two sources over different repositories keep their commits in different folders
+    ///     under the same cache root, and that a source keeps the same folder for the same
+    ///     repository however its address is capitalized.
+    /// </summary>
+    [Fact]
+    public void GitSourceProvider_RepositoryCacheFolder_DiffersForDifferentRepositories()
+    {
+        // Arrange: three sources sharing one cache root
+        var cacheRoot = NewFolder();
+        var stub = NewStub();
+        var options = new GitSourceOptions(() => stub.Path, cacheRoot);
+        var first = Definition();
+        var second = Definition();
+        second.Location = "https://example.invalid/org/other.git";
+        var sameAsFirst = Definition();
+        sameAsFirst.Location = "HTTPS://EXAMPLE.INVALID/org/repo.git";
+
+        // Act
+        var firstFolder = new GitSourceProvider(first, options).RepositoryCacheFolder;
+        var secondFolder = new GitSourceProvider(second, options).RepositoryCacheFolder;
+        var sameFolder = new GitSourceProvider(sameAsFirst, options).RepositoryCacheFolder;
+
+        // Assert: different repositories never share a folder, and one repository always has the same one
+        Assert.NotEqual(firstFolder, secondFolder);
+        Assert.Equal(firstFolder, sameFolder);
+        Assert.StartsWith(Path.GetFullPath(cacheRoot), firstFolder, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that an ssh server whose host key is not trusted yet is reported as unreachable with
+    ///     the instruction to connect once with ssh and accept the host key, without the address.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_GitFailure_UntrustedHostKey_TellsHowToTrustIt()
+    {
+        // Arrange
+        var stub = NewStub().Respond(
+            "ls-remote", standardError: "Host key verification failed.\nfatal: Could not read from remote repository.", exitCode: 128);
+        var definition = Definition();
+        definition.Location = "git@example.invalid:org/repo.git";
+        var provider = new GitSourceProvider(definition, new GitSourceOptions(() => stub.Path, NewFolder()));
+
+        // Act
+        var failure = await Assert.ThrowsAsync<PackageSourceAccessException>(
+            () => provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken));
+
+        // Assert
+        Assert.Equal(PackageSourceFailureKind.Unreachable, failure.Kind);
+        Assert.Contains("Connect once with ssh from a terminal and accept the host key", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("example.invalid", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that acquiring a package this source did not report is refused before git runs.
     /// </summary>
     [Fact]
@@ -315,6 +397,157 @@ public sealed class GitSourceProviderTests : IDisposable
         await Assert.ThrowsAsync<ArgumentNullException>(
             () => provider.AcquireAsync(null!, TestContext.Current.CancellationToken));
         Assert.Empty(stub.ReadInvocations());
+    }
+
+    /// <summary>
+    ///     Test that two tags that name the same version (they differ only in the letter case of the
+    ///     prerelease, which version comparison ignores) keep the smallest tag name and log a warning.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_ListVersions_TwoTagsSameVersion_KeepsSmallestTagAndWarns()
+    {
+        // Arrange: the remote reports two tags for one version
+        var stub = NewStub().Respond(
+            "ls-remote", $"{Sha}\trefs/tags/v1.0.0-beta\n{OtherSha}\trefs/tags/v1.0.0-BETA\n");
+        var logger = new ListLogger();
+        var provider = new GitSourceProvider(Definition(), new GitSourceOptions(() => stub.Path, NewFolder(), Logger: logger));
+
+        // Act
+        var versions = await provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
+
+        // Assert: the smaller name in ordinal order is kept, and the choice is logged
+        var kept = Assert.Single(versions);
+        Assert.Equal("v1.0.0-BETA", kept.Location);
+        Assert.Equal(OtherSha, kept.Revision);
+        Assert.Contains(logger.Snapshot(), line => line.Contains("same version", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     Test that a package whose tag the repository lists, but at another commit than the package
+    ///     names (a forged or stale listing entry), is refused before anything is fetched.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_ListedTagAtOtherCommit_IsRefusedBeforeFetching()
+    {
+        // Arrange: the repository lists v1.0.0 at Sha; the package claims another commit
+        var stub = NewStub().Respond("ls-remote", $"{Sha}\trefs/tags/v1.0.0\n");
+        var provider = new GitSourceProvider(Definition(), new GitSourceOptions(() => stub.Path, NewFolder()));
+        Assert.True(PackageVersion.TryParseStrict("1.0.0", out var version));
+        var forged = new DiscoveredPackage("contoso-agents", version!, "v1.0.0", "Repo", OtherSha);
+
+        // Act
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(forged, TestContext.Current.CancellationToken));
+
+        // Assert: refused for the right reason, and only the listing ran - no repository was created or fetched
+        Assert.Contains("Refresh the list", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(["ls-remote"], stub.ReadInvocations().Select(i => i.Command));
+    }
+
+    /// <summary>
+    ///     Test that a package for a version the repository does not list at all - another tag that
+    ///     matches the pattern, never listed - is refused before anything is fetched.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_VersionNotListed_IsRefusedBeforeFetching()
+    {
+        // Arrange: the repository lists only v1.0.0; the package names v2.0.0, which matches the pattern
+        var stub = NewStub().Respond("ls-remote", $"{Sha}\trefs/tags/v1.0.0\n");
+        var provider = new GitSourceProvider(Definition(), new GitSourceOptions(() => stub.Path, NewFolder()));
+        Assert.True(PackageVersion.TryParseStrict("2.0.0", out var version));
+        var forged = new DiscoveredPackage("contoso-agents", version!, "v2.0.0", "Repo", OtherSha);
+
+        // Act
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(forged, TestContext.Current.CancellationToken));
+
+        // Assert
+        Assert.Contains("not offered by the repository", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(["ls-remote"], stub.ReadInvocations().Select(i => i.Command));
+    }
+
+    /// <summary>
+    ///     Test that a package whose tag name is not the tag the repository lists for that version
+    ///     (the version is listed under a smaller tag name) is refused before anything is fetched.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_TagThatIsNotTheListedOneForTheVersion_IsRefusedBeforeFetching()
+    {
+        // Arrange: both spellings are tags, but only v1.0.0-BETA is listed for the version
+        var stub = NewStub().Respond(
+            "ls-remote", $"{Sha}\trefs/tags/v1.0.0-beta\n{OtherSha}\trefs/tags/v1.0.0-BETA\n");
+        var provider = new GitSourceProvider(Definition(), new GitSourceOptions(() => stub.Path, NewFolder()));
+        Assert.True(PackageVersion.TryParseStrict("1.0.0-beta", out var version));
+        var forged = new DiscoveredPackage("contoso-agents", version!, "v1.0.0-beta", "Repo", Sha);
+
+        // Act
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(forged, TestContext.Current.CancellationToken));
+
+        // Assert
+        Assert.Contains("not offered by the repository", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(["ls-remote"], stub.ReadInvocations().Select(i => i.Command));
+    }
+
+    /// <summary>
+    ///     Test which path components are safe to create on every file system and which name the
+    ///     repository metadata folder in any of its spellings.
+    /// </summary>
+    [Theory]
+    [InlineData("agents", true, false)]
+    [InlineData("a b", true, false)]
+    [InlineData("caf\u00e9.md", true, false)]
+    [InlineData("release-notes.md", true, false)]
+    [InlineData(".gitattributes", true, false)]
+    [InlineData(".gitignore", true, false)]
+    [InlineData("CON", false, false)]
+    [InlineData("con.md", false, false)]
+    [InlineData("Nul.txt", false, false)]
+    [InlineData("COM1", false, false)]
+    [InlineData("lpt9.x", false, false)]
+    [InlineData("CONOUT$", false, false)]
+    [InlineData("COM10", true, false)]
+    [InlineData("console.md", true, false)]
+    [InlineData("a:b", false, false)]
+    [InlineData("a:stream", false, false)]
+    [InlineData("a\\b", false, false)]
+    [InlineData("a*b", false, false)]
+    [InlineData("a?b", false, false)]
+    [InlineData("a\"b", false, false)]
+    [InlineData("a<b", false, false)]
+    [InlineData("a>b", false, false)]
+    [InlineData("a|b", false, false)]
+    [InlineData("ends.", false, false)]
+    [InlineData("ends ", false, false)]
+    [InlineData("tab\tinside", false, false)]
+    [InlineData("", false, false)]
+    [InlineData(".", false, false)]
+    [InlineData("..", false, false)]
+    [InlineData(".git", true, true)]
+    [InlineData(".GIT", true, true)]
+    [InlineData(".Git", true, true)]
+    [InlineData("git~1", true, true)]
+    [InlineData("GIT~12", true, true)]
+    [InlineData(".g\u200cit", true, true)]
+    [InlineData(".\u200eGit", true, true)]
+    [InlineData("\ufeff.git", true, true)]
+    [InlineData(".git.", false, true)]
+    [InlineData("git~", true, false)]
+    [InlineData(".gitx", true, false)]
+    [InlineData("a.git", true, false)]
+    public void GitSourceProvider_PathComponentRules_ClassifyUnsafeNamesAndGitFolderSpellings(
+        string component, bool safe, bool gitFolder)
+    {
+        // Arrange: one component of a repository path
+
+        // Act
+        var isSafe = GitSourceProvider.IsSafePathComponent(component);
+        var isGitFolder = GitSourceProvider.IsGitFolderName(component);
+
+        // Assert: ".git." is a git-folder spelling (NTFS ignores the trailing dot) and is not safe either; the names
+        // that only spell the git folder in an unusual way are safe in themselves, which is why the layout check asks both
+        Assert.Equal(safe, isSafe);
+        Assert.Equal(gitFolder, isGitFolder);
     }
 
     /// <summary>

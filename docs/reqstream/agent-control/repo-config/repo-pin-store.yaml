@@ -80,13 +80,19 @@ sections:
         title: >-
           The RepoPinStore class shall reject a pin file that declares a newer schema version
           than it supports, with a message telling the user to update, and shall leave such a
-          file unchanged instead of overwriting it.
+          file unchanged instead of overwriting it, also when a property it knows has another
+          type in that newer file.
         justification: |
           Fields of a newer schema may mean something different; interpreting them, or
           overwriting the file, could lose or corrupt a pin written by a newer tool version.
         tests:
           - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage
           - RepoPinStore_Save_ExistingNewerSchemaFile_ThrowsAndLeavesFileUnchanged
+          - RepoPinStore_Load_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsUnsupportedPinSchemaException
+          - RepoPinStore_Save_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsAndLeavesFileUnchanged
+          - RepoPinStore_ProbeSchemaVersion_TextOrOversizedOrDifferentlyCasedVersion_IsReadAsNewer
+          - RepoPinStore_ProbeSchemaVersion_NoUsableVersion_ReturnsNullAndInvalidJsonThrows
+          - RepoPinStore_CurrentSchemaWithIncompatibleKnownPropertyType_IsCorruptAndReplacedOnSave
 
       - id: AgentControl-RepoPinStore-SaveContentIdentity
         title: >-
@@ -123,3 +129,4 @@ sections:
         tests:
           - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource
           - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage
+          - RepoPinStore_Save_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsAndLeavesFileUnchanged

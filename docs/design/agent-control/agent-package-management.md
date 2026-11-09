@@ -53,7 +53,9 @@ unit documents and are folded into this subsystem-level description. The subsyst
   (the connection test, the Select Package window, the card's background check) and whose message never
   contains a secret or more of the server's address than its scheme, host and port.
 - *Content identity.* The reader that `AcquireAsync` returns reports a `ContentIdentity` (see *Content identity*
-  below); `null` means the provider cannot name one, which is never a change.
+  below) in the form of its source: `sha256:{hex}` (the SHA-256 of the zip or `.nupkg` file) for a zip folder or
+  NuGet source and `git-commit:{hex}` (the commit a tag pointed to) for a Git source; identities of different forms
+  never compare as the same content. `null` means the provider cannot name one, which is never a change.
 
 **SignatureVerificationSupport.IsSupported**: Tells whether package signatures can be verified here.
 
@@ -217,14 +219,18 @@ hexadecimal SHA-256 of the package file (`AgentControl-AgentPackageManagement-Co
   submodules and filters are off and only the transport of the configured address is allowed - all enforced by
   `GitRemoteClient` per command. The user's own credential helper and ssh keys supply the sign-in; AgentControl
   stores none and the address may not contain one.
-- *Only the layout is read.* The tree of the fetched commit is examined *before* anything is checked out: a symbolic
+- *Only the layout is read.* The tree of the fetched commit is examined *before* anything is written: a symbolic
   link, a submodule or a `.git` entry in the layout (the four managed folders, `release-notes.md`, `AGENTS.md`, below
-  the optional sub-folder) is refused, and so are two entries whose names differ only in letter case or Unicode form
-  (a case-insensitive or normalizing file system would merge them, and the cache may be read on one whatever system
-  wrote it); only the layout paths are checked out, `.git` is deleted and verified gone - if it cannot be removed the
+  the optional sub-folder) is refused, so is a managed folder that is not a folder or a root file that is not a file, so
+  is a name that is not safe on every file system, and so are two entries whose names differ only in letter case or
+  Unicode form (a case-insensitive or normalizing file system would merge them, and the cache may be read on one
+  whatever system wrote it). The validated blobs are then written by AgentControl itself, byte for byte, with no
+  checkout - a checkout would run whatever filter driver the repository's attributes select from the user's own git
+  configuration and would convert the content - `.git` is deleted and verified gone - if it cannot be removed the
   acquisition fails and nothing is published - and the result is read
   through `DirectoryPackageContentReader.OpenLayoutRoot`, which lists and reads only those paths. Links elsewhere in the
-  repository are never checked out and so never matter.
+  repository are never written and so never matter. A package is fetched only if the repository lists its version at its
+  tag and commit when the fetch starts.
 - *Cache.* `{CacheRoot}/{addressKey}/{commit}` with a completeness marker, written to a temporary folder and renamed;
   the five most recently used commits per repository are kept. The key is a hash of the address, so two sources never
   share a folder, and a commit never needs fetching twice.

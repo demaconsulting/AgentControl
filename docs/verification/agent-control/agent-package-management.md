@@ -7,7 +7,8 @@ test suites (`PackageSourceTests.cs`, `PackageVersionTests.cs`, `PackageVersionC
 `PackageSourceRegistryTests.cs`, `ZipFolderSourceProviderTests.cs`,
 `NuGetSourceProviderTests.cs`, `NuGetSourceProviderServerTests.cs`, `NuGetSourceProviderSignatureTests.cs`,
 `NuGetSourceProviderSignedPackageTests.cs`, `SignatureVerificationSupportTests.cs`,
-`PackageContentIdentityTests.cs`, `GitRepositoryAddressTests.cs`, `GitTagPatternTests.cs`, `GitSourceProviderTests.cs` and
+`PackageContentIdentityTests.cs`, `GitRepositoryAddressTests.cs`, `GitTagPatternTests.cs`, `GitSourceProviderTests.cs`
+and
 `GitSourceProviderIntegrationTests.cs`), each of which is documented
 in its own unit-level verification
 design, plus `PackageSourceDefinitionTests.cs` and `PackageSourceServerLocationTests.cs`, which verify the
@@ -290,13 +291,13 @@ the unit tests and covered by
 **AgentPackageManagement_ContentIdentity_ZipAndNuGetSourcesReportTheBytesTheyDeliver**: Through the registry, a zip
 source and a NuGet folder source each acquire a package and report a `sha256:` content identity; the NuGet identity
 is the same on a second acquisition, and a zip replaced under the same version (the file deleted and written again
-with other content) reports an identity that compares as changed. The identity of each kind is verified against an
-independently computed SHA-256 at the unit level. This scenario is tested by
-`AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip`, covering
-`AgentControl-AgentPackageManagement-ContentIdentity` (children: `AgentControl-PackageContentIdentity-Sha256`,
-`AgentControl-PackageContentIdentity-Format`, `AgentControl-PackageContentIdentity-Compare`,
-`AgentControl-ZipFolderSourceProvider-ReportContentIdentity` and
-`AgentControl-NuGetSourceProvider-ReportContentIdentity`).
+with other content) reports an identity that compares as changed. Each reported identity is asserted to equal the
+SHA-256 of the exact delivered file bytes, computed independently of the production hashing code. This scenario is
+tested by `AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip`,
+covering `AgentControl-AgentPackageManagement-ContentIdentity` (children: every
+`AgentControl-PackageContentIdentity-*` requirement, `AgentControl-ZipFolderSourceProvider-ReportContentIdentity`,
+`AgentControl-NuGetSourceProvider-ReportContentIdentity` and
+`AgentControl-NuGetSourceProvider-RefuseUnidentifiablePackage`).
 
 **AgentPackageManagement_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag**: Against a real local bare repository, the
 registry resolves a Git source, the version cache lists `v1.0.0` (annotated) and `v1.1.0` and reports that a newer

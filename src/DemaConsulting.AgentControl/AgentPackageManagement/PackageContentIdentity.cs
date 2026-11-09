@@ -112,6 +112,8 @@ internal static class PackageContentIdentity
     /// <param name="commit">The commit hash: 40 (SHA-1) or 64 (SHA-256 object format) hex digits,
     ///     in either case.</param>
     /// <returns>The identity with the hash lower-cased.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="commit"/> is
+    ///     <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="commit"/> is not 40 or 64
     ///     hex digits (an unchecked value would let a malformed identity into a pin).</exception>
     public static string FromGitCommit(string commit)
@@ -158,8 +160,9 @@ internal static class PackageContentIdentity
     /// <param name="identity">An identity as produced by this class; <see langword="null"/> or
     ///     empty when none is known.</param>
     /// <returns>The identity with its value cut to 12 characters (so two different identities can
-    ///     still be told apart), or <c>none</c> when no identity is known. An identity of an
-    ///     unrecognized shape is cut the same way after its last colon, never echoed in full.</returns>
+    ///     still be told apart), or <c>none</c> when no identity is known. The text is split at its
+    ///     first colon: what follows the first colon is the value that is cut, so an identity of an
+    ///     unrecognized shape is shortened the same way and never echoed in full.</returns>
     public static string Describe(string? identity)
     {
         if (string.IsNullOrWhiteSpace(identity))

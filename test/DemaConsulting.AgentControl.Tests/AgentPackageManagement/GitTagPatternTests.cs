@@ -101,15 +101,42 @@ public sealed class GitTagPatternTests
     }
 
     /// <summary>
-    ///     Test that a pattern longer than the limit is refused, and that a message never repeats the
-    ///     pattern text.
+    ///     Test that a pattern longer than the limit is refused, and that the message never repeats
+    ///     the pattern text.
     /// </summary>
     [Fact]
-    public void GitTagPattern_TryCreate_TooLongOrSecretLooking_IsRefusedWithoutEchoing()
+    public void GitTagPattern_TryCreate_TooLong_IsRefusedWithoutEchoing()
     {
-        // Act / Assert
-        Assert.NotNull(GitTagPattern.GetProblem(new string('a', 201) + "{version}"));
-        Assert.DoesNotContain("s3cr3t", GitTagPattern.GetProblem("s3cr3t token {version}")!, StringComparison.Ordinal);
+        // Arrange: a pattern one character over the 200-character limit
+        var text = new string('a', 192) + "{version}";
+        var atLimit = new string('a', 191) + "{version}";
+
+        // Act
+        var problem = GitTagPattern.GetProblem(text);
+
+        // Assert: refused without repeating the long text, while a pattern of exactly 200 characters is accepted
+        Assert.NotNull(problem);
+        Assert.DoesNotContain(text, problem, StringComparison.Ordinal);
+        Assert.Equal(200, atLimit.Length);
+        Assert.Null(GitTagPattern.GetProblem(atLimit));
+    }
+
+    /// <summary>
+    ///     Test that the message for a secret-looking pattern never repeats the pattern text.
+    /// </summary>
+    [Fact]
+    public void GitTagPattern_TryCreate_SecretLooking_IsRefusedWithoutEchoing()
+    {
+        // Arrange: a pattern that carries a secret and is refused (it contains a space)
+        var text = "s3cr3t token {version}";
+
+        // Act
+        var problem = GitTagPattern.GetProblem(text);
+
+        // Assert: refused, and neither the secret nor the complete pattern is repeated
+        Assert.NotNull(problem);
+        Assert.DoesNotContain("s3cr3t", problem, StringComparison.Ordinal);
+        Assert.DoesNotContain(text, problem, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -173,6 +200,67 @@ public sealed class GitTagPatternTests
     }
 
     /// <summary>
+    ///     Test that a tag whose version breaks strict Semantic Versioning 2.0 does not match: a
+    ///     leading zero in a numeric part or in a numeric prerelease identifier, an empty
+    ///     prerelease or identifier, a character outside letters, digits and hyphen in the
+    ///     prerelease, a missing or extra numeric part, and build metadata.
+    /// </summary>
+    [Theory]
+    [InlineData("v01.2.3")]
+    [InlineData("v1.02.3")]
+    [InlineData("v1.2.03")]
+    [InlineData("v00.0.0")]
+    [InlineData("v1.2.3-01")]
+    [InlineData("v1.2.3-alpha.01")]
+    [InlineData("v1.2.3-")]
+    [InlineData("v1.2.3-.a")]
+    [InlineData("v1.2.3-a..b")]
+    [InlineData("v1.2.3-a_b")]
+    [InlineData("v1.2.3+meta")]
+    [InlineData("v1.2.3-rc.1+meta")]
+    [InlineData("v1.2")]
+    [InlineData("v1.2.3.4")]
+    [InlineData("v1..3")]
+    [InlineData("v+1.2.3")]
+    public void GitTagPattern_TryMatch_NotStrictSemVer_DoesNotMatch(string tag)
+    {
+        // Arrange: a pattern that adds only the letter v
+        Assert.True(GitTagPattern.TryCreate("v{version}", out var pattern, out _));
+
+        // Act
+        var matched = pattern!.TryMatch(tag, out var version);
+
+        // Assert: not a package version
+        Assert.False(matched);
+        Assert.Null(version);
+    }
+
+    /// <summary>
+    ///     Test that versions that are strict Semantic Versioning 2.0 are matched, including a zero
+    ///     part, a single <c>0</c> as a numeric prerelease identifier, hyphens inside identifiers and
+    ///     an alphanumeric identifier that starts with a zero.
+    /// </summary>
+    [Theory]
+    [InlineData("v0.0.0", "0.0.0")]
+    [InlineData("v1.0.0-0", "1.0.0-0")]
+    [InlineData("v1.0.0-0.3.7", "1.0.0-0.3.7")]
+    [InlineData("v1.0.0-x.7.z.92", "1.0.0-x.7.z.92")]
+    [InlineData("v1.0.0-alpha-1", "1.0.0-alpha-1")]
+    [InlineData("v1.0.0-01a", "1.0.0-01a")]
+    public void GitTagPattern_TryMatch_StrictSemVer_Matches(string tag, string expected)
+    {
+        // Arrange
+        Assert.True(GitTagPattern.TryCreate("v{version}", out var pattern, out _));
+
+        // Act
+        var matched = pattern!.TryMatch(tag, out var version);
+
+        // Assert
+        Assert.True(matched);
+        Assert.Equal(expected, version!.ToString());
+    }
+
+    /// <summary>
     ///     Test that the listing glob is <c>refs/tags/</c> plus the literal text before the
     ///     placeholder plus a wildcard.
     /// </summary>
@@ -217,13 +305,109 @@ public sealed class GitTagPatternTests
     [InlineData("\u00e9", false)]
     [InlineData("", false)]
     [InlineData(null, false)]
-    public void GitTagPattern_IsSafeTagName_ChecksCharactersAndRefNameRules(string? name, bool expected) =>
-        Assert.Equal(expected, GitTagPattern.IsSafeTagName(name));
+    public void GitTagPattern_IsSafeTagName_ChecksCharactersAndRefNameRules(string? name, bool expected)
+    {
+        // Arrange: a tag name as a server might report it
+
+        // Act
+        var safe = GitTagPattern.IsSafeTagName(name);
+
+        // Assert
+        Assert.Equal(expected, safe);
+    }
 
     /// <summary>
-    ///     Test that a tag name longer than the limit is not safe.
+    ///     Test that a tag name longer than the 255-character limit is not safe, and one of exactly
+    ///     255 characters is.
     /// </summary>
     [Fact]
-    public void GitTagPattern_IsSafeTagName_TooLong_IsNotSafe() =>
-        Assert.False(GitTagPattern.IsSafeTagName(new string('a', 256)));
+    public void GitTagPattern_IsSafeTagName_TooLong_IsNotSafe()
+    {
+        // Arrange: names on both sides of the limit
+        var atLimit = new string('a', 255);
+        var overLimit = new string('a', 256);
+
+        // Act
+        var atLimitSafe = GitTagPattern.IsSafeTagName(atLimit);
+        var overLimitSafe = GitTagPattern.IsSafeTagName(overLimit);
+
+        // Assert
+        Assert.True(atLimitSafe);
+        Assert.False(overLimitSafe);
+    }
+
+    /// <summary>
+    ///     Test that a version whose tag would be exactly 255 characters is formatted, and one a
+    ///     character longer has no tag, instead of producing a name that could never be fetched.
+    /// </summary>
+    [Fact]
+    public void GitTagPattern_Format_PrereleaseAtAndOverTagLengthLimit_FormatsOrReturnsNull()
+    {
+        // Arrange: "v" + "1.2.3-" is 7 characters, so a 248-character prerelease makes 255
+        Assert.True(GitTagPattern.TryCreate("v{version}", out var pattern, out _));
+        Assert.True(PackageVersion.TryParseStrict("1.2.3-" + new string('a', 248), out var atLimit));
+        Assert.True(PackageVersion.TryParseStrict("1.2.3-" + new string('a', 249), out var overLimit));
+
+        // Act
+        var formattedAtLimit = pattern!.Format(atLimit!);
+        var formattedOverLimit = pattern.Format(overLimit!);
+
+        // Assert
+        Assert.Equal(255, formattedAtLimit!.Length);
+        Assert.Null(formattedOverLimit);
+    }
+
+    /// <summary>
+    ///     Test that a long pattern and a version together that exceed the tag-name limit have no tag,
+    ///     while the same pattern with a version one character shorter does.
+    /// </summary>
+    [Fact]
+    public void GitTagPattern_Format_LongPatternPlusVersion_FormatsAtLimitAndReturnsNullOverIt()
+    {
+        // Arrange: a 95-character prefix and suffix (a 199-character pattern, within its limit)
+        Assert.True(GitTagPattern.TryCreate(new string('p', 95) + "{version}" + new string('s', 95), out var pattern, out _));
+        Assert.True(PackageVersion.TryParseStrict("1.2.3-" + new string('a', 59), out var atLimit));
+        Assert.True(PackageVersion.TryParseStrict("1.2.3-" + new string('a', 60), out var overLimit));
+
+        // Act
+        var formattedAtLimit = pattern!.Format(atLimit!);
+        var formattedOverLimit = pattern.Format(overLimit!);
+
+        // Assert: 95 + 65 + 95 = 255 characters is formatted, 256 is not
+        Assert.Equal(255, formattedAtLimit!.Length);
+        Assert.Null(formattedOverLimit);
+    }
+
+    /// <summary>
+    ///     Test that a version this pattern would not read back as the same version has no tag: build
+    ///     metadata, a fourth numeric part, and a leading zero (parsed by the looser zip-name grammar).
+    /// </summary>
+    [Fact]
+    public void GitTagPattern_Format_VersionThatDoesNotRoundTrip_ReturnsNull()
+    {
+        // Arrange
+        Assert.True(GitTagPattern.TryCreate("v{version}", out var pattern, out _));
+        Assert.True(PackageVersion.TryParse("1.2.3+build", out var withMetadata));
+        Assert.True(PackageVersion.TryParse("1.2.3.4", out var fourParts));
+        Assert.True(PackageVersion.TryParseStrict("01.2.3", out var leadingZero));
+
+        // Act
+        var results = new[] { withMetadata!, fourParts!, leadingZero! }.Select(pattern!.Format).ToList();
+
+        // Assert
+        Assert.All(results, Assert.Null);
+    }
+
+    /// <summary>
+    ///     Test that a null version is rejected.
+    /// </summary>
+    [Fact]
+    public void GitTagPattern_Format_NullVersion_ThrowsArgumentNullException()
+    {
+        // Arrange
+        Assert.True(GitTagPattern.TryCreate("v{version}", out var pattern, out _));
+
+        // Act / Assert
+        Assert.Throws<ArgumentNullException>(() => pattern!.Format(null!));
+    }
 }

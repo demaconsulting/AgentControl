@@ -189,15 +189,48 @@ public class PackageSourceRegistryTests
     }
 
     /// <summary>
-    ///     Test that the default factory builds the Git provider for a valid Git source, passes the
-    ///     options on, and fails closed (at resolve time, not at construction of the registry) for a
-    ///     Git source whose settings are not valid.
+    ///     Test that the default factory builds the Git provider for a valid Git source with the Git
+    ///     options it was given - the provider keeps its fetched packages under the given cache root -
+    ///     and with the defaults when none were given.
     /// </summary>
     [Fact]
-    public void PackageSourceRegistry_Create_GitSource_ResolvesGitProviderAndFailsClosedWhenInvalid()
+    public void PackageSourceRegistry_Create_GitSource_ResolvesGitProviderWithGivenOptionsOrDefaults()
     {
-        // Arrange
-        var registry = PackageSourceRegistry.Create(
+        // Arrange: one registry with explicit options, one without
+        var definition = new PackageSourceDefinition
+        {
+            Alias = "Repo",
+            Type = PackageSourceType.Git,
+            Location = "https://example.invalid/org/repo.git",
+            TagPattern = "v{version}",
+            PackageIds = ["contoso-agents"]
+        };
+        var cacheRoot = Path.Combine(Path.GetTempPath(), "agentcontrol_registry_test_git_" + Guid.NewGuid().ToString("N"));
+        var withOptions = PackageSourceRegistry.Create([definition], git: new GitSourceOptions(() => "git", cacheRoot));
+        var withDefaults = PackageSourceRegistry.Create([definition]);
+
+        // Act
+        var configured = Assert.IsType<GitSourceProvider>(withOptions.Resolve("Repo"));
+        var defaulted = Assert.IsType<GitSourceProvider>(withDefaults.Resolve("Repo"));
+
+        // Assert: the options reached the provider (its cache lives under the given root), and the defaults
+        // put it under the per-user default
+        Assert.Equal("Repo", configured.Alias);
+        Assert.StartsWith(Path.GetFullPath(cacheRoot), configured.RepositoryCacheFolder, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith(
+            Path.GetFullPath(GitSourceOptions.GetDefaultCacheRoot()), defaulted.RepositoryCacheFolder, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(cacheRoot), defaulted.RepositoryCacheFolder, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that a Git source whose settings are not valid fails closed at resolve time, not when
+    ///     the registry is built, so the other sources stay usable.
+    /// </summary>
+    [Fact]
+    public void PackageSourceRegistry_Create_GitSourceWithInvalidSettings_FailsWhenResolvedNotWhenBuilt()
+    {
+        // Arrange: a valid Git source beside one whose address is a remote-helper form
+        var build = () => PackageSourceRegistry.Create(
             [
                 new PackageSourceDefinition
                 {
@@ -218,9 +251,12 @@ public class PackageSourceRegistryTests
             ],
             git: new GitSourceOptions(() => "git", Path.Combine(Path.GetTempPath(), "agentcontrol_registry_test_git")));
 
-        // Act / Assert
-        var provider = Assert.IsType<GitSourceProvider>(registry.Resolve("Repo"));
-        Assert.Equal("Repo", provider.Alias);
+        // Act
+        var registry = build();
+
+        // Assert: building succeeded, the valid source resolves, the invalid one fails when resolved, and an
+        // alias that is not configured is still an error
+        Assert.IsType<GitSourceProvider>(registry.Resolve("Repo"));
         Assert.Throws<InvalidOperationException>(() => registry.Resolve("Bad"));
         Assert.Throws<UnknownSourceException>(() => registry.Resolve("Missing"));
     }

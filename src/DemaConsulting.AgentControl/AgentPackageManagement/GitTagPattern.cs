@@ -34,11 +34,14 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     <c>A-Z a-z 0-9 . _ / + -</c> (the characters AgentControl accepts in a tag name that a
 ///     server reports, see <see cref="IsSafeTagName"/>), and must follow git's ref-name rules (no
 ///     empty, dot-leading or <c>.lock</c>-ending path component, no <c>..</c>, no leading
-///     <c>-</c>) so that a tag formatted from a version is always a legal tag name. A tag
-///     matches when it is the prefix, a strict semantic version
-///     (<see cref="PackageVersion.TryParseStrict"/>: three numeric parts and an optional
-///     prerelease, no <c>+metadata</c>) and the suffix; every other tag is simply not a package
-///     version.
+///     <c>-</c>) so that a tag formatted from a version is a legal tag name. A tag
+///     matches when it is the prefix, a strict Semantic Versioning 2.0.0 version
+///     (<see cref="IsStrictSemanticVersion"/>: exactly three numeric parts without leading zeros and
+///     an optional prerelease whose numeric identifiers have no leading zeros, no <c>+metadata</c>)
+///     and the suffix; every other tag is simply not a package version. A version whose formatted
+///     tag would not be a safe tag name that the pattern reads back as the same version (for
+///     example one with a very long prerelease) has no tag: <see cref="Format"/> returns
+///     <see langword="null"/>.
 ///     </para>
 ///     <para>
 ///     Pure and immutable; thread-safe. Messages never repeat the pattern text.
@@ -52,7 +55,9 @@ internal sealed class GitTagPattern
     public const string Placeholder = "{version}";
 
     /// <summary>
-    ///     The longest pattern (and tag name) accepted.
+    ///     The longest pattern accepted. The tag built from a pattern and a version may be longer,
+    ///     up to the 255-character limit of <see cref="IsSafeTagName"/>; <see cref="Format"/>
+    ///     refuses a version whose tag would exceed it.
     /// </summary>
     private const int MaxLength = 200;
 
@@ -190,19 +195,69 @@ internal sealed class GitTagPattern
         }
 
         var middle = tagName[_prefix.Length..(tagName.Length - _suffix.Length)];
-        return PackageVersion.TryParseStrict(middle, out version) && version is not null;
+        return IsStrictSemanticVersion(middle) && PackageVersion.TryParseStrict(middle, out version) && version is not null;
     }
+
+    /// <summary>
+    ///     Determines whether a text is a Semantic Versioning 2.0.0 version without build metadata:
+    ///     exactly three numeric parts without leading zeros, then an optional <c>-</c> prerelease of
+    ///     dot-separated, non-empty identifiers of letters, digits and hyphens in which a numeric
+    ///     identifier has no leading zero. Stricter than <see cref="PackageVersion.TryParseStrict"/>,
+    ///     which also serves zip file names and so must keep accepting leading zeros.
+    /// </summary>
+    /// <param name="text">The text between the pattern's prefix and suffix.</param>
+    /// <returns><see langword="true"/> when the text is a strict semantic version.</returns>
+    internal static bool IsStrictSemanticVersion(string text)
+    {
+        var dash = text.IndexOf('-', StringComparison.Ordinal);
+        var core = dash < 0 ? text : text[..dash];
+        var parts = core.Split('.');
+        if (parts.Length != 3 || parts.Any(part => !IsNumericIdentifier(part)))
+        {
+            return false;
+        }
+
+        // No '+': build metadata is not part of a tag's version, and a '+' cannot be in an identifier
+        if (dash < 0)
+        {
+            return true;
+        }
+
+        var prerelease = text[(dash + 1)..];
+        return prerelease.Length > 0 && prerelease.Split('.').All(identifier =>
+            identifier.Length > 0 &&
+            identifier.All(character => char.IsAsciiLetterOrDigit(character) || character == '-') &&
+            (!identifier.All(char.IsAsciiDigit) || IsNumericIdentifier(identifier)));
+    }
+
+    /// <summary>
+    ///     Determines whether a text is a numeric identifier without a leading zero (<c>0</c> itself
+    ///     is allowed).
+    /// </summary>
+    /// <param name="text">The identifier.</param>
+    /// <returns><see langword="true"/> for digits only, not starting with <c>0</c> unless it is
+    ///     exactly <c>0</c>.</returns>
+    private static bool IsNumericIdentifier(string text) =>
+        text.Length > 0 && text.All(char.IsAsciiDigit) && (text.Length == 1 || text[0] != '0');
 
     /// <summary>
     ///     Builds the tag name that stands for a version.
     /// </summary>
     /// <param name="version">The version.</param>
-    /// <returns>The prefix, the version text and the suffix.</returns>
+    /// <returns>The prefix, the version text and the suffix, when that is a safe tag name (see
+    ///     <see cref="IsSafeTagName"/>) that <see cref="TryMatch"/> maps back to the same version;
+    ///     otherwise <see langword="null"/> (a prerelease so long that the tag would exceed the
+    ///     tag-name limit, a version with build metadata or a fourth part, or one with a leading
+    ///     zero).</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="version"/> is
     ///     <see langword="null"/>.</exception>
-    public string Format(PackageVersion version)
+    public string? Format(PackageVersion version)
     {
         ArgumentNullException.ThrowIfNull(version);
-        return _prefix + version.ToString() + _suffix;
+        var tag = _prefix + version.ToString() + _suffix;
+
+        // A tag that is not a legal name (too long, for example), or that this pattern would not
+        // read back as this version, is never offered: it could not be listed or fetched anyway
+        return IsSafeTagName(tag) && TryMatch(tag, out var parsed) && parsed == version ? tag : null;
     }
 }

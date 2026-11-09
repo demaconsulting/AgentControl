@@ -33,20 +33,25 @@ sections:
           AgentControl accepts from a server.
         tests:
           - GitTagPattern_TryCreate_InvalidPattern_IsRefused
-          - GitTagPattern_TryCreate_TooLongOrSecretLooking_IsRefusedWithoutEchoing
+          - GitTagPattern_TryCreate_TooLong_IsRefusedWithoutEchoing
+          - GitTagPattern_TryCreate_SecretLooking_IsRefusedWithoutEchoing
 
       - id: AgentControl-GitTagPattern-ExtractStrictVersion
         title: >-
           The GitTagPattern class shall match a tag name to a version only when the name starts
           with the pattern's prefix and ends with its suffix (compared case-sensitively) and the
-          text between them is a strict semantic version of three numeric parts and an optional
-          prerelease, and shall treat every other tag as not a version.
+          text between them is a strict Semantic Versioning 2.0 version of exactly three numeric
+          parts without leading zeros and an optional prerelease whose numeric identifiers have no
+          leading zeros, with no build metadata, and shall treat every other tag as not a version.
         justification: |
-          Tags such as latest, v1.2 or v1.2.3+build are not package versions; matching only strict
-          versions keeps the version list well-ordered and agrees with the zip source's rules.
+          Tags such as latest, v1.2, v01.2.3 or v1.2.3+build are not package versions; matching only
+          strict versions keeps the version list well-ordered and unambiguous (v01.2.3 and v1.2.3
+          would otherwise be one version).
         tests:
           - GitTagPattern_TryMatch_VersionTag_ReturnsVersion
           - GitTagPattern_TryMatch_NotAVersionTag_DoesNotMatch
+          - GitTagPattern_TryMatch_NotStrictSemVer_DoesNotMatch
+          - GitTagPattern_TryMatch_StrictSemVer_Matches
 
       - id: AgentControl-GitTagPattern-FormatTag
         title: >-
@@ -57,6 +62,20 @@ sections:
           and compared with the repository.
         tests:
           - GitTagPattern_TryMatch_VersionTag_ReturnsVersion
+
+      - id: AgentControl-GitTagPattern-FormatRefusesUnsafeTag
+        title: >-
+          The GitTagPattern class shall report that a version has no tag, instead of building a
+          name, when the tag built from the pattern and the version would not be a safe tag name of
+          at most 255 characters that the pattern reads back as the same version.
+        justification: |
+          A version with a very long prerelease, build metadata or a leading zero must not yield a
+          name that could never be listed or fetched, or that stands for another version.
+        tests:
+          - GitTagPattern_Format_PrereleaseAtAndOverTagLengthLimit_FormatsOrReturnsNull
+          - GitTagPattern_Format_LongPatternPlusVersion_FormatsAtLimitAndReturnsNullOverIt
+          - GitTagPattern_Format_VersionThatDoesNotRoundTrip_ReturnsNull
+          - GitTagPattern_Format_NullVersion_ThrowsArgumentNullException
 
       - id: AgentControl-GitTagPattern-ListingPrefix
         title: >-

@@ -29,8 +29,10 @@ Accepted forms and their rules:
 - An absolute local or UNC path - `Path.IsPathFullyQualified`; existence is not checked.
 
 Everything else is refused: other schemes (`http`, `git`, `file`, `ftp`), remote-helper syntax (`::` outside a URL:
-`ext::`, `fd::`), relative paths, a leading `-`, control characters, and addresses over 2048 characters. The cache key is
-the first 16 hexadecimal digits of the SHA-256 of `kind|normalized`, where the normalized form lower-cases the scheme and
+`ext::`, `fd::`), relative paths, a leading `-`, control characters, and addresses over 2048 characters. The cache key
+is
+the first 16 hexadecimal digits of the SHA-256 of `kind|normalized`, where the normalized form lower-cases the scheme
+and
 host (and, on Windows, a local path) and leaves the rest as typed so that case-sensitive servers never collide.
 
 #### Key Methods
@@ -39,18 +41,22 @@ host (and, on Windows, a local path) and leaves the rest as typed so that case-s
 
 - *Parameters*: `string? text`, out `GitRepositoryAddress? address`, out `string? problem`.
 - *Returns*: `bool` - `true` for an accepted address. Never throws. The problem text never repeats `text`
-  (`AgentControl-GitRepositoryAddress-NeverEchoesInput`); the accept/reject rules are
-  `AgentControl-GitRepositoryAddress-AcceptHttps`, `-AcceptSsh`, `-AcceptLocalPath`, `-RejectDangerousTransports`
-  and `-RejectOptionLikeValues`.
+  (`AgentControl-GitRepositoryAddress-NeverEchoesInput`; the fixed wording avoids example addresses that could contain
+  a short input by coincidence); the accept/reject rules are `AgentControl-GitRepositoryAddress-AcceptHttps`,
+  `-AcceptSsh`, `-AcceptScpLikeSsh`, `-AcceptLocalPath`, `-RejectEmbeddedCredentials`, `-RejectDangerousTransports`,
+  `-RejectOptionLikeValues`, `-RejectControlCharacters`, `-RejectMalformedParts` and `-RejectTooLong`.
 
 **GetProblem**: The problem of an address text, or `null`.
 
 **EmbedsCredential**: Reports from the text alone whether it looks like a URL that carries a credential: user
 information on a non-ssh URL, a password in an ssh URL, or a query or fragment
-(`AgentControl-GitRepositoryAddress-RejectEmbeddedCredentials`). `PackageSourceDefinition.GetCredentialProblem` uses it
+(`AgentControl-GitRepositoryAddress-RecognizeEmbeddedCredentials`). `PackageSourceDefinition.GetCredentialProblem` uses
+it
 for Git sources, because a URI-based check cannot parse `user@host:path` and would refuse `ssh://git@host/...`.
 
-**CacheKey** (property): `AgentControl-GitRepositoryAddress-CacheKeyStable`.
+**CacheKey** (property): 16 lower-case hexadecimal digits (`AgentControl-GitRepositoryAddress-CacheKeyFormat`), the same
+for addresses that differ only in scheme or host case (`AgentControl-GitRepositoryAddress-CacheKeyStable`) and different
+for different repositories (`AgentControl-GitRepositoryAddress-CacheKeyDistinguishesRepositories`).
 
 #### Error Handling
 

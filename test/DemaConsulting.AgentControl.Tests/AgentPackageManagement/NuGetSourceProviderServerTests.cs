@@ -128,6 +128,30 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
     }
 
     /// <summary>
+    ///     Test that a package from an anonymous server reports, as its content identity, the SHA-256
+    ///     of the package file that was downloaded into the source's private cache.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_Acquire_AnonymousServer_ReportsSha256OfDownloadedPackageFile()
+    {
+        // Arrange
+        var id = UniqueId();
+        var feed = await StartFeedAsync(id, "1.0.0");
+        var provider = CreateProvider(feed, credentials: null);
+        var package = Assert.Single(await provider.ListVersionsAsync(id, CancellationToken.None));
+
+        // Act
+        using var reader = await provider.AcquireAsync(package, CancellationToken.None);
+
+        // Assert: the identity is the SHA-256 of the downloaded .nupkg, computed here independently
+        var downloaded = Assert.Single(Directory.GetFiles(reader.Description, "*.nupkg"));
+        var expected = "sha256:" + Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(
+                await File.ReadAllBytesAsync(downloaded, TestContext.Current.CancellationToken)));
+        Assert.Equal(expected, reader.ContentIdentity);
+    }
+
+    /// <summary>
     ///     Test that a server that needs a sign-in asks the user once, uses the answer, succeeds
     ///     and remembers the credential for the session.
     /// </summary>

@@ -31,7 +31,8 @@ messages), `ContentIdentity` (the identity of the package the reader reads, or `
 whole file with `PackageContentIdentity.ComputeSha256` (`ContentIdentity`), rewinds the same handle and builds the
 archive over it, so the identity describes exactly the bytes that are extracted and the file cannot be swapped
 between hashing and reading (`AgentControl-PackageContentExtractor-ReaderContentIdentity`); the handle is released
-when the archive cannot be built. `Open` wraps open
+when the archive cannot be built (`AgentControl-PackageContentExtractor-ZipReaderReleasesHandleOnFailure`). `Open` wraps
+open
 failures - an unreadable or invalid archive, and a path that is invalid or unsupported
 (`ArgumentException`, `NotSupportedException`, `PathTooLongException`, `SecurityException`) - in
 `InvalidOperationException` naming the zip, so no path exception escapes to a caller that handles one failure type
@@ -39,8 +40,10 @@ failures - an unreadable or invalid archive, and a path that is invalid or unsup
 
 **DirectoryPackageContentReader**: holds only paths, plus the `ContentIdentity` its opener supplied (`Open` takes
 it as an optional argument and does not hash anything: a package folder has no single file whose bytes define it, so
-`NuGetSourceProvider` supplies the identity of the `.nupkg`; `null` when none is given;
-`AgentControl-PackageContentExtractor-ReaderContentIdentity`). `Open` requires a `content` sub-folder
+`NuGetSourceProvider` supplies the identity of the `.nupkg`, and a layout root the commit of a Git tag; `null` when
+none is given; `AgentControl-PackageContentExtractor-FolderReaderIdentity`,
+`AgentControl-PackageContentExtractor-FolderReaderNoIdentity` and
+`AgentControl-PackageContentExtractor-LayoutRootIdentity`). `Open` requires a `content` sub-folder
 (otherwise `InvalidOperationException` — a wrong-layout package must never make the extractor
 delete a repo's managed folders for nothing; `AgentControl-PackageContentExtractor-RejectMissingContentFolder`) and
 rejects a package folder or a `content` folder
@@ -68,7 +71,8 @@ repo if present, and copies the same four folders from the package into the repo
   field, so logging configured after this class is first touched is never missed).
 - *Postconditions*: The four managed folders under `repoRoot` match the package's managed
   folders exactly (`AgentControl-PackageContentExtractor-ExtractFromFolder`,
-  `-ReplaceManagedFolders`, `-PackageNeverModified`, each prefixed `AgentControl-PackageContentExtractor`). Root-level files
+  `-ReplaceManagedFolders`, `-PackageNeverModified`, each prefixed `AgentControl-PackageContentExtractor`). Root-level
+  files
   such as `release-notes.md` and `AGENTS.md` and any file outside the managed folders are not
   copied (`AgentControl-PackageContentExtractor-NoRootFilesCopied`). Every file's destination is resolved with
   `PathHelpers.SafePathCombine` and its
@@ -109,13 +113,22 @@ or `AGENTS.md` text, or `null` when absent, without copying anything to disk
 `AgentControl-PackageContentExtractor-ReadAgentsMdTemplate`).
 
 **DirectoryPackageContentReader.OpenLayoutRoot**: Opens a folder whose root is the package layout (a checked-out Git
-repository). It lists and reads only `PackageContentExtractor.LayoutPaths` - `.github/agents|standards|templates|skills`,
-`release-notes.md`, `AGENTS.md` - so a `.git` folder, other `.github` content and every other file are never seen; a path
-outside the layout (including one that climbs out with `..`) is refused; the root must exist and not be a link; a link in
+repository). It lists and reads only `PackageContentExtractor.LayoutPaths` -
+`.github/agents|standards|templates|skills`,
+`release-notes.md`, `AGENTS.md` - so a `.git` folder, other `.github` content and every other file are never seen; a
+path
+outside the layout (including one that climbs out with `..`) is refused; the root must exist and not be a link; a link
+in
 the layout (in a managed folder, in place of `.github` or a managed folder, or as a root file) is refused exactly as in
 the `content` mode, while a link that is not part of the layout is neither inspected nor refused
-(`AgentControl-PackageContentExtractor-ReadLayoutRoot`, `AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout`,
-`AgentControl-PackageContentExtractor-ExcludeGitFolder`). `LayoutFolders`, `LayoutRootFiles` and `LayoutPaths` expose the
+(`AgentControl-PackageContentExtractor-ReadLayoutRoot`, `AgentControl-PackageContentExtractor-RefuseOutsideLayoutPaths`,
+`AgentControl-PackageContentExtractor-RefuseMissingOrLinkedLayoutRoot`,
+`AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout`,
+`AgentControl-PackageContentExtractor-RefuseLinkInManagedFolder`,
+`AgentControl-PackageContentExtractor-RefuseLinkInPlaceOfGitHub`,
+`AgentControl-PackageContentExtractor-RefuseLinkInPlaceOfManagedFolder`,
+`AgentControl-PackageContentExtractor-RefuseLinkAsRootFile`, `AgentControl-PackageContentExtractor-ExcludeGitFolder`).
+`LayoutFolders`, `LayoutRootFiles` and `LayoutPaths` expose the
 single list of layout paths to the Git source provider.
 
 #### Error Handling

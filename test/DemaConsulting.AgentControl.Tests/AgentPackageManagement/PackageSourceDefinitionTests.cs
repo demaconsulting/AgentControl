@@ -444,8 +444,16 @@ public class PackageSourceDefinitionTests
     [InlineData("-option", false)]
     [InlineData("trailing.", false)]
     [InlineData("a\nb", false)]
-    public void PackageSourceDefinition_GetSubfolderProblem_AppliesFolderRules(string? subfolder, bool acceptable) =>
-        Assert.Equal(acceptable, PackageSourceDefinition.GetSubfolderProblem(subfolder) is null);
+    public void PackageSourceDefinition_GetSubfolderProblem_AppliesFolderRules(string? subfolder, bool acceptable)
+    {
+        // Arrange: a sub-folder text and whether the folder rules should accept it
+
+        // Act
+        var problem = PackageSourceDefinition.GetSubfolderProblem(subfolder);
+
+        // Assert: no problem exactly when the text is acceptable
+        Assert.Equal(acceptable, problem is null);
+    }
 
     /// <summary>
     ///     Test that a certificate fingerprint is accepted as users copy it - any letter case,

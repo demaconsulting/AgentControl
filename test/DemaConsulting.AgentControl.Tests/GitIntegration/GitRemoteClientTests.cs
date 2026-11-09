@@ -444,12 +444,11 @@ public sealed class GitRemoteClientTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that the tree listing and the path checkout run with literal pathspecs, the checkout
-    ///     alone turns symbolic links off, only full object ids are accepted, and the NUL-separated
-    ///     listing is parsed into modes, types, sizes and paths.
+    ///     Test that the tree listing runs with literal pathspecs, accepts only a full object id and
+    ///     at least one path, and parses the NUL-separated listing into modes, types, sizes and paths.
     /// </summary>
     [Fact]
-    public async Task GitRemoteClient_ListTreeAndCheckout_UseLiteralPathsAndParseEntries()
+    public async Task GitRemoteClient_ListTree_UsesLiteralPathsAndParsesEntries()
     {
         // Arrange
         var (client, stub, _) = CreateClient();
@@ -462,7 +461,6 @@ public sealed class GitRemoteClientTests : IDisposable
         // Act
         var entries = await client.ListTreeAsync(
             repository, Sha, [".github/agents", "release-notes.md"], recursive: true, TestContext.Current.CancellationToken);
-        await client.CheckoutPathsAsync(repository, Sha, [".github/agents"], TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(3, entries.Count);
@@ -470,17 +468,156 @@ public sealed class GitRemoteClientTests : IDisposable
         Assert.Equal("120000", entries[1].Mode);
         Assert.Equal("commit", entries[2].Type);
         Assert.Null(entries[2].Size);
-        var invocations = stub.ReadInvocations();
+        var invocation = Assert.Single(stub.ReadInvocations());
         Assert.EndsWith(
             $"--literal-pathspecs ls-tree -r -z --full-tree -l {Sha} -- .github/agents release-notes.md",
-            invocations[0].Arguments, StringComparison.Ordinal);
-        Assert.DoesNotContain("core.symlinks=false", invocations[0].Arguments, StringComparison.Ordinal);
-        Assert.Contains("-c core.symlinks=false ", invocations[1].Arguments, StringComparison.Ordinal);
-        Assert.EndsWith($"--literal-pathspecs checkout {Sha} -- .github/agents", invocations[1].Arguments, StringComparison.Ordinal);
+            invocation.Arguments, StringComparison.Ordinal);
         await Assert.ThrowsAsync<ArgumentException>(() => client.ListTreeAsync(
-            repository, "HEAD", [], recursive: false, TestContext.Current.CancellationToken));
-        await Assert.ThrowsAsync<ArgumentException>(() => client.CheckoutPathsAsync(
-            repository, "--orphan", [".github"], TestContext.Current.CancellationToken));
+            repository, "HEAD", [".github"], recursive: false, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that an empty path list is refused before git starts, because an empty pathspec list
+    ///     would make <c>ls-tree</c> enumerate the whole tree.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ListTree_EmptyPathList_IsRefusedWithoutRunningGit()
+    {
+        // Arrange: a valid commit id and no paths
+        var (client, stub, _) = CreateClient();
+
+        // Act
+        var failure = await Assert.ThrowsAsync<ArgumentException>(() => client.ListTreeAsync(
+            NewFolder(), Sha, [], recursive: true, TestContext.Current.CancellationToken));
+
+        // Assert: refused because of the paths, and git never ran
+        Assert.Equal("paths", failure.ParamName);
+        Assert.Empty(stub.ReadInvocations());
+    }
+
+    /// <summary>
+    ///     Test that blobs are read with <c>cat-file --batch</c> and no checkout: the arguments are
+    ///     exactly the hardened ones, the object ids are the requests, and the bytes of each answer
+    ///     reach the destination the caller opened for that entry.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ReadBlobs_UsesCatFileBatchAndDeliversRawBytes()
+    {
+        // Arrange: two blobs, answered in order
+        var (client, stub, workRoot) = CreateClient();
+        stub.Respond("cat-file", $"{Sha} blob 5\nhello\n{OtherSha} blob 0\n\n");
+        var blobs = new[] { Blob(Sha, 5, ".github/agents/a.md"), Blob(OtherSha, 0, "release-notes.md") };
+        var written = new Dictionary<string, MemoryStream>();
+
+        // Act
+        await client.ReadBlobsAsync(
+            NewFolder(), blobs, entry => written[entry.Path] = new MemoryStream(), 1024,
+            TestContext.Current.CancellationToken);
+
+        // Assert: the bytes of each answer, and a command that is cat-file --batch and nothing else
+        Assert.Equal("hello", System.Text.Encoding.ASCII.GetString(written[".github/agents/a.md"].ToArray()));
+        Assert.Empty(written["release-notes.md"].ToArray());
+        var invocation = Assert.Single(stub.ReadInvocations());
+        Assert.EndsWith("--literal-pathspecs cat-file --batch", invocation.Arguments, StringComparison.Ordinal);
+        Assert.DoesNotContain("checkout", invocation.Arguments, StringComparison.Ordinal);
+        Assert.Contains(Path.Combine(Path.GetFileName(workRoot), "empty-hooks"), invocation.Arguments, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that blobs that are not well-formed, no blobs at all, and sizes over the budget are
+    ///     refused before git starts.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ReadBlobs_InvalidEntriesOrOverBudget_AreRefusedWithoutRunningGit()
+    {
+        // Arrange
+        var (client, stub, _) = CreateClient();
+        var repository = NewFolder();
+        var token = TestContext.Current.CancellationToken;
+
+        // Act / Assert: no entries, a tree, a bad object id, an unknown size
+        await Assert.ThrowsAsync<ArgumentException>(() => client.ReadBlobsAsync(repository, [], _ => Stream.Null, 10, token));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.ReadBlobsAsync(
+            repository, [new GitTreeEntry("040000", "tree", Sha, null, "a")], _ => Stream.Null, 10, token));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.ReadBlobsAsync(
+            repository, [Blob("--orphan", 1, "a")], _ => Stream.Null, 10, token));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.ReadBlobsAsync(
+            repository, [new GitTreeEntry("100644", "blob", Sha, null, "a")], _ => Stream.Null, 10, token));
+
+        // Act: sizes that together exceed the budget, one byte over
+        var tooLarge = await Assert.ThrowsAsync<GitRemoteException>(() => client.ReadBlobsAsync(
+            repository, [Blob(Sha, 6, "a"), Blob(OtherSha, 5, "b")], _ => Stream.Null, 10, token));
+
+        // Assert
+        Assert.Equal(GitFailureKind.OutputTooLarge, tooLarge.Kind);
+        Assert.Empty(stub.ReadInvocations());
+    }
+
+    /// <summary>
+    ///     Test that an answer that is not the blob that was asked for - another object id, a missing
+    ///     object, another size, data after the last answer or a header without its data - is refused.
+    /// </summary>
+    [Theory]
+    [InlineData("0123456789abcdef0123456789abcdef01234568 blob 5\nhello\n")]
+    [InlineData("0123456789abcdef0123456789abcdef01234567 missing\n")]
+    [InlineData("0123456789abcdef0123456789abcdef01234567 blob 6\nhello!\n")]
+    [InlineData("0123456789abcdef0123456789abcdef01234567 tree 5\nhello\n")]
+    [InlineData("0123456789abcdef0123456789abcdef01234567 blob 5\nhello\nextra\n")]
+    [InlineData("0123456789abcdef0123456789abcdef01234567 blob 5\nhelloX")]
+    [InlineData("0123456789abcdef0123456789abcdef01234567 blob 5\nhel")]
+    [InlineData("0123456789abcdef0123456789abcdef01234567 blob five\nhello\n")]
+    public async Task GitRemoteClient_ReadBlobs_AnswerThatIsNotTheRequestedBlob_IsRefused(string answer)
+    {
+        // Arrange
+        var (client, stub, _) = CreateClient();
+        stub.Respond("cat-file", answer);
+
+        // Act
+        var failure = await Assert.ThrowsAsync<GitRemoteException>(() => client.ReadBlobsAsync(
+            NewFolder(), [Blob(Sha, 5, "a")], _ => new MemoryStream(), 1024, TestContext.Current.CancellationToken));
+
+        // Assert: a refusal that names no object, path or address
+        Assert.Equal(GitFailureKind.Other, failure.Kind);
+        Assert.DoesNotContain(Sha, failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that git failing while reading blobs is classified and worded from a fixed sentence.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ReadBlobs_GitFails_IsClassifiedWithFixedMessage()
+    {
+        // Arrange
+        var (client, stub, _) = CreateClient();
+        stub.Respond("cat-file", standardError: "fatal: not a git repository: /private/place/repo", exitCode: 128);
+
+        // Act
+        var failure = await Assert.ThrowsAsync<GitRemoteException>(() => client.ReadBlobsAsync(
+            NewFolder(), [Blob(Sha, 5, "a")], _ => new MemoryStream(), 1024, TestContext.Current.CancellationToken));
+
+        // Assert
+        Assert.Equal("git cat-file failed (exit code 128).", failure.Message);
+    }
+
+    /// <summary>
+    ///     Test that reading blobs that outlives its time limit is stopped and reported as timed out.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ReadBlobs_ExceedsTimeLimit_KillsProcessAndReportsTimedOut()
+    {
+        // Arrange: git that hangs for 30 seconds, against a limit of one second
+        var stub = NewStub();
+        stub.Respond("cat-file", sleepSeconds: 30);
+        var client = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder(), FetchTimeout: TimeSpan.FromSeconds(1)));
+
+        // Act
+        var failure = await Assert.ThrowsAsync<GitRemoteException>(() => client.ReadBlobsAsync(
+            NewFolder(), [Blob(Sha, 5, "a")], _ => new MemoryStream(), 1024, TestContext.Current.CancellationToken));
+
+        // Assert: timed out, and the process never got to finish
+        Assert.Equal(GitFailureKind.TimedOut, failure.Kind);
+        await Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+        Assert.False(stub.WroteFinishedMarker());
     }
 
     /// <summary>
@@ -531,6 +668,115 @@ public sealed class GitRemoteClientTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that when a process that exceeded its time limit cannot be confirmed to have stopped
+    ///     (the termination does nothing, so it keeps running), the failure is surfaced as
+    ///     <c>ProcessNotStopped</c> instead of being swallowed as an ordinary timeout, and the call
+    ///     still returns promptly.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ListTags_ProcessCannotBeStopped_ReportsProcessNotStoppedAfterTimeout()
+    {
+        // Arrange: git hangs for 30 seconds; the kill seam records the process but leaves it running
+        var stub = NewStub();
+        stub.Respond("ls-remote", sleepSeconds: 30);
+        var started = new List<int>();
+        var client = new GitRemoteClient(new GitRemoteOptions(
+            () => stub.Path, NewFolder(), ListTimeout: TimeSpan.FromSeconds(1))
+        {
+            KillProcessTree = process => started.Add(process.Id),
+            StopTimeout = TimeSpan.FromSeconds(1)
+        });
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            // Act
+            var failure = await Assert.ThrowsAsync<GitRemoteException>(() => client.ListTagsAsync(
+                new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*",
+                TestContext.Current.CancellationToken));
+
+            // Assert: the kill was attempted, termination was not confirmed, and the message is fixed
+            Assert.Equal(GitFailureKind.ProcessNotStopped, failure.Kind);
+            Assert.Single(started);
+            Assert.Equal(
+                "git ls-remote was stopped but could not be confirmed to have ended, so a git process may still be running.",
+                failure.Message);
+            Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(20));
+        }
+        finally
+        {
+            StopForReal(started);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a cancellation whose process cannot be confirmed to have stopped is reported as
+    ///     <c>ProcessNotStopped</c> too - the caller must learn that something may still be running -
+    ///     rather than as a plain cancellation, and that a kill that throws is surfaced the same way.
+    /// </summary>
+    [Theory]
+    [InlineData("does-nothing")]
+    [InlineData("throws-access-denied")]
+    public async Task GitRemoteClient_ListTags_CancelledAndProcessCannotBeStopped_ReportsProcessNotStopped(string kill)
+    {
+        // Arrange: git hangs; the kill seam either does nothing or fails with an access error
+        var stub = NewStub();
+        stub.Respond("ls-remote", sleepSeconds: 30);
+        var started = new List<int>();
+        var client = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder())
+        {
+            KillProcessTree = process =>
+            {
+                started.Add(process.Id);
+                if (kill == "throws-access-denied")
+                {
+                    throw new System.ComponentModel.Win32Exception(5, "Access is denied");
+                }
+            },
+            StopTimeout = TimeSpan.FromSeconds(1)
+        });
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cancellation.CancelAfter(TimeSpan.FromSeconds(1));
+
+        try
+        {
+            // Act
+            var failure = await Assert.ThrowsAsync<GitRemoteException>(() => client.ListTagsAsync(
+                new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*", cancellation.Token));
+
+            // Assert
+            Assert.Equal(GitFailureKind.ProcessNotStopped, failure.Kind);
+            Assert.Single(started);
+        }
+        finally
+        {
+            StopForReal(started);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the real termination (no test seam) is what stops a hanging process on timeout:
+    ///     it ends, nothing is reported beyond the timeout, and the call is not held up.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ListTags_ExceedsTimeLimit_ConfirmsTerminationAndReportsOnlyTimeout()
+    {
+        // Arrange
+        var stub = NewStub();
+        stub.Respond("ls-remote", sleepSeconds: 30);
+        var client = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder(), ListTimeout: TimeSpan.FromSeconds(1)));
+
+        // Act
+        var failure = await Assert.ThrowsAsync<GitRemoteException>(() => client.ListTagsAsync(
+            new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*",
+            TestContext.Current.CancellationToken));
+
+        // Assert: a plain timeout, not a failure to stop
+        Assert.Equal(GitFailureKind.TimedOut, failure.Kind);
+        Assert.Equal("git ls-remote did not finish within 1 seconds and was stopped.", failure.Message);
+    }
+
+    /// <summary>
     ///     Test that more standard output than the cap is refused, not buffered without limit.
     /// </summary>
     [Fact]
@@ -551,12 +797,64 @@ public sealed class GitRemoteClientTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a failure message is a short, redacted summary: a secret in git's error text and
-    ///     a very long error never reach the exception, and the logs never hold the address or
-    ///     arguments.
+    ///     Test that the output cap counts bytes, not characters: text whose character count is well
+    ///     under the cap but whose UTF-8 size is over it is refused.
     /// </summary>
     [Fact]
-    public async Task GitRemoteClient_Failure_MessageIsRedactedBoundedAndLogsAreSecretFree()
+    public async Task GitRemoteClient_ListTags_MultiByteOutputOverCapInBytes_ThrowsOutputTooLarge()
+    {
+        // Arrange: 5,000,000 two-byte characters - under 8 MB as characters, 10 MB as bytes
+        var (client, stub, _) = CreateClient();
+        var characters = 5_000_000;
+        Assert.True(characters < GitRemoteClient.MaxListOutputBytes);
+        stub.Respond("ls-remote", new string('\u00e9', characters));
+
+        // Act
+        var failure = await Assert.ThrowsAsync<GitRemoteException>(() => client.ListTagsAsync(
+            new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*",
+            TestContext.Current.CancellationToken));
+
+        // Assert
+        Assert.Equal(GitFailureKind.OutputTooLarge, failure.Kind);
+    }
+
+    /// <summary>
+    ///     Test the boundary of the output cap: output of exactly the cap in bytes is accepted, one
+    ///     byte more is refused.
+    /// </summary>
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    public async Task GitRemoteClient_ListTags_OutputAtAndOneByteOverCap_IsAcceptedAndRefused(int extraBytes, bool expectRefusal)
+    {
+        // Arrange: one tag line, then ignorable filler up to exactly the cap (plus the extra bytes)
+        var (client, stub, _) = CreateClient();
+        var line = $"{Sha}\trefs/tags/v1.0.0\n";
+        stub.Respond("ls-remote", line + new string('x', GitRemoteClient.MaxListOutputBytes - line.Length + extraBytes));
+
+        // Act
+        var outcome = await Record.ExceptionAsync(() => client.ListTagsAsync(
+            new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*",
+            TestContext.Current.CancellationToken));
+
+        // Assert
+        if (expectRefusal)
+        {
+            Assert.Equal(GitFailureKind.OutputTooLarge, Assert.IsType<GitRemoteException>(outcome).Kind);
+        }
+        else
+        {
+            Assert.Null(outcome);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a failure message is a fixed sentence: a secret in git's error text, the address,
+    ///     the host, a local path and a very long error never reach the exception, and the logs never
+    ///     hold the address or arguments.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_Failure_MessageIsFixedBoundedAndLogsAreSecretFree()
     {
         // Arrange: a noisy failure whose first lines carry secrets, then 200 KB of text
         var stub = NewStub();
@@ -573,15 +871,47 @@ public sealed class GitRemoteClientTests : IDisposable
             new GitRemoteTarget("https://example.invalid/private/repo.git", GitTransport.Https), "refs/tags/*",
             TestContext.Current.CancellationToken));
 
-        // Assert
-        Assert.DoesNotContain("sentinel-pw", failure.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("c2VudGluZWxzZWNyZXQ", failure.Message, StringComparison.Ordinal);
-        Assert.True(failure.Message.Length < 500, failure.Message.Length.ToString());
+        // Assert: a fixed sentence with the exit code, and nothing git printed
+        Assert.Equal("git ls-remote failed (exit code 128).", failure.Message);
         var logged = string.Join("\n", logger.Snapshot());
         Assert.NotEmpty(logger.Snapshot());
         Assert.DoesNotContain("example.invalid", logged, StringComparison.Ordinal);
         Assert.DoesNotContain("sentinel-pw", logged, StringComparison.Ordinal);
         Assert.DoesNotContain("--literal-pathspecs", logged, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that git's error text, which commonly repeats the remote address, the host or a local
+    ///     path, never reaches the message of the exception, whichever kind it is classified as; each
+    ///     kind has its own fixed message.
+    /// </summary>
+    [Theory]
+    [InlineData("fatal: Authentication failed for 'https://user@host.example.invalid/private/repo.git/'", "AuthenticationRequired", "needs a sign-in")]
+    [InlineData("fatal: repository 'https://host.example.invalid/private/repo.git/' not found", "NotFound", "did not find the repository")]
+    [InlineData("fatal: '/srv/private/repo.git' does not appear to be a git repository", "NotFound", "did not find the repository")]
+    [InlineData("fatal: unable to access 'https://host.example.invalid/private/repo.git/': Could not resolve host: host.example.invalid", "Unreachable", "could not reach")]
+    [InlineData("Host key verification failed. (host.example.invalid)", "HostKeyUnverified", "host key")]
+    [InlineData("fatal: detected dubious ownership in repository at '/srv/private/repo.git'", "UnsafeRepository", "owned by another user")]
+    [InlineData("fatal: something unforeseen about https://host.example.invalid/private/repo.git in /srv/private", "Other", "failed (exit code 128)")]
+    public async Task GitRemoteClient_Failure_MessageNeverRepeatsAddressHostOrPath(string stderr, string kindName, string messagePart)
+    {
+        // Arrange
+        var stub = NewStub();
+        stub.Respond("ls-remote", standardError: stderr, exitCode: 128);
+        var client = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder()));
+
+        // Act
+        var failure = await Assert.ThrowsAsync<GitRemoteException>(() => client.ListTagsAsync(
+            new GitRemoteTarget("https://host.example.invalid/private/repo.git", GitTransport.Https), "refs/tags/*",
+            TestContext.Current.CancellationToken));
+
+        // Assert: classified, worded from a fixed sentence, and free of address, host and paths
+        Assert.Equal(Enum.Parse<GitFailureKind>(kindName), failure.Kind);
+        Assert.Contains(messagePart, failure.Message, StringComparison.OrdinalIgnoreCase);
+        foreach (var leaked in new[] { "example.invalid", "host.", "private", "/srv", "repo.git", "https://", "user@" })
+        {
+            Assert.DoesNotContain(leaked, failure.Message, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     /// <summary>
@@ -796,6 +1126,28 @@ public sealed class GitRemoteClientTests : IDisposable
         Assert.Equal(GitFailureKind.GitNotFound, failure.Kind);
     }
 
+    /// <summary>
+    ///     Test that callers that ask for the version check of the same executable at the same time
+    ///     share one <c>git --version</c> run, instead of each running their own while the first is
+    ///     still in flight.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_EnsureSupportedVersion_ConcurrentCallers_RunGitVersionOnce()
+    {
+        // Arrange: a git whose version answer takes a moment, and several clients over it
+        var stub = NewStub().Respond("version", "git version 2.43.0\n", sleepSeconds: 1);
+        var clients = Enumerable.Range(0, 8)
+            .Select(_ => new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder())))
+            .ToList();
+
+        // Act: all of them ask at once
+        await Task.WhenAll(clients.Select(
+            client => Task.Run(() => client.EnsureSupportedVersionAsync(TestContext.Current.CancellationToken), TestContext.Current.CancellationToken)));
+
+        // Assert: one invocation for all callers
+        Assert.Single(stub.ReadInvocations());
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -816,6 +1168,36 @@ public sealed class GitRemoteClientTests : IDisposable
             catch (IOException)
             {
                 // Best-effort cleanup
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Creates a blob entry as a tree listing would report it.
+    /// </summary>
+    /// <param name="sha">The object id.</param>
+    /// <param name="size">The size in bytes.</param>
+    /// <param name="path">The repository path.</param>
+    /// <returns>The entry.</returns>
+    private static GitTreeEntry Blob(string sha, long size, string path) => new("100644", "blob", sha, size, path);
+
+    /// <summary>
+    ///     Kills processes that a test left running on purpose (the process of a termination that the
+    ///     test made fail), so no hanging stub outlives the test.
+    /// </summary>
+    /// <param name="processIds">The process ids recorded by the test seam.</param>
+    private static void StopForReal(IEnumerable<int> processIds)
+    {
+        foreach (var id in processIds)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(id);
+                process.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // The process has already ended
             }
         }
     }

@@ -51,20 +51,55 @@ public sealed class PackageVersionCacheTests : IDisposable
         // Act
         var check = await cache.IsNewerVersionAvailableAsync(
             registry, "Repo", "contoso-agents", "1.0.0", CancellationToken.None);
-        var missing = await cache.IsNewerVersionAvailableAsync(
-            registry, "Repo", "contoso-agents", "0.9.0", CancellationToken.None);
-        var unparsable = await cache.IsNewerVersionAvailableAsync(
-            registry, "Repo", "contoso-agents", "not-a-version", CancellationToken.None);
 
-        // Assert
+        // Assert: the latest and the pinned entries each carry their revision, from one listing call
         Assert.True(check.IsNewerAvailable);
         Assert.Equal("1.1.0", check.Latest?.Version.ToString());
         Assert.Equal("1.0.0", check.Pinned?.Version.ToString());
         Assert.Equal(new string('a', 40), check.Pinned?.Revision);
         Assert.Equal(new string('b', 40), check.Latest?.Revision);
-        Assert.Null(missing.Pinned);
-        Assert.Null(unparsable.Pinned);
         Assert.Equal(1, provider.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that a pinned version the source does not list gives no pinned entry, while the latest
+    ///     version is still reported.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_IsNewerVersionAvailable_PinnedVersionNotListed_ReturnsNoPinnedPackage()
+    {
+        // Arrange: a source that lists 1.0.0 and 1.1.0, and a pin to 0.9.0
+        var provider = new FakePackageSourceProvider("Repo", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
+        var registry = CreateRegistry(provider);
+        var cache = new PackageVersionCache();
+
+        // Act
+        var check = await cache.IsNewerVersionAvailableAsync(
+            registry, "Repo", "contoso-agents", "0.9.0", CancellationToken.None);
+
+        // Assert
+        Assert.Null(check.Pinned);
+        Assert.True(check.IsNewerAvailable);
+        Assert.Equal("1.1.0", check.Latest?.Version.ToString());
+    }
+
+    /// <summary>
+    ///     Test that a pin that does not parse as a version gives no pinned entry.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_IsNewerVersionAvailable_PinDoesNotParse_ReturnsNoPinnedPackage()
+    {
+        // Arrange: a source that lists two versions, and a pin that is not a version
+        var provider = new FakePackageSourceProvider("Repo", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
+        var registry = CreateRegistry(provider);
+        var cache = new PackageVersionCache();
+
+        // Act
+        var check = await cache.IsNewerVersionAvailableAsync(
+            registry, "Repo", "contoso-agents", "not-a-version", CancellationToken.None);
+
+        // Assert
+        Assert.Null(check.Pinned);
     }
 
     /// <summary>

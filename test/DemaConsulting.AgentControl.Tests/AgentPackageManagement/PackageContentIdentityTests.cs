@@ -21,6 +21,7 @@
 using System.Text;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 
+// cspell:ignore xabc ghij
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 
 /// <summary>
@@ -35,7 +36,7 @@ public class PackageContentIdentityTests
 
     /// <summary>
     ///     Test that hashing a stream yields the <c>sha256:</c> identity of its bytes, matching a
-    ///     published test vector, and leaves the stream open.
+    ///     published test vector, written as lower-case hexadecimal after the algorithm prefix.
     /// </summary>
     [Fact]
     public void PackageContentIdentity_ComputeSha256_KnownContent_ReturnsPrefixedLowerCaseHash()
@@ -46,9 +47,30 @@ public class PackageContentIdentityTests
         // Act
         var identity = PackageContentIdentity.ComputeSha256(stream);
 
-        // Assert: the published SHA-256 vector, formatted as sha256:{lower-case hex}, and the stream is still usable
+        // Assert: the published SHA-256 vector, formatted as sha256:{lower-case hex}
+        Assert.Equal("sha256:" + AbcSha256, identity);
+        Assert.Equal(identity.ToLowerInvariant(), identity);
+    }
+
+    /// <summary>
+    ///     Test that hashing leaves the stream open and positioned at its end, and that only the
+    ///     bytes from the stream's current position are hashed, so a caller that must read the same
+    ///     handle afterwards knows to rewind it.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeSha256_Stream_StaysOpenAtEndAndHashesFromCurrentPosition()
+    {
+        // Arrange: "xabc" with the position after the first byte, so only "abc" is hashed
+        using var stream = new MemoryStream(Encoding.ASCII.GetBytes("xabc"));
+        stream.Position = 1;
+
+        // Act
+        var identity = PackageContentIdentity.ComputeSha256(stream);
+
+        // Assert: the identity of "abc", the stream is still open, and its position is at the end
         Assert.Equal("sha256:" + AbcSha256, identity);
         Assert.True(stream.CanRead);
+        Assert.Equal(stream.Length, stream.Position);
     }
 
     /// <summary>
@@ -57,6 +79,8 @@ public class PackageContentIdentityTests
     [Fact]
     public void PackageContentIdentity_ComputeSha256_NullStream_ThrowsArgumentNullException()
     {
+        // Arrange: no stream
+
         // Act / Assert
         Assert.Throws<ArgumentNullException>(() => PackageContentIdentity.ComputeSha256(null!));
     }
@@ -70,6 +94,8 @@ public class PackageContentIdentityTests
     [InlineData("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")]
     public void PackageContentIdentity_FromGitCommit_ValidHash_ReturnsLowerCasePrefixedIdentity(string commit)
     {
+        // Arrange: a commit hash of either width, in either case
+
         // Act
         var identity = PackageContentIdentity.FromGitCommit(commit);
 
@@ -87,48 +113,140 @@ public class PackageContentIdentityTests
     [InlineData("0123456789abcdef0123456789abcdef012345678")]
     public void PackageContentIdentity_FromGitCommit_MalformedHash_ThrowsArgumentException(string commit)
     {
+        // Arrange: a value that is not 40 or 64 hexadecimal digits
+
         // Act / Assert
         Assert.Throws<ArgumentException>(() => PackageContentIdentity.FromGitCommit(commit));
     }
 
     /// <summary>
-    ///     Test the comparison outcomes: nothing to compare when either side is missing, same when
-    ///     equal (ignoring case), changed when different or of a different kind.
+    ///     Test that a null commit hash is rejected with the null-specific exception.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_FromGitCommit_NullCommit_ThrowsArgumentNullException()
+    {
+        // Arrange: no commit hash
+
+        // Act / Assert
+        Assert.Throws<ArgumentNullException>(() => PackageContentIdentity.FromGitCommit(null!));
+    }
+
+    /// <summary>
+    ///     Test that nothing is compared, so there is never a false alarm, when either identity is
+    ///     missing.
     /// </summary>
     [Theory]
-    [InlineData(null, "sha256:aa", "NotComparable")]
-    [InlineData("", "sha256:aa", "NotComparable")]
-    [InlineData("  ", "sha256:aa", "NotComparable")]
-    [InlineData("sha256:aa", null, "NotComparable")]
-    [InlineData(null, null, "NotComparable")]
-    [InlineData("sha256:aa", "sha256:aa", "Same")]
-    [InlineData("sha256:AA", "sha256:aa", "Same")]
-    [InlineData("sha256:aa", "sha256:bb", "Changed")]
-    [InlineData("sha256:aa", "git-commit:aa", "Changed")]
-    public void PackageContentIdentity_Compare_PinnedAndActual_ReturnsExpectedOutcome(
-        string? pinned, string? actual, string expected)
+    [InlineData(null, "sha256:aa")]
+    [InlineData("", "sha256:aa")]
+    [InlineData("  ", "sha256:aa")]
+    [InlineData("sha256:aa", null)]
+    [InlineData("sha256:aa", "")]
+    [InlineData(null, null)]
+    public void PackageContentIdentity_Compare_EitherIdentityMissing_IsNotComparable(string? pinned, string? actual)
     {
+        // Arrange: a pin or a source that has no identity
+
         // Act
         var outcome = PackageContentIdentity.Compare(pinned, actual);
 
         // Assert
-        Assert.Equal(expected, outcome.ToString());
+        Assert.Equal(ContentIdentityComparison.NotComparable, outcome);
+    }
+
+    /// <summary>
+    ///     Test that equal identities are the same, without regard to the letter case of the hash.
+    /// </summary>
+    [Theory]
+    [InlineData("sha256:aa", "sha256:aa")]
+    [InlineData("sha256:AA", "sha256:aa")]
+    [InlineData("git-commit:ab12", "GIT-COMMIT:AB12")]
+    public void PackageContentIdentity_Compare_EqualIdentities_IsSameIgnoringCase(string pinned, string actual)
+    {
+        // Arrange: two spellings of one identity
+
+        // Act
+        var outcome = PackageContentIdentity.Compare(pinned, actual);
+
+        // Assert
+        Assert.Equal(ContentIdentityComparison.Same, outcome);
+    }
+
+    /// <summary>
+    ///     Test that two different identities of the same kind mean the content changed.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_Compare_DifferentValues_IsChanged()
+    {
+        // Arrange: two hashes of the same kind
+
+        // Act
+        var outcome = PackageContentIdentity.Compare("sha256:aa", "sha256:bb");
+
+        // Assert
+        Assert.Equal(ContentIdentityComparison.Changed, outcome);
+    }
+
+    /// <summary>
+    ///     Test that identities of different kinds mean the content changed, because the same
+    ///     version is now delivered by a different kind of source.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_Compare_DifferentKinds_IsChanged()
+    {
+        // Arrange: a file hash against a commit
+
+        // Act
+        var outcome = PackageContentIdentity.Compare("sha256:aa", "git-commit:aa");
+
+        // Assert
+        Assert.Equal(ContentIdentityComparison.Changed, outcome);
     }
 
     /// <summary>
     ///     Test that the short description cuts the value so two identities can be told apart
-    ///     without printing a whole hash, and reports "none" when no identity is known.
+    ///     without printing a whole hash, and keeps a short value whole.
     /// </summary>
     [Fact]
-    public void PackageContentIdentity_Describe_LongAndMissingIdentities_ReturnsShortForm()
+    public void PackageContentIdentity_Describe_LongIdentity_ReturnsShortForm()
     {
         // Arrange
         var identity = "sha256:" + AbcSha256;
 
-        // Act / Assert
-        Assert.Equal("sha256:ba7816bf8f01", PackageContentIdentity.Describe(identity));
+        // Act
+        var described = PackageContentIdentity.Describe(identity);
+
+        // Assert: twelve characters of the value, and a short value is not cut
+        Assert.Equal("sha256:ba7816bf8f01", described);
         Assert.Equal("git-commit:abc", PackageContentIdentity.Describe("git-commit:abc"));
+    }
+
+    /// <summary>
+    ///     Test that the short description reports "none" when no identity is known.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_Describe_MissingIdentity_ReturnsNone()
+    {
+        // Arrange: no identity, or only white space
+
+        // Act / Assert
         Assert.Equal("none", PackageContentIdentity.Describe(null));
         Assert.Equal("none", PackageContentIdentity.Describe(" "));
+    }
+
+    /// <summary>
+    ///     Test that an identity of an unrecognized shape is cut after its first colon and never
+    ///     echoed in full.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_Describe_UnrecognizedShape_CutsAfterFirstColon()
+    {
+        // Arrange: a long value that itself contains a colon
+        var identity = "other:0123456789abcdef:ghij";
+
+        // Act
+        var described = PackageContentIdentity.Describe(identity);
+
+        // Assert: the part after the first colon is cut to twelve characters
+        Assert.Equal("other:0123456789ab", described);
     }
 }

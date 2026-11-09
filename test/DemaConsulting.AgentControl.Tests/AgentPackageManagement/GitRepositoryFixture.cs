@@ -179,10 +179,11 @@ internal sealed class GitRepositoryFixture : IDisposable
     public void AddFile(string path, string content)
     {
         var blob = Git(WorkPath, ["hash-object", "-w", "--stdin"], content).Trim();
-        // cspell:ignore ignorecase precomposeunicode
+        // cspell:ignore ignorecase precomposeunicode protectntfs protecthfs
         Git(
             WorkPath,
             "-c", "core.ignorecase=false", "-c", "core.precomposeunicode=false",
+            "-c", "core.protectNTFS=false", "-c", "core.protectHFS=false",
             "update-index", "--add", "--cacheinfo", $"100644,{blob},{path}");
     }
 

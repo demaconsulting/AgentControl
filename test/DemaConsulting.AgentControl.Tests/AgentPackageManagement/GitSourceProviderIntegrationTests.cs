@@ -22,6 +22,7 @@ using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Tests.PackageCredentials;
 
+// cspell:ignore ufeffu
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 
 /// <summary>
@@ -54,7 +55,7 @@ public sealed class GitSourceProviderIntegrationTests
         fixture.Commit(Layout("two"), "two");
         fixture.Tag("v1.1.0", annotated: true);
         fixture.Tag("v2.0.0-beta.1");
-        foreach (var other in new[] { "latest", "v1.2", "v1.2.3+build", "x1.0.0", "V1.0.1", "v1.2.3.4" })
+        foreach (var other in new[] { "latest", "v1.2", "v1.2.3+build", "x1.0.0", "V1.0.1", "v1.2.3.4", "v01.2.3", "v1.2.3-01" })
         {
             fixture.Tag(other);
         }
@@ -99,29 +100,6 @@ public sealed class GitSourceProviderIntegrationTests
 
         // Act / Assert
         Assert.Empty(await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken));
-    }
-
-    /// <summary>
-    ///     Test that two tags naming the same version keep the smallest tag name and log a warning.
-    /// </summary>
-    [Fact]
-    public async Task GitSourceProvider_ListVersions_TwoTagsSameVersion_KeepsSmallestTagAndWarns()
-    {
-        // Arrange
-        using var fixture = GitRepositoryFixture.CreateOrSkip();
-        fixture.Commit(Layout("one"), "one");
-        fixture.Tag("v1.0.0");
-        fixture.Tag("v01.0.0");
-        fixture.Push();
-        var logger = new ListLogger();
-        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions(logger: logger));
-
-        // Act
-        var versions = await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken);
-
-        // Assert
-        Assert.Equal("v01.0.0", Assert.Single(versions).Location);
-        Assert.Contains(logger.Snapshot(), line => line.Contains("same version", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -226,8 +204,8 @@ public sealed class GitSourceProviderIntegrationTests
 
     /// <summary>
     ///     Test that a tag that was moved is seen at listing as a different commit, that acquiring the
-    ///     old listing entry is refused because the fetched tag is no longer that commit, and that the
-    ///     new listing entry is acquired into its own cache folder.
+    ///     old listing entry is refused because the repository no longer lists the tag at that commit, and
+    ///     that the new listing entry is acquired into its own cache folder.
     /// </summary>
     [Fact]
     public async Task GitSourceProvider_MovedTag_ShowsNewRevisionAndRefusesStaleListing()
@@ -251,10 +229,10 @@ public sealed class GitSourceProviderIntegrationTests
         Assert.Equal(first, listedBefore.Revision);
         Assert.Equal(second, listedAfter.Revision);
 
-        // Assert: the stale entry is refused (the tag no longer points where it was listed)
+        // Assert: the stale entry is refused before anything is fetched (the tag no longer points where it was listed)
         var stale = await Assert.ThrowsAsync<InvalidOperationException>(
             () => provider.AcquireAsync(listedBefore with { Revision = "0123456789abcdef0123456789abcdef01234567" }, TestContext.Current.CancellationToken));
-        Assert.Contains("changed while it was being fetched", stale.Message, StringComparison.Ordinal);
+        Assert.Contains("Refresh the list", stale.Message, StringComparison.Ordinal);
 
         // Assert: the new entry is acquired into its own folder, and the old commit's folder is kept
         using var reader = await provider.AcquireAsync(listedAfter, TestContext.Current.CancellationToken);
@@ -736,6 +714,221 @@ public sealed class GitSourceProviderIntegrationTests
             await Assert.ThrowsAsync<ArgumentException>(
                 () => provider.AcquireAsync(bad, TestContext.Current.CancellationToken));
         }
+    }
+
+    /// <summary>
+    ///     Test that a layout folder that is a file where a managed folder belongs, and a root file
+    ///     that is a folder, are refused with nothing cached: such a tag would otherwise make an
+    ///     extraction delete a managed folder and put nothing back.
+    /// </summary>
+    [Theory]
+    [InlineData("folder-is-file-skills", "'.github/skills' in this tag is not a folder")]
+    [InlineData("folder-is-file-agents", "'.github/agents' in this tag is not a folder")]
+    [InlineData("root-file-is-folder", "'release-notes.md' in this tag is not an ordinary file")]
+    [InlineData("agents-file-is-folder", "'AGENTS.md' in this tag is not an ordinary file")]
+    public async Task GitSourceProvider_Acquire_LayoutFolderAsFileOrRootFileAsFolder_IsRefusedAndNothingCached(
+        string kind, string expected)
+    {
+        // Arrange: a good layout in which one entry has the wrong kind
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var files = Layout("wrong-kind");
+        switch (kind)
+        {
+            case "folder-is-file-skills":
+                files.Remove(".github/skills/skill.md");
+                files[".github/skills"] = "a file where a managed folder belongs";
+                break;
+            case "folder-is-file-agents":
+                files.Remove(".github/agents/copilot.md");
+                files[".github/agents"] = "a file where a managed folder belongs";
+                break;
+            case "root-file-is-folder":
+                files.Remove("release-notes.md");
+                files["release-notes.md/inner.md"] = "a folder where a root file belongs";
+                break;
+            default:
+                files.Remove("AGENTS.md");
+                files["AGENTS.md/inner.md"] = "a folder where a root file belongs";
+                break;
+        }
+
+        fixture.Commit(files, "wrong kind");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, TestContext.Current.CancellationToken));
+
+        // Assert: refused for the right reason, with nothing published or left behind
+        Assert.Contains(expected, failure.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(provider.RepositoryCacheFolder, package.Revision!)));
+        Assert.Empty(Directory.EnumerateDirectories(provider.RepositoryCacheFolder, ".tmp-*"));
+    }
+
+    /// <summary>
+    ///     Test that an entry whose name is not safe on every file system - a Windows device name, a
+    ///     stream separator, a trailing dot - is refused, because the files are written by AgentControl
+    ///     itself and nothing else checks the names.
+    /// </summary>
+    [Theory]
+    [InlineData(".github/agents/CON.md")]
+    [InlineData(".github/agents/com1")]
+    [InlineData(".github/agents/with:colon.md")]
+    [InlineData(".github/standards/sub/trailing.")]
+    public async Task GitSourceProvider_Acquire_UnsafeEntryName_IsRefusedAndNothingCached(string path)
+    {
+        // Arrange: a good layout plus an entry staged straight into the index, so the name needs no real file
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("unsafe-name"), "base");
+        fixture.AddFile(path, "content");
+        fixture.CommitStaged("unsafe name");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, TestContext.Current.CancellationToken));
+
+        // Assert: refused, with nothing published or left behind
+        Assert.Contains("not safe on every file system", failure.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(provider.RepositoryCacheFolder, package.Revision!)));
+        Assert.Empty(Directory.EnumerateDirectories(provider.RepositoryCacheFolder, ".tmp-*"));
+    }
+
+    /// <summary>
+    ///     Test that a filter driver the user's own git configuration defines, and that a fetched
+    ///     repository selects through <c>.gitattributes</c>, never runs: the program the driver names
+    ///     (which writes a marker) is not started, and the delivered content is exactly the bytes of
+    ///     the blobs - no identifier expansion, no line-ending conversion - even though the user's
+    ///     configuration asks for <c>autocrlf</c>.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_HostileFilterSelectedByRepository_NeverRunsAndContentIsRaw()
+    {
+        // Arrange: CRLF content committed first, then attributes that would filter and convert it on checkout
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        const string crlf = "one\r\ntwo\r\nthree\r\n";
+        const string ident = "$Id$ stays literal\n";
+        fixture.Commit(
+            new Dictionary<string, string>(Layout("hostile"))
+            {
+                [".github/standards/style.md"] = crlf,
+                [".github/agents/copilot.md"] = ident
+            },
+            "content");
+        fixture.Commit(
+            new Dictionary<string, string>
+            {
+                [".github/agents/.gitattributes"] = "* filter=pwn ident\n",
+                [".github/standards/.gitattributes"] = "* text eol=lf filter=pwn\n"
+            },
+            "attributes");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var marker = Path.Combine(fixture.Root, "filter-ran.txt");
+        var hostile = CreateHostileFilterEnvironment(fixture, marker);
+
+        // Control: a plain git checkout with the same hostile configuration does run the filter, so the
+        // test is meaningful
+        var control = Path.Combine(fixture.Root, "control");
+        RunWithEnvironment(fixture, hostile, fixture.Root, "init", "-q", control);
+        RunWithEnvironment(fixture, hostile, control, "fetch", "-q", fixture.RemotePath, "refs/tags/v1.0.0:refs/tags/v1.0.0");
+        RunWithEnvironment(fixture, hostile, control, "checkout", "-q", "refs/tags/v1.0.0", "--", ".github/agents", ".github/standards");
+        if (!File.Exists(marker))
+        {
+            Assert.Skip("Filter drivers do not run in this environment, so their neutralization cannot be demonstrated.");
+        }
+
+        File.Delete(marker);
+        var options = fixture.CreateOptions() with { ExtraEnvironment = hostile };
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), options);
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Assert: acquired, the filter program never ran, and the content is byte for byte what the commit holds
+        Assert.False(File.Exists(marker));
+        Assert.Equal(ident, reader.ReadText(".github/agents/copilot.md"));
+        Assert.Equal(System.Text.Encoding.UTF8.GetBytes(crlf), ReadBytes(reader, ".github/standards/style.md"));
+    }
+
+    /// <summary>
+    ///     Test that content is delivered byte for byte as committed - a carriage return, a NUL byte,
+    ///     a byte-order mark, no final line feed, an empty file - under the user's <c>autocrlf</c>
+    ///     setting, with no attributes involved.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_UserAutocrlfSetting_DoesNotChangeDeliveredBytes()
+    {
+        // Arrange
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var files = Layout("bytes");
+        files[".github/templates/crlf.md"] = "a\r\nb\r\nc";
+        files[".github/templates/mixed.md"] = "x\ny\r\nz\rw\0v\ufeffu\n";
+        files[".github/templates/empty.md"] = string.Empty;
+        fixture.Commit(files, "bytes");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var config = Path.Combine(fixture.Root, "autocrlf.gitconfig");
+        await File.WriteAllTextAsync(
+            config, "[core]\n\tautocrlf = true\n\teol = crlf\n[protocol \"file\"]\n\tallow = always\n", TestContext.Current.CancellationToken);
+        var environment = new Dictionary<string, string?>(fixture.IsolationEnvironment) { ["GIT_CONFIG_GLOBAL"] = config };
+        var provider = new GitSourceProvider(
+            fixture.CreateDefinition(), fixture.CreateOptions() with { ExtraEnvironment = environment });
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(System.Text.Encoding.UTF8.GetBytes("a\r\nb\r\nc"), ReadBytes(reader, ".github/templates/crlf.md"));
+        Assert.Equal(System.Text.Encoding.UTF8.GetBytes("x\ny\r\nz\rw\0v\ufeffu\n"), ReadBytes(reader, ".github/templates/mixed.md"));
+        Assert.Empty(ReadBytes(reader, ".github/templates/empty.md"));
+    }
+
+    /// <summary>
+    ///     Reads all bytes of one file of a package.
+    /// </summary>
+    /// <param name="reader">The package content.</param>
+    /// <param name="path">The relative path.</param>
+    /// <returns>The bytes.</returns>
+    private static byte[] ReadBytes(IPackageContentReader reader, string path)
+    {
+        using var stream = reader.OpenRead(path);
+        using var copy = new MemoryStream();
+        stream.CopyTo(copy);
+        return copy.ToArray();
+    }
+
+    /// <summary>
+    ///     Builds an environment in which the user's global git configuration defines a filter driver
+    ///     named <c>pwn</c> whose smudge command writes a marker file, and asks for line-ending
+    ///     conversion.
+    /// </summary>
+    /// <param name="fixture">The fixture.</param>
+    /// <param name="marker">The file the smudge command writes.</param>
+    /// <returns>The environment variables.</returns>
+    private static Dictionary<string, string?> CreateHostileFilterEnvironment(GitRepositoryFixture fixture, string marker)
+    {
+        var config = Path.Combine(fixture.Root, "hostile-filter.gitconfig");
+        var command = $"echo ran >> \\\"{marker.Replace('\\', '/')}\\\" && cat";
+        File.WriteAllText(
+            config,
+            $"[core]\n\tautocrlf = true\n[filter \"pwn\"]\n\tsmudge = \"{command}\"\n\tclean = cat\n\trequired = false\n" +
+            "[protocol \"file\"]\n\tallow = always\n");
+        return new Dictionary<string, string?>
+        {
+            ["GIT_CONFIG_GLOBAL"] = config,
+            ["GIT_CONFIG_NOSYSTEM"] = "1",
+            ["GIT_CONFIG_COUNT"] = null,
+            ["GIT_CONFIG_PARAMETERS"] = null
+        };
     }
 
     /// <summary>

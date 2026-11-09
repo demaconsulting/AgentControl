@@ -137,15 +137,23 @@ is tested by
 `PackageContentExtractor_Extract_NullArguments_ThrowsArgumentNullException` is a defensive test that no
 requirement cites.
 
-**PackageContentExtractor_ReaderContentIdentity_ZipHashedFromTheReadHandleAndFolderCarriesSuppliedIdentity**: A zip
-reader reports the SHA-256 identity of the zip file (compared with a hash computed independently by the test) and
-still reads its entries afterwards, because the hash and the archive share one handle; a file that is not a zip
-releases that handle when opening fails (the file can be deleted straight away); a folder reader reports the
-identity its opener supplied, or none when none was supplied. This scenario is tested by
-`ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries`,
-`ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle` and
-`DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull`, covering
+**PackageContentExtractor_ReaderContentIdentity_ZipHashedFromTheReadHandle**: A zip reader reports the SHA-256
+identity of the zip file (compared with a hash computed independently by the test) and still reads its entries
+afterwards, because the hash and the archive share one handle. This scenario is tested by
+`ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries`, covering
 `AgentControl-PackageContentExtractor-ReaderContentIdentity`.
+
+**PackageContentExtractor_ReaderContentIdentity_ZipHandleReleasedOnFailure**: A file that is not a zip releases the
+handle when opening fails (the file can be deleted straight away). This scenario is tested by
+`ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle`, covering
+`AgentControl-PackageContentExtractor-ZipReaderReleasesHandleOnFailure`.
+
+**PackageContentExtractor_ReaderContentIdentity_FolderCarriesSuppliedIdentityOrNone**: A folder reader reports the
+identity its opener supplied, and none when none was supplied. This scenario is tested by
+`DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull`, covering
+`AgentControl-PackageContentExtractor-FolderReaderIdentity`, and by
+`DirectoryPackageContentReader_Open_WithoutIdentity_ReportsNone`, covering
+`AgentControl-PackageContentExtractor-FolderReaderNoIdentity`.
 
 **PackageContentExtractor_ZipOpenFailure_InvalidPathIsReportedAsInvalidOperation**: Opening a zip
 package with an invalid path (an argument the operating system rejects as a path) throws
@@ -166,15 +174,35 @@ package with an invalid path (an argument the operating system rejects as a path
   such a race depends on operating-system scheduling, so no unit test can reproduce it reliably; the tests above
   verify that a link present before the operation starts is always refused.
 
-**PackageContentExtractor_LayoutRoot_ReadsOnlyLayoutIgnoresUnrelatedLinksRefusesLayoutLinks**: A folder shaped like a
-checked-out repository is read through `OpenLayoutRoot`: only the layout is listed (no `.git`, workflows, README or
-sources), the supplied identity is carried, the package extracts and its notes and template are read, paths outside the
-layout (including `.github/agents/../../.git/config`) are refused, a missing or linked root is refused, an unrelated
-junction or symbolic link is ignored and the same kind of link inside the layout is refused. This scenario is tested by
-`DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity`,
-`DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused`,
-`DirectoryPackageContentReader_OpenLayoutRoot_MissingFolderOrLink_ThrowsInvalidOperationException`,
+**PackageContentExtractor_LayoutRoot_ReadsOnlyLayout**: A folder shaped like a checked-out repository is read through
+`OpenLayoutRoot`: only the layout is listed (no `.git`, workflows, README or sources), the supplied identity is carried,
+the package extracts and its notes and template are read, and paths outside the layout (including
+`.github/agents/../../.git/config`) are refused. This scenario is tested by
+`DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity`, covering
+`AgentControl-PackageContentExtractor-ReadLayoutRoot` and `AgentControl-PackageContentExtractor-ExcludeGitFolder`;
+by `DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused`, covering
+`AgentControl-PackageContentExtractor-RefuseOutsideLayoutPaths` and `AgentControl-PackageContentExtractor-ExcludeGitFolder`;
+by `DirectoryPackageContentReader_OpenLayoutRoot_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull`, covering
+`AgentControl-PackageContentExtractor-LayoutRootIdentity`; and by
+`DirectoryPackageContentReader_OpenLayoutRoot_MissingFolderOrLink_ThrowsInvalidOperationException`, covering
+`AgentControl-PackageContentExtractor-RefuseMissingOrLinkedLayoutRoot`.
+
+**PackageContentExtractor_LayoutRoot_UnrelatedLinksIgnoredLayoutLinksRefused**: A junction or symbolic link that is not
+part of the layout is neither inspected nor refused, while a link in the layout is refused in each position the
+layout has: a file link inside a managed folder, a link standing in place of `.github` itself, a link standing in
+place of a managed folder, and a link standing in place of a root file. The tests create links where the operating
+system lets them and skip otherwise: the junction cases run on Windows, the symbolic-link cases on Linux and macOS.
+This scenario is tested by
 `DirectoryPackageContentReader_OpenLayoutRoot_JunctionOutsideLayoutIgnoredInsideLayoutRefused` and
 `DirectoryPackageContentReader_OpenLayoutRoot_SymlinkOutsideLayoutIgnoredInsideLayoutRefused`, covering
-`AgentControl-PackageContentExtractor-ReadLayoutRoot`, `AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout`
-and `AgentControl-PackageContentExtractor-ExcludeGitFolder`.
+`AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout`;
+`DirectoryPackageContentReader_OpenLayoutRoot_SymlinkFileInManagedFolder_IsRefused`, covering
+`AgentControl-PackageContentExtractor-RefuseLinkInManagedFolder`;
+`DirectoryPackageContentReader_OpenLayoutRoot_JunctionReplacingGitHubFolder_IsRefused` and
+`DirectoryPackageContentReader_OpenLayoutRoot_SymlinkReplacingGitHubFolder_IsRefused`, covering
+`AgentControl-PackageContentExtractor-RefuseLinkInPlaceOfGitHub`;
+`DirectoryPackageContentReader_OpenLayoutRoot_JunctionReplacingManagedFolder_IsRefused` and
+`DirectoryPackageContentReader_OpenLayoutRoot_SymlinkReplacingManagedFolder_IsRefused`, covering
+`AgentControl-PackageContentExtractor-RefuseLinkInPlaceOfManagedFolder`; and
+`DirectoryPackageContentReader_OpenLayoutRoot_SymlinkAsRootFile_IsRefused`, covering
+`AgentControl-PackageContentExtractor-RefuseLinkAsRootFile`.

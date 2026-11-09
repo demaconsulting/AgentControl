@@ -251,6 +251,80 @@ public sealed class NuGetSourceProviderTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that two versions of one package report different identities, each the SHA-256 of
+    ///     its own package file.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_Acquire_TwoVersions_ReportTheIdentityOfTheirOwnPackageFile()
+    {
+        // Arrange: two versions with different content, and the independently computed SHA-256 of each file
+        var feed = CreateTempDirectory();
+        var id = UniqueId();
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "agents v1");
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "2.0.0", marker: "agents v2");
+        var expected = new Dictionary<string, string>();
+        foreach (var file in Directory.GetFiles(feed, "*.nupkg"))
+        {
+            var version = Path.GetFileNameWithoutExtension(file).EndsWith("2.0.0", StringComparison.Ordinal) ? "2.0.0" : "1.0.0";
+            expected[version] = "sha256:" + Convert.ToHexStringLower(
+                System.Security.Cryptography.SHA256.HashData(
+                    await File.ReadAllBytesAsync(file, TestContext.Current.CancellationToken)));
+        }
+
+        var provider = CreateProvider("Feed", feed);
+        var packages = await provider.ListVersionsAsync(id, CancellationToken.None);
+
+        // Act
+        var identities = new Dictionary<string, string?>();
+        foreach (var package in packages)
+        {
+            using var reader = await provider.AcquireAsync(package, CancellationToken.None);
+            identities[package.Version.ToString()] = reader.ContentIdentity;
+        }
+
+        // Assert: each version names its own bytes, and the two differ
+        Assert.Equal(expected["1.0.0"], identities["1.0.0"]);
+        Assert.Equal(expected["2.0.0"], identities["2.0.0"]);
+        Assert.NotEqual(identities["1.0.0"], identities["2.0.0"]);
+    }
+
+    /// <summary>
+    ///     Test that the identity of an acquired package describes the copy held in the source's
+    ///     private package cache: a second acquisition of the same version reports the same identity
+    ///     as the first even though the feed's file was replaced in between, because NuGet versions
+    ///     are immutable by convention and the cached copy is what is unpacked and applied.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_Acquire_SameVersionTwice_ReportsIdentityOfTheCachedCopy()
+    {
+        // Arrange: a package acquired once, so it is in the private cache
+        var feed = CreateTempDirectory();
+        var id = UniqueId();
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "agents v1");
+        var nupkg = Assert.Single(Directory.GetFiles(feed, "*.nupkg"));
+        var original = "sha256:" + Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(
+                await File.ReadAllBytesAsync(nupkg, TestContext.Current.CancellationToken)));
+        var provider = CreateProvider("Feed", feed);
+        var package = Assert.Single(await provider.ListVersionsAsync(id, CancellationToken.None));
+        string? first;
+        using (var reader = await provider.AcquireAsync(package, CancellationToken.None))
+        {
+            first = reader.ContentIdentity;
+        }
+
+        // Act: the feed's file is replaced under the same version, and the version is acquired again
+        File.Delete(nupkg);
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "republished");
+        using var again = await provider.AcquireAsync(package, CancellationToken.None);
+
+        // Assert: the identity is that of the cached copy that was unpacked, the same both times
+        Assert.Equal(original, first);
+        Assert.Equal(original, again.ContentIdentity);
+        Assert.Equal("agents v1", again.ReadText(".github/agents/copilot.md"));
+    }
+
+    /// <summary>
     ///     Test that a package folder holding more than one package file cannot be identified and
     ///     is refused, rather than recorded under an arbitrarily chosen file's hash.
     /// </summary>

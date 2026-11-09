@@ -24,6 +24,7 @@ using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.RepoSync;
 using Microsoft.Extensions.Logging;
 
+// cspell:ignore CONIN CONOUT ufeff
 namespace DemaConsulting.AgentControl.AgentPackageManagement;
 
 /// <summary>
@@ -135,18 +136,22 @@ internal interface IGitTagPreview
 ///     lexicographically smallest tag and a warning is logged.
 ///     </para>
 ///     <para>
-///     <b>Acquiring</b> fetches exactly one tag, shallow, into a temporary repository that
+///     <b>Acquiring</b> first confirms that the repository still lists the package's version at the
+///     tag and commit it was given (a package this source would not list is refused before anything
+///     is fetched), then fetches exactly one tag, shallow, into a temporary repository that
 ///     AgentControl creates from an empty template (so it has no hooks); checks that the fetched
 ///     tag is the commit that was listed; reads the tree of the tag and refuses the package when
-///     any part of the package layout is a symbolic link, a submodule or an entry named
-///     <c>.git</c>, when two entries differ only in letter case or Unicode form (they would be one
-///     file on some file systems), or when it is too large; checks out only the layout paths;
-///     deletes the <c>.git</c> folder (and publishes nothing when it cannot be deleted); and keeps
-///     the result in a cache folder named by the repository and the
-///     commit, so the same commit is never fetched twice and different repositories never share a
-///     folder. Anything in the repository outside the layout (including links) is never checked
-///     out. The reader returned lists and reads only the layout and reports the identity
-///     <c>git-commit:{sha}</c>.
+///     any part of the package layout is a symbolic link, a submodule, an entry named
+///     <c>.git</c> or a name that is not safe on every file system, when a layout folder is not a
+///     folder or a root file is not a file, when two entries differ only in letter case or Unicode
+///     form (they would be one file on some file systems), or when it is too large; writes the
+///     validated files itself, byte for byte as they are in the commit, with no checkout (so no
+///     filter, attribute or line-ending conversion applies); deletes the <c>.git</c> folder (and
+///     publishes nothing when it cannot be deleted); and keeps the result in a cache folder named
+///     by the repository and the commit, so the same commit is never fetched twice and different
+///     repositories never share a folder. Anything in the repository outside the layout (including
+///     links) is never written. The reader returned lists and reads only the layout and reports the
+///     identity <c>git-commit:{sha}</c>.
 ///     </para>
 ///     <para>
 ///     Credentials come only from the user's own git setup (credential helper, ssh keys); see
@@ -181,6 +186,17 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
     ///     How many non-matching tag names a preview shows.
     /// </summary>
     private const int MaxSamples = 5;
+
+    /// <summary>
+    ///     The names Windows reserves for devices; a file or folder cannot have one of them (with or
+    ///     without an extension).
+    /// </summary>
+    private static readonly string[] ReservedDeviceNames =
+    [
+        "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+    ];
 
     /// <summary>
     ///     How old a temporary folder must be before another acquisition removes it.
@@ -355,6 +371,9 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
         {
             if (!IsCompleteCacheFolder(final, commit))
             {
+                // Nothing is fetched that this source would not list: the tag and the commit it was
+                // given must be what the repository offers now, under the same pattern
+                await RequireListedAsync(package, cancellationToken);
                 await EnsureSupportedGitAsync(cancellationToken);
                 await FetchIntoCacheAsync(target, package.Location, commit, final, cancellationToken);
             }
@@ -375,6 +394,32 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
         var reader = DirectoryPackageContentReader.OpenLayoutRoot(layoutRoot, PackageContentIdentity.FromGitCommit(commit));
         await Task.Run(() => Prune(commit), CancellationToken.None);
         return reader;
+    }
+
+    /// <summary>
+    ///     Refuses a package that this source would not list now, so a caller cannot make the source
+    ///     fetch a tag or commit it never offered.
+    /// </summary>
+    /// <param name="package">The package that is about to be fetched.</param>
+    /// <param name="cancellationToken">Cancels the listing.</param>
+    /// <returns>A task that completes when the package is confirmed to be listed.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the repository does not list the
+    ///     package's version at the package's tag and commit (the tag was moved or removed, or it
+    ///     never named that commit).</exception>
+    /// <exception cref="PackageSourceAccessException">Thrown when the repository cannot be listed
+    ///     for a reason the user can act on.</exception>
+    private async Task RequireListedAsync(DiscoveredPackage package, CancellationToken cancellationToken)
+    {
+        var tags = await ListTagsAsync(_pattern.ListingGlob, cancellationToken);
+        var listed = MatchVersions(tags).Packages.FirstOrDefault(candidate => candidate.Version == package.Version);
+        if (listed is null ||
+            !string.Equals(listed.Location, package.Location, StringComparison.Ordinal) ||
+            !string.Equals(listed.Revision, package.Revision, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Version {package.Version} of source '{Alias}' is not offered by the repository at that tag and commit " +
+                "any more (the tag was moved or removed). Refresh the list and try again.");
+        }
     }
 
     /// <summary>
@@ -478,8 +523,8 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
     }
 
     /// <summary>
-    ///     Fetches the tag into a temporary folder, validates and checks out the layout, and
-    ///     publishes the folder as the cache folder of the commit.
+    ///     Fetches the tag into a temporary folder, validates the layout, writes the validated blobs
+    ///     to it as raw bytes, and publishes the folder as the cache folder of the commit.
     /// </summary>
     /// <param name="target">The remote.</param>
     /// <param name="tag">The tag to fetch.</param>
@@ -506,8 +551,8 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
                     $"Tag '{tag}' of source '{Alias}' changed while it was being fetched. Refresh the list and try again.");
             }
 
-            var checkoutPaths = await ValidateLayoutAsync(temporary, commit, cancellationToken);
-            await _client.CheckoutPathsAsync(temporary, commit, checkoutPaths, cancellationToken);
+            var layoutFiles = await ValidateLayoutAsync(temporary, commit, cancellationToken);
+            await MaterializeLayoutAsync(temporary, layoutFiles, cancellationToken);
 
             await Task.Run(() => PublishCheckedOutFolder(temporary, final, commit), CancellationToken.None);
         }
@@ -521,11 +566,67 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
     }
 
     /// <summary>
-    ///     Removes the <c>.git</c> folder from the checked-out temporary folder, verifies that it is
+    ///     Writes the validated layout files into the temporary folder as the exact bytes of their
+    ///     blobs. No checkout is used, so no filter driver, attribute or line-ending conversion the
+    ///     repository or the user's git configuration names can run or change the content.
+    /// </summary>
+    /// <param name="repository">The temporary repository, which is also the root the files are
+    ///     written under (at their repository paths).</param>
+    /// <param name="files">The validated layout files.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>A task that completes when every file is written.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when a file cannot be written.</exception>
+    private async Task MaterializeLayoutAsync(
+        string repository, IReadOnlyList<GitTreeEntry> files, CancellationToken cancellationToken)
+    {
+        var root = Path.GetFullPath(repository).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        try
+        {
+            await _client.ReadBlobsAsync(
+                repository, files, entry => OpenLayoutFile(root, entry), MaxLayoutBytes, cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "A file of the fetched package of source '{Source}' could not be written.", Alias);
+            throw new InvalidOperationException(
+                $"Source '{Alias}': a file of this tag's agent package could not be written to the cache folder " +
+                $"'{_repositoryFolder}'. Check that there is room and that no program blocks the folder, then try again.",
+                ex);
+        }
+    }
+
+    /// <summary>
+    ///     Creates the file a layout entry is written to, refusing anything that would land outside
+    ///     the root or over an existing file.
+    /// </summary>
+    /// <param name="root">The full path of the root folder, ending with a separator.</param>
+    /// <param name="entry">The validated entry.</param>
+    /// <returns>The new, empty file opened for writing.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the path is not below the root.</exception>
+    /// <exception cref="IOException">Thrown when the file already exists or cannot be created.</exception>
+    private Stream OpenLayoutFile(string root, GitTreeEntry entry)
+    {
+        var full = Path.GetFullPath(Path.Combine(root, entry.Path.Replace('/', Path.DirectorySeparatorChar)));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!full.StartsWith(root, comparison))
+        {
+            throw new InvalidOperationException(
+                $"Source '{Alias}': '{Printable(entry.Path)}' in this tag would be written outside the package folder.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+
+        // CreateNew: a file that is already there is never overwritten, and no sharing, so nothing
+        // else can write to it while it is filled
+        return new FileStream(full, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, useAsync: true);
+    }
+
+    /// <summary>
+    ///     Removes the <c>.git</c> folder from the temporary folder, verifies that it is
     ///     gone, marks the folder complete and publishes it. Fails closed: when the repository
     ///     metadata cannot be removed nothing is marked or published.
     /// </summary>
-    /// <param name="temporary">The temporary folder holding the checked-out layout.</param>
+    /// <param name="temporary">The temporary folder holding the written layout.</param>
     /// <param name="final">The cache folder to publish.</param>
     /// <param name="commit">The commit.</param>
     /// <exception cref="InvalidOperationException">Thrown when <c>.git</c> cannot be removed or the
@@ -561,19 +662,21 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
     /// <param name="repository">The temporary repository.</param>
     /// <param name="commit">The commit.</param>
     /// <param name="cancellationToken">Cancels the work.</param>
-    /// <returns>The layout paths that exist in the commit, as git paths from the repository root:
-    ///     the only paths that are checked out.</returns>
+    /// <returns>The regular files of the layout, as listed (paths from the repository root): the
+    ///     only content that is ever written to the cache.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the sub-folder is not a folder, a
-    ///     layout path is a symbolic link, a submodule or contains a <c>.git</c> name, the layout
-    ///     is too large, or there is no layout.</exception>
-    private async Task<List<string>> ValidateLayoutAsync(string repository, string commit, CancellationToken cancellationToken)
+    ///     layout folder is not a folder or a root file is not a file, a layout path is a symbolic
+    ///     link, a submodule or contains a <c>.git</c> name or another name that is not safe on every
+    ///     file system, the layout is too large, or there is no layout.</exception>
+    private async Task<List<GitTreeEntry>> ValidateLayoutAsync(string repository, string commit, CancellationToken cancellationToken)
     {
         var prefix = _subfolder is null ? string.Empty : _subfolder + "/";
 
-        // The named entries themselves first: a sub-folder, .github or a root file that is a link or
-        // a submodule is refused outright (git cannot list below a link, so the recursive listing
-        // below would silently find nothing there). They are listed in separate calls because
-        // git lists everything below a named folder when another pathspec reaches into it.
+        // The named entries themselves first: a sub-folder, .github, a layout folder or a root file
+        // that is a link or a submodule is refused outright (git cannot list below a link, so the
+        // recursive listing below would silently find nothing there). They are listed in separate
+        // calls because git lists everything below a named folder when another pathspec reaches
+        // into it.
         if (_subfolder is not null)
         {
             var folderEntries = await _client.ListTreeAsync(repository, commit, [_subfolder], recursive: false, cancellationToken);
@@ -594,6 +697,15 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
         foreach (var entry in await _client.ListTreeAsync(repository, commit, top, recursive: false, cancellationToken))
         {
             RequireOrdinaryEntry(entry, isFolderExpected: entry.Path == prefix + ".github");
+        }
+
+        // Each layout folder that exists must be a folder: a file (or link) where a managed folder
+        // belongs would pass a listing of files, and extracting it would delete the managed folder
+        // and put nothing back
+        var folderRoots = PackageContentExtractor.LayoutFolders.Select(path => prefix + path).ToList();
+        foreach (var entry in await _client.ListTreeAsync(repository, commit, folderRoots, recursive: false, cancellationToken))
+        {
+            RequireOrdinaryEntry(entry, isFolderExpected: true);
         }
 
         var layoutPaths = PackageContentExtractor.LayoutPaths.Select(path => prefix + path).ToList();
@@ -622,11 +734,20 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
                 $"{MaxLayoutBytes / (1024 * 1024)} MB).");
         }
 
-        // Only the layout paths that really exist are named for the checkout
-        var existing = layoutPaths
-            .Where(path => files.Any(entry => entry.Path == path || entry.Path.StartsWith(path + "/", StringComparison.Ordinal)))
-            .ToList();
-        if (existing.Count == 0)
+        // Every listed file must sit where the layout allows a file: below a layout folder, or as a
+        // root file itself (a blob at a layout folder's own path was refused above)
+        var allowedFolders = folderRoots.Select(path => path + "/").ToList();
+        var allowedFiles = PackageContentExtractor.LayoutRootFiles.Select(file => prefix + file).ToHashSet(StringComparer.Ordinal);
+        var stray = files.FirstOrDefault(entry =>
+            !allowedFiles.Contains(entry.Path) &&
+            !allowedFolders.Any(folder => entry.Path.StartsWith(folder, StringComparison.Ordinal)));
+        if (stray is not null)
+        {
+            throw new InvalidOperationException(
+                $"Source '{Alias}': '{Printable(stray.Path)}' in this tag is not part of the agent package layout.");
+        }
+
+        if (files.Count == 0)
         {
             throw new InvalidOperationException(
                 $"Source '{Alias}': this tag has no agent package layout" +
@@ -634,22 +755,33 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
                 " It must contain .github/agents, .github/standards, .github/templates, .github/skills or release-notes.md.");
         }
 
-        return existing;
+        return [.. files];
     }
 
     /// <summary>
     ///     Refuses a tree entry that is a symbolic link, a submodule, has a <c>.git</c> path
-    ///     component, or is not the expected kind of entry.
+    ///     component or another name that is not safe on every file system, or is not the expected
+    ///     kind of entry.
     /// </summary>
     /// <param name="entry">The entry.</param>
     /// <param name="isFolderExpected">Whether the entry must be a folder (otherwise a regular file).</param>
     /// <exception cref="InvalidOperationException">Thrown when the entry is not acceptable.</exception>
     private void RequireOrdinaryEntry(GitTreeEntry entry, bool isFolderExpected)
     {
-        if (entry.Path.Split('/').Any(part => part.Equals(".git", StringComparison.OrdinalIgnoreCase)))
+        foreach (var part in entry.Path.Split('/'))
         {
-            throw new InvalidOperationException(
-                $"Source '{Alias}': this tag's agent package contains a '.git' entry, which is not allowed.");
+            if (IsGitFolderName(part))
+            {
+                throw new InvalidOperationException(
+                    $"Source '{Alias}': this tag's agent package contains a '.git' entry, which is not allowed.");
+            }
+
+            if (!IsSafePathComponent(part))
+            {
+                throw new InvalidOperationException(
+                    $"Source '{Alias}': '{Printable(entry.Path)}' in this tag has a name that is not safe on every file system, " +
+                    "which is not allowed in an agent package.");
+            }
         }
 
         var acceptable = isFolderExpected
@@ -661,11 +793,60 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
             {
                 "120000" => "a symbolic link",
                 "160000" => "a submodule",
-                _ => "not an ordinary file or folder"
+                _ => isFolderExpected ? "not a folder" : "not an ordinary file"
             };
             throw new InvalidOperationException(
-                $"Source '{Alias}': '{entry.Path}' in this tag is {kind}, which is not allowed in an agent package.");
+                $"Source '{Alias}': '{Printable(entry.Path)}' in this tag is {kind}, which is not allowed in an agent package.");
         }
+    }
+
+    /// <summary>
+    ///     Determines whether a path component names the repository metadata folder on any file
+    ///     system: <c>.git</c> in any letter case, with characters that HFS+ ignores, or as the
+    ///     short name NTFS gives it.
+    /// </summary>
+    /// <param name="component">One component of a repository path.</param>
+    /// <returns><see langword="true"/> when the component would be the <c>.git</c> folder.</returns>
+    internal static bool IsGitFolderName(string component)
+    {
+        // Zero-width and directional characters that HFS+ drops when it compares names, and the
+        // trailing dots and spaces NTFS ignores
+        var visible = string.Concat(component.Where(character => !IsHfsIgnorable(character))).TrimEnd('.', ' ');
+        return visible.Equals(".git", StringComparison.OrdinalIgnoreCase) ||
+               (visible.StartsWith("git~", StringComparison.OrdinalIgnoreCase) && visible.Length > 4 &&
+                visible[4..].All(char.IsAsciiDigit));
+    }
+
+    /// <summary>
+    ///     Determines whether a character is one that HFS+ ignores in names.
+    /// </summary>
+    /// <param name="character">The character.</param>
+    /// <returns><see langword="true"/> for the zero-width, directional and byte-order characters.</returns>
+    private static bool IsHfsIgnorable(char character) =>
+        character is (>= '\u200c' and <= '\u200f') or (>= '\u202a' and <= '\u202e') or
+            (>= '\u206a' and <= '\u206f') or '\ufeff';
+
+    /// <summary>
+    ///     Determines whether one component of a path can be created with the same meaning on every
+    ///     file system the cache may be read on: not empty, not <c>.</c> or <c>..</c>, none of the
+    ///     characters Windows forbids (including the <c>:</c> that starts an alternate data stream
+    ///     and the backslash), no control character, no trailing dot or space, and not the name of
+    ///     a Windows device.
+    /// </summary>
+    /// <param name="component">One component of a repository path.</param>
+    /// <returns><see langword="true"/> when the component is safe to create.</returns>
+    internal static bool IsSafePathComponent(string component)
+    {
+        if (component.Length == 0 || component is "." or ".." ||
+            component.EndsWith('.') || component.EndsWith(' ') ||
+            component.Any(character => char.IsControl(character) || "\\:*?\"<>|".Contains(character, StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        // A device name is reserved with or without an extension (CON, con.txt, COM1.md)
+        var stem = component.Split('.')[0].TrimEnd(' ');
+        return !ReservedDeviceNames.Contains(stem, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>

@@ -27,8 +27,8 @@ namespace DemaConsulting.AgentControl.Tests.GitIntegration;
 ///     <c>GitRemoteClient</c> tests: it records, for every invocation, the arguments, the
 ///     environment variables that matter and the working directory, and answers each git command
 ///     (<c>ls-remote</c>, <c>init</c>, <c>fetch</c>, <c>rev-parse</c>, <c>ls-tree</c>,
-///     <c>checkout</c>, <c>config</c>, <c>--version</c> recorded as <c>version</c>) with canned standard output, standard error and exit code
-///     set per command.
+///     <c>cat-file</c>, <c>config</c>, <c>--version</c> recorded as <c>version</c>) with canned standard output, standard
+///     error and exit code set per command.
 /// </summary>
 /// <remarks>
 ///     On Windows the stub is a <c>.bat</c> file; elsewhere a POSIX shell script marked executable.
@@ -115,7 +115,7 @@ internal sealed partial class GitRemoteStub
     ///     Sets the canned answer of one git command.
     /// </summary>
     /// <param name="command">The git command: <c>ls-remote</c>, <c>init</c>, <c>fetch</c>,
-    ///     <c>rev-parse</c>, <c>ls-tree</c>, <c>checkout</c>, <c>config</c> or <c>version</c>.</param>
+    ///     <c>rev-parse</c>, <c>ls-tree</c>, <c>cat-file</c>, <c>config</c> or <c>version</c>.</param>
     /// <param name="standardOutput">What the command prints to standard output.</param>
     /// <param name="standardError">What the command prints to standard error.</param>
     /// <param name="exitCode">The exit code.</param>
@@ -216,7 +216,7 @@ internal sealed partial class GitRemoteStub
             "set \"ALL= %* \"",
             "set \"CMD=other\""
         };
-        foreach (var command in new[] { "ls-remote", "init", "fetch", "rev-parse", "ls-tree", "checkout", "config", "version" })
+        foreach (var command in new[] { "ls-remote", "init", "fetch", "rev-parse", "ls-tree", "cat-file", "config", "version" })
         {
             var word = command == "version" ? "--version" : command;
             lines.Add($"echo %ALL% | findstr /C:\" {word} \" >nul && set \"CMD={command}\"");
@@ -256,7 +256,7 @@ internal sealed partial class GitRemoteStub
             $"echo \"ENV:{environment}\" >> \"$LOG\"",
             "case \" $* \" in"
         };
-        foreach (var command in new[] { "ls-remote", "init", "fetch", "rev-parse", "ls-tree", "checkout", "config", "version" })
+        foreach (var command in new[] { "ls-remote", "init", "fetch", "rev-parse", "ls-tree", "cat-file", "config", "version" })
         {
             var word = command == "version" ? "--version" : command;
             lines.Add($"  *\" {word} \"*) CMD={command} ;;");

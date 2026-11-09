@@ -448,10 +448,19 @@ sections:
           either can be republished in place.
         children:
           - AgentControl-PackageContentIdentity-Sha256
+          - AgentControl-PackageContentIdentity-Sha256StreamOpen
+          - AgentControl-PackageContentIdentity-Sha256RejectNull
           - AgentControl-PackageContentIdentity-Format
+          - AgentControl-PackageContentIdentity-FormatRejectMalformed
+          - AgentControl-PackageContentIdentity-Describe
+          - AgentControl-PackageContentIdentity-DescribeNone
           - AgentControl-PackageContentIdentity-Compare
+          - AgentControl-PackageContentIdentity-CompareSame
+          - AgentControl-PackageContentIdentity-CompareChanged
+          - AgentControl-PackageContentIdentity-CompareDifferentKinds
           - AgentControl-ZipFolderSourceProvider-ReportContentIdentity
           - AgentControl-NuGetSourceProvider-ReportContentIdentity
+          - AgentControl-NuGetSourceProvider-RefuseUnidentifiablePackage
         tests:
           - AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip
 
@@ -490,40 +499,75 @@ sections:
         children:
           - AgentControl-GitRepositoryAddress-AcceptHttps
           - AgentControl-GitRepositoryAddress-AcceptSsh
+          - AgentControl-GitRepositoryAddress-AcceptScpLikeSsh
           - AgentControl-GitRepositoryAddress-AcceptLocalPath
           - AgentControl-GitRepositoryAddress-RejectEmbeddedCredentials
+          - AgentControl-GitRepositoryAddress-RecognizeEmbeddedCredentials
           - AgentControl-GitRepositoryAddress-RejectDangerousTransports
           - AgentControl-GitRepositoryAddress-RejectOptionLikeValues
+          - AgentControl-GitRepositoryAddress-RejectControlCharacters
+          - AgentControl-GitRepositoryAddress-RejectMalformedParts
+          - AgentControl-GitRepositoryAddress-RejectTooLong
+          - AgentControl-GitRepositoryAddress-CacheKeyFormat
           - AgentControl-GitRepositoryAddress-CacheKeyStable
+          - AgentControl-GitRepositoryAddress-CacheKeyDistinguishesRepositories
           - AgentControl-GitRepositoryAddress-NeverEchoesInput
           - AgentControl-GitTagPattern-RequireSinglePlaceholder
           - AgentControl-GitTagPattern-RejectInvalidRefNames
           - AgentControl-GitTagPattern-ExtractStrictVersion
           - AgentControl-GitTagPattern-FormatTag
+          - AgentControl-GitTagPattern-FormatRefusesUnsafeTag
           - AgentControl-GitTagPattern-ListingPrefix
           - AgentControl-GitTagPattern-VetServerTagNames
           - AgentControl-GitSourceProvider-ValidateDefinition
+          - AgentControl-GitSourceProvider-ValidateDefinitionMessageNeverRepeatsAddress
           - AgentControl-GitSourceProvider-ListPackageId
+          - AgentControl-GitSourceProvider-ListVersionsNoVersionsForOtherPackage
           - AgentControl-GitSourceProvider-ListVersionsByPattern
+          - AgentControl-GitSourceProvider-ListVersionsWithoutClone
+          - AgentControl-GitSourceProvider-ListVersionsOnlyOverAddressTransport
+          - AgentControl-GitSourceProvider-ListVersionsEmptyWhenNoMatch
+          - AgentControl-GitSourceProvider-ListVersionsDuplicateVersionKeepsSmallestTag
           - AgentControl-GitSourceProvider-ResolveAnnotatedTags
           - AgentControl-GitSourceProvider-TagPreview
-          - AgentControl-GitSourceProvider-AcquireShallowTag
-          - AgentControl-GitSourceProvider-CacheByAddressAndCommit
-          - AgentControl-GitSourceProvider-TagMovedBetweenListAndFetch
-          - AgentControl-GitSourceProvider-RejectLinksAndSubmodulesInLayout
-          - AgentControl-GitSourceProvider-Subfolder
-          - AgentControl-GitSourceProvider-ExcludeGitFolder
-          - AgentControl-GitSourceProvider-FailClosedWhenGitFolderRemains
-          - AgentControl-GitSourceProvider-RejectFoldedPathCollisions
-          - AgentControl-GitSourceProvider-ReportContentIdentity
           - AgentControl-GitSourceProvider-AcquireOnlyFromOwnSource
-          - AgentControl-GitSourceProvider-FailureClassification
+          - AgentControl-GitSourceProvider-AcquireRequiresTagAndCommit
+          - AgentControl-GitSourceProvider-AcquireOnlyListedVersions
+          - AgentControl-GitSourceProvider-AcquireShallowTag
+          - AgentControl-GitSourceProvider-AcquireOnlyLayout
+          - AgentControl-GitSourceProvider-AcquireExactBlobBytes
+          - AgentControl-GitSourceProvider-NoRepositoryFilters
+          - AgentControl-GitSourceProvider-HostileHooksNeverRun
+          - AgentControl-GitSourceProvider-ReportContentIdentity
+          - AgentControl-GitSourceProvider-TagMovedBetweenListAndFetch
+          - AgentControl-GitSourceProvider-MovedTagReportedAsNewRevision
+          - AgentControl-GitSourceProvider-CacheByAddressAndCommit
+          - AgentControl-GitSourceProvider-CacheSeparatesRepositories
+          - AgentControl-GitSourceProvider-CacheTrustsOnlyCompleteFolders
+          - AgentControl-GitSourceProvider-CacheSweepsTemporaryFolders
           - AgentControl-GitSourceProvider-CachePruning
+          - AgentControl-GitSourceProvider-RejectLinksAndSubmodulesInLayout
+          - AgentControl-GitSourceProvider-IgnoreLinksOutsideLayout
+          - AgentControl-GitSourceProvider-RejectLayoutEntryOfWrongKind
+          - AgentControl-GitSourceProvider-RejectUnsafeEntryNames
+          - AgentControl-GitSourceProvider-RejectFoldedPathCollisions
+          - AgentControl-GitSourceProvider-Subfolder
+          - AgentControl-GitSourceProvider-RejectBadSubfolder
+          - AgentControl-GitSourceProvider-RejectTagWithoutLayout
+          - AgentControl-GitSourceProvider-ExcludeGitFolder
+          - AgentControl-GitSourceProvider-RejectGitEntryInLayout
+          - AgentControl-GitSourceProvider-FailClosedWhenGitFolderRemains
+          - AgentControl-GitSourceProvider-LeftoverTemporaryFolderNeverUsed
+          - AgentControl-GitSourceProvider-FailureClassification
+          - AgentControl-GitSourceProvider-UntrustedHostKeyHint
+          - AgentControl-GitSourceProvider-FailureMessagesNeverRepeatGitOutput
           - AgentControl-GitSourceProvider-CancellationObserved
           - AgentControl-GitSourceProvider-InteractiveFlagHonored
-          - AgentControl-GitSourceProvider-HostileHooksNeverRun
           - AgentControl-GitSourceProvider-MinimumGitVersion
+          - AgentControl-GitSourceProvider-GitTooOldReportedUnwrapped
+          - AgentControl-GitSourceProvider-MinimumGitVersionCheckedOnce
           - AgentControl-PackageSourceRegistry-GitSourceResolved
+          - AgentControl-PackageSourceRegistry-GitSourceInvalidFailsWhenResolved
           - AgentControl-PackageVersionCache-ReportPinnedListing
           - AgentControl-AgentPackageManagement-GitSourceDefinition
         tests:

@@ -4,6 +4,8 @@
 # GitRepositoryAddress validates the address of a Git repository that a package source reads
 # (https, ssh, or a local path), refuses every form that could run code, be read as an option or
 # carry a credential, and derives the one transport git may use and a stable cache key.
+#
+# Each requirement states one observable outcome and is linked to the tests that show it.
 
 sections:
   - title: GitRepositoryAddress Unit Requirements
@@ -20,14 +22,23 @@ sections:
 
       - id: AgentControl-GitRepositoryAddress-AcceptSsh
         title: >-
-          The GitRepositoryAddress class shall accept an ssh repository address in URL form (with
-          an optional user name and port) and in user@host:path form, and shall report the ssh
-          transport for it.
+          The GitRepositoryAddress class shall accept an ssh repository address in URL form, with
+          an optional user name and port, and shall report the ssh transport for it.
         justification: |
           Many organizations reach their repositories over ssh with keys; the user name in such an
           address is not a secret, so it must not be refused as an embedded credential.
         tests:
-          - GitRepositoryAddress_TryParse_Ssh_IsAccepted
+          - GitRepositoryAddress_TryParse_SshUrl_IsAccepted
+
+      - id: AgentControl-GitRepositoryAddress-AcceptScpLikeSsh
+        title: >-
+          The GitRepositoryAddress class shall accept an ssh repository address in user@host:path
+          form and shall report the ssh transport for it.
+        justification: |
+          The scp-like form is how hosting services show their ssh addresses, so users paste it as
+          it is.
+        tests:
+          - GitRepositoryAddress_TryParse_ScpLikeSsh_IsAccepted
 
       - id: AgentControl-GitRepositoryAddress-AcceptLocalPath
         title: >-
@@ -44,13 +55,24 @@ sections:
         title: >-
           The GitRepositoryAddress class shall refuse an address that embeds a credential - user
           information on an https address, a password in an ssh address, or a query string or
-          fragment - and shall be able to recognize such an address by its text alone.
+          fragment.
         justification: |
           An address is persisted in the settings file and shown in messages; a secret in it would
           end up in both, so it is refused before it can be saved.
         tests:
-          - GitRepositoryAddress_EmbedsCredential_DetectsSecretsOnlyInUrls
+          - GitRepositoryAddress_TryParse_EmbeddedCredential_IsRefused
           - GitRepositoryAddress_TryParse_Hostile_NeverEchoesInput
+
+      - id: AgentControl-GitRepositoryAddress-RecognizeEmbeddedCredentials
+        title: >-
+          The GitRepositoryAddress class shall be able to recognize, from the text alone, an
+          address that embeds a credential, also when the address is invalid for another reason,
+          and shall not treat a plain ssh user name as one.
+        justification: |
+          Settings that are read from a file must be checked for secrets without being accepted
+          as addresses, and the user name of an ssh address is not a secret.
+        tests:
+          - GitRepositoryAddress_EmbedsCredential_DetectsSecretsOnlyInUrls
 
       - id: AgentControl-GitRepositoryAddress-RejectDangerousTransports
         title: >-
@@ -67,26 +89,70 @@ sections:
       - id: AgentControl-GitRepositoryAddress-RejectOptionLikeValues
         title: >-
           The GitRepositoryAddress class shall refuse an address, host, user name or path that
-          starts with a hyphen or contains control characters, white space where it is not
-          allowed, or characters outside the accepted forms, and an address that is too long.
+          starts with a hyphen.
         justification: |
           A value that begins with a hyphen could be read by git or ssh as an option (for example
           -oProxyCommand) and run a program, so such a value must never reach a command line.
         tests:
-          - GitRepositoryAddress_TryParse_DangerousOrUnsupported_IsRefused
+          - GitRepositoryAddress_TryParse_OptionLikeValue_IsRefused
+
+      - id: AgentControl-GitRepositoryAddress-RejectControlCharacters
+        title: >-
+          The GitRepositoryAddress class shall refuse an address that contains a control
+          character, a line break, or white space where it is not allowed.
+        justification: |
+          Such characters can split a value into several command-line arguments or hide the end of
+          a line in a log.
+        tests:
+          - GitRepositoryAddress_TryParse_ControlCharactersOrWhiteSpace_IsRefused
+
+      - id: AgentControl-GitRepositoryAddress-RejectMalformedParts
+        title: >-
+          The GitRepositoryAddress class shall refuse an address whose host, port or path is not
+          in an accepted form, including a URL without a path.
+        justification: |
+          A malformed part is either a typing mistake that would only fail later with a confusing
+          message, or an attempt to smuggle something past the checks.
+        tests:
+          - GitRepositoryAddress_TryParse_MalformedHostPortOrPath_IsRefused
+
+      - id: AgentControl-GitRepositoryAddress-RejectTooLong
+        title: >-
+          The GitRepositoryAddress class shall refuse an address that is too long, without
+          repeating it.
+        justification: |
+          An unbounded value could be used to flood a message, a log or a command line.
+        tests:
           - GitRepositoryAddress_TryParse_TooLong_IsRefused
+
+      - id: AgentControl-GitRepositoryAddress-CacheKeyFormat
+        title: >-
+          The GitRepositoryAddress class shall derive from an address a cache key of 16 lower-case
+          hexadecimal digits.
+        justification: |
+          Fetched packages are kept in a folder named by the repository; the name must be short
+          enough for long paths and safe as a folder name.
+        tests:
+          - GitRepositoryAddress_CacheKey_IsSixteenLowerCaseHexDigits
 
       - id: AgentControl-GitRepositoryAddress-CacheKeyStable
         title: >-
-          The GitRepositoryAddress class shall derive from an address a cache key of 16 lower-case
-          hexadecimal digits that is the same for addresses that differ only in the case of the
-          scheme or host and different for different repositories.
+          The GitRepositoryAddress class shall derive the same cache key for addresses that
+          differ only in the case of the scheme or host.
         justification: |
-          Fetched packages are kept in a folder named by the repository; the name must be stable
-          across runs, short enough for long paths and unable to make two repositories share a
-          folder.
+          The name must be stable across runs and spellings, or the same repository would be
+          fetched into several folders.
         tests:
-          - GitRepositoryAddress_CacheKey_IsStableAndDistinguishesRepositories
+          - GitRepositoryAddress_CacheKey_SchemeAndHostCaseDoNotChangeIt
+
+      - id: AgentControl-GitRepositoryAddress-CacheKeyDistinguishesRepositories
+        title: >-
+          The GitRepositoryAddress class shall derive different cache keys for different
+          repositories.
+        justification: |
+          Two repositories must never share a folder, or one could be served the other's packages.
+        tests:
+          - GitRepositoryAddress_CacheKey_DifferentRepositoriesHaveDifferentKeys
 
       - id: AgentControl-GitRepositoryAddress-NeverEchoesInput
         title: >-
@@ -96,3 +162,5 @@ sections:
           The text of a refused address may be exactly the secret that made it unacceptable.
         tests:
           - GitRepositoryAddress_TryParse_Hostile_NeverEchoesInput
+          - GitRepositoryAddress_TryParse_DangerousOrUnsupported_IsRefused
+          - GitRepositoryAddress_TryParse_TooLong_IsRefused

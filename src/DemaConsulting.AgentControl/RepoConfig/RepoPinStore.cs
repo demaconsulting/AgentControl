@@ -63,7 +63,10 @@ internal sealed class UnsupportedPinSchemaException : InvalidOperationException
 ///     <see cref="UnsupportedPinSchemaException"/> by both <see cref="Load"/> and <see cref="Save"/>,
 ///     so an older AgentControl never misreads - or clobbers - a file written by a newer one (which
 ///     is why the identity is a new schema version: an older client re-pinning a repo to another
-///     version would otherwise carry the old identity forward as an unknown property). JSON
+///     version would otherwise carry the old identity forward as an unknown property). The declared
+///     schema is read first from the raw JSON (<see cref="ProbeSchemaVersion"/>), before any typed
+///     reading, so a newer file whose known property has another type (an identity that is an
+///     object, say) is still recognized as newer and never treated as corrupt or overwritten. JSON
 ///     properties this version does not know are preserved on rewrite, whether or not the caller
 ///     loaded the pin first.
 ///     </para>
@@ -126,6 +129,16 @@ internal static class RepoPinStore
         try
         {
             var json = File.ReadAllText(filePath);
+
+            // The declared schema is read first, from the raw JSON: a file from a newer schema may
+            // give a property this version knows another type, and typed reading would then fail
+            // before the schema check, making a valid newer file look corrupt
+            var declaredSchema = ProbeSchemaVersion(json);
+            if (declaredSchema > RepoPin.CurrentSchemaVersion)
+            {
+                throw new UnsupportedPinSchemaException(filePath, declaredSchema.Value);
+            }
+
             pin = JsonSerializer.Deserialize<RepoPin>(json, JsonOptions);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -233,11 +246,20 @@ internal static class RepoPinStore
         }
 
         // An existing file that cannot be parsed is corrupt: overwriting it is the repair, so it
-        // contributes nothing and blocks nothing
+        // contributes nothing and blocks nothing. The declared schema is read first from the raw
+        // JSON, before any typed reading: a file from a newer schema is never overwritten, even
+        // when it gives a property this version knows another type
         RepoPin? existing;
         try
         {
-            existing = JsonSerializer.Deserialize<RepoPin>(File.ReadAllText(filePath), JsonOptions);
+            var json = File.ReadAllText(filePath);
+            var declaredSchema = ProbeSchemaVersion(json);
+            if (declaredSchema > RepoPin.CurrentSchemaVersion)
+            {
+                throw new UnsupportedPinSchemaException(filePath, declaredSchema.Value);
+            }
+
+            existing = JsonSerializer.Deserialize<RepoPin>(json, JsonOptions);
         }
         catch (JsonException)
         {
@@ -264,5 +286,50 @@ internal static class RepoPinStore
         {
             pin.ExtensionData.TryAdd(name, value);
         }
+    }
+
+    /// <summary>
+    ///     Reads the schema version a pin file declares from its raw JSON, without interpreting any
+    ///     other property, so the version can be checked even when the rest of the file has types
+    ///     this build does not understand.
+    /// </summary>
+    /// <param name="json">The text of the pin file.</param>
+    /// <returns>The declared version (property name matched without regard to letter case; a number,
+    ///     or text holding a whole number); <see cref="int.MaxValue"/> for a whole number too large
+    ///     for an <see cref="int"/>, which is certainly newer; <see langword="null"/> when the
+    ///     document is not an object or declares no usable version (a schema 1 file, or one whose
+    ///     <c>SchemaVersion</c> is another kind of value, which typed reading then judges).</returns>
+    /// <exception cref="JsonException">Thrown when the text is not valid JSON.</exception>
+    internal static int? ProbeSchemaVersion(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (!property.Name.Equals(nameof(RepoPin.SchemaVersion), StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var value = property.Value;
+            if (value.ValueKind == JsonValueKind.Number)
+            {
+                if (value.TryGetInt32(out var version))
+                {
+                    return version;
+                }
+
+                // A whole number beyond int is newer than any version this build knows
+                return value.TryGetDecimal(out var wide) && wide > RepoPin.CurrentSchemaVersion ? int.MaxValue : null;
+            }
+
+            return value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var parsed) ? parsed : null;
+        }
+
+        return null;
     }
 }

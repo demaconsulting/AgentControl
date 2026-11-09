@@ -20,6 +20,7 @@
 
 using DemaConsulting.AgentControl.RepoConfig;
 
+// cspell:ignore SCHEMAVERSION
 namespace DemaConsulting.AgentControl.Tests.RepoConfig;
 
 /// <summary>
@@ -493,6 +494,140 @@ public class RepoPinStoreTests
                 () => RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" }));
             Assert.Equal(newerContent, File.ReadAllText(path));
             Assert.Equal([path], Directory.GetFiles(repoRoot));
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a pin file from a newer schema is recognized as newer - not treated as corrupt -
+    ///     even when a property this build knows has another type there (an identity that is an
+    ///     object or a number, a name that is a list): the declared schema is read before the typed
+    ///     pin is.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "ContentIdentity": { "algorithm": "sha512", "value": "ab" } }""")]
+    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "ContentIdentity": 7 }""")]
+    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": ["p", "q"], "Version": "1.0.0" }""")]
+    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "AgentsMdTemplateDeclined": "maybe" }""")]
+    [InlineData("""{ "PackageName": ["p"], "schemaVersion": 4 }""")]
+    public void RepoPinStore_Load_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsUnsupportedPinSchemaException(string json)
+    {
+        // Arrange: a newer file whose known properties have other types than this build's pin
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(repoRoot, ".agentcontrol.json"), json);
+
+            // Act
+            var ex = Assert.Throws<UnsupportedPinSchemaException>(() => RepoPinStore.Load(repoRoot));
+
+            // Assert: reported as a newer schema, not as an unreadable file
+            Assert.Equal(4, ex.SchemaVersion);
+            Assert.Contains("Update AgentControl", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that saving over a newer-schema pin file with an incompatible known property type is
+    ///     refused and leaves the file byte-for-byte unchanged: it is a valid file from a newer tool,
+    ///     not a corrupt one to repair by overwriting.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "ContentIdentity": { "algorithm": "sha512", "value": "ab" } }""")]
+    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "ContentIdentity": 7 }""")]
+    [InlineData("""{ "SchemaVersion": 4, "PackageName": ["p"] }""")]
+    public void RepoPinStore_Save_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsAndLeavesFileUnchanged(string json)
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(repoRoot, ".agentcontrol.json");
+            File.WriteAllText(path, json);
+            var before = File.ReadAllBytes(path);
+
+            // Act
+            var ex = Assert.Throws<UnsupportedPinSchemaException>(
+                () => RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" }));
+
+            // Assert: refused for the schema, and the file and its folder are untouched
+            Assert.Equal(4, ex.SchemaVersion);
+            Assert.Equal(before, File.ReadAllBytes(path));
+            Assert.Equal([path], Directory.GetFiles(repoRoot));
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a declared schema that is text or a whole number too large for an integer is
+    ///     still recognized as newer, and that a letter-case variant of the property name is read.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "SchemaVersion": "5", "PackageName": ["p"] }""", 5)]
+    [InlineData("""{ "SchemaVersion": 99999999999, "PackageName": ["p"] }""", int.MaxValue)]
+    [InlineData("""{ "SCHEMAVERSION": 7 }""", 7)]
+    public void RepoPinStore_ProbeSchemaVersion_TextOrOversizedOrDifferentlyCasedVersion_IsReadAsNewer(string json, int expected)
+    {
+        // Arrange: a raw document whose declared schema is not a plain integer property
+
+        // Act
+        var declared = RepoPinStore.ProbeSchemaVersion(json);
+
+        // Assert
+        Assert.Equal(expected, declared);
+    }
+
+    /// <summary>
+    ///     Test that the schema probe reports no version for a document without a usable one (a
+    ///     schema 1 file, a version of another kind, a document that is not an object) and rejects
+    ///     text that is not JSON.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_ProbeSchemaVersion_NoUsableVersion_ReturnsNullAndInvalidJsonThrows()
+    {
+        // Arrange: documents without a declared integer schema
+
+        // Act / Assert
+        Assert.Null(RepoPinStore.ProbeSchemaVersion("""{ "PackageName": "p" }"""));
+        Assert.Null(RepoPinStore.ProbeSchemaVersion("""{ "SchemaVersion": true }"""));
+        Assert.Null(RepoPinStore.ProbeSchemaVersion("""{ "SchemaVersion": "next" }"""));
+        Assert.Null(RepoPinStore.ProbeSchemaVersion("[1, 2]"));
+        Assert.Null(RepoPinStore.ProbeSchemaVersion("null"));
+        Assert.ThrowsAny<System.Text.Json.JsonException>(() => RepoPinStore.ProbeSchemaVersion("{ not json"));
+    }
+
+    /// <summary>
+    ///     Test that a pin file of the current schema whose known property has an incompatible type
+    ///     is corrupt: loading reports it as unreadable (not as a newer schema), and saving replaces
+    ///     it, which is the repair.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_CurrentSchemaWithIncompatibleKnownPropertyType_IsCorruptAndReplacedOnSave()
+    {
+        // Arrange: a schema 3 file whose identity is an object
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(repoRoot, ".agentcontrol.json");
+            File.WriteAllText(path, """{ "SchemaVersion": 3, "Source": "Feed", "PackageName": "p", "ContentIdentity": { "x": 1 } }""");
+
+            // Act
+            var loadFailure = Assert.Throws<InvalidOperationException>(() => RepoPinStore.Load(repoRoot));
+            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" });
+
+            // Assert: unreadable, not newer; and replaced by a valid current pin
+            Assert.IsNotType<UnsupportedPinSchemaException>(loadFailure);
+            Assert.Equal("p", RepoPinStore.Load(repoRoot)?.PackageName);
         }
         finally
         {

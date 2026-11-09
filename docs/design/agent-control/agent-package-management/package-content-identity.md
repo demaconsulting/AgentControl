@@ -34,31 +34,35 @@ its end.
 - *Returns*: `string`.
 - *Postconditions*: The stream is left open, positioned at its end, so a caller can hash and then read the very
   same handle (the zip reader does, which closes the window in which the file could be swapped between hashing and
-  reading). Throws `ArgumentNullException` for a null stream
-  (`AgentControl-PackageContentIdentity-Sha256`).
+  reading) (`AgentControl-PackageContentIdentity-Sha256StreamOpen`). Throws `ArgumentNullException` for a null
+  stream (`AgentControl-PackageContentIdentity-Sha256RejectNull`). The value is the SHA-256 digest in lower-case
+  hexadecimal after `sha256:` (`AgentControl-PackageContentIdentity-Sha256`).
 
 **FromGitCommit**: Formats a commit hash as a `git-commit:` identity.
 
 - *Parameters*: `string commit`.
 - *Returns*: `string`, with the hash lower-cased.
-- *Postconditions*: Throws `ArgumentException` unless the hash is 40 or 64 hexadecimal digits, so a malformed
-  value never reaches a pin (`AgentControl-PackageContentIdentity-Format`).
+- *Postconditions*: The result is `git-commit:` plus the lower-cased hash (`AgentControl-PackageContentIdentity-Format`).
+  Throws `ArgumentException` unless the hash is 40 or 64 hexadecimal digits and `ArgumentNullException` for a null
+  hash, so a malformed value never reaches a pin (`AgentControl-PackageContentIdentity-FormatRejectMalformed`).
 
 **Compare**: Compares the identity a pin recorded with the identity of the content now delivered.
 
 - *Parameters*: `string? pinned`, `string? actual`.
 - *Returns*: `ContentIdentityComparison`.
 - *Postconditions*: `NotComparable` when either is null, empty or white space - a pin made before identities were
-  recorded, or a source that reports none, is never a mismatch; otherwise `Same` when the texts are equal ignoring
-  letter case (so a hand-edited pin is not a false alarm) and `Changed` when they differ, including when they are
-  of different kinds (`AgentControl-PackageContentIdentity-Compare`).
+  recorded, or a source that reports none, is never a mismatch (`AgentControl-PackageContentIdentity-Compare`);
+  otherwise `Same` when the texts are equal ignoring letter case, so a hand-edited pin is not a false alarm
+  (`AgentControl-PackageContentIdentity-CompareSame`), and `Changed` when they differ: with the same kind and another
+  value (`AgentControl-PackageContentIdentity-CompareChanged`) or with different kinds
+  (`AgentControl-PackageContentIdentity-CompareDifferentKinds`).
 
 **Describe**: Produces a short form for messages and logs.
 
 - *Parameters*: `string? identity`.
-- *Returns*: `string` - the kind prefix and the first 12 characters of the value, or `none` when no identity is
-  known (`AgentControl-PackageContentIdentity-Format`). An identity of an unrecognized shape is cut the same way,
-  never echoed in full.
+- *Returns*: `string` - the kind prefix and the first 12 characters of the value (`AgentControl-PackageContentIdentity-Describe`),
+  or `none` when no identity is known (`AgentControl-PackageContentIdentity-DescribeNone`). The text is split at its
+  first colon, so an identity of an unrecognized shape is cut the same way and never echoed in full.
 
 #### Error Handling
 

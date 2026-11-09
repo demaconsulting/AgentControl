@@ -146,17 +146,35 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
             nugetFirst = reader.ContentIdentity;
         }
 
+        var expectedZipFirst = Sha256Identity(await File.ReadAllBytesAsync(zipPath, TestContext.Current.CancellationToken));
+        var expectedNuGet = Sha256Identity(await File.ReadAllBytesAsync(
+            Assert.Single(Directory.GetFiles(feed, "*.nupkg", SearchOption.AllDirectories)), TestContext.Current.CancellationToken));
         File.Delete(zipPath);
         WriteZip(zipPath, "republished");
+        var expectedZipRepublished = Sha256Identity(await File.ReadAllBytesAsync(zipPath, TestContext.Current.CancellationToken));
         using var zipAgain = await zips.AcquireAsync(zipPackage, CancellationToken.None);
         using var nugetAgain = await nuget.AcquireAsync(nugetPackage, CancellationToken.None);
 
-        // Assert: both kinds name their bytes, the NuGet identity is stable, and only the zip changed
-        Assert.StartsWith("sha256:", zipFirst, StringComparison.Ordinal);
-        Assert.StartsWith("sha256:", nugetFirst, StringComparison.Ordinal);
+        // Assert: each identity is exactly the SHA-256 of the delivered file's bytes, computed here
+        // independently of the production hashing code
+        Assert.Equal(expectedZipFirst, zipFirst);
+        Assert.Equal(expectedNuGet, nugetFirst);
+        Assert.Equal(expectedZipRepublished, zipAgain.ContentIdentity);
+        Assert.NotEqual(expectedZipFirst, expectedZipRepublished);
+
+        // Assert: the NuGet identity is stable, and only the zip changed
         Assert.Equal(ContentIdentityComparison.Same, PackageContentIdentity.Compare(nugetFirst, nugetAgain.ContentIdentity));
         Assert.Equal(ContentIdentityComparison.Changed, PackageContentIdentity.Compare(zipFirst, zipAgain.ContentIdentity));
     }
+
+    /// <summary>
+    ///     Computes the expected <c>sha256:</c> identity of some bytes directly with the platform's
+    ///     hash, so a test does not rely on the code it checks.
+    /// </summary>
+    /// <param name="bytes">The bytes of the delivered file.</param>
+    /// <returns><c>sha256:</c> followed by the lower-case hexadecimal digest.</returns>
+    private static string Sha256Identity(byte[] bytes) =>
+        "sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
 
     /// <summary>
     ///     Test that on a platform that cannot verify signatures a source whose settings require

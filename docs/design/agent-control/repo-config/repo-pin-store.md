@@ -48,7 +48,13 @@ tells the user to update AgentControl.
   property (`AgentControl-RepoPinStore-SaveContentIdentity`).
   A file declaring a schema version newer than
   `RepoPin.CurrentSchemaVersion` (3) is not interpreted: `UnsupportedPinSchemaException` is thrown
-  (`AgentControl-RepoPinStore-RejectNewerSchema`, `AgentControl-RepoPinStore-SchemaVersion3`).
+  (`AgentControl-RepoPinStore-RejectNewerSchema`, `AgentControl-RepoPinStore-SchemaVersion3`). The declared
+  `SchemaVersion` is read first, from the raw JSON (`ProbeSchemaVersion`, a `JsonDocument` that looks at that one
+  property, matched without regard to letter case and accepted as a number or as text holding a whole number; one too
+  large for an `int` counts as newer), before the typed `RepoPin` is deserialized: a newer file may give a property
+  this build knows another type (a `ContentIdentity` that is an object, say), and typed reading would fail before the
+  schema check and make a valid newer file look corrupt. Only after the probe has found no newer schema is the
+  typed read made, and only then can a `JsonException` mean that the file is corrupt.
 
 **Save**: Writes the `RepoPin` for a repo, creating or overwriting `.agentcontrol.json`.
 
@@ -60,12 +66,14 @@ tells the user to update AgentControl.
   (`AgentControl-RepoPinStore-SourceAlias`, `AgentControl-RepoPinStore-SchemaVersion3`); the content identity is
   written when the pin has one and omitted otherwise (`AgentControl-RepoPinStore-SaveContentIdentity`). Before
   writing, any existing file is inspected: a
-  newer schema aborts the save with `UnsupportedPinSchemaException` and leaves the file
-  untouched (`AgentControl-RepoPinStore-RejectNewerSchema`); properties of the existing file
+  newer schema - found by the same probe, before any typed reading - aborts the save with
+  `UnsupportedPinSchemaException` and leaves the file untouched, whatever the types of its other properties
+  (`AgentControl-RepoPinStore-RejectNewerSchema`); properties of the existing file
   that `RepoPin` does not model are merged into `RepoPin.ExtensionData` (the pin's own values
   win) so they survive the rewrite even when the caller built a fresh `RepoPin`
   (`AgentControl-RepoPinStore-PreserveUnknownFields`); an existing file that cannot be parsed is
-  treated as corrupt and simply replaced. The file is written to a uniquely named temporary file
+  treated as corrupt (invalid JSON, or a current-schema file whose known property has another type) and simply replaced.
+  The file is written to a uniquely named temporary file
   beside it and moved over the pin file, so a failure never leaves a half-written pin, and a
   leftover temporary file is removed.
 
