@@ -38,7 +38,7 @@ sections:
         title: >-
           The GitSourceProvider class shall list the versions of its package from the tags of the
           repository, without cloning it, keeping only the tags that match the tag pattern and are
-          strict semantic versions, narrowing the listing with the pattern's literal prefix, using
+          strict semantic versions, asking the remote only for tags that can match, using
           only the transport of the repository address, and returning an empty list when no tag
           matches.
         justification: |
@@ -75,8 +75,8 @@ sections:
 
       - id: AgentControl-GitSourceProvider-AcquireShallowTag
         title: >-
-          The GitSourceProvider class shall acquire a version by fetching exactly its tag, shallow,
-          into a temporary repository, checking out only the package layout - the four managed
+          The GitSourceProvider class shall acquire a version by fetching exactly its tag, with no
+          more history than it needs, checking out only the package layout - the four managed
           agent folders, release-notes.md and AGENTS.md - and delivering a reader of that layout.
         justification: |
           Fetching only one tag at depth one and checking out only the layout keeps the transfer
@@ -147,6 +147,34 @@ sections:
           delivered tree could be used to attack tools that later run inside it.
         tests:
           - GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder
+
+      - id: AgentControl-GitSourceProvider-FailClosedWhenGitFolderRemains
+        title: >-
+          The GitSourceProvider class shall, when the .git folder of a fetched package cannot be
+          removed, fail the acquisition with a message the user can act on and publish nothing: false
+          cache folder of the commit is marked complete or handed out, a leftover temporary folder
+          is never used as a package and is removed later, and a later acquisition can succeed.
+        justification: |
+          A package that still holds repository metadata, or a half-cleaned cache entry that could
+          be reused, would deliver exactly what the package rules forbid; a locked file must stop
+          the acquisition, not weaken it.
+        tests:
+          - GitSourceProvider_Acquire_GitFolderRemovalFails_IsRefusedNothingPublishedAndLaterAcquisitionSucceeds
+          - GitSourceProvider_Acquire_LeftoverTemporaryFolderWithGit_IsNeverServedAndIsSweptWhenStale
+
+      - id: AgentControl-GitSourceProvider-RejectFoldedPathCollisions
+        title: >-
+          The GitSourceProvider class shall refuse a tag whose package layout holds two entries
+          whose names differ only in letter case or in Unicode form - two files, a file and a
+          folder, or two folders - on every operating system, before anything is checked out or
+          cached, saying that such names are not allowed.
+        justification: |
+          A file system that ignores case or normalizes Unicode treats such entries as one, so one
+          of them would silently replace the other; the cache may be read on such a file system
+          whatever system created it, so the layout is refused everywhere.
+        tests:
+          - GitSourceProvider_FindFoldedPathCollision_DetectsCaseAndUnicodeFormCollisions
+          - GitSourceProvider_Acquire_FoldedPathCollisionInLayout_IsRefusedAndNothingCached
 
       - id: AgentControl-GitSourceProvider-ReportContentIdentity
         title: >-
@@ -227,3 +255,16 @@ sections:
           programs on the user's machine.
         tests:
           - GitSourceProvider_Acquire_HostileHooksAndTemplate_NeverRun
+
+      - id: AgentControl-GitSourceProvider-MinimumGitVersion
+        title: >-
+          The GitSourceProvider class shall, when the application asks for it, refuse a git older
+          than the supported minimum before it lists, previews or fetches anything, reporting the
+          git-too-old failure itself - not wrapped and not prefixed with the source alias - so the
+          application can tell the user how to update git.
+        justification: |
+          An old git would fail in the middle of a fetch with a message the user cannot act on; the
+          early, recognizable failure lets the editor and the card say what to do.
+        tests:
+          - GitSourceProvider_EnforceMinimumGitVersion_OldGit_IsRefusedAsGitTooOldBeforeAnyGitWork
+          - GitSourceProvider_EnforceMinimumGitVersion_NewGit_IsCheckedOnceBeforeTheFirstListing

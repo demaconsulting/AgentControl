@@ -34,6 +34,7 @@ using Avalonia.VisualTree;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.PackageCredentials;
+using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
 using Material.Icons;
@@ -442,7 +443,14 @@ internal sealed partial class MainWindow : Window
         SelectPackageWindowViewModel viewModel;
         try
         {
-            viewModel = new SelectPackageWindowViewModel(card.CreateSourceRegistry(), card.PackageVersionCache);
+            viewModel = card.IsPackageSelectionNeeded
+                ? new SelectPackageWindowViewModel(card.CreateSourceRegistry(), card.PackageVersionCache)
+                : new SelectPackageWindowViewModel(
+                    card.CreateSourceRegistry(),
+                    card.PackageVersionCache,
+                    card.PinnedSource ?? RepoPin.LegacySourceAlias,
+                    card.PinnedPackageName,
+                    card.PinnedPackageVersion);
         }
         catch (InvalidOperationException ex)
         {

@@ -27,7 +27,8 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
 ///     View model for the dialog that adds or edits one package source: a zip-package folder, a
-///     NuGet-package folder or a NuGet-package server.
+///     NuGet-package folder, a NuGet-package server or a Git repository (see the Git part in
+///     <c>SourceEditorViewModel.Git.cs</c>).
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -249,7 +250,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
 
         _existing = existing?.Clone();
         _aliasExists = aliasExists;
-        _providerFactory = providerFactory ?? (definition => new NuGetSourceProvider(definition));
+        _providerFactory = providerFactory ?? CreateDefaultProvider;
         _credentials = credentials;
         _signaturesSupported = signatureVerificationSupported ?? SignatureVerificationSupport.IsSupported;
         Type = existing?.Type ?? type;
@@ -261,6 +262,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         _requireSigned = Type == PackageSourceType.NuGet && (existing?.RequireSignedPackages ?? false);
         _signerFingerprint = existing?.SignerFingerprint ?? string.Empty;
         PackageIds = [.. existing?.PackageIds ?? []];
+        InitializeGit(existing);
 
         AddPackageIdCommand = new RelayCommand(AddPackageId, () => GetPackageIdProblem(_newPackageId) is null);
         RemovePackageIdCommand = new RelayCommand(RemovePackageId, () => _selectedPackageId is not null);
@@ -308,6 +310,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     /// </summary>
     public string Title => (IsNew, IsNuGet, IsServer) switch
     {
+        _ when IsGit => IsNew ? "Add Git Repository" : "Edit Git Repository",
         (true, true, true) => "Add NuGet-Package Server",
         (true, true, false) => "Add NuGet-Package Folder",
         (true, false, _) => "Add Zip-Package Folder",
@@ -319,14 +322,22 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     /// <summary>
     ///     Gets the label of the location field: a folder, or the address of a feed.
     /// </summary>
-    public string LocationLabel => IsServer ? "Feed address" : "Folder";
+    public string LocationLabel => (IsGit, IsServer) switch
+    {
+        (true, _) => "Repository URL",
+        (_, true) => "Feed address",
+        _ => "Folder"
+    };
 
     /// <summary>
     ///     Gets the placeholder shown in the empty location field.
     /// </summary>
-    public string LocationPlaceholder => IsServer
-        ? "https://host/path/index.json"
-        : "Local, mapped-drive, or UNC folder";
+    public string LocationPlaceholder => (IsGit, IsServer) switch
+    {
+        (true, _) => "https://host/org/repo.git",
+        (_, true) => "https://host/path/index.json",
+        _ => "Local, mapped-drive, or UNC folder"
+    };
 
     /// <summary>
     ///     Gets a short explanation of what kind of location to enter, shown beside the location
@@ -334,6 +345,8 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     /// </summary>
     public string LocationHelp => (IsNuGet, IsServer) switch
     {
+        _ when IsGit => "The repository whose tags are the package versions: an https or SSH address, or a local path. " +
+                        "Do not put a password or token in it.",
         (true, true) => "The address of the feed's NuGet V3 service index. It must end in index.json.",
         (true, false) => "A folder of NuGet packages (.nupkg files) - a local, mapped-drive or UNC path.",
         _ => "A folder of agent package zips named {name}-{version}.zip - a local, mapped-drive or UNC path."
@@ -591,23 +604,30 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     /// </summary>
     public bool CanSave =>
         GetAliasProblem() is null && GetLocationProblem() is null && (!IsNuGet || PackageIds.Count > 0) &&
-        GetFingerprintProblem() is null;
+        GetFingerprintProblem() is null && (!IsGit || GetGitSettingsOtherThanAddressProblem() is null);
 
     /// <summary>
     ///     Gets a value indicating whether the connection can be tested now: a server whose
-    ///     address is acceptable and that lists at least one package ID to look for. The alias is
-    ///     not needed.
+    ///     address is acceptable and that lists at least one package ID to look for, or a Git
+    ///     repository whose address, tag pattern, folder and package name are acceptable. The
+    ///     alias is not needed (a Git source whose package name defaults to the alias needs one,
+    ///     because the package name must be valid).
     /// </summary>
-    public bool CanTestConnection =>
-        IsServer && _location.Trim().Length > 0 && GetLocationProblem() is null && PackageIds.Count > 0;
+    public bool CanTestConnection => IsGit
+        ? _location.Trim().Length > 0 && GetLocationProblem() is null && GetGitSettingsOtherThanAddressProblem() is null
+        : IsServer && _location.Trim().Length > 0 && GetLocationProblem() is null && PackageIds.Count > 0;
 
     /// <summary>
     ///     Gets the reason the connection cannot be tested yet, shown as the disabled button's
     ///     tooltip, or the button's normal explanation when it can.
     /// </summary>
-    public string TestConnectionTooltip => CanTestConnection || IsTesting
-        ? "Check that the server answers and lists the first package ID (you may be asked to sign in)"
-        : "Enter a valid feed address and add at least one package ID to test the connection";
+    public string TestConnectionTooltip => (CanTestConnection || IsTesting, IsGit) switch
+    {
+        (true, true) => "List the repository's tags and show which ones match the tag pattern (you may be asked to sign in)",
+        (true, false) => "Check that the server answers and lists the first package ID (you may be asked to sign in)",
+        (false, true) => "Enter a valid repository address and tag pattern (and a package name) to test the connection",
+        _ => "Enter a valid feed address and add at least one package ID to test the connection"
+    };
 
     /// <summary>
     ///     Gets a value indicating whether a connection test is running, so the dialog shows
@@ -618,9 +638,12 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     /// <summary>
     ///     Gets the text shown beside the progress indicator while a test runs.
     /// </summary>
-    public string TestProgressText => PackageIds.Count > 0
-        ? $"Contacting the server and looking for '{PackageIds[0]}'... (you may be asked to sign in)"
-        : "Contacting the server...";
+    public string TestProgressText => (IsGit, PackageIds.Count > 0) switch
+    {
+        (true, _) => "Contacting the repository and listing its tags... (you may be asked to sign in)",
+        (_, true) => $"Contacting the server and looking for '{PackageIds[0]}'... (you may be asked to sign in)",
+        _ => "Contacting the server..."
+    };
 
     /// <summary>
     ///     Gets the outcome of the last connection test, or <see cref="ConnectionTestResultKind.None"/>
@@ -980,6 +1003,20 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     private static partial Regex PackageIdPattern();
 
     /// <summary>
+    ///     Creates the provider a connection test uses when the owner supplied none: a Git source
+    ///     gets a Git provider that may show Git's sign-in (the user started the test) and refuses
+    ///     a Git that is too old; a NuGet source gets a NuGet provider without credential
+    ///     facilities.
+    /// </summary>
+    /// <param name="definition">The source as currently edited.</param>
+    /// <returns>The provider.</returns>
+    private static IPackageSourceProvider CreateDefaultProvider(PackageSourceDefinition definition) =>
+        definition.Type == PackageSourceType.Git
+            ? new GitSourceProvider(
+                definition, GitSourceOptions.Default with { Interactive = true, EnforceMinimumGitVersion = true })
+            : new NuGetSourceProvider(definition);
+
+    /// <summary>
     ///     Builds the source definition the dialog describes: a copy of the edited source (so
     ///     settings the dialog does not show are preserved) or a new definition, with the typed
     ///     location and, for NuGet, the package IDs and (for a server) the insecure-HTTP choice.
@@ -994,6 +1031,11 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         var definition = _existing?.Clone() ?? new PackageSourceDefinition { Alias = alias, Type = Type };
         definition.Location = _location.Trim();
         definition.PackageIds = IsNuGet ? [.. PackageIds] : [];
+        if (IsGit)
+        {
+            ApplyGitFields(definition);
+        }
+
         if (IsServer)
         {
             definition.AllowInsecureHttp = _allowInsecureHttp;
@@ -1030,6 +1072,12 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     ///     the test was cancelled.</exception>
     private async Task TestConnectionAsync(CancellationToken cancellationToken)
     {
+        if (IsGit)
+        {
+            await TestGitConnectionAsync(cancellationToken);
+            return;
+        }
+
         ClearTestResult();
 
         // Remember which inputs this test is for; if any change while it runs, its result is stale
@@ -1125,6 +1173,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         TestResultKind = ConnectionTestResultKind.None;
         TestResultTitle = string.Empty;
         TestResultDetail = string.Empty;
+        ClearTagPreview();
     }
 
     /// <summary>
@@ -1209,6 +1258,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         OnPropertyChanged(nameof(AliasError));
         OnPropertyChanged(nameof(LocationError));
         OnPropertyChanged(nameof(PackageIdsError));
+        RaiseGitValidationChanged();
         OnPropertyChanged(nameof(CanSave));
         OnPropertyChanged(nameof(CanTestConnection));
         OnPropertyChanged(nameof(TestConnectionTooltip));
@@ -1285,7 +1335,11 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     {
         var location = _location.Trim();
 
-        // A server address has its own rules (https, index.json, no credentials)
+        // A Git repository address has its own rules (https, ssh or a local path, no credentials)
+        if (IsGit)
+        {
+            return GetGitLocationProblem(location);
+        }
         if (IsServer)
         {
             var server = new PackageSourceDefinition

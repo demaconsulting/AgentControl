@@ -292,6 +292,138 @@ public sealed class FixtureTests : IDisposable
     }
 
     /// <summary>
+    ///     Validates that <c>git</c> and <c>all</c> are accepted (case-insensitively) and that the Git format writes no
+    ///     package files.
+    /// </summary>
+    /// <param name="value">The <c>--packages</c> value.</param>
+    /// <param name="expected">The expected format name.</param>
+    [Theory]
+    [InlineData("git", "Git")]
+    [InlineData("GIT", "Git")]
+    [InlineData("all", "All")]
+    public void FixtureOptions_Parse_GitAndAll_AreAccepted(string value, string expected)
+    {
+        // Arrange
+        var parsed = CommandLineParser.Parse(["fixture", "fx", "--packages", value]);
+
+        // Act
+        var options = FixtureOptions.Parse(parsed);
+
+        // Assert
+        Assert.Equal(expected, options.Formats.ToString());
+    }
+
+    /// <summary>
+    ///     Validates the exact git command sequence of the Git source: a scratch repository with one commit per version
+    ///     of the first sample package, a lightweight and an annotated tag, and a push into a bare repository, with the
+    ///     identity fixed and signing off.
+    /// </summary>
+    [Fact]
+    public void FixtureBuilder_Build_Git_CreatesBareRepositoryWithTaggedVersions()
+    {
+        // Arrange
+        var git = new RecordingGit();
+        var options = Options("git");
+
+        // Act
+        var result = FixtureBuilder.Build(options, git);
+
+        // Assert
+        var work = Path.Combine(result.Root, "git-source-work");
+        var bare = Path.Combine(result.Root, "git-source.git");
+        var commands = git.Calls.Select(c => string.Join(' ', c.Arguments.Where(a => !a.StartsWith("user.", StringComparison.Ordinal) && a != "-c" && !a.EndsWith("gpgsign=false", StringComparison.Ordinal)))).ToList();
+        Assert.Multiple(
+            () => Assert.Equal(bare, result.GitSourceDirectory),
+            () => Assert.Empty(result.Packages),
+            () => Assert.Equal(
+                [
+                    "init -b main",
+                    "add -A",
+                    "commit -m contoso-agents 1.0.0",
+                    "tag release/1.0.0",
+                    "add -A",
+                    "commit -m contoso-agents 1.1.0",
+                    "tag -a release/1.1.0 -m contoso-agents 1.1.0",
+                    $"init --bare -b main {bare}",
+                    $"push --quiet {bare} main --tags",
+                ],
+                commands),
+            () => Assert.Equal(work, git.Calls[0].WorkingDirectory),
+            () => Assert.Equal(result.Root, git.Calls[7].WorkingDirectory),
+            () => Assert.Equal(work, git.Calls[8].WorkingDirectory),
+            () => Assert.Contains("user.email=puppet@agentcontrol.invalid", git.Calls[2].Arguments),
+            () => Assert.Contains("commit.gpgsign=false", git.Calls[2].Arguments),
+            () => Assert.Contains("tag.gpgsign=false", git.Calls[6].Arguments),
+            () => Assert.False(Directory.Exists(work)));
+    }
+
+    /// <summary>
+    ///     Validates that the Git source is configured with the fields the application reads, and that a pin names it.
+    /// </summary>
+    [Fact]
+    public void FixtureBuilder_Build_GitWithPin_ConfiguresGitSourceAndNamesItInThePin()
+    {
+        // Arrange / Act
+        var result = FixtureBuilder.Build(Options("git", repo: true, pin: new PackagePin("contoso-agents", "1.0.0")), new RecordingGit());
+
+        // Assert
+        using var settings = JsonDocument.Parse(File.ReadAllText(result.SettingsFile));
+        var source = Assert.Single(settings.RootElement.GetProperty("Sources").EnumerateArray());
+        var pin = JsonDocument.Parse(File.ReadAllText(Path.Combine(result.RepoDirectory!, ".agentcontrol.json"))).RootElement;
+        Assert.Multiple(
+            () => Assert.Equal("Git", source.GetProperty("Alias").GetString()),
+            () => Assert.Equal("Git", source.GetProperty("Type").GetString()),
+            () => Assert.Equal(Path.Combine(result.Root, "git-source.git"), source.GetProperty("Location").GetString()),
+            () => Assert.Equal("release/{version}", source.GetProperty("TagPattern").GetString()),
+            () => Assert.Equal(["contoso-agents"], source.GetProperty("PackageIds").EnumerateArray().Select(e => e.GetString())),
+            () => Assert.Equal("Git", pin.GetProperty("Source").GetString()),
+            () => Assert.Equal("Git", settings.RootElement.GetProperty("RecentRepos")[0].GetProperty("PinnedSource").GetString()));
+    }
+
+    /// <summary>
+    ///     Validates that <c>all</c> writes zip and nupkg packages and the Git source, configures the three sources in
+    ///     this order, and that a pin names the zip source.
+    /// </summary>
+    [Fact]
+    public void FixtureBuilder_Build_All_IncludesGitAlongsideZipAndNupkg()
+    {
+        // Arrange
+        var git = new RecordingGit();
+
+        // Act
+        var result = FixtureBuilder.Build(Options("all", repo: true, pin: new PackagePin("contoso-agents", "1.0.0")), git);
+
+        // Assert
+        using var settings = JsonDocument.Parse(File.ReadAllText(result.SettingsFile));
+        Assert.Multiple(
+            () => Assert.Equal(6, result.Packages.Count),
+            () => Assert.NotNull(result.GitSourceDirectory),
+            () => Assert.Equal(
+                ["Default", "NuGet", "Git"],
+                settings.RootElement.GetProperty("Sources").EnumerateArray().Select(e => e.GetProperty("Alias").GetString())),
+            () => Assert.Equal("Default", settings.RootElement.GetProperty("RecentRepos")[0].GetProperty("PinnedSource").GetString()),
+            () => Assert.Contains(git.Calls, call => call.Arguments.Contains("--bare")));
+    }
+
+    /// <summary>
+    ///     Validates that a fixture without the Git format creates no Git source.
+    /// </summary>
+    [Fact]
+    public void FixtureBuilder_Build_Both_HasNoGitSource()
+    {
+        // Arrange
+        var git = new RecordingGit();
+
+        // Act
+        var result = FixtureBuilder.Build(Options("both"), git);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Null(result.GitSourceDirectory),
+            () => Assert.Empty(git.Calls));
+    }
+
+    /// <summary>
     ///     Validates that a folder that already has content is refused, and that an existing empty folder is accepted.
     /// </summary>
     [Fact]
@@ -348,7 +480,14 @@ public sealed class FixtureTests : IDisposable
     private FixtureOptions Options(string packages, bool repo = false, PackagePin? pin = null) =>
         new(
             Path.Combine(_folder.Path, "fx-" + Guid.NewGuid().ToString("N")[..8]),
-            packages switch { "nupkg" => PackageFormats.Nupkg, "both" => PackageFormats.Both, _ => PackageFormats.Zip },
+            packages switch
+            {
+                "nupkg" => PackageFormats.Nupkg,
+                "both" => PackageFormats.Both,
+                "git" => PackageFormats.Git,
+                "all" => PackageFormats.All,
+                _ => PackageFormats.Zip,
+            },
             repo,
             pin);
 

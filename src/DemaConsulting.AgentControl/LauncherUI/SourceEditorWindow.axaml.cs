@@ -153,9 +153,7 @@ internal sealed partial class SourceEditorWindow : Window
 
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = viewModel.IsNuGet
-                ? "Select the folder of NuGet packages"
-                : "Select the folder of agent package zips",
+            Title = GetBrowseTitle(viewModel),
             AllowMultiple = false
         });
 
@@ -165,6 +163,21 @@ internal sealed partial class SourceEditorWindow : Window
         {
             viewModel.Location = localPath;
         }
+    }
+
+    /// <summary>
+    ///     Chooses the title of the folder-browse dialog for the kind of source being edited.
+    /// </summary>
+    /// <param name="viewModel">The editor view model.</param>
+    /// <returns>The title.</returns>
+    private static string GetBrowseTitle(SourceEditorViewModel viewModel)
+    {
+        if (viewModel.IsGit)
+        {
+            return "Select the folder of the Git repository";
+        }
+
+        return viewModel.IsNuGet ? "Select the folder of NuGet packages" : "Select the folder of agent package zips";
     }
 
     /// <summary>

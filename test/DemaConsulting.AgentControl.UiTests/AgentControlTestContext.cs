@@ -79,6 +79,11 @@ internal sealed class AgentControlTestContext : IDisposable
     /// <param name="pinnedContentIdentity">The content identity (for example <c>sha256:...</c> of the
     ///     zip) to record in the repo's pin file, which is then written as the current schema, or
     ///     <see langword="null"/> to write a pin that records none.</param>
+    /// <param name="gitSource">A Git repository to configure as an additional source (which makes the
+    ///     application run the real <c>git</c> instead of the arg-logger stub), or
+    ///     <see langword="null"/> for none.</param>
+    /// <param name="useRealGit">Whether the application runs the real <c>git</c> executable even
+    ///     though no Git source is pre-configured (for example to add one through the dialog).</param>
     public AgentControlTestContext(
         string? packageSourcePath = null,
         string? pinnedPackageName = null,
@@ -89,7 +94,9 @@ internal sealed class AgentControlTestContext : IDisposable
         bool nuGetRequireSigned = false,
         string? nuGetServerIndexUrl = null,
         Action<Dictionary<string, object?>, AgentControlTestContext>? customizeSettings = null,
-        string? pinnedContentIdentity = null)
+        string? pinnedContentIdentity = null,
+        GitSourceSettings? gitSource = null,
+        bool useRealGit = false)
     {
         var root = Directory.CreateTempSubdirectory("AgentControlUiTests-");
         RootDirectory = root.FullName;
@@ -112,7 +119,9 @@ internal sealed class AgentControlTestContext : IDisposable
             nuGetPackageIds,
             nuGetRequireSigned,
             nuGetServerIndexUrl,
-            customizeSettings is null ? null : settings => customizeSettings(settings, this));
+            customizeSettings is null ? null : settings => customizeSettings(settings, this),
+            gitSource,
+            useRealGit);
 
         if (pinnedPackageName is not null && pinnedPackageVersion is not null)
         {
@@ -149,6 +158,14 @@ internal sealed class AgentControlTestContext : IDisposable
     ///     <see cref="Launch"/>; a pre-existing file acts as sign-ins saved in an earlier session.
     /// </summary>
     public string? CredentialStoreFile { get; set; }
+
+    /// <summary>
+    ///     Gets or sets environment variables to add to the launched application's environment (and so to
+    ///     the real <c>git</c> it runs), or <see langword="null"/> (the default) for none. Set before
+    ///     <see cref="Launch"/>; the Git source tests use it to keep git away from the user's own
+    ///     configuration and credential helpers.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? LaunchEnvironment { get; set; }
 
     /// <summary>
     ///     Gets the launched FlaUI <see cref="Application"/>, or <see langword="null"/> before
@@ -189,6 +206,11 @@ internal sealed class AgentControlTestContext : IDisposable
         // NuGet caches service indexes on disk by URL; a private cache per launch keeps a feed that
         // a test starts on a reused port from being answered with a previous run's responses
         startInfo.EnvironmentVariables["NUGET_HTTP_CACHE_PATH"] = Path.Combine(RootDirectory, "nuget-http-cache");
+
+        foreach (var (name, value) in LaunchEnvironment ?? new Dictionary<string, string>())
+        {
+            startInfo.EnvironmentVariables[name] = value;
+        }
 
         // Record which terminal windows already exist so only windows created by this launch
         // can ever be considered for cleanup.

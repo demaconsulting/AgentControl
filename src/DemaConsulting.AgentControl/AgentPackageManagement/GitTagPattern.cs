@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using System.Text.RegularExpressions;
+using DemaConsulting.AgentControl.GitIntegration;
 
 namespace DemaConsulting.AgentControl.AgentPackageManagement;
 
@@ -44,7 +44,7 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     Pure and immutable; thread-safe. Messages never repeat the pattern text.
 ///     </para>
 /// </remarks>
-internal sealed partial class GitTagPattern
+internal sealed class GitTagPattern
 {
     /// <summary>
     ///     The placeholder that stands for the version.
@@ -55,11 +55,6 @@ internal sealed partial class GitTagPattern
     ///     The longest pattern (and tag name) accepted.
     /// </summary>
     private const int MaxLength = 200;
-
-    /// <summary>
-    ///     The longest tag name a server may report and still be considered.
-    /// </summary>
-    private const int MaxTagNameLength = 255;
 
     /// <summary>
     ///     The text before the placeholder.
@@ -95,13 +90,6 @@ internal sealed partial class GitTagPattern
     ///     narrows the listing; matching is done by <see cref="TryMatch"/>.
     /// </summary>
     public string ListingGlob => "refs/tags/" + _prefix + "*";
-
-    /// <summary>
-    ///     Gets the pattern of the characters a tag name may contain.
-    /// </summary>
-    /// <returns>The compiled pattern.</returns>
-    [GeneratedRegex(@"^[A-Za-z0-9._/+-]+\z", RegexOptions.CultureInvariant)]
-    private static partial Regex TagCharacters();
 
     /// <summary>
     ///     Validates a pattern.
@@ -170,32 +158,15 @@ internal sealed partial class GitTagPattern
     ///     Determines whether a tag name is one AgentControl is willing to use in a git command:
     ///     only the characters <c>A-Z a-z 0-9 . _ / + -</c>, at most 255 characters, and a legal
     ///     git ref name (no empty path component, none starting with <c>.</c> or ending in
-    ///     <c>.lock</c>, no <c>..</c>, not ending in <c>.</c>, not starting with <c>-</c>).
+    ///     <c>.lock</c>, no <c>..</c>, not ending in <c>.</c>, not starting with <c>-</c>). The rule
+    ///     itself lives in <see cref="GitRemoteClient.IsSafeTagName"/>, so the client applies
+    ///     exactly the same check before a name reaches a command line.
     /// </summary>
     /// <param name="tagName">The tag name without the <c>refs/tags/</c> prefix, as a server
     ///     reported it or as formatted from a pattern.</param>
     /// <returns><see langword="true"/> when the name is acceptable. A server is untrusted, so a
     ///     name that fails is never put on a command line.</returns>
-    public static bool IsSafeTagName(string? tagName)
-    {
-        if (string.IsNullOrEmpty(tagName) || tagName.Length > MaxTagNameLength ||
-            !TagCharacters().IsMatch(tagName) || tagName.StartsWith('-') ||
-            tagName.EndsWith('.') || tagName.Contains("..", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        foreach (var component in tagName.Split('/'))
-        {
-            if (component.Length == 0 || component.StartsWith('.') ||
-                component.EndsWith(".lock", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    public static bool IsSafeTagName(string? tagName) => GitRemoteClient.IsSafeTagName(tagName);
 
     /// <summary>
     ///     Determines whether a tag is a package version under this pattern.

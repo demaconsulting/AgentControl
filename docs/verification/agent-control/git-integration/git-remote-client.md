@@ -9,7 +9,8 @@ an optional sleep; the tests therefore assert the *exact* command line and envir
 rules of background and interactive work, the time limit and cancellation (the sleeping stub never reaches its
 `FINISHED` marker when it is killed), the output cap, redaction and the classification of failures.
 `GitRemoteClientIntegrationTests.cs` and the subsystem test run the **real git** against local bare repositories (the
-fixture isolates the user's git configuration) to prove the semantics the stubs assume: peeled tags, a shallow fetch of
+fixture, `GitRepositoryFixture` of the `AgentPackageManagement` tests, isolates the user's git configuration; see Test
+Environment) to prove the semantics the stubs assume: peeled tags, a shallow fetch of
 one tag, the tree listing and path checkout, git's own refusal of a transport that is not allowed (including an `ext::`
 helper forced through the internal API), and that trace variables in the parent produce no trace text.
 
@@ -17,13 +18,24 @@ helper forced through the internal API), and that trace variables in the parent 
 
 The stub tests need nothing but the operating system's shell; they belong to the `RealProcess` collection because they
 launch processes and some set variables in the test process (restored afterwards). The real-git tests need git on `PATH`
-and are skipped only when it is not installed; no network, credential or user configuration is used. The batch stub
-drops a `^` from its recorded argument text, so tests assert the commands and options rather than `^{commit}`.
+and are skipped only when it is not installed; no network, credential or user configuration is used. They build their
+repositories with `GitRepositoryFixture`, which belongs to the `AgentPackageManagement` test folder (the Git source tests
+created it first): a deliberate, test-only cross-hierarchy dependency, so a change to the fixture must be checked against
+both `GitRemoteClientIntegrationTests` and `GitSourceProviderIntegrationTests`. The batch stub
+drops a `^` from its recorded argument text, so tests assert the commands and options rather than `^{commit}`. The
+version of git is remembered per executable for the whole test process, so every stub-based version test uses its own
+stub (a unique executable path) and the real-git version test uses the full path of git rather than `git`.
 
 #### Acceptance Criteria
 
 - The `ls-remote` command line is exactly the documented list of command-scoped settings with the address and glob after
   `--`; each transport allows only its own protocol in the configuration and in `GIT_ALLOW_PROTOCOL`.
+- A tag name that is not a legal ref name (empty, dot-leading or `.lock`-ending component, `//`, leading or trailing `/`,
+  `..`, trailing `.`, a forbidden character, too long) is dropped from a server listing and refused for a fetch before git
+  runs; legal names, including nested ones, are fetched.
+- A git older than 2.29 is refused as `GitTooOld` with a message that names the minimum, the version in use and the way
+  to
+  get a newer one; a newer one passes and `git --version` runs once per executable; an unreadable version does not block.
 - Background work cannot prompt (terminal, credential manager, askpass, ssh), even when the user's askpass variables are
   set; user-started work leaves them; trace and redirection variables never reach git; git runs in a neutral folder.
 - ssh gets batch mode and a connect timeout around the user's own OpenSSH command and is left alone for other commands.
@@ -36,18 +48,47 @@ drops a `^` from its recorded argument text, so tests assert the commands and op
 **GitRemoteClient_Commands_UseExactHardenedArgumentsAndAddressesAfterDashDash**: the full argument list of
 `ls-remote`; `init` from an empty template; the shallow single-tag `fetch` with `--no-tags`,
 `--no-recurse-submodules`, `--no-write-fetch-head` and the refspec; `rev-parse`; `ls-tree -r -z --full-tree -l`;
-`checkout` with `core.symlinks=false`; tag names, globs and commit ids that could be read as options are refused before
-git runs; a tag listing keeps only well-formed lines and resolves annotated tags. This scenario is tested by
+`checkout` with `core.symlinks=false`; globs and commit ids that could be read as options are refused before
+git runs; a tag listing keeps only well-formed lines and resolves annotated tags. The exact lists are the design
+document's mechanism, asserted here so that no setting can be added or dropped unnoticed; the requirements they serve
+state only the outcome. This scenario is tested by
 `GitRemoteClient_ListTags_Https_UsesExactCommandScopedConfigurationAndDashDash`,
 `GitRemoteClient_ListTags_ParsesLightweightAndAnnotatedTags`, `GitRemoteClient_ListTags_UnsafeGlob_IsRefusedWithoutRunningGit`,
 `GitRemoteClient_InitAndFetchTag_UseEmptyTemplateAndShallowSingleTagFetch`,
 `GitRemoteClient_FetchTag_RevParseWithoutCommit_Throws`,
 `GitRemoteClient_FetchTag_UnsafeTagName_IsRefusedWithoutRunningGit` and
-`GitRemoteClient_ListTreeAndCheckout_UseLiteralPathsAndParseEntries`, covering
+`GitRemoteClient_ListTreeAndCheckout_UseLiteralPathsAndParseEntries` and
+`GitRemoteClient_ListTags_HostileServerTagNames_AreDropped`, covering
 `AgentControl-GitRemoteClient-ListTagsWithoutClone`, `AgentControl-GitRemoteClient-PeeledTags`,
 `AgentControl-GitRemoteClient-ShallowFetchExactTag`, `AgentControl-GitRemoteClient-ListLayoutTree`,
 `AgentControl-GitRemoteClient-NoHooks`, `AgentControl-GitRemoteClient-NoSubmodulesNoLfs` and
 `AgentControl-GitRemoteClient-CommandScopedConfiguration` (with `GitRemoteClient_ExtraConfigurationAndEnvironment_AreAppliedLast`).
+
+**GitRemoteClient_TagNames_OnlyLegalRefNamesReachGit**: a listing in which a server reports `a//b`, `.hidden`, `x.lock`,
+`a/.b`, `a/b.lock/c`, `trailing/`, `/leading`, `a..b`, `ends.`, `-dash`, a name with a space or colon, `a@{b}` and a
+256-character name (each with a peeled line) yields only the legal names around them and never throws; a fetch of the
+same hostile names (and of option-like names such as `-oProxyCommand=calc`, `--upload-pack=calc`, `v1$(calc)`) is refused
+with `ArgumentException` before git is started; legal names (`v1.0.0`, `release/1.2.3-beta.1`, `pkg+build_1/v1.0.0`) are
+fetched. The rule is `GitRemoteClient.IsSafeTagName`, the same implementation `GitTagPattern.IsSafeTagName` delegates to.
+This scenario is tested by `GitRemoteClient_ListTags_HostileServerTagNames_AreDropped`,
+`GitRemoteClient_FetchTag_UnsafeTagName_IsRefusedWithoutRunningGit` and
+`GitRemoteClient_FetchTag_LegalTagName_IsFetched`, covering `AgentControl-GitRemoteClient-SafeTagNames`.
+
+**GitRemoteClient_MinimumGitVersion_OldGitRefusedNewGitCheckedOnce**: `ParseVersion` reads
+`git version 2.51.0.windows.2`, `git version 2.39.5 (Apple Git-154)`, `git version 2.29` and CRLF-terminated output and
+returns nothing for text that is not a git version. With a stub that answers `git version 2.20.1`, the check throws a
+`GitRemoteException` of kind `GitTooOld` whose message contains "Git 2.29 or newer", the version in use and
+"Settings > Git executable", after exactly one invocation of the hardened `git ... --literal-pathspecs --version` in the
+neutral folder; the refusal is not remembered (after the stub is changed to answer 2.43.0 the next check passes and
+`--version` has run twice). With a new enough git, two checks over two clients of the same executable run `--version`
+once. A text that cannot be read does not block (a warning is logged) and a git that cannot be started is `GitNotFound`.
+With the real git the hardened command line is accepted and the installed git passes. This scenario is tested by
+`GitRemoteClient_ParseVersion_ReadsKnownFormsAndRejectsOthers`,
+`GitRemoteClient_EnsureSupportedVersion_OldGit_IsRefusedWithActionableMessageAndNotRemembered`,
+`GitRemoteClient_EnsureSupportedVersion_NewGit_PassesAndRunsOncePerExecutable`,
+`GitRemoteClient_EnsureSupportedVersion_UnreadableVersionIsNotBlocked_AndMissingGitIsReported` and
+`GitRemoteClient_RealGit_EnsureSupportedVersion_AcceptsTheInstalledGit`, covering
+`AgentControl-GitRemoteClient-MinimumGitVersion`.
 
 **GitRemoteClient_Transport_OnlyTheAllowedProtocol**: for https, ssh and file targets only that protocol is allowed
 (`protocol.allow=never` plus one `protocol.<kind>.allow=always`, `ext` and `fd` never, `GIT_ALLOW_PROTOCOL`); with the

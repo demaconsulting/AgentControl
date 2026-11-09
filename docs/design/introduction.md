@@ -99,7 +99,8 @@ supporting types of `LauncherUI`, not units.
 - **test/** - test projects
   - **DemaConsulting.AgentControl.Tests/** - unit, subsystem and headless-window tests, plus test support
     (an in-process NuGet V3 mock feed, a real signed-package fixture, stub and real git credential
-    helpers, fake credential prompt and remembered-credential store, list logger)
+    helpers, a stub git for the remote client and a real-repository fixture for the Git source,
+    fake credential prompt and remembered-credential store, list logger)
   - **DemaConsulting.AgentControl.UiTests/** - FlaUI end-to-end UI test project
 
 ## Document Conventions

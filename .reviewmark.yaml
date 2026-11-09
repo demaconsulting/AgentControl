@@ -157,6 +157,8 @@ reviews:
       - "test/**/LauncherUI/ThemeResourceTests.cs"
       - "test/**/LauncherUI/CredentialPromptWindowTests.cs"
       - "test/**/LauncherUI/SourceEditorSignatureWindowTests.cs"
+      - "test/**/LauncherUI/SourceEditorGitWindowTests.cs"
+      - "test/**/LauncherUI/PackageSourceGitPresentationTests.cs"
       - "test/**/LauncherUI/DialogWindowTests.cs"
       - "test/**/LauncherUI/HeadlessTestApp.cs"
       - "test/**/LauncherUI/MainWindowTests.cs"
@@ -255,6 +257,7 @@ reviews:
       - "test/**/LauncherUI/RepoCardViewModelTests.cs"
       - "test/**/LauncherUI/RepoCardContentIdentityTests.cs"
       - "test/**/LauncherUI/RepoCardGitSourceTests.cs"
+      - "test/**/LauncherUI/RepoCardGitAwarenessTests.cs"
       - "test/**/LauncherUI/RepoCardColorTests.cs"
       - "test/**/LauncherUI/RepoCardImageTests.cs"
       - "test/**/LauncherUI/TestPng.cs"
@@ -291,6 +294,7 @@ reviews:
       - "src/**/LauncherUI/SettingsWindowViewModel.cs"
       - "test/**/LauncherUI/SettingsWindowViewModelTests.cs"
       - "test/**/LauncherUI/SettingsWindowServerSourceTests.cs"
+      - "test/**/LauncherUI/SettingsWindowGitSourceTests.cs"
 
   - id: AgentControl-LauncherUI-SourceEditorViewModel
     title: Review of Agent Control SourceEditorViewModel unit implementation
@@ -304,9 +308,12 @@ reviews:
       - "docs/design/agent-control/launcher-ui/source-editor-view-model.md"
       - "docs/verification/agent-control/launcher-ui/source-editor-view-model.md"
       - "src/**/LauncherUI/SourceEditorViewModel.cs"
+      - "src/**/LauncherUI/SourceEditorViewModel.Git.cs"
       - "test/**/LauncherUI/SourceEditorViewModelTests.cs"
       - "test/**/LauncherUI/SourceEditorServerViewModelTests.cs"
       - "test/**/LauncherUI/SourceEditorSignatureViewModelTests.cs"
+      - "test/**/LauncherUI/SourceEditorGitViewModelTests.cs"
+      - "test/**/AgentPackageManagement/FakeGitSourceProvider.cs"
 
   - id: AgentControl-LauncherUI-CredentialPromptViewModel
     title: Review of Agent Control CredentialPromptViewModel unit implementation

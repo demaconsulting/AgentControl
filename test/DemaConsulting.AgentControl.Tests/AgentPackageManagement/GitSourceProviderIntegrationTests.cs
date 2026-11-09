@@ -583,6 +583,131 @@ public sealed class GitSourceProviderIntegrationTests
     }
 
     /// <summary>
+    ///     Test that two layout entries whose names differ only in letter case or Unicode form - two
+    ///     files, a file and a folder, two folders, or the composed and decomposed spelling of one
+    ///     name - are refused before anything is checked out or cached, on every platform, because
+    ///     the cache may be read on a file system that treats them as one.
+    /// </summary>
+    [Theory]
+    [InlineData("files-case")]
+    [InlineData("file-and-folder")]
+    [InlineData("folders-case")]
+    [InlineData("unicode-forms")]
+    public async Task GitSourceProvider_Acquire_FoldedPathCollisionInLayout_IsRefusedAndNothingCached(string kind)
+    {
+        // Arrange: a good layout plus two entries that collide when case or Unicode form is folded
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(Layout("base"), "base");
+        var (first, second) = kind switch
+        {
+            "files-case" => (".github/agents/A.md", ".github/agents/a.md"),
+            "file-and-folder" => (".github/skills/notes", ".github/skills/NOTES/entry.md"),
+            "folders-case" => (".github/standards/Docs/one.md", ".github/standards/docs/two.md"),
+            _ => (".github/agents/caf\u00e9.md", ".github/agents/cafe\u0301.md")
+        };
+        fixture.AddFile(first, "first");
+        fixture.AddFile(second, "second");
+        fixture.CommitStaged("colliding " + kind);
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, TestContext.Current.CancellationToken));
+
+        // Assert: refused for the right reason, with nothing published or left behind
+        Assert.Contains("differ only in letter case or Unicode form", failure.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(provider.RepositoryCacheFolder, package.Revision!)));
+        Assert.Empty(Directory.EnumerateDirectories(provider.RepositoryCacheFolder, ".tmp-*"));
+    }
+
+    /// <summary>
+    ///     Test that when the <c>.git</c> folder cannot be removed from the fetched package - the
+    ///     removal fails, or silently leaves it - the acquisition fails, no cache folder of the commit
+    ///     is published or marked complete and nothing is left behind, and that a later acquisition
+    ///     succeeds and delivers a package without <c>.git</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("removal-throws")]
+    [InlineData("removal-does-nothing")]
+    public async Task GitSourceProvider_Acquire_GitFolderRemovalFails_IsRefusedNothingPublishedAndLaterAcquisitionSucceeds(string kind)
+    {
+        // Arrange: the first removal of .git fails, later ones are real
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var commit = fixture.Commit(Layout("clean"), "one");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var removals = 0;
+        var options = fixture.CreateOptions() with
+        {
+            RemoveGitFolder = path =>
+            {
+                if (removals++ > 0)
+                {
+                    GitSourceProvider.DeleteDirectoryOrThrow(path);
+                }
+                else if (kind == "removal-throws")
+                {
+                    throw new IOException("simulated: the folder is in use");
+                }
+            }
+        };
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), options);
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+
+        // Act
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.AcquireAsync(package, TestContext.Current.CancellationToken));
+
+        // Assert: refused with an actionable message, and nothing that could be reused remains
+        Assert.IsNotType<PackageSourceAccessException>(failure);
+        Assert.Contains("could not be finished in the cache folder", failure.Message, StringComparison.Ordinal);
+        var published = Path.Combine(provider.RepositoryCacheFolder, commit);
+        Assert.False(Directory.Exists(published));
+        Assert.Empty(Directory.EnumerateDirectories(provider.RepositoryCacheFolder, ".tmp-*"));
+
+        // Act: a later acquisition (the folder is no longer in use)
+        using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Assert: delivered, complete, and without the repository metadata
+        Assert.Equal("clean", reader.ReadText(".github/agents/copilot.md"));
+        Assert.True(File.Exists(Path.Combine(published, GitSourceProvider.MarkerFileName)));
+        Assert.False(Directory.Exists(Path.Combine(published, ".git")));
+        Assert.Equal(2, removals);
+    }
+
+    /// <summary>
+    ///     Test that a temporary folder that could not be cleaned up after a failed acquisition is
+    ///     never used as a package: it is not named by a commit, so it is not served from the cache,
+    ///     and a later acquisition sweeps it once it is old enough.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_Acquire_LeftoverTemporaryFolderWithGit_IsNeverServedAndIsSweptWhenStale()
+    {
+        // Arrange: a leftover that holds a repository and even a marker for the commit
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var commit = fixture.Commit(Layout("fresh"), "one");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var provider = new GitSourceProvider(fixture.CreateDefinition(), fixture.CreateOptions());
+        var package = (await provider.ListVersionsAsync(PackageId, TestContext.Current.CancellationToken)).Single();
+        var leftover = Path.Combine(provider.RepositoryCacheFolder, ".tmp-failed");
+        Directory.CreateDirectory(Path.Combine(leftover, ".git"));
+        await File.WriteAllTextAsync(Path.Combine(leftover, GitSourceProvider.MarkerFileName), commit, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(leftover, "AGENTS.md"), "poisoned", TestContext.Current.CancellationToken);
+        Directory.SetLastWriteTimeUtc(leftover, DateTime.UtcNow.AddDays(-2));
+
+        // Act
+        using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+
+        // Assert: the package came from the tag, not from the leftover, and the leftover is gone
+        Assert.Equal("# Agents template", reader.ReadText("AGENTS.md"));
+        Assert.False(Directory.Exists(leftover));
+    }
+
+    /// <summary>
     ///     Test that a package this source did not report is refused: another alias, another package, a
     ///     missing revision, or a tag that does not match the pattern or the version.
     /// </summary>

@@ -1008,7 +1008,15 @@ internal sealed class MainWindowViewModel : ViewModelBase
     /// <exception cref="InvalidOperationException">Thrown when the definition is not an
     ///     acceptable NuGet source.</exception>
     internal IPackageSourceProvider CreateConnectionTestProvider(PackageSourceDefinition definition) =>
-        new NuGetSourceProvider(definition, RepoCardViewModel.GetNuGetRootBase(_startupOptions), Credentials);
+        definition.Type == PackageSourceType.Git
+            ? new GitSourceProvider(
+                definition,
+                new GitSourceOptions(
+                    () => RepoCardViewModel.ResolveGitExecutablePath(_settings, _startupOptions),
+                    RepoCardViewModel.GetGitCacheRoot(_startupOptions),
+                    Interactive: true,
+                    EnforceMinimumGitVersion: true))
+            : new NuGetSourceProvider(definition, RepoCardViewModel.GetNuGetRootBase(_startupOptions), Credentials);
 
     /// <summary>
     ///     Attempts to load the pin file for a newly-added repo, tolerating a repo that has never

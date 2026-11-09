@@ -110,3 +110,22 @@ sections:
           - SelectPackageWindowViewModel_Retry_StillFailing_KeepsErrorAndRetryAvailable
           - SelectPackageWindowViewModel_Retry_SourceFailedThenAnswers_LoadsOnlyThatSource
           - SelectPackageWindowViewModel_Retry_NothingFailed_DoesNothing
+
+      - id: AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage
+        title: >-
+          The SelectPackageWindowViewModel class shall, when given the source, package and version
+          a repo is pinned to, start on that source and, once it has been read, select that package
+          and version (keeping the newest version when the pinned one is no longer listed), shall
+          select nothing when that source failed, does not offer the package or is not configured,
+          and shall never override a choice the user made while the source was loading.
+        justification: |
+          Change package opens on what the repo uses now, so choosing the same version again to
+          accept changed content takes one click; a preference that cannot be honored, or that
+          arrives after the user has chosen, must never select something else on the user's behalf.
+        tests:
+          - SelectPackageWindowViewModel_LoadAsync_PreferredPackageAndVersion_AreSelected
+          - SelectPackageWindowViewModel_LoadAsync_PreferredVersionNotListed_KeepsNewestVersion
+          - SelectPackageWindowViewModel_LoadAsync_PreferredPackageNotOffered_SelectsNothing
+          - SelectPackageWindowViewModel_LoadAsync_PreferredSourceFailed_SelectsNothing
+          - SelectPackageWindowViewModel_LoadAsync_PreferredAliasUnknown_SelectsNothing
+          - SelectPackageWindowViewModel_LoadAsync_UserChoiceBeforeLoadEnds_IsNotOverridden

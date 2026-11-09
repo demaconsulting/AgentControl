@@ -58,9 +58,9 @@ internal enum ContentIdentityComparison
 ///     identity when a package is applied, and later syncs of the same version are compared with it.
 ///     The text is <c>{algorithm}:{value}</c>. <c>sha256:{64 lower-case hex}</c> is the SHA-256 of
 ///     the package file (the zip, or the <c>.nupkg</c> a NuGet source unpacked). The
-///     <c>git-commit:{hex}</c> form is reserved for a package source that delivers a tag of a Git
-///     repository (the commit the tag pointed to); <see cref="FromGitCommit"/> formats it so that
-///     source can use the same comparison, but no source in this build produces it yet.
+///     <c>git-commit:{hex}</c> form is the commit a Git tag pointed to; <see cref="GitSourceProvider"/>
+///     delivers it through <see cref="FromGitCommit"/> for a package it fetched, so a Git source
+///     takes part in the same comparison as the others.
 ///     </para>
 ///     <para>
 ///     Pure functions of their parameters (plus the stream that is read) and thread-safe. The
@@ -76,7 +76,7 @@ internal static class PackageContentIdentity
     internal const string Sha256Prefix = "sha256:";
 
     /// <summary>
-    ///     The prefix of an identity that is the commit a Git tag pointed to (reserved for a Git
+    ///     The prefix of an identity that is the commit a Git tag pointed to (produced by the Git
     ///     package source).
     /// </summary>
     internal const string GitCommitPrefix = "git-commit:";

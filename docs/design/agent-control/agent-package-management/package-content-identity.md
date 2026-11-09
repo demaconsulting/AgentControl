@@ -17,8 +17,8 @@ An identity is a string `{kind}:{value}`:
 
 - `sha256:` followed by 64 lower-case hexadecimal digits - the SHA-256 of a package file (a zip, or the `.nupkg`
   a NuGet source unpacked).
-- `git-commit:` followed by a 40- or 64-digit lower-case commit hash - reserved for a package source that
-  delivers a tag of a Git repository. No source in this build produces it.
+- `git-commit:` followed by a 40- or 64-digit lower-case commit hash - the commit a tag of a Git repository pointed
+  to; `GitSourceProvider` produces it for every package it delivers (`FromGitCommit`).
 
 **ContentIdentityComparison**: `enum` - `NotComparable` (a side is missing), `Same`, `Changed`.
 
@@ -74,5 +74,6 @@ malformed or null hash. `Compare` and `Describe` never throw.
 
 - **ZipPackageContentReader** (`RepoSync` subsystem) - `ComputeSha256` over the zip it reads.
 - **NuGetSourceProvider** - `ComputeSha256` over the `.nupkg` it unpacked.
+- **GitSourceProvider** - `FromGitCommit` for the commit of the tag it fetched.
 - **RepoCardViewModel** (`LauncherUI` subsystem) - `Compare` and `Describe` when applying, upgrading to or
   restoring a package.

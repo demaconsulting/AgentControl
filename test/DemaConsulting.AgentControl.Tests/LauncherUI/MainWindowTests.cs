@@ -24,6 +24,7 @@ using Avalonia.Interactivity;
 using Avalonia.Threading;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
+using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
 
@@ -324,6 +325,61 @@ public sealed class MainWindowTests : IDisposable
     [Fact]
     public void App_Initialized_ApplicationIsAgentControlApp() => HeadlessTestApp.Run(() =>
         Assert.IsType<App>(Avalonia.Application.Current));
+
+    /// <summary>
+    ///     Test that "Change package..." on a pinned repo opens the Select Package dialog on the pin's
+    ///     own source, package and version, so the current choice is selected without a click.
+    /// </summary>
+    [Fact]
+    public void MainWindow_ChangePackageOnPinnedRepo_OpensSelectPackageOnThePinnedChoice() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a source with two versions and a repo pinned to the older one
+        var sourceDir = CreateTempDirectory();
+        foreach (var version in new[] { "1.0.0", "1.1.0" })
+        {
+            using var archive = System.IO.Compression.ZipFile.Open(
+                Path.Combine(sourceDir, $"contoso-agents-{version}.zip"), System.IO.Compression.ZipArchiveMode.Create);
+            using var writer = new StreamWriter(archive.CreateEntry(".github/agents/copilot.md").Open());
+            writer.Write(version);
+        }
+
+        var repo = CreateTempDirectory();
+        RepoPinStore.Save(repo, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings
+        {
+            Sources = [PackageSourceDefinition.CreateDefaultZip(sourceDir)],
+            RecentRepos = [new RecentRepo { Path = repo }]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        var window = new MainWindow { DataContext = viewModel };
+        window.Show();
+        try
+        {
+            var card = Assert.Single(viewModel.RepoCards);
+            Assert.True(card.HasPinnedPackage);
+
+            // Act: Change package...
+            card.SelectPackageCommand.Execute(null);
+            var dialog = Assert.Single(window.OwnedWindows.OfType<SelectPackageWindow>());
+            var dialogModel = Assert.IsType<SelectPackageWindowViewModel>(dialog.DataContext);
+            for (var attempt = 0; attempt < 1200 && dialogModel.SelectedVersion is null; attempt++)
+            {
+                Dispatcher.UIThread.RunJobs();
+                await Task.Delay(25, TestContext.Current.CancellationToken);
+            }
+
+            // Assert: the pin's choice is selected, although a newer version exists
+            Assert.Equal("Default", dialogModel.SelectedSource?.Alias);
+            Assert.Equal("contoso-agents", dialogModel.SelectedPackageName);
+            Assert.Equal("1.0.0", dialogModel.SelectedVersion);
+            dialog.Close();
+            Dispatcher.UIThread.RunJobs();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
 
     /// <inheritdoc />
     public void Dispose()

@@ -119,6 +119,8 @@ menu's "Repository" group and keeps its icon and the `PullButton` AutomationId.
 `Status` is the card's overall `RepoCardStatus`, which the view shows as the colored accent bar on the card's
 left edge. A problem outranks everything - the folder is missing (`IsMissing`), the pinned package's source has a
 problem or needs a sign-in (`HasSourceProblem`), or the last action failed (`LastActionFailed`) - then
+`TagMoved` (`IsPinnedTagMoved`: the tag of the pinned Git version now points to another commit, so the card never
+says "up to date" or merely "upgrade available" for content that is no longer what the repo has), then
 `UpgradeAvailable` (`IsUpgradeAvailable`), then `NoPackage` (`IsPackageSelectionNeeded`), then `Checking` (a
 package is pinned but the upgrade check is still running, so the card never claims "up to date" early), then
 `Unknown` (`IsUpgradeStatusUnknown`: the last upgrade check failed because the package source could not be read,
@@ -134,13 +136,13 @@ parent with an end ellipsis first and the leaf with a middle ellipsis only when 
 the start and the end of the folder name visible.
 Green, amber, red and grey are only the view's rendering of that value: `StatusText` says
 it in words ("Up to date", "Upgrade available", "Needs attention", "No agent package", "Checking for updates",
-"Update check failed")
+"Update check failed", "Tag moved")
 and is the bar's accessible name, and `StatusTooltip` adds the reason (for a problem, the missing folder, the
 source problem or "the last action failed"). `LastActionFailed` is set whenever the card raises `ErrorOccurred`
 (the constructor subscribes to its own event, so no call site needs bookkeeping) and when a Git Pull ends with
 git's refusal, and is cleared when the next operation starts (`RunOperationAsync`). **HasAgentFileActions**
-(`IsPackageSelectionNeeded || IsUpgradeAvailable`) lets the card menu hide its "Agent files" group when it has
-nothing to offer.
+(`IsPackageSelectionNeeded || IsUpgradeAvailable || HasPinnedPackage`) lets the card menu hide its "Agent files"
+group when it has nothing to offer: "Select Package...", "Change package..." or "Upgrade to ...".
 
 **Avatar tile** (`AgentControl-RepoCardViewModel-AvatarTile`, `-AvatarFolderGlyph`, `-AvatarColorStable`):
 **AvatarInitials** are the capital first letters
@@ -232,8 +234,13 @@ session credentials and the user's saved sign-in (read without any dialog) but c
 
 - *Package chip* — `HasPackageChip`, `PackageChipText` (package name and version),
   `PackageChipTooltip` (names the package, version, source alias and source kind, or says the
-  pinned source is not configured), the source kind's icon from `PackageSourceIcons` (a server
-  source has its own network-server icon, distinct from the zip-folder and NuGet-folder icons), and
+  pinned source is not configured; for a Git source it adds ", tag {tag} @ {commit}" - the tag is
+  `PinnedTagName`, the source's tag pattern applied to the pinned version, and the commit is
+  `PinnedCommitShort`, the first seven characters of the `git-commit:` identity the pin recorded - and only
+  ", tag {tag}" when the pin recorded no commit; a pin to any other kind of source names neither,
+  `AgentControl-RepoCardViewModel-GitSourceAwareness`), the source kind's icon from `PackageSourceIcons` (a server
+  source has its own network-server icon, distinct from the zip-folder and NuGet-folder icons, and a Git source
+  the Git logo), and
   `PinnedSourceLabel`, the source's alias shown as muted text beside the icon so the source is
   recognizable at a glance without hovering (a pin written before sources existed reports the legacy
   `Default` alias). Hidden for a missing repo or when nothing is pinned.
@@ -256,6 +263,11 @@ session credentials and the user's saved sign-in (read without any dialog) but c
   confirmations (`AgentControl-RepoCardViewModel-UpgradeFromChip`); `IsCheckingUpgrade` shows that the
   background check is still running.
 - *Branch chip* — the branch name with a tooltip.
+- *Tag moved chip* — `IsPinnedTagMoved` and `PinnedTagMovedTooltip` (the tag, the source, the recorded and the new
+  commit - seven characters each - what AgentControl did not do, and that the way to accept it is the menu's "Change
+  package..." and choosing the version again). The amber chip is a button bound to `SelectPackageCommand`, so a click
+  only opens the Change package dialog; it applies nothing
+  (`AgentControl-RepoCardViewModel-TagMovedWarning`).
 - *Status chips* — uncommitted changes, committed agent files, folder missing and package source
   problem (whose tooltip is the actual problem), each color-coded amber or red
   (`AgentControl-LauncherUI-StatusBadges`).
@@ -335,7 +347,16 @@ credentials and **never opens the sign-in dialog**. A server that then answers t
 followed by *Use the card's "..." menu > Refresh to sign in*, so the card says what to do instead of
 interrupting the user. The card's **Refresh** command runs the same check with `allowPrompt` true, and the
 Select Package and Upgrade actions the user chooses use a source registry that may open the dialog
-(`AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`).
+(`AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`). The check result carries the listing's entry for the
+pinned version (`UpgradeCheck.Pinned`). For a Git source whose pin recorded a `git-commit:` identity, a listing that
+shows the pinned version at a different commit (`FindMovedTagCommit`, using `PackageContentIdentity.Compare`) sets
+the moved-tag state through `SetMovedTag`, which notifies `IsPinnedTagMoved`, the tooltip and the status; nothing is
+read, extracted or written because of it, and the state is cleared whenever the pin changes (`RefreshPin`) or the
+listing no longer differs. A pin without an identity, a listing without a revision, a source that is not a Git
+source and a tag that still points to the recorded commit are never reported as moved
+(`AgentControl-RepoCardViewModel-TagMovedWarning`). A `GitRemoteException` of kind `GitTooOld` found by the check
+becomes a source problem with the exception's secret-free message and no sign-in hint
+(`AgentControl-RepoCardViewModel-GitTooOldProblem`).
 
 **Launch**: Launches the configured agentic CLI tool in the repo's working directory.
 
@@ -375,7 +396,9 @@ is an informational side action only — it never blocks `Launch`.
   the reader is compared with the one the repo's pin recorded (`PackageContentIdentity.Compare`): when the version
   the repo is pinned to now delivers different content, nothing is extracted, a warning is logged and
   `ErrorOccurred` says in plain language that the agent files were not synced because the package may have been
-  republished, and the method returns `false` (`AgentControl-RepoCardViewModel-RefuseChangedContent`). A pin that
+  republished and that the way to accept the change, if it is trusted, is the card menu's "Change package..."
+  (it no longer suggests deleting the pin file), and the method returns `false`
+  (`AgentControl-RepoCardViewModel-RefuseChangedContent`). A pin that
   recorded no identity (or a reader that reports none) is not comparable and is synced without any warning. The
   restore **never writes the pin**, whatever the outcome - recording an identity here would change a file under
   version control every time the tool is launched, so such a pin adopts an identity only at the next Select Package
@@ -418,8 +441,8 @@ tolerated and replaced), acquires the package from its provider, compares the ac
 pin's when the pin is for this very package version (`ContentChangedSincePinned`; a different version, a pin
 without an identity and a reader without one are never a change) and, on a change, applies the requested
 `ContentChangeHandling` before anything is touched - `Refuse` (Upgrade: log a warning, `ErrorOccurred` saying the
-package may have been republished and that nothing was changed, return;
-`AgentControl-RepoCardViewModel-RefuseChangedContent`), `Ask` (Select Package: raise
+package may have been republished, that nothing was changed and that "Change package..." accepts it;
+`AgentControl-RepoCardViewModel-RefuseChangedContent`), `Ask` (Select Package / Change package: raise
 `ContentChangeConfirmationRequested`, return) or `Accept` (the user already confirmed: log and continue); then
 extracts it
 (blind-delete-and-replace), proactively ensures the repo's `.gitignore` covers the four managed
@@ -487,10 +510,16 @@ try/catch, separate from `ApplyPackageAndShowReleaseNotesAsync`'s outer catch, s
 failure can never abort the pin write or release-notes display that follow it — mirroring the
 non-blocking idiom already established by `EnsureAgentFilesSyncedBeforeLaunchAsync`.
 
-**SelectPackage** (private): Validates at least one package source is configured, then raises
+**SelectPackage** (private, bound to `SelectPackageCommand`): Validates at least one package source is configured,
+then raises
 `SelectPackageRequested` (a plain event) for the view layer to show the dialog, which starts on
 the source the repo is pinned to when it has one
-(`AgentControl-RepoCardViewModel-SelectPackage`).
+(`AgentControl-RepoCardViewModel-SelectPackage`). The command is executable for any repo that is present and idle,
+whether or not it has a pin: for an unpinned repo it is "Select Package...", for a pinned one "Change package..."
+(`AgentControl-RepoCardViewModel-ChangePackage`). Raising the event never reads or writes the pin; the view layer
+passes the pin's source, package and version to the dialog so it opens on them, and the confirmed choice comes back
+through `ApplySelectedPackageAsync`, where choosing the pinned version again is the explicit way to accept changed
+content (`ConfirmChangedContent`; for a Git source the content differs when the tag now delivers a different commit).
 
 **EvaluatePinnedSource** (private): Part of the cheap refresh. A pin naming a source that is not
 configured sets `SourceProblem` and never looks elsewhere. An unreachable or failing source is

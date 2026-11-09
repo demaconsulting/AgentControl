@@ -22,7 +22,11 @@ in the background ("Checking", then found or missing). A server row shows **"Not
 AgentControl contacts a server only when it is needed (selecting a package, checking for upgrades, or the
 editor's **Test connection**), never just to draw the list, since doing so could mean a network wait and a
 sign-in dialog for a window that was only opened to look. The row's icon and tooltip explain this and point
-to *Edit > Test connection*.
+to *Edit > Test connection*. A Git source is classified by `PackageSourceItemViewModel.IsRemote`: one whose address is
+an https or SSH address is remote and behaves exactly like a server row ("Not checked", no folder check, the tooltip
+says "repository"), while one whose address is a local path is a folder like any other and gets the folder status
+(`AgentControl-SettingsWindowViewModel-GitSourceRowStatus`). Its icon is the Git logo and its kind name "Git
+repository" (`PackageSourceIcons`).
 
 **SelectedSource**: `PackageSourceItemViewModel?` — The row the Edit and Remove commands act on.
 
@@ -85,12 +89,15 @@ check of every source.
   waits for a slow location.
 
 **AddZipSourceCommand**, **AddNuGetFolderSourceCommand**, **AddNuGetServerSourceCommand**,
-**EditSourceCommand**: Raise
+**AddGitSourceCommand**, **EditSourceCommand**: Raise
 `EditorRequested` asking the window to open a `SourceEditorViewModel`, created by
 `CreateEditor` (which passes the provider factory on), for a new source of the chosen kind
-(the three items of the window's **Add** menu: zip-package folder, NuGet-package folder, NuGet-package
-server - one command per menu item, so another source type is one more command and one more item) or for the
-selected source; editing a source whose location is a web address opens the server editor. When the editor
+(the four items of the window's **Add** menu: zip-package folder, NuGet-package folder, NuGet-package
+server, Git repository - one command per menu item, so another source type is one more command and one more
+item) or for the
+selected source; editing a source whose location is a web address opens the server editor, and editing a Git source
+opens the Git editor. `AddGitSourceCommand` requests an editor in Git mode
+(`AgentControl-SettingsWindowViewModel-AddGitSourceMenu`). When the editor
 reports `Saved`, the resulting definition is appended to `Sources` and selected, or replaces the
 edited row in place keeping its position (`AgentControl-SettingsWindowViewModel-AddSource`,
 `AgentControl-SettingsWindowViewModel-EditSource`).
@@ -124,8 +131,11 @@ the window calls it when it closes (`AgentControl-SettingsWindowViewModel-Source
 #### Error Handling
 
 The constructor throws `ArgumentNullException` for a null `initial` or `onSave`. `Save` checks
-every source location with `PackageSourceDefinition.GetCredentialProblem`: a location embedding a
-credential (for example a URL with user information) is not
+every source location with `PackageSourceDefinition.GetCredentialProblem` and every Git source with
+`PackageSourceDefinition.GetGitSettingsProblem` (address, tag pattern, folder inside the repository and package
+name; this also stops a hand-edited settings file, `AgentControl-SettingsWindowViewModel-RefuseInvalidGitSource`):
+a location embedding a
+credential (for example a URL with user information) or a Git source with unusable settings is not
 saved - `onSave` is not invoked, `Saved` is not raised, and `ErrorMessage` (shown in red in the
 window, and never containing the location) explains why. Any failure persisting the resulting
 `AppSettings` (e.g. `InvalidOperationException` from `SettingsStore.Save`) originates from the

@@ -94,8 +94,8 @@ public sealed class PackageSourcesTests
     }
 
     /// <summary>
-    ///     The Settings window's Add button opens a menu that offers all three source types - a
-    ///     zip-package folder, a NuGet-package folder and a NuGet-package server - each with a drawn icon
+    ///     The Settings window's Add button opens a menu that offers all four source types - a
+    ///     zip-package folder, a NuGet-package folder, a NuGet-package server and a Git repository - each with a drawn icon
     ///     and a one-line description, and choosing the NuGet-package folder item opens its own dialog.
     /// </summary>
     [Fact]
@@ -120,7 +120,8 @@ public sealed class PackageSourcesTests
         [
             ("AddZipSourceButton", "Zip-package folder", "A folder of agent package .zip files"),
             ("AddNuGetFolderSourceButton", "NuGet-package folder", "A folder of NuGet packages (.nupkg files)"),
-            ("AddNuGetServerSourceButton", "NuGet-package server", "A server such as Artifactory or Azure Artifacts")
+            ("AddNuGetServerSourceButton", "NuGet-package server", "A server such as Artifactory or Azure Artifacts"),
+            ("AddGitSourceButton", "Git repository", "Packages are tags of a Git repository")
         ];
         foreach (var (id, title, description) in expected)
         {

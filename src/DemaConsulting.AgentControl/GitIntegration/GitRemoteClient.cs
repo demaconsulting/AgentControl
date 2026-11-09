@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
@@ -100,7 +101,13 @@ internal enum GitFailureKind
     /// <summary>
     ///     The output was larger than AgentControl is willing to read.
     /// </summary>
-    OutputTooLarge
+    OutputTooLarge,
+
+    /// <summary>
+    ///     The git in use is older than the oldest version AgentControl supports for Git
+    ///     repository sources.
+    /// </summary>
+    GitTooOld
 }
 
 /// <summary>
@@ -230,6 +237,11 @@ internal sealed record GitRemoteOptions(
 ///     <see cref="GitRemoteException"/> with a classified <see cref="GitRemoteException.Kind"/>.
 ///     Thread-safe: no state is kept between calls other than the cached ssh command.
 ///     </para>
+///     <para>
+///     <b>Version.</b> The commands need Git 2.29 or newer (<c>fetch --no-write-fetch-head</c>);
+///     <see cref="EnsureSupportedVersionAsync"/> checks it once per executable and process and
+///     fails with <see cref="GitFailureKind.GitTooOld"/> and an actionable message.
+///     </para>
 /// </remarks>
 internal sealed partial class GitRemoteClient
 {
@@ -245,14 +257,42 @@ internal sealed partial class GitRemoteClient
     internal const int MaxErrorChars = 64 * 1024;
 
     /// <summary>
+    ///     The oldest git AgentControl supports for Git repository sources: 2.29, which added
+    ///     <c>fetch --no-write-fetch-head</c>.
+    /// </summary>
+    internal static readonly Version MinimumGitVersion = new(2, 29);
+
+    /// <summary>
     ///     The longest summary of git's error text placed in a message.
     /// </summary>
     private const int MaxSummaryChars = 300;
 
     /// <summary>
+    ///     The longest tag name that is considered.
+    /// </summary>
+    private const int MaxTagNameLength = 255;
+
+    /// <summary>
     ///     The connect timeout, in seconds, given to ssh.
     /// </summary>
     private const int SshConnectTimeoutSeconds = 15;
+
+    /// <summary>
+    ///     The longest standard output read from <c>git --version</c>: 4 KB.
+    /// </summary>
+    private const int MaxVersionOutputChars = 4096;
+
+    /// <summary>
+    ///     The time limit for <c>git --version</c>.
+    /// </summary>
+    private static readonly TimeSpan VersionTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    ///     The git executables (as resolved) already found to be new enough, so <c>git --version</c>
+    ///     runs at most once for each in this process.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, bool> VerifiedExecutables =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
     /// <summary>
     ///     How long to wait for a killed process to be reaped and its pipes to close.
@@ -349,6 +389,14 @@ internal sealed partial class GitRemoteClient
     private static partial Regex TagNamePattern();
 
     /// <summary>
+    ///     Gets the pattern of the version in the output of <c>git --version</c>, for example
+    ///     <c>git version 2.51.0.windows.2</c>.
+    /// </summary>
+    /// <returns>The compiled pattern.</returns>
+    [GeneratedRegex(@"\bgit version (\d{1,4})\.(\d{1,4})(?:\.(\d{1,4}))?", RegexOptions.CultureInvariant)]
+    private static partial Regex VersionPattern();
+
+    /// <summary>
     ///     Gets the pattern of a listing glob: tag-name characters and <c>*</c>.
     /// </summary>
     /// <returns>The compiled pattern.</returns>
@@ -363,6 +411,67 @@ internal sealed partial class GitRemoteClient
     private static partial Regex WhitespacePattern();
 
     /// <summary>
+    ///     Checks that the git in use is new enough for Git repository sources, running
+    ///     <c>git --version</c> once per executable and process.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the operation; the process tree is killed.</param>
+    /// <returns>A task that completes when git is known to be supported. A git whose version text
+    ///     cannot be read is not blocked (a warning is logged), and a failure to run git is not
+    ///     remembered, so a later call tries again.</returns>
+    /// <exception cref="GitRemoteException">Thrown with <see cref="GitFailureKind.GitTooOld"/> when
+    ///     git is older than <see cref="MinimumGitVersion"/>, or when git cannot be run.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when cancelled.</exception>
+    public async Task EnsureSupportedVersionAsync(CancellationToken cancellationToken)
+    {
+        var executable = _options.ResolveGitExecutable();
+        if (VerifiedExecutables.ContainsKey(executable))
+        {
+            return;
+        }
+
+        var arguments = BuildArguments(null, GitTransport.File, checkout: false, "--version");
+        var result = await RunAsync(
+            "version", arguments, GitTransport.File, VersionTimeout, MaxVersionOutputChars, cancellationToken);
+        var version = ParseVersion(result.Output);
+        if (version is null)
+        {
+            _logger.LogWarning("The version of git could not be read from its output; it is assumed to be supported.");
+        }
+        else if (version < MinimumGitVersion)
+        {
+            throw new GitRemoteException(
+                GitFailureKind.GitTooOld,
+                $"AgentControl needs Git {MinimumGitVersion} or newer for Git repository sources, but the Git in use " +
+                $"is {version}. Update Git (https://git-scm.com/downloads) or choose a newer Git under " +
+                "Settings > Git executable.");
+        }
+
+        VerifiedExecutables[executable] = true;
+    }
+
+    /// <summary>
+    ///     Reads the version from the output of <c>git --version</c>.
+    /// </summary>
+    /// <param name="output">The standard output, for example <c>git version 2.51.0.windows.2</c>
+    ///     or <c>git version 2.39.5 (Apple Git-154)</c>.</param>
+    /// <returns>The major, minor and patch numbers (patch zero when absent), or
+    ///     <see langword="null"/> when the text is not a git version.</returns>
+    internal static Version? ParseVersion(string? output)
+    {
+        var match = VersionPattern().Match(output ?? string.Empty);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var patch = match.Groups[3].Success ? int.Parse(match.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture) : 0;
+        return new Version(
+            int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
+            int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture),
+            patch);
+    }
+
+    /// <summary>
     ///     Lists the tags of a remote without cloning it.
     /// </summary>
     /// <param name="target">The remote.</param>
@@ -371,7 +480,8 @@ internal sealed partial class GitRemoteClient
     ///     characters and <c>*</c>.</param>
     /// <param name="cancellationToken">Cancels the operation; the process tree is killed.</param>
     /// <returns>The tags (one entry per tag, with an annotated tag resolved to its commit),
-    ///     ordered by name. Lines that are not well-formed tag refs are ignored.</returns>
+    ///     ordered by name. Lines that are not well-formed tag refs, and tags whose name is not a
+    ///     safe tag name (see <see cref="IsSafeTagName"/>), are ignored.</returns>
     /// <exception cref="ArgumentException">Thrown when the glob is not acceptable.</exception>
     /// <exception cref="GitRemoteException">Thrown when git fails, times out, is missing, or prints
     ///     more than 8 MB.</exception>
@@ -416,8 +526,8 @@ internal sealed partial class GitRemoteClient
     /// </summary>
     /// <param name="target">The remote.</param>
     /// <param name="repositoryPath">The repository to fetch into.</param>
-    /// <param name="tagName">The tag, without <c>refs/tags/</c>; only letters, digits and
-    ///     <c>. _ / + -</c>, not starting with <c>-</c>.</param>
+    /// <param name="tagName">The tag, without <c>refs/tags/</c>; must be a safe tag name
+    ///     (<see cref="IsSafeTagName"/>).</param>
     /// <param name="cancellationToken">Cancels the operation; the process tree is killed.</param>
     /// <returns>The commit the tag points to in the fetched repository.</returns>
     /// <exception cref="ArgumentException">Thrown when the tag name is not acceptable.</exception>
@@ -579,13 +689,23 @@ internal sealed partial class GitRemoteClient
             }
 
             var name = reference[Prefix.Length..];
-            if (name.EndsWith("^{}", StringComparison.Ordinal))
+            var isPeeled = name.EndsWith("^{}", StringComparison.Ordinal);
+            var tagName = isPeeled ? name[..^3] : name;
+
+            // A name a server reports is untrusted: one that is not a legal, safe tag name is
+            // dropped here and never used
+            if (!IsSafeTagName(tagName))
             {
-                peeled[name[..^3]] = sha;
+                continue;
+            }
+
+            if (isPeeled)
+            {
+                peeled[tagName] = sha;
             }
             else
             {
-                objects[name] = sha;
+                objects[tagName] = sha;
             }
         }
 
@@ -685,14 +805,43 @@ internal sealed partial class GitRemoteClient
         fragments.Any(fragment => text.Contains(fragment, StringComparison.Ordinal));
 
     /// <summary>
+    ///     Determines whether a tag name is one AgentControl is willing to put on a command line:
+    ///     only the characters <c>A-Z a-z 0-9 . _ / + -</c>, at most 255 characters, and a legal
+    ///     git ref name (no empty path component, none starting with <c>.</c> or ending in
+    ///     <c>.lock</c>, no <c>..</c>, not ending in <c>.</c>, not starting with <c>-</c>). The one
+    ///     implementation of the rule, shared with the tag pattern (which sits above this unit).
+    /// </summary>
+    /// <param name="tagName">The tag name without the <c>refs/tags/</c> prefix.</param>
+    /// <returns><see langword="true"/> when the name is acceptable.</returns>
+    internal static bool IsSafeTagName(string? tagName)
+    {
+        if (string.IsNullOrEmpty(tagName) || tagName.Length > MaxTagNameLength ||
+            !TagNamePattern().IsMatch(tagName) || tagName.StartsWith('-') ||
+            tagName.EndsWith('.') || tagName.Contains("..", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var component in tagName.Split('/'))
+        {
+            if (component.Length == 0 || component.StartsWith('.') ||
+                component.EndsWith(".lock", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     ///     Requires a tag name that is safe to put in a refspec.
     /// </summary>
     /// <param name="tagName">The tag name.</param>
     /// <exception cref="ArgumentException">Thrown when it is not acceptable.</exception>
     private static void RequireSafeTagName(string tagName)
     {
-        if (string.IsNullOrEmpty(tagName) || tagName.Length > 255 || tagName.StartsWith('-') ||
-            tagName.Contains("..", StringComparison.Ordinal) || !TagNamePattern().IsMatch(tagName))
+        if (!IsSafeTagName(tagName))
         {
             throw new ArgumentException("The tag name is not acceptable.", nameof(tagName));
         }

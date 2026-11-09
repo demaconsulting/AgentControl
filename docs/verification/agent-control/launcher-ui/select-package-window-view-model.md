@@ -3,7 +3,8 @@
 #### Verification Approach
 
 `SelectPackageWindowViewModel` is verified with unit tests defined in
-`SelectPackageWindowViewModelTests.cs` and `SelectPackageRetryTests.cs`. No Avalonia `Window` is constructed in these tests,
+`SelectPackageWindowViewModelTests.cs` (which also holds the tests of the preferred package and version) and
+`SelectPackageRetryTests.cs`. No Avalonia `Window` is constructed in these tests,
 matching `SettingsWindowViewModelTests`'s pattern; they use real temporary directories and
 package-zip fixtures behind a real `PackageSourceRegistry` and `PackageVersionCache`, plus
 deliberately slow and failing source providers to prove the dialog does not block and isolates
@@ -26,6 +27,10 @@ N/A - standard test environment.
 - Confirmation is permitted only when a source, a package name and a version are selected.
 - The confirmed package reference matches exactly what the user selected, including the source.
 - A failed read of a source or of a package's versions can be retried on its own.
+- Given the source, package and version a repo is pinned to, the dialog selects them once the source has been read
+  (the newest version stays selected when the pinned one is no longer listed), selects nothing when the source failed,
+  does not offer the package or is not configured, and never overrides a choice the user made first; a Git source is
+  shown with the Git icon and its type name.
 
 #### Test Scenarios
 
@@ -97,3 +102,19 @@ in progress. This scenario is tested by
 `SelectPackageWindowViewModel_Retry_SourceFailedThenAnswers_LoadsOnlyThatSource` and
 `SelectPackageWindowViewModel_Retry_NothingFailed_DoesNothing`, covering
 `AgentControl-SelectPackageWindowViewModel-Retry`.
+
+**SelectPackageWindowViewModel_PreselectCurrentPackage_OpensOnThePinnedChoice**: Given the source, package and version of
+a pin, loading selects that package and version in the preferred source; when the pinned version is no longer listed the
+newest stays selected; when the source's package list does not offer the package, when the source could not be read and
+when the alias names no configured source nothing is selected; and a package chosen by the user before the load ends is
+not replaced by the preference. This scenario is tested by
+`SelectPackageWindowViewModel_LoadAsync_PreferredPackageAndVersion_AreSelected`,
+`SelectPackageWindowViewModel_LoadAsync_PreferredVersionNotListed_KeepsNewestVersion`,
+`SelectPackageWindowViewModel_LoadAsync_PreferredPackageNotOffered_SelectsNothing`,
+`SelectPackageWindowViewModel_LoadAsync_PreferredSourceFailed_SelectsNothing`,
+`SelectPackageWindowViewModel_LoadAsync_PreferredAliasUnknown_SelectsNothing` and
+`SelectPackageWindowViewModel_LoadAsync_UserChoiceBeforeLoadEnds_IsNotOverridden`, covering
+`AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage`. The row of a Git source showing the Git icon and
+the type name "Git repository" is checked by `SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName`
+and is cited by the `LauncherUI` subsystem requirement `AgentControl-LauncherUI-GitSourcePresentation`; the dialog
+opening on the pinned choice from the card menu is verified in the `LauncherUI` subsystem tests.

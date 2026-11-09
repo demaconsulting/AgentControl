@@ -423,6 +423,14 @@ public sealed class GitRemoteClientTests : IDisposable
     [InlineData("v1:other")]
     [InlineData("v1$(calc)")]
     [InlineData("")]
+    [InlineData("a//b")]
+    [InlineData(".hidden")]
+    [InlineData("a/.b")]
+    [InlineData("x.lock")]
+    [InlineData("a/x.lock/b")]
+    [InlineData("trailing/")]
+    [InlineData("/leading")]
+    [InlineData("ends.")]
     public async Task GitRemoteClient_FetchTag_UnsafeTagName_IsRefusedWithoutRunningGit(string tag)
     {
         // Arrange
@@ -629,6 +637,163 @@ public sealed class GitRemoteClientTests : IDisposable
         // Assert
         Assert.Equal(GitFailureKind.GitNotFound, failure.Kind);
         Assert.Contains("Settings", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a tag name the server reports that is not a legal, safe ref name is dropped (with
+    ///     its peeled line) and never throws, while good names around it are kept.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ListTags_HostileServerTagNames_AreDropped()
+    {
+        // Arrange
+        var (client, stub, _) = CreateClient();
+        var hostile = new[]
+        {
+            "a//b", ".hidden", "x.lock", "a/.b", "a/b.lock/c", "trailing/", "/leading", "a..b", "ends.", "-dash",
+            "has space", "colon:name", "a@{b}", new string('x', 256)
+        };
+        var output = new System.Text.StringBuilder();
+        output.Append($"{Sha}\trefs/tags/v1.0.0\n");
+        foreach (var name in hostile)
+        {
+            output.Append($"{OtherSha}\trefs/tags/{name}\n{Sha}\trefs/tags/{name}^{{}}\n");
+        }
+
+        output.Append($"{OtherSha}\trefs/tags/release/v2.0.0\n");
+        stub.Respond("ls-remote", output.ToString());
+
+        // Act
+        var tags = await client.ListTagsAsync(
+            new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*",
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(["release/v2.0.0", "v1.0.0"], tags.Select(tag => tag.Name));
+    }
+
+    /// <summary>
+    ///     Test that legal tag names, including nested ones, are still accepted for a fetch.
+    /// </summary>
+    [Theory]
+    [InlineData("v1.0.0")]
+    [InlineData("release/1.2.3-beta.1")]
+    [InlineData("pkg+build_1/v1.0.0")]
+    public async Task GitRemoteClient_FetchTag_LegalTagName_IsFetched(string tag)
+    {
+        // Arrange
+        var (client, stub, _) = CreateClient();
+        stub.Respond("rev-parse", Sha + "\n");
+
+        // Act
+        var commit = await client.FetchTagAsync(
+            new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), NewFolder(), tag,
+            TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(Sha, commit);
+        Assert.True(GitRemoteClient.IsSafeTagName(tag));
+    }
+
+    /// <summary>
+    ///     Test that the version of git is read from the text of different git builds, and that
+    ///     anything else is not a version.
+    /// </summary>
+    [Theory]
+    [InlineData("git version 2.51.0.windows.2", "2.51.0")]
+    [InlineData("git version 2.39.5 (Apple Git-154)\n", "2.39.5")]
+    [InlineData("git version 2.29", "2.29.0")]
+    [InlineData("git version 2.20.1\r\n", "2.20.1")]
+    [InlineData("git version 3.0.0-rc1", "3.0.0")]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    [InlineData("hello 2.30.0", null)]
+    [InlineData("git version two", null)]
+    public void GitRemoteClient_ParseVersion_ReadsKnownFormsAndRejectsOthers(string? output, string? expected) =>
+        Assert.Equal(expected, GitRemoteClient.ParseVersion(output)?.ToString());
+
+    /// <summary>
+    ///     Test that a git older than the minimum is refused with an actionable message before any
+    ///     other git command runs, and that the refusal is not remembered, so a git that was updated
+    ///     is accepted by the next check.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_EnsureSupportedVersion_OldGit_IsRefusedWithActionableMessageAndNotRemembered()
+    {
+        // Arrange
+        var (client, stub, workRoot) = CreateClient();
+        stub.Respond("version", "git version 2.20.1\n");
+
+        // Act
+        var failure = await Assert.ThrowsAsync<GitRemoteException>(
+            () => client.EnsureSupportedVersionAsync(TestContext.Current.CancellationToken));
+
+        // Assert: refused, saying what to do, after exactly one hardened `git --version`
+        Assert.Equal(GitFailureKind.GitTooOld, failure.Kind);
+        Assert.Contains("Git 2.29 or newer", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("2.20.1", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("Settings > Git executable", failure.Message, StringComparison.Ordinal);
+        var invocation = Assert.Single(stub.ReadInvocations());
+        Assert.Equal("version", invocation.Command);
+        Assert.EndsWith("--literal-pathspecs --version", invocation.Arguments, StringComparison.Ordinal);
+        Assert.Equal("0", invocation.Environment["GIT_TERMINAL_PROMPT"]);
+        Assert.EndsWith(
+            Path.Combine(Path.GetFileName(workRoot), "neutral"),
+            invocation.WorkingDirectory.TrimEnd('\\', '/'),
+            StringComparison.Ordinal);
+
+        // Act: git is updated; the old answer was not cached
+        stub.Respond("version", "git version 2.43.0\n");
+        await client.EnsureSupportedVersionAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(2, stub.ReadInvocations().Count(i => i.Command == "version"));
+    }
+
+    /// <summary>
+    ///     Test that a new enough git passes, and that <c>git --version</c> runs only once for the
+    ///     same executable, however many clients ask.
+    /// </summary>
+    [Theory]
+    [InlineData("git version 2.29.0")]
+    [InlineData("git version 2.51.0.windows.2")]
+    public async Task GitRemoteClient_EnsureSupportedVersion_NewGit_PassesAndRunsOncePerExecutable(string versionText)
+    {
+        // Arrange
+        var stub = NewStub().Respond("version", versionText + "\n");
+        var first = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder()));
+        var second = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder()));
+
+        // Act
+        await first.EnsureSupportedVersionAsync(TestContext.Current.CancellationToken);
+        await first.EnsureSupportedVersionAsync(TestContext.Current.CancellationToken);
+        await second.EnsureSupportedVersionAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Single(stub.ReadInvocations());
+    }
+
+    /// <summary>
+    ///     Test that a version text that cannot be read does not block git (a warning is logged), and
+    ///     that a git that cannot be run is reported and not remembered.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_EnsureSupportedVersion_UnreadableVersionIsNotBlocked_AndMissingGitIsReported()
+    {
+        // Arrange
+        var stub = NewStub().Respond("version", "something unexpected\n");
+        var logger = new ListLogger();
+        var client = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder(), Logger: logger));
+        var missing = new GitRemoteClient(new GitRemoteOptions(() => Path.Combine(NewFolder(), "no-such-git"), NewFolder()));
+
+        // Act
+        await client.EnsureSupportedVersionAsync(TestContext.Current.CancellationToken);
+        var failure = await Assert.ThrowsAsync<GitRemoteException>(
+            () => missing.EnsureSupportedVersionAsync(TestContext.Current.CancellationToken));
+
+        // Assert
+        Assert.Contains(logger.Snapshot(), line => line.Contains("could not be read", StringComparison.Ordinal));
+        Assert.Equal(GitFailureKind.GitNotFound, failure.Kind);
     }
 
     /// <inheritdoc />

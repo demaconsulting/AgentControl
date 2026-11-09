@@ -28,7 +28,8 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - Applying settings drops cached package results only for sources that were edited or removed.
 - Constructing the view model reads no package source; upgrade availability is checked in the
   background, and an unreachable source affects only the cards pinned to it.
-- The connection-test provider shares the application's session credentials with the cards.
+- The connection-test provider shares the application's session credentials with the cards, and for a Git source is a
+  Git provider that is interactive and runs the configured git after its version check.
 - With no repo in a group the list is flat and has no header; with groups it is sectioned
   (Favorites, groups alphabetically, Ungrouped), a favorite is listed once, collapsed sections hide their
   cards but keep their headers, a filter shows every match (even in a collapsed group) and leaves the
@@ -143,10 +144,18 @@ the background. This scenario is tested by
 `AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`.
 
 **MainWindowViewModel_ConnectionTestProvider_UsesTheSharedCredentialFacilities**: The view model hands out a
-real `NuGetSourceProvider` for the settings window's connection test, built with the same credential context
+real `NuGetSourceProvider` for the settings window's connection test of a NuGet source, built with the same credential context
 (session store and prompt) as the cards, so a sign-in made during a test is remembered for the session. This
 scenario is tested by `MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials`
-(in `SettingsWindowServerSourceTests.cs`), covering `AgentControl-MainWindowViewModel-ConnectionTestProvider`.
+(in `SettingsWindowServerSourceTests.cs`) and `MainWindowViewModel_CreateConnectionTestProvider_NuGetSource_ReturnsNuGetProvider`,
+covering `AgentControl-MainWindowViewModel-ConnectionTestProvider`.
+
+**MainWindowViewModel_GitConnectionTestProvider_InteractiveGitWithTheConfiguredGit**: For a Git source the view model
+hands out a real `GitSourceProvider` that runs the git named by the startup override (a recording stub stands in for git
+here), asks for the git version before it lists the repository's tags (the version gate), and runs git as work the user
+started - `GCM_INTERACTIVE` is not forced to `never` and `core.askPass` is not blanked, so Git's own sign-in may appear.
+This scenario is tested by `MainWindowViewModel_CreateConnectionTestProvider_GitSource_ReturnsInteractiveGitProvider`,
+covering `AgentControl-MainWindowViewModel-GitConnectionTestProvider`.
 
 **MainWindowViewModel_ApplyTheme_SavedThemeIsHandedToTheApplierOnlyAfterTheSave**: With a recording theme
 applier, `ApplySettings` with the dark theme persists it and calls the applier once with it, covering

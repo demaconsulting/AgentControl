@@ -219,7 +219,10 @@ hexadecimal SHA-256 of the package file (`AgentControl-AgentPackageManagement-Co
   stores none and the address may not contain one.
 - *Only the layout is read.* The tree of the fetched commit is examined *before* anything is checked out: a symbolic
   link, a submodule or a `.git` entry in the layout (the four managed folders, `release-notes.md`, `AGENTS.md`, below
-  the optional sub-folder) is refused; only the layout paths are checked out, `.git` is deleted, and the result is read
+  the optional sub-folder) is refused, and so are two entries whose names differ only in letter case or Unicode form
+  (a case-insensitive or normalizing file system would merge them, and the cache may be read on one whatever system
+  wrote it); only the layout paths are checked out, `.git` is deleted and verified gone - if it cannot be removed the
+  acquisition fails and nothing is published - and the result is read
   through `DirectoryPackageContentReader.OpenLayoutRoot`, which lists and reads only those paths. Links elsewhere in the
   repository are never checked out and so never matter.
 - *Cache.* `{CacheRoot}/{addressKey}/{commit}` with a completeness marker, written to a temporary folder and renamed;
@@ -230,6 +233,9 @@ hexadecimal SHA-256 of the package file (`AgentControl-AgentPackageManagement-Co
 - *User-started versus background.* `GitSourceOptions.Interactive` is the `allowPrompt` switch of the card: only work
   the user started lets git show its credential UI; a missing sign-in in the background is
   `PackageSourceFailureKind.AuthenticationFailed`, which the card already shows as "sign-in needed".
+- *Git version.* The fetch needs Git 2.29 or newer. When the application sets `GitSourceOptions.EnforceMinimumGitVersion`
+  the provider checks the git in use before the first listing or fetch and throws the client's `GitRemoteException` of
+  kind `GitTooOld` unchanged, so the UI can recognize it and explain how to update git or choose another one.
 
 **Package authenticity.** A NuGet source (folder or server) can require signed packages and optionally pin the
 publisher's certificate. The decisions, in the order a reader will ask about them:

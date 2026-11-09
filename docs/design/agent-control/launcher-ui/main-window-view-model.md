@@ -205,10 +205,15 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
   choice takes effect without a restart (`AgentControl-MainWindowViewModel-ApplyTheme`); a refused save never reaches
   this step (`AgentControl-MainWindowViewModel-RefusedThemeNotApplied`).
 
-**CreateConnectionTestProvider**: Creates the `NuGetSourceProvider` that the settings window's
-**Test connection** lists versions through for a source being edited, with the same credential facilities
+**CreateConnectionTestProvider**: Creates the provider that the settings window's
+**Test connection** lists through for a source being edited: for a NuGet source the `NuGetSourceProvider`, with the
+same credential facilities
 and cache location the cards use, so a sign-in made during a test is remembered for the session and not
-asked for again when a package is selected (`AgentControl-MainWindowViewModel-ConnectionTestProvider`).
+asked for again when a package is selected (`AgentControl-MainWindowViewModel-ConnectionTestProvider`); for a Git
+source a `GitSourceProvider` that runs git with the configured git executable (the setting, else the startup
+override, else `git`, as the cards do), keeps its cache in the same `git-cache` folder, is **interactive** (git may
+show its own sign-in, because the user started the test) and enforces the minimum git version, so an old git is
+reported as such instead of failing obscurely (`AgentControl-MainWindowViewModel-GitConnectionTestProvider`).
 `MainWindow` passes it to `SettingsWindowViewModel` as the provider factory.
 
 **UpdateDisplayedRepoCards** (private): Recomputes `DisplayedItems` and `DisplayedRepoCards` from
@@ -287,8 +292,8 @@ succeeding.
 - **PackageVersionCache** (`AgentPackageManagement` subsystem) — shared across all cards;
   invalidated per source by `ApplySettings` when a package source was edited or removed.
 - **PackageCredentialContext** (`PackageCredentials` subsystem) — the session credentials and sign-in
-  prompt it holds and passes on; **NuGetSourceProvider** (`AgentPackageManagement`) — created by
-  `CreateConnectionTestProvider`.
+  prompt it holds and passes on; **NuGetSourceProvider**, **GitSourceProvider**, **GitSourceOptions**
+  (`AgentPackageManagement`) — created by `CreateConnectionTestProvider`.
 
 #### Callers
 

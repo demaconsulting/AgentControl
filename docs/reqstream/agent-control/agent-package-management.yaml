@@ -513,6 +513,8 @@ sections:
           - AgentControl-GitSourceProvider-RejectLinksAndSubmodulesInLayout
           - AgentControl-GitSourceProvider-Subfolder
           - AgentControl-GitSourceProvider-ExcludeGitFolder
+          - AgentControl-GitSourceProvider-FailClosedWhenGitFolderRemains
+          - AgentControl-GitSourceProvider-RejectFoldedPathCollisions
           - AgentControl-GitSourceProvider-ReportContentIdentity
           - AgentControl-GitSourceProvider-AcquireOnlyFromOwnSource
           - AgentControl-GitSourceProvider-FailureClassification
@@ -520,6 +522,7 @@ sections:
           - AgentControl-GitSourceProvider-CancellationObserved
           - AgentControl-GitSourceProvider-InteractiveFlagHonored
           - AgentControl-GitSourceProvider-HostileHooksNeverRun
+          - AgentControl-GitSourceProvider-MinimumGitVersion
           - AgentControl-PackageSourceRegistry-GitSourceResolved
           - AgentControl-PackageVersionCache-ReportPinnedListing
           - AgentControl-AgentPackageManagement-GitSourceDefinition

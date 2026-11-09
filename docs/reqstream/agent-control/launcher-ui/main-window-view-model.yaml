@@ -157,6 +157,19 @@ sections:
           happens.
         tests:
           - MainWindowViewModel_CreateConnectionTestProvider_ReturnsNuGetProviderWithCredentials
+          - MainWindowViewModel_CreateConnectionTestProvider_NuGetSource_ReturnsNuGetProvider
+
+      - id: AgentControl-MainWindowViewModel-GitConnectionTestProvider
+        title: >-
+          The MainWindowViewModel class shall give the settings window's connection test of a Git
+          source a provider that runs git with the configured git executable, may show Git's own
+          sign-in because the user started the test, and refuses a git that is too old.
+        justification: |
+          The connection test is something the user started, so Git's credential UI may appear, and
+          it must use the same git as the rest of the application; testing with an unsupported git
+          would fail in a way that means nothing to the user.
+        tests:
+          - MainWindowViewModel_CreateConnectionTestProvider_GitSource_ReturnsInteractiveGitProvider
 
       - id: AgentControl-MainWindowViewModel-ApplyTheme
         title: >-

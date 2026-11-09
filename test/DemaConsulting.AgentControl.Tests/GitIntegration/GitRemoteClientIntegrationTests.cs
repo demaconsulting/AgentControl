@@ -178,6 +178,27 @@ public sealed class GitRemoteClientIntegrationTests
     }
 
     /// <summary>
+    ///     Test that the real git answers the hardened <c>--version</c> command the version check runs
+    ///     (the command-scoped settings and the literal-pathspecs option do not stop it) and is
+    ///     accepted.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_RealGit_EnsureSupportedVersion_AcceptsTheInstalledGit()
+    {
+        // Arrange: the full path, so the once-per-executable memory of other tests (which use "git") is not involved
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var git = FindGitOnPath();
+        var client = new GitRemoteClient(new GitRemoteOptions(
+            () => git, Path.Combine(fixture.Root, "client-work"), ExtraEnvironment: fixture.IsolationEnvironment));
+
+        // Act
+        var failure = await Record.ExceptionAsync(() => client.EnsureSupportedVersionAsync(TestContext.Current.CancellationToken));
+
+        // Assert: the installed git is new enough (the project requires it), and the command ran
+        Assert.Null(failure);
+    }
+
+    /// <summary>
     ///     Creates a client for a fixture with its own work folder, the fixture's isolation and no
     ///     prompts.
     /// </summary>
@@ -189,6 +210,25 @@ public sealed class GitRemoteClientIntegrationTests
         ExtraEnvironment: fixture.IsolationEnvironment,
         ListTimeout: TimeSpan.FromSeconds(60),
         FetchTimeout: TimeSpan.FromSeconds(120)));
+
+    /// <summary>
+    ///     Finds the full path of git on the <c>PATH</c>.
+    /// </summary>
+    /// <returns>The path, or <c>git</c> when it cannot be found.</returns>
+    private static string FindGitOnPath()
+    {
+        var name = OperatingSystem.IsWindows() ? "git.exe" : "git";
+        foreach (var folder in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = Path.Combine(folder.Trim('"'), name);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return "git";
+    }
 
     /// <summary>
     ///     Gets the files of a small repository.

@@ -82,6 +82,11 @@ internal static class TestSettingsWriter
     /// <param name="customize">Edits the settings dictionary just before it is written (for example
     ///     to add more repos, a repo's group or the collapsed groups), or <see langword="null"/>
     ///     for none.</param>
+    /// <param name="gitSource">A Git repository to configure as an additional source (switching the
+    ///     file to the multi-source format), or <see langword="null"/> for none.</param>
+    /// <param name="useRealGit">Whether the application runs the real <c>git</c> executable instead of
+    ///     the arg-logger stub; implied by <paramref name="gitSource"/>, since a Git source cannot be
+    ///     read through the stub.</param>
     public static void Write(
         string configDirectory,
         string argLoggerStubExePath,
@@ -93,7 +98,9 @@ internal static class TestSettingsWriter
         IReadOnlyList<string>? nuGetPackageIds = null,
         bool nuGetRequireSigned = false,
         string? nuGetServerIndexUrl = null,
-        Action<Dictionary<string, object?>>? customize = null)
+        Action<Dictionary<string, object?>>? customize = null,
+        GitSourceSettings? gitSource = null,
+        bool useRealGit = false)
     {
         Directory.CreateDirectory(configDirectory);
 
@@ -118,7 +125,12 @@ internal static class TestSettingsWriter
             }
         };
 
-        if (nuGetFeedPath is null && nuGetServerIndexUrl is null)
+        if (useRealGit || gitSource is not null)
+        {
+            settings["GitExecutablePath"] = "git";
+        }
+
+        if (nuGetFeedPath is null && nuGetServerIndexUrl is null && gitSource is null)
         {
             // Older single-folder format, which the application migrates to a "Default" source
             settings["PackageSourcePath"] = packageSourcePath;
@@ -155,6 +167,24 @@ internal static class TestSettingsWriter
                 });
             }
 
+            if (gitSource is not null)
+            {
+                var git = new Dictionary<string, object?>
+                {
+                    ["Alias"] = gitSource.Alias,
+                    ["Type"] = "Git",
+                    ["Location"] = gitSource.Location,
+                    ["TagPattern"] = gitSource.TagPattern,
+                    ["PackageIds"] = new[] { gitSource.PackageId }
+                };
+                if (gitSource.Subfolder is not null)
+                {
+                    git["Subfolder"] = gitSource.Subfolder;
+                }
+
+                sources.Add(git);
+            }
+
             settings["Sources"] = sources;
         }
 
@@ -164,3 +194,19 @@ internal static class TestSettingsWriter
         File.WriteAllText(Path.Combine(configDirectory, "settings.json"), json);
     }
 }
+
+/// <summary>
+///     A Git repository source to pre-seed into <c>settings.json</c> (its <c>Type</c> is <c>Git</c>).
+/// </summary>
+/// <param name="Alias">The source alias, recorded in a repo's pin when it uses this source.</param>
+/// <param name="Location">The repository address: here the path of a local bare repository.</param>
+/// <param name="TagPattern">The tag pattern whose <c>{version}</c> part is the package version.</param>
+/// <param name="PackageId">The one package the repository delivers.</param>
+/// <param name="Subfolder">The folder of the repository that holds the package layout, or
+///     <see langword="null"/> for the repository root.</param>
+internal sealed record GitSourceSettings(
+    string Alias,
+    string Location,
+    string TagPattern,
+    string PackageId,
+    string? Subfolder = null);

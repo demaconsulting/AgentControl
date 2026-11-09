@@ -90,8 +90,12 @@ day as a quick-launch utility for AI-assisted development sessions.
 - Application-level logging (error message boxes are sufficient)
 - Non-Windows installers for v1 (code stays cross-platform-capable via
   Avalonia, but only an MSI is produced initially)
-- Version 1 supports only a filesystem-based package source (UNC/local/mapped
-  drive); other source types (HTTP, package feeds) are explicitly deferred
+- Package sources are of four kinds: a folder of zip packages, a folder of
+  NuGet packages (local/mapped/UNC), a NuGet-package server, and a Git
+  repository (one repository = one package; its SemVer tags matching a
+  configurable tag pattern are the versions). Other kinds (for example plain
+  HTTP downloads) are not supported. AgentControl never stores credentials:
+  servers and Git use the user's own credential helper, SSH keys or ssh-agent
 
 ## Technology Stack
 
@@ -105,7 +109,9 @@ day as a quick-launch utility for AI-assisted development sessions.
   `Environment.SpecialFolder.ApplicationData` (`%APPDATA%\AgentControl\`) for
   AgentControl's own settings/recent-repos state; per-repo `.agentcontrol.json`
   at each repo's root for the version pin
-- **External services**: none — filesystem-based package source only
+- **External services**: only the package sources the user configures — a NuGet
+  server or a remote Git repository (reached through the user's own `git`,
+  version 2.29 or newer); the folder sources need no service
 
 ## Software Structure
 
@@ -186,11 +192,16 @@ AgentControl
   versions can require manual migration steps (documented in release notes),
   so silently floating to the newest version would risk applying breaking
   changes without the developer's awareness. The pin also records a *content
-  identity* (a SHA-256 of the zip or NuGet package) of what was applied, so a
-  package republished under the same version is noticed and not synced
-  silently; the launch-time restore only checks it and never writes the pin
-  (that would dirty the working tree), and pins without an identity adopt one
-  at the next Select Package or Upgrade.
+  identity* of what was applied — a SHA-256 of the zip or NuGet package, or
+  `git-commit:<sha>` for a Git source — so a package republished under the same
+  version, or a Git tag moved to another commit, is noticed and not synced
+  silently: pin = source alias + package + version + content identity. The
+  launch-time restore only checks it and never writes the pin (that would
+  dirty the working tree), and pins without an identity adopt one at the next
+  Select Package or Upgrade. A moved tag is flagged on the repo's card (a
+  "Tag moved" chip) but nothing is applied automatically; accepting the new
+  content is an explicit **Change package...** of the same version, which asks
+  for confirmation and records the new identity.
 
 - **Blind delete of the four known folders** (`.github/agents`,
   `.github/standards`, `.github/templates`, `.github/skills`) rather than a
@@ -338,7 +349,9 @@ to this document's own Purpose statement. The following closes that gap:
 
 - **"Select Package..." action** replaces "Upgrade" in the repo card's "..."
   menu whenever `PinnedPackageName` is unset (the two are mutually
-  exclusive — a repo is either never-pinned or already-pinned, never both).
+  exclusive — a repo is either never-pinned or already-pinned, never both;
+  a pinned repo has **Change package...** instead, which opens the same
+  dialog preselected on the current choice).
   It opens a small modal dialog that:
   1. Enumerates the distinct package base names discoverable at the
      configured source directory (see the name/version splitting algorithm
@@ -406,9 +419,9 @@ amends the "Ensure-synced-before-launch" bullet above:
 
 ## Open Concerns
 
-1. 🟢 **LOW** Package source scaling: only a filesystem path is supported for
-   v1; HTTP(S)/authenticated/package-feed sources are explicitly deferred to a
-   future release and will need their own design pass when prioritized.
+1. 🟢 **LOW** Package source scaling: sources are read on demand and cached per
+   source (or, for Git, per repository and commit); very large catalogs or
+   repositories are bounded by size and time limits rather than paged.
 2. 🟢 **LOW** Cross-platform distribution: Avalonia code is kept
    platform-portable, but only a Windows MSI is planned for v1 — packaging for
    macOS/Linux is deferred until there is customer demand.

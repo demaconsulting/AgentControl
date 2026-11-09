@@ -41,6 +41,11 @@ internal static partial class Commands
             Console.WriteLine($"  package \"{package}\"");
         }
 
+        if (result.GitSourceDirectory is { } gitSource)
+        {
+            Console.WriteLine($"GIT_SOURCE path=\"{gitSource}\" alias=\"{FixtureBuilder.GitSourceAlias}\" package=\"{FixtureBuilder.GitPackageName}\" tags=\"{FixtureBuilder.GitTagPatternText}\"");
+        }
+
         if (result.RepoDirectory is { } repo)
         {
             Console.WriteLine($"REPO path=\"{repo}\"");

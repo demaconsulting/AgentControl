@@ -28,6 +28,14 @@ is skipped rather than reported as proof.
   second acquisition needs no remote; a moved tag shows as another revision and a stale listing is refused.
 - A link, a submodule or a `.git` entry in the layout, a bad sub-folder and a tag without layout are refused with nothing
   cached or left behind; links elsewhere are ignored.
+- Two layout entries that differ only in letter case or Unicode form (two files, a file and a folder, two folders, the
+  composed and decomposed spelling of one name) are refused on every operating system before checkout, with nothing
+  cached or left behind.
+- When the `.git` folder cannot be removed (the removal fails or silently leaves it) the acquisition fails with an
+  actionable message, no cache folder of the commit exists or is marked complete, no temporary folder is left, a
+  leftover temporary folder is never served, and a later acquisition succeeds.
+- With the version check on, an old git is refused as `GitTooOld` before anything is listed or fetched, and a new one is
+  checked once.
 - No hook runs, git failures become the provider's failure kinds without leaking text, cancellation stops the work, old
   commits are pruned, and a hand-edited definition fails closed.
 
@@ -71,6 +79,39 @@ refused with a message that says why. This scenario is tested by
 `GitSourceProvider_Acquire_Subfolder_ReadsLayoutFromThatFolder`, `GitSourceProvider_Acquire_BadSubfolder_IsRefused` and
 `GitSourceProvider_Acquire_TagWithoutLayout_IsRefused`, covering
 `AgentControl-GitSourceProvider-RejectLinksAndSubmodulesInLayout` and `AgentControl-GitSourceProvider-Subfolder`.
+
+**GitSourceProvider_Acquire_RefusesFoldedPathCollisions**: the pairs `.github/agents/A.md` and `a.md`, a file
+`.github/skills/notes` and a folder `.github/skills/NOTES/`, two folders `Docs` and `docs`, and `café.md` spelled composed
+and decomposed are committed with `hash-object` and `update-index --cacheinfo` (with git's case-folding and Unicode
+composition settings turned off for that call, so neither the platform nor the user's configuration can merge them
+in the
+index), tagged and pushed; acquiring the tag fails with "differ only in letter case or Unicode form", no `{commit}` folder
+and no temporary folder exist afterwards. Because the check works on the listing, the outcome does not depend on the file
+system the test runs on. A table of path sets (including identical repeated paths and distinct names that are not
+collisions) checks the detection itself. This scenario is tested by
+`GitSourceProvider_FindFoldedPathCollision_DetectsCaseAndUnicodeFormCollisions` and
+`GitSourceProvider_Acquire_FoldedPathCollisionInLayout_IsRefusedAndNothingCached`, covering
+`AgentControl-GitSourceProvider-RejectFoldedPathCollisions`.
+
+**GitSourceProvider_Acquire_FailsClosedWhenGitFolderRemains**: the test seam of `GitSourceOptions` replaces the removal
+of `.git` with one that throws an `IOException` and, in a second case, one that does nothing (so the post-removal check
+finds `.git`); the acquisition fails with an `InvalidOperationException` ("could not be finished in the cache
+folder"), the
+`{commit}` folder does not exist, no `.tmp-*` folder remains, and a second acquisition (the seam now deletes for real)
+delivers the layout with the marker and without `.git`. A leftover `.tmp-*` folder that holds a `.git` folder and even a
+marker for the commit is never served - the package comes from the tag - and is swept once it is old. This scenario is
+tested by `GitSourceProvider_Acquire_GitFolderRemovalFails_IsRefusedNothingPublishedAndLaterAcquisitionSucceeds` and
+`GitSourceProvider_Acquire_LeftoverTemporaryFolderWithGit_IsNeverServedAndIsSweptWhenStale`, covering
+`AgentControl-GitSourceProvider-FailClosedWhenGitFolderRemains`.
+
+**GitSourceProvider_EnforceMinimumGitVersion**: with `EnforceMinimumGitVersion` and a stub git that answers
+`git version 2.20.1`, listing, previewing and acquiring each throw the `GitRemoteException` of kind `GitTooOld` itself
+(its message names Git 2.29, not the source alias) and the stub is only ever asked for its version; with a stub that
+answers `git version 2.43.0`, the version is asked once, before the first `ls-remote`, and not again for the second
+listing. This scenario is tested by
+`GitSourceProvider_EnforceMinimumGitVersion_OldGit_IsRefusedAsGitTooOldBeforeAnyGitWork` and
+`GitSourceProvider_EnforceMinimumGitVersion_NewGit_IsCheckedOnceBeforeTheFirstListing`, covering
+`AgentControl-GitSourceProvider-MinimumGitVersion`.
 
 **GitSourceProvider_Acquire_NeverRunsHooksAndOnlyAcquiresItsOwnPackages**: with a template directory and a global
 hooks path that install a hook, the hook's marker never appears; packages of another alias or package, without a

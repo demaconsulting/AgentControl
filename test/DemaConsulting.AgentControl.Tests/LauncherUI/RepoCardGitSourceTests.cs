@@ -87,11 +87,16 @@ public sealed class RepoCardGitSourceTests : IDisposable
             var provider = card.CreateSourceRegistry(allowPrompt).Resolve("Repo");
             await provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
 
-            // Assert
-            var invocation = Assert.Single(stub.ReadInvocations());
-            Assert.Equal(expectedGcmInteractive, invocation.Environment["GCM_INTERACTIVE"]);
-            Assert.Equal(!allowPrompt, invocation.Arguments.Contains("core.askPass=", StringComparison.Ordinal));
-            Assert.Equal("0", invocation.Environment["GIT_TERMINAL_PROMPT"]);
+            // Assert: the version gate runs first (user-facing sources require a supported git), then
+            // the listing; both run in the requested prompt mode
+            var invocations = stub.ReadInvocations();
+            Assert.Equal(["version", "ls-remote"], invocations.Select(item => item.Command));
+            foreach (var invocation in invocations)
+            {
+                Assert.Equal(expectedGcmInteractive, invocation.Environment["GCM_INTERACTIVE"]);
+                Assert.Equal(!allowPrompt, invocation.Arguments.Contains("core.askPass=", StringComparison.Ordinal));
+                Assert.Equal("0", invocation.Environment["GIT_TERMINAL_PROMPT"]);
+            }
         }
         finally
         {

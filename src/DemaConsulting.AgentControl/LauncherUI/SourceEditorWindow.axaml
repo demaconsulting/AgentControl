@@ -103,6 +103,11 @@
                     IsVisible="{Binding IsServer}"
                     Text="{x:Static vm:SourceEditorViewModel.LocationExamplesText}"
                     FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+        <TextBlock Name="SourceGitLocationExamplesText"
+                    AutomationProperties.AutomationId="SourceGitLocationExamplesText"
+                    IsVisible="{Binding IsGit}"
+                    Text="{x:Static vm:SourceEditorViewModel.GitLocationExamplesText}"
+                    FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
         <TextBlock Name="SourceLocationErrorText"
                     AutomationProperties.AutomationId="SourceLocationErrorText"
                     IsVisible="{Binding LocationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
@@ -121,6 +126,88 @@
                         IsVisible="{Binding ShowInsecureWarning}"
                         Text="Warning: with plain http, the user name and password you type are sent unencrypted. Only use this on a network you trust."
                         Foreground="{DynamicResource WarningForeground}" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Section: Package (Git repositories). One repository delivers one package; its name defaults to
+             the alias. -->
+        <StackPanel Name="SourceEditorGitPackageSection"
+                     AutomationProperties.AutomationId="SourceEditorGitPackageSection"
+                     IsVisible="{Binding IsGit}" Spacing="6">
+            <Border Classes="sectionRule" />
+            <TextBlock Classes="section" Text="Package" />
+            <TextBlock Text="Package name" Classes="fieldLabel" />
+            <TextBox Name="SourceGitPackageIdTextBox"
+                      AutomationProperties.AutomationId="SourceGitPackageIdTextBox"
+                      PlaceholderText="{Binding GitPackageIdPlaceholder}"
+                      ToolTip.Tip="The name of the package this repository delivers; empty uses the alias"
+                      Text="{Binding GitPackageId}" />
+            <TextBlock Name="SourceGitPackageIdHelpText"
+                        AutomationProperties.AutomationId="SourceGitPackageIdHelpText"
+                        Text="{x:Static vm:SourceEditorViewModel.GitPackageIdHelpText}"
+                        FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+            <TextBlock Name="SourceGitPackageIdErrorText"
+                        AutomationProperties.AutomationId="SourceGitPackageIdErrorText"
+                        IsVisible="{Binding GitPackageIdError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Text="{Binding GitPackageIdError}"
+                        Foreground="{DynamicResource ErrorForeground}" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Section: Versions (Git repositories). The tag pattern says which tags are package versions. -->
+        <StackPanel Name="SourceEditorVersionsSection"
+                     AutomationProperties.AutomationId="SourceEditorVersionsSection"
+                     IsVisible="{Binding IsGit}" Spacing="6">
+            <Border Classes="sectionRule" />
+            <TextBlock Classes="section" Text="Versions" />
+            <TextBlock Text="Tag pattern" Classes="fieldLabel" />
+            <TextBox Name="SourceTagPatternTextBox"
+                      AutomationProperties.AutomationId="SourceTagPatternTextBox"
+                      PlaceholderText="v{version}"
+                      ToolTip.Tip="Which tags are package versions: {version} stands for the version, everything else must match exactly (including case)"
+                      Text="{Binding TagPattern}" />
+            <TextBlock Name="SourceTagPatternHelpText"
+                        AutomationProperties.AutomationId="SourceTagPatternHelpText"
+                        Text="{x:Static vm:SourceEditorViewModel.TagPatternHelpText}"
+                        FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+            <TextBlock Name="SourceTagPatternErrorText"
+                        AutomationProperties.AutomationId="SourceTagPatternErrorText"
+                        IsVisible="{Binding TagPatternError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Text="{Binding TagPatternError}"
+                        Foreground="{DynamicResource ErrorForeground}" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Section: Location in repo (Git repositories). Optional folder that holds the package layout. -->
+        <StackPanel Name="SourceEditorSubfolderSection"
+                     AutomationProperties.AutomationId="SourceEditorSubfolderSection"
+                     IsVisible="{Binding IsGit}" Spacing="6">
+            <Border Classes="sectionRule" />
+            <TextBlock Classes="section" Text="Location in repo" />
+            <TextBlock Text="Folder (optional)" Classes="fieldLabel" />
+            <TextBox Name="SourceSubfolderTextBox"
+                      AutomationProperties.AutomationId="SourceSubfolderTextBox"
+                      PlaceholderText="For example: packaging/agents"
+                      ToolTip.Tip="The folder inside the repository that holds .github/, release-notes.md and AGENTS.md; empty means the top"
+                      Text="{Binding Subfolder}" />
+            <TextBlock Name="SourceSubfolderHelpText"
+                        AutomationProperties.AutomationId="SourceSubfolderHelpText"
+                        Text="{x:Static vm:SourceEditorViewModel.SubfolderHelpText}"
+                        FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+            <TextBlock Name="SourceSubfolderErrorText"
+                        AutomationProperties.AutomationId="SourceSubfolderErrorText"
+                        IsVisible="{Binding SubfolderError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Text="{Binding SubfolderError}"
+                        Foreground="{DynamicResource ErrorForeground}" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Section: Sign-in (Git repositories). Credentials come from the user's own Git setup. -->
+        <StackPanel Name="SourceEditorGitSignInSection"
+                     AutomationProperties.AutomationId="SourceEditorGitSignInSection"
+                     IsVisible="{Binding IsGit}" Spacing="6">
+            <Border Classes="sectionRule" />
+            <TextBlock Classes="section" Text="Sign-in" />
+            <TextBlock Name="SourceGitSignInHelpText"
+                        AutomationProperties.AutomationId="SourceGitSignInHelpText"
+                        Text="{x:Static vm:SourceEditorViewModel.GitSignInHelpText}"
+                        FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
         </StackPanel>
 
         <!-- Section: Packages (NuGet sources). A NuGet source lists the packages it offers. -->
@@ -251,11 +338,12 @@
                         Foreground="{DynamicResource ErrorForeground}" FontSize="12" TextWrapping="Wrap" />
         </StackPanel>
 
-        <!-- Section: Connection test (servers only): try the address before saving. Shows progress with
-             a "Cancel test" button while it runs, then the outcome in words. -->
+        <!-- Section: Connection test (servers and Git repositories): try the address before saving. Shows
+             progress with a "Cancel test" button while it runs, then the outcome in words (and, for a
+             Git repository, the tags that match the pattern). -->
         <StackPanel Name="SourceEditorTestSection"
                      AutomationProperties.AutomationId="SourceEditorTestSection"
-                     IsVisible="{Binding IsServer}" Spacing="6">
+                     IsVisible="{Binding ShowTestSection}" Spacing="6">
             <Border Classes="sectionRule" />
             <TextBlock Classes="section" Text="Connection test" />
             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -314,6 +402,21 @@
                     </StackPanel>
                 </StackPanel>
             </Border>
+
+            <!-- The tags that match the pattern, after a Git connection test -->
+            <StackPanel Name="SourceTagPreviewPanel"
+                         AutomationProperties.AutomationId="SourceTagPreviewPanel"
+                         IsVisible="{Binding HasTagPreview}" Spacing="4">
+                <TextBlock Name="SourceTagPreviewSummaryText"
+                            AutomationProperties.AutomationId="SourceTagPreviewSummaryText"
+                            Text="{Binding TagPreviewSummary}"
+                            FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <ListBox Name="SourceTagPreviewList"
+                          AutomationProperties.AutomationId="SourceTagPreviewList"
+                          ItemsSource="{Binding TagPreviewItems}"
+                          BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="1" CornerRadius="4"
+                          MaxHeight="150" />
+            </StackPanel>
         </StackPanel>
     </StackPanel>
     </ScrollViewer>

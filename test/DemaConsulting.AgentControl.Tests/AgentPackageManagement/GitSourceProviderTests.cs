@@ -20,6 +20,7 @@
 
 using System.Diagnostics;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Tests.GitIntegration;
 
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
@@ -314,6 +315,89 @@ public sealed class GitSourceProviderTests : IDisposable
         await Assert.ThrowsAsync<ArgumentNullException>(
             () => provider.AcquireAsync(null!, TestContext.Current.CancellationToken));
         Assert.Empty(stub.ReadInvocations());
+    }
+
+    /// <summary>
+    ///     Test the detection of names that a case-folding or normalizing file system would merge,
+    ///     without any repository: case, a file against a folder, folders, and Unicode forms are
+    ///     collisions; identical and genuinely different names are not.
+    /// </summary>
+    [Theory]
+    [InlineData(".github/agents/A.md|.github/agents/a.md", true)]
+    [InlineData(".github/skills/x|.github/skills/X/y.md", true)]
+    [InlineData(".github/standards/Docs/a.md|.github/standards/docs/b.md", true)]
+    [InlineData(".github/Agents/a.md|.github/agents/b.md", true)]
+    [InlineData(".github/agents/caf\u00e9.md|.github/agents/cafe\u0301.md", true)]
+    [InlineData(".github/agents/CAF\u00c9.md|.github/agents/cafe\u0301.md", true)]
+    [InlineData(".github/agents/a.md|.github/agents/b.md|.github/skills/a.md|release-notes.md", false)]
+    [InlineData(".github/agents/a.md|.github/agents/a.md", false)]
+    [InlineData(".github/skills/s/one.md|.github/skills/s/two.md|.github/skills/t/one.md", false)]
+    [InlineData("", false)]
+    public void GitSourceProvider_FindFoldedPathCollision_DetectsCaseAndUnicodeFormCollisions(string paths, bool expectCollision)
+    {
+        // Act
+        var collision = GitSourceProvider.FindFoldedPathCollision(paths.Split('|', StringSplitOptions.RemoveEmptyEntries));
+
+        // Assert
+        Assert.Equal(expectCollision, collision is not null);
+    }
+
+    /// <summary>
+    ///     Test that, with the version check on, a git that is too old is refused before anything is
+    ///     listed or fetched - for listing, previewing and acquiring - with the client's own
+    ///     exception of kind <c>GitTooOld</c> (not wrapped, not prefixed with the alias) so the
+    ///     application can recognize it.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_EnforceMinimumGitVersion_OldGit_IsRefusedAsGitTooOldBeforeAnyGitWork()
+    {
+        // Arrange
+        var stub = NewStub().Respond("version", "git version 2.20.1\n");
+        var provider = new GitSourceProvider(
+            Definition(), new GitSourceOptions(() => stub.Path, NewFolder(), EnforceMinimumGitVersion: true));
+        Assert.True(PackageVersion.TryParseStrict("1.0.0", out var version));
+        var package = new DiscoveredPackage("contoso-agents", version!, "v1.0.0", "Repo", Sha);
+
+        // Act
+        var listing = await Assert.ThrowsAsync<GitRemoteException>(
+            () => provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken));
+        var preview = await Assert.ThrowsAsync<GitRemoteException>(
+            () => provider.PreviewAsync(TestContext.Current.CancellationToken));
+        var acquire = await Assert.ThrowsAsync<GitRemoteException>(
+            () => provider.AcquireAsync(package, TestContext.Current.CancellationToken));
+
+        // Assert
+        foreach (var failure in new[] { listing, preview, acquire })
+        {
+            Assert.Equal(GitFailureKind.GitTooOld, failure.Kind);
+            Assert.Contains("Git 2.29 or newer", failure.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("Repo", failure.Message, StringComparison.Ordinal);
+        }
+
+        Assert.All(stub.ReadInvocations(), invocation => Assert.Equal("version", invocation.Command));
+    }
+
+    /// <summary>
+    ///     Test that, with the version check on, a new enough git is checked once, before the first
+    ///     listing, and that the check is not repeated for later work.
+    /// </summary>
+    [Fact]
+    public async Task GitSourceProvider_EnforceMinimumGitVersion_NewGit_IsCheckedOnceBeforeTheFirstListing()
+    {
+        // Arrange
+        var stub = NewStub()
+            .Respond("version", "git version 2.43.0\n")
+            .Respond("ls-remote", $"{Sha}\trefs/tags/v1.0.0\n");
+        var provider = new GitSourceProvider(
+            Definition(), new GitSourceOptions(() => stub.Path, NewFolder(), EnforceMinimumGitVersion: true));
+
+        // Act
+        var first = await provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
+        await provider.PreviewAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Single(first);
+        Assert.Equal(["version", "ls-remote", "ls-remote"], stub.ReadInvocations().Select(i => i.Command));
     }
 
     /// <inheritdoc />

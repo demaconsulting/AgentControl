@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Text;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.RepoSync;
@@ -48,6 +49,10 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 /// <param name="FetchTimeout">The limit for fetching a tag, or <see langword="null"/> for the
 ///     default.</param>
 /// <param name="MaxCachedCommits">How many fetched commits are kept per repository.</param>
+/// <param name="EnforceMinimumGitVersion"><see langword="true"/> to refuse a git older than
+///     <see cref="GitRemoteClient.MinimumGitVersion"/> before the first listing or fetch (with a
+///     <see cref="GitRemoteException"/> of kind <see cref="GitFailureKind.GitTooOld"/>); the
+///     application sets it, tests that assert exact git invocations leave it off.</param>
 internal sealed record GitSourceOptions(
     Func<string> ResolveGitExecutable,
     string? CacheRoot = null,
@@ -57,12 +62,20 @@ internal sealed record GitSourceOptions(
     IReadOnlyDictionary<string, string?>? ExtraEnvironment = null,
     TimeSpan? ListTimeout = null,
     TimeSpan? FetchTimeout = null,
-    int MaxCachedCommits = GitSourceOptions.DefaultMaxCachedCommits)
+    int MaxCachedCommits = GitSourceOptions.DefaultMaxCachedCommits,
+    bool EnforceMinimumGitVersion = false)
 {
     /// <summary>
     ///     The default number of fetched commits kept per repository.
     /// </summary>
     public const int DefaultMaxCachedCommits = 5;
+
+    /// <summary>
+    ///     Gets a test seam that replaces the removal of the <c>.git</c> folder before a fetched
+    ///     package is published, so a removal that fails (or silently does nothing) can be
+    ///     simulated; <see langword="null"/> for the real removal.
+    /// </summary>
+    internal Action<string>? RemoveGitFolder { get; init; }
 
     /// <summary>
     ///     Gets the default settings: <c>git</c> from the path, the per-user cache, background
@@ -126,8 +139,10 @@ internal interface IGitTagPreview
 ///     AgentControl creates from an empty template (so it has no hooks); checks that the fetched
 ///     tag is the commit that was listed; reads the tree of the tag and refuses the package when
 ///     any part of the package layout is a symbolic link, a submodule or an entry named
-///     <c>.git</c>, or when it is too large; checks out only the layout paths; deletes the
-///     <c>.git</c> folder; and keeps the result in a cache folder named by the repository and the
+///     <c>.git</c>, when two entries differ only in letter case or Unicode form (they would be one
+///     file on some file systems), or when it is too large; checks out only the layout paths;
+///     deletes the <c>.git</c> folder (and publishes nothing when it cannot be deleted); and keeps
+///     the result in a cache folder named by the repository and the
 ///     commit, so the same commit is never fetched twice and different repositories never share a
 ///     folder. Anything in the repository outside the layout (including links) is never checked
 ///     out. The reader returned lists and reads only the layout and reports the identity
@@ -137,7 +152,10 @@ internal interface IGitTagPreview
 ///     Credentials come only from the user's own git setup (credential helper, ssh keys); see
 ///     <see cref="GitRemoteClient"/>. Work that the user did not start must be created with
 ///     <see cref="GitSourceOptions.Interactive"/> false: it can then never prompt, and a missing
-///     sign-in is reported as <see cref="PackageSourceFailureKind.AuthenticationFailed"/>. Thread-safe;
+///     sign-in is reported as <see cref="PackageSourceFailureKind.AuthenticationFailed"/>. When
+///     <see cref="GitSourceOptions.EnforceMinimumGitVersion"/> is set, an old git is refused before
+///     the first listing or fetch with the <see cref="GitRemoteException"/> of kind
+///     <see cref="GitFailureKind.GitTooOld"/> itself. Thread-safe;
 ///     two simultaneous acquisitions of the same commit are safe (the one that loses the final
 ///     rename uses the winner's folder).
 ///     </para>
@@ -337,6 +355,7 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
         {
             if (!IsCompleteCacheFolder(final, commit))
             {
+                await EnsureSupportedGitAsync(cancellationToken);
                 await FetchIntoCacheAsync(target, package.Location, commit, final, cancellationToken);
             }
             else
@@ -380,6 +399,7 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
     {
         try
         {
+            await EnsureSupportedGitAsync(cancellationToken);
             return await _client.ListTagsAsync(
                 new GitRemoteTarget(_address.Value, ToTransport(_address.Kind)), refGlob, cancellationToken);
         }
@@ -388,6 +408,15 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
             throw Translate(ex);
         }
     }
+
+    /// <summary>
+    ///     Checks the version of git when the options ask for it.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the check.</param>
+    /// <returns>A task that completes when git is known to be supported.</returns>
+    /// <exception cref="GitRemoteException">Thrown when git is too old or cannot be run.</exception>
+    private Task EnsureSupportedGitAsync(CancellationToken cancellationToken) =>
+        _options.EnforceMinimumGitVersion ? _client.EnsureSupportedVersionAsync(cancellationToken) : Task.CompletedTask;
 
     /// <summary>
     ///     Sorts the tags of the repository into package versions and other tags.
@@ -480,19 +509,49 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
             var checkoutPaths = await ValidateLayoutAsync(temporary, commit, cancellationToken);
             await _client.CheckoutPathsAsync(temporary, commit, checkoutPaths, cancellationToken);
 
-            await Task.Run(
-                () =>
-                {
-                    DeleteDirectory(Path.Combine(temporary, ".git"));
-                    File.WriteAllText(Path.Combine(temporary, MarkerFileName), commit);
-                    Publish(temporary, final, commit);
-                },
-                CancellationToken.None);
+            await Task.Run(() => PublishCheckedOutFolder(temporary, final, commit), CancellationToken.None);
         }
         finally
         {
-            // After a successful publish the temporary folder no longer exists
+            // After a successful publish the temporary folder no longer exists. A folder that
+            // cannot be removed here is never reused (its name is unique, it holds no completeness
+            // marker unless it was published) and is swept by a later acquisition.
             await Task.Run(() => DeleteDirectory(temporary), CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    ///     Removes the <c>.git</c> folder from the checked-out temporary folder, verifies that it is
+    ///     gone, marks the folder complete and publishes it. Fails closed: when the repository
+    ///     metadata cannot be removed nothing is marked or published.
+    /// </summary>
+    /// <param name="temporary">The temporary folder holding the checked-out layout.</param>
+    /// <param name="final">The cache folder to publish.</param>
+    /// <param name="commit">The commit.</param>
+    /// <exception cref="InvalidOperationException">Thrown when <c>.git</c> cannot be removed or the
+    ///     folder cannot be published.</exception>
+    private void PublishCheckedOutFolder(string temporary, string final, string commit)
+    {
+        try
+        {
+            var gitFolder = Path.Combine(temporary, ".git");
+            (_options.RemoveGitFolder ?? DeleteDirectoryOrThrow)(gitFolder);
+            if (Directory.Exists(gitFolder) || File.Exists(gitFolder))
+            {
+                throw new IOException("The repository metadata folder is still there.");
+            }
+
+            File.WriteAllText(Path.Combine(temporary, MarkerFileName), commit);
+            Publish(temporary, final, commit);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "The fetched package of source '{Source}' could not be finished in the cache.", Alias);
+            throw new InvalidOperationException(
+                $"Source '{Alias}': the fetched package could not be finished in the cache folder (the Git metadata " +
+                "could not be removed, or the folder could not be moved into place). Close programs that may be using " +
+                $"the folder '{_repositoryFolder}' and try again.",
+                ex);
         }
     }
 
@@ -544,6 +603,16 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
         {
             RequireOrdinaryEntry(entry, isFolderExpected: false);
             bytes += entry.Size ?? 0;
+        }
+
+        // Checked on every platform: the cache may be read on a file system that folds case or
+        // Unicode forms, where two such entries would be one file or folder
+        var collision = FindFoldedPathCollision(files.Select(entry => entry.Path));
+        if (collision is not null)
+        {
+            throw new InvalidOperationException(
+                $"Source '{Alias}': this tag's agent package has files or folders whose names differ only in letter case " +
+                $"or Unicode form ({collision}), which would collide on some file systems and is not allowed.");
         }
 
         if (files.Count > MaxLayoutFiles || bytes > MaxLayoutBytes)
@@ -598,6 +667,54 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
                 $"Source '{Alias}': '{entry.Path}' in this tag is {kind}, which is not allowed in an agent package.");
         }
     }
+
+    /// <summary>
+    ///     Finds two paths that a case-folding or normalizing file system would treat as the same
+    ///     file or folder.
+    /// </summary>
+    /// <param name="paths">The git paths (<c>/</c>-separated) of the validated layout entries.</param>
+    /// <returns>A short description of the first colliding pair of names (with control characters
+    ///     replaced), or <see langword="null"/> when no two names collide. Every path component
+    ///     counts, so a file and a folder that differ only in case collide as well. A name that
+    ///     cannot be normalized is reported as colliding with itself.</returns>
+    internal static string? FindFoldedPathCollision(IEnumerable<string> paths)
+    {
+        var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var path in paths)
+        {
+            var current = string.Empty;
+            foreach (var part in path.Split('/'))
+            {
+                current = current.Length == 0 ? part : current + "/" + part;
+                string key;
+                try
+                {
+                    // Unicode composition first (NFC and NFD spellings are one name on some file
+                    // systems), then case
+                    key = current.Normalize(NormalizationForm.FormC).ToUpperInvariant();
+                }
+                catch (ArgumentException)
+                {
+                    return $"'{Printable(current)}' is not valid text";
+                }
+
+                if (!seen.TryAdd(key, current) && !string.Equals(seen[key], current, StringComparison.Ordinal))
+                {
+                    return $"'{Printable(seen[key])}' and '{Printable(current)}'";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    ///     Makes a repository path safe to show in a message.
+    /// </summary>
+    /// <param name="text">The path.</param>
+    /// <returns>The path with control characters replaced.</returns>
+    private static string Printable(string text) =>
+        string.Concat(text.Select(character => char.IsControl(character) ? '?' : character));
 
     /// <summary>
     ///     Makes the temporary folder the cache folder of the commit, or accepts that a concurrent
@@ -699,26 +816,38 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
     {
         try
         {
-            if (!Directory.Exists(path))
-            {
-                return;
-            }
-
-            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-            {
-                var attributes = File.GetAttributes(file);
-                if ((attributes & FileAttributes.ReadOnly) != 0)
-                {
-                    File.SetAttributes(file, attributes & ~FileAttributes.ReadOnly);
-                }
-            }
-
-            Directory.Delete(path, recursive: true);
+            DeleteDirectoryOrThrow(path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // A folder that cannot be removed now is swept later (temporary folders) or ignored (cache)
         }
+    }
+
+    /// <summary>
+    ///     Deletes a folder tree like <see cref="DeleteDirectory"/> but lets a failure through, for
+    ///     the places where a folder that stays must stop the work.
+    /// </summary>
+    /// <param name="path">The folder.</param>
+    /// <exception cref="IOException">Thrown when something in the folder cannot be deleted.</exception>
+    /// <exception cref="UnauthorizedAccessException">Thrown when access to the folder is denied.</exception>
+    internal static void DeleteDirectoryOrThrow(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+        {
+            var attributes = File.GetAttributes(file);
+            if ((attributes & FileAttributes.ReadOnly) != 0)
+            {
+                File.SetAttributes(file, attributes & ~FileAttributes.ReadOnly);
+            }
+        }
+
+        Directory.Delete(path, recursive: true);
     }
 
     /// <summary>
@@ -729,6 +858,9 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
     ///     otherwise an <see cref="InvalidOperationException"/> with git's redacted summary.</returns>
     private Exception Translate(GitRemoteException ex) => ex.Kind switch
     {
+        // Returned as it is (not wrapped, no alias): the application recognizes this kind to
+        // explain how to get a newer git
+        GitFailureKind.GitTooOld => ex,
         GitFailureKind.AuthenticationRequired => new PackageSourceAccessException(
             PackageSourceFailureKind.AuthenticationFailed,
             $"Sign-in needed for the Git repository of source '{Alias}'. AgentControl uses your own Git sign-in " +

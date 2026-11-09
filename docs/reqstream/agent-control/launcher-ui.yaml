@@ -162,16 +162,19 @@ sections:
         title: >-
           The LauncherUI subsystem shall offer one Add action in the Settings window that opens
           a menu of the package source types that can be added (zip-package folder, NuGet-package
-          folder and NuGet-package server), each with its type's icon and a description.
+          folder, NuGet-package server and Git repository), each with its type's icon and a
+          description.
         justification: |
           One entry point keeps the Settings window short as source types are added, and the
           descriptions tell the user which type to choose.
         children:
           - AgentControl-SettingsWindowViewModel-AddSource
+          - AgentControl-SettingsWindowViewModel-AddGitSourceMenu
         tests:
           - SettingsWindow_AddZipSourceClicked_ShowsEditorAndSavingAddsSource
           - SettingsWindow_AddNuGetFolderClickedThenCancelled_AddsNothing
           - SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls
+          - SettingsWindow_AddGitSourceButton_IsInTheAddMenuAndOpensGitEditor
 
       - id: AgentControl-LauncherUI-Appearance
         title: >-
@@ -776,7 +779,8 @@ sections:
         title: >-
           The LauncherUI subsystem shall let the user choose a configured package source, then
           browse the package name/version pairs it offers and apply one to a repo with no
-          existing pin, recording the source in the pin.
+          existing pin, recording the source in the pin (a repo that already has a pin chooses
+          another package or version through Change package, which has its own requirement).
         justification: |
           A repo with no pin has no prior version to upgrade from, so an explicit
           source/package/version selection window is the only way to establish the initial pin;
@@ -1471,13 +1475,117 @@ sections:
         title: >-
           The LauncherUI subsystem shall set up Git package sources so that git is run with the
           configured git executable, may show its credential UI only for work the user started and
-          never for background work such as the upgrade check or the restore before launch, and
-          keeps what it fetches inside the isolated configuration directory when one is given.
+          never for background work such as the upgrade check or the restore before launch, keeps
+          what it fetches inside the isolated configuration directory when one is given, and, when
+          the installed git is older than the supported version, says so on the card (for the
+          background check) instead of failing in an unclear way.
         justification: |
           A sign-in window that opens by itself, or a test that writes into the real user profile,
           would be a defect; the card is where the difference between user-started and background
-          work is known.
+          work is known. A git that is too old fails with an error that means nothing to the user,
+          so the card says what is wrong and what to do.
         children:
           - AgentControl-RepoCardViewModel-GitSourceOptions
+          - AgentControl-RepoCardViewModel-GitTooOldProblem
         tests:
           - RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork
+          - RepoCardViewModel_RefreshUpgradeStatus_GitTooOld_ShowsSourceProblemWithoutSignIn
+
+      - id: AgentControl-LauncherUI-GitSourceEditor
+        title: >-
+          The LauncherUI subsystem shall offer, for a Git repository source, an editor in which the
+          user enters the repository address, the package name, a tag pattern and optionally the
+          folder inside the repository, each explained with examples, validated while the user types
+          and saved only when the application would accept it, and in which the user can test the
+          connection to see which of the repository's tags match the pattern before saving.
+        justification: |
+          A Git source is only useful when its address and tag pattern are right, and a pattern that
+          matches nothing is an easy mistake (a capital letter, a missing prefix); showing the
+          matching tags, and the tags that did not match when none does, lets the user fix it while
+          the dialog is still open instead of discovering an empty package list later.
+        children:
+          - AgentControl-SourceEditorViewModel-GitEditor
+          - AgentControl-SourceEditorViewModel-GitValidation
+          - AgentControl-SourceEditorViewModel-GitTestConnection
+          - AgentControl-SourceEditorViewModel-GitTestFailureReasons
+          - AgentControl-SourceEditorViewModel-GitTestCancelAndStale
+          - AgentControl-SourceEditorViewModel-GitTagPreview
+          - AgentControl-SettingsWindowViewModel-RefuseInvalidGitSource
+          - AgentControl-MainWindowViewModel-GitConnectionTestProvider
+        tests:
+          - SourceEditorWindow_GitSource_ShowsGitSectionsAndHidesNuGetOnes
+          - SourceEditorWindow_GitSource_BadTagPattern_ShowsErrorAndDisablesSave
+          - SourceEditorWindow_GitSource_TestConnection_ShowsTagPreviewList
+          - SourceEditorWindow_GitSource_Save_ClosesWithTheGitDefinition
+
+      - id: AgentControl-LauncherUI-GitSignInGuidance
+        title: >-
+          The LauncherUI subsystem shall tell the user, in the Git repository source editor, that
+          AgentControl uses the user's own Git sign-in (credential manager or SSH keys), never
+          stores credentials, may show Git's sign-in for the connection test and Select Package, and
+          never prompts for checks it runs in the background.
+        justification: |
+          A user who has to guess where a sign-in comes from may put a password into the address;
+          saying who signs in, and when a prompt can appear, prevents that and makes a prompt the
+          user did not expect recognizable.
+        children:
+          - AgentControl-SourceEditorViewModel-GitSignInNote
+        tests:
+          - SourceEditorWindow_GitSource_ShowsGitSectionsAndHidesNuGetOnes
+
+      - id: AgentControl-LauncherUI-GitSourcePresentation
+        title: >-
+          The LauncherUI subsystem shall present a Git repository source with the Git icon and its
+          type name wherever sources are shown (the Settings list, Select Package and the repo
+          card), list a remote Git source as not checked and a Git source on a local path with its
+          folder status, and show on the card of a repo pinned to a Git source the tag and the
+          shortened commit its files came from.
+        justification: |
+          The same name can exist in several sources, so the user must be able to tell a Git source
+          from a folder or a server at a glance; knowing the exact tag and commit a repo's files came
+          from is what makes a later change to that tag recognizable.
+        children:
+          - AgentControl-SettingsWindowViewModel-GitSourceRowStatus
+          - AgentControl-RepoCardViewModel-GitSourceAwareness
+        tests:
+          - PackageSourceIcons_GitSource_HasGitIconAndNames
+          - SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName
+          - PackageSourceItemViewModel_RemoteGitSource_IsNotCheckedAndNeverAsksTheFolder
+          - PackageSourceItemViewModel_LocalGitSource_ChecksTheFolder
+          - PackageSourceItemViewModel_OtherKinds_RemoteClassificationUnchanged
+          - RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias
+
+      - id: AgentControl-LauncherUI-TagMovedWarning
+        title: >-
+          The LauncherUI subsystem shall show, on the card of a repo pinned to a Git source, a
+          "Tag moved" warning when the tag of the pinned version now points to a different commit
+          than the one the repo's files came from, explaining what happened and how to accept it,
+          and shall never apply anything because of it.
+        justification: |
+          A moved tag changes the instructions an agent follows without a new version, so the user
+          must be told; applying it silently would defeat the point of pinning, so the decision
+          stays with the user.
+        children:
+          - AgentControl-RepoCardViewModel-TagMovedWarning
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip
+          - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing
+
+      - id: AgentControl-LauncherUI-ChangePackage
+        title: >-
+          The LauncherUI subsystem shall let the user, for a repo that already has a pin, open the
+          package selection from the card menu as Change package, starting on the source, package
+          and version the repo uses, so that the user can choose another package or version, or
+          choose the same version again to accept content that changed behind it.
+        justification: |
+          A pinned repo needs a way to move to another package, and the deliberate way to accept a
+          republished version or a moved tag is to choose it again; starting on the current choice
+          makes that a single confirmation, and the confirmation of changed content is the same
+          one a first selection gets.
+        children:
+          - AgentControl-RepoCardViewModel-ChangePackage
+          - AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage
+        tests:
+          - MainWindow_ChangePackageOnPinnedRepo_OpensSelectPackageOnThePinnedChoice
+          - MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed
+          - RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CanExecuteAsChangePackage

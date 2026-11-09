@@ -4,23 +4,25 @@
 # GitRemoteClient runs git against a remote repository whose content and answers are untrusted:
 # it lists tags without cloning, fetches exactly one tag shallow, reads and checks out only named
 # paths, and does so with command-scoped hardening, no prompts in the background, bounded time and
-# output, redacted messages and classified failures.
+# output, redacted messages and classified failures. The requirements state what an observer sees;
+# the exact settings, arguments and environment that achieve it are in the unit's design document.
 
 sections:
   - title: GitRemoteClient Unit Requirements
     requirements:
       - id: AgentControl-GitRemoteClient-ListTagsWithoutClone
         title: >-
-          The GitRemoteClient class shall list the tags of a remote repository with one remote
-          query, passing the address and the tag glob after a double hyphen, and shall keep only
-          well-formed tag lines.
+          The GitRemoteClient class shall list the tags of a remote repository with one query that
+          does not clone it, shall never let the address or the tag filter be read as an option, and
+          shall keep only well-formed tags with a safe name.
         justification: |
-          Listing versions must be cheap and must not give a hostile address or glob a chance to be
-          read as an option.
+          Listing versions must be cheap and must not give a hostile address, filter or tag name a
+          chance to be read as an option or to reach a command line.
         tests:
           - GitRemoteClient_ListTags_Https_UsesExactCommandScopedConfigurationAndDashDash
           - GitRemoteClient_ListTags_ParsesLightweightAndAnnotatedTags
           - GitRemoteClient_ListTags_UnsafeGlob_IsRefusedWithoutRunningGit
+          - GitRemoteClient_ListTags_HostileServerTagNames_AreDropped
 
       - id: AgentControl-GitRemoteClient-PeeledTags
         title: >-
@@ -34,24 +36,39 @@ sections:
 
       - id: AgentControl-GitRemoteClient-ShallowFetchExactTag
         title: >-
-          The GitRemoteClient class shall create the repository it fetches into from an empty
-          template and fetch exactly one tag at depth one without other tags, submodules or a
-          fetch-head file, naming the address after a double hyphen, and shall refuse a tag name
-          that could be read as an option or inject into a refspec before git is started.
+          The GitRemoteClient class shall fetch exactly one tag of a remote repository, with no
+          more history than that tag needs and without other tags, submodules or leftover fetch
+          state, into a new repository that has no hooks, and shall report the commit the fetched
+          tag points to.
         justification: |
-          Transferring only what is needed keeps a fetch fast and small, and an untrusted tag name
-          must never reach a command line in a form git could interpret.
+          Transferring only what is needed keeps a fetch fast and small, and a repository made for
+          the fetch must not carry anything that could run when it is used.
         tests:
           - GitRemoteClient_InitAndFetchTag_UseEmptyTemplateAndShallowSingleTagFetch
           - GitRemoteClient_FetchTag_RevParseWithoutCommit_Throws
-          - GitRemoteClient_FetchTag_UnsafeTagName_IsRefusedWithoutRunningGit
           - GitRemoteClient_RealGit_ListInitFetchListTreeCheckout_Sequence
+
+      - id: AgentControl-GitRemoteClient-SafeTagNames
+        title: >-
+          The GitRemoteClient class shall use a tag name only when it is a legal git ref name made
+          of letters, digits and . _ / + - and of bounded length - ignoring any other name a server
+          reports and refusing any other name before git is started - and shall never accept a
+          name that could be read as an option or inject into a refspec.
+        justification: |
+          A server is untrusted and a tag name ends up on a command line; the complete ref-name
+          rules, not only a character list, keep a hostile name (empty or dot-leading components,
+          .lock endings, double slashes) away from git.
+        tests:
+          - GitRemoteClient_ListTags_HostileServerTagNames_AreDropped
+          - GitRemoteClient_FetchTag_UnsafeTagName_IsRefusedWithoutRunningGit
+          - GitRemoteClient_FetchTag_LegalTagName_IsFetched
 
       - id: AgentControl-GitRemoteClient-ListLayoutTree
         title: >-
-          The GitRemoteClient class shall list the entries of a commit's tree for named literal
-          paths with their mode, type, size and path, shall check out only named literal paths of a
-          commit with symbolic links turned off, and shall accept only a full commit id.
+          The GitRemoteClient class shall list the entries of a commit's tree for named paths,
+          taken literally, with their mode, type, size and path, shall check out only the named
+          paths of a commit without creating symbolic links, and shall accept only a full commit
+          id.
         justification: |
           The package layout must be examined before anything is written, and a path or commit
           taken from an untrusted tree must not be interpreted as a pattern or an option.
@@ -61,8 +78,8 @@ sections:
 
       - id: AgentControl-GitRemoteClient-NoHooks
         title: >-
-          The GitRemoteClient class shall run git so that no hook runs: the hooks path is an
-          empty AgentControl-owned folder and a new repository is created from an empty template.
+          The GitRemoteClient class shall never run a hook, whether the user's template or global
+          configuration installs one into every new repository or a repository ships one.
         justification: |
           A hook is a program; one installed by the user's template or global configuration, or
           shipped by a repository, must not run because a package was fetched.
@@ -73,9 +90,9 @@ sections:
 
       - id: AgentControl-GitRemoteClient-TransportAllowList
         title: >-
-          The GitRemoteClient class shall allow git to use only the transport of the address it is
-          given, and no other, through command-scoped configuration and the allowed-protocols
-          variable.
+          The GitRemoteClient class shall let git use only the transport of the address it is
+          given, and no other, so that an address of another transport, or a remote helper, is
+          refused by git itself.
         justification: |
           Even an address that passed validation must not make git use a remote helper or another
           transport, so the restriction is also enforced by git itself.
@@ -85,8 +102,8 @@ sections:
 
       - id: AgentControl-GitRemoteClient-NoSubmodulesNoLfs
         title: >-
-          The GitRemoteClient class shall run git so that submodules are not fetched or recursed
-          into and large-file-storage filters do not run.
+          The GitRemoteClient class shall never fetch or recurse into submodules and never run a
+          large-file-storage filter.
         justification: |
           Submodules and filters fetch from other places and run programs, which a package source
           must never do.
@@ -97,9 +114,9 @@ sections:
 
       - id: AgentControl-GitRemoteClient-NoPromptInBackground
         title: >-
-          The GitRemoteClient class shall, for work that is not user-initiated, make every kind of
-          prompt impossible - no terminal prompt, no credential-manager UI, no askpass program -
-          overriding the user's own askpass variables.
+          The GitRemoteClient class shall, for work that is not user-initiated, never prompt in any
+          way - no terminal prompt, no credential-manager window, no askpass program - whatever
+          the user's own settings say, so a missing sign-in is a failure and not a question.
         justification: |
           A background check that opens a sign-in window or waits for input would hang or surprise
           the user; it must fail quietly instead.
@@ -119,9 +136,9 @@ sections:
 
       - id: AgentControl-GitRemoteClient-SshBatchMode
         title: >-
-          The GitRemoteClient class shall run an OpenSSH command for an ssh remote with batch mode
-          and a connect timeout, based on the user's own ssh command, and shall leave a command
-          that is not OpenSSH untouched.
+          The GitRemoteClient class shall make ssh for an ssh remote fail quickly instead of
+          waiting for a passphrase, a password or a host-key answer, building on the user's own
+          ssh command, and shall leave a command that is not OpenSSH untouched.
         justification: |
           ssh would otherwise wait for a passphrase or a host-key answer that nobody can give; a
           wrapper such as plink has other options and is the user's choice.
@@ -132,9 +149,10 @@ sections:
 
       - id: AgentControl-GitRemoteClient-CommandScopedConfiguration
         title: >-
-          The GitRemoteClient class shall pass its configuration on the command line of each git
-          process and in its environment only, applying any extra configuration last, and never
-          write it to the user's configuration or to a repository.
+          The GitRemoteClient class shall apply its safety settings to the git processes it starts
+          only, never writing them to the user's configuration or to a repository, so the user's
+          own git setup (credential helpers, proxies, certificates) keeps working and is not
+          changed; extra settings given for tests are applied after them.
         justification: |
           The hardening is for AgentControl's commands only; the user's own git setup, credential
           helpers and proxies must keep working and must not be changed.
@@ -144,10 +162,9 @@ sections:
 
       - id: AgentControl-GitRemoteClient-NoTraceVariables
         title: >-
-          The GitRemoteClient class shall remove trace and repository-redirection variables from
-          the environment of git, so trace output cannot reach a message and a stray variable
-          cannot redirect an operation, and shall run git in a neutral working folder with a
-          ceiling above it.
+          The GitRemoteClient class shall never let a trace or repository-redirection setting of
+          the environment affect, or appear in the output of, the git processes it starts, and
+          shall run git so that the configuration of a surrounding repository is never read.
         justification: |
           Trace output can contain authorization headers, and a surrounding repository's
           configuration must never be read.
@@ -157,9 +174,9 @@ sections:
 
       - id: AgentControl-GitRemoteClient-TimeoutAndCancel
         title: >-
-          The GitRemoteClient class shall stop a git process that exceeds its time limit or whose
-          token is cancelled by killing the whole process tree, reporting a time limit as a
-          failure of its own kind and a cancellation as cancellation.
+          The GitRemoteClient class shall stop a git process, and everything it started, that
+          exceeds its time limit or whose token is cancelled, reporting a time limit as a failure
+          of its own kind and a cancellation as cancellation.
         justification: |
           A stuck remote or helper must not hold an operation or leave a process behind.
         tests:
@@ -180,8 +197,8 @@ sections:
 
       - id: AgentControl-GitRemoteClient-SecretFreeArguments
         title: >-
-          The GitRemoteClient class shall never write the address, the arguments or git's raw
-          output to a log, and shall refuse to put an unsafe value on a command line.
+          The GitRemoteClient class shall never leak the address, the arguments or git's raw output
+          into a log or a message, and shall refuse to put an unsafe value on a command line.
         justification: |
           Arguments and output can carry what a user typed or a server sent; only the operation
           and the outcome are safe to record.
@@ -204,3 +221,20 @@ sections:
           - GitRemoteClient_Failure_IsClassifiedFromGitsMessage
           - GitRemoteClient_GitExecutableMissing_ReportsGitNotFound
           - GitRemoteClient_RealGit_FetchMissingTag_ReportsNotFound
+
+      - id: AgentControl-GitRemoteClient-MinimumGitVersion
+        title: >-
+          The GitRemoteClient class shall refuse to work with a git older than version 2.29, as a
+          failure of its own kind whose message says which version is in use and how to get a
+          newer one, shall not block a git whose version cannot be read, and shall check each git
+          executable only once per process.
+        justification: |
+          The fetch needs options that older gits do not have and would fail with a message the
+          user cannot act on; a clear, early refusal tells them to update git or choose another
+          one, and a version that cannot be read must not lock out a working git.
+        tests:
+          - GitRemoteClient_ParseVersion_ReadsKnownFormsAndRejectsOthers
+          - GitRemoteClient_EnsureSupportedVersion_OldGit_IsRefusedWithActionableMessageAndNotRemembered
+          - GitRemoteClient_EnsureSupportedVersion_NewGit_PassesAndRunsOncePerExecutable
+          - GitRemoteClient_EnsureSupportedVersion_UnreadableVersionIsNotBlocked_AndMissingGitIsReported
+          - GitRemoteClient_RealGit_EnsureSupportedVersion_AcceptsTheInstalledGit

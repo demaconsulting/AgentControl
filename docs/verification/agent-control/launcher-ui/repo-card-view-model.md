@@ -4,7 +4,9 @@
 
 `RepoCardViewModel` is verified with unit tests defined in `RepoCardViewModelTests.cs`, for NuGet server
 sources, `RepoCardServerSourceTests.cs`, for the signature indicator, `RepoCardSignatureTests.cs`, for the
-card color and group chip, `RepoCardColorTests.cs` (and, for moving into groups, `RepoGroupingTests.cs`) and, for the
+card color and group chip, `RepoCardColorTests.cs` (and, for moving into groups, `RepoGroupingTests.cs`), for the
+Git source (the Git icon and tooltip, the moved tag, Change package and the git version problem)
+`RepoCardGitAwarenessTests.cs`, for the Git source's registry options `RepoCardGitSourceTests.cs` and, for the
 repo picture, `RepoCardImageTests.cs`. Every
 test substitutes a stub script for the git executable (via `GitStub`, mirroring
 `GitClientTests`) and uses real temporary directories/zip fixtures for package-source and
@@ -48,9 +50,15 @@ invocations are not parallelized with other tests using real process launches).
   source; a pin from a newer schema stops an apply before the repo is touched.
 - The pin records the content identity of the package that was applied; an Upgrade, or the restore of missing agent
   files before launch, that finds the pinned version delivering content that differs from the recorded identity applies
-  nothing and leaves the pin unchanged, a Select Package of that version asks first and applies it, recording the new
+  nothing and leaves the pin unchanged (and says that Change package... accepts the change), Change package... or
+  Select Package of that version asks first and applies it, recording the new
   identity, only after the user confirmed, a pin or a source without an identity is never treated as changed, and the
   launch-time restore never writes the pin.
+- A card pinned to a Git source shows the Git icon and the alias, names the tag and the first seven characters of the
+  commit in its chip tooltip, shows "Tag moved" - and applies nothing - when the tag now points to a different commit
+  than the one recorded, never reports a move for a pin without a recorded commit or a source that is not Git, and
+  says when the installed git is too old without suggesting a sign-in; a pinned repo can execute Select Package as
+  Change package.
 - A NuGet folder source can be selected from, upgraded from, and applied to a repo.
 - A background upgrade check never opens the sign-in dialog and explains on the card what to do; a check the
   user starts may ask once, and the credential is then remembered for the session.
@@ -208,16 +216,24 @@ the pin and raises `ReleaseNotesReady` when a newer version is available, and ra
 and `RepoCardViewModel_UpgradeCommand_NoPackageSourceConfigured_RaisesErrorOccurred`, covering
 `AgentControl-RepoCardViewModel-Upgrade`.
 
-**RepoCardViewModel_SelectPackage_OfferedOnlyForUnpinnedPresentRepoWithSource**:
-`IsPackageSelectionNeeded` reflects pin state; `SelectPackageCommand` cannot execute when a
-pin already exists or the repo is missing, raises only an error when no source is configured,
+**RepoCardViewModel_SelectPackage_OfferedForUnpinnedPresentRepoWithSource**:
+`IsPackageSelectionNeeded` reflects pin state; `SelectPackageCommand` cannot execute when
+the repo is missing, raises only an error when no source is configured,
 and raises `SelectPackageRequested` with the source path when a source is configured. This
 scenario is tested by `RepoCardViewModel_IsPackageSelectionNeeded_ReflectsPinState`,
-`RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CannotExecute`,
 `RepoCardViewModel_SelectPackageCommand_RepoIsMissing_CannotExecute`,
 `RepoCardViewModel_SelectPackageCommand_NoPackageSourceConfigured_RaisesErrorOccurredOnly`, and
 `RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias`,
 covering `AgentControl-RepoCardViewModel-SelectPackage`.
+
+**RepoCardViewModel_ChangePackage_OfferedForPinnedRepo**: The same command is "Change package..." for a repo that has
+a pin: it can execute although a pin exists (renamed from `..._PinAlreadyExists_CannotExecute`, which asserted the
+opposite before the card offered Change package), the card reports a pinned package and counts the action among those
+of the menu's agent files group (`HasAgentFileActions`), and executing it raises `SelectPackageRequested` once while the
+repo stays pinned. This scenario is tested by
+`RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CanExecuteAsChangePackage` and
+`RepoCardViewModel_SelectPackageCommand_PinnedRepo_RaisesSelectPackageRequested`, covering
+`AgentControl-RepoCardViewModel-ChangePackage`.
 
 **RepoCardViewModel_ApplySelectedPackage_RejectsStaleVersionWithoutMutatingPin**: Applying a
 valid chosen name/version updates the pin, extracts files, and raises `ReleaseNotesReady`; a
@@ -549,6 +565,55 @@ not marked declined, while declining the offer raised by an explicit apply is st
 `RepoCardContentIdentityTests.cs`), covering `AgentControl-RepoCardViewModel-RecordContentIdentity`,
 `AgentControl-RepoCardViewModel-RefuseChangedContent`, `AgentControl-RepoCardViewModel-ConfirmChangedContent`,
 `AgentControl-RepoCardViewModel-AdoptMissingIdentity` and `AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin`.
+The refusal messages (the Upgrade of a republished version and the restore before launch) say that "Change package..."
+is how to accept the change and no longer tell the user to delete the pin file; the two refusal tests assert that
+(`RepoCardContentIdentityTests.cs`: the message contains `Change package...` and does not contain `.agentcontrol.json`).
+Refusing an Upgrade of a republished version is, in the application, reachable only by a race (an Upgrade is offered
+only for a version newer than the pin), so this refusal is verified at this unit level only; the confirmation, by
+contrast, is reachable through Change package... and is shown end to end in the system verification.
+
+**RepoCardViewModel_GitSourceAwareness_IconAliasTagAndShortCommit**: A card pinned to a Git source shows the Git icon
+and the source's alias beside the package and version; its chip tooltip reads "Agent files: {package} {version} from
+source '{alias}' (git repository), tag {tag} @ {first seven characters of the commit}." where the tag is the source's tag
+pattern applied to the pinned version and the commit is the one the pin recorded; with no recorded commit (a pin made
+before commits were recorded) it names the tag only; and a pin to a zip source names neither. This scenario is tested by
+`RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias`,
+`RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit`,
+`RepoCardViewModel_PackageChipTooltip_GitPinWithoutIdentity_NamesTagOnly` and
+`RepoCardViewModel_PackageChipTooltip_ZipPin_HasNoTagOrCommit`, covering
+`AgentControl-RepoCardViewModel-GitSourceAwareness`. The tests use a `FakePackageSourceProvider` standing in for the Git
+source and a pin file written for the test, so no Git repository or network is involved.
+
+**RepoCardViewModel_TagMovedWarning_ShownNeverAppliedAndClearedWhenAccepted**: With a Git pin that recorded a commit,
+a listing that shows the pinned version at another commit makes the card show the "Tag moved" status - outranking an
+available upgrade, hiding the up-to-date cue, with a tooltip that names the tag, "abcdef0 -> 1234567" and "Change
+package..." - and the check acquires nothing, extracts nothing and leaves the pin byte for byte unchanged; a tag that
+still points to the recorded commit, a pin that recorded no commit and a source that is not a Git source (even if its
+listing carries a revision) are never reported as moved; and once the pin records the new commit (the user accepted
+it) a refresh clears the warning and the card is up to date again. Choosing the pinned version again when the tag now
+delivers another commit asks for confirmation and changes nothing (no error, no extraction, the pin as it was); with the
+confirmation it extracts the new content and records the new commit (the short commit and the warning follow); and with
+nobody to ask the refusal advises Change package... and does not tell the user to edit or delete the pin file. This
+scenario is tested by `RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip`,
+`RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing`,
+`RepoCardViewModel_RefreshUpgradeStatus_SameCommit_IsNotMoved`,
+`RepoCardViewModel_RefreshUpgradeStatus_ZipSourceWithRevision_IsNotMoved`,
+`RepoCardViewModel_RefreshUpgradeStatus_PinWithoutIdentity_IsNotMoved`,
+`RepoCardViewModel_RefreshUpgradeStatus_PinUpdatedAfterTagMoved_ClearsMovedTag`,
+`RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommit_AsksAndChangesNothing`,
+`RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommitAccepted_AppliesAndRecordsCommit` and
+`RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommitWithoutSubscriber_AdvisesChangePackage` (all in
+`RepoCardGitAwarenessTests.cs`), covering `AgentControl-RepoCardViewModel-TagMovedWarning` and, for the three apply
+tests, `AgentControl-RepoCardViewModel-ConfirmChangedContent`. That a click on the chip opens Change package... is the
+chip's binding to the same command and is exercised only end to end.
+
+**RepoCardViewModel_GitTooOld_BackgroundCheckExplainsWithoutSignIn**: When the background check's listing fails because
+the installed git is older than the supported version, the card has a package source problem with the explanation as
+the message, does not say a sign-in is needed, is a problem status and offers no upgrade. This scenario is tested by
+`RepoCardViewModel_RefreshUpgradeStatus_GitTooOld_ShowsSourceProblemWithoutSignIn`, covering
+`AgentControl-RepoCardViewModel-GitTooOldProblem`. The version gate itself (git older than 2.29 is refused before any
+remote command, and a git at the minimum is accepted) is verified in the `GitIntegration` and `AgentPackageManagement`
+tests, and the existing `RepoCardGitSourceTests.cs` shows the gate asked first, then `ls-remote`.
 
 **RepoCardViewModel_GitSourceOptions_PromptOnlyForUserStartedWork**: With a Git source configured and a stub as the git
 executable (from the startup override), the registry built for work the user started runs git without

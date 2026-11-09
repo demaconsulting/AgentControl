@@ -137,9 +137,12 @@ a modal confirmation, never overwriting a pre-existing `AGENTS.md` and rememberi
 user is not re-prompted for that repo again (`AgentControl-System-AgentsMdTemplate`). Select Package and
 Upgrade record in the pin the content identity of the package they applied; an Upgrade, or the restore of
 missing agent files at launch, that finds the pinned version delivering different content than recorded applies
-nothing and says so, while a Select Package of that version asks the user to confirm first, and a pin with no
-identity adopts one silently the next time a package is selected or upgraded to - the launch-time restore never
-writes the pin (`AgentControl-System-PackageContentIntegrity`). See
+nothing and says so, while choosing that version again with Change package... asks the user to confirm first, a Git
+tag that now points to another commit is shown on the card as a "Tag moved" warning that applies nothing, and a pin
+with no identity adopts one silently the next time a package is selected or upgraded to - the launch-time restore never
+writes the pin (`AgentControl-System-PackageContentIntegrity`). A Git repository can be a package source: the user
+adds it from Settings with a tag pattern, sees which tags match before saving and chooses a version in Select Package
+(`AgentControl-System-GitSources`). See
 `docs/design/agent-control/{subsystem}.md` for each subsystem's own design, and
 `docs/design/agent-control/program.md` for `Program`'s design (which also documents Avalonia's `App`
 bootstrap responsibility, per program.sysml's documented exception for units without a dedicated
@@ -224,7 +227,8 @@ longer raise an error box, release notes or a prompt, and the window releases it
   keyboard).
 - *Contract*: The main window shows the recent-repos list with per-repo cards exposing
   Launch as a button and, in the card's "..." menu, Git Pull, Refresh (labeled "Check again" for a repo whose
-  folder is missing), Select Package/Upgrade, Move to group, Card color and Remove, plus the favorite star and
+  folder is missing), Select Package/Change package/Upgrade, Move to group, Card color and Remove, plus the favorite
+  star and
   the upgrade chip; the list is flat, or sectioned (Favorites, the user's groups, Ungrouped) once a repo is in a
   group; the toolbar-level app bar holds the filter, Add, Settings and About
   (`AgentControl-System-RecentRepos`, `AgentControl-System-AddRemoveRepo`, `AgentControl-System-SearchAndSort`,

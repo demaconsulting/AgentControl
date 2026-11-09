@@ -310,6 +310,9 @@
     <Style Selector="Border.StatusAccent.statusProblem">
         <Setter Property="Background" Value="{DynamicResource StatusAccentProblem}" />
     </Style>
+    <Style Selector="Border.StatusAccent.statusTagMoved">
+        <Setter Property="Background" Value="{DynamicResource StatusAccentUpgrade}" />
+    </Style>
 
     <!-- ===== Avatar tile: the repo's initials on a stable per-repo color ===== -->
     <Style Selector="Border.Avatar">

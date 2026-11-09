@@ -60,6 +60,22 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     private readonly PackageVersionCache _cache;
 
     /// <summary>
+    ///     The package to select once the preferred source has loaded, or <see langword="null"/>.
+    /// </summary>
+    private readonly string? _preferredPackageName;
+
+    /// <summary>
+    ///     The alias of the source the preferred package belongs to, or <see langword="null"/>.
+    /// </summary>
+    private readonly string? _preferredSourceAlias;
+
+    /// <summary>
+    ///     The version to select once the preferred package's versions have loaded, or
+    ///     <see langword="null"/>.
+    /// </summary>
+    private readonly string? _preferredVersion;
+
+    /// <summary>
     ///     Cancels the version load for the package selected most recently; replaced whenever the
     ///     selection changes.
     /// </summary>
@@ -115,16 +131,30 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     /// <param name="preferredSourceAlias">The alias of the source to start on (for example the
     ///     source the repo is already pinned to), or <see langword="null"/>/an unknown alias to
     ///     start on the first source.</param>
+    /// <param name="preferredPackageName">The package to select once the preferred source has
+    ///     loaded (for example the package the repo is pinned to), or <see langword="null"/> for
+    ///     none. Ignored when the source cannot be read or does not offer it, and never
+    ///     overrides a choice the user already made.</param>
+    /// <param name="preferredVersion">The version to select once that package's versions have
+    ///     loaded (the pinned version), or <see langword="null"/> to keep the newest. Ignored when
+    ///     the source no longer lists it.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry"/> or
     ///     <paramref name="cache"/> is <see langword="null"/>.</exception>
     public SelectPackageWindowViewModel(
-        PackageSourceRegistry registry, PackageVersionCache cache, string? preferredSourceAlias = null)
+        PackageSourceRegistry registry,
+        PackageVersionCache cache,
+        string? preferredSourceAlias = null,
+        string? preferredPackageName = null,
+        string? preferredVersion = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(cache);
 
         _registry = registry;
         _cache = cache;
+        _preferredPackageName = preferredPackageName;
+        _preferredSourceAlias = preferredSourceAlias;
+        _preferredVersion = preferredVersion;
         Sources = [.. registry.Definitions.Select(definition => new SelectPackageSourceViewModel(definition))];
         _isLoading = Sources.Count > 0;
         _selectedSource = Sources.FirstOrDefault(
@@ -371,10 +401,55 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         try
         {
             await Task.WhenAll(Sources.Select(source => LoadSourceAsync(source, cancellationToken)));
+            await ApplyPreferredSelectionAsync();
         }
         finally
         {
             IsLoading = false;
+        }
+    }
+
+    /// <summary>
+    ///     Selects the preferred package and version (the ones a repo is pinned to) once the
+    ///     preferred source has loaded, so "Change package..." opens on the current choice.
+    /// </summary>
+    /// <remarks>
+    ///     Does nothing when no preference was given, when the user has already picked a package
+    ///     (or another source), when the selected source failed or does not offer the package, and
+    ///     keeps the newest version when the preferred version is no longer listed.
+    /// </remarks>
+    /// <returns>A task that completes when the selection (and the version load it starts) is
+    ///     done.</returns>
+    private async Task ApplyPreferredSelectionAsync()
+    {
+        if (_preferredPackageName is null || _selectedPackageName is not null ||
+            _selectedSource is not { HasError: false, IsLoading: false } source ||
+            !string.Equals(source.Alias, _preferredSourceAlias, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var package = source.PackageNames.FirstOrDefault(
+            name => string.Equals(name, _preferredPackageName, StringComparison.OrdinalIgnoreCase));
+        if (package is null)
+        {
+            return;
+        }
+
+        SelectedPackageName = package;
+        await PendingVersionsLoad;
+
+        // A newer selection by the user while the versions loaded must not be overridden
+        if (_selectedPackageName != package || _preferredVersion is null)
+        {
+            return;
+        }
+
+        var version = AvailableVersions.FirstOrDefault(
+            text => string.Equals(text, _preferredVersion, StringComparison.OrdinalIgnoreCase));
+        if (version is not null)
+        {
+            SelectedVersion = version;
         }
     }
 

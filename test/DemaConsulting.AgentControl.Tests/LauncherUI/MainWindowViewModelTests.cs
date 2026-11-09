@@ -22,6 +22,7 @@ using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.Settings;
+using DemaConsulting.AgentControl.Startup;
 using DemaConsulting.AgentControl.Tests.GitIntegration;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
@@ -751,6 +752,75 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         // Assert
         Assert.True(viewModel.RepoCards[0].IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that the connection-test provider for a Git source is a Git provider that runs the
+    ///     git executable from the startup override, checks that git is new enough first, and lets
+    ///     git show its sign-in (the test is started by the user).
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_CreateConnectionTestProvider_GitSource_ReturnsInteractiveGitProvider()
+    {
+        // Arrange: the stub stands in for git, from the startup override; a config directory isolates the cache
+        var stub = GitRemoteStub.Create();
+        try
+        {
+            var options = StartupOptions.Parse(["--config-dir", CreateTempDirectory(), "--git-path", stub.Path]);
+            var viewModel = new MainWindowViewModel(new AppSettings(), options, configDirectory: CreateTempDirectory());
+            var definition = new PackageSourceDefinition
+            {
+                Alias = "Repo",
+                Type = PackageSourceType.Git,
+                Location = "https://git.example.com/org/agents.git",
+                TagPattern = "v{version}",
+                PackageIds = ["contoso-agents"]
+            };
+
+            // Act
+            var provider = viewModel.CreateConnectionTestProvider(definition);
+            await provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
+
+            // Assert: a Git provider; the version gate ran before the listing; git may prompt
+            Assert.IsType<GitSourceProvider>(provider);
+            Assert.Equal("Repo", provider.Alias);
+            var invocations = stub.ReadInvocations();
+            Assert.Equal(["version", "ls-remote"], invocations.Select(item => item.Command));
+            Assert.All(invocations, invocation =>
+            {
+                Assert.NotEqual("never", invocation.Environment["GCM_INTERACTIVE"]);
+                Assert.DoesNotContain("core.askPass=", invocation.Arguments, StringComparison.Ordinal);
+            });
+        }
+        finally
+        {
+            stub.Delete();
+        }
+    }
+
+    /// <summary>
+    ///     Test that a NuGet source still gets a NuGet provider, with or without startup options that
+    ///     name a git executable.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_CreateConnectionTestProvider_NuGetSource_ReturnsNuGetProvider()
+    {
+        // Arrange
+        var options = StartupOptions.Parse(["--config-dir", CreateTempDirectory(), "--git-path", "git-not-used"]);
+        var viewModel = new MainWindowViewModel(new AppSettings(), options, configDirectory: CreateTempDirectory());
+        var definition = new PackageSourceDefinition
+        {
+            Alias = "Feed",
+            Type = PackageSourceType.NuGet,
+            Location = "https://feeds.example.com/v3/index.json",
+            PackageIds = ["contoso-agents"]
+        };
+
+        // Act
+        var provider = viewModel.CreateConnectionTestProvider(definition);
+
+        // Assert
+        Assert.IsType<NuGetSourceProvider>(provider);
     }
 
     /// <summary>

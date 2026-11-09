@@ -37,7 +37,10 @@ and suffix and a strict version between.
 
 **IsSafeTagName** (static): Vets a tag name a server reports before it can reach a refspec: only
 `A-Z a-z 0-9 . _ / + -`, at most 255 characters, a legal ref name, not starting with `-`
-(`AgentControl-GitTagPattern-VetServerTagNames`). `TryMatch` applies it first.
+(`AgentControl-GitTagPattern-VetServerTagNames`). `TryMatch` applies it first. The rule itself is implemented once, in
+`GitRemoteClient.IsSafeTagName` (`GitIntegration`), and this method delegates to it, so the client applies exactly the
+same check to what a server reports and to the tag it is asked to fetch; the rule lives in the lower subsystem because
+`GitIntegration` must not depend on `AgentPackageManagement`.
 
 #### Error Handling
 
@@ -46,7 +49,7 @@ Nothing throws for invalid text (`false` and a message); `Format` throws `Argume
 #### Dependencies
 
 - **PackageVersion** (same subsystem) - strict version parsing and the version's text.
-- **.NET BCL** - generated, `\z`-anchored regular expression.
+- **GitRemoteClient** (GitIntegration) - `IsSafeTagName`, the one implementation of the tag-name rule.
 
 #### Callers
 

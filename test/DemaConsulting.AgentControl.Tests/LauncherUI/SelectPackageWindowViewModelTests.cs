@@ -466,6 +466,173 @@ public sealed class SelectPackageWindowViewModelTests
     }
 
     /// <summary>
+    ///     Test that a preferred source, package and version (the ones a pinned repo uses, for
+    ///     "Change package...") are selected once the source has loaded, so the dialog opens on the
+    ///     current choice and can be confirmed at once.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_PreferredPackageAndVersion_AreSelected()
+    {
+        // Arrange
+        var a = new FakePackageSourceProvider(
+            "A", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"), ("contoso-agents", "2.0.0"), ("other", "1.0.0"));
+        var viewModel = CreatePreferringViewModel("A", "contoso-agents", "1.1.0", a);
+
+        // Act
+        await viewModel.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("A", viewModel.SelectedSource?.Alias);
+        Assert.Equal("contoso-agents", viewModel.SelectedPackageName);
+        Assert.Equal("1.1.0", viewModel.SelectedVersion);
+        Assert.True(viewModel.CanConfirm);
+    }
+
+    /// <summary>
+    ///     Test that when the preferred version is no longer listed the package is still selected and
+    ///     the version stays the newest one.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_PreferredVersionNotListed_KeepsNewestVersion()
+    {
+        // Arrange
+        var a = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"), ("contoso-agents", "2.0.0"));
+        var viewModel = CreatePreferringViewModel("A", "contoso-agents", "0.5.0", a);
+
+        // Act
+        await viewModel.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("contoso-agents", viewModel.SelectedPackageName);
+        Assert.Equal("2.0.0", viewModel.SelectedVersion);
+    }
+
+    /// <summary>
+    ///     Test that a preferred package the source does not offer selects nothing.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_PreferredPackageNotOffered_SelectsNothing()
+    {
+        // Arrange
+        var a = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var viewModel = CreatePreferringViewModel("A", "gone-agents", "1.0.0", a);
+
+        // Act
+        await viewModel.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(viewModel.SelectedPackageName);
+        Assert.Null(viewModel.SelectedVersion);
+        Assert.False(viewModel.CanConfirm);
+    }
+
+    /// <summary>
+    ///     Test that a preferred source that failed to load selects nothing.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_PreferredSourceFailed_SelectsNothing()
+    {
+        // Arrange: the preferred source is a zip folder that does not exist
+        var missing = Path.Combine(Path.GetTempPath(), "agentcontrol_missing_source_" + Guid.NewGuid());
+        var registry = new PackageSourceRegistry(
+            [new PackageSourceDefinition { Alias = "Down", Type = PackageSourceType.Zip, Location = missing }],
+            definition => new ZipFolderSourceProvider(definition));
+        var viewModel = new SelectPackageWindowViewModel(registry, new PackageVersionCache(), "Down", "contoso-agents", "1.0.0");
+
+        // Act
+        await viewModel.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(viewModel.HasSourceError);
+        Assert.Null(viewModel.SelectedPackageName);
+        Assert.Null(viewModel.SelectedVersion);
+    }
+
+    /// <summary>
+    ///     Test that a preferred alias that names no configured source preselects nothing: the first
+    ///     source is shown and no package is chosen for the user.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_PreferredAliasUnknown_SelectsNothing()
+    {
+        // Arrange
+        var a = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var viewModel = CreatePreferringViewModel("Z", "contoso-agents", "1.0.0", a);
+
+        // Act
+        await viewModel.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("A", viewModel.SelectedSource?.Alias);
+        Assert.Null(viewModel.SelectedPackageName);
+        Assert.Null(viewModel.SelectedVersion);
+    }
+
+    /// <summary>
+    ///     Test that a package the user picks while other sources are still loading is not replaced by
+    ///     the preferred one when loading ends.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_UserChoiceBeforeLoadEnds_IsNotOverridden()
+    {
+        // Arrange: the preferred source A loads at once, B only when released
+        var gate = new TaskCompletionSource();
+        var a = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"), ("other", "1.0.0"));
+        var registry = new PackageSourceRegistry(
+            [
+                new PackageSourceDefinition { Alias = "A", Type = PackageSourceType.Zip, Location = "unused" },
+                new PackageSourceDefinition { Alias = "B", Type = PackageSourceType.Zip, Location = "unused" }
+            ],
+            definition => definition.Alias == "A" ? a : new GatedPackageListProvider("B", gate.Task));
+        var viewModel = new SelectPackageWindowViewModel(registry, new PackageVersionCache(), "A", "contoso-agents", "1.0.0");
+        var loading = viewModel.LoadAsync(CancellationToken.None);
+        for (var attempt = 0; attempt < 1000 && viewModel.Sources[0].IsLoading; attempt++)
+        {
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+
+        // Act: the user chooses another package, then loading ends
+        viewModel.SelectedPackageName = "other";
+        await viewModel.PendingVersionsLoad;
+        gate.SetResult();
+        await loading;
+
+        // Assert
+        Assert.Equal("other", viewModel.SelectedPackageName);
+    }
+
+    /// <summary>
+    ///     Test that a Git source is listed with the Git icon and its kind name, like the other kinds.
+    /// </summary>
+    [Fact]
+    public void SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName()
+    {
+        // Arrange
+        var provider = new FakePackageSourceProvider("Repo", ("contoso-agents", "1.0.0"));
+        var registry = new PackageSourceRegistry(
+            [
+                new PackageSourceDefinition
+                {
+                    Alias = "Repo",
+                    Type = PackageSourceType.Git,
+                    Location = "https://git.example.com/org/agents.git",
+                    TagPattern = "v{version}",
+                    PackageIds = ["contoso-agents"]
+                }
+            ],
+            _ => provider);
+
+        // Act
+        var viewModel = new SelectPackageWindowViewModel(registry, new PackageVersionCache());
+
+        // Assert
+        var row = Assert.Single(viewModel.Sources);
+        Assert.Equal(Material.Icons.MaterialIconKind.Git, row.TypeIcon);
+        Assert.Equal("Git repository", row.TypeName);
+        Assert.Contains("Git repository", row.AutomationName, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that constructing with a null registry or cache throws ArgumentNullException.
     /// </summary>
     [Fact]
@@ -476,6 +643,13 @@ public sealed class SelectPackageWindowViewModelTests
         Assert.Throws<ArgumentNullException>(
             () => new SelectPackageWindowViewModel(CreateRegistry(new FakePackageSourceProvider("A")), null!));
     }
+
+    /// <summary>
+    ///     Creates the view model under test with a preferred source, package and version.
+    /// </summary>
+    private static SelectPackageWindowViewModel CreatePreferringViewModel(
+        string alias, string package, string version, params FakePackageSourceProvider[] providers) =>
+        new(CreateRegistry(providers), new PackageVersionCache(), alias, package, version);
 
     /// <summary>
     ///     Creates the view model under test over in-memory sources, starting on the first.
@@ -497,6 +671,34 @@ public sealed class SelectPackageWindowViewModelTests
         new(
             providers.Select(p => new PackageSourceDefinition { Alias = p.Alias, Type = PackageSourceType.Zip, Location = "unused" }),
             definition => providers.Single(p => p.Alias == definition.Alias));
+
+    /// <summary>
+    ///     A source whose package list arrives (empty) only when its gate opens, so a test can keep
+    ///     the dialog loading while the user acts.
+    /// </summary>
+    /// <param name="alias">The alias this provider reports.</param>
+    /// <param name="gate">The task the package list waits for.</param>
+    private sealed class GatedPackageListProvider(string alias, Task gate) : IPackageSourceProvider
+    {
+        /// <inheritdoc />
+        public string Alias { get; } = alias;
+
+        /// <inheritdoc />
+        public async Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken)
+        {
+            await gate.WaitAsync(cancellationToken);
+            return [];
+        }
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<DiscoveredPackage>> ListVersionsAsync(
+            string packageId, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        /// <inheritdoc />
+        public Task<IPackageContentReader> AcquireAsync(DiscoveredPackage package, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+    }
 
     /// <summary>
     ///     A source whose package list never arrives unless the caller cancels, for the

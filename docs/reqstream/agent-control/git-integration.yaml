@@ -104,8 +104,8 @@ sections:
           shallow, reading the tree of a commit and checking out only named paths - with every
           protection command-scoped (no hooks, only the transport of the address, no submodules or
           large-file filters, no trace output), without any prompt for work the user did not start,
-          within a time and output limit that stops the whole process tree, and reporting failures
-          classified and redacted.
+          within a time and output limit that stops the whole process tree, reporting failures
+          classified and redacted, and refusing a git that is too old for it with a clear message.
         justification: |
           Package sources in Git repositories make the repository, and the remote that serves it,
           the source of what lands on a developer's machine; none of it may run code or leak
@@ -114,6 +114,7 @@ sections:
           - AgentControl-GitRemoteClient-ListTagsWithoutClone
           - AgentControl-GitRemoteClient-PeeledTags
           - AgentControl-GitRemoteClient-ShallowFetchExactTag
+          - AgentControl-GitRemoteClient-SafeTagNames
           - AgentControl-GitRemoteClient-ListLayoutTree
           - AgentControl-GitRemoteClient-NoHooks
           - AgentControl-GitRemoteClient-TransportAllowList
@@ -127,6 +128,7 @@ sections:
           - AgentControl-GitRemoteClient-OutputBoundedAndRedacted
           - AgentControl-GitRemoteClient-SecretFreeArguments
           - AgentControl-GitRemoteClient-FailureClassification
+          - AgentControl-GitRemoteClient-MinimumGitVersion
         tests:
           # Subsystem test with the real git executable and a local repository, every isolation
           # in force; the exact arguments, environment, limits and redaction are verified against

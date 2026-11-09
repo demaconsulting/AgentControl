@@ -118,7 +118,8 @@ the *GitCredentialClient Design*.
 `GitRemoteClient` is a fourth, deliberately separate unit because its threat model differs from both neighbors: the repository
 and the server behind it are untrusted, so every command is hardened by command-scoped configuration and environment (no
 hooks, one transport, no submodules or filters, no trace output), run asynchronously from a neutral folder with a time and
-output limit that kills the whole process tree, and reported through classified, redacted failures. It shares only the
+output limit that kills the whole process tree, and reported through classified, redacted failures; a git older than 2.29
+is refused up front with an actionable message. It shares only the
 git executable setting with `GitClient` and `GitCredentialClient`; none of their code was changed. The user's own
 credential helper, proxy and CA settings are left in force, so sign-in is whatever the user already has - and
 it may show its

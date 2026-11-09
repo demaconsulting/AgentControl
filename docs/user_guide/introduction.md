@@ -20,16 +20,16 @@ This user guide covers:
 - The main window: the app bar, the repo cards, and the light and dark themes
 - Adding a repository to the recent-repos list
 - Reading a repo card's chips: pinned package, upgrade, branch, and status warnings
-- Configuring package sources (zip-package folders, NuGet-package folders and NuGet-package
-  servers), including testing a server's connection and signing in to it
+- Configuring package sources (zip-package folders, NuGet-package folders, NuGet-package
+  servers and Git repositories), including testing a connection and signing in
 - Why a published package version should never be reused, and how to guard against it
-- Selecting an initial agent package for a never-pinned repo, and upgrading an
-  already-pinned repo
+- Selecting an initial agent package for a never-pinned repo, changing the package or version of a pinned repo,
+  and upgrading an already-pinned repo
 - Launch behavior, including ensure-synced-before-launch semantics
 - Pulling the latest commits for a repo
 - Configuring per-user settings (package sources, git executable, agent tool, shell)
 - The About dialog
-- Authoring agent packages (zip files and NuGet packages) so AgentControl can discover and
+- Authoring agent packages (zip files, NuGet packages and tagged Git repositories) so AgentControl can discover and
   apply them
 
 # Installation
@@ -96,15 +96,16 @@ Each repo card shows:
 - The "..." menu is grouped. **Repository**: **Git Pull** (see *Pulling Changes*) and **Refresh** (re-checks
   the repo's git state, upgrade status and committed-agent-files chip without waiting for the next app
   launch; for a repo whose folder is missing it reads **Check again** and checks whether the folder is
-  available again). **Agent files**: **Select Package...** or **Upgrade to x.y.z** (mutually exclusive — see below;
-  the group is hidden when neither applies). **Organize**: **Move to group** and **Card color...** (see
+  available again). **Agent files**: **Select Package...** (a repo with no package yet), **Change package...** (a
+  repo that already has one) and **Upgrade to x.y.z** (when a newer version exists); the group is hidden when none
+  of them applies - see below. **Organize**: **Move to group** and **Card color...** (see
   *Organizing Repos with Groups* and *Choosing a Card Color*). Then **Remove from list**.
 
 ![A card with the repo's own picture and an up-to-date package, a section header, and a card with an upgrade chip
 and an uncommitted-changes warning](images/repo-card-anatomy.png)
 
-![The open "..." menu of a card: Git Pull and Refresh under Repository, Move to group and Card color under
-Organize, and Remove from list](images/card-menu.png)
+![The open "..." menu of a card: Git Pull and Refresh under Repository, Change package... under Agent files, Move to
+group and Card color under Organize, and Remove from list](images/card-menu.png)
 
 Removing a repo from the list prompts for confirmation first, since it is a destructive
 action against AgentControl's own recent-repos state (it does not touch the repository
@@ -170,10 +171,12 @@ button](images/card-color-palette.png)
 
 - **Agent package chip** (robot icon) — the agent package the repo is pinned to and its
   version, for example `contoso-agents 1.0.0`. Beside the version, a small icon shows the kind of
-  source the package came from (a folder of zips, a folder of NuGet packages, or a NuGet server) and
-  the source's **alias** is shown as muted text next to it, so you can see where the package came
+  source the package came from (a folder of zips, a folder of NuGet packages, a NuGet server or a Git repository)
+  and the source's **alias** is shown as muted text next to it, so you can see where the package came
   from without hovering. The tooltip names the source in full: "Agent files: contoso-agents 1.0.0
-  from source 'Default' (zip folder)". If the source is not configured, the tooltip says so. When the pinned
+  from source 'Default' (zip folder)". For a Git repository the tooltip also names the tag and the first seven
+  characters of the commit the files came from, for example "..., tag v1.0.0 @ 3f9c2e1". If the source is not
+  configured, the tooltip says so. When the pinned
   package is the newest one available, a small green **check mark** inside the chip (tooltip "Agent files are
   up to date") says so, in addition to the green bar on the card's left edge; it is not shown while an upgrade is
   available, while AgentControl is still checking, or when there is a problem.
@@ -184,6 +187,11 @@ button](images/card-color-palette.png)
   unavailable while another operation is running on the card. While AgentControl is still checking the
   source, the chip is not shown yet (the card shows "checking for updates..."); a slow or unreachable
   source never blocks the window.
+- **Tag moved** (amber, tag icon) — the repo is pinned to a version of a **Git repository** source, and that
+  version's tag now points to a different commit than the one the repo's agent files came from (someone moved the
+  tag). AgentControl keeps using the files you have and applies nothing by itself; the tooltip names the tag and
+  both commits. If you trust the change, click the chip or use the card's "..." menu > **Change package...** and
+  choose the same version again (see *Version Immutability and Trust*).
 - **No agent package chip** (grey) — the repo has no pin yet. Click it, or use "..." > **Select
   Package...**, to choose one.
 - **Branch chip** — the repo's current git branch.
@@ -205,8 +213,12 @@ button](images/card-color-palette.png)
   example it was removed or renamed in Settings). The tooltip states the problem. No upgrade is
   offered and no other source is ever used instead; restore the source with the same alias in
   Settings to resolve it.
-- **Sign-in needed** (red) — the repo is pinned to a server that needs a sign-in, and the background check
-  never asks. Use the card's "..." menu > **Refresh** to sign in (see *Signing In*).
+- **Sign-in needed** (red) — the repo is pinned to a server or a Git repository that needs a sign-in, and the
+  background check never asks. Use the card's "..." menu > **Refresh** to sign in (see *Signing In* and *Adding a
+  Git Repository*).
+
+![A card whose package comes from a Git repository: the package chip shows the Git icon and the source's alias, and
+an amber Tag moved chip warns that the pinned version's tag now names another commit](images/repo-card-git.png)
 
 Below the chips, a card shows the outcome of the last action you started on it - for example the reason a
 **Git Pull** failed - in small text under the repo's path (hover for the full text).
@@ -214,7 +226,7 @@ Below the chips, a card shows the outcome of the last action you started on it -
 # Package Sources
 
 AgentControl takes agent packages from one or more **package sources**, which you manage in
-Settings. Three kinds of source are supported:
+Settings. Four kinds of source are supported:
 
 - **Zip-package folder** — a folder (local, mapped drive, or UNC share) holding agent package
   zip files named `{package-name}-{version}.zip`.
@@ -224,14 +236,18 @@ Settings. Three kinds of source are supported:
 - **NuGet-package server** — a NuGet feed served over the web, such as JFrog Artifactory or Azure
   Artifacts. You give its **feed address** and, as for a folder, the **package IDs** you want from it.
   A server may need you to sign in (see *Signing In*).
+- **Git repository** — one Git repository (https, SSH, or a local or UNC path) that delivers **one package**,
+  whose versions are the repository's **tags** (for example `v1.2.0`). It uses your own Git installation and
+  sign-in (see *Adding a Git Repository*).
 
 Each source has an **alias**, the short name shown in the app and recorded in a repo's pin.
 
 ## Adding a Source
 
 1. Open Settings (the gear icon) and, above the **Package sources** list, click **Add** and choose
-   **Zip-package folder**, **NuGet-package folder** or **NuGet-package server** from the menu (each item
-   shows its icon and a one-line description; see *Adding a NuGet-Package Server* for the last one).
+   **Zip-package folder**, **NuGet-package folder**, **NuGet-package server** or **Git repository** from the menu
+   (each item shows its icon and a one-line description; see *Adding a NuGet-Package Server* and *Adding a Git
+   Repository* for the last two).
 2. Type an **alias**. It must be unique (letters are compared ignoring case) and cannot be
    changed later, because repo pins refer to it.
 3. For a folder, enter the **location** as a full folder path, or use **Browse** to pick the
@@ -239,18 +255,19 @@ Each source has an **alias**, the short name shown in the app and recorded in a 
    (a web address is a server, which has its own button).
 4. For a NuGet-package folder, enter each package ID and click **Add**; at least one is required.
    A NuGet source (folder or server) also has a **Package signatures** section, where you can require signed
-   packages (see *Requiring Signed Packages*).
+   packages (see *Requiring Signed Packages*). A Git repository has its own fields (see *Adding a Git
+   Repository*).
 5. Messages under each field say what is wrong, and **Save** stays disabled until everything is
    valid. Then save the source, and save the Settings window to keep the change.
 
-![The Settings window with the Add menu open: Zip-package folder, NuGet-package folder and NuGet-package
-server](images/settings-add-menu.png)
+![The Settings window with the Add menu open: the four kinds of source - Zip-package folder, NuGet-package folder,
+NuGet-package server and Git repository](images/settings-add-menu.png)
 
 Each row of the list shows the alias, an icon for the kind of source, the location (hover for
-the full text) and a status. For a folder the status is whether the folder can currently be
-found, checked in the background so an offline network share never freezes Settings. A server
-shows **Not checked**: AgentControl contacts a server only when it is needed - when you select a
-package, check for upgrades or press **Test connection** - never just to draw the list, because
+the full text) and a status. For a folder (or a Git repository given as a local path) the status is whether the
+folder can currently be found, checked in the background so an offline network share never freezes Settings. A
+server or a remote Git repository shows **Not checked**: AgentControl contacts it only when it is needed - when you
+select a package, check for upgrades or press **Test connection** - never just to draw the list, because
 that could mean a wait, or a sign-in, for a window you only opened to look.
 
 ## Adding a NuGet-Package Server
@@ -520,13 +537,138 @@ the same credential. In testing, a second server named by a feed's index receive
 header. So **add only servers you trust**, because the feed you add decides where package downloads
 are requested from. If you do not trust a feed's operator, do not sign in to it.
 
+## Adding a Git Repository
+
+A **Git repository** source delivers **one package** from **one repository**: the package's versions are the
+repository's **tags** that match a pattern you choose, and a version's files are the package layout (see
+*Authoring a Git Package*) as it was at that tag. Use it when your team already keeps its agent files in a Git
+repository: tagging a release publishes it, with no zip or NuGet package to build.
+
+Click **Add** and choose **Git repository**. The dialog is a stack of titled sections - **Source**, **Package**,
+**Versions**, **Location in repo**, **Sign-in** and **Connection test** - and scrolls when the screen is short.
+
+![The lower part of the Add Git Repository dialog: the tag pattern, the optional folder in the repository, the
+sign-in note and a successful Test connection that lists the tags matching the pattern](images/source-editor-git.png)
+
+### Source, package and versions
+
+- **Alias** — as for any source: unique, and fixed once the source is saved, because repo pins refer to it.
+- **Repository URL** — where the repository is. Three forms of address are accepted, plus a local path:
+
+  ```text
+  https:       https://host/org/repo.git
+  SSH:         git@host:org/repo.git
+               ssh://git@host/org/repo.git
+  Local path:  C:\Demo\agent-packages.git   or   \\server\share\agent-packages.git
+  ```
+
+  For a local path you can also use **Browse**. An address with a user name and password or a token in it is
+  refused (AgentControl never stores credentials; see *Signing In to a Git Repository*), and so are other
+  transports: plain `http://`, `git://` and remote helpers such as `ext::` are never used.
+- **Package name** (the **Package** section) — the name this package has in Select Package and on repo cards. Leave
+  it empty to use the alias (when the alias is a valid package name: letters, digits, `.`, `_` and `-`).
+- **Tag pattern** (the **Versions** section) — which tags are versions. The text `{version}` stands for the version
+  and everything else must match the tag **exactly**. The default is `v{version}`. Examples:
+
+  | Pattern | Finds a tag such as | Version |
+  | :--- | :--- | :--- |
+  | `v{version}` (default) | `v1.2.3` | 1.2.3 |
+  | `release/V{version}` | `release/V1.2.3-beta.1` | 1.2.3-beta.1 |
+  | `ver{version}` | `ver1.2.3` | 1.2.3 |
+
+  The version part must be a strict SemVer: three numbers such as `1.2.3`, optionally with a prerelease such as
+  `1.2.3-beta.1`. A tag with build metadata (`v1.2.3+build.5`), with two or four numbers, or without a version is
+  **ignored**. The fixed parts of the pattern are **case-sensitive**: `V{version}` does not find `v1.2.3`, and
+  `v{version}` does not find `V1.2.3`. The box checks the pattern as you type and says what is wrong.
+- **Folder (optional)** (the **Location in repo** section) — if the package layout is not at the top of the
+  repository but in a subfolder (for example `packaging/agents`), enter that folder; the `.github` folders,
+  `release-notes.md` and `AGENTS.md` are then taken from it. Leave it empty for the top of the repository.
+
+**Save** stays disabled until the alias, the address, the package name, the pattern and the folder are all valid.
+
+### Testing the connection
+
+Click **Test connection** to try the source before saving it. AgentControl **lists the repository's tags without
+cloning it** (nothing is downloaded but the list of tags), and shows which tags match your pattern. While it works
+you see progress and a **Cancel test** button. The result says in words what happened:
+
+- **Connection OK** — the repository answered and has tags that match. A summary such as "4 of 17 tags match the
+  pattern" and the newest matching versions (each with its tag name) appear, and the newest version is named.
+- **No matching tags** — the repository answered, but no tag is a version under your pattern (or it has no tags
+  yet). The message shows a few tags the repository **does** have and reminds you to check the prefix and the
+  capitalization of the pattern - the fixed parts are case-sensitive - and that the version part is three numbers
+  such as `1.2.3`.
+- **Sign-in needed** — the repository wants a sign-in that AgentControl could not complete (see *Signing In to a Git
+  Repository*).
+- **Repository not found** — the address is wrong, or your account may not see the repository.
+- **Repository unreachable** — the server could not be reached (for SSH this includes a host key that is not
+  trusted yet; the message says how to fix it).
+- **Timed out** — Git did not answer in time and was stopped.
+- **Git is too old** — AgentControl needs Git 2.29 or newer (see *Git on Your Computer*).
+- **Connection failed** — anything else; the message says what.
+
+If you change the address, the pattern, the folder or the package name, the last result is cleared, because it
+described the old values.
+
+### Signing In to a Git Repository
+
+AgentControl **never stores credentials** for a Git repository and never shows its own sign-in dialog for one; it uses
+the sign-in your own Git setup already provides:
+
+- **https** — your Git credential helper (on Windows normally **Git Credential Manager**). If it needs to ask you,
+  it shows its own window.
+- **SSH** — your own SSH keys, or the keys in your **ssh-agent**. AgentControl runs `ssh` without any prompt, so the
+  key must work **without a passphrase prompt** (load it into ssh-agent first), and the server's **host key must
+  already be trusted**: connect once from a terminal (for example `ssh git@host`) and accept the host key. AgentControl
+  never accepts a host key on your behalf.
+- **Local path** — the file permissions of your own account.
+
+Sign-in may be asked for only when **you** start the action: **Test connection**, **Select Package...**,
+**Change package...** and **Upgrade**. The background checks AgentControl makes (at start, after you change Settings
+and when you add a repo) **never prompt**. When one needs a sign-in, the repo's card shows a red **Sign-in needed**
+chip; sign in with Git as above, then choose the card's "..." menu > **Refresh**.
+
+### Git on Your Computer
+
+A Git repository source runs the `git` program installed on your computer - the same one used for **Git Pull** -
+and needs **Git 2.29 or newer**. With an older Git, **Test connection** and the other actions report **Git is too
+old** and say which version was found. Install a newer Git, or set **Git executable path override** in Settings (see
+*Settings*) to a newer `git`.
+
+### What Git Does and Never Does
+
+AgentControl runs Git with a locked-down command line, because the contents of a repository are not trusted:
+
+- It **lists** tags (no clone), and to apply a version it **fetches just that tag, one commit deep**, and checks out
+  **only the package layout**: the four managed folders (`.github/agents`, `.github/standards`,
+  `.github/templates`, `.github/skills`), `release-notes.md` and `AGENTS.md` (inside the configured folder, if any).
+  Nothing else in the repository is read or written.
+- It **never runs hooks**, never initializes or updates **submodules**, never runs **Git LFS** filters, and never
+  uses **remote helpers** (such as `ext::` or `fd::`). Only https, SSH and a local path are allowed - never plain
+  `http` or `git://`.
+- A **symbolic link or submodule** inside the package layout makes AgentControl refuse that version, and the
+  `.git` folder is **never copied** into your repo.
+- The fetched files are **cached** per repository and commit in AgentControl's own folder under your local
+  application data (the last few commits per repository are kept), so a version already used on this computer is
+  applied again without the network.
+- It does not change your Git configuration, and it does not override Git's safety checks (for example "dubious
+  ownership" is reported, not bypassed).
+
+### Where Git Sources Are Recorded
+
+Like the other kinds, a Git source is saved in your `settings.json` (see *What Is Stored*). A repo's pin records the
+package name, the version, the source alias and the **commit** the tag pointed to - see *Version Immutability and
+Trust* for what happens when a tag is moved.
+
 ## Editing and Removing a Source
 
 Select a row and click **Edit** (the **Edit** and **Remove** buttons sit above the list and act on the
 selected row) to change its location (a server's feed address and insecure-HTTP
-choice) or (for NuGet) its package IDs; the alias is fixed, and a server opens the same dialog as when
+choice, a Git repository's address, tag pattern, folder and package name) or (for NuGet) its package IDs; the alias
+is fixed, and a server opens the same dialog as when
 adding, including the **Sign-in** section with **Forget saved sign-in** (see
-*Remembering a Sign-In*), the signature options and **Test connection**.
+*Remembering a Sign-In*), the signature options and **Test connection**; a Git repository opens the Git dialog
+(see *Adding a Git Repository*).
 **Remove** asks for confirmation. Removing a source is allowed
 even when repos are pinned to it, but the confirmation tells you how many are: those repos will show a
 **Package source problem** chip until a source with that alias is configured again.
@@ -534,20 +676,24 @@ even when repos are pinned to it, but the confirmation tells you how many are: t
 ## What Is Stored
 
 Sources are saved in your per-user `settings.json` (in AgentControl's folder under your user
-profile) as alias, kind, location, package IDs and - for a server - the insecure-HTTP choice and - for a
+profile) as alias, kind, location, package IDs and - for a server - the insecure-HTTP choice, - for a
 NuGet source - whether signed packages are required and the optional publisher fingerprint (a fingerprint is
-public information, not a secret). Each
+public information, not a secret) and - for a Git repository - the tag pattern (`TagPattern`), the optional folder
+in the repository (`Subfolder`) and its one package name. Each
 repo's `.agentcontrol.json` pin records the package name, exact version, **the alias of its
-source** and a content fingerprint of the package that was applied (see *Version Immutability and Trust*).
+source** and a **content identity** of the package that was applied (`ContentIdentity`: `sha256:` and the
+SHA-256 of a zip or NuGet package, or `git-commit:` and the commit of a Git tag; see *Version Immutability and
+Trust*).
 AgentControl never reads or writes a repo's own `nuget.config`, and keeps its NuGet caches
 in its own folder under your user profile.
 
 | Item | Stored? |
 | :--- | :--- |
-| Alias, kind, location, feed address, package IDs, insecure-HTTP choice, signature options | Yes, in `settings.json` |
-| Package name, version, source alias and content fingerprint of a repo | Yes, in the repo's `.agentcontrol.json` |
+| Alias, kind, location, feed address, package IDs, signature options, Git tag pattern and folder | In `settings.json` |
+| Package name, version, source alias and content identity (hash or Git commit) | In the repo's `.agentcontrol.json` |
 | The user name and password or token you type in the sign-in dialog | **Never by AgentControl** - memory only |
 | The same sign-in, when you tick **Remember on this computer** | Only by **your Git credential helper** |
+| A Git repository's sign-in (https credentials, SSH keys) | **Never by AgentControl** - your Git setup holds it |
 | Secrets in the log, the settings, a pin file or the repo | **Never** - the log redacts them |
 
 The log removes passwords, authorization headers (whatever their scheme) and the query strings and user
@@ -575,9 +721,11 @@ name in another place from being installed under your repo's pin.
 A pin names a package, a version and a source, but a version number is only a label: whether the content behind
 `contoso-agents 1.1.0` can change later depends on the source. AgentControl therefore also records a **content
 identity** in the pin - for a zip package, a SHA-256 fingerprint of the zip file; for a NuGet package, the same
-fingerprint of the package file in AgentControl's private cache for that source - and uses it to notice when a version
-you already applied has been **republished** with different content (see *Republished Versions* below). The
-fingerprint detects a changed package; it does not tell you who published it.
+fingerprint of the package file in AgentControl's private cache for that source; for a Git repository, the
+**commit** the version's tag pointed to (`git-commit:` and the commit id) - and uses it to notice when a version
+you already applied has been **republished** with different content, or its Git tag **moved** (see *Republished
+Versions* below). The
+identity detects a changed package; it does not tell you who published it.
 
 - **Zip-package folders and NuGet-package folders** - anyone with write access to the folder can overwrite
   `contoso-agents-1.1.0.zip` or `contoso-agents.1.1.0.nupkg` in place. For a NuGet folder this can also make
@@ -588,13 +736,16 @@ fingerprint detects a changed package; it does not tell you who published it.
 - **NuGet-package servers** - nuget.org, JFrog Artifactory and Azure Artifacts normally refuse to overwrite a
   version that is already published, but some servers can be configured to allow a redeploy, or a delete followed
   by a push of the same version.
-- **Git repositories** (a planned kind of source) - a tag can be moved to a different commit by force.
+- **Git repositories** - a tag is only a name for a commit, and it can be **moved** to a different commit (a forced
+  tag), or deleted and created again. AgentControl records the commit, so a moved tag is noticed: the card shows an
+  amber **Tag moved** chip (see below). Annotated tags are recommended, but they can be moved too.
 
 To keep a version trustworthy:
 
 - Restrict write access to shared package folders to the people who publish.
 - Turn on "no overwrite" (immutable versions) wherever the server offers it.
-- Never reuse a version number: publish a new version instead, even for a small fix.
+- Never reuse a version number: publish a new version instead, even for a small fix. For a Git repository this
+  means **never moving, and never deleting and re-creating, a tag** - tag a new version instead.
 - For NuGet sources, use **Require signed packages** with a pinned publisher fingerprint (see *Requiring Signed
   Packages*), so a package that was not signed by your publisher is refused. A signature does not stop the
   publisher itself from signing different content under the same version, so the rules above still apply.
@@ -602,28 +753,34 @@ To keep a version trustworthy:
 ### Republished Versions
 
 When AgentControl is about to apply or restore the exact version your repo is pinned to and finds that its content
-no longer matches the fingerprint in the pin, it does **not** quietly replace your agent files:
+no longer matches the identity in the pin, it does **not** quietly replace your agent files:
 
 - **Upgrade** and the **restore of missing agent files when you launch** stop, change nothing and tell you in a
   message that the package "now contains different files than the copy this repo was set up with, although the
   version number is the same" and may have been republished. The launch still starts your tool, without the files.
   The right fix is for the package's maintainer to publish the changed files as a **new version**. If you trust the
-  change and want the new content anyway, delete the repo's `.agentcontrol.json` file and select the package again;
-  the new content's fingerprint is then recorded.
-- **Select Package** of that same version asks you to confirm first (a question that names the package and
-  defaults to **No**); only **Yes** replaces the agent files and records the new fingerprint.
-- A pin made before fingerprints existed, or by a source that cannot provide one, has nothing to compare, so you are
-  **never warned** about it: the fingerprint is simply recorded the next time you select a package or upgrade. The
+  change and want the new content anyway, use the card's "..." menu > **Change package...** and choose the same
+  version again, as described next; the new content's identity is then recorded.
+- **Change package...** (and **Select Package...**) of that same version asks you to confirm first (a question that
+  names the package and defaults to **No**); only **Yes** replaces the agent files and records the new identity.
+- **A moved Git tag** is noticed earlier, by the background check: the card shows an amber **Tag moved** chip whose
+  tooltip names the tag and the old and new commit (first seven characters each). AgentControl keeps using the files
+  you already have and applies **nothing** by itself - not even at launch. Clicking
+  the chip (or the card's "..." menu > **Change package...**) opens the Select Package dialog on the current
+  choice; choose the same version again and confirm to accept the new commit. An upgrade to a **newer** version is
+  still possible while a tag is flagged.
+- A pin made before identities existed, or by a source that cannot provide one, has nothing to compare, so you are
+  **never warned** about it: the identity is simply recorded the next time you select a package or upgrade. The
   restore at launch never writes the pin, so it never changes a file in your working tree.
 
-Fingerprints are recorded in the pin file with **schema version 3**. An older AgentControl refuses to read or change
-such a pin (it tells you to update), so keep the same AgentControl version across the people who share a repo's pin.
-Pins made by earlier versions still load.
+Content identities are recorded in the pin file with **schema version 3**. An older AgentControl refuses to read or
+change such a pin (it tells you to update), so keep the same AgentControl version across the people who share a
+repo's pin. Pins made by earlier versions still load.
 
 # Selecting and Upgrading Agent Packages
 
-A repo's card shows exactly one of **Select Package...** or **Upgrade** in its "..." menu,
-never both, depending on whether the repo already has a pin.
+A repo's card shows **Select Package...** in its "..." menu while the repo has no pin, and **Change package...**
+once it has one; **Upgrade to x.y.z** is added when a newer version is available.
 
 ## Selecting an Initial Package
 
@@ -642,7 +799,8 @@ shows **Select Package...**. Choosing it opens a dialog with three columns:
    do, its versions in descending order, defaulting the
    selection to the latest. If the versions cannot be read, the error is shown with **Retry**
    beside it. Reading a server can take several seconds, and a cancelled or failed sign-in can be
-   retried from here without closing the dialog.
+   retried from here without closing the dialog. A Git repository source offers its one package, and its versions
+   are the matching tags; Git may ask for your sign-in here (see *Signing In to a Git Repository*).
 
 ![The Select Package dialog with the source Contoso, the package contoso-agents and the version 1.1.0
 selected](images/select-package.png)
@@ -653,6 +811,21 @@ package, delete the four managed folders if present, extract the new files, ensu
 source), offer the `AGENTS.md` template if applicable (see *AGENTS.md Template Offer* below), then show the
 release notes. While this runs the card shows
 that it is busy and offers **Cancel**.
+
+## Changing the Package or Version of a Pinned Repo
+
+A repo that already has a package shows **Change package...** in the "..." menu's **Agent files** group. It opens the
+same Select Package dialog, **preselected** on the repo's current source, package and version. Use it to:
+
+- **Move to another version or package** (for example an older version, or a package from another source): pick it
+  and confirm; AgentControl runs the same extract-and-pin sequence as an upgrade and nothing more is asked.
+- **Accept changed content of the version you already use**: choose the **same** version again. If its content has
+  not changed there is nothing to confirm; if it has changed (a moved Git tag, a republished zip or NuGet package;
+  the card's **Tag moved** chip leads here too), AgentControl asks you to confirm, with **No** as the default - only
+  **Yes** replaces the agent files and records the new content identity (see *Republished Versions*).
+
+The messages of **Upgrade** and of the restore at launch, when they refuse a changed package, point to this
+action: use the card's "..." menu > **Change package...** and choose the same version again.
 
 ## Upgrading an Already-Pinned Repo
 
@@ -668,7 +841,8 @@ upgrade chip, which you can also click to start the upgrade). Upgrading:
 3. Extracts the new files into those same four folders.
 4. Ensures your `.gitignore` covers the four managed folders (adding them if not already
    covered), so they are far less likely to be committed by accident.
-5. Rewrites the `.agentcontrol.json` pin to the new package name, version and content fingerprint. (If the
+5. Rewrites the `.agentcontrol.json` pin to the new package name, version and content identity (for a Git
+   source, the commit of the version's tag). (If the
    version is the one you are already pinned to but its content changed, the upgrade stops before step 2 - see
    *Republished Versions*.)
 6. Offers the package's `AGENTS.md` template if applicable (see
@@ -736,8 +910,8 @@ Open Settings from the **Settings** button (the gear icon) in the main window's 
 Tools section](images/settings-dark.png)
 
 - **Package sources** — the list of configured package sources, with one **Add** button (a menu of
-  **Zip-package folder**, **NuGet-package folder** and **NuGet-package server**), **Edit** and **Remove** (see
-  *Package Sources*).
+  **Zip-package folder**, **NuGet-package folder**, **NuGet-package server** and **Git repository**), **Edit** and
+  **Remove** (see *Package Sources*).
   A NuGet source can require signed packages (see *Requiring Signed Packages*);
   a source that does not require them is not checked - no checksum or signature
   verification is performed on its packages by AgentControl, so the security and integrity of such a
@@ -750,7 +924,7 @@ Tools section](images/settings-dark.png)
   default.
 - **Tools** — the next three settings:
 - **Git executable path override** — a specific `git` executable to use instead of resolving
-  `git` from the process `PATH`.
+  `git` from the process `PATH` (also used by Git repository sources, which need Git 2.29 or newer).
 - **Agent tool selection** — which agentic CLI tool Launch starts: **GitHub Copilot CLI**,
   **Cursor**, **Claude Code**, or a **Custom command** line that you supply yourself. In a custom command
   line, quote the executable path if it contains spaces, for example
@@ -793,8 +967,8 @@ the focus is back where it was in the main window.
 This section is the reference for teams that build and publish agent packages for
 AgentControl to discover and apply — not for developers who only consume packages through
 the app's own Select Package/Upgrade UI. A package can be published as a **zip file** in a
-zip-package folder, or as a **NuGet package** in a NuGet-package folder; both carry the same
-content (see *Managed Folders* and the sections after it), differing only in
+zip-package folder, as a **NuGet package** in a NuGet-package folder, or as **tags of a Git repository**; all carry
+the same content (see *Managed Folders* and the sections after it), differing only in
 where the content sits and how the name and version are found.
 
 ## Package File Naming
@@ -1024,6 +1198,51 @@ When you pack with an **SDK-style project** instead, use an explicit `PackagePat
 
 Inspect the produced `.nupkg` (it is a zip file) to confirm the `content/.github/...` entries are
 present before publishing.
+
+## Authoring a Git Package
+
+A **Git repository** source needs no file to build or copy: the repository itself is the package, and its tags are
+the versions. Package authors need to know four things:
+
+1. **The layout** is the same as for a zip package, at the **top of the repository** (or in the **subfolder** the
+   consumer configures in the source, for example `packaging/agents`):
+
+   ```text
+   your-agent-repo/
+   ├── release-notes.md
+   ├── AGENTS.md
+   └── .github/
+       ├── agents/
+       ├── standards/
+       ├── templates/
+       └── skills/
+   ```
+
+   Only the four `.github` folders, `release-notes.md` and the optional `AGENTS.md` are used (they behave as
+   described in *Managed Folders*, *Release Notes* and *AGENTS.md Template Offer*); everything else in the repository is
+   ignored and never read. A repository with none of the four folders and no `release-notes.md` at that place is not a
+   package. A symbolic link or a submodule anywhere inside the layout makes AgentControl refuse that version, so do
+   not use them there.
+2. **A release is a tag.** Tag each release with a **SemVer** tag that matches the tag pattern the consumers
+   configured - by default `v{version}`, for example `v1.2.0` or `v1.3.0-beta.1`. The version part must be three
+   numbers with an optional prerelease; tags with build metadata (`+...`) or any other form are ignored. The literal
+   parts of the pattern are case-sensitive, so tell consumers the exact pattern you use (`v{version}`,
+   `release/V{version}`, `ver{version}`, ...). Create and publish the tag:
+
+   ```text
+   git tag -a v1.2.0 -m "Release 1.2.0"
+   git push origin v1.2.0
+   ```
+
+   **Annotated tags** (`-a`) are recommended: they record who tagged the release and when. Consumers see the
+   version as soon as the tag is on the server; there is no index or registration step.
+3. **The package name** is not in the repository: consumers give it when they add the source (it defaults to the
+   source's alias), so one repository delivers exactly one package.
+4. **Never move a tag, and never delete and re-create one.** Publish a new version instead, even for a small fix.
+   AgentControl records the commit a version came from, so a tag moved after it was used is flagged on **every**
+   user's card with a **Tag moved** chip, and each of them has to decide deliberately whether to accept the new
+   content (see *Version Immutability and Trust*). If a published tag was a mistake, publish the correction as the
+   next version and say so in its `release-notes.md`.
 
 ## References
 

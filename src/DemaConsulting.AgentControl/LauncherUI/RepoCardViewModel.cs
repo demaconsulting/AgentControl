@@ -78,12 +78,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     What a user can do about a republished package version that was refused: ask for a new
-    ///     version, or - when the change is trusted - start the repo's package selection over, which
-    ///     records the package's current content.
+    ///     version, or - when the change is trusted - choose the same version again with the card
+    ///     menu's "Change package...", which asks for confirmation and then records the package's
+    ///     current content.
     /// </summary>
     private const string ContentChangeAdvice =
         "Ask the package's maintainer to publish the changed files as a new version. If you trust the change, " +
-        "you can instead delete this repo's .agentcontrol.json file and select the package again.";
+        "you can instead accept it: use the card's \"...\" menu > Change package... and choose the same version again.";
 
     /// <summary>
     ///     The shared recent-repos settings entry this card represents. Held by reference (not
@@ -139,6 +140,23 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     "Launch".
     /// </summary>
     private const int MaxLaunchToolNameLength = 10;
+
+    /// <summary>
+    ///     How many characters of a commit the card shows, the length git itself uses by default.
+    /// </summary>
+    private const int ShortCommitLength = 7;
+
+    /// <summary>
+    ///     The <c>git-commit:</c> identity the pin recorded for the pinned version, read from the
+    ///     pin file; <see langword="null"/> when none.
+    /// </summary>
+    private string? _pinnedContentIdentity;
+
+    /// <summary>
+    ///     The commit the pinned tag points to now when it differs from the recorded one, else
+    ///     <see langword="null"/>.
+    /// </summary>
+    private string? _movedTagCommit;
 
     /// <summary>
     ///     Cancels the package operation currently running for this card (the one that holds
@@ -277,8 +295,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
         PullCommand = new AsyncRelayCommand(PullAsync, ReportUnexpectedFailure, () => CanPull && !IsMissing && !IsBusy);
         UpgradeCommand = new AsyncRelayCommand(
             UpgradeAsync, ReportUnexpectedFailure, () => IsUpgradeAvailable && !IsMissing && !IsBusy);
-        SelectPackageCommand = new RelayCommand(
-            SelectPackage, () => IsPackageSelectionNeeded && !IsMissing && !IsBusy);
+        // Offered for a repo without a package ("Select Package...") and for a pinned one ("Change
+        // package..."): the user's way to choose another package or version and to accept content
+        // that changed behind a version they already use
+        SelectPackageCommand = new RelayCommand(SelectPackage, () => !IsMissing && !IsBusy);
         // Refresh stays available for a repo whose folder is missing: it is the only in-app way to
         // re-check once the folder (a remounted drive, a restored clone) is back
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, ReportUnexpectedFailure, () => !IsBusy);
@@ -795,6 +815,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public RepoCardStatus Status => this switch
     {
         { IsMissing: true } or { HasSourceProblem: true } or { LastActionFailed: true } => RepoCardStatus.Problem,
+        { IsPinnedTagMoved: true } => RepoCardStatus.TagMoved,
         { IsUpgradeAvailable: true } => RepoCardStatus.UpgradeAvailable,
         { IsPackageSelectionNeeded: true } => RepoCardStatus.NoPackage,
         { IsCheckingUpgrade: true } => RepoCardStatus.Checking,
@@ -804,11 +825,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets a value indicating whether the card menu's "Agent files" group has anything to offer:
-    ///     "Select Package..." (no package pinned yet) or "Upgrade to ..." (a newer version exists).
-    ///     When neither applies the group, its header and its separator are hidden rather than shown
-    ///     empty.
+    ///     "Select Package..." (no package pinned yet), "Change package..." (a package is pinned) or
+    ///     "Upgrade to ..." (a newer version exists). A repo whose folder is missing has none, so the
+    ///     group, its header and its separator are hidden rather than shown empty.
     /// </summary>
-    public bool HasAgentFileActions => IsPackageSelectionNeeded || IsUpgradeAvailable;
+    public bool HasAgentFileActions => IsPackageSelectionNeeded || IsUpgradeAvailable || HasPinnedPackage;
 
     /// <summary>
     ///     Gets the status in words, for the accent bar's accessible name so the status is never
@@ -821,6 +842,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RepoCardStatus.Problem => "Needs attention",
         RepoCardStatus.NoPackage => "No agent package",
         RepoCardStatus.Unknown => "Update check failed",
+        RepoCardStatus.TagMoved => "Tag moved",
         _ => "Checking for updates"
     };
 
@@ -834,6 +856,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RepoCardStatus.NoPackage => "No agent package is pinned for this repo.",
         RepoCardStatus.Checking => "Checking whether a newer agent package version is available...",
         RepoCardStatus.Unknown => "Update check failed: the package source could not be read, so it is not known whether a newer agent package version is available. Use Refresh in the card menu to try again.",
+        RepoCardStatus.TagMoved => PinnedTagMovedTooltip,
         _ when IsMissing => "Needs attention: this repo's folder could not be found on disk. Use Check again in the card menu once it is back.",
         _ when HasSourceProblem => $"Needs attention: {SourceProblem}",
         _ => "Needs attention: the last action failed."
@@ -1110,6 +1133,73 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public bool ShowUpToDateCue => HasPinnedPackage && Status == RepoCardStatus.UpToDate;
 
     /// <summary>
+    ///     Gets the commit a Git source's pinned version was set up from, as recorded in the pin
+    ///     (<c>git-commit:</c> identity), or <see langword="null"/> when the pin is not from a Git
+    ///     source or recorded none. Read from the pin file by <see cref="RefreshPin"/>; not part of
+    ///     the recent-repos settings.
+    /// </summary>
+    private string? PinnedContentIdentity => _pinnedContentIdentity;
+
+    /// <summary>
+    ///     Gets the commit of the pinned Git version shortened to seven characters, or
+    ///     <see langword="null"/> when the pin recorded none.
+    /// </summary>
+    public string? PinnedCommitShort
+    {
+        get
+        {
+            const string prefix = PackageContentIdentity.GitCommitPrefix;
+            var identity = PinnedContentIdentity?.Trim();
+            if (identity is null || !identity.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var commit = identity[prefix.Length..];
+            return commit.Length >= ShortCommitLength ? commit[..ShortCommitLength].ToLowerInvariant() : null;
+        }
+    }
+
+    /// <summary>
+    ///     Gets the tag the pinned version has in its Git source (the source's tag pattern applied to
+    ///     the pinned version), or <see langword="null"/> when the pin is not from a configured Git
+    ///     source.
+    /// </summary>
+    public string? PinnedTagName
+    {
+        get
+        {
+            if (PinnedSourceDefinition is not { Type: PackageSourceType.Git } source ||
+                !PackageVersion.TryParseStrict(PinnedPackageVersion, out var version) || version is null ||
+                !GitTagPattern.TryCreate(source.TagPattern, out var pattern, out _) || pattern is null)
+            {
+                return null;
+            }
+
+            return pattern.Format(version);
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether the tag of the pinned Git version now points to a
+    ///     different commit than the one the repo was set up from (a "moved tag"). Set by the
+    ///     background upgrade check; it never applies anything by itself.
+    /// </summary>
+    public bool IsPinnedTagMoved => _movedTagCommit is not null;
+
+    /// <summary>
+    ///     Gets the tooltip of the moved-tag chip: which tag moved, from which commit to which, and
+    ///     what the user can do, or an empty string when the tag has not moved.
+    /// </summary>
+    public string PinnedTagMovedTooltip => _movedTagCommit is null
+        ? string.Empty
+        : $"The tag {PinnedTagName ?? PinnedPackageVersion} of source '{PinnedSource}' now points to a different commit " +
+          $"({PinnedCommitShort ?? "unknown"} -> {_movedTagCommit[..Math.Min(ShortCommitLength, _movedTagCommit.Length)]}) " +
+          "than the one this repo's agent files came from. AgentControl keeps using the files you have and " +
+          "applies nothing by itself. If you trust the change, accept it with the \"...\" menu > Change package... " +
+          "and choose this version again; otherwise ask the maintainer to publish a new version instead of moving a tag.";
+
+    /// <summary>
     ///     Gets the part of <see cref="RepoPath"/> before its last directory separator (for example
     ///     <c>C:\work\clients</c>), or an empty string when the path has no separator. The card
     ///     shows it with an end ellipsis next to <see cref="RepoPathLeaf"/>, which is never
@@ -1213,9 +1303,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Gets the tooltip of the agent package chip: which package and version the agent files
     ///     came from and from which source (by alias and kind).
     /// </summary>
-    public string PackageChipTooltip =>
-        $"Agent files: {PackageChipText} from source '{PinnedSource ?? RepoPin.LegacySourceAlias}' " +
-        $"({PackageSourceIcons.GetShortName(PinnedSourceDefinition)}).";
+    public string PackageChipTooltip
+    {
+        get
+        {
+            var tooltip = $"Agent files: {PackageChipText} from source '{PinnedSource ?? RepoPin.LegacySourceAlias}' " +
+                          $"({PackageSourceIcons.GetShortName(PinnedSourceDefinition)})";
+
+            // A Git source is told apart by the tag and the commit the files came from
+            var tag = PinnedTagName;
+            var commit = PinnedCommitShort;
+            if (tag is not null)
+            {
+                tooltip += commit is null ? $", tag {tag}" : $", tag {tag} @ {commit}";
+            }
+
+            return tooltip + ".";
+        }
+    }
 
     /// <summary>
     ///     Gets the label of the Launch button: <c>Launch</c> followed by the configured agent
@@ -1362,7 +1467,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         // A Git source follows the same rule: only work the user started may let git show its
         // credential UI; the background check never prompts and reports "sign-in needed" instead
         var git = new GitSourceOptions(
-            () => ResolveGitExecutablePath(settings), GetGitCacheRoot(_startupOptions), Interactive: allowPrompt);
+            () => ResolveGitExecutablePath(settings), GetGitCacheRoot(_startupOptions), Interactive: allowPrompt,
+            EnforceMinimumGitVersion: true);
         return PackageSourceRegistry.Create(
             settings.GetEffectiveSources(), GetNuGetRootBase(_startupOptions), credentials, git);
     }
@@ -1448,6 +1554,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowNoPackageChip));
         OnPropertyChanged(nameof(PackageChipText));
         OnPropertyChanged(nameof(PackageChipTooltip));
+        OnPropertyChanged(nameof(PinnedTagName));
+        OnPropertyChanged(nameof(PinnedCommitShort));
+        OnPropertyChanged(nameof(PinnedTagMovedTooltip));
         OnPropertyChanged(nameof(PinnedSourceIcon));
         OnPropertyChanged(nameof(PinnedSourceLabel));
         OnPropertyChanged(nameof(RequiresSignature));
@@ -2993,13 +3102,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     private void RefreshPin()
     {
-        var previous = (PinnedPackageName, PinnedPackageVersion, PinnedSource);
+        var previous = (PinnedPackageName, PinnedPackageVersion, PinnedSource, _pinnedContentIdentity);
         try
         {
             var pin = RepoPinStore.Load(RepoPath);
             PinnedPackageName = pin?.PackageName;
             PinnedPackageVersion = pin?.Version;
             PinnedSource = pin?.Source;
+            _pinnedContentIdentity = pin?.ContentIdentity;
         }
         catch (InvalidOperationException ex)
         {
@@ -3011,16 +3121,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
             PinnedPackageName = null;
             PinnedPackageVersion = null;
             PinnedSource = null;
+            _pinnedContentIdentity = null;
             StatusMessage = $"Failed to read pin file: {ex.Message}";
         }
 
         // A different pin makes everything learned about upgrades for the old one meaningless: drop
         // it and ignore any check still running for it (the caller starts a new one)
-        if ((PinnedPackageName, PinnedPackageVersion, PinnedSource) != previous)
+        if ((PinnedPackageName, PinnedPackageVersion, PinnedSource, _pinnedContentIdentity) != previous)
         {
             InvalidateUpgradeCheck();
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
+            SetMovedTag(null);
+            RaisePackageChipChanged();
         }
     }
 
@@ -3145,6 +3258,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             IsUpgradeStatusUnknown = false;
             IsCheckingUpgrade = false;
+            SetMovedTag(null);
             return;
         }
 
@@ -3162,6 +3276,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 LatestAvailableVersion = check.Latest?.Version.ToString();
                 IsUpgradeAvailable = check.IsNewerAvailable;
                 IsUpgradeStatusUnknown = false;
+
+                // A Git tag that now names another commit is shown, never applied
+                SetMovedTag(FindMovedTagCommit(check));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
@@ -3184,6 +3301,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
                         $"{SecretRedactor.SafeMessage(ex)} Use the card's \"...\" menu > Refresh to sign in.",
                         needsSignIn: true);
                 }
+                else if (ex is GitRemoteException { Kind: GitFailureKind.GitTooOld })
+                {
+                    // Nothing can be checked until Git is updated: say so on the card
+                    SetSourceProblem(SecretRedactor.SafeMessage(ex), needsSignIn: false);
+                }
             }
         }
         finally
@@ -3193,6 +3315,49 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 IsCheckingUpgrade = false;
             }
         }
+    }
+
+    /// <summary>
+    ///     Sets the commit a moved tag now points to and notifies everything derived from it.
+    /// </summary>
+    /// <param name="commit">The commit the pinned tag points to now, or <see langword="null"/>
+    ///     when the tag has not moved (or the question does not apply).</param>
+    private void SetMovedTag(string? commit)
+    {
+        if (string.Equals(_movedTagCommit, commit, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _movedTagCommit = commit;
+        OnPropertyChanged(nameof(IsPinnedTagMoved));
+        OnPropertyChanged(nameof(PinnedTagMovedTooltip));
+        RaiseStatusChanged();
+    }
+
+    /// <summary>
+    ///     Finds out whether the tag of the pinned version of a Git source now points to another
+    ///     commit than the one the pin recorded.
+    /// </summary>
+    /// <param name="check">The result of the upgrade check, which carries the listing's entry for
+    ///     the pinned version.</param>
+    /// <returns>The commit the tag points to now when it differs from the recorded commit;
+    ///     <see langword="null"/> when the source is not a Git source, the pin recorded no commit
+    ///     (an older pin adopts one the next time a package is applied), the listing does not
+    ///     show the pinned version, or the commit is the same.</returns>
+    private string? FindMovedTagCommit(UpgradeCheck check)
+    {
+        var revision = check.Pinned?.Revision;
+        if (PinnedSourceDefinition is not { Type: PackageSourceType.Git } ||
+            revision is null || !GitRemoteClient.ObjectIdPattern().IsMatch(revision))
+        {
+            return null;
+        }
+
+        return PackageContentIdentity.Compare(PinnedContentIdentity, PackageContentIdentity.FromGitCommit(revision)) ==
+               ContentIdentityComparison.Changed
+            ? revision
+            : null;
     }
 
     /// <summary>
@@ -3343,10 +3508,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <param name="settings">The current application settings.</param>
     /// <returns>The git executable path or command name to invoke.</returns>
-    private string ResolveGitExecutablePath(AppSettings settings) =>
+    private string ResolveGitExecutablePath(AppSettings settings) => ResolveGitExecutablePath(settings, _startupOptions);
+
+    /// <summary>
+    ///     Resolves the git executable path to use: the per-user setting if configured,
+    ///     otherwise the startup-time test override, otherwise <c>"git"</c> (PATH resolution).
+    /// </summary>
+    /// <param name="settings">The application settings.</param>
+    /// <param name="startupOptions">The startup overrides, or <see langword="null"/>.</param>
+    /// <returns>The git executable path or command name to invoke.</returns>
+    internal static string ResolveGitExecutablePath(AppSettings settings, Startup.StartupOptions? startupOptions) =>
         !string.IsNullOrWhiteSpace(settings.GitExecutablePath)
             ? settings.GitExecutablePath
-            : _startupOptions?.GitExecutableOverride ?? "git";
+            : startupOptions?.GitExecutableOverride ?? "git";
 
     /// <summary>
     ///     Resolves the agent tool command line to launch: a well-known command for the built-in

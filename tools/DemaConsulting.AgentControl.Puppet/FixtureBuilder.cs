@@ -41,9 +41,19 @@ internal enum PackageFormats
     Nupkg,
 
     /// <summary>
-    ///     Both, side by side.
+    ///     Zip and nupkg, side by side.
     /// </summary>
     Both,
+
+    /// <summary>
+    ///     Only a local bare git repository with one tag per version of the first sample package.
+    /// </summary>
+    Git,
+
+    /// <summary>
+    ///     Zip, nupkg and git.
+    /// </summary>
+    All,
 }
 
 /// <summary>
@@ -65,13 +75,13 @@ internal sealed record FixtureOptions(string Directory, PackageFormats Formats, 
     /// <summary>
     ///     Reads the options of <c>fixture</c>.
     /// </summary>
-    /// <param name="parsed">The parsed command: the folder, <c>--packages zip|nupkg|both</c>, <c>--repo</c>, <c>--pin name@version</c>.</param>
+    /// <param name="parsed">The parsed command: the folder, <c>--packages zip|nupkg|both|git|all</c>, <c>--repo</c>, <c>--pin name@version</c>.</param>
     /// <returns>The options; <c>--pin</c> implies <c>--repo</c>.</returns>
     /// <exception cref="PuppetException">Thrown with a usage error when the folder is missing or an option is invalid.</exception>
     internal static FixtureOptions Parse(ParsedCommand parsed)
     {
         ArgumentNullException.ThrowIfNull(parsed);
-        const string usage = "agentcontrol-puppet fixture <dir> [--packages zip|nupkg|both] [--repo] [--pin <name>@<version>]";
+        const string usage = "agentcontrol-puppet fixture <dir> [--packages zip|nupkg|both|git|all] [--repo] [--pin <name>@<version>]";
         if (parsed.Positional.Count < 1 || string.IsNullOrWhiteSpace(parsed.Positional[0]))
         {
             throw PuppetException.Usage(usage);
@@ -83,7 +93,9 @@ internal sealed record FixtureOptions(string Directory, PackageFormats Formats, 
             "zip" => PackageFormats.Zip,
             "nupkg" => PackageFormats.Nupkg,
             "both" => PackageFormats.Both,
-            _ => throw PuppetException.Usage("--packages must be zip, nupkg or both."),
+            "git" => PackageFormats.Git,
+            "all" => PackageFormats.All,
+            _ => throw PuppetException.Usage("--packages must be zip, nupkg, both, git or all."),
         };
 
         PackagePin? pin = null;
@@ -126,13 +138,15 @@ internal sealed record FixtureOptions(string Directory, PackageFormats Formats, 
 /// <param name="RepoDirectory">The git repository, or <see langword="null"/> when none was asked for.</param>
 /// <param name="ConfigDirectory">The folder to pass to <c>launch --config-dir</c>.</param>
 /// <param name="SettingsFile">The <c>settings.json</c> inside the config folder.</param>
+/// <param name="GitSourceDirectory">The bare git repository of the Git package source, or <see langword="null"/> when none was asked for.</param>
 internal sealed record FixtureResult(
     string Root,
     string PackagesDirectory,
     IReadOnlyList<string> Packages,
     string? RepoDirectory,
     string ConfigDirectory,
-    string SettingsFile);
+    string SettingsFile,
+    string? GitSourceDirectory = null);
 
 /// <summary>
 ///     Runs git for the fixture; replaceable so the fixture can be unit-tested without git.
@@ -168,6 +182,11 @@ internal sealed class ProcessGitRunner : IGitRunner
         {
             startInfo.ArgumentList.Add(argument);
         }
+
+        // Hermetic and offline: neither the user's nor the system's git configuration applies, and git never prompts
+        startInfo.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+        startInfo.Environment["GIT_CONFIG_GLOBAL"] = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
+        startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
 
         try
         {
@@ -219,6 +238,27 @@ internal static partial class FixtureBuilder
     internal const string NuGetSourceAlias = "NuGet";
 
     /// <summary>
+    ///     The alias of the Git package source the fixture configures.
+    /// </summary>
+    internal const string GitSourceAlias = "Git";
+
+    /// <summary>
+    ///     The folder of the bare repository of the Git package source, inside the fixture folder.
+    /// </summary>
+    internal const string GitSourceFolderName = "git-source.git";
+
+    /// <summary>
+    ///     The tag pattern of the Git package source: the tag <c>release/1.0.0</c> is version 1.0.0.
+    /// </summary>
+    internal const string GitTagPatternText = "release/{version}";
+
+    /// <summary>
+    ///     The version of the Git package that gets an annotated tag; the others get lightweight tags, so both kinds are
+    ///     exercised.
+    /// </summary>
+    internal const string AnnotatedGitVersion = "1.1.0";
+
+    /// <summary>
     ///     The sample packages written to the package source: name and version.
     /// </summary>
     internal static readonly IReadOnlyList<(string Name, string Version)> SamplePackages =
@@ -226,6 +266,22 @@ internal static partial class FixtureBuilder
         ("contoso-agents", "1.0.0"),
         ("contoso-agents", "1.1.0"),
         ("fabrikam-agents", "2.0.0"),
+    ];
+
+    /// <summary>
+    ///     The package the Git source delivers: the first sample package (one commit and tag per version).
+    /// </summary>
+    internal static readonly string GitPackageName = SamplePackages[0].Name;
+
+    /// <summary>
+    ///     The <c>git -c</c> settings that fix the identity and switch signing off, so no user configuration is needed.
+    /// </summary>
+    private static readonly string[] GitIdentity =
+    [
+        "-c", "user.name=AgentControl Puppet",
+        "-c", "user.email=puppet@agentcontrol.invalid",
+        "-c", "commit.gpgsign=false",
+        "-c", "tag.gpgsign=false",
     ];
 
     /// <summary>
@@ -272,15 +328,22 @@ internal static partial class FixtureBuilder
         var packages = new List<string>();
         foreach (var (name, version) in SamplePackages)
         {
-            if (options.Formats is PackageFormats.Zip or PackageFormats.Both)
+            if (HasZip(options.Formats))
             {
                 packages.Add(WriteZip(packagesDirectory, name, version));
             }
 
-            if (options.Formats is PackageFormats.Nupkg or PackageFormats.Both)
+            if (HasNupkg(options.Formats))
             {
                 packages.Add(WriteNupkg(packagesDirectory, name, version));
             }
+        }
+
+        string? gitSourceDirectory = null;
+        if (HasGit(options.Formats))
+        {
+            gitSourceDirectory = Path.Combine(options.Directory, GitSourceFolderName);
+            CreateGitSource(options.Directory, gitSourceDirectory, git);
         }
 
         string? repoDirectory = null;
@@ -291,18 +354,46 @@ internal static partial class FixtureBuilder
         }
 
         var settingsFile = Path.Combine(configDirectory, "settings.json");
-        File.WriteAllText(settingsFile, SettingsJson(packagesDirectory, repoDirectory, options.Pin, options.Formats));
-        return new FixtureResult(options.Directory, packagesDirectory, packages, repoDirectory, configDirectory, settingsFile);
+        File.WriteAllText(settingsFile, SettingsJson(packagesDirectory, repoDirectory, options.Pin, options.Formats, gitSourceDirectory));
+        return new FixtureResult(options.Directory, packagesDirectory, packages, repoDirectory, configDirectory, settingsFile, gitSourceDirectory);
     }
 
     /// <summary>
+    ///     Tests whether the formats include zip packages.
+    /// </summary>
+    /// <param name="formats">The package formats.</param>
+    /// <returns><see langword="true"/> when zip packages are written.</returns>
+    internal static bool HasZip(PackageFormats formats) => formats is PackageFormats.Zip or PackageFormats.Both or PackageFormats.All;
+
+    /// <summary>
+    ///     Tests whether the formats include nupkg packages.
+    /// </summary>
+    /// <param name="formats">The package formats.</param>
+    /// <returns><see langword="true"/> when nupkg packages are written.</returns>
+    internal static bool HasNupkg(PackageFormats formats) => formats is PackageFormats.Nupkg or PackageFormats.Both or PackageFormats.All;
+
+    /// <summary>
+    ///     Tests whether the formats include the git package source.
+    /// </summary>
+    /// <param name="formats">The package formats.</param>
+    /// <returns><see langword="true"/> when the bare git repository is created.</returns>
+    internal static bool HasGit(PackageFormats formats) => formats is PackageFormats.Git or PackageFormats.All;
+
+    /// <summary>
     ///     Gets the alias of the package source a pin of the fixture names: the zip source when zip packages exist,
-    ///     otherwise the NuGet source.
+    ///     otherwise the NuGet source, otherwise the Git source.
     /// </summary>
     /// <param name="formats">The package formats of the fixture.</param>
     /// <returns>The alias.</returns>
-    internal static string PinSourceAlias(PackageFormats formats) =>
-        formats == PackageFormats.Nupkg ? NuGetSourceAlias : ZipSourceAlias;
+    internal static string PinSourceAlias(PackageFormats formats)
+    {
+        if (HasZip(formats))
+        {
+            return ZipSourceAlias;
+        }
+
+        return HasNupkg(formats) ? NuGetSourceAlias : GitSourceAlias;
+    }
 
     /// <summary>
     ///     Builds the content of <c>settings.json</c>: the package sources and the recent-repos list.
@@ -311,22 +402,24 @@ internal static partial class FixtureBuilder
     ///     Only <c>Sources</c> and <c>RecentRepos</c> are written: every other setting keeps its default, and
     ///     unknown settings of a newer version are never emitted, so the file loads in any version of the application.
     ///     Zip packages are offered by a <c>Zip</c> source and <c>.nupkg</c> packages by a <c>NuGet</c> folder source
-    ///     (which, as NuGet cannot list a folder cheaply, names the sample package IDs it offers).
+    ///     (which, as NuGet cannot list a folder cheaply, names the sample package IDs it offers). The bare git
+    ///     repository is a <c>Git</c> source delivering the first sample package from its <c>release/{version}</c> tags.
     /// </remarks>
     /// <param name="packagesDirectory">The package source folder.</param>
     /// <param name="repoDirectory">The repository folder, or <see langword="null"/>.</param>
     /// <param name="pin">The pin, or <see langword="null"/>.</param>
     /// <param name="formats">The package formats of the fixture.</param>
+    /// <param name="gitSourceDirectory">The bare git repository of the Git source, or <see langword="null"/> for none.</param>
     /// <returns>The JSON text.</returns>
-    internal static string SettingsJson(string packagesDirectory, string? repoDirectory, PackagePin? pin, PackageFormats formats)
+    internal static string SettingsJson(string packagesDirectory, string? repoDirectory, PackagePin? pin, PackageFormats formats, string? gitSourceDirectory = null)
     {
         var sources = new List<object>();
-        if (formats is PackageFormats.Zip or PackageFormats.Both)
+        if (HasZip(formats))
         {
             sources.Add(new { Alias = ZipSourceAlias, Type = "Zip", Location = packagesDirectory });
         }
 
-        if (formats is PackageFormats.Nupkg or PackageFormats.Both)
+        if (HasNupkg(formats))
         {
             sources.Add(new
             {
@@ -334,6 +427,18 @@ internal static partial class FixtureBuilder
                 Type = "NuGet",
                 Location = packagesDirectory,
                 PackageIds = SamplePackages.Select(package => package.Name).Distinct().ToArray(),
+            });
+        }
+
+        if (gitSourceDirectory is not null)
+        {
+            sources.Add(new
+            {
+                Alias = GitSourceAlias,
+                Type = "Git",
+                Location = gitSourceDirectory,
+                TagPattern = GitTagPatternText,
+                PackageIds = new[] { GitPackageName },
             });
         }
 
@@ -472,6 +577,68 @@ internal static partial class FixtureBuilder
 
         git.Run(directory, ["init", "-b", "main"]);
         git.Run(directory, ["add", "-A"]);
-        git.Run(directory, ["-c", "user.name=AgentControl Puppet", "-c", "user.email=puppet@agentcontrol.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Initial commit"]);
+        git.Run(directory, [.. GitIdentity, "commit", "-m", "Initial commit"]);
+    }
+
+    /// <summary>
+    ///     Creates the bare repository of the Git source: one commit per version of <see cref="GitPackageName"/>, with the
+    ///     package layout at the repository root, tagged <c>release/{version}</c> (the <see cref="AnnotatedGitVersion"/>
+    ///     tag is annotated, the others are lightweight). Everything is local; nothing is fetched or pushed over a network.
+    /// </summary>
+    /// <param name="root">The fixture folder.</param>
+    /// <param name="bareDirectory">The bare repository to create.</param>
+    /// <param name="git">Runs git.</param>
+    private static void CreateGitSource(string root, string bareDirectory, IGitRunner git)
+    {
+        var work = Path.Combine(root, "git-source-work");
+        Directory.CreateDirectory(work);
+        try
+        {
+            git.Run(work, ["init", "-b", "main"]);
+            foreach (var (name, version) in SamplePackages.Where(package => package.Name == GitPackageName))
+            {
+                foreach (var (file, content) in PackageFiles(name, version))
+                {
+                    var path = Path.Combine(work, file.Replace('/', Path.DirectorySeparatorChar));
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    File.WriteAllText(path, content);
+                }
+
+                var tag = GitTagPatternText.Replace("{version}", version, StringComparison.Ordinal);
+                git.Run(work, ["add", "-A"]);
+                git.Run(work, [.. GitIdentity, "commit", "-m", $"{name} {version}"]);
+                git.Run(
+                    work,
+                    version == AnnotatedGitVersion
+                        ? [.. GitIdentity, "tag", "-a", tag, "-m", $"{name} {version}"]
+                        : ["tag", tag]);
+            }
+
+            git.Run(root, ["init", "--bare", "-b", "main", bareDirectory]);
+            git.Run(work, ["push", "--quiet", bareDirectory, "main", "--tags"]);
+        }
+        finally
+        {
+            DeleteDirectory(work);
+        }
+    }
+
+    /// <summary>
+    ///     Deletes a folder tree, clearing the read-only attribute git puts on its object files first.
+    /// </summary>
+    /// <param name="directory">The folder.</param>
+    private static void DeleteDirectory(string directory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+        {
+            File.SetAttributes(file, FileAttributes.Normal);
+        }
+
+        Directory.Delete(directory, recursive: true);
     }
 }

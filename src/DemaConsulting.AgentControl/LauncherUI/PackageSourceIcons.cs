@@ -37,7 +37,8 @@ internal static class PackageSourceIcons
 {
     /// <summary>
     ///     Gets the icon for a source: a zipped folder for a zip-package folder, a package for a
-    ///     NuGet-package folder and a server for a NuGet-package server.
+    ///     NuGet-package folder, a server for a NuGet-package server and the Git logo for a Git
+    ///     repository.
     /// </summary>
     /// <param name="definition">The source, or <see langword="null"/> when its definition is not
     ///     known (for example a pin naming a source that is not configured).</param>
@@ -47,6 +48,7 @@ internal static class PackageSourceIcons
     {
         null => MaterialIconKind.HelpCircleOutline,
         { Type: PackageSourceType.Zip } => MaterialIconKind.FolderZip,
+        { Type: PackageSourceType.Git } => MaterialIconKind.Git,
         { Type: PackageSourceType.NuGet, LocationKind: PackageSourceLocationKind.Server } => MaterialIconKind.ServerNetwork,
         _ => MaterialIconKind.PackageVariant
     };
@@ -61,6 +63,7 @@ internal static class PackageSourceIcons
     {
         null => "Unknown source",
         { Type: PackageSourceType.Zip } => "Zip-package folder",
+        { Type: PackageSourceType.Git } => "Git repository",
         { Type: PackageSourceType.NuGet, LocationKind: PackageSourceLocationKind.Server } => "NuGet-package server",
         _ => "NuGet-package folder"
     };
@@ -76,6 +79,7 @@ internal static class PackageSourceIcons
     {
         null => "source not configured",
         { Type: PackageSourceType.Zip } => "zip folder",
+        { Type: PackageSourceType.Git } => "git repository",
         { Type: PackageSourceType.NuGet, LocationKind: PackageSourceLocationKind.Server } => "NuGet server",
         _ => "NuGet folder"
     };

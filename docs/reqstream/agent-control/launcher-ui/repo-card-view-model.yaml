@@ -218,18 +218,34 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-SelectPackage
         title: >-
-          The RepoCardViewModel class shall offer package selection only when the repo has no
+          The RepoCardViewModel class shall offer package selection for a repo that has no
           existing pin and is not missing, and shall require a configured package source
           before requesting selection.
         justification: |
           Selecting an initial package only makes sense for a repo that is present on disk and
-          not already pinned; without a configured source there is nothing to select from.
+          not yet pinned; without a configured source there is nothing to select from. A repo
+          that already has a pin is offered the same selection as Change package, which has its
+          own requirement.
         tests:
           - RepoCardViewModel_IsPackageSelectionNeeded_ReflectsPinState
-          - RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CannotExecute
           - RepoCardViewModel_SelectPackageCommand_RepoIsMissing_CannotExecute
           - RepoCardViewModel_SelectPackageCommand_NoPackageSourceConfigured_RaisesErrorOccurredOnly
           - RepoCardViewModel_SelectPackageCommand_SourceConfigured_RaisesSelectPackageRequestedWithSourceAlias
+
+      - id: AgentControl-RepoCardViewModel-ChangePackage
+        title: >-
+          The RepoCardViewModel class shall offer package selection, as Change package, for a
+          repo that already has a pin and is not missing, shall count it among the actions of the
+          card menu's agent files group, and shall request the selection when the user chooses it,
+          while the repo still being pinned.
+        justification: |
+          A pinned repo must be able to move to another package or version, and choosing the version
+          it already uses again is the deliberate way to accept content that changed behind it;
+          requesting the selection must not touch the pin, so nothing changes unless the user
+          confirms a choice.
+        tests:
+          - RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CanExecuteAsChangePackage
+          - RepoCardViewModel_SelectPackageCommand_PinnedRepo_RaisesSelectPackageRequested
 
       - id: AgentControl-RepoCardViewModel-ApplySelectedPackage
         title: >-
@@ -809,11 +825,14 @@ sections:
           The RepoCardViewModel class shall, when an upgrade or the restore of missing agent
           files before launch finds that the version the repo is pinned to now has content that
           differs from the recorded identity, apply nothing, leave the pin as it was and tell the
-          user in plain language that the package may have been republished, without showing a
-          hash.
+          user in plain language that the package may have been republished and that the card
+          menu's Change package action is how to accept it if the change is trusted, without
+          showing a hash and without telling the user to edit or delete the pin file.
         justification: |
           Restoring or upgrading to a changed copy of a version would silently change the
-          instructions the agent follows; the user must learn about it instead.
+          instructions the agent follows; the user must learn about it instead, and must be shown
+          the safe, deliberate way to accept it (a confirmation) rather than a way that discards the
+          repo's pin.
         tests:
           - RepoCardViewModel_UpgradeCommand_SameVersionRepublished_RefusesWithoutChangingRepoOrPin
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SameVersionRepublished_RefusesWithoutExtractingOrWritingPin
@@ -821,16 +840,22 @@ sections:
       - id: AgentControl-RepoCardViewModel-ConfirmChangedContent
         title: >-
           The RepoCardViewModel class shall, when the user selects the version the repo is pinned
-          to and that version's content differs from the recorded identity, change nothing and
+          to and that version's content differs from the recorded identity (a package republished
+          with other files, or a Git tag that now points to another commit), change nothing and
           request the user's confirmation, shall apply the package and record its new identity
-          once the user has confirmed, and shall refuse the change when there is nobody to ask.
+          once the user has confirmed, and shall refuse the change, pointing to Change package,
+          when there is nobody to ask.
         justification: |
-          Selecting the version again is the deliberate way to accept a republished package; the
-          decision belongs to the user, and a change that cannot be put to them must not go ahead.
+          Selecting the version again with Change package is the deliberate way to accept a
+          republished package or a moved tag; the decision belongs to the user, and a change that
+          cannot be put to them must not go ahead.
         tests:
           - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing
           - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedAndAccepted_AppliesAndRecordsNewIdentity
           - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedWithoutSubscriber_IsRefused
+          - RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommit_AsksAndChangesNothing
+          - RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommitAccepted_AppliesAndRecordsCommit
+          - RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommitWithoutSubscriber_AdvisesChangePackage
 
       - id: AgentControl-RepoCardViewModel-AdoptMissingIdentity
         title: >-
@@ -872,3 +897,52 @@ sections:
         tests:
           - RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork
           - RepoCardViewModel_GetGitCacheRoot_UsesConfigDirectoryWhenGiven
+
+      # ---- Git source on the card ----
+      - id: AgentControl-RepoCardViewModel-GitSourceAwareness
+        title: >-
+          The RepoCardViewModel class shall present a repo pinned to a Git source with the Git icon
+          and the source's alias, and shall name in the package chip's tooltip the tag the pinned
+          version has in that source and the first seven characters of the commit the repo's agent
+          files came from (the tag alone when the pin recorded no commit, and neither for a source
+          that is not a Git source).
+        justification: |
+          A Git source is told apart from a folder or a server by its icon, and the tag and commit
+          say exactly which content the repo has, which is what a later change to the tag is
+          measured against.
+        tests:
+          - RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias
+          - RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit
+          - RepoCardViewModel_PackageChipTooltip_GitPinWithoutIdentity_NamesTagOnly
+          - RepoCardViewModel_PackageChipTooltip_ZipPin_HasNoTagOrCommit
+
+      - id: AgentControl-RepoCardViewModel-TagMovedWarning
+        title: >-
+          The RepoCardViewModel class shall, when the background check finds that the tag of the
+          version a repo is pinned to in a Git source now points to a different commit than the one
+          recorded in the pin, show the "Tag moved" status with a tooltip naming the tag and both
+          commits and how to accept the change, shall apply nothing and change no pin, shall not
+          show the status when the commit is the same, the pin recorded no commit or the source is
+          not a Git source, and shall clear it when the pin is updated to the new commit.
+        justification: |
+          A tag that is moved changes the instructions an agent follows without a new version; the
+          user must be told, but acting on it without being asked would defeat pinning. A missing or
+          non-Git identity carries no evidence of a move, so it must not raise the warning.
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip
+          - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing
+          - RepoCardViewModel_RefreshUpgradeStatus_SameCommit_IsNotMoved
+          - RepoCardViewModel_RefreshUpgradeStatus_ZipSourceWithRevision_IsNotMoved
+          - RepoCardViewModel_RefreshUpgradeStatus_PinWithoutIdentity_IsNotMoved
+          - RepoCardViewModel_RefreshUpgradeStatus_PinUpdatedAfterTagMoved_ClearsMovedTag
+
+      - id: AgentControl-RepoCardViewModel-GitTooOldProblem
+        title: >-
+          The RepoCardViewModel class shall, when the background check finds that the installed git
+          is older than the supported version, show the explanation as a package source problem
+          that does not say a sign-in is needed, and offer no upgrade.
+        justification: |
+          A git that is too old fails every Git source; the card must say what is wrong and what to
+          do, and must not send the user to sign in, which would not help.
+        tests:
+          - RepoCardViewModel_RefreshUpgradeStatus_GitTooOld_ShowsSourceProblemWithoutSignIn

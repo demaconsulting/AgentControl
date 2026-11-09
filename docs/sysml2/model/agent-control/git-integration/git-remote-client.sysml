@@ -1,6 +1,6 @@
 package AgentControl {
     part def GitRemoteClient {
-        doc /* Runs git against a remote repository whose content and answers are untrusted: lists tags without a clone, fetches exactly one tag shallow, reads and checks out named paths, with command-scoped hardening (no hooks, only the transport of the address, no submodules or filters, no trace output), no prompts for background work, bounded time and output, redacted messages and classified failures. */
+        doc /* Runs git against a remote repository whose content and answers are untrusted: lists tags without a clone, fetches exactly one tag shallow, reads and checks out named paths, with command-scoped hardening (no hooks, only the transport of the address, no submodules or filters, no trace output), no prompts for background work, bounded time and output, redacted messages and classified failures; uses only legal git ref names for tags and refuses a git older than 2.29. */
 
         comment sourceRef /* Source: src/DemaConsulting.AgentControl/GitIntegration/GitRemoteClient.cs */
         comment testRef /* Test: test/DemaConsulting.AgentControl.Tests/GitIntegration/GitRemoteClientTests.cs; test/DemaConsulting.AgentControl.Tests/GitIntegration/GitRemoteClientIntegrationTests.cs; test/DemaConsulting.AgentControl.Tests/GitIntegration/GitRemoteStub.cs */

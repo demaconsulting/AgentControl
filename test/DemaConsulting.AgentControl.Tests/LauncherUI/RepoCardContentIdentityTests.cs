@@ -82,6 +82,8 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         var message = Assert.Single(errors);
         Assert.Contains("now contains different files", message, StringComparison.Ordinal);
         Assert.Contains("Nothing was changed", message, StringComparison.Ordinal);
+        Assert.Contains("Change package...", message, StringComparison.Ordinal);
+        Assert.DoesNotContain(".agentcontrol.json", message, StringComparison.Ordinal);
         Assert.Equal("v1", ReadMarker(repo));
         Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
     }
@@ -111,6 +113,8 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         var message = Assert.Single(errors);
         Assert.Contains("not synced", message, StringComparison.Ordinal);
         Assert.Contains("now contains different files", message, StringComparison.Ordinal);
+        Assert.Contains("Change package...", message, StringComparison.Ordinal);
+        Assert.DoesNotContain(".agentcontrol.json", message, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(repo, ".github", "agents")));
         Assert.Equal(pinBefore, File.ReadAllText(PinPath(repo)));
     }

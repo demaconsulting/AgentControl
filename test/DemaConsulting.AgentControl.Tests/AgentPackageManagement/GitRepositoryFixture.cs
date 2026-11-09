@@ -170,6 +170,23 @@ internal sealed class GitRepositoryFixture : IDisposable
     }
 
     /// <summary>
+    ///     Stages a regular file entry (mode 100644) without writing it to the working folder, so
+    ///     paths that a case-insensitive or normalizing file system would merge (<c>A.md</c> and
+    ///     <c>a.md</c>) can be committed on every platform.
+    /// </summary>
+    /// <param name="path">The repository path of the file.</param>
+    /// <param name="content">The file's text.</param>
+    public void AddFile(string path, string content)
+    {
+        var blob = Git(WorkPath, ["hash-object", "-w", "--stdin"], content).Trim();
+        // cspell:ignore ignorecase precomposeunicode
+        Git(
+            WorkPath,
+            "-c", "core.ignorecase=false", "-c", "core.precomposeunicode=false",
+            "update-index", "--add", "--cacheinfo", $"100644,{blob},{path}");
+    }
+
+    /// <summary>
     ///     Stages a submodule entry (mode 160000, pointing at the given commit).
     /// </summary>
     /// <param name="path">The repository path of the submodule.</param>
