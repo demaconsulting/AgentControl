@@ -2,12 +2,15 @@
 
 #### Verification Approach
 
-`GitClient` is verified with unit tests defined in `GitClientTests.cs`. Every test runs
+`GitClient` is verified with unit tests defined in `GitClientTests.cs`. Most tests run
 against `GitStub`, a fake git executable script (matching the pattern used by
 `ProgramTests`/`RepoCardViewModelTests`) that records its invocation arguments and returns
-configured stdout/stderr/exit-code values, so tests never depend on a real git installation
+configured stdout/stderr/exit-code values, so those tests never depend on a real git installation
 or a real repository history. Tests using `GitStub` belong to the `RealProcess` xUnit
-collection since they still launch a real subprocess (the stub script itself).
+collection since they still launch a real subprocess (the stub script itself). The tests of
+listing and stopping git tracking agent folders also use a real temporary git repository (built by
+`GitRepositoryFixture`, skipped where git is not installed and failed when the environment variable `CI`
+is set), because what git tracks before and after must be observed, not assumed.
 
 #### Test Environment
 
@@ -47,6 +50,39 @@ agent files reports true, one with none reports false, and a failed `ls-files` q
 `GitClient_HasCommittedAgentFiles_LsFilesReportsNothing_ReturnsFalse`, and
 `GitClient_HasCommittedAgentFiles_LsFilesFails_ThrowsInvalidOperationException`, covering
 `AgentControl-GitClient-DetectCommittedFiles`.
+
+**GitClient_ListTrackedAgentFolders_ReportsOnlyTrackedFoldersOrRaisesOnFailure**: In a real
+repo that tracks some of the four agent folders, only those are reported, in the fixed folder
+order, and an untracked folder that merely exists on disk is not; a file tracked at the exact path of a
+managed folder counts while a prefix sibling (`.github/standards-old`) does not; a repo that tracks none
+reports an empty list; and a failed `ls-files` query throws `InvalidOperationException`. This
+scenario is tested by
+`GitClient_GetTrackedAgentFolders_SomeFoldersTracked_ReturnsOnlyThoseInKnownOrder`,
+`GitClient_GetTrackedAgentFolders_NothingTracked_ReturnsEmptyList`,
+`GitClient_GetTrackedAgentFolders_ExactPathTracked_CountsItButNotPrefixSibling`, and
+`GitClient_GetTrackedAgentFolders_LsFilesFails_ThrowsInvalidOperationException`, covering
+`AgentControl-GitClient-ListTrackedAgentFolders`.
+
+**GitClient_UntrackAgentFolders_RemovesFromIndexOnlyOrRaisesOnFailure**: In a real repo,
+stopping git tracking two of three tracked agent folders removes exactly those from git's index, leaves
+every file on disk with its content and every other tracked path (and the third folder) still
+tracked, and a failing `git rm` throws `InvalidOperationException` naming the command. This
+scenario is tested by
+`GitClient_UntrackAgentFolders_TrackedFolders_RemovesThemFromIndexOnlyAndKeepsFilesOnDisk` and
+`GitClient_UntrackAgentFolders_GitRmFails_ThrowsInvalidOperationException`, covering
+`AgentControl-GitClient-UntrackAgentFolders`.
+
+**GitClient_RestoreAgentFolderTracking_UndoesUntrack**: In a real repo, a folder that was untracked is tracked again after
+`RestoreAgentFolderTracking` and its file is unchanged on disk. This scenario is tested by
+`GitClient_RestoreAgentFolderTracking_AfterUntrack_RestoresIndexAndKeepsFiles`, covering
+`AgentControl-GitClient-RestoreAgentFolderTracking`.
+
+**GitClient_UntrackAgentFolders_RefusesAnythingButAgentFolders**: An empty list, a folder that
+is not a known agent folder, an option-like value and `null` are refused with
+`ArgumentException`/`ArgumentNullException` and git is never invoked (the stub's invocation log
+stays absent). This scenario is tested by
+`GitClient_UntrackAgentFolders_EmptyOrUnknownFolders_ThrowsArgumentException`, covering
+`AgentControl-GitClient-UntrackOnlyAgentFolders`.
 
 **GitClient_CurrentBranch_FastPathHandlesAllHeadFormsWithSubprocessFallback**: The fast path
 resolves a normal branch, a detached HEAD marker, and a worktree indirection directly from

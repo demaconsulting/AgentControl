@@ -7,7 +7,10 @@
 `GitClient` wraps the configured git executable to answer every git-derived question the
 `LauncherUI` subsystem needs about a repo: working-tree cleanliness, pull execution, current
 branch, `HEAD` commit hash, and whether any of the four known agent folders are committed to
-the tree. Each public method invokes a single git subcommand via `RunGit` and translates its
+the tree. It is also the one place AgentControl changes what git tracks: it reports which of
+the four folders are tracked and can stop git tracking them (index only), which lets the
+`LauncherUI` subsystem convert a repo that committed its agent files. Each public method
+invokes a single git subcommand via `RunGit` and translates its
 exit code/output into a typed result or exception, isolating every other unit in the codebase
 from git's process-based interface.
 
@@ -26,8 +29,9 @@ intermittent exit-code `-1` flakiness documented in
 `.agent-logs/implementation-agentcontrol-v1-final-3e91c7.md`.
 
 **KnownAgentFolders**: `static readonly string[]` — the four folders (`.github/agents`,
-`.github/standards`, `.github/templates`, `.github/skills`) whose committed-tracking status
-`HasCommittedAgentFiles` checks.
+`.github/standards`, `.github/templates`, `.github/skills`) whose tracking status
+`HasCommittedAgentFiles` checks, `GetTrackedAgentFolders` reports and `UntrackAgentFolders`
+accepts (and refuses anything else).
 
 #### Key Methods
 
@@ -60,6 +64,39 @@ tracked at `HEAD`, via `git ls-files -- {folders}`.
 - *Returns*: `bool`. Purely advisory — never modifies git tracking state, only reports whether
   the developer appears to have accidentally committed proprietary agent content
   (`AgentControl-GitClient-DetectCommittedFiles`).
+
+**GetTrackedAgentFolders**: Lists which of the four known agent folders currently have files
+tracked by git, via a single `git ls-files -z -- {folders}`.
+
+- *Parameters*: `string repositoryPath`.
+- *Returns*: `IReadOnlyList<string>` — repo-relative `/`-separated folder paths (for example
+  `.github/agents`) in the fixed order of `KnownAgentFolders`; empty when none is tracked.
+- *Postconditions*: Reads the index afresh on every call (no cache), so the answer is current
+  at the moment of a decision. `-z` output is used so git never quotes an unusual file name,
+  and a folder counts as tracked when a listed path is the folder path itself (a file, link or submodule tracked at
+  that exact path) or lies below `{folder}/` - never a sibling that only shares the name's prefix
+  (`AgentControl-GitClient-ListTrackedAgentFolders`).
+
+**UntrackAgentFolders**: Stops git tracking the given agent folders via
+`git rm -r --cached --quiet -- {folders}`.
+
+- *Parameters*: `string repositoryPath`, `IReadOnlyCollection<string> folders` — each one of
+  `KnownAgentFolders` and each with at least one tracked file (as returned by
+  `GetTrackedAgentFolders`; `git rm` refuses a path that matches nothing).
+- *Postconditions*: Only the index changes: `--cached` leaves every working-tree file in
+  place, no force flag is used (git's own protection of staged work applies), paths follow `--`
+  so they cannot be read as options, and nothing is committed (the deletions stay staged for the
+  user to commit) (`AgentControl-GitClient-UntrackAgentFolders`).
+- *Errors*: An empty list, `null`, or any value that is not a known agent folder throws
+  `ArgumentException`/`ArgumentNullException` before git is run
+  (`AgentControl-GitClient-UntrackOnlyAgentFolders`); a git failure (for example an index lock
+  held by another git process) throws `InvalidOperationException` carrying git's message.
+
+**RestoreAgentFolderTracking**: Undoes `UntrackAgentFolders` for the given agent folders via
+`git reset -q -- {folders}`, restoring their index entries from `HEAD` and leaving the working tree untouched; used
+to roll back a conversion whose package could not be applied (`AgentControl-GitClient-RestoreAgentFolderTracking`). It
+accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`) and throws
+`InvalidOperationException` carrying git's message when `git reset` fails.
 
 **GetCurrentBranch**: Gets the repo's current branch name, or `"(detached)"` for a detached
 `HEAD`.
@@ -96,4 +133,6 @@ flakiness.
 
 - **RepoCardViewModel** — constructs a `GitClient` per action (using the resolved git
   executable path) and calls `IsWorkingTreeClean`, `Pull`, `GetHeadCommitHash`,
-  `HasCommittedAgentFiles`, and `GetCurrentBranch` across its refresh/pull methods.
+  `HasCommittedAgentFiles`, and `GetCurrentBranch` across its refresh/pull methods, and
+  `GetTrackedAgentFolders` and `UntrackAgentFolders` when it applies a package to a repo whose
+  agent folders are tracked by git.

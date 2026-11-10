@@ -178,10 +178,11 @@ internal sealed class GitClient
     ///     the four known agent folders; otherwise <see langword="false"/>.
     /// </returns>
     /// <remarks>
-    ///     Per architecture.md's "Committed agent files" badge: this is purely advisory - it
+    ///     Per architecture.md's "Committed agent files" badge: this query is purely advisory - it
     ///     never modifies git tracking state, it only reports whether the developer appears to
     ///     have accidentally committed proprietary agent content into a repo meant to gitignore
-    ///     it.
+    ///     it. Stopping the tracking is a separate, deliberate step: see
+    ///     <see cref="UntrackAgentFolders"/>.
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when <paramref name="repositoryPath"/> is null,
     ///     empty, or whitespace.</exception>
@@ -200,6 +201,151 @@ internal sealed class GitClient
         }
 
         return !string.IsNullOrWhiteSpace(result.StandardOutput);
+    }
+
+    /// <summary>
+    ///     Lists which of the four known agent folders currently have at least one file tracked by
+    ///     git (in the index), via a single <c>git ls-files</c>.
+    /// </summary>
+    /// <param name="repositoryPath">Absolute path to the repository working directory.</param>
+    /// <returns>
+    ///     The tracked folders, as repo-relative <c>/</c>-separated paths (for example
+    ///     <c>.github/agents</c>), in the fixed order of the known folders; an empty list when none
+    ///     is tracked.
+    /// </returns>
+    /// <remarks>
+    ///     Exists so a caller that is about to stop the tracking (see
+    ///     <see cref="UntrackAgentFolders"/>) can tell the user exactly which folders are affected
+    ///     and can untrack only those: <c>git rm</c> refuses a path that matches nothing. Reads the
+    ///     index afresh on every call and never uses a cache, so the answer is current at the moment
+    ///     of the decision. The output is requested NUL-separated (<c>-z</c>) so that git never
+    ///     quotes an unusual file name and the folder prefix is always recognizable.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="repositoryPath"/> is null,
+    ///     empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be
+    ///     started, or when <c>git ls-files</c> exits with a non-zero code.</exception>
+    public IReadOnlyList<string> GetTrackedAgentFolders(string repositoryPath)
+    {
+        var arguments = new List<string> { "ls-files", "-z", "--" };
+        arguments.AddRange(KnownAgentFolders);
+
+        var result = RunGit(repositoryPath, arguments.ToArray());
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"'git ls-files' failed with exit code {result.ExitCode}: {result.StandardError.Trim()}");
+        }
+
+        // A folder is tracked when any listed path is the folder itself (a file, link or submodule
+        // tracked at that exact path) or lies below it; matching is by whole path segment so a
+        // sibling such as ".github/agents-old" never counts
+        var trackedPaths = result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        return
+        [
+            .. KnownAgentFolders.Where(folder => trackedPaths.Any(path =>
+                path.Equals(folder, StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase)))
+        ];
+    }
+
+    /// <summary>
+    ///     Stops git tracking the given agent folders - removes their files from the index only -
+    ///     by running <c>git rm -r --cached --quiet -- &lt;folders&gt;</c>.
+    /// </summary>
+    /// <param name="repositoryPath">Absolute path to the repository working directory.</param>
+    /// <param name="folders">The folders to stop tracking, each one of the four known agent
+    ///     folders (as returned by <see cref="GetTrackedAgentFolders"/>) and each with at least one
+    ///     tracked file. Must not be empty.</param>
+    /// <remarks>
+    ///     This is the one place AgentControl changes git tracking state, and it is deliberately
+    ///     narrow: <c>--cached</c> means the working tree is never touched (the files stay on disk
+    ///     until the package replaces them), no force flag is used (so git's own protection against
+    ///     losing staged work applies), the paths follow <c>--</c> so they can never be read as
+    ///     options, and only the known agent folders are accepted so a caller can never untrack
+    ///     anything else. Nothing is committed; the deletions stay staged for the user to commit.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="repositoryPath"/> is null,
+    ///     empty, or whitespace, when <paramref name="folders"/> is empty, or when it contains
+    ///     anything other than a known agent folder.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="folders"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be
+    ///     started, or when <c>git rm</c> exits with a non-zero code (for example another git
+    ///     process holds the index lock, or a path has staged changes git refuses to discard); the
+    ///     message carries git's own explanation.</exception>
+    public void UntrackAgentFolders(string repositoryPath, IReadOnlyCollection<string> folders)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
+        ArgumentNullException.ThrowIfNull(folders);
+
+        // Only the known folders may be untracked: nothing else is AgentControl's to stop tracking
+        if (folders.Count == 0)
+        {
+            throw new ArgumentException("At least one folder must be given.", nameof(folders));
+        }
+
+        var unknown = folders.FirstOrDefault(folder => !KnownAgentFolders.Contains(folder, StringComparer.Ordinal));
+        if (unknown is not null)
+        {
+            throw new ArgumentException($"'{unknown}' is not one of the known agent folders.", nameof(folders));
+        }
+
+        var arguments = new List<string> { "rm", "-r", "--cached", "--quiet", "--" };
+        arguments.AddRange(folders);
+
+        var result = RunGit(repositoryPath, arguments.ToArray());
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"'git rm --cached' failed with exit code {result.ExitCode}: {result.StandardError.Trim()}");
+        }
+    }
+
+    /// <summary>
+    ///     Undoes <see cref="UntrackAgentFolders"/>: restores the index entries of the given agent
+    ///     folders from <c>HEAD</c> with <c>git reset -q -- &lt;folders&gt;</c>, leaving the working
+    ///     tree untouched.
+    /// </summary>
+    /// <param name="repositoryPath">Absolute path to the repository working directory.</param>
+    /// <param name="folders">The folders to track again, each one of the four known agent folders.
+    ///     Must not be empty.</param>
+    /// <remarks>
+    ///     Used to roll back a conversion whose package could not be applied, so a failed apply never
+    ///     leaves the folders' removal from git staged. Accepts only the known agent folders and puts
+    ///     the paths after <c>--</c>, like <see cref="UntrackAgentFolders"/>.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="repositoryPath"/> is null,
+    ///     empty, or whitespace, when <paramref name="folders"/> is empty, or when it contains
+    ///     anything other than a known agent folder.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="folders"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be
+    ///     started, or when <c>git reset</c> exits with a non-zero code.</exception>
+    public void RestoreAgentFolderTracking(string repositoryPath, IReadOnlyCollection<string> folders)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
+        ArgumentNullException.ThrowIfNull(folders);
+        if (folders.Count == 0)
+        {
+            throw new ArgumentException("At least one folder must be given.", nameof(folders));
+        }
+
+        var unknown = folders.FirstOrDefault(folder => !KnownAgentFolders.Contains(folder, StringComparer.Ordinal));
+        if (unknown is not null)
+        {
+            throw new ArgumentException($"'{unknown}' is not one of the known agent folders.", nameof(folders));
+        }
+
+        var arguments = new List<string> { "reset", "-q", "--" };
+        arguments.AddRange(folders);
+
+        var result = RunGit(repositoryPath, arguments.ToArray());
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"'git reset' failed with exit code {result.ExitCode}: {result.StandardError.Trim()}");
+        }
     }
 
     /// <summary>

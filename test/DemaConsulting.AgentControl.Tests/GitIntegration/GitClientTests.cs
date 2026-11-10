@@ -369,6 +369,225 @@ public class GitClientTests
     }
 
     /// <summary>
+    ///     Test that GetTrackedAgentFolders reports exactly the known agent folders that have tracked
+    ///     files - and not an untracked-but-present folder or other tracked paths - in the fixed
+    ///     order of the known folders.
+    /// </summary>
+    [Fact]
+    public void GitClient_GetTrackedAgentFolders_SomeFoldersTracked_ReturnsOnlyThoseInKnownOrder()
+    {
+        // Arrange: a real repo that tracks skills and agents (committed in the opposite order) plus
+        // unrelated files, with a standards folder on disk that git does not track
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(
+            new Dictionary<string, string>
+            {
+                [".github/skills/s.md"] = "skill",
+                [".github/agents/a.md"] = "agent",
+                [".github/workflows/ci.yml"] = "ci",
+                ["README.md"] = "readme"
+            },
+            "Track agent files");
+        Directory.CreateDirectory(Path.Combine(fixture.WorkPath, ".github", "standards"));
+        File.WriteAllText(Path.Combine(fixture.WorkPath, ".github", "standards", "untracked.md"), "untracked");
+        var client = new GitClient("git", _logger);
+
+        // Act
+        var tracked = client.GetTrackedAgentFolders(fixture.WorkPath);
+
+        // Assert: only the tracked managed folders, in the known order
+        Assert.Equal([".github/agents", ".github/skills"], tracked);
+    }
+
+    /// <summary>
+    ///     Test that GetTrackedAgentFolders returns an empty list when no known agent folder has
+    ///     tracked files.
+    /// </summary>
+    [Fact]
+    public void GitClient_GetTrackedAgentFolders_NothingTracked_ReturnsEmptyList()
+    {
+        // Arrange: a real repo whose only tracked files are outside the agent folders
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(new Dictionary<string, string> { ["README.md"] = "readme" }, "Initial commit");
+        var client = new GitClient("git", _logger);
+
+        // Act
+        var tracked = client.GetTrackedAgentFolders(fixture.WorkPath);
+
+        // Assert
+        Assert.Empty(tracked);
+    }
+
+    /// <summary>
+    ///     Test that GetTrackedAgentFolders counts a known agent folder path that is itself tracked
+    ///     as a single entry (here a file named <c>.github/agents</c>), and does not count a sibling
+    ///     whose name only starts with a known folder's name.
+    /// </summary>
+    [Fact]
+    public void GitClient_GetTrackedAgentFolders_ExactPathTracked_CountsItButNotPrefixSibling()
+    {
+        // Arrange: a real repo tracking a file at the exact path .github/agents and a sibling folder
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(
+            new Dictionary<string, string>
+            {
+                [".github/agents"] = "a file where the folder would be",
+                [".github/standards-old/s.md"] = "sibling"
+            },
+            "Track exact path and sibling");
+        var client = new GitClient("git", _logger);
+
+        // Act
+        var tracked = client.GetTrackedAgentFolders(fixture.WorkPath);
+
+        // Assert: the exact path counts, the prefix sibling does not
+        Assert.Equal([".github/agents"], tracked);
+    }
+
+    /// <summary>
+    ///     Test that RestoreAgentFolderTracking undoes UntrackAgentFolders: the folders' files are back in
+    ///     git's index and the working tree is unchanged.
+    /// </summary>
+    [Fact]
+    public void GitClient_RestoreAgentFolderTracking_AfterUntrack_RestoresIndexAndKeepsFiles()
+    {
+        // Arrange: a real repo whose agents folder was untracked
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(
+            new Dictionary<string, string> { [".github/agents/a.md"] = "agent", ["README.md"] = "readme" },
+            "Track agent files");
+        var client = new GitClient("git", _logger);
+        client.UntrackAgentFolders(fixture.WorkPath, [".github/agents"]);
+        Assert.Empty(client.GetTrackedAgentFolders(fixture.WorkPath));
+
+        // Act
+        client.RestoreAgentFolderTracking(fixture.WorkPath, [".github/agents"]);
+
+        // Assert: tracked again, file unchanged on disk
+        Assert.Equal([".github/agents"], client.GetTrackedAgentFolders(fixture.WorkPath));
+        Assert.Equal("agent", File.ReadAllText(Path.Combine(fixture.WorkPath, ".github", "agents", "a.md")));
+    }
+
+    /// <summary>
+    ///     Test that GetTrackedAgentFolders throws when "git ls-files" fails.
+    /// </summary>
+    [Fact]
+    public void GitClient_GetTrackedAgentFolders_LsFilesFails_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var stub = GitStub.Create(lsFilesExitCode: 128, lsFilesError: "fatal: not a git repository");
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act / Assert
+            Assert.Throws<InvalidOperationException>(() => client.GetTrackedAgentFolders(repoDir));
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that UntrackAgentFolders removes the given folders from the index only: their files
+    ///     stay on disk unchanged, every other tracked path stays tracked, and a tracked agent folder
+    ///     that was not named stays tracked.
+    /// </summary>
+    [Fact]
+    public void GitClient_UntrackAgentFolders_TrackedFolders_RemovesThemFromIndexOnlyAndKeepsFilesOnDisk()
+    {
+        // Arrange: a real repo that tracks three agent folders and unrelated files
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(
+            new Dictionary<string, string>
+            {
+                [".github/agents/a.md"] = "agent",
+                [".github/standards/s.md"] = "standard",
+                [".github/skills/k.md"] = "skill",
+                [".github/workflows/ci.yml"] = "ci",
+                ["README.md"] = "readme"
+            },
+            "Track agent files");
+        var client = new GitClient("git", _logger);
+
+        // Act: untrack two of the three
+        client.UntrackAgentFolders(fixture.WorkPath, [".github/agents", ".github/standards"]);
+
+        // Assert: the index no longer lists the two folders but still lists everything else
+        var indexed = fixture.Git(fixture.WorkPath, "ls-files").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim()).ToList();
+        Assert.Equal([".github/skills/k.md", ".github/workflows/ci.yml", "README.md"], indexed);
+
+        // Assert: nothing was deleted or changed on disk
+        Assert.Equal("agent", File.ReadAllText(Path.Combine(fixture.WorkPath, ".github", "agents", "a.md")));
+        Assert.Equal("standard", File.ReadAllText(Path.Combine(fixture.WorkPath, ".github", "standards", "s.md")));
+        Assert.Equal("skill", File.ReadAllText(Path.Combine(fixture.WorkPath, ".github", "skills", "k.md")));
+
+        // Assert: the client agrees that only the skills folder is still tracked
+        Assert.Equal([".github/skills"], client.GetTrackedAgentFolders(fixture.WorkPath));
+    }
+
+    /// <summary>
+    ///     Test that UntrackAgentFolders throws when "git rm" fails, carrying git's explanation.
+    /// </summary>
+    [Fact]
+    public void GitClient_UntrackAgentFolders_GitRmFails_ThrowsInvalidOperationException()
+    {
+        // Arrange: a stub that does not know "rm" and so exits with a failure code
+        var stub = GitStub.Create();
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(
+                () => client.UntrackAgentFolders(repoDir, [".github/agents"]));
+
+            // Assert
+            Assert.Contains("git rm --cached", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that UntrackAgentFolders refuses an empty list and anything that is not a known
+    ///     agent folder, so it can never untrack a path that is not AgentControl's to manage.
+    /// </summary>
+    [Fact]
+    public void GitClient_UntrackAgentFolders_EmptyOrUnknownFolders_ThrowsArgumentException()
+    {
+        // Arrange: a stub that would fail the test if git were ever invoked
+        var invocationLog = Path.Combine(Path.GetTempPath(), $"agentcontrol_git_log_{Guid.NewGuid():N}.txt");
+        var stub = GitStub.Create(invocationLogPath: invocationLog);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act / Assert: nothing, a source folder and an option-like value are all refused
+            Assert.Throws<ArgumentException>(() => client.UntrackAgentFolders(repoDir, []));
+            Assert.Throws<ArgumentException>(() => client.UntrackAgentFolders(repoDir, ["src"]));
+            Assert.Throws<ArgumentException>(() => client.UntrackAgentFolders(repoDir, ["--force"]));
+            Assert.Throws<ArgumentNullException>(() => client.UntrackAgentFolders(repoDir, null!));
+            Assert.False(File.Exists(invocationLog));
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+            File.Delete(invocationLog);
+        }
+    }
+
+    /// <summary>
     ///     Test that GetCurrentBranch resolves a normal branch name via the fast path, reading a
     ///     hand-written <c>.git/HEAD</c> file directly rather than invoking the (stub) git
     ///     executable at all.

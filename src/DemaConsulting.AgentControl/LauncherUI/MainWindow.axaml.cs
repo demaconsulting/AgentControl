@@ -293,14 +293,16 @@ internal sealed partial class MainWindow : Window
     ///     <see cref="RepoCardViewModel.ReleaseNotesReady"/>,
     ///     <see cref="RepoCardViewModel.RemoveRequested"/>,
     ///     <see cref="RepoCardViewModel.AgentsMdTemplateOfferRequested"/>, and
-    ///     <see cref="RepoCardViewModel.ContentChangeConfirmationRequested"/> events so failures show
+    ///     <see cref="RepoCardViewModel.ContentChangeConfirmationRequested"/>, and
+    ///     <see cref="RepoCardViewModel.CommittedFilesConversionRequested"/> events so failures show
     ///     a message box, successful upgrades open a non-modal <see cref="ReleaseNotesViewer"/>
     ///     tracked by this window (see <see cref="ShowTrackedChildWindow"/>, so it closes when
     ///     this window does, rather than outliving it), a remove request shows a confirmation
     ///     dialog before actually removing the card, an AGENTS.md template offer shows a
     ///     modal <see cref="ConfirmationWindow"/> before writing the template or recording a
-    ///     decline, and a republished package version asks for confirmation before it replaces
-    ///     the copy the repo was set up with.
+    ///     decline, a republished package version asks for confirmation before it replaces
+    ///     the copy the repo was set up with, and a repo whose agent folders are tracked by git asks
+    ///     for confirmation before they are taken out of git.
     /// </summary>
     /// <param name="card">The card to subscribe to.</param>
     private void AttachCardHandlers(RepoCardViewModel card)
@@ -333,6 +335,9 @@ internal sealed partial class MainWindow : Window
         async void OnContentChangeConfirmationRequested(object? sender, ContentChangeConfirmationRequest request) =>
             await ConfirmContentChangeAsync(card, request);
 
+        async void OnCommittedFilesConversionRequested(object? sender, CommittedFilesConversionRequest request) =>
+            await ConfirmCommittedFilesConversionAsync(request);
+
         // Runs after the view model has regrouped the list (its handler was attached when the card was created)
         card.FavoriteChanged += OnFavoriteChanged;
         card.ErrorOccurred += OnErrorOccurred;
@@ -342,6 +347,7 @@ internal sealed partial class MainWindow : Window
         card.NewGroupRequested += OnNewGroupRequested;
         card.AgentsMdTemplateOfferRequested += OnTemplateOfferRequested;
         card.ContentChangeConfirmationRequested += OnContentChangeConfirmationRequested;
+        card.CommittedFilesConversionRequested += OnCommittedFilesConversionRequested;
 
         _cardHandlerRemovers[card] = () =>
         {
@@ -353,6 +359,7 @@ internal sealed partial class MainWindow : Window
             card.NewGroupRequested -= OnNewGroupRequested;
             card.AgentsMdTemplateOfferRequested -= OnTemplateOfferRequested;
             card.ContentChangeConfirmationRequested -= OnContentChangeConfirmationRequested;
+            card.CommittedFilesConversionRequested -= OnCommittedFilesConversionRequested;
         };
     }
 
@@ -520,6 +527,39 @@ internal sealed partial class MainWindow : Window
         if (confirmed)
         {
             await card.ApplySelectedPackageAsync(request.Selection, acceptContentChange: true);
+        }
+    }
+
+    /// <summary>
+    ///     Shows the <see cref="ConfirmationWindow"/> asking whether AgentControl may stop git tracking
+    ///     the agent folders of a repo before applying a package, and reports the answer to the card's
+    ///     waiting package operation.
+    /// </summary>
+    /// <param name="request">The question and the way to answer it, as carried by
+    ///     <see cref="RepoCardViewModel.CommittedFilesConversionRequested"/>.</param>
+    /// <remarks>
+    ///     The dialog is modal, so the user cannot act on the window behind it while the question is
+    ///     open, and the card stays busy until it is answered. The default (focused) answer is No, as
+    ///     for every <see cref="ConfirmationWindow"/>, so pressing Enter or closing the dialog changes
+    ///     nothing. The request is always answered - an unexpected failure to show the dialog counts as
+    ///     No - because the card's operation would otherwise wait for ever.
+    /// </remarks>
+    private async Task ConfirmCommittedFilesConversionAsync(CommittedFilesConversionRequest request)
+    {
+        var confirmed = false;
+        try
+        {
+            confirmed = await new ConfirmationWindow(request.Message).ShowDialog<bool>(this);
+        }
+        catch (Exception ex)
+        {
+            // This runs from an async void handler: an escaping exception would be unhandled on the
+            // UI thread, so a failure to show the dialog is logged and counts as No
+            _logger.LogError(ex, "Could not show the committed-agent-files conversion question");
+        }
+        finally
+        {
+            request.Respond(confirmed);
         }
     }
 

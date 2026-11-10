@@ -4,7 +4,8 @@
 # PURPOSE:
 # - Define requirements for the AgentControl GitIntegration subsystem
 # - GitIntegration spans GitClient.cs (invokes the configured git executable for status,
-#   pull, branch, and committed-files queries), CommittedAgentFilesCache.cs (caches the
+#   pull, branch, and committed-files queries and for stopping git tracking managed agent folders),
+#   CommittedAgentFilesCache.cs (caches the
 #   committed-agent-files-changed check keyed by HEAD commit hash), GitCredentialClient.cs
 #   (keeps, finds and removes a package feed's sign-in in the user's own Git credential helper)
 #   and GitRemoteClient.cs (runs git against a remote repository whose content and answers are
@@ -58,6 +59,23 @@ sections:
         tests:
           - GitClient_HasCommittedAgentFiles_LsFilesReportsFiles_ReturnsTrue
           - CommittedAgentFilesCache_SameRepoAndHash_ReturnsCachedValue
+
+      - id: AgentControl-GitIntegration-UntrackAgentFolders
+        title: >-
+          The GitIntegration subsystem shall report which of a repo's managed agent folders have
+          files tracked by git and shall stop git tracking chosen ones, leaving every file on disk
+          and every other tracked path as it was.
+        justification: |
+          A repo that committed its agent folders can only be managed from a package once git no
+          longer tracks them; this must be possible without deleting what the team committed and
+          without touching anything else in the repo.
+        children:
+          - AgentControl-GitClient-ListTrackedAgentFolders
+          - AgentControl-GitClient-UntrackAgentFolders
+          - AgentControl-GitClient-RestoreAgentFolderTracking
+          - AgentControl-GitClient-UntrackOnlyAgentFolders
+        tests:
+          - GitIntegrationSubsystem_CommittedAgentFolders_ReportedThenUntrackedWithoutTouchingFilesOrOtherPaths
 
       - id: AgentControl-GitIntegration-CurrentBranch
         title: >-

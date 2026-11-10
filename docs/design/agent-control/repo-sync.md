@@ -180,10 +180,11 @@ is a distinct post-extraction side effect — following the same architectural p
 pin-file write, which also happens in the caller immediately after a successful extraction,
 not inside `Extract`. This keeps `GitIgnoreEnsurer` independently testable and independently
 skippable (its own non-blocking try/catch) without complicating `PackageZipExtractor`'s error
-handling. Per architecture.md's "Committed agent files" badge description, AgentControl does
-not modify git tracking state itself; `GitIgnoreEnsurer` is a deliberate, narrow exception
-limited to `.gitignore` *content* (never git tracking state) and does not contradict that
-stance (`AgentControl-RepoSync-GitIgnorePrevention`).
+handling. `GitIgnoreEnsurer` only ever changes `.gitignore` *content*, never git tracking state; the one place
+AgentControl changes what git tracks is the separate, consented removal of tracked managed folders that
+`RepoCardViewModel` performs before it applies a package (see `launcher-ui.md`, *Converting committed agent files*) -
+which is also why `.gitignore` can only take effect for those folders afterwards
+(`AgentControl-RepoSync-GitIgnorePrevention`).
 
 #### Residual risks
 

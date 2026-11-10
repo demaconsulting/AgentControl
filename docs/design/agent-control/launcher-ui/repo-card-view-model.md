@@ -68,7 +68,9 @@ the pin or settings no longer have the problem.
 
 **CurrentBranch**, **HasCommittedAgentFiles**: `string?`/`bool` — Resolved via `GitClient`,
 with the committed-files result consulting the per-card `CommittedAgentFilesCache`
-(`AgentControl-RepoCardViewModel-CommittedFilesBadge`).
+(`AgentControl-RepoCardViewModel-CommittedFilesBadge`). The badge is advisory for Launch (which skips the
+sync and changes nothing); Select Package, Change package and Upgrade offer to convert such a repo instead (see
+*Converting committed agent files* under `ApplyPackageAndShowReleaseNotesAsync`).
 
 **IsUpgradeAvailable**, **LatestAvailableVersion**: `bool`/`string?` — Resolved via the shared
 `PackageVersionCache` at the pin's source (`AgentControl-RepoCardViewModel-UpgradeBadge`).
@@ -318,7 +320,8 @@ It marks the card retired, advances `_upgradeCheckGeneration` and `_imageGenerat
 dropped, clears "checking", cancels the running operation (`CancelOperation`; the operation ends cancelled, which is
 never reported as an error), sets every event of the card (`ErrorOccurred`, `ReleaseNotesReady`,
 `AgentsMdTemplateOfferRequested`, `FavoriteChanged`, `GroupChanged`, `CardColorChanged`, `LaunchRecorded`,
-`NewGroupRequested`, `RemoveRequested`, `SelectPackageRequested`, `ContentChangeConfirmationRequested`) to `null`
+`NewGroupRequested`, `RemoveRequested`, `SelectPackageRequested`, `ContentChangeConfirmationRequested`,
+`CommittedFilesConversionRequested`) to `null`
 so that nothing it still does can show an
 error box, release notes or a prompt, and clears the picture, which disposes it
 (`AgentControl-RepoCardViewModel-RetiredCardReportsNothing`, `-RetireCancelsRunningWork`). A retired card ignores
@@ -452,7 +455,9 @@ then applies it via `ApplyPackageAndShowReleaseNotesAsync`.
 **ApplyPackageAndShowReleaseNotesAsync** (private): Shared extract-and-pin sequence reused by
 `Upgrade` and `ApplySelectedPackageAsync`: first loads the repo's existing pin (a newer-schema pin
 aborts here with its actionable message while the repo is still untouched; a corrupt one is
-tolerated and replaced), acquires the package from its provider, compares the acquired content's identity with the
+tolerated and replaced), then - before anything is acquired - asks git which managed folders are tracked and, if
+any are, asks the user (see **Converting committed agent files** below), acquires the package from its provider,
+compares the acquired content's identity with the
 pin's when the pin is for this very package version (`ContentChangedSincePinned`; a different version, a pin
 without an identity and a reader without one are never a change) and, on a change, applies the requested
 `ContentChangeHandling` before anything is touched - `Refuse` (Upgrade: log a warning, `ErrorOccurred` saying the
@@ -460,8 +465,9 @@ package may have been republished, that nothing was changed and that "Change pac
 or any advice to edit the pin file;
 `AgentControl-RepoCardViewModel-RefuseChangedContent`, `-RefuseChangedContentMessage`), `Ask` (Select Package / Change
 package: raise
-`ContentChangeConfirmationRequested`, return) or `Accept` (the user already confirmed: log and continue); then
-extracts it
+`ContentChangeConfirmationRequested`, return) or `Accept` (the user already confirmed: log and continue); then, for
+a repo whose managed folders are tracked and whose conversion the user confirmed, stops git tracking them
+immediately before it extracts the package
 (blind-delete-and-replace), proactively ensures the repo's `.gitignore` covers the four managed
 agent folders (via `EnsureGitIgnoreCoversManagedFolders`, its own non-blocking step — see Error
 Handling), updates the loaded pin in place with the package's source alias, name, version and content
@@ -474,6 +480,54 @@ the view can show the modal question at once and hold the release notes back unt
 instead of being covered by, or lost behind, the question
 (`AgentControl-RepoCardViewModel-AgentsMdOfferBeforeReleaseNotes`). The acquired package reader stays open until the
 sequence ends.
+
+**Converting committed agent files** (inside `ApplyPackageAndShowReleaseNotesAsync`): Putting a repo under
+package management is impossible while git tracks its managed folders, because `.gitignore` has no effect on tracked
+files - the package's files would be invisible to git while the old ones showed as modified or deleted, and a commit
+of everything would record a broken mix. The sequence therefore converts such a repo, deliberately:
+
+1. *Fresh check* (`FindTrackedAgentFoldersAsync`): on a worker thread, `GitClient.GetTrackedAgentFolders` asks git
+   which of the four folders have tracked files, right now. The cached `HasCommittedAgentFiles` badge is never
+   consulted, because it is keyed by the `HEAD` commit and does not notice files staged since. A git that cannot
+   answer (not installed, not a repository) counts as "nothing tracked", exactly as the badge treats it, and the
+   apply continues as before (`AgentControl-RepoCardViewModel-CheckTrackedFoldersFresh`,
+   `-NoConvertWhenNotTracked`).
+2. *Ask before anything is acquired* (`ConfirmCommittedFilesConversionAsync`): when folders are tracked, the card
+   raises `CommittedFilesConversionRequested` with a `CommittedFilesConversionRequest` whose message names the repo,
+   the tracked folders and the package, says AgentControl will stop tracking the folders in git (the files stay on
+   disk until the package replaces them), add them to `.gitignore` and apply the package, and that the result is to
+   be committed afterwards. The request is answered in place: the operation awaits `request.Answer` while it holds
+   the card busy (`IsBusy`), so the card's other actions stay disabled and the operation stays serialized - unlike
+   the content-change question, which ends the operation and re-enters it with `acceptContentChange`. With no
+   subscriber nobody can be asked, so `ErrorOccurred` explains that confirmation is needed and nothing is changed
+   (`-ConfirmBeforeConverting`, `-NeverConvertWithoutAsking`). The question is asked once the existing pin is read
+   and before the package is acquired, so declining costs nothing.
+3. *Declined*: the method returns having acquired nothing and changed nothing - no git change, no file, no
+   `.gitignore`, no pin - and `StatusMessage` says the action was canceled and nothing was changed
+   (`-DeclineConvertChangesNothing`).
+4. *Agreed*: the package is acquired and passes the content-identity checks as before. A republished version asks its
+   own question and ends the apply, so nothing has been untracked at that point; the user's confirmation of the
+   changed content re-enters the apply, which asks about the conversion again, because the conversion is only
+   confirmed for the apply that carries it out. Immediately before extraction `UntrackAgentFoldersAsync` calls
+   `GitClient.UntrackAgentFolders` for exactly the tracked folders (`git rm -r --cached`, index only), so a package
+   that could not be fetched or was refused leaves git as it was (`-ConvertTrackedFolders`). A failure is rethrown as
+   an `InvalidOperationException` saying AgentControl could not stop git tracking the folders and nothing was
+   changed, with git's message; the outer handler reports it through `ErrorOccurred`, and the apply stops before
+   any file is replaced, `.gitignore` or the pin is written (`-StopWhenUntrackFails`). If the extraction then fails
+   (for example the extractor refuses the package's layout), `RestoreAgentFolderTrackingAsync` puts the folders back
+   into git's index with `GitClient.RestoreAgentFolderTracking` (best effort, logged on failure) before the error is
+   reported, so a failed apply never leaves the folders' removal staged and no pin is written
+   (`-RestoreTrackingWhenApplyFails`).
+5. *Afterwards*: the extraction, `EnsureGitIgnoreCoversManagedFolders`, the pin write and the release notes run as
+   always. Because git's index changed, a `finally` clause on every way out of the apply invalidates the card's
+   `CommittedAgentFilesCache` entry, re-runs `RefreshBranchAndCommittedFiles` (so the "Committed agent files" chip
+   clears - `git ls-files` reads the index) and `RefreshGitStatus` (so the "Uncommitted changes" chip shows,
+   expectedly). On success `StatusMessage` is the usual success message followed by a sentence saying the agent
+   folders are no longer tracked by git and that committing the change (the deletions, `.gitignore` and
+   `.agentcontrol.json`) finishes it (`-ConvertedRepoStatus`).
+
+Launch behavior is unchanged: `EnsureAgentFilesSyncedBeforeLaunchAsync` still skips the sync for a repo whose badge
+shows committed agent files and never converts anything.
 
 **MaybeOfferAgentsMdTemplate** (private): Decides whether to offer the package's optional
 root-level `AGENTS.md` template, called immediately after every successful extraction in both
@@ -564,7 +618,10 @@ and reports it via `ErrorOccurred`. `RefreshGitStatus`/`RefreshBranchAndCommitte
 `InvalidOperationException` from `GitClient` and degrade to "unknown"/`false` rather than
 propagating, since these run as part of routine, frequent UI refreshes.
 `ApplyPackageAndShowReleaseNotesAsync` catches `InvalidOperationException` and
-`DirectoryNotFoundException`, raising `ErrorOccurred` without applying a partial pin update; its
+`DirectoryNotFoundException`, raising `ErrorOccurred` without applying a partial pin update (a failure of
+`GitClient.UntrackAgentFolders` is rethrown with an explanation that nothing was changed and so stops the apply
+before any file is replaced; a git that cannot answer the fresh tracking check is treated as "nothing tracked");
+its
 read of a prior pin's `AgentsMdTemplateDeclined` value is guarded by its own inner try/catch that
 treats an `InvalidOperationException` (corrupt/unreadable existing pin file) as "no persisted
 decline" (defaults to `false`) rather than letting it propagate to the outer catch and abort the
@@ -622,7 +679,10 @@ background task, and a retired card raises nothing.
   `AcceptAgentsMdTemplate` to safely combine the repo root with the fixed `AGENTS.md`
   filename before any read or write.
 - **GitClient**, **CommittedAgentFilesCache** (`GitIntegration` subsystem) — git status,
-  branch, and committed-files queries.
+  branch, and committed-files queries, the fresh check of which managed folders git tracks and the removal of
+  those folders from git's index when a repo is converted.
+- **CommittedFilesConversionRequest** (`LauncherUI`, own file) — carries the conversion question to the view layer
+  and the answer back to the waiting operation.
 - **ShellDetector**, **AgentToolLauncher** (`AgentToolLauncher` subsystem) — shell detection
   and process launch.
 - **AppLogging**, **ILogger** (`Logging` subsystem) — `_logger` logs the real business
@@ -643,7 +703,8 @@ background task, and a retired card raises nothing.
   saved by then; `CardColorChanged` needs no re-ordering), and retires a card when its repo is removed.
 - **MainWindow** (code-behind) — subscribes to `RemoveRequested`
   (`AgentControl-RepoCardViewModel-RemoveRequest`), `SelectPackageRequested`, `NewGroupRequested`,
-  `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, and `ErrorOccurred` to drive
+  `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`,
+  `CommittedFilesConversionRequested` (answered through a modal `ConfirmationWindow`), and `ErrorOccurred` to drive
   dialogs/windows (detaching these handlers when a card leaves the list), calling
   `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the
   `ConfirmationWindow` shown for the AGENTS.md template offer, `MoveToGroup` from the card menu's

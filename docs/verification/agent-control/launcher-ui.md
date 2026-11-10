@@ -892,6 +892,24 @@ choice, and the end-to-end scenarios of the system verification
 (`AgentControl_PackageContentIntegrity_MovedGitTagIs...`)
 take it through to the confirmation with a real Git repository.
 
+**LauncherUI_ConvertCommittedAgentFiles_AsksFirstAndConvertsOnlyWhenConfirmed**: Applying a package to a
+repo whose managed agent folders are tracked by git asks first, in a modal question, and changes nothing until it is
+answered. Against a real temporary git repository that tracks an agents folder and a README, with a package source
+serving one package, the headless window test `MainWindow_ApplyingToRepoWithTrackedAgentFolders_AsksFirstAndConvertsOnlyWhenConfirmed`
+applies the package and finds one `ConfirmationWindow` owned by the main window while the card is still busy and no
+pin file exists; answering No leaves the question gone, the card idle, the file tracked by git, the old file on disk and
+the pin absent; applying again and answering Yes leaves git no longer tracking the agents folder, the old file replaced
+by the package, the pin written, the status message telling the user to commit the change and the committed-files
+badge cleared. The same test is the system-level evidence of `AgentControl-System-ConvertCommittedAgentFiles` (the real
+window and card with a real git repository; it is not a UI-automation test), and
+`RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersDeclined_ChangesNothing` is cited at the subsystem level
+besides it, covering `AgentControl-LauncherUI-ConvertCommittedAgentFiles` (children
+`AgentControl-RepoCardViewModel-CheckTrackedFoldersFresh`, `-ConfirmBeforeConverting`, `-DeclineConvertChangesNothing`,
+`-NeverConvertWithoutAsking`, `-ConvertTrackedFolders`, `-ConvertedRepoStatus`, `-StopWhenUntrackFails` and
+`-NoConvertWhenNotTracked`); the other behavior - only the tracked folders are untracked, the untrack failure, no
+question for an untracked repo, a stale badge - is verified by the `RepoCardViewModel` unit tests (see the
+`RepoCardViewModel` unit verification design).
+
 **LauncherUI_GitSourceSetup_PromptOnlyForUserStartedWork**: The registry the card builds for Git sources runs git with
 the configured git executable (or the one the owner supplies) and caches Git packages inside the isolated configuration
 directory; the registry for work the user started lets git show its credential UI, and the registry for background work

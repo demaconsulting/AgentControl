@@ -282,20 +282,35 @@ AgentControl
     package source.
   - ⚠️ **Committed agent files** — one or more of `.github/agents`,
     `.github/standards`, `.github/templates`, `.github/skills` are tracked by
-    git at `HEAD` (i.e. accidentally committed into a repo that's meant to
-    gitignore them). This is purely advisory — AgentControl does not modify
-    git tracking state itself.
+    git (i.e. committed into a repo that's meant to gitignore them). For
+    Launch this is purely advisory — Launch never modifies git tracking
+    state. "Select Package...", "Change package..." and "Upgrade" offer to
+    convert such a repo instead (see below).
 
-  Separately from this advisory badge, immediately after every successful
+  Separately from this badge, immediately after every successful
   "Select Package..."/"Upgrade" extraction, AgentControl now also proactively
   ensures the repo's root `.gitignore` covers the four managed folders (via a
   fixed marker-comment idempotency check only — never `git check-ignore`, and
   never a gitignore-pattern/glob analysis). This is purely additive to any
   existing `.gitignore` content, never blocks the extraction on failure, and
-  never touches git tracking state — a deliberate, narrow exception to the
-  "AgentControl does not modify git tracking state itself" stance above (that
-  stance still holds), not a contradiction of it. The committed-agent-files
-  badge above remains unchanged and still purely advisory.
+  never touches git tracking state itself.
+
+  Converting committed agent files: `.gitignore` has no effect on files git
+  already tracks, so applying a package over tracked managed folders would
+  leave git showing them modified or deleted while the package's new files
+  stayed invisible. Select Package, Change package and Upgrade therefore check
+  with git, at that moment (never the cached badge), which of the four
+  managed folders have tracked files. If any do, AgentControl asks for
+  confirmation in a modal dialog before downloading or changing anything,
+  naming the repo, the tracked folders and the package. Declining changes
+  nothing at all. Agreeing lets the apply proceed and, immediately before the
+  package replaces the files, runs `git rm -r --cached` for only the tracked
+  folders (index only — the files stay on disk until replaced); a failure
+  stops the apply before any file is replaced. Afterwards the committed-files
+  badge clears, the "Uncommitted changes" badge shows, and the status message
+  tells the user to commit the change (the deletions, `.gitignore` and
+  `.agentcontrol.json`). Repos with no tracked managed files, or whose git
+  state cannot be read, behave as before, and Launch never converts.
   - ❌ **Missing** — the repo path no longer exists on disk (deleted or an
     unmounted network/removable drive). Suppresses all other badges/actions
     for that card; offers a "Remove from list" action (never auto-removed,

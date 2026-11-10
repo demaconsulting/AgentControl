@@ -2,7 +2,8 @@
 # Software Unit Requirements for the GitClient Class
 #
 # GitClient invokes the configured git executable to query working-tree cleanliness, pull
-# commits, read the HEAD commit hash, detect committed agent files, and resolve the current
+# commits, read the HEAD commit hash, detect committed agent files, list which managed agent
+# folders are tracked and stop tracking them, and resolve the current
 # branch (using a fast path that reads .git/HEAD directly before falling back to a subprocess).
 
 sections:
@@ -45,6 +46,54 @@ sections:
           - GitClient_HasCommittedAgentFiles_LsFilesReportsFiles_ReturnsTrue
           - GitClient_HasCommittedAgentFiles_LsFilesReportsNothing_ReturnsFalse
           - GitClient_HasCommittedAgentFiles_LsFilesFails_ThrowsInvalidOperationException
+
+      - id: AgentControl-GitClient-ListTrackedAgentFolders
+        title: >-
+          The GitClient class shall report which of a repo's managed agent folders have files
+          tracked by git, from git's current state at the time of the call, and shall raise a
+          clear error when the underlying query fails.
+        justification: |
+          Converting a repo with committed agent files must name, and act on, exactly the folders
+          that are tracked at that moment; an answer remembered from an earlier commit could name
+          folders that are no longer tracked or miss ones that are.
+        tests:
+          - GitClient_GetTrackedAgentFolders_SomeFoldersTracked_ReturnsOnlyThoseInKnownOrder
+          - GitClient_GetTrackedAgentFolders_NothingTracked_ReturnsEmptyList
+          - GitClient_GetTrackedAgentFolders_ExactPathTracked_CountsItButNotPrefixSibling
+          - GitClient_GetTrackedAgentFolders_LsFilesFails_ThrowsInvalidOperationException
+
+      - id: AgentControl-GitClient-UntrackAgentFolders
+        title: >-
+          The GitClient class shall stop git tracking the managed agent folders it is given,
+          leaving every file on disk and every other tracked path as it was, and shall raise a
+          clear error carrying git's explanation when git cannot do so.
+        justification: |
+          A package can only manage folders that git does not track, but the files a team
+          committed must not be deleted or changed by taking them out of git; a failure must be
+          reported so the caller can stop before replacing anything.
+        tests:
+          - GitClient_UntrackAgentFolders_TrackedFolders_RemovesThemFromIndexOnlyAndKeepsFilesOnDisk
+          - GitClient_UntrackAgentFolders_GitRmFails_ThrowsInvalidOperationException
+
+      - id: AgentControl-GitClient-RestoreAgentFolderTracking
+        title: >-
+          The GitClient class shall be able to put managed agent folders it stopped tracking back
+          into git's tracking, leaving the files on disk as they are.
+        justification: |
+          A conversion whose package then cannot be applied must be undone, so a failed apply
+          never leaves the folders' removal from git staged.
+        tests:
+          - GitClient_RestoreAgentFolderTracking_AfterUntrack_RestoresIndexAndKeepsFiles
+
+      - id: AgentControl-GitClient-UntrackOnlyAgentFolders
+        title: >-
+          The GitClient class shall refuse to stop git tracking anything that is not one of the
+          managed agent folders, and shall refuse an empty list, without running git.
+        justification: |
+          Stopping git tracking is the one change AgentControl makes to what a team has committed;
+          it must never reach a path that is not one of the folders AgentControl manages.
+        tests:
+          - GitClient_UntrackAgentFolders_EmptyOrUnknownFolders_ThrowsArgumentException
 
       - id: AgentControl-GitClient-CurrentBranch
         title: >-

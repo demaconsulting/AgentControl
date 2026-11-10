@@ -82,6 +82,45 @@ public class GitIntegrationSubsystemTests
     }
 
     /// <summary>
+    ///     Test, with the real git, the capability of taking committed agent folders out of git as a
+    ///     whole: the tracked managed folders are reported, stopping the tracking of them leaves every
+    ///     file on disk and every other tracked path alone, and the folders are then reported as no
+    ///     longer tracked.
+    /// </summary>
+    [Fact]
+    public void GitIntegrationSubsystem_CommittedAgentFolders_ReportedThenUntrackedWithoutTouchingFilesOrOtherPaths()
+    {
+        // Arrange: a real repo that tracks two managed folders and unrelated files
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(
+            new Dictionary<string, string>
+            {
+                [".github/agents/a.md"] = "agent",
+                [".github/templates/t.md"] = "template",
+                [".github/workflows/ci.yml"] = "ci",
+                ["README.md"] = "readme"
+            },
+            "Track agent files");
+        var client = new GitClient();
+
+        // Act
+        var before = client.GetTrackedAgentFolders(fixture.WorkPath);
+        client.UntrackAgentFolders(fixture.WorkPath, before.ToArray());
+        var after = client.GetTrackedAgentFolders(fixture.WorkPath);
+
+        // Assert: both folders were reported, none is tracked now, the other paths are still tracked
+        // and every file is still on disk
+        Assert.Equal([".github/agents", ".github/templates"], before);
+        Assert.Empty(after);
+        Assert.False(client.HasCommittedAgentFiles(fixture.WorkPath));
+        Assert.Equal(
+            [".github/workflows/ci.yml", "README.md"],
+            fixture.Git(fixture.WorkPath, "ls-files").Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.Trim()));
+        Assert.True(File.Exists(Path.Combine(fixture.WorkPath, ".github", "agents", "a.md")));
+        Assert.True(File.Exists(Path.Combine(fixture.WorkPath, ".github", "templates", "t.md")));
+    }
+
+    /// <summary>
     ///     Test, with the real git, that the raw content of a listed blob is read from the fetched commit
     ///     exactly as the commit holds it - carriage returns, a NUL byte and an identifier that an
     ///     attribute asks to expand - even though the user's configuration asks for line-ending conversion

@@ -213,12 +213,12 @@ button](images/card-color-palette.png)
 - **Uncommitted changes** (amber) — the repo has uncommitted local changes; this disables the
   **Git Pull** action for that card.
 - **Committed agent files** (amber) — one or more of `.github/agents`, `.github/standards`,
-  `.github/templates`, `.github/skills` are tracked by git at `HEAD` in this repo. This is
-  purely advisory: AgentControl does not modify git tracking state itself, it only warns
-  that content meant to stay untracked (via `.gitignore`) appears to have been committed.
-  Separately, AgentControl proactively ensures your `.gitignore` covers these four folders
-  immediately after every Select-Package/Upgrade (see below), which makes this situation
-  much less likely to occur going forward.
+  `.github/templates`, `.github/skills` are tracked by git in this repo. For **Launch** this is purely
+  advisory: Launch never changes git tracking state, it only warns that content meant to stay untracked (via
+  `.gitignore`) appears to have been committed, and skips the agent-package sync. **Select Package...**, **Change
+  package...** and **Upgrade** instead offer to *convert* the repo: after you confirm, AgentControl stops git
+  tracking those folders and manages them from the package (see *Repos with Committed Agent Files* below). They
+  also ensure your `.gitignore` covers the four folders, which keeps them out of git from then on.
 - **Folder missing** (red) — the repo path no longer exists on disk (for example, a deleted
   folder or an unmounted network/removable drive). This suppresses the card's other chips and
   actions, and offers a "Remove from list" action instead (the card is never auto-removed, since
@@ -841,7 +841,8 @@ package, delete the four managed folders if present, extract the new files, ensu
 `.gitignore` covers the four managed folders, write the `.agentcontrol.json` pin (naming the
 source), offer the `AGENTS.md` template if applicable (see *AGENTS.md Template Offer* below), then show the
 release notes. While this runs the card shows
-that it is busy and offers **Cancel**.
+that it is busy and offers **Cancel**. If the repo has agent folders committed to git, AgentControl asks first
+(see *Repos with Committed Agent Files* below).
 
 ## Changing the Package or Version of a Pinned Repo
 
@@ -849,7 +850,8 @@ A repo that already has a package shows **Change package...** in the "..." menu'
 same Select Package dialog, **preselected** on the repo's current source, package and version. Use it to:
 
 - **Move to another version or package** (for example an older version, or a package from another source): pick it
-  and confirm; AgentControl runs the same extract-and-pin sequence as an upgrade and nothing more is asked.
+  and confirm; AgentControl runs the same extract-and-pin sequence as an upgrade and nothing more is asked (unless the
+  repo has agent folders committed to git, see *Repos with Committed Agent Files*).
 - **Accept changed content of the version you already use**: choose the **same** version again. If its content has
   not changed there is nothing to confirm; if it has changed (a moved Git tag, a republished zip or NuGet package;
   the card's **Tag moved** chip leads here too), AgentControl asks you to confirm, with **No** as the default - only
@@ -891,6 +893,38 @@ you are expected to resolve it manually. Any local customizations you may have a
 the four managed folders are not preserved across an upgrade: AgentControl always performs a
 blind delete-and-replace of those exact four folders, never a precise diff against the
 previous package's contents.
+
+## Repos with Committed Agent Files
+
+If a repo has some of the four managed folders (`.github/agents`, `.github/standards`, `.github/templates`,
+`.github/skills`) committed to git - the card shows the amber **Committed agent files** chip - AgentControl cannot
+manage them from a package as they are: adding them to `.gitignore` has no effect on files git already tracks, so
+replacing them would leave git showing the old files as modified or deleted and the new ones invisible, and committing
+everything would record a broken mix. So **Select Package...**, **Change package...** and **Upgrade** convert such a
+repo, only with your consent:
+
+1. AgentControl asks git, at that moment, which of the four folders are tracked (the chip is not relied on, as it can
+   be out of date), and - **before anything is downloaded or changed** - shows a question that names the repo, the
+   tracked folders and the package. For example: *'my-repo' has agent files committed to git in .github/agents,
+   .github/standards. AgentControl manages these folders from the package and keeps them out of git. To continue,
+   AgentControl will stop tracking them in git (the files stay on disk until the package replaces them), add them
+   to .gitignore, and apply contoso-agents 1.1.0. Commit the result afterwards to finish the change. Continue?*
+   The card shows that it is busy while the question is open, and **No** is the default.
+2. If you answer **No**, nothing changes at all: nothing is downloaded, git still tracks the same files, your files,
+   `.gitignore` and the pin are untouched, and the card says the action was canceled.
+3. If you answer **Yes**, AgentControl opens and validates the package as usual and then, just before replacing the
+   files, tells git to stop tracking exactly the folders that were tracked (`git rm -r --cached`: only git's index
+   changes, nothing is deleted from your disk by this step). If git cannot do that - for example another git process
+   is running in the repo - the apply stops before any file is replaced, and the message says nothing was changed.
+4. The package is then applied as described above (the old files are replaced, `.gitignore` is updated and the pin is
+   written). The **Committed agent files** chip clears, and the **Uncommitted changes** chip appears, as expected:
+   the removal of the old files from git is staged but not committed.
+5. **Commit the change** - the deletions of the old files, `.gitignore` and `.agentcontrol.json` - to finish. The
+   card's status message reminds you.
+
+A repo that has no managed folders tracked by git, or whose git state cannot be read (git is not installed, or the
+folder is not a git repository), is applied exactly as before, with no question. **Launch** never converts a repo: it
+still leaves the managed folders alone and skips the sync, as described under *Launching*.
 
 # Launching
 

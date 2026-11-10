@@ -59,8 +59,9 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   never applied silently; you accept it on purpose with **Change package...** in the card's "..." menu
 - **Status chips**: each repo card shows an amber upgrade chip ("Upgrade to" and the version an upgrade
   would move to; click it to upgrade), an uncommitted-changes warning, a committed-agent-files
-  warning (advisory only — flags when the managed folders were accidentally committed to
-  git), a missing-folder indicator when the path no longer exists on disk, a
+  warning (flags when the managed folders were committed to git; Select Package, Change package and
+  Upgrade then offer to stop git tracking them before applying the package, and ask first), a
+  missing-folder indicator when the path no longer exists on disk, a
   package-source-problem indicator when the pinned source is not configured, a sign-in-needed indicator
   when the pinned server or Git repository needs a sign-in, and an amber **Tag moved** chip when the Git tag
   of the pinned version now names another commit. Separately,
