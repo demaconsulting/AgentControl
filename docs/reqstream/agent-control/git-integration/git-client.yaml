@@ -59,6 +59,7 @@ sections:
         tests:
           - GitClient_GetTrackedAgentFolders_SomeFoldersTracked_ReturnsOnlyThoseInKnownOrder
           - GitClient_GetTrackedAgentFolders_NothingTracked_ReturnsEmptyList
+          - GitClient_GetTrackedAgentFolders_ExactPathTracked_CountsItButNotPrefixSibling
           - GitClient_GetTrackedAgentFolders_LsFilesFails_ThrowsInvalidOperationException
 
       - id: AgentControl-GitClient-UntrackAgentFolders

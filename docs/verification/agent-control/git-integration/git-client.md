@@ -53,11 +53,13 @@ agent files reports true, one with none reports false, and a failed `ls-files` q
 
 **GitClient_ListTrackedAgentFolders_ReportsOnlyTrackedFoldersOrRaisesOnFailure**: In a real
 repo that tracks some of the four agent folders, only those are reported, in the fixed folder
-order, and an untracked folder that merely exists on disk is not; a repo that tracks none
+order, and an untracked folder that merely exists on disk is not; a file tracked at the exact path of a
+managed folder counts while a prefix sibling (`.github/standards-old`) does not; a repo that tracks none
 reports an empty list; and a failed `ls-files` query throws `InvalidOperationException`. This
 scenario is tested by
 `GitClient_GetTrackedAgentFolders_SomeFoldersTracked_ReturnsOnlyThoseInKnownOrder`,
-`GitClient_GetTrackedAgentFolders_NothingTracked_ReturnsEmptyList`, and
+`GitClient_GetTrackedAgentFolders_NothingTracked_ReturnsEmptyList`,
+`GitClient_GetTrackedAgentFolders_ExactPathTracked_CountsItButNotPrefixSibling`, and
 `GitClient_GetTrackedAgentFolders_LsFilesFails_ThrowsInvalidOperationException`, covering
 `AgentControl-GitClient-ListTrackedAgentFolders`.
 

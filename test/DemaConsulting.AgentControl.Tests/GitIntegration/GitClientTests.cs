@@ -419,6 +419,32 @@ public class GitClientTests
     }
 
     /// <summary>
+    ///     Test that GetTrackedAgentFolders counts a known agent folder path that is itself tracked
+    ///     as a single entry (here a file named <c>.github/agents</c>), and does not count a sibling
+    ///     whose name only starts with a known folder's name.
+    /// </summary>
+    [Fact]
+    public void GitClient_GetTrackedAgentFolders_ExactPathTracked_CountsItButNotPrefixSibling()
+    {
+        // Arrange: a real repo tracking a file at the exact path .github/agents and a sibling folder
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(
+            new Dictionary<string, string>
+            {
+                [".github/agents"] = "a file where the folder would be",
+                [".github/standards-old/s.md"] = "sibling"
+            },
+            "Track exact path and sibling");
+        var client = new GitClient("git", _logger);
+
+        // Act
+        var tracked = client.GetTrackedAgentFolders(fixture.WorkPath);
+
+        // Assert: the exact path counts, the prefix sibling does not
+        Assert.Equal([".github/agents"], tracked);
+    }
+
+    /// <summary>
     ///     Test that GetTrackedAgentFolders throws when "git ls-files" fails.
     /// </summary>
     [Fact]

@@ -237,12 +237,14 @@ internal sealed class GitClient
                 $"'git ls-files' failed with exit code {result.ExitCode}: {result.StandardError.Trim()}");
         }
 
-        // A folder is tracked when any listed path lies below it; matching is by whole path
-        // segment ("<folder>/") so a sibling such as ".github/agents-old" never counts
+        // A folder is tracked when any listed path is the folder itself (a file, link or submodule
+        // tracked at that exact path) or lies below it; matching is by whole path segment so a
+        // sibling such as ".github/agents-old" never counts
         var trackedPaths = result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries);
         return
         [
             .. KnownAgentFolders.Where(folder => trackedPaths.Any(path =>
+                path.Equals(folder, StringComparison.OrdinalIgnoreCase) ||
                 path.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase)))
         ];
     }

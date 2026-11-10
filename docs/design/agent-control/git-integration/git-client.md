@@ -73,7 +73,8 @@ tracked by git, via a single `git ls-files -z -- {folders}`.
   `.github/agents`) in the fixed order of `KnownAgentFolders`; empty when none is tracked.
 - *Postconditions*: Reads the index afresh on every call (no cache), so the answer is current
   at the moment of a decision. `-z` output is used so git never quotes an unusual file name,
-  and a folder counts as tracked only when a listed path lies below `{folder}/`
+  and a folder counts as tracked when a listed path is the folder path itself (a file, link or submodule tracked at
+  that exact path) or lies below `{folder}/` - never a sibling that only shares the name's prefix
   (`AgentControl-GitClient-ListTrackedAgentFolders`).
 
 **UntrackAgentFolders**: Stops git tracking the given agent folders via
