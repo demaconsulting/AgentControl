@@ -47,6 +47,10 @@ AgentControl is distributed as a Windows MSI installer, built from
 2. Run the installer and follow the prompts.
 3. Launch **AgentControl** from the Start menu.
 
+Running an AgentControl installer always replaces the AgentControl that is installed - an upgrade, a reinstall of
+the same version, or an older version (a downgrade) - so there is only ever one installed copy.
+
+The installed application is **self-contained and single-file**: it bundles its own copy of
 The installed application is **self-contained and single-file**: it bundles its own copy of
 the .NET 10 runtime (matching the app's `net10.0` target framework and the Avalonia UI
 framework's Windows desktop requirements), so the target machine needs no pre-installed

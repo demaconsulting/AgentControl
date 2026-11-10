@@ -183,6 +183,9 @@ AgentControl is distributed as a Windows MSI installer, built from
 2. Run the installer and follow the prompts.
 3. Launch **AgentControl** from the Start menu.
 
+Running an AgentControl installer always replaces the AgentControl that is installed - an upgrade, a reinstall of
+the same version, or an older version (a downgrade) - so there is only ever one installed copy.
+
 A Git repository package source also needs [Git](https://git-scm.com/downloads) **2.29 or newer** on the machine
 (AgentControl says "Git is too old" otherwise; **Settings > Git executable path override** can point to a newer
 one). The other source kinds need no Git.
