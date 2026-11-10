@@ -524,6 +524,110 @@ public sealed class RepoGroupingTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that adding a repo to a group creates its card directly in that group (spelled as the
+    ///     existing group, whatever the letter case asked for), persists the group, and puts the card
+    ///     in the group's section.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepoToGroup_NewRepo_AddsCardInTheGroupAndPersistsIt()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        var viewModel = CreateViewModel(configDir, new Spec("w1", Group: "Work"), new Spec("loose"));
+        var newRepo = CreateRepoDirectory("fresh");
+
+        // Act: the group is asked for in different letter case
+        var result = viewModel.AddRepoToGroup(newRepo, "work");
+
+        // Assert: a new card, in "Work" (as spelled), saved, and listed in the Work section
+        Assert.Equal(AddRepoResult.Added, result);
+        var card = Assert.Single(viewModel.RepoCards, candidate => candidate.RepoName == "fresh");
+        Assert.Equal("Work", card.GroupName);
+        Assert.Equal(["Work"], viewModel.GroupNames);
+        Assert.Equal(["[Work 2]", "fresh", "w1", "[Ungrouped 1]", "loose"], Describe(viewModel));
+        var reloaded = SettingsStore.Load(configDir);
+        Assert.Equal("Work", reloaded.RecentRepos.Single(repo => repo.Path == newRepo).GroupName);
+    }
+
+    /// <summary>
+    ///     Test that adding a repo that is already listed moves its existing entry into the group
+    ///     instead of adding a second one.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepoToGroup_RepoAlreadyListed_MovesItIntoTheGroup()
+    {
+        // Arrange: "loose" is ungrouped, "w1" holds the Work group
+        var viewModel = CreateViewModel(new Spec("w1", Group: "Work"), new Spec("loose"));
+        var loose = viewModel.RepoCards.Single(card => card.RepoName == "loose");
+
+        // Act
+        var result = viewModel.AddRepoToGroup(loose.RepoPath, "Work");
+
+        // Assert: still two repos, and the existing one is now in Work
+        Assert.Equal(AddRepoResult.MovedExisting, result);
+        Assert.Equal(2, viewModel.RepoCards.Count);
+        Assert.Equal("Work", loose.GroupName);
+        Assert.Equal(["[Work 2]", "w1", "loose"], Describe(viewModel));
+    }
+
+    /// <summary>
+    ///     Test that a repo whose folder does not exist is not added, and nothing changes.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepoToGroup_FolderMissing_AddsNothing()
+    {
+        // Arrange
+        var viewModel = CreateViewModel(new Spec("w1", Group: "Work"));
+        var missing = Path.Combine(CreateTempDirectory(), "does-not-exist");
+
+        // Act
+        var result = viewModel.AddRepoToGroup(missing, "Work");
+
+        // Assert
+        Assert.Equal(AddRepoResult.NotAdded, result);
+        Assert.Single(viewModel.RepoCards);
+    }
+
+    /// <summary>
+    ///     Test that adding to a collapsed group opens it, so the repo that was just added is visible.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepoToGroup_CollapsedGroup_ExpandsIt()
+    {
+        // Arrange
+        var viewModel = CreateViewModel(new Spec("w1", Group: "Work"));
+        viewModel.ToggleGroupCollapsed("Work");
+        Assert.True(viewModel.IsGroupCollapsed("Work"));
+
+        // Act
+        viewModel.AddRepoToGroup(CreateRepoDirectory("fresh"), "Work");
+
+        // Assert
+        Assert.False(viewModel.IsGroupCollapsed("Work"));
+        Assert.Equal(["[Work 2]", "fresh", "w1"], Describe(viewModel));
+    }
+
+    /// <summary>
+    ///     Test that a group name the rules refuse (blank, or a built-in section's name) is rejected
+    ///     before anything is added.
+    /// </summary>
+    /// <param name="groupName">The refused group name.</param>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("Favorites")]
+    [InlineData("Ungrouped")]
+    public void MainWindowViewModel_AddRepoToGroup_InvalidGroupName_ThrowsAndAddsNothing(string groupName)
+    {
+        // Arrange
+        var viewModel = CreateViewModel(new Spec("w1", Group: "Work"));
+
+        // Act / Assert
+        Assert.Throws<ArgumentException>(() => viewModel.AddRepoToGroup(CreateRepoDirectory("fresh"), groupName));
+        Assert.Single(viewModel.RepoCards);
+    }
+
+    /// <summary>
     ///     Describes the displayed items as text: a header as <c>[Name count]</c> (with
     ///     <c>collapsed</c> when its cards are hidden) and a card as its repo name.
     /// </summary>

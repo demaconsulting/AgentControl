@@ -64,11 +64,11 @@ public class SettingsWindowServerSourceTests
 
     /// <summary>
     ///     Test that a saved server appears in the list with the server icon and kind name, is
-    ///     "Not checked" (the folder check is never run for it), and is written to the settings
+    ///     "Online source" (the folder check is never run for it), and is written to the settings
     ///     with its insecure-HTTP choice.
     /// </summary>
     [Fact]
-    public async Task SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt()
+    public async Task SettingsWindowViewModel_SaveServerSource_ListsItAsOnlineSourceAndPersistsIt()
     {
         // Arrange: a folder check that must never be asked about a server
         var asked = new List<string>();
@@ -93,12 +93,12 @@ public class SettingsWindowServerSourceTests
         await viewModel.WaitForStatusChecksAsync();
         viewModel.SaveCommand.Execute(null);
 
-        // Assert: listed as a server whose status says it is not checked
+        // Assert: listed as a server whose status says it is an online source
         var row = Assert.Single(viewModel.Sources);
         Assert.True(row.IsServer);
         Assert.Equal(MaterialIconKind.ServerNetwork, row.TypeIcon);
         Assert.Equal("NuGet-package server", row.TypeName);
-        Assert.Equal("Not checked", row.StatusText);
+        Assert.Equal("Online source", row.StatusText);
         Assert.Contains("Test connection", row.StatusTooltip, StringComparison.Ordinal);
         Assert.False(row.IsAvailable);
         Assert.False(row.IsMissing);

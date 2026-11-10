@@ -46,7 +46,7 @@ public sealed class MainWindowSmokeTests
 
         // Assert
         Assert.False(mainWindow.IsOffscreen);
-        Assert.Equal("AgentControl", mainWindow.Title);
+        Assert.Equal("Agent Control", mainWindow.Title);
         Assert.Equal("MainWindowRoot", mainWindow.AutomationId);
     }
 }

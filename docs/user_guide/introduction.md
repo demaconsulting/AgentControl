@@ -150,9 +150,15 @@ name and how many repos it holds:
   A section with no repo has no header. Within a section the most recently launched repo comes first.
 
 Click a header (its chevron, name or count) to **collapse** or **expand** the section; AgentControl remembers which
-sections you collapsed. A group's header also has a "..." menu: **Rename group...** (the same prompt; another
+sections you collapsed. A group's header also has a "..." menu. Its first item, **Add repository...**, opens the same
+folder picker as the **Add repo** button in the app bar and puts the folder you choose straight into that group (if
+the repo is already in the list, it is moved into the group and a message tells you so; if you cancel the picker,
+nothing changes). After a separator come **Rename group...** (the same prompt; another
 group's name is refused) and **Remove group**, which asks for confirmation and leaves the group's repos in the
-list, ungrouped. Nothing on disk changes.
+list, ungrouped. Nothing on disk changes. The built-in **Favorites** and **Ungrouped** headers have no menu.
+
+![The open "..." menu of the Client Work group header: Add repository..., then Rename group... and Remove
+group](images/group-menu.png)
 
 The **filter box** always searches all repos: while it has text, every section is shown expanded and a section
 without a match disappears, so a repo is never hidden inside a collapsed group; clear the filter and your collapsed
@@ -272,9 +278,17 @@ NuGet-package server and Git repository](images/settings-add-menu.png)
 Each row of the list shows the alias, an icon for the kind of source, the location (hover for
 the full text) and a status. For a folder (or a Git repository given as a local path) the status is whether the
 folder can currently be found, checked in the background so an offline network share never freezes Settings. A
-server or a remote Git repository shows **Not checked**: AgentControl contacts it only when it is needed - when you
-select a package, check for upgrades or press **Test connection** - never just to draw the list, because
-that could mean a wait, or a sign-in, for a window you only opened to look.
+server or a remote Git repository shows a neutral **Online source** status with a cloud icon: AgentControl
+contacts it only when it needs it - when you select a package, check for upgrades, sync at launch or press
+**Test connection** - never just to draw the list, because
+that could mean a wait, or a sign-in, for a window you only opened to look. A NuGet source (a folder or a server)
+that requires signed packages also shows a small **Signed only** badge with a shield; hover over it to see that
+signed packages are required and, when you pinned a publisher, that only that publisher is accepted (shown by the
+start and end of its certificate fingerprint).
+
+The Settings window and the package source editor windows can be **resized** (drag an edge or corner): paths and
+feed addresses can be long, so the fields and the source list widen with the window and show more of the text, and a
+window made shorter than its content scrolls while **Save** stays in view. The windows reopen at their usual size.
 
 ## Adding a NuGet-Package Server
 
@@ -862,7 +876,12 @@ upgrade chip, which you can also click to start the upgrade). Upgrading:
 6. Offers the package's `AGENTS.md` template if applicable (see
    [AGENTS.md Template Offer](#agentsmd-template-offer) below). This question comes first.
 7. Shows the new package's `release-notes.md` (when the package includes one) in a
-   non-modal, resizable window, in front, once the question (if there was one) has been answered.
+   non-modal, resizable window, in front, once the question (if there was one) has been answered. A Markdown link
+   in the notes - `[text](https://...)`, `<https://...>` or a bare `https://...` address - is shown as a link: hover
+   over it to see the full address, then click it (or focus it with **Tab** and press **Enter** or **Space**) to open
+   it in your default web browser. Only `http` and `https` addresses become links; anything else (a `file:` path,
+   `mailto:`, a relative path) is shown as plain text and is never opened, because release notes come from packages.
+   Inline `` `code` `` is shown in a monospace font, without the backticks.
 
 There is no rollback if a step fails partway through — a message box reports the error, and
 you are expected to resolve it manually. Any local customizations you may have added inside
@@ -1079,7 +1098,9 @@ folders as fully owned and replaced by the package, not a place for local edits.
 A package zip may optionally include a root-level `release-notes.md` entry. It is never
 extracted to disk as part of the managed folders; instead, AgentControl reads its content
 directly from the zip and displays it in a non-modal window after a successful extract or
-upgrade. A package with no `release-notes.md` entry is still extracted successfully — the
+upgrade. Links in the notes (`[text](https://...)`, `<https://...>` and bare `https://` addresses) are clickable
+and open in your default web browser - only for `http` and `https` addresses; any other kind of link is shown as
+plain text and never opened. A package with no `release-notes.md` entry is still extracted successfully — the
 release-notes display is simply skipped.
 
 ## AGENTS.md Template Offer

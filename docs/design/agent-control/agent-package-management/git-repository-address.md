@@ -75,4 +75,4 @@ Invalid input is reported through the `problem` out value and `false`; nothing t
   check of `PackageSourceDefinition`) before a Git source can be tested or saved; the editor uses the address rules
   directly, not the provider's parse.
 - **PackageSourceItemViewModel** (`LauncherUI`) - `TryParse` tells a local path from a remote address, so a remote
-  source is listed as not checked and a local one with the status of its folder.
+  source is listed as an online source and a local one with the status of its folder.

@@ -161,6 +161,19 @@ present (case-insensitive comparison, matching Windows path semantics). Attempts
 existing pin via `RepoPinStore.Load`, tolerating (returning `null` for) a repo that has never
 been synced.
 
+**AddRepoToGroup**: Adds a repository straight into one of the user's groups, or moves an already listed repo into it.
+
+- *Parameters*: `string repoPath`, `string groupName`.
+- *Returns*: `AddRepoResult` - `Added`, `MovedExisting`, `MoveFailed` (the card reported the failed save through
+  `SettingsSaveFailed`) or `NotAdded` (the folder does not exist).
+- *Preconditions*: a non-blank path and a valid group name (`RepoGroupName.Validate`); a built-in section's name or a
+  blank name throws `ArgumentException`.
+- *Postconditions*: shares the add with `AddRepo` (the private `AddRepoCore`), with the group - spelled as an existing
+  group of the same name ignoring case - set on the new entry before the single save, so the repo is never listed
+  ungrouped in between; a repo already listed is moved with `RepoCardViewModel.MoveToGroup` instead of being added
+  twice; and a collapsed target group is expanded so the repo is visible
+  (`AgentControl-MainWindowViewModel-AddRepoToGroup`). The group is stored in the user's settings only.
+
 **RemoveRepo**: Removes a repo card unconditionally.
 
 - *Parameters*: `RepoCardViewModel card`.

@@ -136,6 +136,25 @@ public class RepoGroupHeaderViewModelTests
     }
 
     /// <summary>
+    ///     Test that the add-repository command only raises its request.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_AddRepoCommand_RaisesRequest()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        var requests = 0;
+        header.AddRepoRequested += (_, _) => requests++;
+
+        // Act
+        header.AddRepoCommand.Execute(null);
+        header.AddRepoCommand.Execute(null);
+
+        // Assert
+        Assert.Equal(2, requests);
+    }
+
+    /// <summary>
     ///     Test that the header's text form is its accessible name, which names the hosting list item
     ///     for assistive technology instead of the type name.
     /// </summary>

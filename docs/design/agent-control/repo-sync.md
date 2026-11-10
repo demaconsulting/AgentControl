@@ -163,7 +163,15 @@ since a modal dialog would block launching the agent tool while release notes ar
 `MarkdownBlock` into a `TextBlock`: heading blocks render every inline run bold (in addition to
 their larger font size), regardless of whether individual runs were themselves marked
 `**bold**`, so the heading's visual weight matches its larger size; non-heading (body) blocks
-bold only the runs the Markdown source explicitly marked `**bold**`.
+bold only the runs the Markdown source explicitly marked `**bold**`. A link run (one whose address
+passes `IsOpenableUrl`; the code-behind checks again) is rendered as an inline `Button` styled as a link
+(`Button.link` in `AppStyles.axaml`: the theme-aware `LinkForeground`, underlined, a focus ring on keyboard
+focus), so it is focusable and Enter or Space activates it like a click, with the full address as its
+tooltip. Activating it calls `OpenLinkAsync`, which re-checks the address, hands the exact string to an
+injectable opener (the platform launcher, `TopLevel.Launcher`, so no shell is involved; tests pass their own),
+and turns any failure into a logged warning and a message box instead of an exception
+(`AgentControl-RepoSync-ReleaseNotesLinks`). Without a click handler, or for an address that fails the gate,
+a link run is drawn as ordinary text.
 
 `GitIgnoreEnsurer` runs from `RepoCardViewModel` rather than from inside
 `PackageZipExtractor.Extract` itself: `Extract` stays a pure file-sync operation with a single

@@ -117,7 +117,7 @@ public sealed class NuGetServerSourceTests
         Assert.True(Retry.WhileFalse(() => save.IsEnabled, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200)).Result);
         save.Invoke();
         Assert.True(WaitForText(settingsWindow, "SourceAliasText", "Feed"));
-        Assert.True(WaitForText(settingsWindow, "SourceStatusText", "Not checked"));
+        Assert.True(WaitForText(settingsWindow, "SourceStatusText", "Online source"));
         Find(settingsWindow, "SaveSettingsButton").AsButton().Invoke();
         var settingsPath = Path.Combine(context.ConfigDirectory, "settings.json");
         Assert.True(Retry.WhileFalse(

@@ -100,6 +100,16 @@ sections:
         tests:
           - RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests
 
+      - id: AgentControl-RepoGroupHeaderViewModel-AddRepoRequest
+        title: >-
+          The RepoGroupHeaderViewModel class shall request that a repository be added to its group
+          when the user chooses the add-repository action of the header.
+        justification: |
+          Choosing the folder needs a dialog that belongs to the window; the header only reports
+          that the user wants to add a repo to this group.
+        tests:
+          - RepoGroupHeaderViewModel_AddRepoCommand_RaisesRequest
+
       - id: AgentControl-RepoGroupHeaderViewModel-RequiresName
         title: >-
           The RepoGroupHeaderViewModel class shall refuse to be created without a name.

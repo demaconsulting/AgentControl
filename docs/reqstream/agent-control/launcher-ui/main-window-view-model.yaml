@@ -32,6 +32,23 @@ sections:
           - MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse
           - MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse
 
+      - id: AgentControl-MainWindowViewModel-AddRepoToGroup
+        title: >-
+          The MainWindowViewModel class shall add a repo straight into one of the user's groups,
+          moving the existing entry into that group instead when the repo is already tracked,
+          shall reject a nonexistent folder and an invalid group name, shall open a collapsed
+          target group so the repo is visible, and shall keep the group only in the user's
+          settings.
+        justification: |
+          Adding a repo to a group in one step saves the developer the add-then-move round trip,
+          while the duplicate and nonexistent-path protections of the plain add still apply.
+        tests:
+          - MainWindowViewModel_AddRepoToGroup_NewRepo_AddsCardInTheGroupAndPersistsIt
+          - MainWindowViewModel_AddRepoToGroup_RepoAlreadyListed_MovesItIntoTheGroup
+          - MainWindowViewModel_AddRepoToGroup_FolderMissing_AddsNothing
+          - MainWindowViewModel_AddRepoToGroup_CollapsedGroup_ExpandsIt
+          - MainWindowViewModel_AddRepoToGroup_InvalidGroupName_ThrowsAndAddsNothing
+
       - id: AgentControl-MainWindowViewModel-RemoveRepo
         title: >-
           The MainWindowViewModel class shall remove a repo card from its collections and

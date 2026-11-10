@@ -82,6 +82,7 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
         ToggleCommand = new RelayCommand(
             () => ToggleRequested?.Invoke(this, EventArgs.Empty), () => IsToggleEnabled);
         RenameCommand = new RelayCommand(() => RenameRequested?.Invoke(this, EventArgs.Empty));
+        AddRepoCommand = new RelayCommand(() => AddRepoRequested?.Invoke(this, EventArgs.Empty));
         RemoveGroupCommand = new RelayCommand(() => RemoveGroupRequested?.Invoke(this, EventArgs.Empty));
     }
 
@@ -204,6 +205,12 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     public RelayCommand ToggleCommand { get; }
 
     /// <summary>
+    ///     Gets the command that asks to add a repository straight into this group; it raises
+    ///     <see cref="AddRepoRequested"/>. Offered for the user's own groups only.
+    /// </summary>
+    public RelayCommand AddRepoCommand { get; }
+
+    /// <summary>
     ///     Gets the command that asks to rename the group; it raises <see cref="RenameRequested"/>.
     ///     Offered for the user's own groups only.
     /// </summary>
@@ -219,6 +226,12 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     ///     Raised when the user asks to collapse or expand the section.
     /// </summary>
     public event EventHandler? ToggleRequested;
+
+    /// <summary>
+    ///     Raised when the user asks to add a repository to the group; the window shows the folder
+    ///     picker and adds the chosen folder to this group.
+    /// </summary>
+    public event EventHandler? AddRepoRequested;
 
     /// <summary>
     ///     Raised when the user asks to rename the group; the window shows the name prompt.

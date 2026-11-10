@@ -212,11 +212,23 @@ the events that need a dialog.
   any failure reaches the card as "no picture".
 - *`MainWindowViewModel` and `RepoGroupHeaderViewModel`*: the main view-model creates, and keeps one instance per
   section (Favorites, each group, Ungrouped), and updates its `Count`, collapsed state and toggle availability in place
-  so the header keeps keyboard focus. It subscribes to the header's three request events: `ToggleRequested` it handles
-  itself (`ToggleGroupCollapsed`, saved before applied); `RenameRequested` and `RemoveGroupRequested` it forwards,
-  with the group's name, as its own `GroupRenameRequested` and `GroupRemoveRequested` events, to which `MainWindow`
-  responds with a prompt or a confirmation and then calls `RenameGroup`/`RemoveGroup`. The header holds no settings
+  so the header keeps keyboard focus. It subscribes to the header's four request events: `ToggleRequested` it handles
+  itself (`ToggleGroupCollapsed`, saved before applied); `RenameRequested`, `RemoveGroupRequested` and
+  `AddRepoRequested` it forwards, with the group's name, as its own `GroupRenameRequested`, `GroupRemoveRequested` and
+  `GroupAddRepoRequested` events, to which `MainWindow` responds with a prompt, a confirmation or the folder picker and
+  then calls `RenameGroup`/`RemoveGroup`/`AddRepoToGroup`. The header holds no settings
   and no reference to the main view-model.
+- *Add repository to a group*: `MainWindow.AddRepoAsync(viewModel, groupName)` is the one add-repo flow, shared by the
+  top-bar `AddRepoButton` (no group) and the group header menu's **Add repository...** (the header's group): it asks
+  for a folder through the native folder picker (a replaceable seam, `RepoFolderPicker`, so tests answer with a path
+  or a cancel), does nothing at all when the picker is cancelled, and calls `MainWindowViewModel.AddRepo` or
+  `AddRepoToGroup`. Both go through the same private add (`AddRepoCore`: folder must exist, a repo already listed is
+  not added twice, pin loaded, saved once, then listed), which, given a group, stores the group on the new entry before
+  it is saved. For a repo that is already listed `AddRepoToGroup` instead moves the existing entry with
+  `RepoCardViewModel.MoveToGroup` and the window says so in a message box (`AddRepoResult.MovedExisting`); the plain
+  add keeps refusing it. A collapsed target group is expanded so the new card is visible. The favorites and ungrouped
+  headers have no "..." menu, so the item is offered on the user's own groups only
+  (`AgentControl-LauncherUI-GroupAddRepository`).
 - *`GroupNameViewModel` and `GroupNameWindow`*: neither the card nor the main view-model creates the prompt; the
   window's code-behind does, when `RepoCardViewModel` raises `NewGroupRequested` (with the card's existing group
   names) or the header's rename is forwarded (with the group's name as the name being renamed), and shows
@@ -229,6 +241,19 @@ the events that need a dialog.
   `CredentialPromptWindow`, `SelectPackageWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `AboutWindow` and
   `GroupNameWindow`. It knows no view-model; a window that has a view-model passes its `Cancel` as the cancel
   action. The release-notes window is the only window that does not apply it.
+- *Resizable `SettingsWindow` and `SourceEditorWindow`*: both are `CanResize` with a `MinWidth` of 500 and a
+  `MinHeight` of 360 and no maximum width, and keep their default opening size (800 and 640 wide, `SizeToContent`
+  `Height`, centered on the owner); when the user resizes them Avalonia ends the automatic height, so nothing fights
+  the user's size, and the size is not remembered. Their fields (`TextBox`, `ComboBox`, the location and address
+  fields, the source list) stretch with the window width, and the source list rows show more of the location
+  (end-ellipsis trimming where it does not fit). Each form sits in a `ScrollViewer` (`SettingsScrollViewer`,
+  `SourceEditorScrollViewer`) above a fixed row holding the error message and the Save button (Settings) or Save and
+  Cancel (editor), so a window made shorter than its content scrolls the form and never clips the buttons; the editor
+  still limits its own height to the screen when it opens (`AgentControl-LauncherUI-ResizableSourceDialogs`).
+- *Window titles*: the windows show the product name with a space - "Agent Control" (main window and the message and
+  confirmation boxes), "Agent Control Settings" and "About Agent Control". This is display text only: the product,
+  executable, assembly, namespaces, settings folder and AutomationIds keep the name `AgentControl`. The Puppet and the
+  UI tests that look a window up by title use the same strings.
 - *Supporting types*: `CardColorPalette` is a static table built from `RecentRepo.CardColorNames` (the single list of
   valid names, owned by `Settings`); the card uses it to accept a color name and to find the tile's palette index, and
   the main window's palette pop-up draws one swatch per entry. `PathEllipsisText` is a control in the card's template
@@ -280,8 +305,13 @@ construction and exposes `IsCustomAgentToolSelected` to drive the settings windo
 custom-command entry field visibility. It lists the configured package sources as
 `PackageSourceItemViewModel` rows (alias, kind icon from `PackageSourceIcons`, shortened
 location, and a folder-exists status computed on a background thread; a server source and a Git source on a remote
-address show "Not checked" because they are never contacted merely to draw the list, while a Git source on a local
-path is a folder like any other) offers one **Add** button whose menu lists the
+address show the neutral status "Online source" with a cloud icon - no warning styling - because they are never
+contacted merely to draw the list (the tooltip says when they are contacted and points to Edit > Test connection),
+while a Git source on a local path is a folder like any other; a NuGet source that requires signed packages also shows
+a small "Signed only" badge (`SourceSignedOnlyBadge`, a shield icon in the neutral `Chip` style) whose tooltip says
+signed packages are required and, when a publisher is pinned, that only that publisher is accepted, naming it by the
+start and end of its certificate fingerprint only, as the repo card's shield does) offers one **Add** button whose
+menu lists the
 source types (zip-package folder, NuGet-package folder, NuGet-package server, Git repository), with Edit and Remove
 (which act
 on the selected row) beside it on the list's header line, and also exposes the **Theme** choice (system
@@ -408,7 +438,7 @@ input changed is never shown. Save refuses a Git source whose settings the appli
 `SettingsWindowViewModel.Save` re-checks every Git source (so a hand-edited settings file is stopped with a message)
 (`AgentControl-LauncherUI-GitSourceEditor`, `AgentControl-LauncherUI-GitSignInGuidance`). Everywhere a source is shown
 it carries the Git icon and the name "Git repository" (`PackageSourceIcons`); `PackageSourceItemViewModel.IsRemote`
-makes a remote Git source "Not checked" like a server and a Git source on a local path show its folder status
+makes a remote Git source an "Online source" like a server and a Git source on a local path show its folder status
 (`AgentControl-LauncherUI-GitSourcePresentation`). On a repo card the package chip shows the Git icon and the alias;
 its tooltip adds the tag (the source's tag pattern applied to the pinned version) and the first seven characters of
 the commit the pin recorded as its `git-commit:` identity. When the background check finds that the tag of the pinned
@@ -477,7 +507,8 @@ own settings file (on the repo's `RecentRepo`, and the collapsed section names i
 repository or its `.agentcontrol.json` (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`).
 *Sections.* The list is a single `ListBox` over `MainWindowViewModel.DisplayedItems` with two row templates: a
 repo card, and a section header - one flat button (chevron, icon, name, count chip) that collapses or expands the
-section, plus, for the user's own groups, a "..." menu with **Rename group...** and **Remove group**. The header
+section, plus, for the user's own groups, a "..." menu with **Add repository...** (first, then a separator) and
+**Rename group...** and **Remove group**. The header
 button's accessible name says the section, its count and its state (`Work, 2 repos, collapsed`). A decision
 made here: a favorite repo is listed **only** under *Favorites* (not a second time under its group), so every
 repo appears once and the counts add up; its card shows its group as a chip so the user can still see where it
@@ -618,8 +649,8 @@ folder inside the repository, each explained by examples and validated while the
 settings save applies, a sign-in note, and a connection test that lists the repository's tags and previews which of
 them match the pattern (`AgentControl-LauncherUI-GitSourceEditor`, `AgentControl-LauncherUI-GitSignInGuidance`). The
 test's provider is the owner's (`MainWindowViewModel.CreateConnectionTestProvider`): the configured git, interactive,
-refusing a git that is too old. A Git source is listed with the Git icon and the kind name "Git repository": "Not
-checked" when its address is remote, the folder status when it is a local path; the Select Package list and the repo
+refusing a git that is too old. A Git source is listed with the Git icon and the kind name "Git repository": "Online
+source" when its address is remote, the folder status when it is a local path; the Select Package list and the repo
 card use the same icon, and the card's package chip tooltip names the tag the pinned version has under the source's
 current tag pattern and the first seven characters of the commit the files came from
 (`AgentControl-LauncherUI-GitSourcePresentation`).

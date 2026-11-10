@@ -264,7 +264,7 @@ holds both sources. `SettingsWindowViewModel`'s `SaveCommand` is also executed w
 git/agent-tool overrides and shell preference, proving the edited preferences are captured and
 communicated for persistence (this part is verified only by the view-model's own unit test, a
 disclosed granularity limitation). The Add NuGet-Package Server dialog is also exercised: plain `http` is refused
-until "Allow insecure HTTP" is ticked, and after saving the source is listed as "Not checked" and persisted with its
+until "Allow insecure HTTP" is ticked, and after saving the source is listed as an "Online source" and persisted with its
 insecure-HTTP choice. The tooltip that shows the whole location of a source in the editor is not exercised end to
 end; it is verified in the `LauncherUI` subsystem tests. This scenario is tested by
 `windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt`,

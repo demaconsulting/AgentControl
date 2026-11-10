@@ -10,8 +10,10 @@ is delivered in - by `RepoSyncSubsystemTests.cs`, whose tests use the readers an
 temporary folders and a real zip, the way the application drives them. `ReleaseNotesViewerViewModelTests.cs` also
 directly exercises
 `ReleaseNotesViewer`'s internal `BuildBlockTextBlock` rendering helper (via `InternalsVisibleTo`),
-constructing `MarkdownBlock` values and asserting on the resulting `TextBlock`'s `Run` styling,
-without constructing the `Window` itself. End-to-end window display is covered only by the FlaUI
+constructing `MarkdownBlock` values and asserting on the resulting `TextBlock`'s `Run` styling, and, in the
+headless Avalonia test application, a `ReleaseNotesViewer` window built with a test opener in place of the
+browser launcher (link rendering, click, keyboard activation and failure reporting). End-to-end window display is
+covered only by the FlaUI
 release-notes-dialog check described at the system level (see the `AgentControl` system-level
 verification design). All `PackageContentExtractor`, `PackageZipExtractor` and `GitIgnoreEnsurer`
 tests operate on real temporary directories and real files (zip archives, unpacked package folders,
@@ -75,6 +77,22 @@ heading/body bold-rendering distinction, covering `AgentControl-RepoSync-Release
 (children:
 `AgentControl-PackageZipExtractor-ReadReleaseNotes`,
 `AgentControl-ReleaseNotesViewerViewModel-Display`).
+
+**RepoSync_ReleaseNotesLinks_ClickOpensOnlyHttpAndFailuresAreReported**: In the headless test application a link run
+renders as a focusable button with the link style and the full address as its tooltip, but as plain text when there
+is no click handler or the address is not an openable http/https URL; in a release-notes window clicking the link of
+`[good](https://...)` hands the exact address to the injected opener (and a `javascript:` or `file:` link in the same
+notes is not a button at all); Enter on the focused link does the same as a click; and opening a link refuses every
+other address without calling the opener and turns an opener failure into a message that names the address instead
+of an exception. No real browser is ever started. This scenario is tested by
+`ReleaseNotesViewer_BuildBlockTextBlock_LinkRun_RendersFocusableLinkButtonWithAddressTooltip`,
+`ReleaseNotesViewer_BuildBlockTextBlock_LinkRunWithoutHandlerOrWithUnsafeAddress_RendersPlainText`,
+`ReleaseNotesViewer_LinkClick_InvokesOpenerWithExactUrl_NonHttpLinkIsNotClickable`,
+`ReleaseNotesViewer_LinkFocusedEnterKey_InvokesOpener` and
+`ReleaseNotesViewer_OpenLinkAsync_OpensOnlyHttpAndReportsFailures`, covering
+`AgentControl-RepoSync-ReleaseNotesLinks` (child `AgentControl-ReleaseNotesViewerViewModel-Links`). These tests use
+the shared headless test application of the `LauncherUI` tests (`HeadlessTestApp`) and the `MessageBoxWindow` of
+`LauncherUI` is the only other `LauncherUI` type the viewer uses.
 
 **RepoSync_GitIgnorePrevention_UnitTestsCoverMarkerScanCreateAppendAndWriteFailure**:
 Proactively ensuring a repo's `.gitignore` covers the four managed agent folders is verified by

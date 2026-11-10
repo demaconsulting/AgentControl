@@ -18,16 +18,21 @@ package-source folder appears as the source named `Default`). Each row wraps a p
 the `PackageSourceDefinition`, so the live settings are never mutated, and exposes the alias, a
 kind icon and label (from `PackageSourceIcons`), the location, the number of repos pinned to it,
 and a status text (`AgentControl-SettingsWindowViewModel-SourceList`). A folder row's status is computed
-in the background ("Checking", then found or missing). A server row shows **"Not checked"** from the start:
-AgentControl contacts a server only when it is needed (selecting a package, checking for upgrades, or the
-editor's **Test connection**), never just to draw the list, since doing so could mean a network wait and a
-sign-in dialog for a window that was only opened to look. The row's icon and tooltip explain this and point
+in the background ("Checking", then found or missing). A server row shows the neutral status **"Online source"** (a
+cloud icon, no warning or question styling) from the start:
+AgentControl contacts a server only when it is needed (selecting a package, checking for upgrades, syncing at launch
+or the editor's **Test connection**), never just to draw the list, since doing so could mean a network wait and a
+sign-in dialog for a window that was only opened to look. The row's tooltip explains this and points
 to *Edit > Test connection*. A Git source is classified by `PackageSourceItemViewModel.IsRemote`: one whose address is
-an https or SSH address is remote and behaves exactly like a server row ("Not checked", no folder check, the tooltip
-says "repository"), while one whose address is a local path is a folder like any other and gets the folder status
+an https or SSH address is remote and behaves exactly like a server row ("Online source", no folder check, the same
+tooltip), while one whose address is a local path is a folder like any other and gets the folder status
 (`AgentControl-SettingsWindowViewModel-GitSourceRowStatus`, `-GitSourceLocalFolderStatus`). Its icon is the Git logo and
 its kind name "Git
-repository" (`PackageSourceIcons`).
+repository" (`PackageSourceIcons`). A row also exposes `RequiresSignature` (true only for a NuGet source, folder or
+server, with `RequireSignedPackages` on) and `SignatureTooltip`, which the row's "Signed only" badge shows: signed
+packages are required and, when a publisher fingerprint is pinned, that only that publisher is accepted, naming the
+fingerprint by its start and end only (`NuGetSourceProvider.SummarizeFingerprint`, as the repo card does)
+(`AgentControl-LauncherUI-SourceSignedOnlyBadge`).
 
 **SelectedSource**: `PackageSourceItemViewModel?` — The row the Edit and Remove commands act on.
 

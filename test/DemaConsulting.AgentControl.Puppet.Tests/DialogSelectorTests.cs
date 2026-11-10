@@ -28,7 +28,7 @@ public class DialogSelectorTests
     /// <summary>
     ///     A candidate for the main window (never chosen).
     /// </summary>
-    private static readonly DialogCandidate Main = new("AgentControl", false, true);
+    private static readonly DialogCandidate Main = new("Agent Control", false, true);
 
     /// <summary>
     ///     Validates that with no dialog open there is nothing to choose.
@@ -95,7 +95,7 @@ public class DialogSelectorTests
     public void DialogSelector_InnermostDialog_EnumerationDiffersFromZOrder_ReturnsTheTopmost()
     {
         // Arrange: Settings is on top of the stack although the editor is listed after it; the main window owns both
-        var main = new DialogCandidate("AgentControl", false, true, 1);
+        var main = new DialogCandidate("Agent Control", false, true, 1);
         var settings = new DialogCandidate("Settings", false, true, 2, 1);
         var editor = new DialogCandidate("Edit source", false, true, 3, 1);
 
@@ -113,7 +113,7 @@ public class DialogSelectorTests
     public void DialogSelector_InnermostDialog_OwnerChain_ReturnsTheInnermostOwnedDialog()
     {
         // Arrange: enumeration lists the innermost editor before the Settings window that owns it
-        var main = new DialogCandidate("AgentControl", false, true, 1);
+        var main = new DialogCandidate("Agent Control", false, true, 1);
         var editor = new DialogCandidate("Edit source", false, true, 3, 2);
         var settings = new DialogCandidate("Settings", false, true, 2, 1);
 
@@ -132,7 +132,7 @@ public class DialogSelectorTests
     public void DialogSelector_InnermostDialog_TopmostRootDoesNotQualify_ReturnsNextTopmostDialog()
     {
         // Arrange
-        var main = new DialogCandidate("AgentControl", false, true, 1);
+        var main = new DialogCandidate("Agent Control", false, true, 1);
         var settings = new DialogCandidate("Settings", false, true, 2, 1);
         var editor = new DialogCandidate("Edit source", false, true, 3, 2);
         var tooltip = new DialogCandidate("Save", false, false, 4);
@@ -175,7 +175,7 @@ public class DialogSelectorTests
     public void DialogSelector_InnermostDialog_NonModalWindow_IsSkipped()
     {
         // Arrange
-        var main = new DialogCandidate("AgentControl", false, true, 1);
+        var main = new DialogCandidate("Agent Control", false, true, 1);
         var notes = new DialogCandidate("Release notes", false, true, 2, 1, NonModal: true);
         var settings = new DialogCandidate("Settings", false, true, 3, 1);
 

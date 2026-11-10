@@ -159,6 +159,7 @@ reviews:
       - "test/**/LauncherUI/SourceEditorSignatureWindowTests.cs"
       - "test/**/LauncherUI/SourceEditorGitWindowTests.cs"
       - "test/**/LauncherUI/PackageSourceGitPresentationTests.cs"
+      - "test/**/LauncherUI/PackageSourceStatusPresentationTests.cs"
       - "test/**/LauncherUI/DialogWindowTests.cs"
       - "test/**/LauncherUI/HeadlessTestApp.cs"
       - "test/**/LauncherUI/MainWindowTests.cs"

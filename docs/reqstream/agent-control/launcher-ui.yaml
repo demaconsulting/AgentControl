@@ -282,6 +282,25 @@ sections:
           - MainWindow_GroupedRepos_ShowHeadersWithNameCountAndState
           - MainWindow_FavoriteInGroup_ShowsGroupChip
 
+      - id: AgentControl-LauncherUI-GroupAddRepository
+        title: >-
+          The LauncherUI subsystem shall offer "Add repository..." as the first item of the menu of
+          each of the user's group headers, which asks for a repository folder like the top-bar
+          add does and puts the repo in that group - moving the existing entry into the group
+          and saying so when the repo is already listed - and shall change nothing when the
+          folder choice is cancelled.
+        justification: |
+          Adding a repo to a group otherwise takes two steps (add, then move to the group); the
+          group header is where the developer is already looking when they want a repo there.
+        children:
+          - AgentControl-RepoGroupHeaderViewModel-AddRepoRequest
+          - AgentControl-MainWindowViewModel-AddRepoToGroup
+        tests:
+          - MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator
+          - MainWindow_HeaderMenuAddRepository_PickedFolderJoinsGroup_CancelChangesNothing
+          - MainWindow_HeaderMenuAddRepository_AlreadyListedRepo_MovesIntoGroupAndSaysSo
+          - MainWindow_AddRepoButton_UsesSamePickerAndAddsUngrouped
+
       - id: AgentControl-LauncherUI-RepoGroupsFlatList
         title: >-
           The LauncherUI subsystem shall list the repos without any section header while no repo is
@@ -870,17 +889,48 @@ sections:
       - id: AgentControl-LauncherUI-PackageSources
         title: >-
           The LauncherUI subsystem shall let the user see the configured package sources with
-          their kind and location and whether their folder can be found, listing a server
-          source as not checked rather than contacting it merely to show the list.
+          their kind and location and whether their folder can be found, listing a remote source
+          as a neutral online source rather than contacting it merely to show the list.
         justification: |
-          The developer must see what is configured and whether it is usable at a glance, and a
-          server that may need a sign-in must never be contacted just to draw the list.
+          The developer must see what is configured and whether it is usable at a glance, a
+          server that may need a sign-in must never be contacted just to draw the list, and a
+          source that is simply not contacted here must not look like a configuration error.
         children:
           - AgentControl-SettingsWindowViewModel-SourceList
           - AgentControl-SettingsWindowViewModel-SaveResultingSources
         tests:
           - SettingsWindowViewModel_Constructor_ListsConfiguredSourcesInOrder
-          - SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt
+          - SettingsWindowViewModel_SaveServerSource_ListsItAsOnlineSourceAndPersistsIt
+          - PackageSourceItemViewModel_ServerSource_ShowsNeutralOnlineSourceStatus
+          - PackageSourceItemViewModel_LocalFolderSource_KeepsFolderStatuses
+
+      - id: AgentControl-LauncherUI-SourceSignedOnlyBadge
+        title: >-
+          The LauncherUI subsystem shall mark, in the Settings source list, each NuGet source that
+          requires signed packages with a "Signed only" badge whose tooltip says that signed
+          packages are required and, when a publisher is pinned, that only that publisher is
+          accepted - naming it by the start and end of its fingerprint only - and shall show no
+          badge on any other source.
+        justification: |
+          Whether a source insists on signed packages is a security decision the developer made
+          once; seeing it on the list confirms it is still in force without opening the editor.
+        tests:
+          - PackageSourceItemViewModel_RequiresSignature_OnlyForSignedNuGetSources
+          - PackageSourceItemViewModel_SignatureTooltip_NoPinnedPublisher_SaysAnyTrustedSigner
+          - PackageSourceItemViewModel_SignatureTooltip_PinnedPublisher_ShowsOnlyStartAndEndOfFingerprint
+          - SettingsWindow_SourceRows_ShowSignedOnlyBadgeOnlyWhereRequiredAndOnlineSourceStatus
+
+      - id: AgentControl-LauncherUI-ResizableSourceDialogs
+        title: >-
+          The LauncherUI subsystem shall let the user resize the Settings window and the
+          package-source editor window, with a minimum size that keeps their content usable, and
+          shall widen their fields and the source list with the window.
+        justification: |
+          Folder paths and feed addresses can be long; a fixed-width window forces the developer
+          to scroll inside a text box to read or check the value they are entering.
+        tests:
+          - SettingsWindow_Resizable_HasMinimumSizeAndWidensFieldsAndSourceList
+          - SourceEditorWindow_Resizable_HasMinimumSizeAndWidensFields
 
       - id: AgentControl-LauncherUI-AddPackageSource
         title: >-
@@ -1632,18 +1682,19 @@ sections:
 
       - id: AgentControl-LauncherUI-GitSourceRowStatus
         title: >-
-          The LauncherUI subsystem shall list a remote Git source in the Settings window as not
-          checked, list a Git source on a local path with the status of its folder, and keep a
-          saved Git source in the settings.
+          The LauncherUI subsystem shall list a remote Git source in the Settings window as an
+          online source, list a Git source on a local path with the status of its folder, and keep
+          a saved Git source in the settings.
         justification: |
           A remote repository cannot be checked without a network and a sign-in, so claiming a
-          status for it would mislead; a local path can be checked like any folder source.
+          status for it would mislead, and saying "not checked" would look like an error; a local
+          path can be checked like any folder source.
         children:
           - AgentControl-SettingsWindowViewModel-GitSourceRowStatus
           - AgentControl-SettingsWindowViewModel-GitSourceLocalFolderStatus
           - AgentControl-SettingsWindowViewModel-GitSourcePersisted
         tests:
-          - PackageSourceItemViewModel_RemoteGitSource_IsNotCheckedAndNeverAsksTheFolder
+          - PackageSourceItemViewModel_RemoteGitSource_IsOnlineSourceAndNeverAsksTheFolder
           - PackageSourceItemViewModel_LocalGitSource_ChecksTheFolder
           - PackageSourceItemViewModel_OtherKinds_RemoteClassificationUnchanged
 

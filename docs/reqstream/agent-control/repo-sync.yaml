@@ -71,12 +71,34 @@ sections:
           - AgentControl-PackageZipExtractor-ReadReleaseNotes
           - AgentControl-ReleaseNotesViewerViewModel-Display
           - AgentControl-ReleaseNotesViewerViewModel-MarkdownParsing
+          - AgentControl-ReleaseNotesViewerViewModel-CodeSpans
         tests:
           - PackageZipExtractor_ReadReleaseNotes_EntryPresent_ReturnsContentWithoutExtracting
           - PackageZipExtractor_ReadReleaseNotes_NoEntry_ReturnsNull
           - ReleaseNotesViewerViewModel_Constructor_EmptyReleaseNotes_UsesPlaceholderMessage
           - ReleaseNotesViewer_BuildBlockTextBlock_HeadingBlock_RendersAllRunsBold
           - ReleaseNotesViewer_BuildBlockTextBlock_BodyBlock_OnlyBoldsMarkedRuns
+
+      - id: AgentControl-RepoSync-ReleaseNotesLinks
+        title: >-
+          The RepoSync subsystem shall show a link in the release notes as a keyboard-focusable
+          link that shows its full address as a tooltip and opens it in the user's default web
+          browser when clicked or activated from the keyboard, only for an absolute http or https
+          address, shall never open any other address, and shall report a failure to open a link
+          to the user without failing.
+        justification: |
+          A developer reading release notes after an upgrade should reach the linked issue or
+          migration guide in one click; but release notes are untrusted package content, so the
+          address is shown before it is followed, no other kind of address (a file, a script, a
+          mail client) is ever launched, and a missing browser must not crash the application.
+        children:
+          - AgentControl-ReleaseNotesViewerViewModel-Links
+        tests:
+          - ReleaseNotesViewer_BuildBlockTextBlock_LinkRun_RendersFocusableLinkButtonWithAddressTooltip
+          - ReleaseNotesViewer_BuildBlockTextBlock_LinkRunWithoutHandlerOrWithUnsafeAddress_RendersPlainText
+          - ReleaseNotesViewer_LinkClick_InvokesOpenerWithExactUrl_NonHttpLinkIsNotClickable
+          - ReleaseNotesViewer_LinkFocusedEnterKey_InvokesOpener
+          - ReleaseNotesViewer_OpenLinkAsync_OpensOnlyHttpAndReportsFailures
 
       - id: AgentControl-RepoSync-GitIgnorePrevention
         title: >-

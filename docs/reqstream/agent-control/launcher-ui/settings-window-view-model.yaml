@@ -71,7 +71,7 @@ sections:
           package-source folder as the source named Default - and shall show, without blocking
           the caller, whether each source's folder can currently be found, treating a folder
           that cannot be examined as not found and abandoning checks still running when the
-          window is disposed, and shall show a server source as not checked instead of
+          window is disposed, and shall show a server source as an online source (a neutral status) instead of
           contacting it.
         justification: |
           A developer must see what is configured and whether it is usable at a glance; a folder
@@ -83,7 +83,7 @@ sections:
           - SettingsWindowViewModel_Constructor_FolderCheckSlow_ShowsCheckingThenResultWithoutBlocking
           - SettingsWindowViewModel_FolderCheck_MissingOrFailing_ShowsMissing
           - SettingsWindowViewModel_Dispose_CancelsPendingFolderChecks
-          - SettingsWindowViewModel_SaveServerSource_ListsItAsNotCheckedAndPersistsIt
+          - SettingsWindowViewModel_SaveServerSource_ListsItAsOnlineSourceAndPersistsIt
 
       - id: AgentControl-SettingsWindowViewModel-AddSource
         title: >-
@@ -151,13 +151,13 @@ sections:
 
       - id: AgentControl-SettingsWindowViewModel-GitSourceRowStatus
         title: >-
-          The SettingsWindowViewModel class shall list a Git source on a remote address as not
-          checked, without contacting it.
+          The SettingsWindowViewModel class shall list a Git source on a remote address as an
+          online source (a neutral status), without contacting it.
         justification: |
           A remote repository may need the network and a sign-in, so it is contacted only when the
-          user asks (the editor's Test connection).
+          user asks (the editor's Test connection); saying "not checked" would look like an error.
         tests:
-          - SettingsWindowViewModel_SaveGitSource_ListsItAsNotCheckedAndPersistsIt
+          - SettingsWindowViewModel_SaveGitSource_ListsItAsOnlineSourceAndPersistsIt
 
       - id: AgentControl-SettingsWindowViewModel-GitSourceLocalFolderStatus
         title: >-

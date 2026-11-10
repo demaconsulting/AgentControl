@@ -45,8 +45,8 @@ agentcontrol-puppet instances
 agentcontrol-puppet quit [--instance <alias>] [--kill]
 ```
 
-AgentControl has no automation endpoint, and all instances share the same window titles ("AgentControl",
-"AgentControl Settings", "Select Package", "About AgentControl"), so the Puppet never finds an instance by title.
+AgentControl has no automation endpoint, and all instances share the same window titles ("Agent Control",
+"Agent Control Settings", "Select Package", "About Agent Control"), so the Puppet never finds an instance by title.
 Instead `launch` writes a record per alias to `%TEMP%\AgentControlPuppet\instances\<alias>.json` (process id, process
 start time, executable and `--config-dir`). Every command validates the record before it touches anything:
 
@@ -63,7 +63,7 @@ failed-`launch` cleanup act on that process only and never on an unrelated progr
 All UI Automation lookups are scoped to the process id of the instance, never to a window title.
 
 - `launch` starts `DemaConsulting.AgentControl.exe --config-dir <dir>` and waits until the process is alive, UI
-  Automation attaches and the main window (titled `AgentControl`) is visible, then prints
+  Automation attaches and the main window (titled `Agent Control`) is visible, then prints
   `OK instance=<alias> pid=<pid> exe=... config=... title=...`. It refuses (exit 4) when the alias already has a live
   instance, unless `--allow-existing` (the old instance is then left running and, once the new one is ready, the alias
   points to the new one; a launch that fails leaves the old record untouched). A
@@ -143,14 +143,14 @@ dialogs can repeat the main window's ids, so every element command accepts two s
   currently realized (those scrolled out of view may not exist); prefer names. `--item-list <id>` names another list whose
   items should be searched (matched by any text the item shows).
 - `--window <title>` limits the lookup to the windows of the instance with that title (exact, ignoring case; else a
-  part of the title), for example `type GitExecutablePathTextBox "C:\tools\git.exe" --window "AgentControl Settings"`.
+  part of the title), for example `type GitExecutablePathTextBox "C:\tools\git.exe" --window "Agent Control Settings"`.
 
 The pop-up of the "more actions" button is shared by all cards, so open it with `--item` and then use the menu item's id
 without it.
 
 ### AutomationIds
 
-- **Main** (`AgentControl`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`, `AddRepoButton`,
+- **Main** (`Agent Control`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`, `AddRepoButton`,
   `OpenSettingsButton`, `OpenAboutButton`,
   `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`.
 - **Group header** (repeated, one per section, in `RepoListBox`; only present once a repo is in a group):
@@ -180,7 +180,7 @@ without it.
   `CardColorAutomaticButton`.
 - **New group / Rename group** (`New group`, `Rename group`): `GroupNamePromptText`, `GroupNameTextBox`,
   `GroupNameErrorText`, `GroupNameHintText`, `GroupNameCancelButton`, `GroupNameAcceptButton`.
-- **Settings** (`AgentControl Settings`): the package sources `SourcesList` (rows with `SourceAliasText`,
+- **Settings** (`Agent Control Settings`): the package sources `SourcesList` (rows with `SourceAliasText`,
   `SourceLocationText`, `SourceStatusText`), `AddSourceButton` (opens the Add menu), its items
   `AddZipSourceButton`, `AddNuGetFolderSourceButton`, `AddNuGetServerSourceButton`, `AddGitSourceButton`,
   `EditSourceButton`,
@@ -196,15 +196,15 @@ without it.
 - **Select Package** (`Select Package`): `SelectPackageSourceList`, `SelectPackageNameList`,
   `SelectPackageVersionList`, `SelectPackageCancelButton`, `SelectPackageConfirmButton` (and the inline error and retry
   controls).
-- **About** (`About AgentControl`): `AboutTaglineText`, `AboutVersionText`, `AboutCopyrightText`, `AboutLicenseText`,
+- **About** (`About Agent Control`): `AboutTaglineText`, `AboutVersionText`, `AboutCopyrightText`, `AboutLicenseText`,
   `AboutDependenciesList`, `AboutCloseButton`.
-- **Confirmation** (`AgentControl`): `ConfirmationMessageText`, `ConfirmationNoButton`, `ConfirmationYesButton`.
+- **Confirmation** (`Agent Control`): `ConfirmationMessageText`, `ConfirmationNoButton`, `ConfirmationYesButton`.
 - **Message box**: `MessageText`, `MessageBoxOkButton`.
 - **Release notes**: `ReleaseNotesPanel`, `ReleaseNotesHeading`.
 
 The ids come from `src/DemaConsulting.AgentControl/**/*.axaml`; `tree` and `dialogs` print what is actually there.
 The window chrome has ids too (`Close`, `Maximize-Restore`, `Minimize-Restore`), which is how to close a dialog that has
-no button of its own: `click Close --window "AgentControl Settings"`. Badges and other controls that carry no
+no button of its own: `click Close --window "Agent Control Settings"`. Badges and other controls that carry no
 AutomationId of their own appear in `tree` by name.
 
 ## Real-input commands
@@ -349,7 +349,7 @@ $box = "$env:TEMP\acp-demo"
 & $puppet dialogs                                       # exit 10: the dialog and its controls are listed
 & $puppet read SourceLocationText --raw
 & $puppet shot "$box\settings.png"                      # the picture shows the Settings window over the main window
-& $puppet click Close --window "AgentControl Settings"
+& $puppet click Close --window "Agent Control Settings"
 
 # Pin the repo to a package: open the card menu, pick Select Package, choose a name and a version
 & $puppet click MoreActionsButton --item repo
