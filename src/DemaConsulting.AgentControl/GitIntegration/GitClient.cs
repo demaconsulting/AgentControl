@@ -303,6 +303,52 @@ internal sealed class GitClient
     }
 
     /// <summary>
+    ///     Undoes <see cref="UntrackAgentFolders"/>: restores the index entries of the given agent
+    ///     folders from <c>HEAD</c> with <c>git reset -q -- &lt;folders&gt;</c>, leaving the working
+    ///     tree untouched.
+    /// </summary>
+    /// <param name="repositoryPath">Absolute path to the repository working directory.</param>
+    /// <param name="folders">The folders to track again, each one of the four known agent folders.
+    ///     Must not be empty.</param>
+    /// <remarks>
+    ///     Used to roll back a conversion whose package could not be applied, so a failed apply never
+    ///     leaves the folders' removal from git staged. Accepts only the known agent folders and puts
+    ///     the paths after <c>--</c>, like <see cref="UntrackAgentFolders"/>.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="repositoryPath"/> is null,
+    ///     empty, or whitespace, when <paramref name="folders"/> is empty, or when it contains
+    ///     anything other than a known agent folder.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="folders"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be
+    ///     started, or when <c>git reset</c> exits with a non-zero code.</exception>
+    public void RestoreAgentFolderTracking(string repositoryPath, IReadOnlyCollection<string> folders)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
+        ArgumentNullException.ThrowIfNull(folders);
+        if (folders.Count == 0)
+        {
+            throw new ArgumentException("At least one folder must be given.", nameof(folders));
+        }
+
+        var unknown = folders.FirstOrDefault(folder => !KnownAgentFolders.Contains(folder, StringComparer.Ordinal));
+        if (unknown is not null)
+        {
+            throw new ArgumentException($"'{unknown}' is not one of the known agent folders.", nameof(folders));
+        }
+
+        var arguments = new List<string> { "reset", "-q", "--" };
+        arguments.AddRange(folders);
+
+        var result = RunGit(repositoryPath, arguments.ToArray());
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"'git reset' failed with exit code {result.ExitCode}: {result.StandardError.Trim()}");
+        }
+    }
+
+    /// <summary>
     ///     Gets the repository's current branch name, or <c>"(detached)"</c> when <c>HEAD</c> is
     ///     detached.
     /// </summary>

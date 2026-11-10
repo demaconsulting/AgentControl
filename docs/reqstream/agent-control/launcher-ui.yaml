@@ -1557,6 +1557,7 @@ sections:
           - AgentControl-RepoCardViewModel-ConvertTrackedFolders
           - AgentControl-RepoCardViewModel-ConvertedRepoStatus
           - AgentControl-RepoCardViewModel-StopWhenUntrackFails
+          - AgentControl-RepoCardViewModel-RestoreTrackingWhenApplyFails
           - AgentControl-RepoCardViewModel-NoConvertWhenNotTracked
         tests:
           - RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersDeclined_ChangesNothing

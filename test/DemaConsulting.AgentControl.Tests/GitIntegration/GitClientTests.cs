@@ -445,6 +445,30 @@ public class GitClientTests
     }
 
     /// <summary>
+    ///     Test that RestoreAgentFolderTracking undoes UntrackAgentFolders: the folders' files are back in
+    ///     git's index and the working tree is unchanged.
+    /// </summary>
+    [Fact]
+    public void GitClient_RestoreAgentFolderTracking_AfterUntrack_RestoresIndexAndKeepsFiles()
+    {
+        // Arrange: a real repo whose agents folder was untracked
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(
+            new Dictionary<string, string> { [".github/agents/a.md"] = "agent", ["README.md"] = "readme" },
+            "Track agent files");
+        var client = new GitClient("git", _logger);
+        client.UntrackAgentFolders(fixture.WorkPath, [".github/agents"]);
+        Assert.Empty(client.GetTrackedAgentFolders(fixture.WorkPath));
+
+        // Act
+        client.RestoreAgentFolderTracking(fixture.WorkPath, [".github/agents"]);
+
+        // Assert: tracked again, file unchanged on disk
+        Assert.Equal([".github/agents"], client.GetTrackedAgentFolders(fixture.WorkPath));
+        Assert.Equal("agent", File.ReadAllText(Path.Combine(fixture.WorkPath, ".github", "agents", "a.md")));
+    }
+
+    /// <summary>
     ///     Test that GetTrackedAgentFolders throws when "git ls-files" fails.
     /// </summary>
     [Fact]

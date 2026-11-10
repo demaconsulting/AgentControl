@@ -72,6 +72,7 @@ sections:
         children:
           - AgentControl-GitClient-ListTrackedAgentFolders
           - AgentControl-GitClient-UntrackAgentFolders
+          - AgentControl-GitClient-RestoreAgentFolderTracking
           - AgentControl-GitClient-UntrackOnlyAgentFolders
         tests:
           - GitIntegrationSubsystem_CommittedAgentFolders_ReportedThenUntrackedWithoutTouchingFilesOrOtherPaths

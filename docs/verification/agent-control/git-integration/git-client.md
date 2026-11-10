@@ -72,6 +72,11 @@ scenario is tested by
 `GitClient_UntrackAgentFolders_GitRmFails_ThrowsInvalidOperationException`, covering
 `AgentControl-GitClient-UntrackAgentFolders`.
 
+**GitClient_RestoreAgentFolderTracking_UndoesUntrack**: In a real repo, a folder that was untracked is tracked again after
+`RestoreAgentFolderTracking` and its file is unchanged on disk. This scenario is tested by
+`GitClient_RestoreAgentFolderTracking_AfterUntrack_RestoresIndexAndKeepsFiles`, covering
+`AgentControl-GitClient-RestoreAgentFolderTracking`.
+
 **GitClient_UntrackAgentFolders_RefusesAnythingButAgentFolders**: An empty list, a folder that
 is not a known agent folder, an option-like value and `null` are refused with
 `ArgumentException`/`ArgumentNullException` and git is never invoked (the stub's invocation log

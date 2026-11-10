@@ -602,7 +602,9 @@ package's, writes the pin and `.gitignore`, clears `HasCommittedAgentFiles` (whi
 message that contains the success message and says to commit the change; Upgrade of a pinned repo does the same and
 names the newer version in its question; with an index lock present (git cannot remove the folders) the agreed apply
 raises one error that says nothing was changed and carries git's `rm --cached` message, leaving the old files, the
-index, the pin and `.gitignore` unchanged; a repo that tracks nothing under the managed folders is applied with no
+index, the pin and `.gitignore` unchanged; a package the extractor refuses after git stopped tracking the folders puts
+them back into git's index, raises one error and writes no pin; a repo that tracks nothing under the managed folders
+is applied with no
 question, no change to the index and the plain success message; a file staged after the badge was computed for the
 same commit is still found, so the question is asked although the badge was clear; with no subscriber to the question
 the apply stops with an error saying confirmation is needed and changes nothing; and in a folder that is not a git
@@ -612,13 +614,15 @@ repository the package is applied without a question. This scenario is tested by
 `RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersAccepted_StopsTrackingThenAppliesPackageAndAsksToCommit`,
 `RepoCardViewModel_UpgradeCommand_TrackedAgentFoldersAccepted_StopsTrackingThenUpgrades`,
 `RepoCardViewModel_ApplySelectedPackage_UntrackFails_StopsBeforeExtractingAndChangesNothingElse`,
+`RepoCardViewModel_ApplySelectedPackage_ExtractFailsAfterUntrack_RestoresGitTracking`,
 `RepoCardViewModel_ApplySelectedPackage_NoTrackedAgentFiles_AppliesWithoutAskingOrTouchingGit`,
 `RepoCardViewModel_ApplySelectedPackage_BadgeStaleBecauseFilesStagedLater_ChecksGitFreshAndAsks`,
 `RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersWithoutSubscriber_StopsAndChangesNothing` and
 `RepoCardViewModel_ApplySelectedPackage_GitCannotAnswer_AppliesAsBefore` (in `RepoCardCommittedFilesTests.cs`),
 covering `AgentControl-RepoCardViewModel-CheckTrackedFoldersFresh`, `-ConfirmBeforeConverting`,
 `-DeclineConvertChangesNothing`, `-NeverConvertWithoutAsking`, `-ConvertTrackedFolders`, `-ConvertedRepoStatus`,
-`-StopWhenUntrackFails` and `-NoConvertWhenNotTracked`. The modal question itself, and that the card stays busy while
+`-StopWhenUntrackFails`, `-RestoreTrackingWhenApplyFails` and `-NoConvertWhenNotTracked`. The modal question itself,
+and that the card stays busy while
 it is open, are shown with the real window in the `LauncherUI` subsystem verification.
 
 **RepoCardViewModel_GitSourceAwareness_IconAliasTagAndShortCommit**: A card pinned to a Git source shows the Git icon

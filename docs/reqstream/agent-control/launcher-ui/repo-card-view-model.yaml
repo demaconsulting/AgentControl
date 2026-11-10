@@ -969,6 +969,17 @@ sections:
         tests:
           - RepoCardViewModel_ApplySelectedPackage_UntrackFails_StopsBeforeExtractingAndChangesNothingElse
 
+      - id: AgentControl-RepoCardViewModel-RestoreTrackingWhenApplyFails
+        title: >-
+          The RepoCardViewModel class shall, when a package cannot be applied after git stopped
+          tracking the managed agent folders, put the folders back into git's tracking and write no
+          pin.
+        justification: |
+          A failed apply must not leave the repo half-converted, with the folders' removal from
+          git staged but no package applied.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_ExtractFailsAfterUntrack_RestoresGitTracking
+
       - id: AgentControl-RepoCardViewModel-NoConvertWhenNotTracked
         title: >-
           The RepoCardViewModel class shall apply a package to a repo that has no managed agent

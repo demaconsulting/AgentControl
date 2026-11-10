@@ -2713,7 +2713,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 untracked = await UntrackAgentFoldersAsync(trackedFolders);
             }
 
-            await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
+            try
+            {
+                await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
+            }
+            catch when (untracked)
+            {
+                // The package could not be applied: put the folders back in git's index so a failed
+                // apply never leaves their removal from git staged
+                await RestoreAgentFolderTrackingAsync(trackedFolders);
+                untracked = false;
+                throw;
+            }
+
             EnsureGitIgnoreCoversManagedFolders();
 
             // Preserve a prior AGENTS.md template decline (and any unknown fields) across
@@ -2908,6 +2920,27 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
 
         return true;
+    }
+
+    /// <summary>
+    ///     Rolls back <see cref="UntrackAgentFoldersAsync"/> after the package could not be applied:
+    ///     restores the folders' entries in git's index (the working tree is untouched). Best effort -
+    ///     a failure is logged, never thrown, so the original apply error is the one reported.
+    /// </summary>
+    /// <param name="trackedFolders">The folders that were untracked; never empty.</param>
+    private async Task RestoreAgentFolderTrackingAsync(IReadOnlyList<string> trackedFolders)
+    {
+        var git = new GitClient(ResolveGitExecutablePath(_getSettings()));
+        try
+        {
+            await Task.Run(() => git.RestoreAgentFolderTracking(RepoPath, trackedFolders), CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _logger.LogWarning(
+                ex, "Could not restore git tracking of {Folders} for repo '{RepoName}'",
+                string.Join(", ", trackedFolders), RepoName);
+        }
     }
 
     /// <summary>

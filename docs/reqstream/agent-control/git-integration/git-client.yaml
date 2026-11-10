@@ -75,6 +75,16 @@ sections:
           - GitClient_UntrackAgentFolders_TrackedFolders_RemovesThemFromIndexOnlyAndKeepsFilesOnDisk
           - GitClient_UntrackAgentFolders_GitRmFails_ThrowsInvalidOperationException
 
+      - id: AgentControl-GitClient-RestoreAgentFolderTracking
+        title: >-
+          The GitClient class shall be able to put managed agent folders it stopped tracking back
+          into git's tracking, leaving the files on disk as they are.
+        justification: |
+          A conversion whose package then cannot be applied must be undone, so a failed apply
+          never leaves the folders' removal from git staged.
+        tests:
+          - GitClient_RestoreAgentFolderTracking_AfterUntrack_RestoresIndexAndKeepsFiles
+
       - id: AgentControl-GitClient-UntrackOnlyAgentFolders
         title: >-
           The GitClient class shall refuse to stop git tracking anything that is not one of the

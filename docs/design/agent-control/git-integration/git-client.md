@@ -92,6 +92,12 @@ tracked by git, via a single `git ls-files -z -- {folders}`.
   (`AgentControl-GitClient-UntrackOnlyAgentFolders`); a git failure (for example an index lock
   held by another git process) throws `InvalidOperationException` carrying git's message.
 
+**RestoreAgentFolderTracking**: Undoes `UntrackAgentFolders` for the given agent folders via
+`git reset -q -- {folders}`, restoring their index entries from `HEAD` and leaving the working tree untouched; used
+to roll back a conversion whose package could not be applied (`AgentControl-GitClient-RestoreAgentFolderTracking`). It
+accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`) and throws
+`InvalidOperationException` carrying git's message when `git reset` fails.
+
 **GetCurrentBranch**: Gets the repo's current branch name, or `"(detached)"` for a detached
 `HEAD`.
 

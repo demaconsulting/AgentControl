@@ -217,6 +217,33 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a package the extractor refuses after git has stopped tracking the folders puts
+    ///     the folders back in git's index: a failed apply never leaves their removal staged, the old
+    ///     files stay, and no pin is written.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ApplySelectedPackage_ExtractFailsAfterUntrack_RestoresGitTracking()
+    {
+        // Arrange: a tracked repo and a package with a path-escaping entry the extractor refuses
+        var (fixture, card, provider) = CreateTrackedRepo();
+        provider.Files = ["../escape.md"];
+        var indexBefore = IndexedFiles(fixture);
+        var errors = new List<string>();
+        card.ErrorOccurred += (_, message) => errors.Add(message);
+        card.CommittedFilesConversionRequested += (_, request) => request.Respond(true);
+
+        // Act
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
+
+        // Assert: the apply failed, git tracks exactly what it tracked before, nothing else changed
+        Assert.Single(errors);
+        Assert.Equal(indexBefore, IndexedFiles(fixture));
+        Assert.Equal("old agent", File.ReadAllText(Path.Combine(fixture.WorkPath, ".github", "agents", "old.md")));
+        Assert.False(File.Exists(Path.Combine(fixture.WorkPath, ".agentcontrol.json")));
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
     ///     Test that a repo with no tracked managed files is applied exactly as before: no question,
     ///     no change to git, and the ordinary success message.
     /// </summary>
@@ -419,7 +446,19 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
         ///     Initializes the source.
         /// </summary>
         /// <param name="versions">The versions it offers.</param>
-        public CountingProvider(string[] versions) => _versions = versions;
+        /// <param name="files">The files its packages list, or <see langword="null"/> for one in each
+        ///     managed folder.</param>
+        public CountingProvider(string[] versions, string[]? files = null)
+        {
+            _versions = versions;
+            Files = files;
+        }
+
+        /// <summary>
+        ///     Gets or sets the files its packages list, or <see langword="null"/> for one in each
+        ///     managed folder.
+        /// </summary>
+        public string[]? Files { get; set; }
 
         /// <summary>
         ///     Gets how many times a package was acquired.
@@ -444,7 +483,7 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
         public Task<IPackageContentReader> AcquireAsync(DiscoveredPackage package, CancellationToken cancellationToken)
         {
             AcquireCalls++;
-            return Task.FromResult<IPackageContentReader>(new FixedReader());
+            return Task.FromResult<IPackageContentReader>(new FixedReader(Files));
         }
 
         /// <summary>
@@ -471,11 +510,19 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
             ".github/skills/skill.md"
         ];
 
+        private readonly string[] _files;
+
+        /// <summary>
+        ///     Initializes the reader.
+        /// </summary>
+        /// <param name="files">The files it lists, or <see langword="null"/> for one in each managed folder.</param>
+        public FixedReader(string[]? files = null) => _files = files ?? ManagedFiles;
+
         /// <inheritdoc />
         public string Description => "stub package";
 
         /// <inheritdoc />
-        public IReadOnlyList<string> ListFiles() => ManagedFiles;
+        public IReadOnlyList<string> ListFiles() => _files;
 
         /// <inheritdoc />
         public Stream OpenRead(string relativePath) =>

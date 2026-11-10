@@ -513,7 +513,11 @@ of everything would record a broken mix. The sequence therefore converts such a 
    that could not be fetched or was refused leaves git as it was (`-ConvertTrackedFolders`). A failure is rethrown as
    an `InvalidOperationException` saying AgentControl could not stop git tracking the folders and nothing was
    changed, with git's message; the outer handler reports it through `ErrorOccurred`, and the apply stops before
-   any file is replaced, `.gitignore` or the pin is written (`-StopWhenUntrackFails`).
+   any file is replaced, `.gitignore` or the pin is written (`-StopWhenUntrackFails`). If the extraction then fails
+   (for example the extractor refuses the package's layout), `RestoreAgentFolderTrackingAsync` puts the folders back
+   into git's index with `GitClient.RestoreAgentFolderTracking` (best effort, logged on failure) before the error is
+   reported, so a failed apply never leaves the folders' removal staged and no pin is written
+   (`-RestoreTrackingWhenApplyFails`).
 5. *Afterwards*: the extraction, `EnsureGitIgnoreCoversManagedFolders`, the pin write and the release notes run as
    always. Because git's index changed, a `finally` clause on every way out of the apply invalidates the card's
    `CommittedAgentFilesCache` entry, re-runs `RefreshBranchAndCommittedFiles` (so the "Committed agent files" chip
