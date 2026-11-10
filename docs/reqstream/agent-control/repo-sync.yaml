@@ -71,6 +71,7 @@ sections:
           - AgentControl-PackageZipExtractor-ReadReleaseNotes
           - AgentControl-ReleaseNotesViewerViewModel-Display
           - AgentControl-ReleaseNotesViewerViewModel-MarkdownParsing
+          - AgentControl-ReleaseNotesViewerViewModel-CodeSpans
         tests:
           - PackageZipExtractor_ReadReleaseNotes_EntryPresent_ReturnsContentWithoutExtracting
           - PackageZipExtractor_ReadReleaseNotes_NoEntry_ReturnsNull
