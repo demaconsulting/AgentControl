@@ -437,26 +437,31 @@ sections:
 
       - id: AgentControl-AgentPackageManagement-ContentIdentity
         title: >-
-          The AgentPackageManagement subsystem shall give every package a zip folder or a NuGet
-          source supplies a content identity that names exactly the bytes of the package file it
-          delivered, so that a package version republished with different content is told apart
-          from the copy that was recorded.
+          The AgentPackageManagement subsystem shall give every package a source supplies (a zip
+          folder, a NuGet source or a Git repository) a content identity computed from the agent
+          files it delivers, so that the same files from any kind of source, packed in any way,
+          have the same identity, and a package version republished with different files is told
+          apart from the copy that was recorded.
         justification: |
-          Nothing in a folder of zip files or a NuGet feed keeps a published version unchanged;
-          the identity is the evidence a repo's pin needs to notice that the content behind a
-          version number is no longer what was applied. Both source types are covered because
-          either can be republished in place. For a NuGet package the identity describes the copy
-          held on this machine, so a republish of a version already held is not noticed until the
-          copy is cleared.
+          Nothing in a folder of zip files, a NuGet feed or a Git repository keeps a published
+          version unchanged, and teammates reach the same files through different sources; an
+          identity of the files themselves is the evidence a repo's pin needs both to notice that
+          the files behind a version number are no longer what was applied and to recognize
+          another source that delivers the identical files. For a NuGet package the identity
+          describes the copy held on this machine, so a republish of a version already held is not
+          noticed until the copy is cleared.
         children:
-          - AgentControl-PackageContentIdentity-Sha256
-          - AgentControl-PackageContentIdentity-Sha256StreamOpen
-          - AgentControl-PackageContentIdentity-Sha256RejectNull
+          - AgentControl-PackageContentIdentity-FilesIdentity
+          - AgentControl-PackageContentIdentity-FilesIdentityIndependentOfPackaging
+          - AgentControl-PackageContentIdentity-FilesIdentityCoversExtractedFilesOnly
+          - AgentControl-PackageContentIdentity-FilesIdentityDetectsChange
+          - AgentControl-PackageContentIdentity-FilesIdentityRejectUnacceptable
           - AgentControl-ZipFolderSourceProvider-ReportContentIdentity
           - AgentControl-NuGetSourceProvider-ReportContentIdentity
-          - AgentControl-NuGetSourceProvider-RefuseUnidentifiablePackage
+          - AgentControl-GitSourceProvider-ReportContentIdentity
         tests:
-          - AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip
+          - AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportFilesIdentityAndDetectRepublishedZip
+          - AgentPackageManagementSubsystem_SameFilesFromZipNuGetAndGit_ReportTheSameIdentity
 
       - id: AgentControl-AgentPackageManagement-ContentIdentityComparable
         title: >-
@@ -466,8 +471,10 @@ sections:
         justification: |
           The identity is only useful if what was recorded can be compared with what a source
           delivers now, whichever kind of source produced either, and an identity of another
-          kind or a damaged one must never be mistaken for a change.
+          kind (one an older version recorded from a package file or a commit) or a damaged one
+          must never be mistaken for a change.
         children:
+          - AgentControl-PackageContentIdentity-RecognizeFilesIdentity
           - AgentControl-PackageContentIdentity-Format
           - AgentControl-PackageContentIdentity-FormatRejectMalformed
           - AgentControl-PackageContentIdentity-Describe
@@ -475,10 +482,26 @@ sections:
           - AgentControl-PackageContentIdentity-Compare
           - AgentControl-PackageContentIdentity-CompareSame
           - AgentControl-PackageContentIdentity-CompareChanged
-          - AgentControl-PackageContentIdentity-CompareDifferentKinds
         tests:
-          - AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip
+          - AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportFilesIdentityAndDetectRepublishedZip
           - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag
+
+      - id: AgentControl-AgentPackageManagement-OffersAcrossSources
+        title: >-
+          The AgentPackageManagement subsystem shall list what all the configured sources offer of
+          a package in the order the sources are configured, skipping a source that cannot be read,
+          and shall determine the newest version offered across them, with a version that several
+          sources offer attributed to the first of them in configuration order.
+        justification: |
+          A repo's pin names a source alias that another user's configuration may not have; the
+          other configured sources are then the candidates for supplying the pinned files and for
+          offering an upgrade, and the order the user chose in Settings decides between equals.
+        children:
+          - AgentControl-PackageVersionCache-ListAcrossSources
+          - AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure
+          - AgentControl-PackageVersionCache-NewestAcrossSources
+        tests:
+          - AgentPackageManagementSubsystem_AcrossSources_ListsOffersInConfigurationOrderAndNewestWins
 
       - id: AgentControl-AgentPackageManagement-GitSourceDefinition
         title: >-
@@ -605,11 +628,13 @@ sections:
       - id: AgentControl-AgentPackageManagement-GitSourceContentIdentity
         title: >-
           The AgentPackageManagement subsystem shall name the commit of a Git version's tag as the
-          content identity of the package it supplies, and shall show a moved tag as another commit
-          for the same version, so that a moved tag can be noticed.
+          source revision of the package it supplies, in addition to the identity of its files, and
+          shall show a moved tag as another commit for the same version, so that a moved tag can
+          be noticed.
         justification: |
-          A tag is mutable; the commit it pointed to when the package was applied is the identity
-          that cannot change unless the tag is moved.
+          A tag is mutable; the commit it pointed to when the package was applied is the revision
+          that cannot change unless the tag is moved, and the same files can be reached through
+          different commits, so the revision is kept apart from the identity of the files.
         children:
           - AgentControl-GitSourceProvider-ReportContentIdentity
           - AgentControl-GitSourceProvider-TagMovedBetweenListAndFetch

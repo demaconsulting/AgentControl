@@ -20,7 +20,9 @@ badge. It also provides the package-authenticity behavior
 (`AgentControl-AgentPackageManagement-SignedPackages`, `AgentControl-AgentPackageManagement-SignaturePlatformSupport`,
 which support `AgentControl-System-PackageAuthenticity`). It also provides the content identity of a
 delivered package (`AgentControl-AgentPackageManagement-ContentIdentity` and `-ContentIdentityComparable`, which support
-`AgentControl-System-PackageContentIntegrity`). It also provides the Git repository source - the tags of a repository
+`AgentControl-System-PackageContentIntegrity`) and the offers of all configured sources
+(`AgentControl-AgentPackageManagement-OffersAcrossSources`, which supports
+`AgentControl-System-UpgradeAcrossSources`). It also provides the Git repository source - the tags of a repository
 that match a pattern as the versions of one package, fetched shallow into a cache keyed by repository and commit
 (`AgentControl-AgentPackageManagement-GitSource`, `-GitSourceDefinition`, `-GitSourceSettingsChecked`,
 `-GitSourceAddressRules`, `-GitSourceAcquire`, `-GitSourceContentIdentity`, `-GitSourceNoRepositoryCode`,
@@ -59,9 +61,10 @@ OTS item.
   (the connection test, the Select Package window, the card's background check) and whose message never
   contains a secret or more of the server's address than its scheme, host and port.
 - *Content identity.* The reader that `AcquireAsync` returns reports a `ContentIdentity` (see *Content identity*
-  below) in the form of its source: `sha256:{hex}` (the SHA-256 of the zip or `.nupkg` file) for a zip folder or
-  NuGet source and `git-commit:{hex}` (the commit a tag pointed to) for a Git source; identities of different forms
-  never compare as the same content. `null` means the provider cannot name one, which is never a change.
+  below): `files-sha256:{hex}`, computed from the delivered agent files, the same form for every kind of source, so
+  the same files from a zip folder, a NuGet source or a Git source have the same identity. A Git source also
+  reports the commit a tag pointed to as the reader's `SourceRevision` (`git-commit:{hex}`), which is not part of
+  the identity. `null` means the provider cannot name an identity, which is never a change.
 
 **SignatureVerificationSupport.IsSupported**: Tells whether package signatures can be verified here.
 
@@ -210,26 +213,46 @@ failure to a `PackageSourceAccessException` with a secret-free message
 package. Both hand a package's content to the
 `RepoSync` subsystem as an `IPackageContentReader`.
 
-**Content identity.** Nothing in a folder of zip files or a NuGet feed keeps a published version unchanged, so
-every package a zip or NuGet source delivers carries a *content identity*: `sha256:` followed by the lower-case
-hexadecimal SHA-256 of the package file (`AgentControl-AgentPackageManagement-ContentIdentity`). The decisions:
+**Content identity.** Nothing in a folder of zip files, a NuGet feed or a Git repository keeps a published version
+unchanged, and teammates reach the same files through sources of different kinds and names, so every package a
+source delivers carries a *content identity* computed from the agent files it delivers: `files-sha256:` followed by
+the lower-case hexadecimal SHA-256 of a canonical encoding of those files, documented in *PackageContentIdentity
+Design* (`AgentControl-AgentPackageManagement-ContentIdentity`). The decisions:
 
-- *Which bytes.* For a zip source, the zip file itself, hashed by `ZipPackageContentReader` from the one open handle
-  its entries are then read from, so the identity describes exactly the bytes that are extracted. For a NuGet
-  source, the single `.nupkg` file in the package's folder of the source's private cache, which is the copy this
-  machine unpacked (a machine whose cache holds other bytes for the same version reports a different identity,
-  which is the warning that is wanted); a folder with none or several, or a package file that is a link, is
-  refused rather than recorded under a guessed hash.
-- *Why not the unpacked files.* The package file is one stable thing to hash on every platform; hashing a tree
-  would depend on file order, attributes and line endings.
+- *Which bytes.* The files `PackageContentExtractor` would write into a repo's four managed folders - nothing else
+  in the package (release notes, the AGENTS.md template, other files) and nothing about the container (zip, `.nupkg`,
+  repository, compression, timestamps, entry order). It is computed centrally by `PackageContentIdentity` from an
+  `IPackageContentReader`, so the zip, NuGet and Git readers all produce it the same way; a reader computes it on
+  first use from its own files, which are the very files that are extracted. For a NuGet source it describes the
+  unpacked copy in the source's private cache, which is the copy this machine applies (a machine whose cache holds
+  other files for the same version reports a different identity, which is the warning that is wanted).
+- *Why not the package file.* A hash of the zip or `.nupkg` differs for the same files whenever they are packed
+  differently, moved between kinds of source or served by a re-packing mirror, which made a teammate's equally good
+  source look like a "republished" package; hashing the files themselves does not.
 - *The comparison.* `PackageContentIdentity.Compare(pinned, actual)` answers *not comparable* when either side is
-  missing, *same*, or *changed*; callers (the repo card) decide what to do. A missing identity is never a change,
-  so pins made before identities were recorded, and sources that report none, cause no warning.
+  missing or is not a files identity (so an identity an older version recorded from a package file or a commit
+  is never a mismatch), *same*, or *changed*; callers (the repo card) decide what to do. A missing identity is never
+  a change, so pins made before identities were recorded, and sources that report none, cause no warning.
 - *Git.* `PackageContentIdentity.FromGitCommit` formats `git-commit:` plus the commit a tag pointed to, which
-  `GitSourceProvider` reports as the identity of what it delivered; the comparison treats identities of different
-  kinds as different.
+  `GitSourceProvider` reports as the *source revision* of what it delivered (`IPackageContentReader.SourceRevision`),
+  separate from the identity: the same files can be reached through different commits, and the commit is what a
+  moved tag is detected by.
 - *Not a signature.* The identity detects a republished or altered package; it does not prove who published it
   (see *Package authenticity* for that).
+
+**Offers across sources.** A repo's pin names one source alias, but aliases are each user's own configuration, so
+when that source is not available the other configured sources have to be asked what they offer.
+`PackageVersionCache.GetVersionsAcrossSourcesAsync` lists what every configured source offers of a package in the
+order the sources are configured (the order in Settings; each source's versions highest first), through the same
+per-source cache as every other query so no source is read twice in a session, optionally leaving out one alias
+(the pinned source, already consulted on its own). A source that cannot be read is skipped so that one unreachable
+share or server never hides what the others offer; when every consulted source failed, the first failure is thrown
+rather than an empty answer that would wrongly say nobody offers the package
+(`AgentControl-AgentPackageManagement-OffersAcrossSources`). `IsNewerVersionAvailableAcrossSourcesAsync` builds the
+same `UpgradeCheck` as the single-source check over that list: the newest version wins and, because a later offer
+must be strictly newer to replace the current choice, a version several sources offer is attributed to the first of
+them in configuration order. The *policy* of when other sources may be used, and the verification that makes it safe,
+is the repo card's (see *RepoCardViewModel Design*).
 
 **Git repository source.** `GitSourceProvider` (with `GitRepositoryAddress` and `GitTagPattern`, over the hardened
 `GitRemoteClient` of the `GitIntegration` subsystem) makes one configured repository one package. The decisions:

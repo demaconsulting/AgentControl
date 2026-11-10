@@ -247,14 +247,16 @@ sections:
       # ---- Content identity of the package that was read ----
       - id: AgentControl-PackageContentExtractor-ReaderContentIdentity
         title: >-
-          The zip package reader shall report the SHA-256 content identity of the zip, computed
-          from the same open handle its entries are read from.
+          The zip package reader shall report, as the content identity of the zip, the identity of
+          the agent files that its entries hold - not of the zip file - computed from the same open
+          handle its entries are read from.
         justification: |
-          The identity recorded in a repo's pin must describe the bytes that were actually
-          extracted; an identity taken in a separate look at the file could describe other bytes if
-          the file were replaced in between.
+          The identity recorded in a repo's pin must describe the files that were actually
+          extracted, and not depend on how they were compressed or ordered in the zip; an identity
+          taken in a separate look at the file could describe other files if the file were replaced
+          in between.
         tests:
-          - ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries
+          - ZipPackageContentReader_Open_ValidZip_ReportsFilesIdentityAndReadsEntries
 
       - id: AgentControl-PackageContentExtractor-ZipReaderReleasesHandleOnFailure
         title: >-
@@ -267,22 +269,16 @@ sections:
 
       - id: AgentControl-PackageContentExtractor-FolderReaderIdentity
         title: >-
-          The folder package reader shall report the content identity its opener supplied.
+          The folder package reader shall report, as its content identity, the identity of the
+          agent files in the folder, so that an unpacked package folder, a layout folder and a zip
+          with the same agent files report the same identity, and shall report no source revision
+          unless its opener supplied one.
         justification: |
-          A folder package has no single file to hash, so its source supplies the identity (the
-          SHA-256 of the unpacked package file, or the commit of a Git tag), and the reader must
-          pass it on unchanged.
+          The identity recorded in a repo's pin must describe the files that were extracted, so
+          that the same files from any kind of source are recognized as the same; a plain folder
+          has no revision of its own.
         tests:
-          - DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull
-
-      - id: AgentControl-PackageContentExtractor-FolderReaderNoIdentity
-        title: >-
-          The folder package reader shall report no content identity when its opener supplied none.
-        justification: |
-          A reader that cannot name an identity must say so rather than invent one; "none" means
-          there is nothing to compare, never a changed package.
-        tests:
-          - DirectoryPackageContentReader_Open_WithoutIdentity_ReportsNone
+          - DirectoryPackageContentReader_Open_FolderFiles_ReportsFilesIdentityAndNoRevision
 
       # ---- Package layout in the root of a folder (Git packages) ----
       - id: AgentControl-PackageContentExtractor-ReadLayoutRoot
@@ -294,16 +290,31 @@ sections:
           A folder that holds a package holds many things that are not the package; the extractor
           must see only the layout.
         tests:
-          - DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity
+          - DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesRevision
 
       - id: AgentControl-PackageContentExtractor-LayoutRootIdentity
         title: >-
-          The folder package reader, when reading a layout root, shall report the content identity
-          its opener supplied, or none when none was supplied.
+          The folder package reader, when reading a layout root, shall report the source revision
+          its opener supplied, or none when none was supplied, and the same identity of the agent
+          files whether or not a revision was supplied.
         justification: |
-          A Git package is identified by the commit it was fetched at, which only its opener knows.
+          A Git package is identified by the commit it was fetched at, which only its opener knows;
+          that commit is kept apart from the identity of the files, which must not depend on it.
         tests:
-          - DirectoryPackageContentReader_OpenLayoutRoot_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull
+          - DirectoryPackageContentReader_OpenLayoutRoot_WithAndWithoutRevision_ReportsSuppliedRevisionOrNull
+
+      - id: AgentControl-PackageContentExtractor-ManagedPackagePath
+        title: >-
+          The PackageContentExtractor class shall say, for a path in a package, whether extraction
+          would write the file into one of the managed agent folders and under which canonical path,
+          and shall refuse a path that extraction would refuse.
+        justification: |
+          Whatever vouches for the files a package delivers - its content identity - must cover
+          exactly the files that end up in a repo; asking the extractor's own rule, instead of
+          repeating it, keeps the two from drifting apart.
+        tests:
+          - PackageContentExtractor_GetManagedPackagePath_ManagedAndOtherPaths_ReportsCanonicalPathOrNull
+          - PackageContentExtractor_GetManagedPackagePath_PathEscapingPackage_ThrowsInvalidOperationException
 
       - id: AgentControl-PackageContentExtractor-RefuseMissingOrLinkedLayoutRoot
         title: >-
@@ -383,5 +394,5 @@ sections:
           A repository's metadata is not part of a package and must not be copied into
           another repository.
         tests:
-          - DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity
+          - DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesRevision
           - DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused

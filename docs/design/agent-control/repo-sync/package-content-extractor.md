@@ -23,14 +23,18 @@ that are blind-deleted and replaced on every sync/upgrade; the single source of 
 both `Extract` and `AllManagedFoldersExist`.
 
 **IPackageContentReader**: a read-only view of package content — `Description` (a path for
-messages), `ContentIdentity` (the identity of the package the reader reads, or `null` when it cannot name one;
-`null` means "nothing to compare", never "changed"), `ListFiles()` (relative paths with `/` separators),
-`OpenRead(path)` and `ReadText(path)` (null when absent). Implementations never write to the package.
+messages), `ContentIdentity` (the identity of the agent files the reader delivers, or `null` when it cannot name
+one; `null` means "nothing to compare", never "changed"), `SourceRevision` (the revision the source says the files
+came from - `git-commit:<commit id>` for a Git tag - or `null`), `ListFiles()` (relative paths with `/`
+separators), `OpenRead(path)` and `ReadText(path)` (null when absent). Implementations never write to the package.
 
-**ZipPackageContentReader**: holds a `ZipArchive` open until disposed; `Open` opens the zip **once**, hashes the
-whole file with `PackageContentIdentity.ComputeSha256` (`ContentIdentity`), rewinds the same handle and builds the
-archive over it, so the identity describes exactly the bytes that are extracted and no other file can be read
-between hashing and reading (`AgentControl-PackageContentExtractor-ReaderContentIdentity`); the handle is released
+**ZipPackageContentReader**: holds a `ZipArchive` open until disposed; `Open` opens the zip **once** and builds the
+archive over that handle. `ContentIdentity` is computed on first use - and remembered - with
+`PackageContentIdentity.TryComputeFilesIdentity(this)` from the entries the archive holds, so the identity
+describes the agent files that are extracted, whatever the zip's compression, timestamps or entry order, and no
+other file can be read between identifying and reading because the open handle denies writers
+(`AgentControl-PackageContentExtractor-ReaderContentIdentity`); a reader opened only for the release notes
+never pays for reading every file. The handle is released
 when the archive cannot be built (`AgentControl-PackageContentExtractor-ZipReaderReleasesHandleOnFailure`). `Open` wraps
 open
 failures - an unreadable or invalid archive, and a path that is invalid or unsupported
@@ -38,11 +42,13 @@ failures - an unreadable or invalid archive, and a path that is invalid or unsup
 `InvalidOperationException` naming the zip, so no path exception escapes to a caller that handles one failure type
 (`AgentControl-PackageContentExtractor-ZipOpenFailure`).
 
-**DirectoryPackageContentReader**: holds only paths, plus the `ContentIdentity` its opener supplied (`Open` takes
-it as an optional argument and does not hash anything: a package folder has no single file whose bytes define it, so
-`NuGetSourceProvider` supplies the identity of the `.nupkg`, and a layout root the commit of a Git tag; `null` when
-none is given; `AgentControl-PackageContentExtractor-FolderReaderIdentity`,
-`AgentControl-PackageContentExtractor-FolderReaderNoIdentity` and
+**DirectoryPackageContentReader**: holds only paths, plus the `SourceRevision` its opener supplied (`OpenLayoutRoot`
+takes it as an optional argument: a Git source passes the commit of the tag whose blobs were written; `null` when
+none is given). `ContentIdentity` is computed on first use - and remembered - from the files of the folder with
+`PackageContentIdentity.TryComputeFilesIdentity(this)`, so an unpacked NuGet package folder, a Git layout folder and
+a zip with the same agent files report the same identity, and nothing about the folder (the `.nupkg` next to the
+`content` folder, other files) takes part
+(`AgentControl-PackageContentExtractor-FolderReaderIdentity` and
 `AgentControl-PackageContentExtractor-LayoutRootIdentity`). `Open` requires a `content` sub-folder
 (otherwise `InvalidOperationException` — a wrong-layout package must never make the extractor
 delete a repo's managed folders for nothing; `AgentControl-PackageContentExtractor-RejectMissingContentFolder`) and
@@ -106,6 +112,19 @@ ordinary folders, without inspecting contents. A managed folder that is a link, 
 linked `.github`, is not valid, so a caller that skips syncing when the folders exist falls
 through to `Extract`, which refuses the link with a clear error
 (`AgentControl-PackageContentExtractor-ManagedFoldersExist`).
+
+**GetManagedPackagePath**: Applies the extraction's own membership rule to one package path: says whether `Extract`
+would write the file into a managed folder and under which canonical path.
+
+- *Parameters*: `string relativePath` - a path as `ListFiles` returns it.
+- *Returns*: `string?` - the canonical path (`.`/`..` resolved, `/` separators) of a file that falls within a managed
+  folder, `null` for any other file (the root files, other `.github` content, a look-alike folder name).
+- *Algorithm*: It runs `ResolveManagedDestination` - the very method `Extract` uses - against a fixed, purely lexical
+  stand-in root (`ProbeRoot`, never read or written), then takes the destination's path relative to that root.
+  Existing code is thereby reused rather than copied, so the set of files a content identity covers can never
+  drift from the set of files extraction writes (`AgentControl-PackageContentExtractor-ManagedPackagePath`).
+- *Errors*: `InvalidOperationException` for a path `Extract` would refuse (one that resolves outside the package),
+  `ArgumentNullException` for a null path. Performs no I/O.
 
 **ReadReleaseNotes / ReadAgentsMdTemplate**: Return the package's root-level `release-notes.md`
 or `AGENTS.md` text, or `null` when absent, without copying anything to disk
@@ -171,9 +190,10 @@ This residual risk is repeated in the `RepoSync` subsystem design and is recorde
 
 - **PathHelpers** (`Utilities` subsystem) — `SafePathCombine` for every destination and package
   file path.
-- **PackageContentIdentity** (`AgentPackageManagement` subsystem) — `ComputeSha256`, used by
-  `ZipPackageContentReader` to name the bytes of the zip it reads (a documented dependency in the direction
-  opposite to the providers' use of the readers: the identity format is owned by one unit rather than duplicated).
+- **PackageContentIdentity** (`AgentPackageManagement` subsystem) — `TryComputeFilesIdentity`, used by both readers
+  to name the agent files they deliver (a documented dependency in the direction opposite to the providers' use of
+  the readers: the identity format is owned by one unit rather than duplicated); in turn `PackageContentIdentity`
+  calls `GetManagedPackagePath` and the reader's `ListFiles`/`OpenRead`.
 - **AppLogging**, **ILogger** (`Logging` subsystem) — extraction/delete diagnostics under a string
   category name (a static class cannot be a generic type argument).
 - **.NET BCL** — `System.IO.Compression`, `System.IO`.

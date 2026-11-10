@@ -53,12 +53,16 @@ internal sealed class UnsupportedPinSchemaException : InvalidOperationException
 /// </summary>
 /// <remarks>
 ///     <para>
-///     The store understands three schema versions. Version 1 (no <c>SchemaVersion</c> or
+///     The store understands four schema versions. Version 1 (no <c>SchemaVersion</c> or
 ///     <c>Source</c> property) predates configurable sources and is read as a pin to the source
 ///     named <see cref="RepoPin.LegacySourceAlias"/>; version 2 adds <c>SchemaVersion</c> and
-///     <c>Source</c>; version 3 adds <c>ContentIdentity</c> and is what <see cref="Save"/> always
-///     writes (a pin read from an older file simply has no identity until it is next saved with
-///     one). A file declaring a newer schema
+///     <c>Source</c>; version 3 added a <c>ContentIdentity</c> of the package container; version 4
+///     makes <c>ContentIdentity</c> an identity of the delivered files, adds <c>SourceRevision</c>
+///     and is what <see cref="Save"/> always writes. Reading a pin older than version 4 drops its
+///     container identity (it cannot be compared with a files identity, so it means "no recorded
+///     identity", never "changed") and carries a recorded Git commit over as the source revision;
+///     the files identity is recorded the next time a package is selected, changed or upgraded.
+///     A file declaring a newer schema
 ///     than <see cref="RepoPin.CurrentSchemaVersion"/> is rejected with
 ///     <see cref="UnsupportedPinSchemaException"/> by both <see cref="Load"/> and <see cref="Save"/>,
 ///     so an older AgentControl never misreads - or clobbers - a file written by a newer one (which
@@ -90,6 +94,19 @@ internal static class RepoPinStore
     private const int FirstSchemaWithSource = 2;
 
     /// <summary>
+    ///     The first schema version whose <c>ContentIdentity</c> is computed from the delivered
+    ///     files; an older pin's identity (of a container, or of a Git commit) is not carried over as
+    ///     one.
+    /// </summary>
+    private const int FirstSchemaWithFilesIdentity = 4;
+
+    /// <summary>
+    ///     The prefix of the Git commit text a schema 3 pin recorded as its identity for a Git
+    ///     source; such a value becomes the source revision of the migrated pin.
+    /// </summary>
+    private const string LegacyGitCommitPrefix = "git-commit:";
+
+    /// <summary>
     ///     JSON serialization options shared by <see cref="Load"/> and <see cref="Save"/>: indented
     ///     output, and case-insensitive reading so hand-edited camelCase names are accepted.
     /// </summary>
@@ -106,8 +123,9 @@ internal static class RepoPinStore
     /// <param name="repoRoot">Absolute path to the repository root.</param>
     /// <returns>The parsed pin, or <see langword="null"/> when no pin file exists. A version 1 pin
     ///     (schema older than 2) is returned with <see cref="RepoPin.Source"/> set to
-    ///     <see cref="RepoPin.LegacySourceAlias"/>; a pin older than version 3 has no
-    ///     <see cref="RepoPin.ContentIdentity"/>.</returns>
+    ///     <see cref="RepoPin.LegacySourceAlias"/>; a pin older than version 4 is returned without
+    ///     a <see cref="RepoPin.ContentIdentity"/> (and, for a Git commit it recorded, with that
+    ///     commit as <see cref="RepoPin.SourceRevision"/>).</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="UnsupportedPinSchemaException">Thrown when the pin file declares a schema
@@ -155,6 +173,23 @@ internal static class RepoPinStore
         if (pin.SchemaVersion > RepoPin.CurrentSchemaVersion)
         {
             throw new UnsupportedPinSchemaException(filePath, pin.SchemaVersion);
+        }
+
+        // A pin written before schema 4 recorded an identity of the package container (a zip or
+        // .nupkg hash) or of a Git commit: neither can be compared with an identity computed from
+        // the delivered files, so the pin has no files identity until it is next saved with one
+        // (never a reason to refuse anything). A Git commit it recorded is still the commit its
+        // files came from, so it carries over as the source revision, which keeps a moved tag
+        // detectable for such a pin.
+        if (pin.SchemaVersion < FirstSchemaWithFilesIdentity)
+        {
+            var legacyIdentity = pin.ContentIdentity?.Trim();
+            pin.ContentIdentity = null;
+            if (string.IsNullOrWhiteSpace(pin.SourceRevision) && legacyIdentity is not null &&
+                legacyIdentity.StartsWith(LegacyGitCommitPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                pin.SourceRevision = legacyIdentity;
+            }
         }
 
         // A pin written before sources existed (schema 1) names none: it belongs to the legacy

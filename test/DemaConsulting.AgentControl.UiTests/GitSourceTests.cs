@@ -286,7 +286,8 @@ public sealed class GitSourceTests
         Assert.Equal("Repo", pin.RootElement.GetProperty("Source").GetString());
         Assert.Equal(GitFixtureRepository.PackageName, pin.RootElement.GetProperty("PackageName").GetString());
         Assert.Equal("1.0.0", pin.RootElement.GetProperty("Version").GetString());
-        Assert.Equal("git-commit:" + tagCommit, pin.RootElement.GetProperty("ContentIdentity").GetString());
+        Assert.Equal("git-commit:" + tagCommit, pin.RootElement.GetProperty("SourceRevision").GetString());
+        Assert.Equal(GitFixtureRepository.FilesIdentity("git 1.0.0"), pin.RootElement.GetProperty("ContentIdentity").GetString());
 
         // Assert: the card's package chip shows the package and version, the Git icon and the alias
         Assert.True(WaitForText(mainWindow, "RepoPinnedVersionText", $"{GitFixtureRepository.PackageName} 1.0.0"));
@@ -452,7 +453,8 @@ public sealed class GitSourceTests
         {
             Assert.Equal("1.0.0", pin.RootElement.GetProperty("Version").GetString());
             Assert.Equal("Repo", pin.RootElement.GetProperty("Source").GetString());
-            Assert.Equal("git-commit:" + movedCommit, pin.RootElement.GetProperty("ContentIdentity").GetString());
+            Assert.Equal("git-commit:" + movedCommit, pin.RootElement.GetProperty("SourceRevision").GetString());
+            Assert.Equal(GitFixtureRepository.FilesIdentity("git 1.0.0 moved"), pin.RootElement.GetProperty("ContentIdentity").GetString());
         }
 
         // Assert: the warning is gone, because the pin now matches the tag
@@ -474,7 +476,8 @@ public sealed class GitSourceTests
             pinnedPackageName: GitFixtureRepository.PackageName,
             pinnedPackageVersion: "1.0.0",
             pinnedSource: "Repo",
-            pinnedContentIdentity: "git-commit:" + commit,
+            pinnedContentIdentity: GitFixtureRepository.FilesIdentity("git 1.0.0"),
+            pinnedSourceRevision: "git-commit:" + commit,
             gitSource: fixture.CreateSource())
         {
             LaunchEnvironment = fixture.IsolationEnvironment

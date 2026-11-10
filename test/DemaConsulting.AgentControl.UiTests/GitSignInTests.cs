@@ -197,7 +197,7 @@ public sealed class GitSignInTests
             pinnedPackageName: GitFixtureRepository.PackageName,
             pinnedPackageVersion: "1.0.0",
             pinnedSource: "Private",
-            pinnedContentIdentity: "git-commit:" + commit,
+            pinnedSourceRevision: "git-commit:" + commit,
             gitSource: new GitSourceSettings(
                 "Private", server.RepositoryUrl, "release/{version}", GitFixtureRepository.PackageName))
         {

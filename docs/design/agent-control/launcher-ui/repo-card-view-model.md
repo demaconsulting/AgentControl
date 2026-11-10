@@ -12,8 +12,10 @@ orchestration, pull-eligibility checks) is implemented here or delegated to `Git
 rather than in any view code-behind, so this class is fully unit-testable without an Avalonia
 window, and every change to the user's own settings entry (favorite, group, card color, launch time) is made
 through the owner (see *Changes go through the owner* below). Every package-source operation is bound to the
-source named in the repo's pin
-(`AgentControl-RepoCardViewModel-SourceAwareness`), and the card shows whether that source requires signed
+source named in the repo's pin, which is the *preferred* source: another configured source takes its place only when
+it is verified to deliver the files the pin recorded (see *Portable pins* below;
+`AgentControl-RepoCardViewModel-SourceAwareness`), and the card shows whether the source that supplies the package
+requires signed
 packages (`AgentControl-RepoCardViewModel-SignatureIndicator`).
 
 #### Data Model
@@ -43,7 +45,11 @@ neither be favorited nor unfavorited.) Setting it changes the shared record and 
 once per change, but only after the owner saved the change (see *Changes go through the owner* below); the
 owning `MainWindowViewModel` re-sections the list.
 `PinnedSource` is the alias of the source the pin names (a pin written before sources existed
-reads as `Default`).
+reads as `Default`): the preferred source, which stays as recorded even when another source supplies the files. The
+card also keeps, read from the pin by `RefreshPin`, the pin's `ContentIdentity` (what another source's files are
+verified against), its `SourceRevision` (the commit a Git pin's files came from) and `_supplyingSource` - the alias of
+the configured source that was verified to deliver the identical files when the pinned source cannot be used, never
+written to the pin.
 
 **Changes go through the owner** (`AgentControl-RepoCardViewModel-ChangeSavedBeforeApplied`): the constructor takes
 an optional `commitChange` callback, `Func<RecentRepo, Action<RecentRepo>, bool>`. The card never assigns to its
@@ -58,13 +64,18 @@ in tests) the change is applied to the entry directly. The assignments must be p
 because the owner runs them twice (candidate, then live entry).
 
 **SourceProblem** / **HasSourceProblem**: `string?`/`bool` — the card's error state for a pin whose
-source cannot be used: an alias that is not among the configured sources, or a source configuration that is itself
-invalid (for example a duplicated alias; "The package sources are not configured correctly: ..."), which is a
-problem and never "up to date" (`AgentControl-RepoCardViewModel-InvalidSourceConfigurationIsProblem`). When set, no
-upgrade is offered and no other source is ever consulted
+package cannot be obtained: its source alias is not among the configured sources and no other configured source
+delivers the identical files (or the pin recorded no identity to verify one against), or a source configuration that is
+itself invalid (for example a duplicated alias; "The package sources are not configured correctly: ..."), which is a
+problem and never "up to date" (`AgentControl-RepoCardViewModel-InvalidSourceConfigurationIsProblem`). The text for a
+pin that nothing can supply says that the pinned source is not configured and that no other configured source delivers the
+identical files - or, for a pin that recorded no identity of its files, that no other source can be matched to it -
+and what to do about it (`AgentControl-RepoCardViewModel-UnresolvedPinExplained`). When set, no
+upgrade is offered and no source whose files are not verified is ever used
 (`AgentControl-RepoCardViewModel-SourceAwareness`); the main window shows it as a warning badge
-on the card, with the reason as its tooltip. Set by the cheap refresh; cleared when
-the pin or settings no longer have the problem.
+on the card, with the reason as its tooltip. Set by the cheap refresh and by the upgrade check; cleared when
+the pin or settings no longer have the problem. It is *not* set when another source supplies the files: the chip then
+names that source (see *Portable pins* below).
 
 **CurrentBranch**, **HasCommittedAgentFiles**: `string?`/`bool` — Resolved via `GitClient`,
 with the committed-files result consulting the per-card `CommittedAgentFilesCache`
@@ -235,19 +246,23 @@ session credentials and the user's saved sign-in (read without any dialog) but c
 (`AgentControl-RepoCardViewModel-DisplayInfo`, `AgentControl-RepoCardViewModel-UpgradeBadge`):
 
 - *Package chip* — `HasPackageChip`, `PackageChipText` (package name and version),
-  `PackageChipTooltip` (names the package, version, source alias and source kind, or says the
-  pinned source is not configured; for a Git source it adds ", tag {tag} @ {commit}" - the tag is
+  `PackageChipTooltip` (names the package, version, source alias and source kind of the source that supplies the
+  files - the pinned one, or the one that stands in for it - and, when another source supplies them, adds the
+  `SourceSubstitutionNote`: *Pinned source 'X' is not configured; the identical files come from 'Y'.* or *...does
+  not offer {package} {version}; ...*; for a Git source it adds ", tag {tag} @ {commit}" - the tag is
   `PinnedTagName`, the source's tag pattern applied to the pinned version, and the commit is
-  `PinnedCommitShort`, the first seven characters of the `git-commit:` identity the pin recorded - and only
+  `PinnedCommitShort`, the first seven characters of the `git-commit:` source revision the pin recorded - and only
   ", tag {tag}" when the pin recorded no commit; a pin to any other kind of source names neither,
   `AgentControl-RepoCardViewModel-GitSourceAwareness`, `-GitSourceTooltip`), the source kind's icon from
   `PackageSourceIcons` (a server
   source has its own network-server icon, distinct from the zip-folder and NuGet-folder icons, and a Git source
   the Git logo), and
-  `PinnedSourceLabel`, the source's alias shown as muted text beside the icon so the source is
-  recognizable at a glance without hovering (a pin written before sources existed reports the legacy
-  `Default` alias). Hidden for a missing repo or when nothing is pinned.
-- *Signature shield* — `RequiresSignature` is `true` only when the pinned source is a **NuGet** source whose
+  `PinnedSourceLabel`, the alias of the source that supplies the files shown as muted text beside the icon so the
+  source is recognizable at a glance without hovering (the pinned source's alias - a pin written before sources
+  existed reports the legacy `Default` alias - or, when another source stands in for it, that source's alias;
+  `AgentControl-RepoCardViewModel-ShowSupplyingSource`). Hidden for a missing repo or when nothing is pinned.
+- *Signature shield* — `RequiresSignature` is `true` only when the source that supplies the package is a **NuGet**
+  source whose
   definition requires signed packages (not for a zip source, a source that is not configured, or a source without
   the requirement), and `SignatureTooltip` says "Signature required (any trusted signer)" or, when the source pins a
   publisher, "Signature required (signer pinned: A3AF7AF1…7641)" naming only the start and end of the fingerprint
@@ -338,7 +353,9 @@ first becomes visible.
 immediate full refresh; `RefreshCommand` runs it asynchronously.
 
 **RefreshUpgradeStatusAsync**: Checks, in the background, whether the pin's source offers a
-newer version than the pinned one, using the shared cache. A retired card returns at once. Each check takes a new
+newer version than the pinned one, using the shared cache - and, when the pin's source is not available, which other
+source supplies the pinned files and what the configured sources offer (see *Portable pins*). A retired card returns
+at once. Each check takes a new
 generation number when it starts, and a check started later supersedes one
 still waiting (`AgentControl-RepoCardViewModel-SupersededUpgradeCheck`), so a result for settings that have
 since changed is discarded; a source configuration that is invalid is shown as a problem
@@ -352,16 +369,21 @@ followed by *Use the card's "..." menu > Refresh to sign in*, so the card says w
 interrupting the user. The card's **Refresh** command runs the same check with `allowPrompt` true, and the
 Select Package and Upgrade actions the user chooses use a source registry that may open the dialog
 (`AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`). The check result carries the listing's entry for the
-pinned version (`UpgradeCheck.Pinned`). For a Git source whose pin recorded a `git-commit:` identity, a listing that
-shows the pinned version at a different commit (`FindMovedTagCommit`, using `PackageContentIdentity.Compare`) sets
+pinned version (`UpgradeCheck.Pinned`). For a Git source whose pin recorded a `git-commit:` source revision, a listing
+that
+shows the pinned version at a different commit (`FindMovedTagCommit`, comparing the pin's `SourceRevision` with
+`PackageContentIdentity.FromGitCommit(listing revision)`) sets
 the moved-tag state through `SetMovedTag`, which notifies `IsPinnedTagMoved`, the tooltip and the status; nothing is
 read, extracted or written because of it, and the state is cleared whenever the pin changes (`RefreshPin`), the
 listing no longer differs, a check fails (the tag state is then unknown, so an earlier warning must not stay up as if
 it had been confirmed) or the repo's folder is missing (`AgentControl-RepoCardViewModel-TagMovedWarning`,
-`-TagMovedClearedByNewPin`, `-TagMovedClearedWhenUnknown`). Only a well-formed `git-commit:` identity (40 or 64 hex
-digits) is compared: a pin without an identity, a pin whose identity is of another kind or malformed, a listing without
-a revision, a source that is not a Git source and a tag that still points to the recorded commit are never reported as
-moved (`-TagMovedNeedsEvidence`). The tag of the pinned version is not stored in the pin: it is derived from the
+`-TagMovedClearedByNewPin`, `-TagMovedClearedWhenUnknown`). Only a well-formed `git-commit:` revision (40 or 64 hex
+digits) is compared: a pin without a revision, a pin whose revision is of another kind or malformed, a listing without
+a revision, a source that is not a Git source (the check is made only against the pinned Git source, never against a
+stand-in) and a tag that still points to the recorded commit are never reported as
+moved (`-TagMovedNeedsEvidence`). A pin an older version wrote - whose commit was recorded as its identity - is read
+with that commit as its source revision, so its moved tag is still seen. The tag of the pinned version is not stored in
+the pin: it is derived from the
 source's tag pattern as configured now (`PinnedTagName`). Editing the pattern therefore maps the pinned version to
 another tag, and when that tag names a different commit than the pin recorded it is reported as a moved tag; the user
 accepts it, or not, with "Change package..." (`-TagMovedFollowsTagPattern`).
@@ -405,21 +427,29 @@ is an informational side action only — it never blocks `Launch`.
   is already `true`, returns `true` immediately with no extra I/O — and critically, never
   calls `MaybeOfferAgentsMdTemplate` in that case, since the offer must only ever fire when a
   sync genuinely happens. Otherwise resolves the *currently pinned* package at the source the pin
-  names (never the latest, and never another source - a pin whose source is not configured fails
-  here with a non-blocking warning) and re-extracts it directly via
+  names when that source is configured and offers the pinned version (never the latest) - or, when it is not
+  configured or does not offer that version, at another configured source verified to deliver the identical files (see
+  *Portable pins*; never for a pin without a files identity, and a pinned source that delivers other files for the
+  version is a republished package, not a reason to look elsewhere) - and re-extracts it directly via
   `PackageContentExtractor.Extract` over the reader the provider returns,
   without displaying release notes but still calling `MaybeOfferAgentsMdTemplate`; if this
   re-extraction attempt fails for any reason, `ErrorOccurred` is raised as a non-blocking
-  warning (`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`). Before it extracts, the content identity of
+  warning (`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`); when no source can supply the package the
+  warning says that the pinned source is not configured (or does not offer the version) and no other configured source
+  delivers the identical files (`AgentControl-RepoCardViewModel-UnresolvedPinExplained`). Before it extracts from the
+  pinned source, the content identity of
   the reader is compared with the one the repo's pin recorded (`PackageContentIdentity.Compare`): when the version
-  the repo is pinned to now delivers different content, nothing is extracted, a warning is logged and
+  the repo is pinned to now delivers different files, nothing is extracted, a warning is logged and
   `ErrorOccurred` says in plain language that the agent files were not synced because the package may have been
   republished and that the way to accept the change, if it is trusted, is the card menu's "Change package..."
   (it no longer suggests deleting the pin file), and the method returns `false`
   (`AgentControl-RepoCardViewModel-RefuseChangedContent`). A pin that
-  recorded no identity (or a reader that reports none) is not comparable and is synced without any warning. The
-  restore **never writes the pin**, whatever the outcome - recording an identity here would change a file under
-  version control every time the tool is launched, so such a pin adopts an identity only at the next Select Package
+  recorded no identity of its files (or a reader that reports none) is not comparable and is synced without any
+  warning. The
+  restore **never writes the pin**, whatever the outcome - and so never rewrites the alias when another source
+  supplied the files - because recording an identity here would change a file under
+  version control every time the tool is launched, so such a pin adopts an identity only at the next Select Package,
+  Change package
   or Upgrade (`AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin`,
   `AgentControl-RepoCardViewModel-AdoptMissingIdentity`). That includes the AGENTS.md template offer the restore may
   raise: the card remembers that the open offer came from the restore, and a decline of such an offer is not
@@ -470,8 +500,9 @@ a repo whose managed folders are tracked and whose conversion the user confirmed
 immediately before it extracts the package
 (blind-delete-and-replace), proactively ensures the repo's `.gitignore` covers the four managed
 agent folders (via `EnsureGitIgnoreCoversManagedFolders`, its own non-blocking step — see Error
-Handling), updates the loaded pin in place with the package's source alias, name, version and content
-identity (replacing any identity recorded before, `AgentControl-RepoCardViewModel-RecordContentIdentity`) and
+Handling), updates the loaded pin in place with the package's source alias (the source actually used), name, version,
+content identity and source revision (replacing whatever was recorded before, including nothing or an older kind of
+identity, `AgentControl-RepoCardViewModel-RecordContentIdentity`) and
 saves it (so `AgentsMdTemplateDeclined` and any unknown fields are preserved), refreshes
 pin/upgrade-status properties, calls `MaybeOfferAgentsMdTemplate` and finally raises
 `ReleaseNotesReady` with the new package's release notes. The offer is raised *before* the release notes so
@@ -593,9 +624,49 @@ passes the pin's source, package and version to the dialog so it opens on them, 
 through `ApplySelectedPackageAsync`, where choosing the pinned version again is the explicit way to accept changed
 content (`ConfirmChangedContent`; for a Git source the content differs when the tag now delivers a different commit).
 
-**EvaluatePinnedSource** (private): Part of the cheap refresh. A pin naming a source that is not
-configured sets `SourceProblem` and never looks elsewhere. An unreachable or failing source is
+**EvaluatePinnedSource** (private): Part of the cheap refresh. It clears the source problem and decides what can be
+settled without reading a source. A pin whose source is configured goes on to the asynchronous check. A pin whose
+source is *not* configured goes on too - without any problem set yet - when it recorded a files identity and at least
+one source is configured, because only reading the sources can tell whether another one delivers the identical files;
+otherwise (no identity to verify against, or no source at all) `SourceProblem` is set at once with the explanation
+(`AgentControl-RepoCardViewModel-FallbackNeverWithoutIdentity`, `-UnresolvedPinExplained`). A stand-in source that is
+no longer configured is dropped. An unreachable or failing source is
 reported by the background upgrade check as "no upgrade offered".
+
+**Portable pins** (`AgentControl-System-PortablePin`, `AgentControl-System-SourcePinIntegrity`). The alias in a pin is
+user-specific configuration, so it is a *preferred* source, resolved in this order wherever the pinned package is
+acquired or checked (`FindVerifiedSourceAsync`):
+
+1. If the pinned alias is configured and offers the pinned package and version, that source is used, with the
+   identity check as always - a version it now delivers with other files is refused as republished, never handed to
+   another source.
+2. Otherwise - the alias is not configured, or it does not offer that version - and only if the pin recorded a files
+   identity (`PackageContentIdentity.IsFilesIdentity`; a pin from an older version, or a source that named none, has
+   nothing to verify against), the other configured sources are tried in Settings order. The candidates come from
+   `PackageVersionCache.GetVersionsAcrossSourcesAsync` (excluding the pinned alias), so no source is read twice and
+   a source that cannot be read is skipped; of those, only the ones that list the pinned name and version are
+   *acquired*, and the first whose reader's `ContentIdentity` compares `Same` with the pin's is accepted
+   (`-FallbackToIdenticalSource`). A candidate that delivers other files is disposed and passed over
+   (`-FallbackRejectsDifferentFiles`); one that fails to acquire is skipped. Acquisition happens only here, so
+   nothing is downloaded or fetched when the pinned source works.
+3. No verified match gives today's behavior: the red "Package source problem" chip, or the non-blocking launch warning,
+   with the explanation described under **SourceProblem**.
+
+A verified stand-in is never written into the pin (the launch never writes it, and the alias remains the preferred
+source for the next user): the card remembers its alias, `_supplyingSource`, and `PinnedSourceLabel`, the icon, the
+signature shield and the tooltip then describe the source that really supplies the files, with the tooltip's
+`SourceSubstitutionNote` saying why; no source problem is shown
+(`-ShowSupplyingSource`). When the pinned alias supplies the package again (the user added the source) the next check
+drops the stand-in. Credentials are unchanged: the background check uses a registry that never prompts, so a
+candidate that needs a sign-in is simply one that cannot be verified.
+
+*Upgrades across sources.* If the pinned alias is configured, the upgrade check is as before. If it is not (and a
+stand-in was verified), `RefreshUpgradeStatusAsync` asks `PackageVersionCache.IsNewerVersionAvailableAcrossSourcesAsync`
+
+- the newest version across the configured sources wins, a tie keeps Settings order - and `UpgradeCoreAsync` upgrades
+from the source that offers it, so the pin then records the alias of the source actually used, like every deliberate
+action (Select, Change, Upgrade) does (`-UpgradeAcrossSources`). Moved-tag detection stays tied to the pinned alias
+being a configured Git source.
 
 **CreateSourceRegistry**: Besides the credential context, the registry is given the Git options: the git executable
 (the setting, else the `--git-path` override, else `git`), the cache root (`GetGitCacheRoot`: a `git-cache`
@@ -610,8 +681,8 @@ presents as "sign-in needed" (`AgentControl-RepoCardViewModel-GitSourceOptions`,
 
 `Launch` catches `InvalidOperationException`/`ArgumentException` from
 `AgentToolLauncher.BuildProcessStartInfo`/`Launch` and raises `ErrorOccurred`.
-`EnsureAgentFilesSyncedBeforeLaunchAsync` catches `InvalidOperationException` (extraction failure, or an
-unconfigured pinned source via `UnknownSourceException`) and `DirectoryNotFoundException`
+`EnsureAgentFilesSyncedBeforeLaunchAsync` catches `InvalidOperationException` (extraction failure, an invalid source
+configuration or a failure of the pinned source) and `DirectoryNotFoundException`
 (unreachable source), raising `ErrorOccurred` as a non-blocking warning for each rather than
 propagating or blocking the launch. `Pull` catches `InvalidOperationException` from `GitClient.Pull`
 and reports it via `ErrorOccurred`. `RefreshGitStatus`/`RefreshBranchAndCommittedFiles` catch
@@ -660,13 +731,14 @@ background task, and a retired card raises nothing.
 - **RepoImageLocator** (`LauncherUI`) — finds and decodes the repo's picture, enforcing every rule about what
   may be shown.
 - **RepoPinStore** (`RepoConfig` subsystem) — reads/writes the repo's pin, including the recorded content
-  identity.
-- **PackageContentIdentity**, **IPackageContentReader.ContentIdentity** (`AgentPackageManagement`/`RepoSync`
-  subsystems) — the identity of the content a source delivered, and the comparison with the recorded one.
+  identity and source revision.
+- **PackageContentIdentity**, **IPackageContentReader.ContentIdentity** / **SourceRevision**
+  (`AgentPackageManagement`/`RepoSync` subsystems) — the identity of the files a source delivered, the revision a Git
+  tag pointed to, and the comparison with the recorded identity (also what verifies another source).
 - **PackageSourceRegistry**, **IPackageSourceProvider**, **PackageVersionCache**,
   **DiscoveredPackage**, **PackageSourceAccessException** (`AgentPackageManagement` subsystem) — source
-  resolution at the pin's alias, package discovery, acquisition, upgrade-availability checks, and the
-  failure cause that distinguishes "needs a sign-in" from other failures.
+  resolution at the pin's alias, package discovery (also across sources), acquisition, upgrade-availability checks, and
+  the failure cause that distinguishes "needs a sign-in" from other failures.
 - **PackageCredentialContext** (`PackageCredentials` subsystem) — the session credentials and sign-in prompt
   handed to server sources; `WithoutPrompt` for background work.
 - **PackageContentExtractor**, **PackageZipExtractor** (`RepoSync` subsystem) — extracts a

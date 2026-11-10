@@ -132,11 +132,11 @@ public sealed class GitSourceProviderIntegrationTests
 
     /// <summary>
     ///     Test that acquiring a tag delivers exactly the package layout: the managed folders and the
-    ///     root files, no <c>.git</c> folder, none of the repository's other files, and the identity
-    ///     of the commit; and that the cache folder is named by the commit.
+    ///     root files, no <c>.git</c> folder, none of the repository's other files, the commit as its
+    ///     source revision and the identity of the files; and that the cache folder is named by the commit.
     /// </summary>
     [Fact]
-    public async Task GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder()
+    public async Task GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitRevisionAndNoGitFolder()
     {
         // Arrange
         using var fixture = GitRepositoryFixture.CreateOrSkip();
@@ -159,7 +159,8 @@ public sealed class GitSourceProviderIntegrationTests
             files);
         Assert.Equal("marker-1", reader.ReadText(".github/agents/copilot.md"));
         Assert.Equal("# Release notes marker-1", reader.ReadText("release-notes.md"));
-        Assert.Equal("git-commit:" + commit, reader.ContentIdentity);
+        Assert.Equal(PackageContentIdentity.FromGitCommit(commit), reader.SourceRevision);
+        Assert.True(PackageContentIdentity.IsFilesIdentity(reader.ContentIdentity));
         Assert.Throws<InvalidOperationException>(() => reader.ReadText("README.md"));
 
         // Assert: the cache folder is named by the commit, holds no .git and leaves no temporary folder
@@ -237,7 +238,7 @@ public sealed class GitSourceProviderIntegrationTests
         // Assert: the new entry is acquired into its own folder, and the old commit's folder is kept
         using var reader = await provider.AcquireAsync(listedAfter, TestContext.Current.CancellationToken);
         Assert.Equal("republished", reader.ReadText(".github/agents/copilot.md"));
-        Assert.Equal("git-commit:" + second, reader.ContentIdentity);
+        Assert.Equal(PackageContentIdentity.FromGitCommit(second), reader.SourceRevision);
         Assert.True(Directory.Exists(Path.Combine(provider.RepositoryCacheFolder, first)));
         Assert.True(Directory.Exists(Path.Combine(provider.RepositoryCacheFolder, second)));
         Assert.Empty(Directory.EnumerateDirectories(provider.RepositoryCacheFolder, ".tmp-*"));

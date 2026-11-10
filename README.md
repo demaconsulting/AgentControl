@@ -52,17 +52,19 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   palette (or **Automatic**); the status bar keeps its fixed colors. Both are stored only in your own AgentControl
   settings - never in the repository or its `.agentcontrol.json` - so they are never shared through git
 - **Version-pinned agent packages**: every repo names an exact agent package name and
-  semantic version, the source it came from and a content identity (a SHA-256 of the package, or the commit of a
-  Git tag) in its `.agentcontrol.json` pin file — there
+  semantic version, the source it came from (a preferred source: teammates may use any source that delivers the
+  identical files) and a content identity (a SHA-256 over the delivered agent files, the same for a zip, a NuGet
+  package or a Git tag) in its `.agentcontrol.json` pin file — there
   is no floating "latest" mode, so upgrades are always a deliberate, visible action. A published version whose
-  content later changes (a republished zip or NuGet package, a Git tag moved to another commit) is noticed and
+  files later change (a republished zip or NuGet package, a Git tag moved to another commit) is noticed and
   never applied silently; you accept it on purpose with **Change package...** in the card's "..." menu
 - **Status chips**: each repo card shows an amber upgrade chip ("Upgrade to" and the version an upgrade
   would move to; click it to upgrade), an uncommitted-changes warning, a committed-agent-files
   warning (flags when the managed folders were committed to git; Select Package, Change package and
   Upgrade then offer to stop git tracking them before applying the package, and ask first), a
   missing-folder indicator when the path no longer exists on disk, a
-  package-source-problem indicator when the pinned source is not configured, a sign-in-needed indicator
+  package-source-problem indicator when the pinned package cannot be obtained (its source is not configured and no
+  other configured source delivers the identical files), a sign-in-needed indicator
   when the pinned server or Git repository needs a sign-in, and an amber **Tag moved** chip when the Git tag
   of the pinned version now names another commit. Separately,
   AgentControl proactively ensures the repo's `.gitignore` covers the four managed
@@ -148,11 +150,15 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   are, and once a server has authenticated, the NuGet client can answer sign-in challenges from other hosts
   that the index names with the same credential. AgentControl itself only ever offers a credential to the
   server's own address, but cannot stop the NuGet client from doing that.
-- A repo's pin names its source by alias, and a package is only ever taken from that source; a
-  missing source is an error, never a fallback to another source with a package of the same name.
+- A repo's pin names its preferred source by alias. A package is taken from that source, and when the alias is not
+  configured on your computer (a teammate may call a source differently, or use another kind of source) only from
+  another configured source that is verified to deliver the **identical files** - never merely because it has a
+  package of the same name; a pin with no recorded file fingerprint never falls back, and with no verified source the
+  card shows a package-source problem.
 - A version number is only a label: depending on the source, a published version can be overwritten with different
   content (a shared folder by anyone who can write to it, some servers when redeploy is allowed). AgentControl
-  records a fingerprint of each package it applies and does not replace a repo's agent files with a package of the
+  records a fingerprint of the agent files of each package it applies and does not replace a repo's agent files with a
+  package of the
   same version whose content changed (an Upgrade or the restore at launch stops with a message; choosing that
   version again with **Change package...** asks for confirmation). The fingerprint detects a changed package; it
   does not prove who published it. For a NuGet package it describes the copy cached on this computer, so a server-side
@@ -215,13 +221,15 @@ when you choose it; if reading a source fails, a **Retry** button appears beside
 
 A repo that already has a package shows **Change package...** in its "..." menu instead. It opens the same dialog
 preselected on the current source, package and version; choosing another version or package simply changes it, and
-choosing the **same** version whose content has changed (a moved Git tag, a republished zip or NuGet package) asks for
+choosing the **same** version whose files have changed (a republished zip or NuGet package, or a moved Git tag that
+delivers other files) asks for
 confirmation first (the default is **No**) before replacing the agent files and recording the new identity.
 
 ### Upgrading
 
 Once a repo is pinned, its card shows an amber upgrade chip (for example **Upgrade to 1.1.0**) whenever a
-newer version of the pinned package is available at the source the pin names; click the chip, or use
+newer version of the pinned package is available at the source the pin names (or, when that source is not configured
+on your computer, at the sources that deliver the repo's files); click the chip, or use
 **Upgrade to 1.1.0** in the card's "..." menu, to upgrade. Upgrading re-runs the
 same validate → delete → extract → pin sequence, offers the package's `AGENTS.md` template when it applies
 (below) and then shows the new package's `release-notes.md` (when present) in a non-modal window, in front.

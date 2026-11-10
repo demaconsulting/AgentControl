@@ -20,29 +20,40 @@ root.
 `Save`: `WriteIndented = true` so the on-disk file is human-readable, and
 `PropertyNameCaseInsensitive = true` so hand-edited camelCase names are accepted. Property
 names are written exactly as declared on `RepoPin` (PascalCase, as pin files always have been):
-`SchemaVersion`, `Source`, `PackageName`, `Version`, `AgentsMdTemplateDeclined`, `ContentIdentity` (omitted when
-null), followed by any unknown properties.
+`SchemaVersion`, `Source`, `PackageName`, `Version`, `AgentsMdTemplateDeclined`, `ContentIdentity` and
+`SourceRevision` (each omitted when null), followed by any unknown properties.
 
-**ContentIdentity forms**: the identity is opaque text to the store, which reads it and writes it back unchanged. Two
-forms exist side by side: `sha256:<hex>` (zip and NuGet sources: the SHA-256 of the delivered zip or `.nupkg` file; for
-a NuGet source it describes the copy cached on this machine) and `git-commit:<commit id>` (Git sources: the commit the
-tag pointed to). A pin without an identity (written before identities were recorded, or by a source that reports none)
-is valid; it adopts an identity the next time the user deliberately applies a package (Select Package, Upgrade or
-Change package), never at launch, which does not write the pin. Schema compatibility: pins of schema 1 and 2 are read
-and rewritten as the current schema (3) on the next save; a pin of a newer schema is refused by `Load` and never
-overwritten by `Save`, so a build that does not know a newer form can neither misread nor destroy it
+**ContentIdentity and SourceRevision**: both are opaque text to the store, which reads them and writes them back
+unchanged. `ContentIdentity` is `files-sha256:<hex>`, the identity of the agent files the package delivered, the
+same for the same files whatever kind of source delivered them (for a NuGet source it describes the copy cached on
+this machine); `SourceRevision` is `git-commit:<commit id>` for a Git source - the commit the tag pointed to - and
+absent for every other kind. A pin without an identity (written before identities were recorded, or by a source that
+reports none) is valid; it adopts an identity the next time the user deliberately applies a package (Select Package,
+Upgrade or Change package), never at launch, which does not write the pin. Schema compatibility: pins of schema 1 to
+3 are read (see *Load*) and rewritten as the current schema (4) on the next save; a pin of a newer schema is refused by
+`Load` and never overwritten by `Save`, so a build that does not know a newer form can neither misread nor destroy it
 (`AgentControl-RepoPinStore-RejectNewerSchema`, `AgentControl-System-IdentityAdoptedOnUpgrade`).
 
-**Git pins record the commit, not the tag**: for a Git source `ContentIdentity` is the `git-commit:` identity of the
+**Migration of schema 3**: a schema 3 pin recorded an identity of the *container* (`sha256:` of a zip or `.nupkg`
+file) or, for a Git source, `git-commit:`. Neither can be compared with an identity of the files, so `Load` drops
+it: the pin is returned with no `ContentIdentity` - which means "no recorded identity", never "changed" - and a
+`git-commit:` value it recorded is carried over as `SourceRevision`, so a moved tag stays detectable for a repo that
+was pinned before this change (`AgentControl-RepoPinStore-MigrateLegacyIdentity`). The files identity is recorded the
+next time the user selects, changes or upgrades the package; the launch-time restore never writes the pin.
+
+**Git pins record the commit, not the tag**: for a Git source `SourceRevision` is the `git-commit:` value of the
 commit the files came from, and no property records the tag. The tag of a pinned version is derived whenever it is
 needed, by applying the source's tag pattern as it is configured at that moment to the pinned `Version`. If the user
 edits the pattern of a source, a pinned version therefore maps to another tag; when that tag's commit differs from the
-recorded `git-commit:` identity, the content is reported as changed (the card's "Tag moved" warning) and the user
-accepts it with Change package, which records the new commit. The pin schema is unchanged by this
+recorded `SourceRevision`, the card reports the tag as moved (the card's "Tag moved" warning) and the user accepts it
+with Change package, which records the new commit. The pin schema is unchanged by this
 (`AgentControl-RepoCardViewModel-TagMovedFollowsTagPattern`).
 
 **FirstSchemaWithSource**: `const int` — `2`, the first schema version whose pins name their source; only an older
 pin (no `Source`) is read as a pin to the legacy `Default` source, whatever the current schema is.
+
+**FirstSchemaWithFilesIdentity**: `const int` — `4`, the first schema version whose `ContentIdentity` is computed
+from the delivered files; an older pin's identity is dropped by `Load`.
 
 **UnsupportedPinSchemaException** (same file): an `InvalidOperationException` subtype raised
 when a pin file declares a newer schema than the build supports; its message names the file and
@@ -62,11 +73,13 @@ tells the user to update AgentControl.
   mapped to anything: `InvalidOperationException` is thrown, so a malformed pin is never
   resolved against a source it did not name (`AgentControl-RepoPinStore-RejectUnnamedSource`).
   A pin of schema 1 or 2 has no `ContentIdentity` and is returned as such
-  (`AgentControl-RepoPinStore-LoadWithoutIdentity`); `ContentIdentity` is matched case-insensitively like every
-  property (`AgentControl-RepoPinStore-SaveContentIdentity`).
+  (`AgentControl-RepoPinStore-LoadWithoutIdentity`); a pin of schema 3 is returned without the identity it
+  recorded, with a `git-commit:` identity carried over as `SourceRevision`
+  (`AgentControl-RepoPinStore-MigrateLegacyIdentity`); `ContentIdentity` and `SourceRevision` are matched
+  case-insensitively like every property (`AgentControl-RepoPinStore-SaveContentIdentity`).
   A file declaring a schema version newer than
-  `RepoPin.CurrentSchemaVersion` (3) is not interpreted: `UnsupportedPinSchemaException` is thrown
-  (`AgentControl-RepoPinStore-RejectNewerSchema`, `AgentControl-RepoPinStore-SchemaVersion3`). The declared
+  `RepoPin.CurrentSchemaVersion` (4) is not interpreted: `UnsupportedPinSchemaException` is thrown
+  (`AgentControl-RepoPinStore-RejectNewerSchema`, `AgentControl-RepoPinStore-SchemaVersion4`). The declared
   `SchemaVersion` is read first, from the raw JSON (`ProbeSchemaVersion`, a `JsonDocument` that looks at that one
   property, matched without regard to letter case and accepted as a number or as text holding a whole number; one too
   large for an `int` counts as newer), before the typed `RepoPin` is deserialized: a newer file may give a property
@@ -80,9 +93,10 @@ tells the user to update AgentControl.
 - *Returns*: `void`.
 - *Preconditions*: `repoRoot` must already exist.
 - *Postconditions*: The pin file reflects `pin` exactly (`AgentControl-RepoPinStore-Save`), with
-  `SchemaVersion` set to the current version (3) and the source alias written
-  (`AgentControl-RepoPinStore-SourceAlias`, `AgentControl-RepoPinStore-SchemaVersion3`); the content identity is
-  written when the pin has one and omitted otherwise (`AgentControl-RepoPinStore-SaveContentIdentity`). Before
+  `SchemaVersion` set to the current version (4) and the source alias written
+  (`AgentControl-RepoPinStore-SourceAlias`, `AgentControl-RepoPinStore-SchemaVersion4`); the content identity and the
+  source revision are written when the pin has them and omitted otherwise
+  (`AgentControl-RepoPinStore-SaveContentIdentity`). Before
   writing, any existing file is inspected: a
   newer schema - found by the same probe, before any typed reading - aborts the save with
   `UnsupportedPinSchemaException` and leaves the file untouched, whatever the types of its other properties
@@ -118,7 +132,7 @@ propagate.
 #### Callers
 
 - **RepoCardViewModel** — calls `Load` during `RefreshPin`, before applying a package and when restoring missing
-  agent files before launch (to compare the recorded content identity), and `Save` inside
-  `ApplyPackageAndShowReleaseNotes` after a successful extraction - never from the restore at launch, which must not
-  rewrite a file under version control.
+  agent files before launch (to compare the recorded content identity and to verify another source against it), and
+  `Save` inside `ApplyPackageAndShowReleaseNotes` after a successful extraction - never from the restore at launch,
+  which must not rewrite a file under version control.
 - **MainWindowViewModel** — calls `Load` when a repo is added, to cache its pin.

@@ -121,6 +121,46 @@ internal static class PackageContentExtractor
     internal static IReadOnlyList<string> LayoutPaths { get; } = [.. LayoutFolders, .. LayoutRootFiles];
 
     /// <summary>
+    ///     A fixed, purely lexical stand-in for a repo root, used to apply the extraction's own
+    ///     containment and managed-folder rules to a package path without any real repo (see
+    ///     <see cref="GetManagedPackagePath"/>). Nothing is ever read from or written to it.
+    /// </summary>
+    private static readonly string ProbeRoot =
+        Path.GetFullPath(Path.DirectorySeparatorChar + "agentcontrol-package-root");
+
+    /// <summary>
+    ///     Applies the extraction's membership rule to one package path: says whether
+    ///     <see cref="Extract"/> would write the file into one of the four managed folders and, if
+    ///     so, under what canonical package-relative path.
+    /// </summary>
+    /// <param name="relativePath">A path as listed by <see cref="IPackageContentReader.ListFiles"/>
+    ///     (<c>/</c> separators, relative to the package content root).</param>
+    /// <returns>The canonical path - <c>..</c> and <c>.</c> segments resolved, <c>/</c> separators -
+    ///     of a file that falls within a managed folder; <see langword="null"/> for a file that is
+    ///     not extracted (the root-level <c>release-notes.md</c> and <c>AGENTS.md</c>, anything
+    ///     outside the four folders).</returns>
+    /// <remarks>
+    ///     Exists so that the content identity (see <c>PackageContentIdentity</c>) covers exactly the
+    ///     files <see cref="Extract"/> writes, by running the very same check rather than a copy of
+    ///     it: a rule that existed twice could drift, and an identity over a different set of files
+    ///     than the one delivered would vouch for the wrong thing. Performs no I/O.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="relativePath"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the path is invalid, including a
+    ///     path that resolves outside the package root - the same files <see cref="Extract"/>
+    ///     rejects.</exception>
+    internal static string? GetManagedPackagePath(string relativePath)
+    {
+        ArgumentNullException.ThrowIfNull(relativePath);
+
+        var destination = ResolveManagedDestination(relativePath, ProbeRoot);
+        return destination is null
+            ? null
+            : Path.GetRelativePath(ProbeRoot, destination).Replace(Path.DirectorySeparatorChar, '/');
+    }
+
+    /// <summary>
     ///     Validates every file path in the package, deletes the four managed folders under
     ///     <paramref name="repoRoot"/> if present, and copies the same four folders from the
     ///     package into the repo.

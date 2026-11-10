@@ -21,10 +21,11 @@ N/A - standard test environment; no external services or hardware required.
 - A repo with no pin file reports no pin rather than throwing or returning a default value.
 - A declined AGENTS.md template offer survives a save-then-load round trip, and a legacy pin
   file written before that field existed loads with it defaulted to false.
-- The content identity of the applied package, in either of its forms (`sha256:` for a zip or NuGet package,
-  `git-commit:` for a Git tag), survives from one session to the next as recorded, is never invented for a pin
+- The content identity of the applied package (`files-sha256:`, the same for every kind of source) and, for a Git tag,
+  the source revision (`git-commit:`) survive from one session to the next as recorded, are never invented for a pin
   that has none, and a pin written before identities existed loads with none and adopts the identity of the next
-  package applied, keeping its other properties.
+  package applied, keeping its other properties. A schema 3 pin's identity of a container is dropped (never compared),
+  and its Git commit becomes the source revision.
 - A pin file of a newer schema version than the application writes is never interpreted or overwritten, loading it and
   saving over it both fail with advice to update, and the file is left byte for byte unchanged.
 
@@ -51,7 +52,7 @@ source alias survives a save-then-load round trip; a pin written before sources 
 a pin to `Default` (a pin of schema 2 or later that names no source is rejected rather than mapped);
 unknown properties survive a rewrite; and a pin from a newer schema is
 rejected without being interpreted or overwritten. These are verified by the `RepoPinStore` unit
-tests, with `RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource`,
+tests, with `RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion4AndRoundTripsSource`,
 `RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource`,
 `RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault`,
 `RepoPinStore_Save_UnknownProperties_ArePreserved`, and
@@ -61,19 +62,24 @@ cited directly at the subsystem level, covering `AgentControl-RepoConfig-SourceP
 `AgentControl-RepoPinStore-RejectUnnamedSource`,
 `AgentControl-RepoPinStore-PreserveUnknownFields`, `AgentControl-RepoPinStore-RejectNewerSchema`).
 
-**RepoConfig_ContentIdentityPin_SurvivesSessionsIsNeverInventedAndIsAdoptedOnTheNextApply**: Through the subsystem's
+**RepoConfig_ContentIdentityPin_SurvivesSessionsMigratesOlderPinsAndIsAdoptedOnTheNextApply**: Through the subsystem's
 public surface (`RepoPinStore` with `RepoPin`) against real repo folders, one session saves a pin that records a
-`sha256:` identity (a zip or NuGet package), one that records a `git-commit:` identity (a Git tag) and one that records
-none, and a later session loads them: each identity comes back as recorded, the pin without one has none and no
-`ContentIdentity` property is in its file; a pin file as an earlier version wrote it (schema version 2, with the other
-known properties) loads with no identity, then adopts the identity of the next package applied - the file is rewritten
+`files-sha256:` identity with a `git-commit:` source revision and one that records none, and a later session loads
+them: each value comes back as recorded, the pin without them has none and no `ContentIdentity` property is in its
+file. Pin files as earlier versions wrote them - schema 2 with the other known properties, schema 3 with the `sha256:`
+identity of a container and schema 3 with a `git-commit:` identity - load with no content identity (the container
+identity is dropped, never carried as a files identity) and the Git commit as the source revision where there was
+one; the schema 2 and the schema 3 pin then adopt the identity of the next package applied - the file is rewritten
 in the current schema version and the source, version and declined-template flag are kept. This scenario is tested by
-`RepoConfig_ContentIdentityPin_SurvivesSessionsIsNeverInventedAndIsAdoptedOnTheNextApply` in
+`RepoConfig_ContentIdentityPin_SurvivesSessionsMigratesOlderPinsAndIsAdoptedOnTheNextApply` in
 `RepoConfigSubsystemTests.cs`, covering `AgentControl-RepoConfig-ContentIdentityPin` (child:
-`AgentControl-RepoPinStore-SaveContentIdentity`) and `AgentControl-RepoConfig-LegacyPinWithoutIdentity` (child:
-`AgentControl-RepoPinStore-LoadWithoutIdentity`). The unit-level tests of the same rules are
-`RepoPinStore_SaveThenLoad_ContentIdentity_RoundTripsAndIsOmittedWhenAbsent` and
-`RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema3OnSave`.
+`AgentControl-RepoPinStore-SaveContentIdentity`), `AgentControl-RepoConfig-LegacyPinWithoutIdentity` (child:
+`AgentControl-RepoPinStore-LoadWithoutIdentity`) and `AgentControl-RepoConfig-LegacyIdentityMigration` (child:
+`AgentControl-RepoPinStore-MigrateLegacyIdentity`). The unit-level tests of the same rules are
+`RepoPinStore_SaveThenLoad_ContentIdentityAndSourceRevision_RoundTripAndAreOmittedWhenAbsent`,
+`RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema4OnSave`,
+`RepoPinStore_Load_Schema3PinWithContainerIdentity_DropsIdentityAndRewritesAsSchema4` and
+`RepoPinStore_Load_Schema3PinWithGitCommitIdentity_CarriesItAsSourceRevision`.
 
 **RepoConfig_PinSchemaVersion_NewerSchemaIsRefusedWithAdviceAndNeverOverwritten**: A pin file written by a newer
 version of the application (whose identity property is an object, not text) is never interpreted or overwritten by this
@@ -82,6 +88,6 @@ the application, saving a pin over it throws the same and leaves the file byte f
 beside it; once the user replaces the file by a pin of the schema this version writes, it is read normally. The schema
 version this version writes is the current one, so an older version refuses its files in the same way. This scenario is
 tested by `RepoConfig_NewerSchemaPin_IsRefusedWithAdviceAndNeverOverwritten` in `RepoConfigSubsystemTests.cs`, covering
-`AgentControl-RepoConfig-PinSchemaVersion` (child: `AgentControl-RepoPinStore-SchemaVersion3`). The unit-level tests
+`AgentControl-RepoConfig-PinSchemaVersion` (child: `AgentControl-RepoPinStore-SchemaVersion4`). The unit-level tests
 (including a newer-schema file whose known property has another type, and the schema probe) are those of
 `AgentControl-RepoPinStore-RejectNewerSchema`.

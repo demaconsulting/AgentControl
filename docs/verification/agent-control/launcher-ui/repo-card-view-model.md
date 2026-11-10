@@ -50,12 +50,23 @@ invocations are not parallelized with other tests using real process launches).
   package genuinely has a template to offer, never re-fires after a decline is persisted, and
   never fires when the ensure-synced-before-launch check found the managed folders already
   present.
-- Every package-source operation is bound to the source named in the pin, with a pin lacking a source
-  read as a pin to Default; the pin records the source alias and keeps its other fields; a pin naming
-  an unconfigured source gives an error state and no upgrade, and nothing is extracted from any other
-  source; a pin from a newer schema stops an apply before the repo is touched.
-- The pin records the content identity of the package that was applied; an Upgrade, or the restore of missing agent
-  files before launch, that finds the pinned version delivering content that differs from the recorded identity applies
+- Every package-source operation is bound to the source named in the pin, the preferred source, with a pin lacking a
+  source read as a pin to Default; the pin records the source alias of the source actually used and keeps its other
+  fields; a pin naming an unconfigured source gives an error state and no upgrade unless another configured source is
+  verified to deliver the identical files (see the next items), and nothing is extracted from a source whose files are
+  not verified; a pin from a newer schema stops an apply before the repo is touched.
+- When the pinned source is not configured or does not offer the pinned version, the other configured sources are
+  tried in Settings order and the first that delivers files with the identical files identity supplies the package, for
+  the card and for the restore at launch, without the pin being written; the chip then names that source and its
+  tooltip says why, and no source problem is shown; a source with other files is never accepted, a pin with no files
+  identity (also one migrated from schema 3) never falls back, and a pinned source that is configured and offers the
+  version but delivers other files is refused as republished, never replaced; the problem text says that the pinned
+  source is not configured and that no other configured source delivers the identical files. This works across kinds
+  of source (a pin made from NuGet served by a zip source, a pin made from a zip served by a Git source). The upgrade
+  check of such a pin considers the configured sources that offer the package, the newest version wins and a tie
+  keeps Settings order, and an Upgrade or Change package records the alias of the source it used.
+- The pin records the files identity of the package that was applied; an Upgrade, or the restore of missing agent
+  files before launch, that finds the pinned version delivering files that differ from the recorded identity applies
   nothing and leaves the pin unchanged (and says that Change package... accepts the change), Change package... or
   Select Package of that version asks first and applies it, recording the new
   identity, only after the user confirmed, a pin or a source without an identity is never treated as changed, and the
@@ -370,7 +381,8 @@ to its owner. This scenario is tested by
 **RepoCardViewModel_SourceAwareness_BindsEveryOperationToThePinsSource**: Applying a package from a
 legacy single path records source `Default` in a current-schema pin; selecting from the second of
 two sources offering the same package and version records that alias and extracts that source's
-content; a pin to a source that is not configured sets the card's source problem (naming the
+content; a pin to a source that is not configured (and that has no files identity to verify another source against)
+sets the card's source problem (naming the
 alias), offers no upgrade and no latest version even though another source offers a higher
 version; applying a package for an unconfigured alias raises an error naming it and leaves the
 repo and pin unchanged; the ensure-synced repair for such a pin fails without extracting; with the
@@ -381,6 +393,7 @@ applying over a pin from a newer schema raises an error and leaves the pin and r
 This scenario is tested by
 `RepoCardViewModel_ApplySelectedPackage_LegacySinglePath_PinRecordsDefaultSourceAlias`,
 `RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent`,
+`RepoCardViewModel_ApplySelectedPackage_FromOtherSourceWithSameFiles_RecordsThatSourceAndSameIdentity`,
 `RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
 `RepoCardViewModel_ApplySelectedPackage_UnconfiguredSourceAlias_RaisesErrorAndChangesNothing`,
 `RepoCardViewModel_EnsureAgentFilesSynced_PinNamesUnconfiguredSource_ReturnsFalseWithoutExtracting`,
@@ -548,20 +561,74 @@ source is cancelled by retiring: it ends, the card is idle, nothing was reported
 retired card read no source and offer no upgrade (`AgentControl-RepoCardViewModel-RetiredCardChecksNothing`, tested by
 `RepoCardViewModel_Retire_LaterRefresh_DoesNothing`).
 
+**RepoCardViewModel_PortablePin_FallsBackToASourceWithTheIdenticalFilesOnly** (in `RepoCardPortablePinTests.cs`, with
+real zip sources, a real NuGet folder feed and, for one test, a real local Git repository, and repos that were really
+applied from a zip source so that the pin is what the application writes): A pin whose alias is not configured here,
+while another configured source delivers the identical files repacked with other release notes, shows no source
+problem, names the source that supplies the files on the chip (the pinned alias is not shown) with the tooltip "Pinned
+source '...' is not configured; the identical files come from '...'", and leaves the pin as it was; a pin whose alias
+is configured but does not offer the version gets the same with the tooltip saying that the source does not offer the
+package and version; when several sources deliver the identical files the first in Settings order supplies them and a
+source with that name and version but other files, before it, is passed over; configuring the pinned alias again
+drops the substitute and the chip shows the pinned source with no substitution note. The restore before launch of a
+fresh clone extracts the pinned files from the other source (for an unconfigured alias, and for a configured alias
+that no longer offers the version) and does not write the pin; a pin made from a NuGet folder source is supplied by a
+zip source of the same files, and a pin made from a zip is restored at launch from a Git source of the same files
+(real repository, no source revision in the pin); the restore does not accept a source whose package has other files
+(nothing is extracted, the warning says that the pinned source is not configured and no other configured source
+delivers the identical files); the card of such a pin shows the source problem with the same explanation; a pin with no
+files identity (also one that is a schema 3 pin with the identity of a container) never falls back, even to a source
+with that package name and version - on the card the source problem is shown, at launch nothing is extracted - and a
+schema 3 pin's old identity is never a reason to refuse the restore; and a pinned source that is configured and offers
+the version but now delivers other files is refused as republished although another source has the original files.
+This scenario is tested by
+`RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasIdenticalFiles_NamesSupplierWithoutProblem`,
+`RepoCardViewModel_Refresh_PinnedAliasDoesNotOfferVersionAndOtherSourceHasIdenticalFiles_NamesSupplier`,
+`RepoCardViewModel_Refresh_SeveralSources_UsesFirstSourceWithIdenticalFilesInSettingsOrder`,
+`RepoCardViewModel_Refresh_PinnedAliasConfigured_ShowsPinnedSourceWithoutSubstitution`,
+`RepoCardViewModel_Refresh_PinnedAliasConfiguredAgain_DropsSubstitute`,
+`RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasDifferentFiles_ShowsSourceProblem`,
+`RepoCardViewModel_Refresh_PinWithoutFilesIdentityAndAliasNotConfigured_NeverFallsBack`,
+`RepoCardViewModel_Refresh_PinMadeFromNuGetAndTeammateHasZipSource_IsSuppliedByZip`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAliasNotConfigured_RestoresFromIdenticalSourceWithoutWritingPin`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAliasLacksVersion_RestoresFromIdenticalSource`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinMadeFromZipAndTeammateHasGitSource_RestoresFromGit`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_OnlyOtherFilesAvailable_RefusesWithExplanation`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutFilesIdentity_NeverFallsBack`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_Schema3PinWithContainerIdentity_SyncsWithoutRefusing` and
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedSourceRepublished_IsRefusedNotServedByAnotherSource`,
+covering `AgentControl-RepoCardViewModel-FallbackToIdenticalSource`, `-FallbackRejectsDifferentFiles`,
+`-FallbackNeverWithoutIdentity`, `-ShowSupplyingSource` and `-UnresolvedPinExplained` (each prefixed
+`AgentControl-RepoCardViewModel`).
+
+**RepoCardViewModel_PortablePin_UpgradeChecksAcrossSourcesAndRecordsTheSourceUsed**: For a pin whose alias is not
+configured, the upgrade check considers the configured sources that offer the package and the newest version wins;
+Upgrade applies it from the source that offers it and records that source's alias and the identity of its files; when
+two sources offer the same newest version the first in Settings order is used and recorded; and Change package from
+another configured source records the alias of the source that was used with the identity of its files, which are the
+same files as before. This scenario is tested by
+`RepoCardViewModel_UpgradeCommand_PinnedAliasNotConfigured_UsesNewestVersionAcrossSourcesAndRecordsItsAlias`,
+`RepoCardViewModel_UpgradeCommand_PinnedAliasNotConfiguredAndTie_KeepsSettingsOrder` and
+`RepoCardViewModel_ApplySelectedPackage_FromOtherSourceWithSameFiles_RecordsThatSourceAndSameIdentity`, covering
+`AgentControl-RepoCardViewModel-UpgradeAcrossSources`. The credentials rules are unchanged and not re-tested here: the
+background check never prompts, so a source that needs a sign-in simply cannot be verified there.
+
 **RepoCardViewModel_ContentIdentity_RecordedRefusedConfirmedAndAdopted**: Applying a package (Select Package, or
-Upgrade to a newer version) writes the SHA-256 of the zip, computed independently by the test, into the pin. Using
-real zip sources, after the 1.0.0 zip is republished with other content: an Upgrade that finds it as the latest
+Upgrade to a newer version) writes the files identity of the package's agent files, computed independently by the test,
+into the pin (with the source revision for a Git source). Using
+real zip sources, after the 1.0.0 zip is republished with other file content: an Upgrade that finds it as the latest
 version raises an error saying the files "now contain different files" and that nothing was changed, extracts nothing
 and leaves the pin file byte for byte unchanged; the restore of missing managed folders before launch returns
 `false` with an error saying the agent files were not synced, creates no folder and leaves the pin file byte for byte
 unchanged; selecting the same version raises `ContentChangeConfirmationRequested` (carrying the selection and a
 question naming the package), raises no error and changes nothing, and selecting it with the user's confirmation
 applies the changed content and records its new identity; selecting it with nobody subscribed to the confirmation is
-refused with the same error. A pin written without an identity applies silently and has an identity recorded; an
+refused with the same error. A pin written without an identity applies silently and has an identity recorded; a schema 3
+pin that recorded the identity of a container (read as having none) is restored at launch without any refusal; an
 Upgrade to a newer version records the new version's identity without a warning; the restore at launch of such a pin,
 and of an unchanged package, extracts and leaves the pin file untouched; a source whose reader reports no identity
 is applied without any warning and the pin then records none. This scenario is tested by
-`RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin`,
+`RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsFilesIdentityInPin`,
 `RepoCardViewModel_UpgradeCommand_NewerVersion_RecordsNewIdentityWithoutWarning`,
 `RepoCardViewModel_UpgradeCommand_SameVersionRepublished_RefusesWithoutChangingRepoOrPin`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SameVersionRepublished_RefusesWithoutExtractingOrWritingPin`,
@@ -569,6 +636,7 @@ is applied without any warning and the pin then records none. This scenario is t
 `RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedAndAccepted_AppliesAndRecordsNewIdentity`,
 `RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedWithoutSubscriber_IsRefused`,
 `RepoCardViewModel_ApplySelectedPackage_PinWithoutIdentity_AdoptsIdentityWithoutWarning`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_Schema3PinWithContainerIdentity_SyncsWithoutRefusing`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutIdentity_SyncsSilentlyAndNeverWritesPin`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UnchangedContent_SyncsAndNeverWritesPin`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AgentsMdOfferDeclined_NeverWritesPin` (a package carrying an
@@ -629,11 +697,12 @@ it is open, are shown with the real window in the `LauncherUI` subsystem verific
 and the source's alias beside the package and version; its chip tooltip reads "Agent files: {package} {version} from
 source '{alias}' (git repository), tag {tag} @ {first seven characters of the commit}."
 where the tag is the source's tag
-pattern applied to the pinned version and the commit is the one the pin recorded; with no recorded commit (a pin made
+pattern applied to the pinned version and the commit is the source revision the pin recorded; with no recorded commit
+(a pin made
 before commits were recorded) it names the tag only; and a pin to a zip source names neither. This scenario is tested by
 `RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias`,
 `RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit`,
-`RepoCardViewModel_PackageChipTooltip_GitPinWithoutIdentity_NamesTagOnly` and
+`RepoCardViewModel_PackageChipTooltip_GitPinWithoutRevision_NamesTagOnly` and
 `RepoCardViewModel_PackageChipTooltip_ZipPin_HasNoTagOrCommit`, covering
 `AgentControl-RepoCardViewModel-GitSourceAwareness` (icon and alias)
 and `AgentControl-RepoCardViewModel-GitSourceTooltip`
@@ -641,30 +710,35 @@ and `AgentControl-RepoCardViewModel-GitSourceTooltip`
 tests use a `FakePackageSourceProvider` standing in for the Git
 source and a pin file written for the test, so no Git repository or network is involved.
 
-**RepoCardViewModel_TagMovedWarning_ShownNeverAppliedAndClearedWhenAccepted**: With a Git pin that recorded a commit,
-a listing that shows the pinned version at another commit makes the card show the "Tag moved" status - outranking an
-available upgrade, hiding the up-to-date cue, with a tooltip that names the tag, "abcdef0 -> 1234567" and "Change
+**RepoCardViewModel_TagMovedWarning_ShownNeverAppliedAndClearedWhenAccepted**: With a Git pin that recorded a commit
+as its source revision, a listing that shows the pinned version at another commit makes the card show the "Tag moved"
+status - outranking an available upgrade, hiding the up-to-date cue, with a tooltip that names the tag,
+"abcdef0 -> 1234567" and "Change
 package..." - and the check acquires nothing, extracts nothing and leaves the pin byte for byte unchanged; a tag that
-still points to the recorded commit, a pin that recorded no commit, a pin whose identity is not a well-formed commit
-identity (a `sha256:` digest, a malformed or short `git-commit:` value or any other text, in a theory) and a source that
-is not a Git source (even if its listing carries a revision) are never reported as moved; and once the pin records the
+still points to the recorded commit, a pin that recorded no commit, a pin whose source revision is not a well-formed
+commit (a `sha256:` digest, a malformed or short `git-commit:` value or any other text, in a theory) and a source that
+is not a Git source (even if its listing carries a revision) are never reported as moved; a schema 3 Git pin, whose
+`git-commit:` identity is read as its source revision, still has its moved tag detected; and once the pin records the
 new commit (the user accepted it) a refresh clears the warning and the card is up to date again. Choosing the pinned
 version again when the tag now
-delivers another commit asks for confirmation and changes nothing (no error, no extraction, the pin as it was); with the
-confirmation it extracts the new content and records the new commit (the short commit and the warning follow); and with
+delivers another commit - and other files - asks for confirmation and changes nothing (no error, no extraction, the pin
+as it was); with the
+confirmation it extracts the new content and records the new commit as the source revision (the short commit and the
+warning follow); and with
 nobody to ask the refusal advises Change package... and does not tell the user to edit or delete the pin file. This
 scenario is tested by `RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip`,
 `RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing`,
 `RepoCardViewModel_RefreshUpgradeStatus_SameCommit_IsNotMoved`,
 `RepoCardViewModel_RefreshUpgradeStatus_ZipSourceWithRevision_IsNotMoved`,
-`RepoCardViewModel_RefreshUpgradeStatus_PinWithoutIdentity_IsNotMoved`,
-`RepoCardViewModel_RefreshUpgradeStatus_GitSourceWithNonCommitIdentity_IsNotMoved`,
+`RepoCardViewModel_RefreshUpgradeStatus_PinWithoutRevision_IsNotMoved`,
+`RepoCardViewModel_RefreshUpgradeStatus_GitSourceWithNonCommitRevision_IsNotMoved`,
+`RepoCardViewModel_RefreshUpgradeStatus_Schema3GitPin_DetectsMovedTagFromMigratedCommit`,
 `RepoCardViewModel_RefreshUpgradeStatus_PinUpdatedAfterTagMoved_ClearsMovedTag`,
 `RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommit_AsksAndChangesNothing`,
 `RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommitAccepted_AppliesAndRecordsCommit` and
 `RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommitWithoutSubscriber_AdvisesChangePackage` (all in
 `RepoCardGitAwarenessTests.cs`), covering `AgentControl-RepoCardViewModel-TagMovedWarning`, `-TagMovedAppliesNothing`,
-`-TagMovedNeedsEvidence` and `-TagMovedClearedByNewPin` and, for the apply tests,
+`-TagMovedNeedsEvidence`, `-TagMovedWarning` and `-TagMovedClearedByNewPin` and, for the apply tests,
 `AgentControl-RepoCardViewModel-ConfirmChangedContent`, `-ApplyConfirmedContent` and `-RefuseChangeWithoutAsking`. That
 a click on the chip opens Change package... is the chip's binding to the same command and is exercised only end to end.
 

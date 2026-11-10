@@ -260,6 +260,7 @@ reviews:
       - "test/**/LauncherUI/RepoCardContentIdentityTests.cs"
       - "test/**/LauncherUI/RepoCardGitSourceTests.cs"
       - "test/**/LauncherUI/RepoCardGitAwarenessTests.cs"
+      - "test/**/LauncherUI/RepoCardPortablePinTests.cs"
       - "test/**/LauncherUI/RepoCardCommittedFilesTests.cs"
       - "test/**/LauncherUI/RepoCardColorTests.cs"
       - "test/**/LauncherUI/RepoCardImageTests.cs"

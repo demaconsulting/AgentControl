@@ -18,9 +18,84 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace DemaConsulting.AgentControl.UiTests;
+
+/// <summary>
+///     Computes the content identity of agent files the way the application documents it, independently
+///     of the application's own code, so end-to-end tests can state what a pin must record.
+/// </summary>
+/// <remarks>
+///     The identity is <c>files-sha256:</c> followed by the SHA-256 of a byte stream built from the agent
+///     files (those in the four managed folders under <c>.github</c>) in ordinal order of their
+///     <c>/</c>-separated package-relative path: for each file the UTF-8 path, a zero byte, the file length
+///     as eight little-endian bytes, then the file's bytes.
+/// </remarks>
+internal static class TestFilesIdentity
+{
+    /// <summary>
+    ///     The package-relative folders whose files take part in the identity.
+    /// </summary>
+    private static readonly string[] ManagedFolders =
+        [".github/agents/", ".github/standards/", ".github/templates/", ".github/skills/"];
+
+    /// <summary>
+    ///     Computes the identity of the agent files among the given files.
+    /// </summary>
+    /// <param name="files">Package-relative path and content of files; files outside the managed
+    ///     folders are ignored.</param>
+    /// <returns>The identity text.</returns>
+    public static string Compute(IEnumerable<(string Path, byte[] Content)> files)
+    {
+        using var stream = new MemoryStream();
+        foreach (var (path, content) in files
+                     .Where(file => ManagedFolders.Any(folder => file.Path.StartsWith(folder, StringComparison.Ordinal)))
+                     .OrderBy(file => file.Path, StringComparer.Ordinal))
+        {
+            stream.Write(Encoding.UTF8.GetBytes(path));
+            stream.WriteByte(0);
+            stream.Write(BitConverter.GetBytes((long)content.Length));
+            stream.Write(content);
+        }
+
+        return "files-sha256:" + Convert.ToHexStringLower(SHA256.HashData(stream.ToArray()));
+    }
+
+    /// <summary>
+    ///     Computes the identity of agent files given as text.
+    /// </summary>
+    /// <param name="files">Package-relative path and UTF-8 text (no byte-order mark) of each file.</param>
+    /// <returns>The identity text.</returns>
+    public static string OfText(params (string Path, string Text)[] files) =>
+        Compute(files.Select(file => (file.Path, Encoding.UTF8.GetBytes(file.Text))));
+
+    /// <summary>
+    ///     Computes the identity of the agent files inside a zip or <c>.nupkg</c> file.
+    /// </summary>
+    /// <param name="archivePath">The archive.</param>
+    /// <param name="rootPrefix">The folder of the archive that is the package content root (empty for
+    ///     a zip package, <c>content/</c> for a NuGet package).</param>
+    /// <returns>The identity text.</returns>
+    public static string OfArchive(string archivePath, string rootPrefix = "")
+    {
+        using var archive = ZipFile.OpenRead(archivePath);
+        var files = new List<(string Path, byte[] Content)>();
+        foreach (var entry in archive.Entries.Where(
+                     entry => entry.Name.Length > 0 && entry.FullName.StartsWith(rootPrefix, StringComparison.Ordinal)))
+        {
+            using var stream = entry.Open();
+            using var buffer = new MemoryStream();
+            stream.CopyTo(buffer);
+            files.Add((entry.FullName[rootPrefix.Length..], buffer.ToArray()));
+        }
+
+        return Compute(files);
+    }
+}
 
 /// <summary>
 ///     Writes a repo's <c>.agentcontrol.json</c> pin file directly, without taking a compile-time
@@ -43,17 +118,33 @@ internal static class TestRepoPinWriter
     /// <param name="sourceAlias">The alias of the source the package came from, or
     ///     <see langword="null"/> to write a pin file in the older format that names no source.</param>
     /// <param name="contentIdentity">The content identity to record, or <see langword="null"/> for a
-    ///     pin that records none; a pin that records one is written as schema version 3 and, if
+    ///     pin that records none; a pin that records one is written as schema version 4 and, if
     ///     <paramref name="sourceAlias"/> is <see langword="null"/>, names the <c>Default</c> source.</param>
+    /// <param name="sourceRevision">The source revision (for a Git source, <c>git-commit:...</c>) to
+    ///     record, or <see langword="null"/> to record none; handled like
+    ///     <paramref name="contentIdentity"/>.</param>
     public static void Write(
-        string repoPath, string packageName, string version, string? sourceAlias = null, string? contentIdentity = null)
+        string repoPath,
+        string packageName,
+        string version,
+        string? sourceAlias = null,
+        string? contentIdentity = null,
+        string? sourceRevision = null)
     {
         var pin = new Dictionary<string, object?> { ["PackageName"] = packageName, ["Version"] = version };
-        if (contentIdentity is not null)
+        if (contentIdentity is not null || sourceRevision is not null)
         {
-            pin["SchemaVersion"] = 3;
+            pin["SchemaVersion"] = 4;
             pin["Source"] = sourceAlias ?? "Default";
-            pin["ContentIdentity"] = contentIdentity;
+            if (contentIdentity is not null)
+            {
+                pin["ContentIdentity"] = contentIdentity;
+            }
+
+            if (sourceRevision is not null)
+            {
+                pin["SourceRevision"] = sourceRevision;
+            }
         }
         else if (sourceAlias is not null)
         {

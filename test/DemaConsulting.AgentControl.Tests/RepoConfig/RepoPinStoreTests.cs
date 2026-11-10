@@ -219,11 +219,11 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
-    ///     Test that saving writes schema version 3 and the source alias, and that a pin
+    ///     Test that saving writes schema version 4 and the source alias, and that a pin
     ///     round-trips with its source.
     /// </summary>
     [Fact]
-    public void RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource()
+    public void RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion4AndRoundTripsSource()
     {
         // Arrange
         var repoRoot = CreateTempDirectory();
@@ -234,11 +234,11 @@ public class RepoPinStoreTests
             var loaded = RepoPinStore.Load(repoRoot);
             var json = File.ReadAllText(Path.Combine(repoRoot, ".agentcontrol.json"));
 
-            // Assert: the file declares schema 3 and the source, and the pin round-trips
-            Assert.Contains("\"SchemaVersion\": 3", json, StringComparison.Ordinal);
+            // Assert: the file declares schema 4 and the source, and the pin round-trips
+            Assert.Contains("\"SchemaVersion\": 4", json, StringComparison.Ordinal);
             Assert.Contains("\"Source\": \"Team Feed\"", json, StringComparison.Ordinal);
             Assert.NotNull(loaded);
-            Assert.Equal(3, loaded.SchemaVersion);
+            Assert.Equal(4, loaded.SchemaVersion);
             Assert.Equal("Team Feed", loaded.Source);
             Assert.Equal("1.2.3.4+b5", loaded.Version);
         }
@@ -249,23 +249,31 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
-    ///     Test that a recorded content identity round-trips through save and load, and is not
-    ///     written at all when the pin has none.
+    ///     Test that a recorded content identity and source revision round-trip through save and
+    ///     load, and neither is written at all when the pin has none.
     /// </summary>
     [Fact]
-    public void RepoPinStore_SaveThenLoad_ContentIdentity_RoundTripsAndIsOmittedWhenAbsent()
+    public void RepoPinStore_SaveThenLoad_ContentIdentityAndSourceRevision_RoundTripAndAreOmittedWhenAbsent()
     {
         // Arrange
         var repoRoot = CreateTempDirectory();
         try
         {
             var path = Path.Combine(repoRoot, ".agentcontrol.json");
-            var identity = "sha256:" + new string('a', 64);
+            var identity = "files-sha256:" + new string('a', 64);
+            var revision = "git-commit:" + new string('b', 40);
 
-            // Act 1: save a pin that records an identity, then reload it
+            // Act 1: save a pin that records both, then reload it
             RepoPinStore.Save(
                 repoRoot,
-                new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0", ContentIdentity = identity });
+                new RepoPin
+                {
+                    Source = "Feed",
+                    PackageName = "p",
+                    Version = "1.0.0",
+                    ContentIdentity = identity,
+                    SourceRevision = revision
+                });
             var withIdentity = RepoPinStore.Load(repoRoot);
             var jsonWithIdentity = File.ReadAllText(path);
 
@@ -274,11 +282,15 @@ public class RepoPinStoreTests
             var withoutIdentity = RepoPinStore.Load(repoRoot);
             var jsonWithoutIdentity = File.ReadAllText(path);
 
-            // Assert: the identity is written and read back, and is absent when not recorded
+            // Assert: both are written and read back, and are absent when not recorded
             Assert.Contains($"\"ContentIdentity\": \"{identity}\"", jsonWithIdentity, StringComparison.Ordinal);
+            Assert.Contains($"\"SourceRevision\": \"{revision}\"", jsonWithIdentity, StringComparison.Ordinal);
             Assert.Equal(identity, withIdentity?.ContentIdentity);
+            Assert.Equal(revision, withIdentity?.SourceRevision);
             Assert.DoesNotContain("ContentIdentity", jsonWithoutIdentity, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("SourceRevision", jsonWithoutIdentity, StringComparison.OrdinalIgnoreCase);
             Assert.Null(withoutIdentity?.ContentIdentity);
+            Assert.Null(withoutIdentity?.SourceRevision);
         }
         finally
         {
@@ -288,12 +300,12 @@ public class RepoPinStoreTests
 
     /// <summary>
     ///     Test that pin files written before identities existed (version 1 and version 2) still
-    ///     load, with no content identity, and are written back as schema version 3.
+    ///     load, with no content identity, and are written back as schema version 4.
     /// </summary>
     [Theory]
     [InlineData("""{ "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
     [InlineData("""{ "SchemaVersion": 2, "Source": "Feed", "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
-    public void RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema3OnSave(string json)
+    public void RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema4OnSave(string json)
     {
         // Arrange: a version 1 or version 2 pin file
         var repoRoot = CreateTempDirectory();
@@ -307,10 +319,11 @@ public class RepoPinStoreTests
             Assert.NotNull(loaded);
             RepoPinStore.Save(repoRoot, loaded);
 
-            // Assert: no identity was invented, and the rewritten file is schema 3
+            // Assert: no identity was invented, and the rewritten file is schema 4
             Assert.Null(loaded.ContentIdentity);
+            Assert.Null(loaded.SourceRevision);
             Assert.Equal("contoso-agents", loaded.PackageName);
-            Assert.Contains("\"SchemaVersion\": 3", File.ReadAllText(path), StringComparison.Ordinal);
+            Assert.Contains("\"SchemaVersion\": 4", File.ReadAllText(path), StringComparison.Ordinal);
         }
         finally
         {
@@ -319,7 +332,80 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
-    ///     Test that a hand-written camelCase <c>contentIdentity</c> is read.
+    ///     Test that a schema 3 pin's identity of a container (<c>sha256:</c> of a zip or package file)
+    ///     is not carried over as an identity - it cannot be compared with one computed from the files, so
+    ///     it means "no recorded identity" - and that the rewritten file is schema 4 without it.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_Load_Schema3PinWithContainerIdentity_DropsIdentityAndRewritesAsSchema4()
+    {
+        // Arrange: a schema 3 pin that recorded the SHA-256 of a package file
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(repoRoot, ".agentcontrol.json");
+            File.WriteAllText(
+                path,
+                $$"""{ "SchemaVersion": 3, "Source": "Feed", "PackageName": "p", "Version": "1.0.0", "ContentIdentity": "sha256:{{new string('a', 64)}}", "AgentsMdTemplateDeclined": true }""");
+
+            // Act: load it, then save it back
+            var loaded = RepoPinStore.Load(repoRoot);
+            Assert.NotNull(loaded);
+            RepoPinStore.Save(repoRoot, loaded);
+            var rewritten = File.ReadAllText(path);
+
+            // Assert: no identity, no revision, other fields kept, and the file is schema 4 without the old text
+            Assert.Null(loaded.ContentIdentity);
+            Assert.Null(loaded.SourceRevision);
+            Assert.True(loaded.AgentsMdTemplateDeclined);
+            Assert.Contains("\"SchemaVersion\": 4", rewritten, StringComparison.Ordinal);
+            Assert.DoesNotContain("ContentIdentity", rewritten, StringComparison.Ordinal);
+            Assert.DoesNotContain("sha256", rewritten, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a schema 3 pin's Git commit identity becomes the migrated pin's source revision (so a
+    ///     moved tag stays detectable) and not a content identity, and that it is written back as such.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_Load_Schema3PinWithGitCommitIdentity_CarriesItAsSourceRevision()
+    {
+        // Arrange: a schema 3 pin from a Git source
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(repoRoot, ".agentcontrol.json");
+            var commit = "git-commit:" + new string('c', 40);
+            File.WriteAllText(
+                path,
+                $$"""{ "SchemaVersion": 3, "Source": "Repo", "PackageName": "p", "Version": "1.0.0", "ContentIdentity": "{{commit}}" }""");
+
+            // Act
+            var loaded = RepoPinStore.Load(repoRoot);
+            Assert.NotNull(loaded);
+            RepoPinStore.Save(repoRoot, loaded);
+            var reloaded = RepoPinStore.Load(repoRoot);
+
+            // Assert: the commit is the source revision, there is no content identity, and it round-trips as schema 4
+            Assert.Null(loaded.ContentIdentity);
+            Assert.Equal(commit, loaded.SourceRevision);
+            Assert.Equal(4, reloaded?.SchemaVersion);
+            Assert.Equal(commit, reloaded?.SourceRevision);
+            Assert.Null(reloaded?.ContentIdentity);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a hand-written camelCase <c>contentIdentity</c> and <c>sourceRevision</c> are read.
     /// </summary>
     [Fact]
     public void RepoPinStore_Load_CamelCaseContentIdentity_IsRead()
@@ -330,13 +416,14 @@ public class RepoPinStoreTests
         {
             File.WriteAllText(
                 Path.Combine(repoRoot, ".agentcontrol.json"),
-                """{ "schemaVersion": 3, "source": "Feed", "packageName": "p", "version": "1.0.0", "contentIdentity": "sha256:abc" }""");
+                """{ "schemaVersion": 4, "source": "Feed", "packageName": "p", "version": "1.0.0", "contentIdentity": "files-sha256:abc", "sourceRevision": "git-commit:def" }""");
 
             // Act
             var loaded = RepoPinStore.Load(repoRoot);
 
             // Assert
-            Assert.Equal("sha256:abc", loaded?.ContentIdentity);
+            Assert.Equal("files-sha256:abc", loaded?.ContentIdentity);
+            Assert.Equal("git-commit:def", loaded?.SourceRevision);
         }
         finally
         {
@@ -457,15 +544,15 @@ public class RepoPinStoreTests
         {
             File.WriteAllText(
                 Path.Combine(repoRoot, ".agentcontrol.json"),
-                """{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "Version": "1.0.0" }""");
+                """{ "SchemaVersion": 5, "Source": "Feed", "PackageName": "p", "Version": "1.0.0" }""");
 
             // Act
             var ex = Assert.Throws<UnsupportedPinSchemaException>(() => RepoPinStore.Load(repoRoot));
 
             // Assert: the message names the file's version and tells the user what to do
-            Assert.Equal(4, ex.SchemaVersion);
-            Assert.Contains("4", ex.Message, StringComparison.Ordinal);
-            Assert.Contains("up to 3", ex.Message, StringComparison.Ordinal);
+            Assert.Equal(5, ex.SchemaVersion);
+            Assert.Contains("5", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("up to 4", ex.Message, StringComparison.Ordinal);
             Assert.Contains("Update AgentControl", ex.Message, StringComparison.Ordinal);
         }
         finally
@@ -508,11 +595,11 @@ public class RepoPinStoreTests
     ///     pin is.
     /// </summary>
     [Theory]
-    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "ContentIdentity": { "algorithm": "sha512", "value": "ab" } }""")]
-    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "ContentIdentity": 7 }""")]
-    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": ["p", "q"], "Version": "1.0.0" }""")]
-    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "AgentsMdTemplateDeclined": "maybe" }""")]
-    [InlineData("""{ "PackageName": ["p"], "schemaVersion": 4 }""")]
+    [InlineData("""{ "SchemaVersion": 5, "Source": "Feed", "PackageName": "p", "ContentIdentity": { "algorithm": "sha512", "value": "ab" } }""")]
+    [InlineData("""{ "SchemaVersion": 5, "Source": "Feed", "PackageName": "p", "ContentIdentity": 7 }""")]
+    [InlineData("""{ "SchemaVersion": 5, "Source": "Feed", "PackageName": ["p", "q"], "Version": "1.0.0" }""")]
+    [InlineData("""{ "SchemaVersion": 5, "Source": "Feed", "PackageName": "p", "AgentsMdTemplateDeclined": "maybe" }""")]
+    [InlineData("""{ "PackageName": ["p"], "schemaVersion": 5 }""")]
     public void RepoPinStore_Load_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsUnsupportedPinSchemaException(string json)
     {
         // Arrange: a newer file whose known properties have other types than this build's pin
@@ -525,7 +612,7 @@ public class RepoPinStoreTests
             var ex = Assert.Throws<UnsupportedPinSchemaException>(() => RepoPinStore.Load(repoRoot));
 
             // Assert: reported as a newer schema, not as an unreadable file
-            Assert.Equal(4, ex.SchemaVersion);
+            Assert.Equal(5, ex.SchemaVersion);
             Assert.Contains("Update AgentControl", ex.Message, StringComparison.Ordinal);
         }
         finally
@@ -540,9 +627,9 @@ public class RepoPinStoreTests
     ///     not a corrupt one to repair by overwriting.
     /// </summary>
     [Theory]
-    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "ContentIdentity": { "algorithm": "sha512", "value": "ab" } }""")]
-    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "ContentIdentity": 7 }""")]
-    [InlineData("""{ "SchemaVersion": 4, "PackageName": ["p"] }""")]
+    [InlineData("""{ "SchemaVersion": 5, "Source": "Feed", "PackageName": "p", "ContentIdentity": { "algorithm": "sha512", "value": "ab" } }""")]
+    [InlineData("""{ "SchemaVersion": 5, "Source": "Feed", "PackageName": "p", "ContentIdentity": 7 }""")]
+    [InlineData("""{ "SchemaVersion": 5, "PackageName": ["p"] }""")]
     public void RepoPinStore_Save_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsAndLeavesFileUnchanged(string json)
     {
         // Arrange
@@ -558,7 +645,7 @@ public class RepoPinStoreTests
                 () => RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" }));
 
             // Assert: refused for the schema, and the file and its folder are untouched
-            Assert.Equal(4, ex.SchemaVersion);
+            Assert.Equal(5, ex.SchemaVersion);
             Assert.Equal(before, File.ReadAllBytes(path));
             Assert.Equal([path], Directory.GetFiles(repoRoot));
         }

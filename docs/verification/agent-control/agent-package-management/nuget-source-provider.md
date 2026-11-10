@@ -387,20 +387,17 @@ and is irrelevant for a source that does not require them. This scenario is test
 `NuGetSourceProvider_Constructor_InvalidFingerprint_RefusesWhenSignaturesAreRequired`, covering
 `AgentControl-NuGetSourceProvider-UnreadableFingerprintRefused`.
 
-**NuGetSourceProvider_ReportContentIdentity_IsTheSha256OfTheNupkg**: An acquired package's reader reports the
-`sha256:` identity of the package file, equal to a SHA-256 computed independently by the test over the `.nupkg` in
-the feed folder, for a folder source and for a server source (the `.nupkg` downloaded into the private cache); two
+**NuGetSourceProvider_ReportContentIdentity_IsTheFilesIdentityOfTheCachedCopy**: An acquired package's reader reports
+the `files-sha256:` identity of the agent files of the copy unpacked in the private cache - not of the `.nupkg` file -
+for a folder source and for a server source (the `.nupkg` downloaded into the private cache); two
 versions of one package report the identity of their own files and differ; and a second acquisition of the same version
 reports the identity of the copy held in the private cache even though the feed's file was replaced in between - the
 identity describes the local copy that is unpacked and applied (NuGet versions are immutable by convention, and the
-cache is what spares a second download), which the user guide states. This scenario is tested by
-`NuGetSourceProvider_Acquire_ExistingPackage_ReportsSha256OfNupkgAsContentIdentity`,
-`NuGetSourceProvider_Acquire_TwoVersions_ReportTheIdentityOfTheirOwnPackageFile`,
+cache is what spares a second download), which the user guide states. The folder-source test also compares two feeds
+that hold the same agent files in packages that differ in bytes (another nuspec, other release notes, unrelated
+entries) and expects the same identity. This scenario is tested by
+`NuGetSourceProvider_Acquire_ExistingPackage_ReportsFilesIdentityIndependentOfNupkg`,
+`NuGetSourceProvider_Acquire_TwoVersions_ReportDifferentIdentities`,
 `NuGetSourceProvider_Acquire_SameVersionTwice_ReportsIdentityOfTheCachedCopy` and
-`NuGetSourceProvider_Acquire_AnonymousServer_ReportsSha256OfDownloadedPackageFile`, covering
+`NuGetSourceProvider_Acquire_AnonymousServer_ReportsFilesIdentityOfDownloadedPackage`, covering
 `AgentControl-NuGetSourceProvider-ReportContentIdentity`.
-
-**NuGetSourceProvider_RefuseUnidentifiablePackage_AmbiguousPackageFile**: A package folder in the private cache that
-holds a second package file cannot be identified and is refused with an error that says so. This scenario is tested by
-`NuGetSourceProvider_Acquire_AmbiguousPackageFile_ThrowsInvalidOperationException`, covering
-`AgentControl-NuGetSourceProvider-RefuseUnidentifiablePackage`.

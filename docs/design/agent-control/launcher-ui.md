@@ -398,8 +398,9 @@ model raises the offer before `ReleaseNotesReady`, `MainWindow` remembers the op
 it, so the question never covers the notes and the notes window - which has no owner - is not lost behind the
 modal question; the notes are not opened at all when the main window has closed meanwhile.
 
-A package version republished with different content (the same version, other bytes) - or, for a Git source, a tag
-that now points to another commit - is handled the same way: when **Change package...** (or **Select Package...**)
+A package version republished with different files (the same version, other content) - or, for a Git source, a tag
+that now points to another commit delivering other files - is handled the same way: when **Change package...** (or
+**Select Package...**)
 of the version the repo is pinned to would replace its agent files with changed content,
 `RepoCardViewModel` changes nothing and raises `ContentChangeConfirmationRequested` with the selection and a
 plain-language question; `MainWindow` shows it in the same modal `ConfirmationWindow` (the safe answer, No, is the
@@ -459,8 +460,8 @@ it carries the Git icon and the name "Git repository" (`PackageSourceIcons`); `P
 makes a remote Git source an "Online source" like a server and a Git source on a local path show its folder status
 (`AgentControl-LauncherUI-GitSourcePresentation`). On a repo card the package chip shows the Git icon and the alias;
 its tooltip adds the tag (the source's tag pattern applied to the pinned version) and the first seven characters of
-the commit the pin recorded as its `git-commit:` identity. When the background check finds that the tag of the pinned
-version now points to a different commit (`UpgradeCheck.Pinned.Revision` against that identity) the card shows the
+the commit the pin recorded as its `git-commit:` source revision. When the background check finds that the tag of the pinned
+version now points to a different commit (`UpgradeCheck.Pinned.Revision` against that source revision) the card shows the
 amber **Tag moved** chip (`TagMovedChip`, `RepoCardStatus.TagMoved`, which outranks "upgrade available" and hides the
 up-to-date cue); the chip's tooltip names the tag and both commits, its click only opens **Change package...**, and
 nothing is ever applied by it (`AgentControl-LauncherUI-TagMovedWarning`). A git older than the supported version
@@ -673,8 +674,19 @@ card use the same icon, and the card's package chip tooltip names the tag the pi
 current tag pattern and the first seven characters of the commit the files came from
 (`AgentControl-LauncherUI-GitSourcePresentation`).
 
-**Tag moved and Change package.** A Git pin records the commit of the content it was set up from as a `git-commit:`
-identity, not the tag. When a check finds that the tag of the pinned version now points to another commit, the card
+**Portable pins.** The source alias in a repo's pin is user-specific, so it is only the preferred source. When it is
+not configured, or does not offer the pinned version, `RepoCardViewModel` looks for another configured source (in
+Settings order) that delivers files with the identical `files-sha256:` content identity and uses it, without
+rewriting the pin; the package chip then shows that source's alias and kind icon, and its tooltip says that the pinned
+source is not configured (or does not offer the version) and that the identical files come from the other source, and
+the red "Package source problem" chip is not shown. Without a verified source (or for a pin that recorded no files
+identity) the problem chip stays, with a message that no other configured source delivers the identical files. The
+upgrade check then looks at the sources that offer the package, the newest version winning
+(`AgentControl-LauncherUI-PinnedSourceFallback`, `-PinnedSourceSupplierShown`, `-UpgradeAcrossSources`).
+
+**Tag moved and Change package.** A Git pin records the commit of the files it was set up from as its `git-commit:`
+source revision (the content identity is the files identity, as for every source), not the tag. When a check finds
+that the tag of the pinned version now points to another commit, the card
 shows an amber "Tag moved" chip, explains what happened and applies nothing; because a tag can move at any time, the
 card's Refresh command, which the user starts, reads the Git source again instead of reusing the session's cached
 listing, while the background check may use the cache, and a warning is cleared again whenever a later check fails or

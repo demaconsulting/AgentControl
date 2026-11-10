@@ -171,8 +171,9 @@ AgentControl
 │                            package's release-notes.md after a successful
 │                            upgrade
 ├── RepoConfig - reads/writes the per-repo .agentcontrol.json pin file
-│                (source alias + package name + pinned version + content
-│                identity (sha256 or git commit) + whether the user declined
+│                (preferred source alias + package name + pinned version +
+│                content identity of the files (files-sha256) + git source
+│                revision + whether the user declined
 │                the AGENTS.md template offer; no "latest"/unpinned mode)
 ├── AgentToolLauncher - detects installed shells (prefers highest available
 │                       PowerShell/pwsh, falls back to Windows PowerShell 5,
@@ -204,10 +205,14 @@ AgentControl
   versions can require manual migration steps (documented in release notes),
   so silently floating to the newest version would risk applying breaking
   changes without the developer's awareness. The pin also records a *content
-  identity* of what was applied — a SHA-256 of the zip or NuGet package, or
-  `git-commit:<sha>` for a Git source — so a package republished under the same
-  version, or a Git tag moved to another commit, is noticed and not synced
-  silently: pin = source alias + package + version + content identity. The
+  identity* of what was applied — a SHA-256 over the agent files themselves
+  (`files-sha256:`), the same whatever zip, NuGet package or Git repository
+  delivered them — so a package republished under the same version is noticed
+  and not synced silently, and a teammate may use any source that delivers the
+  identical files; a Git pin also records the commit as its source revision, so
+  a moved tag is noticed:
+  pin = preferred source alias + package + version + content identity + source
+  revision. The
   launch-time restore only checks it and never writes the pin (that would
   dirty the working tree), and pins without an identity adopt one at the next
   Select Package or Upgrade. A moved tag is flagged on the repo's card (a

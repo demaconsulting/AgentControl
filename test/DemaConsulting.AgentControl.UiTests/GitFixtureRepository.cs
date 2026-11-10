@@ -367,6 +367,19 @@ internal sealed class GitFixtureRepository : IDisposable
     }
 
     /// <summary>
+    ///     Computes the identity of the agent files <see cref="CommitVersion"/> commits for a marker,
+    ///     independently of the application.
+    /// </summary>
+    /// <param name="marker">The content of <c>.github/agents/git.md</c>.</param>
+    /// <returns>The <c>files-sha256:</c> identity text.</returns>
+    internal static string FilesIdentity(string marker) =>
+        TestFilesIdentity.OfText(
+            (".github/agents/git.md", marker),
+            (".github/standards/git.md", "# Git Standard\n"),
+            (".github/templates/git.md", "# Git Template\n"),
+            (".github/skills/git.md", "# Git Skill\n"));
+
+    /// <summary>
     ///     Writes the package layout with the given content and commits it.
     /// </summary>
     /// <param name="marker">The content of <c>.github/agents/git.md</c>.</param>

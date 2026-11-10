@@ -28,11 +28,12 @@ nothing.
 tag
 name, `Revision` = the commit, `SourceAlias` = the source alias.
 
-**The tag is derived, not stored.** A pin to this source records the commit (`git-commit:` identity) and the version,
-never the tag: the tag of a version is whatever the source's tag pattern, as configured now, maps that version to. If
+**The tag is derived, not stored.** A pin to this source records the commit (`SourceRevision`, `git-commit:`) and the
+version, never the tag: the tag of a version is whatever the source's tag pattern, as configured now, maps that
+version to. If
 the pattern of a source is edited, a pinned version maps to a different tag, whose commit may differ from the one the
-pin recorded; the listing then carries that other commit as the package's `Revision`, the comparison with the pin
-reports changed content, and the application shows it as a moved tag and applies nothing until the user accepts it
+pin recorded; the listing then carries that other commit as the package's `Revision`, the comparison with the pin's
+source revision reports a moved tag, and the application shows it as such and applies nothing until the user accepts it
 with Change package (see the `RepoCardViewModel` design). No schema or provider change is needed for this.
 
 **Cache layout** (`-CacheByAddressAndCommit`, `-CacheSeparatesRepositories`, `-CacheTrustsOnlyCompleteFolders`,
@@ -162,7 +163,9 @@ works (`-MinimumGitVersion`, `-GitTooOldReportedUnwrapped`; the version is check
 `-MinimumGitVersionCheckedOnce`).
 
 The reader is `DirectoryPackageContentReader.OpenLayoutRoot(root[/subfolder], "git-commit:{commit}")`
-(`-ReportContentIdentity`), wrapped with the lease described above. After a successful acquisition the oldest cached
+(`-ReportContentIdentity`): the commit travels with it as the reader's `SourceRevision`, while its `ContentIdentity`
+is the identity of the agent files in the layout, computed like every other source's. It is wrapped with the lease
+described above. After a successful acquisition the oldest cached
 commits beyond `MaxCachedCommits` are deleted, never the one just used and never one a reader holds (so the cache can
 temporarily hold more while readers are open, `-CachePruningSparesOpenReaders`); failures are logged and ignored
 (`-CachePruning`).

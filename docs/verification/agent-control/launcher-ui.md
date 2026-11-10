@@ -859,13 +859,36 @@ the version without its build metadata, carries the full build version as its to
 the metadata. This scenario is tested by `AboutWindow_VersionRow_IsLabeledAndShortWithFullVersionInTooltip`, covering
 `AgentControl-LauncherUI-AboutVersionRow`.
 
+**LauncherUI_PortablePins_AnotherSourceWithTheIdenticalFilesSuppliesThePinnedPackage**: A repo whose pin names a source
+this machine has not configured, while another configured source delivers the identical files, is shown with that
+source on its package chip and no source problem; with no source that delivers the identical files (or a pin that
+recorded no files identity) the card shows the source problem and explains that the pinned source is not configured and
+that no other configured source delivers the identical files; the restore before launch uses only a source verified
+by the identical files and never writes the pin; and for such a repo the upgrade check offers the newest version the
+configured sources offer, which Upgrade applies from the source that offers it, recording that source. This scenario is
+verified by the `RepoCardViewModel` unit tests (see their unit verification design), with
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAliasNotConfigured_RestoresFromIdenticalSourceWithoutWritingPin`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_OnlyOtherFilesAvailable_RefusesWithExplanation`,
+`RepoCardViewModel_Refresh_PinWithoutFilesIdentityAndAliasNotConfigured_NeverFallsBack`,
+`RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasIdenticalFiles_NamesSupplierWithoutProblem`,
+`RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasDifferentFiles_ShowsSourceProblem` and
+`RepoCardViewModel_UpgradeCommand_PinnedAliasNotConfigured_UsesNewestVersionAcrossSourcesAndRecordsItsAlias` cited
+directly at the subsystem level, and by the headless window tests
+`MainWindow_PinnedAliasNotConfiguredButIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem` (the chip names the
+supplying source and the problem chip is not shown, with real zip sources and a pin written by a real apply) and
+`MainWindow_PinnedAliasNotConfigured_UpgradeChipOffersNewestVersionFromAnotherSource` (the upgrade chip is offered for
+the newest version of another source), covering `AgentControl-LauncherUI-PinnedSourceFallback` (children:
+`AgentControl-RepoCardViewModel-FallbackToIdenticalSource`, `-FallbackRejectsDifferentFiles` and
+`-FallbackNeverWithoutIdentity`), `AgentControl-LauncherUI-PinnedSourceSupplierShown` (children: `-ShowSupplyingSource`
+and `-UnresolvedPinExplained`) and `AgentControl-LauncherUI-UpgradeAcrossSources` (child: `-UpgradeAcrossSources`).
+
 **LauncherUI_ContentChangeProtection_RepublishedVersionIsNeverAppliedUnnoticed**: A package version republished with
-other content is not applied silently: an Upgrade and the restore of missing agent files before launch refuse it and
+other files is not applied silently: an Upgrade and the restore of missing agent files before launch refuse it and
 say so, and a Select Package of the pinned version raises the confirmation request. In the main window the request
 becomes a modal confirmation whose answer No changes nothing (the repo and the pin keep what they had) and whose
 answer Yes applies the changed package and records its new identity; a pin without an identity adopts one silently.
 This scenario is verified by the `RepoCardViewModel` unit tests (see their unit verification design), with
-`RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin`,
+`RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsFilesIdentityInPin`,
 `RepoCardViewModel_UpgradeCommand_SameVersionRepublished_RefusesWithoutChangingRepoOrPin`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SameVersionRepublished_RefusesWithoutExtractingOrWritingPin`,
 `RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing` and

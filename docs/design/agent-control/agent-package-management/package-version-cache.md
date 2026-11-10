@@ -72,6 +72,29 @@ parse. For a Git
 source it carries the commit the tag points to now, which the card compares with the pinned commit to notice a moved tag
 (`AgentControl-PackageVersionCache-ReportPinnedListing`).
 
+**GetVersionsAcrossSourcesAsync**: Lists what every configured source offers of a package
+(`AgentControl-PackageVersionCache-ListAcrossSources`).
+
+- *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string? excludeAlias`, `CancellationToken`.
+- *Returns*: `Task<IReadOnlyList<DiscoveredPackage>>` - the offers source by source in the order of
+  `registry.Definitions` (the order the user configured), each source's versions highest first.
+- *Algorithm*: For each definition other than `excludeAlias` (which is never contacted), calls
+  `GetVersionsDescendingAsync`, so every source is read through - and once per session cached in - its own entry.
+- *Postconditions*: A source that fails with an I/O, permission or `InvalidOperationException` error (which includes
+  `PackageSourceAccessException`) is skipped, remembering the first failure, so the others' offers still arrive
+  (`AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure`); when at least one source was consulted and
+  every one failed, that first failure is rethrown with its original stack (an empty answer would say that nobody
+  offers the package). Cancellation always propagates.
+
+**IsNewerVersionAvailableAcrossSourcesAsync**: The upgrade question across all configured sources, for a pin whose
+own source is not available (`AgentControl-PackageVersionCache-NewestAcrossSources`).
+
+- *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string pinnedVersion`, `CancellationToken`.
+- *Returns*: `Task<UpgradeCheck>` built by the same private `BuildUpgradeCheck` as the single-source method: the latest
+  is the first offer that no later offer exceeds - a later offer replaces the choice only when strictly newer, so a
+  tie keeps the earlier source, i.e. Settings order - and `Pinned` is the first offer whose version equals the
+  pinned one.
+
 #### Error Handling
 
 Every method that queries a source on a cache miss propagates the provider's exceptions
@@ -81,7 +104,8 @@ unconfigured alias; argument checks throw `ArgumentNullException`/`ArgumentExcep
 hit returns the previously observed result instead, even if the source has since become
 unreachable — a deliberate staleness trade-off to avoid re-querying a potentially slow or
 offline location on every UI refresh. Two simultaneous misses for the same key may both query;
-the later result wins.
+the later result wins. The across-sources methods catch a single source's failure (see their descriptions) instead
+of propagating it, unless every consulted source failed.
 
 #### Dependencies
 
@@ -95,6 +119,7 @@ the later result wins.
   calls `Invalidate(sourceAlias)` for each source that is edited or removed when settings are
   applied.
 - **RepoCardViewModel** — calls `IsNewerVersionAvailableAsync` when refreshing the upgrade
-  badge.
+  badge, and `GetVersionsAcrossSourcesAsync` / `IsNewerVersionAvailableAcrossSourcesAsync` when the pin's source is
+  not configured or does not offer the pinned version.
 - **SelectPackageWindowViewModel** — calls `GetPackageIdsAsync`/`GetVersionsDescendingAsync` to
   populate its picker lists.

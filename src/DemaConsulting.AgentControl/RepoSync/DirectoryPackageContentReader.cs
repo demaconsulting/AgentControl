@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.RepoSync;
@@ -69,17 +70,28 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     private readonly bool _layoutOnly;
 
     /// <summary>
+    ///     The identity once it has been computed (<see langword="null"/> is a valid result:
+    ///     "cannot be named").
+    /// </summary>
+    private string? _contentIdentity;
+
+    /// <summary>
+    ///     Whether <see cref="_contentIdentity"/> has been computed.
+    /// </summary>
+    private bool _identityComputed;
+
+    /// <summary>
     ///     Initializes a reader for a package folder whose content root has been validated.
     /// </summary>
     /// <param name="packageFolder">The unpacked package folder.</param>
     /// <param name="contentRoot">The validated content root inside it.</param>
-    /// <param name="contentIdentity">The identity the opener computed for the package, if any.</param>
+    /// <param name="sourceRevision">The revision the opener knows the content came from, if any.</param>
     /// <param name="layoutOnly">Whether only the package layout of the root is exposed.</param>
-    private DirectoryPackageContentReader(string packageFolder, string contentRoot, string? contentIdentity, bool layoutOnly)
+    private DirectoryPackageContentReader(string packageFolder, string contentRoot, string? sourceRevision, bool layoutOnly)
     {
         Description = packageFolder;
         _contentRoot = contentRoot;
-        ContentIdentity = contentIdentity;
+        SourceRevision = sourceRevision;
         _layoutOnly = layoutOnly;
     }
 
@@ -87,27 +99,46 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     public string Description { get; }
 
     /// <summary>
-    ///     Gets the identity the opener supplied for this package (for a NuGet package, the
-    ///     SHA-256 of the unpacked <c>.nupkg</c>), or <see langword="null"/> when none was given.
-    ///     The reader only carries it: a folder reader does not hash anything itself because the
-    ///     folder has no single file whose bytes define the package.
+    ///     Gets the <c>files-sha256:</c> identity of the agent files in the folder, or
+    ///     <see langword="null"/> when they cannot be identified (see
+    ///     <see cref="PackageContentIdentity.TryComputeFilesIdentity"/>).
     /// </summary>
-    public string? ContentIdentity { get; }
+    /// <remarks>
+    ///     Computed from the files themselves on first use and remembered, so a NuGet package, a
+    ///     Git tag's files and a zip that hold the same agent files all report the same identity.
+    /// </remarks>
+    public string? ContentIdentity
+    {
+        get
+        {
+            if (!_identityComputed)
+            {
+                _contentIdentity = PackageContentIdentity.TryComputeFilesIdentity(this);
+                _identityComputed = true;
+            }
+
+            return _contentIdentity;
+        }
+    }
+
+    /// <summary>
+    ///     Gets the revision the opener supplied for this content (for a Git package, the
+    ///     <c>git-commit:</c> of the tag's commit), or <see langword="null"/> when none was given.
+    ///     The reader only carries it: a folder has no revision of its own.
+    /// </summary>
+    public string? SourceRevision { get; }
 
     /// <summary>
     ///     Opens an unpacked package folder for reading.
     /// </summary>
     /// <param name="packageFolder">The unpacked package folder (the one that contains
     ///     <c>content</c>).</param>
-    /// <param name="contentIdentity">The content identity of the package, as computed by the caller
-    ///     (see <see cref="IPackageContentReader.ContentIdentity"/>); <see langword="null"/> when
-    ///     the caller has none.</param>
     /// <returns>A reader over the folder's <c>content</c> sub-folder.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="packageFolder"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the folder has no <c>content</c>
     ///     sub-folder, or the package folder or the content root is itself a link.</exception>
-    public static DirectoryPackageContentReader Open(string packageFolder, string? contentIdentity = null)
+    public static DirectoryPackageContentReader Open(string packageFolder)
     {
         ArgumentNullException.ThrowIfNull(packageFolder);
 
@@ -135,7 +166,7 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
                 $"Package content folder '{contentRoot}' is a link, which is not allowed.");
         }
 
-        return new DirectoryPackageContentReader(packageFolder, contentRoot, contentIdentity, layoutOnly: false);
+        return new DirectoryPackageContentReader(packageFolder, contentRoot, sourceRevision: null, layoutOnly: false);
     }
 
     /// <summary>
@@ -145,8 +176,8 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     /// </summary>
     /// <param name="layoutRoot">The folder that holds <c>.github/...</c>, <c>release-notes.md</c>
     ///     and <c>AGENTS.md</c> directly (the repository root or the configured sub-folder).</param>
-    /// <param name="contentIdentity">The identity of the content, as computed by the caller (for
-    ///     a Git tag, <c>git-commit:{sha}</c>); <see langword="null"/> when it has none.</param>
+    /// <param name="sourceRevision">The revision the content came from, as supplied by the caller
+    ///     (for a Git tag, <c>git-commit:{sha}</c>); <see langword="null"/> when it has none.</param>
     /// <returns>A reader that lists and reads only the four managed folders under <c>.github</c>
     ///     and the two root files. Everything else in the folder (including a <c>.git</c> folder
     ///     and any link that is not part of the layout) is never listed, read or inspected.</returns>
@@ -155,7 +186,7 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     /// <exception cref="InvalidOperationException">Thrown when the folder does not exist or is
     ///     itself a link. A link inside the layout is refused when the layout is listed or read,
     ///     exactly as for <see cref="Open"/>.</exception>
-    public static DirectoryPackageContentReader OpenLayoutRoot(string layoutRoot, string? contentIdentity = null)
+    public static DirectoryPackageContentReader OpenLayoutRoot(string layoutRoot, string? sourceRevision = null)
     {
         ArgumentNullException.ThrowIfNull(layoutRoot);
 
@@ -170,7 +201,7 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
                 $"Package folder '{layoutRoot}' is a link, which is not allowed.");
         }
 
-        return new DirectoryPackageContentReader(layoutRoot, layoutRoot, contentIdentity, layoutOnly: true);
+        return new DirectoryPackageContentReader(layoutRoot, layoutRoot, sourceRevision, layoutOnly: true);
     }
 
     /// <inheritdoc />

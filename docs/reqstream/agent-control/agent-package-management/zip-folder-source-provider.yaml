@@ -129,10 +129,12 @@ sections:
       - id: AgentControl-ZipFolderSourceProvider-ReportContentIdentity
         title: >-
           The ZipFolderSourceProvider class shall report, as the content identity of a package it
-          supplies, the SHA-256 identity of the bytes of the zip file that its content is read
-          from, so that a zip republished under the same version reports a different identity.
+          supplies, the identity of the agent files in the zip - not of the zip file - so that a
+          zip republished under the same version with other files reports a different identity,
+          and a zip repacked with the same files reports the same one.
         justification: |
           A zip in a shared folder can be replaced in place without its file name changing; the
-          identity of the bytes actually delivered is what lets a repo's pin notice the change.
+          identity of the files actually delivered is what lets a repo's pin notice the change,
+          and is what lets the same files from another kind of source be recognized as the same.
         tests:
-          - ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReportsSha256OfZipAsContentIdentity
+          - ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReportsFilesIdentityOfZipContent

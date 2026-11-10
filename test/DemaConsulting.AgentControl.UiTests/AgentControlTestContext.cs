@@ -76,14 +76,17 @@ internal sealed class AgentControlTestContext : IDisposable
     /// <param name="customizeSettings">Edits the settings dictionary just before it is written, with
     ///     this context (whose <see cref="RootDirectory"/> and <see cref="RepoPath"/> are set), or
     ///     <see langword="null"/> for none; used to seed groups, collapsed groups and more repos.</param>
-    /// <param name="pinnedContentIdentity">The content identity (for example <c>sha256:...</c> of the
-    ///     zip) to record in the repo's pin file, which is then written as the current schema, or
+    /// <param name="pinnedContentIdentity">The content identity (<c>files-sha256:...</c> of the agent
+    ///     files) to record in the repo's pin file, which is then written as the current schema, or
     ///     <see langword="null"/> to write a pin that records none.</param>
     /// <param name="gitSource">A Git repository to configure as an additional source (which makes the
     ///     application run the real <c>git</c> instead of the arg-logger stub), or
     ///     <see langword="null"/> for none.</param>
     /// <param name="useRealGit">Whether the application runs the real <c>git</c> executable even
     ///     though no Git source is pre-configured (for example to add one through the dialog).</param>
+    /// <param name="pinnedSourceRevision">The source revision (for a Git source, <c>git-commit:...</c>)
+    ///     to record in the repo's pin file, which is then written as the current schema, or
+    ///     <see langword="null"/> to record none.</param>
     public AgentControlTestContext(
         string? packageSourcePath = null,
         string? pinnedPackageName = null,
@@ -96,7 +99,8 @@ internal sealed class AgentControlTestContext : IDisposable
         Action<Dictionary<string, object?>, AgentControlTestContext>? customizeSettings = null,
         string? pinnedContentIdentity = null,
         GitSourceSettings? gitSource = null,
-        bool useRealGit = false)
+        bool useRealGit = false,
+        string? pinnedSourceRevision = null)
     {
         var root = Directory.CreateTempSubdirectory("AgentControlUiTests-");
         RootDirectory = root.FullName;
@@ -126,7 +130,7 @@ internal sealed class AgentControlTestContext : IDisposable
         if (pinnedPackageName is not null && pinnedPackageVersion is not null)
         {
             TestRepoPinWriter.Write(
-                RepoPath, pinnedPackageName, pinnedPackageVersion, pinnedSource, pinnedContentIdentity);
+                RepoPath, pinnedPackageName, pinnedPackageVersion, pinnedSource, pinnedContentIdentity, pinnedSourceRevision);
         }
 
         _shellCleaner = new LaunchedShellCleaner(argLoggerStubExe, LogCleanup);

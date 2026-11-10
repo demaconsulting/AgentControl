@@ -144,12 +144,15 @@ port, and the real `git upload-pack`).
 - A Git repository that needs a sign-in is never prompted for by a background check (the card shows "Sign-in needed",
   the user's helper was asked but could not prompt, the server saw no credential) and may be prompted for by work the
   user starts (Refresh on the card, Test connection in the editor).
-- A package's content identity is recorded in the pin for a zip, a NuGet-package and a Git source; a republished
-  zip or NuGet package of the pinned version is not synced at launch.
+- A package's content identity (a SHA-256 over its agent files, the same for every kind of source) is recorded in the
+  pin for a zip, a NuGet-package and a Git source; a republished zip or NuGet package of the pinned version is not
+  synced at launch.
 - Several package sources can be configured and carried forward from the legacy setting, a NuGet
   folder source supplies packages applied like zip packages, a NuGet server source can be added with a
-  typed sign-in and supplies packages the same way, and a repo pin is only ever resolved
-  against the source it names.
+  typed sign-in and supplies packages the same way, and a repo pin is resolved against the source it names, or - only
+  when that source is not configured or does not offer the version - against another configured source that delivers
+  files with the identical identity, which the card then shows without reporting a problem; a repo pinned to a source
+  that is not configured and recorded no identity to verify against shows the problem.
 - No credential typed during an end-to-end run is found in any file the application wrote; a sign-in the user chose
   to remember is found only in the user's own (emulated) credential helper, is used again without a dialog and is
   removed by "Forget saved sign-in".
@@ -449,24 +452,42 @@ tested by
 `windows@UpgradeMenuItem_Click_NuGetSourceRequiresSignaturesAndPackageUnsigned_IsRefusedAndRepoUnchanged`, covering
 `AgentControl-System-PackageAuthenticity`.
 
-**AgentControl_SourcePinIntegrity_PinBoundToSource_NoSubstitution**: With the same package id
+**AgentControl_SourcePinIntegrity_PinBoundToSource_NoUnverifiedSubstitution**: With the same package id
 offered by two sources, a pin to the second source resolves only against it and the first source
-is never contacted; a pin naming a source that is not configured gives an error state for the repo
-and offers no upgrade from any other source. The published application shows both behaviors: a repo
+is never contacted; a pin naming a source that is not configured, and recording no identity of its files to verify
+another source against, gives an error state for the repo
+and offers no upgrade from any other source (a pin that does record one can be supplied by another source with
+identical files, see the next scenario). The published application shows both behaviors: a repo
 pinned to the NuGet source is upgraded from it although the zip source offers a higher version of
-the same package name, and a repo pinned to an unconfigured source shows a package source problem
+the same package name, and a repo pinned to an unconfigured source whose pin has no identity shows a package source
+problem
 badge, offers no upgrade, and keeps its pin file unchanged. This scenario is tested by
 `windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly` and
 `windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
 covering `AgentControl-System-SourcePinIntegrity`.
 
+**AgentControl_PortablePin_AnotherSourceWithTheIdenticalFilesSuppliesThePackage**: A repo whose committed pin names a
+source this machine does not have, while another configured source - of the same or another kind - delivers the
+identical files, shows its package on the card with the supplying source named instead of a package source problem, and
+the pin file is left as it was; for such a repo the upgrade chip is offered for the newest version of the configured
+sources and the same files are restored on a fresh clone from the verified source only; a source whose files differ is
+never used. The published application is not run for this scenario (it needs two differently named configurations of
+one repo, which the FlaUI fixtures do not model, and the application is not started during this change); it is
+verified end to end through the real main window, headless, with real zip sources and a pin written by a real apply:
+`MainWindow_PinnedAliasNotConfiguredButIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem` and
+`MainWindow_PinnedAliasNotConfigured_UpgradeChipOffersNewestVersionFromAnotherSource`, covering
+`AgentControl-System-PortablePin` and `AgentControl-System-UpgradeAcrossSources`. The rules (the order of the sources,
+the identical-files check, no fallback without an identity, the unchanged pin) are verified at the unit and subsystem
+levels (see the `LauncherUI` and `RepoCardViewModel` verification designs).
+
 **AgentControl_PackageContentIntegrity_IdentityIsRecordedForEveryKindOfSource**: In the published application,
-selecting a package for a never-pinned repo writes a pin (schema version 3) whose content identity names what was
-applied, computed independently by the test: for a zip source the SHA-256 of the zip, for a NuGet-package folder
-source the SHA-256 of the `.nupkg` file, and for a Git source `git-commit:` plus the commit the chosen tag points to
+selecting a package for a never-pinned repo writes a pin (schema version 4) whose content identity names what was
+applied, computed independently by the test: for a zip source and for a NuGet-package folder source the
+`files-sha256:` identity of the agent files the package delivers (the same value whatever the container), and for a Git
+source the same kind of identity plus, as the source revision, `git-commit:` and the commit the chosen tag points to
 (the Git run is `SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip`, described with the Git
-scenarios below). This scenario is tested by `windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile`,
-`windows@SelectPackage_FromNuGetFolderSource_RecordsSha256OfNupkgInPinFile` and
+scenarios below). This scenario is tested by `windows@SelectPackageMenuItem_Click_RecordsFilesIdentityInPinFile`,
+`windows@SelectPackage_FromNuGetFolderSource_RecordsFilesIdentityInPinFile` and
 `windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip`, covering
 `AgentControl-System-PackageContentIntegrity` and `AgentControl-System-PinFile`. For a NuGet package the identity
 describes the copy held on this machine (see the NuGet source unit verification), so a republish in the feed of a
@@ -489,7 +510,7 @@ scenario is tested by `windows@LaunchButton_Click_PinnedVersionRepublished_Expla
 
 **AgentControl_IdentityAdoptedOnUpgrade_PinWithoutIdentityRecordsOneWithoutWarning**: A repo whose pin has no identity
 (as written before identities existed) is upgraded from 1.0.0 to 1.1.0 with the upgrade chip: the release notes open,
-no message is shown, and the pin now holds the SHA-256 of the 1.1.0 zip. This scenario is tested by
+no message is shown, and the pin now holds the files identity of the 1.1.0 package. This scenario is tested by
 `windows@UpgradeChip_Click_PinWithoutIdentity_AdoptsIdentityOfNewVersionWithoutWarning`, covering
 `AgentControl-System-IdentityAdoptedOnUpgrade`.
 
@@ -505,7 +526,7 @@ offers "Change package..." and no longer "Select Package...". This run is tested
 Package dialog on the pin's source, package and version, choosing that version again shows the plain-language
 question that the package now contains different files, and answering No changes nothing (the repo's file, the pin
 and the warning are as before). In the third run answering Yes applies the tag's new content, opens its release notes,
-keeps the version and records the commit the tag points to now as the pin's identity, and the "Tag moved" chip goes
+keeps the version and records the commit the tag points to now as the pin's source revision, and the "Tag moved" chip goes
 away. These two runs are tested by
 `windows@ChangePackageMenuItem_SameVersionWithMovedTag_AsksAndDecliningLeavesRepoUnchanged` and
 `windows@ChangePackageMenuItem_SameVersionWithMovedTag_ConfirmingAppliesNewContentAndRecordsNewCommit`, covering
@@ -686,7 +707,8 @@ tag (`release/1.0.0`) and says the fixed parts are case-sensitive, no preview li
 makes the same test succeed. In a third run, with the Git source preconfigured, a never-pinned repo is offered Select
 Package... (and not Change package...); choosing the package and version 1.0.0 applies the tag's files,
 opens its release
-notes and writes a pin holding the source, package, version and `git-commit:` plus the commit the tag points to, and the
+notes and writes a pin holding the source, package, version, the files identity and `git-commit:` plus the commit the
+tag points to as its source revision, and the
 card shows the package and version, the alias and (as drawn ink beside the alias - the icon itself is decorative and
 not in the UI Automation tree) the Git icon. This scenario is tested by
 `windows@SettingsWindow_AddGitRepositoryViaDialog_TestsConnectionListsTagsAndPersistsIt`,

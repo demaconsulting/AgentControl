@@ -98,3 +98,42 @@ sections:
           - PackageVersionCache_IsNewerVersionAvailable_PinnedVersionListed_ReturnsPinnedPackageWithRevision
           - PackageVersionCache_IsNewerVersionAvailable_PinnedVersionNotListed_ReturnsNoPinnedPackage
           - PackageVersionCache_IsNewerVersionAvailable_PinDoesNotParse_ReturnsNoPinnedPackage
+
+      - id: AgentControl-PackageVersionCache-ListAcrossSources
+        title: >-
+          The PackageVersionCache class shall list what every configured source offers of a package
+          in the order the sources are configured, each source's versions from highest to lowest,
+          leaving out a source it is told to exclude without contacting it, and reading each source
+          only once however often it is asked.
+        justification: |
+          A repo's pin names one source alias, but aliases are per-user configuration: when that
+          source is not available here, the other configured sources are the candidates that may
+          deliver the same files, and their order is the order the user chose in Settings.
+        tests:
+          - PackageVersionCache_GetVersionsAcrossSources_ReturnsOffersInConfigurationOrderAndExcludesAlias
+
+      - id: AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure
+        title: >-
+          The PackageVersionCache class shall skip a source that cannot be read when listing across
+          sources, so that the offers of the others are still returned, and shall report the first
+          failure when every source that was consulted failed.
+        justification: |
+          One unreachable share or server must not hide what the others offer; but when nothing
+          could be read, an empty answer would wrongly claim that no source offers the package.
+        tests:
+          - PackageVersionCache_GetVersionsAcrossSources_OneSourceFails_ReturnsTheOthersOffers
+          - PackageVersionCache_GetVersionsAcrossSources_EverySourceFails_ThrowsTheFirstFailure
+
+      - id: AgentControl-PackageVersionCache-NewestAcrossSources
+        title: >-
+          The PackageVersionCache class shall determine, across all configured sources, the newest
+          version of a package and whether it is newer than a pinned version, attributing a version
+          that several sources offer to the first of them in configuration order, and shall report
+          no upgrade and no latest version when no source offers the package.
+        justification: |
+          When a repo's pinned source is not configured, the upgrade check has to consider every
+          source that offers the package; the newest version wins, and a tie must resolve the same
+          way every time, by the order the user set.
+        tests:
+          - PackageVersionCache_IsNewerVersionAvailableAcrossSources_NewestWinsAndTieKeepsConfigurationOrder
+          - PackageVersionCache_IsNewerVersionAvailableAcrossSources_NobodyOffersPackage_ReportsNoUpgrade

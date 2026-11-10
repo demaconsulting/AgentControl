@@ -1474,14 +1474,17 @@ sections:
       - id: AgentControl-LauncherUI-SourceAwareActions
         title: >-
           The LauncherUI subsystem shall perform select-package, upgrade, launch-time sync and
-          upgrade-available checks for a repo only at the package source named in the repo's
-          pin, shall record that source in the pin when a package is applied, shall show an
-          error state instead of offering anything when the pinned source is not configured, and
+          upgrade-available checks for a repo at the package source named in the repo's pin
+          whenever that source is configured and offers the pinned version, shall record the source
+          that was actually used in the pin when a package is applied, shall show an error state
+          instead of offering anything when the pinned package can be obtained neither from the
+          pinned source nor from another configured source delivering the identical files, and
           shall keep cached source results only for sources that have not changed.
         justification: |
-          A repo's pin binds it to one source; quietly using a different source because the
-          pinned one is missing or renamed would install content the pin never named, and the
-          user needs to see that the source is missing so they can restore it.
+          A repo's pin names the preferred source of its package; quietly using a different source
+          because the pinned one is missing or renamed would install content the pin never named
+          unless that content is proven identical, and the user needs to see that the package
+          cannot be obtained so they can restore the source or choose the package again.
         children:
           - AgentControl-RepoCardViewModel-SourceAwareness
           - AgentControl-MainWindowViewModel-InvalidateChangedSources
@@ -1490,17 +1493,72 @@ sections:
           - RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
           - RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent
 
+      - id: AgentControl-LauncherUI-PinnedSourceFallback
+        title: >-
+          The LauncherUI subsystem shall obtain a repo's pinned package from another configured
+          source when the source named in the pin is not configured or does not offer the pinned
+          version, but only from a source - the first in Settings order - whose files have exactly
+          the identity the pin recorded, never from a source whose files differ, and never for a pin
+          that recorded no identity of its files.
+        justification: |
+          Source aliases belong to each user's own configuration, so the same repo reaches the same
+          agent files through different sources on different machines; verifying the files, rather
+          than trusting a name, is what makes that safe.
+        children:
+          - AgentControl-RepoCardViewModel-FallbackToIdenticalSource
+          - AgentControl-RepoCardViewModel-FallbackRejectsDifferentFiles
+          - AgentControl-RepoCardViewModel-FallbackNeverWithoutIdentity
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAliasNotConfigured_RestoresFromIdenticalSourceWithoutWritingPin
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_OnlyOtherFilesAvailable_RefusesWithExplanation
+          - RepoCardViewModel_Refresh_PinWithoutFilesIdentityAndAliasNotConfigured_NeverFallsBack
+          - MainWindow_PinnedAliasNotConfiguredButIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem
+
+      - id: AgentControl-LauncherUI-PinnedSourceSupplierShown
+        title: >-
+          The LauncherUI subsystem shall show on a repo's package chip which source actually
+          supplies its pinned package when that is not the source named in the pin, without a
+          source problem, and shall explain a pinned package that no configured source can supply.
+        justification: |
+          A teammate whose configuration differs must see a working repo, and see where its files
+          come from; when nothing can supply them the card must say why in terms the user can act
+          on.
+        children:
+          - AgentControl-RepoCardViewModel-ShowSupplyingSource
+          - AgentControl-RepoCardViewModel-UnresolvedPinExplained
+        tests:
+          - RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasIdenticalFiles_NamesSupplierWithoutProblem
+          - RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasDifferentFiles_ShowsSourceProblem
+          - MainWindow_PinnedAliasNotConfiguredButIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem
+
+      - id: AgentControl-LauncherUI-UpgradeAcrossSources
+        title: >-
+          The LauncherUI subsystem shall, for a repo whose pinned source is not configured but whose
+          pinned files another configured source supplies, offer an upgrade to the newest version
+          the configured sources offer (a tie keeping Settings order) and apply it from the source
+          that offers it, recording that source in the pin.
+        justification: |
+          A teammate with differently named sources must still be offered the next version of the
+          team's agent package; upgrading is a deliberate action, so the pin then names the source
+          that was actually used.
+        children:
+          - AgentControl-RepoCardViewModel-UpgradeAcrossSources
+        tests:
+          - RepoCardViewModel_UpgradeCommand_PinnedAliasNotConfigured_UsesNewestVersionAcrossSourcesAndRecordsItsAlias
+          - MainWindow_PinnedAliasNotConfigured_UpgradeChipOffersNewestVersionFromAnotherSource
+
       - id: AgentControl-LauncherUI-ContentChangeProtection
         title: >-
-          The LauncherUI subsystem shall record the content identity of a package in the repo's pin
-          when the package is selected or upgraded to.
+          The LauncherUI subsystem shall record the content identity of the agent files of a package
+          in the repo's pin when the package is selected or upgraded to.
         justification: |
           A package republished under the version a repo is pinned to would silently change the
-          instructions an agent follows; recording what was applied is what makes that detectable.
+          instructions an agent follows; recording what was applied is what makes that detectable,
+          and what lets another source with the identical files stand in for the pinned one.
         children:
           - AgentControl-RepoCardViewModel-RecordContentIdentity
         tests:
-          - RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin
+          - RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsFilesIdentityInPin
 
       - id: AgentControl-LauncherUI-ContentChangeRefusal
         title: >-
@@ -1566,10 +1624,12 @@ sections:
       - id: AgentControl-LauncherUI-ContentChangeAdoption
         title: >-
           The LauncherUI subsystem shall apply a package silently, recording its identity, when the
-          pin recorded none or the source reports none.
+          pin recorded no identity of agent files (including one an older version recorded from a
+          package file) or the source reports none.
         justification: |
-          Pins made before identities existed, and sources that cannot name an identity, must keep
-          working without warnings that mean nothing.
+          Pins made before identities were recorded or before they were computed from the files,
+          and sources that cannot name an identity, must keep working without warnings that mean
+          nothing.
         children:
           - AgentControl-RepoCardViewModel-AdoptMissingIdentity
           - AgentControl-RepoCardViewModel-IgnoreMissingSourceIdentity

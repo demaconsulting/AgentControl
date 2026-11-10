@@ -51,14 +51,17 @@ no network. Otherwise standard test environment, with no external services or ha
 - A Git source lists the tags that match its pattern as versions with their commits, delivers the layout of a chosen
   tag (and nothing else) from a cache keyed by repository and commit, refuses links, submodules and colliding names
   in the layout leaving nothing in the cache, runs no hook or filter of the user's configuration, names the commit
-  as the identity and shows a moved tag as a different revision.
+  as the source revision and shows a moved tag as a different revision.
 - A Git source is described by its address, tag pattern, optional sub-folder and exactly one package ID and persisted
   with its type by name; an invalid description, an address that carries a credential or names another transport
   is refused when the source is resolved, never repeating the address.
 - Work the application starts itself never lets git prompt, work the user starts may; a failure is reported in the
   failure type the caller acts on, and an old git is refused with advice.
-- A package a zip or NuGet source delivers reports the SHA-256 identity of its package file, and a zip republished
-  under the same version reports a different one.
+- A package a zip, NuGet or Git source delivers reports the SHA-256 identity of its agent files, the same one for the
+  same files from any kind of source however they are packed, and a zip republished under the same version with other
+  files reports a different one.
+- The offers of all configured sources are listed in configuration order, a source that cannot be read is skipped, and
+  the newest version across them wins, a tie keeping the first source in configuration order.
 - Package discovery reflects only what is physically present in a source folder.
 - Upgrade detection produces a definite true/false answer for every input, including an
   unparsable pinned version or an empty source folder.
@@ -299,26 +302,44 @@ the unit tests and covered by
 `AgentControl-NuGetSourceProvider-FailClosedWithoutVerification` and
 `AgentControl-NuGetSourceProvider-UnsupportedPlatformDoesNotAffectOpenSources`.
 
-**AgentPackageManagement_ContentIdentity_ZipAndNuGetSourcesReportTheBytesTheyDeliver**: Through the registry, a zip
-source and a NuGet folder source each acquire a package and report a `sha256:` content identity; the NuGet identity
-is the same on a second acquisition, and a zip replaced under the same version (the file deleted and written again
-with other content) reports an identity that compares as changed. Each reported identity is asserted to equal the
-SHA-256 of the exact delivered file bytes, computed independently of the production hashing code. For a NuGet package
+**AgentPackageManagement_ContentIdentity_ZipAndNuGetSourcesReportTheFilesTheyDeliver**: Through the registry, a zip
+source and a NuGet folder source each acquire a package and report a `files-sha256:` content identity; the NuGet
+identity is the same on a second acquisition, and a zip replaced under the same version (the file deleted and written
+again with other file content) reports an identity that compares as changed. Each reported identity is asserted to
+equal an identity the test computes independently of the production hashing code from the agent files it put into the
+package. For a NuGet package
 the identity describes the copy held on this machine: a version already held is not re-read from the feed, so a
 republish of it in the feed is not noticed until the copy is cleared - the behavior is documented, not a defect. This
-scenario is tested by `AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip`,
-covering `AgentControl-AgentPackageManagement-ContentIdentity` (children: the SHA-256 computation requirements,
+scenario is tested by `AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportFilesIdentityAndDetectRepublishedZip`,
+covering `AgentControl-AgentPackageManagement-ContentIdentity` (children: the files-identity computation requirements,
 `AgentControl-ZipFolderSourceProvider-ReportContentIdentity`, `AgentControl-NuGetSourceProvider-ReportContentIdentity`
-and `AgentControl-NuGetSourceProvider-RefuseUnidentifiablePackage`) and
+and `AgentControl-GitSourceProvider-ReportContentIdentity`) and
 `AgentControl-AgentPackageManagement-ContentIdentityComparable` (children: the `AgentControl-PackageContentIdentity-*`
-format, description and comparison requirements; the same test and the Git scenario below, whose identities are of
-another kind).
+recognition, format, description and comparison requirements).
+
+**AgentPackageManagement_ContentIdentity_SameFilesFromZipNuGetAndGitAreTheSame**: The same four agent files are
+delivered as a zip, as a NuGet package and as the layout of a tag in a real local Git repository (the Git fixture of
+the test project, whose commit also holds release notes that are not part of the identity); the three readers report
+the identity the test computes independently from the files, and the Git reader also reports its commit as the source
+revision while the others report none. This scenario is tested by
+`AgentPackageManagementSubsystem_SameFilesFromZipNuGetAndGit_ReportTheSameIdentity`,
+covering `AgentControl-AgentPackageManagement-ContentIdentity` and
+`AgentControl-AgentPackageManagement-ContentIdentityComparable`.
+
+**AgentPackageManagement_AcrossSources_ListsOffersInConfigurationOrderAndNewestWins**: Through the registry and the
+version cache, three zip sources offer the package, one of them being excluded as the pinned source, and a fourth
+source has no folder: the offers of the others are listed in configuration order, the excluded source is not read, the
+unreadable source is skipped, and the newest version across the sources wins (the excluded source is still considered
+for the latest), a version offered by two sources being attributed to the first in configuration order. This scenario
+is tested by
+`AgentPackageManagementSubsystem_AcrossSources_ListsOffersInConfigurationOrderAndNewestWins`, covering
+`AgentControl-AgentPackageManagement-OffersAcrossSources`.
 
 **AgentPackageManagement_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag**: Against a real local bare repository, the
 registry resolves a Git source, the version cache lists `v1.0.0` (annotated) and `v1.1.0` and reports that a newer
 version is available and the listing entry of the pinned version with its commit; acquiring the pinned version delivers
-its content with the identity `git-commit:{commit}`; after the maintainer moves `v1.0.0` to another commit a new
-session lists the pinned version at the other commit, which compares as changed against the identity that was
+its content with the source revision `git-commit:{commit}`; after the maintainer moves `v1.0.0` to another commit a new
+session lists the pinned version at the other commit, which differs from the revision that was
 reported. The rules of the address, the pattern, the layout checks, the cache and the failure kinds are verified by
 the unit tests of `GitRepositoryAddress`, `GitTagPattern` and `GitSourceProvider`, and the settings, registry, version
 cache and extractor rules by their own units. This scenario is tested by

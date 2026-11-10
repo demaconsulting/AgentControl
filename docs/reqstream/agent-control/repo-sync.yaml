@@ -172,25 +172,28 @@ sections:
 
       - id: AgentControl-RepoSync-ContentIdentity
         title: >-
-          The RepoSync subsystem shall expose, for a package it reads, the content identity that
-          the package's source supplied (or none when the source supplied none), so that what a
-          source can say about its package reaches the pin.
+          The RepoSync subsystem shall expose, for a package it reads, the identity of the agent
+          files the package delivers (the same identity for the same files whether they come from a
+          zip, an unpacked package folder or a layout folder), and the source revision its source
+          supplied (or none), so that what is recorded in the pin is the same for every kind of
+          source.
         justification: |
-          The identity recorded in a repo's pin comes from the source of the package (the hash of a
-          zip or a NuGet package, the commit of a Git tag); the reader is the channel that carries
-          it from the source to the code that records it.
+          The identity recorded in a repo's pin must not depend on the container the files came
+          in, so that another user's source of another kind can be recognized as delivering the
+          same files; the revision of a Git tag is the one thing only the source knows, and the
+          reader is the channel that carries it to the code that records it.
         children:
           - AgentControl-PackageContentExtractor-FolderReaderIdentity
-          - AgentControl-PackageContentExtractor-FolderReaderNoIdentity
+          - AgentControl-PackageContentExtractor-ManagedPackagePath
         tests:
-          - RepoSync_ContentIdentity_FolderReadersReportTheSuppliedIdentityOrNone
+          - RepoSync_ContentIdentity_SameFilesFromEveryKindOfReader_ReportTheSameIdentity
 
       - id: AgentControl-RepoSync-ContentIdentityOfAppliedBytes
         title: >-
           The RepoSync subsystem shall, for a zip package, compute the content identity from the
-          very bytes that are extracted, so that what is recorded is always what was applied.
+          very files that are extracted, so that what is recorded is always what was applied.
         justification: |
-          An identity taken in a separate look at the package file could describe different bytes
+          An identity taken in a separate look at the package file could describe different files
           than the ones extracted if the file were replaced in between; computing it from the one
           open handle that is also read closes that window.
         children:
@@ -202,7 +205,7 @@ sections:
       - id: AgentControl-RepoSync-LayoutRoot
         title: >-
           The RepoSync subsystem shall be able to read a package from a folder whose root is the
-          package layout (such as the files of a Git package), reporting the content identity its
+          package layout (such as the files of a Git package), reporting the source revision its
           source supplied, and shall refuse a layout root that does not exist or is a link.
         justification: |
           A Git package is delivered as a folder rather than a zip or a NuGet package; the same

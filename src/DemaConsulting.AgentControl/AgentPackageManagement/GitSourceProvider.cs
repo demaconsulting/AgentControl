@@ -150,8 +150,9 @@ internal interface IGitTagPreview
 ///     publishes nothing when it cannot be deleted); and keeps the result in a cache folder named
 ///     by the repository and the commit, so the same commit is never fetched twice and different
 ///     repositories never share a folder. Anything in the repository outside the layout (including
-///     links) is never written. The reader returned lists and reads only the layout and reports the
-///     identity <c>git-commit:{sha}</c>.
+///     links) is never written. The reader returned lists and reads only the layout, reports the
+///     files identity of what it delivers like every other source, and carries the commit as its
+///     source revision <c>git-commit:{sha}</c>.
 ///     </para>
 ///     <para>
 ///     Credentials come only from the user's own git setup (credential helper, ssh keys); see
@@ -405,6 +406,8 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
             var layoutRoot = _subfolder is null
                 ? final
                 : Path.Combine(final, _subfolder.Replace('/', Path.DirectorySeparatorChar));
+            // The commit travels with the reader as its source revision (a moved tag is detected by
+            // it); the identity of the files is computed from the files themselves, like any source's
             var reader = DirectoryPackageContentReader.OpenLayoutRoot(layoutRoot, PackageContentIdentity.FromGitCommit(commit));
             await Task.Run(() => Prune(commit), CancellationToken.None);
 
@@ -1254,6 +1257,9 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
 
         /// <inheritdoc />
         public string? ContentIdentity => inner.ContentIdentity;
+
+        /// <inheritdoc />
+        public string? SourceRevision => inner.SourceRevision;
 
         /// <inheritdoc />
         public IReadOnlyList<string> ListFiles() => inner.ListFiles();

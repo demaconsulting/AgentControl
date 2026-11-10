@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using System.Security.Cryptography;
 using System.Text.Json;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Tools;
@@ -26,14 +25,14 @@ using FlaUI.Core.Tools;
 namespace DemaConsulting.AgentControl.UiTests;
 
 /// <summary>
-///     End-to-end tests of package content integrity: the pin records which bytes a package version
-///     delivered, and a version that is later republished with different content is not synced
+///     End-to-end tests of package content integrity: the pin records which agent files a package version
+///     delivered, and a version that is later republished with different files is not synced
 ///     silently.
 /// </summary>
 public sealed class PackageContentIntegrityTests
 {
     /// <summary>
-    ///     A republished package version (same version, different zip bytes) must not be re-synced
+    ///     A republished package version (same version, different agent files) must not be re-synced
     ///     at launch: the launch tells the user the agent files were not synced, extracts nothing
     ///     and leaves the pin file exactly as it was - and the launch itself continues: the
     ///     configured agent tool is still invoked in the repo's working directory.
@@ -52,11 +51,13 @@ public sealed class PackageContentIntegrityTests
 
         try
         {
-            // Arrange: a repo pinned to 1.0.0 with the identity of the original zip, whose managed
-            // folders are missing, and a source whose 1.0.0 zip has since been republished
+            // Arrange: a repo pinned to 1.0.0 with the identity of the original files, whose managed
+            // folders are missing, and a source whose 1.0.0 zip has since been republished with other agent files
             var originalZip = FixturePackageBuilder.Create(sourceDirectory, packageName, "1.0.0", "# original\n");
-            var identity = Sha256Identity(originalZip);
-            FixturePackageBuilder.Create(sourceDirectory, packageName, "1.0.0", "# republished with other content\n");
+            var identity = TestFilesIdentity.OfArchive(originalZip);
+            FixturePackageBuilder.Create(
+                sourceDirectory, packageName, "1.0.0", "# republished with other content\n",
+                agentFileContent: "# Republished Agent\n");
 
             using var context = new AgentControlTestContext(
                 packageSourcePath: sourceDirectory,
@@ -109,11 +110,11 @@ public sealed class PackageContentIntegrityTests
     }
 
     /// <summary>
-    ///     Selecting a package for a never-pinned repo must record the SHA-256 of the package zip in
-    ///     the repo's pin file, so a later republished copy of the version can be told apart.
+    ///     Selecting a package for a never-pinned repo must record the identity of the package's agent
+    ///     files in the repo's pin file, so a later republished copy of the version can be told apart.
     /// </summary>
     [Fact]
-    public void SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile()
+    public void SelectPackageMenuItem_Click_RecordsFilesIdentityInPinFile()
     {
         if (!System.OperatingSystem.IsWindows())
         {
@@ -161,10 +162,10 @@ public sealed class PackageContentIntegrityTests
                 title => title.StartsWith("Release Notes", StringComparison.Ordinal),
                 TimeSpan.FromSeconds(15)));
 
-            // Assert: the pin names the identity of the zip that was applied
+            // Assert: the pin names the identity of the files of the zip that was applied
             using var pin = JsonDocument.Parse(File.ReadAllText(Path.Combine(context.RepoPath, ".agentcontrol.json")));
-            Assert.Equal(Sha256Identity(zip), pin.RootElement.GetProperty("ContentIdentity").GetString());
-            Assert.Equal(3, pin.RootElement.GetProperty("SchemaVersion").GetInt32());
+            Assert.Equal(TestFilesIdentity.OfArchive(zip), pin.RootElement.GetProperty("ContentIdentity").GetString());
+            Assert.Equal(4, pin.RootElement.GetProperty("SchemaVersion").GetInt32());
         }
         finally
         {
@@ -174,7 +175,7 @@ public sealed class PackageContentIntegrityTests
 
     /// <summary>
     ///     Upgrading a repo whose pin predates content identities must not warn: the upgrade is
-    ///     applied and the pin adopts the SHA-256 of the newly applied package.
+    ///     applied and the pin adopts the identity of the files of the newly applied package.
     /// </summary>
     [Fact]
     public void UpgradeChip_Click_PinWithoutIdentity_AdoptsIdentityOfNewVersionWithoutWarning()
@@ -226,7 +227,7 @@ public sealed class PackageContentIntegrityTests
                 {
                     using var pin = JsonDocument.Parse(File.ReadAllText(pinPath));
                     return pin.RootElement.TryGetProperty("ContentIdentity", out var identity) &&
-                           identity.GetString() == Sha256Identity(newerZip);
+                           identity.GetString() == TestFilesIdentity.OfArchive(newerZip);
                 },
                 timeout: TimeSpan.FromSeconds(10),
                 interval: TimeSpan.FromMilliseconds(200)).Result);
@@ -239,11 +240,11 @@ public sealed class PackageContentIntegrityTests
 
     /// <summary>
     ///     Selecting a package from a NuGet-package folder source for a never-pinned repository must record
-    ///     the SHA-256 of the <c>.nupkg</c> file in the repo's pin file (schema 3), so that a version
-    ///     republished in the feed can be told apart later.
+    ///     the identity of the package's agent files in the repo's pin file (schema 4) - not of the
+    ///     <c>.nupkg</c> file - so that a version republished in the feed can be told apart later.
     /// </summary>
     [Fact]
-    public void SelectPackage_FromNuGetFolderSource_RecordsSha256OfNupkgInPinFile()
+    public void SelectPackage_FromNuGetFolderSource_RecordsFilesIdentityInPinFile()
     {
         if (!System.OperatingSystem.IsWindows())
         {
@@ -274,11 +275,11 @@ public sealed class PackageContentIntegrityTests
             Assert.NotNull(context.WaitForWindow(
                 title => title.StartsWith("Release Notes", StringComparison.Ordinal), TimeSpan.FromSeconds(30)));
 
-            // Assert: the files came from the NuGet package, and the pin names the identity of the .nupkg file
+            // Assert: the files came from the NuGet package, and the pin names the identity of its agent files
             Assert.Equal("from feed", File.ReadAllText(Path.Combine(context.RepoPath, ".github", "agents", "feed.md")));
             using var pin = JsonDocument.Parse(File.ReadAllText(Path.Combine(context.RepoPath, ".agentcontrol.json")));
-            Assert.Equal(Sha256Identity(nupkg), pin.RootElement.GetProperty("ContentIdentity").GetString());
-            Assert.Equal(3, pin.RootElement.GetProperty("SchemaVersion").GetInt32());
+            Assert.Equal(TestFilesIdentity.OfArchive(nupkg, "content/"), pin.RootElement.GetProperty("ContentIdentity").GetString());
+            Assert.Equal(4, pin.RootElement.GetProperty("SchemaVersion").GetInt32());
         }
         finally
         {
@@ -305,9 +306,10 @@ public sealed class PackageContentIntegrityTests
 
         try
         {
-            // Arrange: a repo pinned to 1.0.0 with the identity of the original .nupkg, whose managed folders
-            // are missing, and a feed whose 1.0.0 package has since been republished
-            var identity = Sha256Identity(NuGetFixturePackageBuilder.Create(feedDirectory, packageName, "1.0.0", "original"));
+            // Arrange: a repo pinned to 1.0.0 with the identity of the original package's files, whose managed
+            // folders are missing, and a feed whose 1.0.0 package has since been republished
+            var identity = TestFilesIdentity.OfArchive(
+                NuGetFixturePackageBuilder.Create(feedDirectory, packageName, "1.0.0", "original"), "content/");
             NuGetFixturePackageBuilder.Create(feedDirectory, packageName, "1.0.0", "republished with other content");
             using var context = new AgentControlTestContext(
                 pinnedPackageName: packageName,
@@ -379,14 +381,6 @@ public sealed class PackageContentIntegrityTests
             left.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
             right.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
             StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    ///     Computes the <c>sha256:</c> content identity of a file independently of the application.
-    /// </summary>
-    /// <param name="path">The file to hash.</param>
-    /// <returns>The identity text.</returns>
-    private static string Sha256Identity(string path) =>
-        "sha256:" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
 
     /// <summary>
     ///     Best-effort recursive delete of a temporary fixture directory.

@@ -46,16 +46,15 @@ sections:
       - id: AgentControl-RepoConfig-SourcePin
         title: >-
           The RepoConfig subsystem shall record the alias of the package source in a repo's
-          pin, shall read a pin written before sources existed as a pin to the source named
-          Default, shall reject a pin of the current schema version that names no source,
-          shall preserve pin-file properties it does not understand when rewriting,
-          and shall neither interpret nor overwrite a pin file written by a newer version of
-          the tool.
+          pin as the preferred source, shall read a pin written before sources existed as a pin
+          to the source named Default, shall reject a pin of the current schema version that
+          names no source, shall preserve pin-file properties it does not understand when
+          rewriting, and shall neither interpret nor overwrite a pin file written by a newer
+          version of the tool.
         justification: |
-          Binding a pin to its source is what lets every later operation resolve the pin at the
-          right source only; existing pins must keep working, a pin file may be shared with
-          other tool versions, and an older tool must never damage a file it does not
-          understand.
+          Recording the source a pin came from is what lets every later operation try that source
+          first; existing pins must keep working, a pin file may be shared with other tool
+          versions, and an older tool must never damage a file it does not understand.
         children:
           - AgentControl-RepoPinStore-SourceAlias
           - AgentControl-RepoPinStore-LegacyV1
@@ -63,7 +62,7 @@ sections:
           - AgentControl-RepoPinStore-PreserveUnknownFields
           - AgentControl-RepoPinStore-RejectNewerSchema
         tests:
-          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource
+          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion4AndRoundTripsSource
           - RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource
           - RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault
           - RepoPinStore_Save_UnknownProperties_ArePreserved
@@ -72,15 +71,18 @@ sections:
       - id: AgentControl-RepoConfig-ContentIdentityPin
         title: >-
           The RepoConfig subsystem shall record in a repo's pin the content identity of the
-          package that was applied, in whatever form its source gave it, and shall omit it when
-          none is known.
+          agent files of the package that was applied, whatever kind of source delivered them,
+          and the source revision (for a Git source, the commit) the files came from, and shall
+          omit each when none is known.
         justification: |
-          The identity is what lets a later sync notice a republished package version, so it must
-          survive across sessions with the pin; a pin whose source reported none must not claim one.
+          The identity is what lets a later sync notice a republished package version and lets
+          another source with the identical files stand in for the pinned one, so it must survive
+          across sessions with the pin; the revision is what lets a moved Git tag be noticed. A pin
+          whose source reported none must not claim one.
         children:
           - AgentControl-RepoPinStore-SaveContentIdentity
         tests:
-          - RepoConfig_ContentIdentityPin_SurvivesSessionsIsNeverInventedAndIsAdoptedOnTheNextApply
+          - RepoConfig_ContentIdentityPin_SurvivesSessionsMigratesOlderPinsAndIsAdoptedOnTheNextApply
 
       - id: AgentControl-RepoConfig-LegacyPinWithoutIdentity
         title: >-
@@ -93,7 +95,23 @@ sections:
         children:
           - AgentControl-RepoPinStore-LoadWithoutIdentity
         tests:
-          - RepoConfig_ContentIdentityPin_SurvivesSessionsIsNeverInventedAndIsAdoptedOnTheNextApply
+          - RepoConfig_ContentIdentityPin_SurvivesSessionsMigratesOlderPinsAndIsAdoptedOnTheNextApply
+
+      - id: AgentControl-RepoConfig-LegacyIdentityMigration
+        title: >-
+          The RepoConfig subsystem shall read a pin whose identity an older version recorded from a
+          package file or a Git commit as a pin with no identity of its files, never as an identity
+          that can differ from the files, carrying a recorded Git commit over as the source
+          revision.
+        justification: |
+          An identity computed from something other than the files can neither confirm nor refute
+          that the files are the same: treating it as a mismatch would refuse files that are
+          identical, and trusting it would verify nothing. A pin made before this change must
+          therefore behave as a pin with no recorded identity until the next deliberate apply.
+        children:
+          - AgentControl-RepoPinStore-MigrateLegacyIdentity
+        tests:
+          - RepoConfig_ContentIdentityPin_SurvivesSessionsMigratesOlderPinsAndIsAdoptedOnTheNextApply
 
       - id: AgentControl-RepoConfig-PinSchemaVersion
         title: >-
@@ -101,10 +119,10 @@ sections:
           the tool refuses to interpret or overwrite, and shall itself refuse, with advice, to read
           or overwrite a pin of a newer schema version.
         justification: |
-          A tool version that does not know the content identity must not re-pin the repo to
-          another version while carrying the old identity forward, which would raise a false
+          A tool version that does not know the identity of the files must not re-pin the repo to
+          another version while carrying an old identity forward, which would raise a false
           alarm - so it has to refuse the file instead.
         children:
-          - AgentControl-RepoPinStore-SchemaVersion3
+          - AgentControl-RepoPinStore-SchemaVersion4
         tests:
           - RepoConfig_NewerSchemaPin_IsRefusedWithAdviceAndNeverOverwritten

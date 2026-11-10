@@ -40,7 +40,7 @@ sections:
           A pin is only meaningful together with the source it came from, and a failed write
           must never leave a half-written pin file that loses the repo's pin.
         tests:
-          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource
+          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion4AndRoundTripsSource
           - RepoPinStore_Load_CamelCasePropertyNames_AreRead
           - RepoPinStore_Save_CorruptExistingFile_IsReplacedAndLeavesNoTemporaryFile
 
@@ -96,14 +96,14 @@ sections:
 
       - id: AgentControl-RepoPinStore-SaveContentIdentity
         title: >-
-          The RepoPinStore class shall write the content identity of a pin when it has one, read it
-          back (also when the property name was written by hand in a different letter case), and
-          write nothing for a pin that has none.
+          The RepoPinStore class shall write the content identity and the source revision of a pin
+          when it has them, read them back (also when the property names were written by hand in a
+          different letter case), and write nothing for a pin that has none.
         justification: |
-          The identity must persist with the pin to be of any use after the application restarts,
-          and a pin whose source reported no identity must not claim one.
+          The identity and the revision must persist with the pin to be of any use after the
+          application restarts, and a pin whose source reported none must not claim one.
         tests:
-          - RepoPinStore_SaveThenLoad_ContentIdentity_RoundTripsAndIsOmittedWhenAbsent
+          - RepoPinStore_SaveThenLoad_ContentIdentityAndSourceRevision_RoundTripAndAreOmittedWhenAbsent
           - RepoPinStore_Load_CamelCaseContentIdentity_IsRead
 
       - id: AgentControl-RepoPinStore-LoadWithoutIdentity
@@ -115,18 +115,33 @@ sections:
           Repos pinned by an earlier version of the tool must keep working without a migration
           step, and must not be treated as having a changed identity.
         tests:
-          - RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema3OnSave
+          - RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema4OnSave
           - RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource
 
-      - id: AgentControl-RepoPinStore-SchemaVersion3
+      - id: AgentControl-RepoPinStore-MigrateLegacyIdentity
         title: >-
-          The RepoPinStore class shall write pin files as schema version 3 and shall refuse, with a
+          The RepoPinStore class shall read a pin file of schema version 3 without the content
+          identity it records - an identity of a package file or of a Git commit, which cannot be
+          compared with an identity of the files - and shall carry a Git commit it records over as
+          the pin's source revision.
+        justification: |
+          An identity computed from something other than the files can neither confirm nor refute
+          that the files are the same, so it must never be taken for one and raise a false alarm;
+          the commit is still the revision the files came from, which keeps a moved tag detectable
+          for a repo that was pinned before this change.
+        tests:
+          - RepoPinStore_Load_Schema3PinWithContainerIdentity_DropsIdentityAndRewritesAsSchema4
+          - RepoPinStore_Load_Schema3PinWithGitCommitIdentity_CarriesItAsSourceRevision
+
+      - id: AgentControl-RepoPinStore-SchemaVersion4
+        title: >-
+          The RepoPinStore class shall write pin files as schema version 4 and shall refuse, with a
           message naming the versions, to read or overwrite a pin file of any newer schema version.
         justification: |
-          A tool version that does not know the content identity would carry a stale one forward
-          when it re-pins a repo, so the schema version is raised for it to refuse the file
+          A tool version that does not know the identity of the files would carry a stale one
+          forward when it re-pins a repo, so the schema version is raised for it to refuse the file
           instead of corrupting the pin.
         tests:
-          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion3AndRoundTripsSource
+          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion4AndRoundTripsSource
           - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage
           - RepoPinStore_Save_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsAndLeavesFileUnchanged

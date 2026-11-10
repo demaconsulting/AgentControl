@@ -48,9 +48,9 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
     private const string PinnedCommit = "abcdef0123456789abcdef0123456789abcdef01";
 
     /// <summary>
-    ///     The content identity a Git pin records for <see cref="PinnedCommit"/>.
+    ///     The source revision a Git pin records for <see cref="PinnedCommit"/>.
     /// </summary>
-    private const string PinnedIdentity = "git-commit:" + PinnedCommit;
+    private const string PinnedRevision = "git-commit:" + PinnedCommit;
 
     /// <summary>
     ///     Another commit, for a tag that moved.
@@ -100,10 +100,10 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
     ///     recorded) names the tag only.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_PackageChipTooltip_GitPinWithoutIdentity_NamesTagOnly()
+    public void RepoCardViewModel_PackageChipTooltip_GitPinWithoutRevision_NamesTagOnly()
     {
         // Arrange / Act
-        var (_, card, _) = CreatePinnedCard(identity: null);
+        var (_, card, _) = CreatePinnedCard(revision: null);
 
         // Assert
         Assert.Null(card.PinnedCommitShort);
@@ -119,7 +119,7 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
     public void RepoCardViewModel_PackageChipTooltip_ZipPin_HasNoTagOrCommit()
     {
         // Arrange / Act
-        var (_, card, _) = CreatePinnedCard(source: ZipSource(), identity: "sha256:" + new string('a', 64));
+        var (_, card, _) = CreatePinnedCard(source: ZipSource(), revision: null);
 
         // Assert
         Assert.Null(card.PinnedTagName);
@@ -210,7 +210,7 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
     public async Task RepoCardViewModel_RefreshUpgradeStatus_ZipSourceWithRevision_IsNotMoved()
     {
         // Arrange
-        var (_, card, provider) = CreatePinnedCard(source: ZipSource(), identity: "sha256:" + new string('a', 64));
+        var (_, card, provider) = CreatePinnedCard(source: ZipSource(), revision: null);
         provider.Revisions["1.2.3"] = OtherCommit;
 
         // Act
@@ -226,10 +226,10 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
     ///     as moved (it adopts a commit the next time a package is applied).
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_RefreshUpgradeStatus_PinWithoutIdentity_IsNotMoved()
+    public async Task RepoCardViewModel_RefreshUpgradeStatus_PinWithoutRevision_IsNotMoved()
     {
         // Arrange
-        var (_, card, provider) = CreatePinnedCard(identity: null);
+        var (_, card, provider) = CreatePinnedCard(revision: null);
         provider.Revisions["1.2.3"] = OtherCommit;
 
         // Act
@@ -238,6 +238,36 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
         // Assert
         Assert.False(card.IsPinnedTagMoved);
         Assert.Equal(RepoCardStatus.UpToDate, card.Status);
+    }
+
+    /// <summary>
+    ///     Test that a schema 3 Git pin - whose recorded <c>git-commit:</c> identity becomes the source
+    ///     revision when the pin is read - still has a moved tag detected and its commit shown.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshUpgradeStatus_Schema3GitPin_DetectsMovedTagFromMigratedCommit()
+    {
+        // Arrange: a pin file written by the previous schema, and a tag that now points to another commit
+        var repo = CreateTempDirectory();
+        await File.WriteAllTextAsync(
+            Path.Combine(repo, ".agentcontrol.json"),
+            $$"""{ "SchemaVersion": 3, "Source": "Repo", "PackageName": "contoso-agents", "Version": "1.2.3", "ContentIdentity": "{{PinnedRevision}}" }""",
+            TestContext.Current.CancellationToken);
+        var provider = new FakePackageSourceProvider("Repo", ("contoso-agents", "1.2.3"));
+        provider.Revisions["1.2.3"] = OtherCommit;
+        var settings = new AppSettings { Sources = [GitSource()] };
+        var registry = new PackageSourceRegistry(settings.Sources, _ => provider);
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), registryFactory: _ => registry);
+        card.RefreshCheap();
+
+        // Act
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the old commit is the revision, so the moved tag is seen
+        Assert.Equal("abcdef0", card.PinnedCommitShort);
+        Assert.True(card.IsPinnedTagMoved);
+        Assert.Contains("abcdef0 -> 1234567", card.PinnedTagMovedTooltip, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -259,7 +289,7 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
             Source = "Repo",
             PackageName = "contoso-agents",
             Version = "1.2.3",
-            ContentIdentity = PackageContentIdentity.FromGitCommit(OtherCommit)
+            SourceRevision = PackageContentIdentity.FromGitCommit(OtherCommit)
         });
         card.RefreshCheap();
         await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
@@ -307,7 +337,7 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
     public async Task RepoCardViewModel_RefreshAsync_ZipSource_KeepsUsingCachedListing()
     {
         // Arrange
-        var (_, card, provider) = CreatePinnedCard(source: ZipSource(), identity: "sha256:" + new string('a', 64));
+        var (_, card, provider) = CreatePinnedCard(source: ZipSource(), revision: null);
         await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
 
         // Act
@@ -369,18 +399,18 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a pin whose content identity is not a well-formed commit identity is never reported
-    ///     as a moved tag, whatever the listing says: there is no recorded commit to compare with.
+    ///     Test that a pin whose source revision is not a well-formed commit is never reported as a moved
+    ///     tag, whatever the listing says: there is no recorded commit to compare with.
     /// </summary>
     [Theory]
     [InlineData("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
     [InlineData("git-commit:not-a-commit")]
     [InlineData("git-commit:abcdef0")]
     [InlineData("something-else")]
-    public async Task RepoCardViewModel_RefreshUpgradeStatus_GitSourceWithNonCommitIdentity_IsNotMoved(string identity)
+    public async Task RepoCardViewModel_RefreshUpgradeStatus_GitSourceWithNonCommitRevision_IsNotMoved(string revision)
     {
         // Arrange: a Git source whose tag now points to another commit
-        var (_, card, provider) = CreatePinnedCard(identity: identity);
+        var (_, card, provider) = CreatePinnedCard(revision: revision);
         provider.Revisions["1.2.3"] = OtherCommit;
 
         // Act
@@ -412,7 +442,7 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
             Source = "Repo",
             PackageName = "contoso-agents",
             Version = "1.2.3",
-            ContentIdentity = PinnedIdentity
+            SourceRevision = PinnedRevision
         });
         var settings = new AppSettings { Sources = [GitSource()] };
         var card = new RepoCardViewModel(
@@ -549,7 +579,8 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
         // Assert
         Assert.Empty(errors);
         Assert.Equal("content of 1234567", await File.ReadAllTextAsync(Path.Combine(repo, ".github", "agents", "copilot.md"), TestContext.Current.CancellationToken));
-        Assert.Equal(PackageContentIdentity.FromGitCommit(OtherCommit), RepoPinStore.Load(repo)?.ContentIdentity);
+        Assert.Equal(PackageContentIdentity.FromGitCommit(OtherCommit), RepoPinStore.Load(repo)?.SourceRevision);
+        Assert.Equal(CommitReader.IdentityOf(OtherCommit), RepoPinStore.Load(repo)?.ContentIdentity);
         Assert.Equal("1234567", card.PinnedCommitShort);
         Assert.False(card.IsPinnedTagMoved);
     }
@@ -623,12 +654,12 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
     ///     provider serving that version.
     /// </summary>
     /// <param name="source">The source the pin names; the Git source when <see langword="null"/>.</param>
-    /// <param name="identity">The content identity the pin records; the commit identity by default,
+    /// <param name="revision">The source revision the pin records; the commit by default,
     ///     <see langword="null"/> for a pin that recorded none.</param>
     /// <param name="newerVersion">A second version the provider serves, or <see langword="null"/>.</param>
     /// <returns>The repo folder, the card (its pin read) and the fake provider.</returns>
     private (string Repo, RepoCardViewModel Card, FakePackageSourceProvider Provider) CreatePinnedCard(
-        PackageSourceDefinition? source = null, string? identity = PinnedIdentity, string? newerVersion = null)
+        PackageSourceDefinition? source = null, string? revision = PinnedRevision, string? newerVersion = null)
     {
         var definition = source ?? GitSource();
         var repo = CreateTempDirectory();
@@ -637,7 +668,7 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
             Source = "Repo",
             PackageName = "contoso-agents",
             Version = "1.2.3",
-            ContentIdentity = identity
+            SourceRevision = revision
         });
         var provider = newerVersion is null
             ? new FakePackageSourceProvider("Repo", ("contoso-agents", "1.2.3"))
@@ -663,7 +694,8 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
             Source = "Repo",
             PackageName = "contoso-agents",
             Version = "1.2.3",
-            ContentIdentity = PackageContentIdentity.FromGitCommit(PinnedCommit)
+            ContentIdentity = CommitReader.IdentityOf(PinnedCommit),
+            SourceRevision = PackageContentIdentity.FromGitCommit(PinnedCommit)
         });
         var provider = new DeliveringGitProvider { Commit = PinnedCommit };
         var settings = new AppSettings { Sources = [GitSource()] };
@@ -753,16 +785,29 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
     }
 
     /// <summary>
-    ///     A reader over a fixed set of files whose content names the commit it stands for.
+    ///     A reader over a fixed set of files whose content names the commit it stands for; its content
+    ///     identity is a (synthetic) files identity that differs from commit to commit, and the commit is
+    ///     its source revision.
     /// </summary>
     /// <param name="commit">The commit.</param>
     private sealed class CommitReader(string commit) : IPackageContentReader
     {
+        /// <summary>
+        ///     Gets the files identity this reader reports for a commit.
+        /// </summary>
+        /// <param name="commit">The commit.</param>
+        /// <returns>A well-formed files identity that is different for every commit.</returns>
+        public static string IdentityOf(string commit) =>
+            "files-sha256:" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(commit)));
+
         /// <inheritdoc />
         public string Description => "commit " + commit;
 
         /// <inheritdoc />
-        public string? ContentIdentity => PackageContentIdentity.FromGitCommit(commit);
+        public string? ContentIdentity => IdentityOf(commit);
+
+        /// <inheritdoc />
+        public string? SourceRevision => PackageContentIdentity.FromGitCommit(commit);
 
         /// <inheritdoc />
         public IReadOnlyList<string> ListFiles() =>

@@ -464,8 +464,8 @@ sections:
       - id: AgentControl-System-PinFile
         title: >-
           The tool shall persist each repo's pinned agent package name, exact version,
-          package source and content identity, so that upgrades are an explicit user action
-          rather than an automatic version float.
+          preferred package source and content identity, so that upgrades are an explicit user
+          action rather than an automatic version float.
         tags: [system]
         justification: |
           Per architecture.md's "Mandatory version pinning" decision, package upgrades can
@@ -478,9 +478,9 @@ sections:
         tests:
           - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
           # The pin file records the content identity of what was applied, for every kind of source:
-          # the SHA-256 of the zip, the SHA-256 of the NuGet package, the commit of a Git tag.
-          - windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile
-          - windows@SelectPackage_FromNuGetFolderSource_RecordsSha256OfNupkgInPinFile
+          # the identity of the package's agent files, and for a Git tag also the commit.
+          - windows@SelectPackageMenuItem_Click_RecordsFilesIdentityInPinFile
+          - windows@SelectPackage_FromNuGetFolderSource_RecordsFilesIdentityInPinFile
           - windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip
 
       - id: AgentControl-System-AgentsMdTemplate
@@ -657,16 +657,18 @@ sections:
 
       - id: AgentControl-System-SourcePinIntegrity
         title: >-
-          The tool shall record in each repo's pin the alias of the source its package came
-          from and shall resolve that pin only against that source; when the source is not
-          configured the tool shall report an error for that repo and shall never substitute
-          another source.
+          The tool shall record in each repo's pin the alias of the source its package came from
+          as the preferred source, shall resolve the pin against that source whenever it is
+          configured and offers the pinned version, shall use another configured source for the
+          pin only when that source delivers files identical to those the pin recorded, and shall
+          report an error for the repo when no source can supply the pinned package.
         tags: [system]
         justification: |
           A package name is not unique across sources, so resolving a pin by name alone could
           install a different source's package under the repo's pin (a dependency-confusion
-          attack, or just an accident). Pins must therefore be bound to their source, and a
-          missing source must stop the operation rather than be quietly replaced.
+          attack, or just an accident). A pin is therefore bound to its source - and to the exact
+          files it recorded - and a missing or renamed source may only be replaced by one that is
+          proven to deliver those same files, otherwise the operation must stop with an error.
         children:
           - AgentControl-RepoConfig-SourcePin
           - AgentControl-AgentPackageManagement-SourceResolution
@@ -674,15 +676,60 @@ sections:
         tests:
           # End to end: a pin to the NuGet source is upgraded from that source although the zip
           # source offers a higher version of the same package name, and a pin to an
-          # unconfigured source shows an error and offers no upgrade from another source.
+          # unconfigured source (that recorded no identity of its files) shows an error and offers
+          # no upgrade from another source.
           - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
           - windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
+
+      - id: AgentControl-System-PortablePin
+        title: >-
+          The tool shall obtain a repo's pinned agent files from any configured package source,
+          whatever its alias or kind, that delivers files identical to the files the pin recorded,
+          when the source named in the pin is not configured or does not offer the pinned version,
+          shall show on the repo's card which source supplies them without reporting a problem, and
+          shall never obtain them from a source whose files differ.
+        tags: [system, security]
+        justification: |
+          A repo's pin is committed and shared by a team, but source aliases are every user's own
+          configuration. Teammates who get the same agent files from a differently named source, a
+          different kind of source or a re-packed mirror must not see a broken repo, lose upgrades
+          or be unable to restore the files on a fresh clone; the identical files are the evidence
+          that makes this safe, and a source whose files differ must never be used on the strength
+          of its package name alone.
+        children:
+          - AgentControl-LauncherUI-PinnedSourceFallback
+          - AgentControl-LauncherUI-PinnedSourceSupplierShown
+          - AgentControl-AgentPackageManagement-ContentIdentity
+          - AgentControl-RepoConfig-LegacyIdentityMigration
+        tests:
+          # Headless end to end through the main window: a repo pinned to a source this machine does
+          # not have, whose files another configured source delivers, shows that source on its chip
+          # and no source problem.
+          - MainWindow_PinnedAliasNotConfiguredButIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem
+
+      - id: AgentControl-System-UpgradeAcrossSources
+        title: >-
+          The tool shall, for a repo whose pinned source is not configured but whose pinned files
+          another configured source delivers, offer an upgrade to the newest version that the
+          configured sources offer and apply it from the source that offers it, recording that
+          source in the repo's pin.
+        tags: [system]
+        justification: |
+          A teammate with differently named sources must still be told about, and be able to take,
+          the next version of the team's agent package, without every user having to name sources
+          alike.
+        children:
+          - AgentControl-LauncherUI-UpgradeAcrossSources
+          - AgentControl-AgentPackageManagement-OffersAcrossSources
+        tests:
+          - MainWindow_PinnedAliasNotConfigured_UpgradeChipOffersNewestVersionFromAnotherSource
 
       - id: AgentControl-System-PackageContentIntegrity
         title: >-
           The tool shall record in each repo's pin a content identity - a fingerprint of the
-          package that was applied - whenever it applies a package from any kind of package
-          source (a zip folder, a NuGet package folder or server, or a Git repository).
+          agent files of the package that was applied, the same whatever kind of package source
+          delivered them - whenever it applies a package from any kind of package source (a zip
+          folder, a NuGet package folder or server, or a Git repository).
         tags: [system, security]
         justification: |
           A package version is meant to be immutable, but a folder of zip files, a package feed or
@@ -690,7 +737,8 @@ sections:
           version would silently change the instructions an agent follows in every repo pinned to
           that version (a supply-chain risk as well as an honest mistake). Recording what was
           applied is what makes a republished version detectable, so it must happen for every kind
-          of source.
+          of source - and computing it from the files, not from the container, is what keeps the
+          same files from different sources from looking like a change.
         children:
           - AgentControl-AgentPackageManagement-ContentIdentity
           - AgentControl-AgentPackageManagement-ContentIdentityComparable
@@ -700,8 +748,8 @@ sections:
           - AgentControl-LauncherUI-ContentChangeProtection
           - AgentControl-AgentPackageManagement-GitSourceContentIdentity
         tests:
-          - windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile
-          - windows@SelectPackage_FromNuGetFolderSource_RecordsSha256OfNupkgInPinFile
+          - windows@SelectPackageMenuItem_Click_RecordsFilesIdentityInPinFile
+          - windows@SelectPackage_FromNuGetFolderSource_RecordsFilesIdentityInPinFile
           - windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip
 
       - id: AgentControl-System-ChangedContentRefusedAtLaunch
@@ -761,16 +809,18 @@ sections:
 
       - id: AgentControl-System-IdentityAdoptedOnUpgrade
         title: >-
-          The tool shall record a content identity, without any warning, when the user upgrades a
-          repo whose pin has none.
+          The tool shall record a content identity of the agent files, without any warning, when the
+          user upgrades a repo whose pin has none, including a pin whose identity an older version
+          recorded from a package file.
         tags: [system]
         justification: |
-          Pins made before identities existed must keep working without nagging; the next
-          deliberate upgrade is the moment an identity can be recorded without claiming anything
-          changed.
+          Pins made before identities were recorded, or before they were computed from the files,
+          must keep working without nagging; the next deliberate upgrade is the moment an identity
+          can be recorded without claiming anything changed.
         children:
           - AgentControl-LauncherUI-ContentChangeAdoption
           - AgentControl-RepoConfig-LegacyPinWithoutIdentity
+          - AgentControl-RepoConfig-LegacyIdentityMigration
         tests:
           - windows@UpgradeChip_Click_PinWithoutIdentity_AdoptsIdentityOfNewVersionWithoutWarning
 

@@ -31,55 +31,78 @@ namespace DemaConsulting.AgentControl.Tests.RepoConfig;
 public class RepoConfigSubsystemTests
 {
     /// <summary>
-    ///     Test that the content identity of the applied package, in either of the forms the application
-    ///     records, survives from one session to the next and is never invented: a zip or NuGet identity
-    ///     and a Git commit identity round-trip, a pin that has none writes none, and a pin written before
-    ///     identities existed loads with none and adopts the identity of the next package applied.
+    ///     Test that the content identity of the applied package (computed from its files) and the source
+    ///     revision survive from one session to the next and are never invented: both round-trip, a pin that
+    ///     has none writes none, a pin written before identities existed loads with none, a schema 3 pin's
+    ///     identity of a container is dropped and its Git commit becomes the source revision, and each such
+    ///     pin adopts the identity of the next package applied.
     /// </summary>
     [Fact]
-    public void RepoConfig_ContentIdentityPin_SurvivesSessionsIsNeverInventedAndIsAdoptedOnTheNextApply()
+    public void RepoConfig_ContentIdentityPin_SurvivesSessionsMigratesOlderPinsAndIsAdoptedOnTheNextApply()
     {
-        // Arrange: one repo per kind of identity, and a pin file as an earlier version wrote it
-        var zipRepo = CreateTempDirectory();
-        var gitRepo = CreateTempDirectory();
+        // Arrange: one repo per kind of pin, and pin files as earlier versions wrote them
+        var filesRepo = CreateTempDirectory();
         var noneRepo = CreateTempDirectory();
         var oldRepo = CreateTempDirectory();
+        var containerRepo = CreateTempDirectory();
+        var gitV3Repo = CreateTempDirectory();
         try
         {
-            var sha256 = "sha256:" + new string('a', 64);
+            var filesIdentity = "files-sha256:" + new string('a', 64);
             var gitCommit = "git-commit:" + new string('b', 40);
-            var adopted = "sha256:" + new string('c', 64);
+            var adopted = "files-sha256:" + new string('c', 64);
             var oldPinPath = Path.Combine(oldRepo, ".agentcontrol.json");
             File.WriteAllText(
                 oldPinPath,
                 """{ "SchemaVersion": 2, "Source": "Feed", "PackageName": "p", "Version": "1.0.0", "AgentsMdTemplateDeclined": true }""");
+            File.WriteAllText(
+                Path.Combine(containerRepo, ".agentcontrol.json"),
+                $$"""{ "SchemaVersion": 3, "Source": "Zips", "PackageName": "p", "Version": "1.0.0", "ContentIdentity": "sha256:{{new string('e', 64)}}" }""");
+            File.WriteAllText(
+                Path.Combine(gitV3Repo, ".agentcontrol.json"),
+                $$"""{ "SchemaVersion": 3, "Source": "Repo", "PackageName": "p", "Version": "1.0.0", "ContentIdentity": "{{gitCommit}}" }""");
 
-            // Act: one session saves each pin, a later session loads them
-            RepoPinStore.Save(zipRepo, new RepoPin { Source = "Zips", PackageName = "p", Version = "1.0.0", ContentIdentity = sha256 });
-            RepoPinStore.Save(gitRepo, new RepoPin { Source = "Repo", PackageName = "p", Version = "1.0.0", ContentIdentity = gitCommit });
+            // Act: one session saves the pins, a later session loads them
+            RepoPinStore.Save(
+                filesRepo,
+                new RepoPin
+                {
+                    Source = "Repo",
+                    PackageName = "p",
+                    Version = "1.0.0",
+                    ContentIdentity = filesIdentity,
+                    SourceRevision = gitCommit
+                });
             RepoPinStore.Save(noneRepo, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" });
-            var zipPin = RepoPinStore.Load(zipRepo);
-            var gitPin = RepoPinStore.Load(gitRepo);
+            var filesPin = RepoPinStore.Load(filesRepo);
             var nonePin = RepoPinStore.Load(noneRepo);
             var oldPin = RepoPinStore.Load(oldRepo);
+            var containerPin = RepoPinStore.Load(containerRepo);
+            var gitV3Pin = RepoPinStore.Load(gitV3Repo);
 
-            // Assert: each identity came back as recorded, the pin without one has none and none is in its file,
-            // and the old pin has no identity either
+            // Assert: the recorded values came back, nothing was invented, and older identities are not
+            // carried over as files identities
             Assert.Multiple(
-                () => Assert.Equal(sha256, zipPin?.ContentIdentity),
-                () => Assert.Equal(gitCommit, gitPin?.ContentIdentity),
+                () => Assert.Equal(filesIdentity, filesPin?.ContentIdentity),
+                () => Assert.Equal(gitCommit, filesPin?.SourceRevision),
                 () => Assert.Null(nonePin?.ContentIdentity),
                 () => Assert.DoesNotContain(
                     "ContentIdentity",
                     File.ReadAllText(Path.Combine(noneRepo, ".agentcontrol.json")),
                     StringComparison.OrdinalIgnoreCase),
-                () => Assert.Null(oldPin?.ContentIdentity));
+                () => Assert.Null(oldPin?.ContentIdentity),
+                () => Assert.Null(containerPin?.ContentIdentity),
+                () => Assert.Null(containerPin?.SourceRevision),
+                () => Assert.Null(gitV3Pin?.ContentIdentity),
+                () => Assert.Equal(gitCommit, gitV3Pin?.SourceRevision));
 
-            // Act: the next package applied to the old pin's repo records its identity
+            // Act: the next package applied to each older pin's repo records its identity
             oldPin!.ContentIdentity = adopted;
             RepoPinStore.Save(oldRepo, oldPin);
             var adoptedPin = RepoPinStore.Load(oldRepo);
             var rewritten = File.ReadAllText(oldPinPath);
+            containerPin!.ContentIdentity = adopted;
+            RepoPinStore.Save(containerRepo, containerPin);
 
             // Assert: the identity was adopted, the file is now the current schema and the rest of the pin is kept
             Assert.Multiple(
@@ -87,11 +110,12 @@ public class RepoConfigSubsystemTests
                 () => Assert.Contains($"\"SchemaVersion\": {RepoPin.CurrentSchemaVersion}", rewritten, StringComparison.Ordinal),
                 () => Assert.Equal("Feed", adoptedPin?.Source),
                 () => Assert.Equal("1.0.0", adoptedPin?.Version),
-                () => Assert.True(adoptedPin?.AgentsMdTemplateDeclined));
+                () => Assert.True(adoptedPin?.AgentsMdTemplateDeclined),
+                () => Assert.Equal(adopted, RepoPinStore.Load(containerRepo)?.ContentIdentity));
         }
         finally
         {
-            foreach (var repo in new[] { zipRepo, gitRepo, noneRepo, oldRepo })
+            foreach (var repo in new[] { filesRepo, noneRepo, oldRepo, containerRepo, gitV3Repo })
             {
                 Directory.Delete(repo, recursive: true);
             }
@@ -120,7 +144,7 @@ public class RepoConfigSubsystemTests
             var saveFailure = Assert.Throws<UnsupportedPinSchemaException>(
                 () => RepoPinStore.Save(
                     repoRoot,
-                    new RepoPin { Source = "Feed", PackageName = "p", Version = "2.0.0", ContentIdentity = "sha256:" + new string('d', 64) }));
+                    new RepoPin { Source = "Feed", PackageName = "p", Version = "2.0.0", ContentIdentity = "files-sha256:" + new string('d', 64) }));
 
             // Assert: the refusals name the versions and say to update, and the file is untouched
             Assert.Multiple(

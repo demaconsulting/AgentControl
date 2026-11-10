@@ -30,8 +30,10 @@ namespace DemaConsulting.AgentControl.RepoConfig;
 ///     <para>
 ///     Per architecture.md's "Mandatory version pinning" decision, a repo always names an exact
 ///     package and version - there is no "latest"/unpinned mode. Since several package sources can
-///     be configured, a pin also names the <see cref="Source"/> alias the package came from, so it
-///     is only ever resolved against that source.
+///     be configured, a pin also names the <see cref="Source"/> alias the package came from: the
+///     preferred source. Aliases are user-specific, so when that alias is not configured (or does
+///     not offer the version) another configured source is used only if it delivers files whose
+///     <see cref="ContentIdentity"/> equals the one recorded here.
 ///     </para>
 ///     <para>
 ///     Property names are written exactly as declared (PascalCase, as pin files always have been)
@@ -45,12 +47,15 @@ namespace DemaConsulting.AgentControl.RepoConfig;
 internal sealed class RepoPin
 {
     /// <summary>
-    ///     The pin file schema version this build reads and writes. Version 3 adds
-    ///     <see cref="ContentIdentity"/>; it is a new version rather than an additive field so an
-    ///     older AgentControl, which would carry a stale identity forward when it re-pins the repo
-    ///     to another version, refuses the file instead (see <see cref="RepoPinStore"/>).
+    ///     The pin file schema version this build reads and writes. Version 3 added a content
+    ///     identity of the package container; version 4 makes <see cref="ContentIdentity"/> an
+    ///     identity of the delivered <em>files</em> (the same for any source that delivers the same
+    ///     files) and adds <see cref="SourceRevision"/>. Each is a new version rather than an
+    ///     additive field so an older AgentControl, which would carry a stale identity forward when
+    ///     it re-pins the repo to another version, refuses the file instead (see
+    ///     <see cref="RepoPinStore"/>).
     /// </summary>
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     /// <summary>
     ///     The source alias a pin written before pins named a source is resolved against: the alias
@@ -66,8 +71,11 @@ internal sealed class RepoPin
     public int SchemaVersion { get; set; }
 
     /// <summary>
-    ///     Gets or sets the alias of the package source the pinned package came from. For a pin file
-    ///     written before sources existed, <see cref="RepoPinStore.Load"/> sets this to
+    ///     Gets or sets the alias of the package source the pinned package came from: the
+    ///     <em>preferred</em> source. Aliases are per-user configuration, so another user may reach
+    ///     the same files through a source with another alias or of another kind; the files are then
+    ///     recognized by <see cref="ContentIdentity"/> and this alias is not rewritten. For a pin
+    ///     file written before sources existed, <see cref="RepoPinStore.Load"/> sets this to
     ///     <see cref="LegacySourceAlias"/>.
     /// </summary>
     public string? Source { get; set; }
@@ -84,19 +92,36 @@ internal sealed class RepoPin
     public string Version { get; set; } = string.Empty;
 
     /// <summary>
-    ///     Gets or sets the content identity of the package this pin was made from (for example
-    ///     <c>sha256:...</c> of the zip or <c>.nupkg</c> file), or <see langword="null"/> when none
-    ///     is recorded.
+    ///     Gets or sets the content identity of the agent files this pin was made from
+    ///     (<c>files-sha256:</c> followed by 64 hex digits, see <c>PackageContentIdentity</c>), or
+    ///     <see langword="null"/> when none is recorded.
     /// </summary>
     /// <remarks>
-    ///     Recorded when a package is selected or upgraded, so a later sync of the same version can
-    ///     tell that the package was republished with different content. Absent in pins written
-    ///     before schema version 3 (and in a pin whose source reported no identity), which means
-    ///     "nothing to compare" rather than "changed"; the next select or upgrade records one. Not
-    ///     written when <see langword="null"/>.
+    ///     Computed from the delivered files, so it is the same whichever source (zip folder, NuGet,
+    ///     Git) delivered them. Recorded when a package is selected, changed or upgraded, so a later
+    ///     sync of the same version can tell that the package was republished and so another source
+    ///     with the identical files can stand in for the pinned one. Absent in pins written before
+    ///     schema version 4, whose identity was computed from a container and cannot be compared
+    ///     with one computed from the files (see <see cref="RepoPinStore.Load"/>), and in a pin
+    ///     whose source reported none; absent means "nothing to compare" rather than "changed", and
+    ///     the next select, change or upgrade records one. Not written when <see langword="null"/>.
     /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ContentIdentity { get; set; }
+
+    /// <summary>
+    ///     Gets or sets the source revision the pinned files came from - for a Git source the
+    ///     <c>git-commit:{sha}</c> of the tag's commit - or <see langword="null"/> when the source
+    ///     has no such notion or none is recorded.
+    /// </summary>
+    /// <remarks>
+    ///     Not part of the content identity (the same files can be reached through different
+    ///     commits); it lets AgentControl notice that a Git tag was moved to another commit. Not
+    ///     written when <see langword="null"/>.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceRevision { get; set; }
+
     /// <summary>
     ///     Gets or sets whether the user has already been offered, and declined, the package's
     ///     optional root-level <c>AGENTS.md</c> template for this repo.

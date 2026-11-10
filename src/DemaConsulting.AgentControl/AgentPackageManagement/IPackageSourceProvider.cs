@@ -82,13 +82,14 @@ internal interface IPackageSourceProvider
     ///     this same provider.</param>
     /// <param name="cancellationToken">Token to abandon the call.</param>
     /// <returns>A reader over the package content that the caller must dispose. Its
-    ///     <see cref="IPackageContentReader.ContentIdentity"/> names the content the source
-    ///     delivered, in the form of the source: <c>sha256:{hex}</c>, the SHA-256 of the zip or
-    ///     <c>.nupkg</c> file, for a zip folder or NuGet source, and <c>git-commit:{hex}</c>, the
-    ///     commit a tag pointed to, for a Git source. The caller can pin it and later compare it
-    ///     with <see cref="PackageContentIdentity.Compare"/>: identities of different forms never
-    ///     compare as the same content. A provider that cannot name one leaves it
-    ///     <see langword="null"/>.</returns>
+    ///     <see cref="IPackageContentReader.ContentIdentity"/> names the agent files the source
+    ///     delivered, in one form for every kind of source: <c>files-sha256:{hex}</c>, computed
+    ///     from the delivered files themselves (see <see cref="PackageContentIdentity"/>), so the
+    ///     same files from a zip folder, a NuGet source or a Git source have the same identity. The
+    ///     caller can pin it and later compare it with <see cref="PackageContentIdentity.Compare"/>.
+    ///     A Git source also reports the commit a tag pointed to as
+    ///     <see cref="IPackageContentReader.SourceRevision"/>. A provider that cannot name an
+    ///     identity leaves it <see langword="null"/>.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="package"/> was discovered
     ///     at a different source (a package is never fetched from a source it did not come
     ///     from).</exception>
