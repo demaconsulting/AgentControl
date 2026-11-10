@@ -155,10 +155,48 @@ internal static class PackageContentExtractor
         ArgumentNullException.ThrowIfNull(relativePath);
 
         var destination = ResolveManagedDestination(relativePath, ProbeRoot);
-        return destination is null
-            ? null
-            : Path.GetRelativePath(ProbeRoot, destination).Replace(Path.DirectorySeparatorChar, '/');
+        return destination is null ? null : ToPackagePath(ProbeRoot, destination);
     }
+
+    /// <summary>
+    ///     Refuses a package that holds two files whose canonical paths differ only in letter case.
+    /// </summary>
+    /// <param name="packageDescription">The package's description, for the message.</param>
+    /// <param name="canonicalPaths">The canonical paths of the files that would be written into the
+    ///     managed folders (see <see cref="GetManagedPackagePath"/>).</param>
+    /// <remarks>
+    ///     The one rule both <see cref="Extract"/> and the content identity apply. On a
+    ///     case-insensitive file system (Windows, macOS) such files are one file, so what ends up in
+    ///     the repo would depend on the order of the entries while the identity stayed the same;
+    ///     the package is therefore refused on every platform, as the Git source already refuses
+    ///     such a layout. Only the whole path matters - two folders that differ in case but hold
+    ///     differently named files do not collide. Exactly equal paths are not reported here.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Thrown when two paths differ only in letter
+    ///     case.</exception>
+    internal static void RejectCaseCollisions(string packageDescription, IEnumerable<string> canonicalPaths)
+    {
+        var collision = canonicalPaths
+            .GroupBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Distinct(StringComparer.Ordinal).Take(2).ToList())
+            .FirstOrDefault(spellings => spellings.Count > 1);
+        if (collision is not null)
+        {
+            throw new InvalidOperationException(
+                $"Package '{packageDescription}' contains files whose names differ only in letter case: " +
+                $"'{collision[0]}' and '{collision[1]}'. They would overwrite each other on a case-insensitive file " +
+                "system, so the package is not accepted.");
+        }
+    }
+
+    /// <summary>
+    ///     Expresses a resolved destination as a package-relative path with <c>/</c> separators.
+    /// </summary>
+    /// <param name="root">The root the destination was resolved against.</param>
+    /// <param name="destination">The resolved destination path.</param>
+    /// <returns>The canonical package-relative path.</returns>
+    private static string ToPackagePath(string root, string destination) =>
+        Path.GetRelativePath(root, destination).Replace(Path.DirectorySeparatorChar, '/');
 
     /// <summary>
     ///     Validates every file path in the package, deletes the four managed folders under
@@ -216,6 +254,11 @@ internal static class PackageContentExtractor
                 managedFiles.Add((relativePath, destinationPath));
             }
         }
+
+        // Two files whose names differ only in letter case would be one file on some file systems,
+        // so what the repo ends up with would depend on the entry order: refuse before deleting
+        RejectCaseCollisions(
+            reader.Description, managedFiles.Select(file => ToPackagePath(repoRoot, file.DestinationPath)));
 
         // Step 3: refuse to touch a repo whose managed-folder chain is redirected. Destination
         // containment above is purely lexical: if <repo>/.github (or a managed folder, or a

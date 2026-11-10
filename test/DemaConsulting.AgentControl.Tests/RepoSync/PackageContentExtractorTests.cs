@@ -253,6 +253,62 @@ public sealed class PackageContentExtractorTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a zip that holds two files whose paths differ only in letter case is refused before
+    ///     anything in the repo is deleted or written: on a case-insensitive file system the two would be one
+    ///     file and the extracted bytes would depend on the entry order.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_ZipWithPathsDifferingOnlyInCase_ThrowsBeforeDeletingManagedFolders()
+    {
+        // Arrange: a zip with .github/agents/a.md and .github/agents/A.md, and a repo with existing managed content
+        var zipPath = Path.Combine(CreateTempDirectory(), "pkg-1.0.0.zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            foreach (var (path, content) in new[] { (".github/agents/a.md", "lower"), (".github/agents/A.md", "upper") })
+            {
+                using var writer = new StreamWriter(archive.CreateEntry(path).Open());
+                writer.Write(content);
+            }
+        }
+
+        var repo = CreateTempDirectory();
+        var agents = Path.Combine(repo, ".github", "agents");
+        Directory.CreateDirectory(agents);
+        File.WriteAllText(Path.Combine(agents, "keep.md"), "keep me");
+        using var reader = ZipPackageContentReader.Open(zipPath);
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => PackageContentExtractor.Extract(reader, repo));
+
+        // Assert: a clear message naming both files, nothing deleted, nothing written, and no identity
+        Assert.Contains("differ only in letter case", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(".github/agents/a.md", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(".github/agents/A.md", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("keep me", File.ReadAllText(Path.Combine(agents, "keep.md")));
+        Assert.Equal(["keep.md"], Directory.GetFiles(agents).Select(Path.GetFileName));
+        Assert.Null(reader.ContentIdentity);
+    }
+
+    /// <summary>
+    ///     Test that folders whose names differ only in letter case do not count as a collision as long as
+    ///     the files in them have different names, and that exactly the same file name in the same folder
+    ///     is not reported as a case collision.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_RejectCaseCollisions_OnlyWholePathsThatFoldTogetherAreRefused()
+    {
+        // Arrange / Act / Assert: different file names in folders that differ in case are fine
+        PackageContentExtractor.RejectCaseCollisions(
+            "pkg", [".github/skills/Sub/a.md", ".github/skills/sub/b.md", ".github/agents/a.md", ".github/agents/a.md"]);
+
+        // Assert: the same whole path in another case is refused
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => PackageContentExtractor.RejectCaseCollisions(
+                "pkg", [".github/skills/Sub/a.md", ".github/skills/sub/A.md"]));
+        Assert.Contains("'.github/skills/Sub/a.md' and '.github/skills/sub/A.md'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that a symbolic link to a file inside a managed folder of an unpacked package is
     ///     rejected before any managed folder in the repo is deleted.
     /// </summary>

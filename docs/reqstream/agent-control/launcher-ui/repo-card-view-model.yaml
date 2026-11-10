@@ -1092,14 +1092,24 @@ sections:
         title: >-
           The RepoCardViewModel class shall, when the pinned package can be obtained from no
           configured source, show a package source problem - and tell the user before a launch
-          that agent files were not synced - saying that the pinned source is not configured and
-          that no other configured source delivers the identical files, or, for a pin that recorded
-          no identity of its files, that no other source can be matched to it.
+          that agent files were not synced - saying that the pinned source is not configured (or,
+          for a configured source, does not offer the pinned version) and that no other configured
+          source delivers the identical files, or, for a pin that recorded no identity of its
+          files, that no other source can be matched to it; the card is not shown as up to date
+          meanwhile. When the pinned source is configured but no longer offers the pinned version,
+          a newer version it does offer stays available as an upgrade (the chip and the menu
+          command), the way out of the problem; with no newer version no upgrade is offered, and
+          when the pinned source is not configured none is offered either.
         justification: |
           The user needs to know why nothing was substituted and what to do about it (add the
-          source, or choose the package again from a configured source).
+          source, or choose the package again from a configured source); a card that claimed to be
+          up to date for files nothing can supply would hide that the pinned files cannot be
+          restored, while a source that answered and offers a newer version gives the user a way
+          out - upgrading - that the problem must not take away.
         tests:
           - RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasDifferentFiles_ShowsSourceProblem
+          - RepoCardViewModel_Refresh_PinnedAliasDoesNotOfferVersionAndNoOtherSourceHasIdenticalFiles_ShowsSourceProblemAndStillOffersNewerVersion
+          - RepoCardViewModel_Refresh_PinnedAliasDoesNotOfferVersionAndNothingNewer_ShowsSourceProblemAndNoUpgrade
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_OnlyOtherFilesAvailable_RefusesWithExplanation
           - RepoCardViewModel_Refresh_PinWithoutFilesIdentityAndAliasNotConfigured_NeverFallsBack
 

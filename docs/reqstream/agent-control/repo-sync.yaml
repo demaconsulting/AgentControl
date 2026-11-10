@@ -30,6 +30,7 @@ sections:
           - AgentControl-PackageZipExtractor-Extract
           - AgentControl-PackageZipExtractor-AllManagedFoldersExist
           - AgentControl-PackageContentExtractor-ZipOpenFailure
+          - AgentControl-PackageContentExtractor-RefuseCaseCollision
           - AgentControl-Utilities-SafePaths
         tests:
           - PackageZipExtractor_Extract_FreshRepo_CreatesManagedFoldersOnly

@@ -271,6 +271,30 @@ public class PackageContentIdentityTests
     }
 
     /// <summary>
+    ///     Test that a package whose managed files include two paths that differ only in letter case is
+    ///     refused (they are one file on a case-insensitive file system, so the extracted bytes would depend
+    ///     on the entry order while the identity stayed the same), that the non-throwing form reports no
+    ///     identity, and that files in other folders or with other names are unaffected.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeFilesIdentity_PathsDifferingOnlyInCase_ThrowsAndTryReportsNone()
+    {
+        // Arrange: a.md and A.md in one managed folder
+        using var reader = new InMemoryReader((".github/agents/a.md", [1]), (".github/agents/A.md", [2]));
+        using var fine = new InMemoryReader((".github/agents/a.md", [1]), (".github/standards/A.md", [2]));
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => PackageContentIdentity.ComputeFilesIdentity(reader));
+
+        // Assert
+        Assert.Contains("differ only in letter case", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(".github/agents/a.md", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(".github/agents/A.md", ex.Message, StringComparison.Ordinal);
+        Assert.Null(PackageContentIdentity.TryComputeFilesIdentity(reader));
+        Assert.NotNull(PackageContentIdentity.TryComputeFilesIdentity(fine));
+    }
+
+    /// <summary>
     ///     Test that a path that resolves outside the package root - which extraction refuses - is
     ///     refused here too, and that the non-throwing form reports no identity instead.
     /// </summary>

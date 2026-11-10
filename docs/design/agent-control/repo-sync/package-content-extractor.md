@@ -126,6 +126,20 @@ would write the file into a managed folder and under which canonical path.
 - *Errors*: `InvalidOperationException` for a path `Extract` would refuse (one that resolves outside the package),
   `ArgumentNullException` for a null path. Performs no I/O.
 
+**RejectCaseCollisions** (internal): The one rule that refuses a package holding two files whose canonical paths
+differ only in letter case (compared with `OrdinalIgnoreCase`; exactly equal paths are not its business, and folders
+that differ in case do not collide unless the whole path does).
+
+- *Parameters*: the package description and the canonical paths of the files that go into the managed folders.
+- *Postconditions*: Throws `InvalidOperationException` "Package '...' contains files whose names differ only in
+  letter case: 'a' and 'b'. They would overwrite each other on a case-insensitive file system, so the package is not
+  accepted." Checked on every platform, like the Git source's refusal of colliding names, because the package may be
+  applied on a file system that folds case, and the extracted bytes would otherwise depend on the order of the
+  entries. `Extract` calls it with the canonical paths of every file it would write, in step 2 before any step 3
+  check or deletion, so a refused package leaves the repo untouched
+  (`AgentControl-PackageContentExtractor-RefuseCaseCollision`); `PackageContentIdentity` calls the very same method,
+  so the two can never disagree.
+
 **ReadReleaseNotes / ReadAgentsMdTemplate**: Return the package's root-level `release-notes.md`
 or `AGENTS.md` text, or `null` when absent, without copying anything to disk
 (`AgentControl-PackageContentExtractor-ReadReleaseNotes`,

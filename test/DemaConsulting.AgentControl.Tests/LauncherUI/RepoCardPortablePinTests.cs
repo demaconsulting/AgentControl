@@ -231,6 +231,72 @@ public sealed class RepoCardPortablePinTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a pin whose alias is configured but does not offer the pinned version, while no other
+    ///     source delivers the identical files, is a source problem like an unconfigured alias (the card is
+    ///     not "up to date"), but that a newer version the pinned source does offer is still offered as an
+    ///     upgrade - the way out of the problem - through the chip and the menu command.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_PinnedAliasDoesNotOfferVersionAndNoOtherSourceHasIdenticalFiles_ShowsSourceProblemAndStillOffersNewerVersion()
+    {
+        // Arrange: "Contoso" is configured but only has 2.0.0 now; "Artifactory" has 1.0.0 with other files
+        var (repo, _) = CreatePinnedRepo("Contoso", "v1", out var contosoFolder);
+        File.Delete(Path.Combine(contosoFolder, $"{PackageId}-1.0.0.zip"));
+        WriteZip(contosoFolder, "2.0.0", "v2");
+        var settings = new AppSettings
+        {
+            Sources = [ZipSource("Contoso", contosoFolder), ZipSource("Artifactory", CreateSourceFolder("other files"))]
+        };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: a problem that says the pinned source does not offer the version, nothing substituted,
+        // and the upgrade the source does offer stays available (chip data and the shared command)
+        Assert.True(card.HasSourceProblem);
+        Assert.Contains(
+            "The pinned source 'Contoso' does not offer contoso-agents 1.0.0", card.SourceProblem, StringComparison.Ordinal);
+        Assert.Contains("no other configured source delivers the identical files", card.SourceProblem, StringComparison.Ordinal);
+        Assert.False(card.IsPinnedSourceSubstituted);
+        Assert.Equal(RepoCardStatus.Problem, card.Status);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("2.0.0", card.LatestAvailableVersion);
+        Assert.Equal("2.0.0", card.UpgradeChipText);
+        Assert.True(card.UpgradeCommand.CanExecute(null));
+        Assert.True(card.HasAgentFileActions);
+    }
+
+    /// <summary>
+    ///     Test that the same pin whose configured source has no newer version either shows the source
+    ///     problem and offers no upgrade, and is not "up to date".
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_PinnedAliasDoesNotOfferVersionAndNothingNewer_ShowsSourceProblemAndNoUpgrade()
+    {
+        // Arrange: "Contoso" only has an older 0.5.0 now; no other source delivers the identical files
+        var (repo, _) = CreatePinnedRepo("Contoso", "v1", out var contosoFolder);
+        File.Delete(Path.Combine(contosoFolder, $"{PackageId}-1.0.0.zip"));
+        WriteZip(contosoFolder, "0.5.0", "old");
+        var settings = new AppSettings
+        {
+            Sources = [ZipSource("Contoso", contosoFolder), ZipSource("Artifactory", CreateSourceFolder("other files"))]
+        };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.True(card.HasSourceProblem);
+        Assert.Equal(RepoCardStatus.Problem, card.Status);
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.False(card.UpgradeCommand.CanExecute(null));
+    }
+
+    /// <summary>
     ///     Test that the substitute is dropped when the pinned alias is configured again: the chip shows
     ///     the pinned source once more.
     /// </summary>

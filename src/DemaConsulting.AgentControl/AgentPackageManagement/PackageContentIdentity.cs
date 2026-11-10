@@ -139,8 +139,9 @@ internal static class PackageContentIdentity
     ///     <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the package cannot be listed or
     ///     read, lists a path <see cref="PackageContentExtractor.Extract"/> would also reject, lists
-    ///     two files with the same canonical path (the identity would depend on which one wins), or
-    ///     a file changes length while it is being read.</exception>
+    ///     two files with the same canonical path (the identity would depend on which one wins) or
+    ///     with paths that differ only in letter case (they would be one file on a case-insensitive
+    ///     file system), or a file changes length while it is being read.</exception>
     public static string ComputeFilesIdentity(IPackageContentReader reader)
     {
         ArgumentNullException.ThrowIfNull(reader);
@@ -167,6 +168,8 @@ internal static class PackageContentIdentity
                     "so its content cannot be identified.");
             }
         }
+
+        PackageContentExtractor.RejectCaseCollisions(reader.Description, files.Select(file => file.CanonicalPath));
 
         // Frame every file as path, 0x00, length (8 bytes, little-endian), bytes; the framing keeps
         // two different sets of files from ever producing the same stream

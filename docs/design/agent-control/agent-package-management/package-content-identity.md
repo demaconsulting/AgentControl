@@ -63,8 +63,12 @@ read) and is thread-safe.
 - *Postconditions*: The result has the form above. Throws `ArgumentNullException` for a null reader, and
   `InvalidOperationException` for a package it cannot identify - one that cannot be listed or read, that lists a
   path `Extract` would also refuse (one that resolves outside the package), that lists two files with the same
-  canonical path (the identity would depend on which one extraction lets win), or in which a file does not have the
-  length it had when it was measured (`AgentControl-PackageContentIdentity-FilesIdentityRejectUnacceptable`).
+  canonical path (the identity would depend on which one extraction lets win) or with canonical paths that differ
+  only in letter case (`PackageContentExtractor.RejectCaseCollisions`, the rule `Extract` applies too: on a
+  case-insensitive file system they are one file, so the extracted bytes would depend on the entry order while the
+  identity stayed the same; `AgentControl-PackageContentIdentity-FilesIdentityRejectCaseCollision`), or in which a file
+  does not have the length it had when it was measured
+  (`AgentControl-PackageContentIdentity-FilesIdentityRejectUnacceptable`).
 
 **TryComputeFilesIdentity**: The same, but returns `null` instead of throwing `InvalidOperationException`. What
 the readers' `ContentIdentity` property uses: a reader opened only for its release notes never pays for reading

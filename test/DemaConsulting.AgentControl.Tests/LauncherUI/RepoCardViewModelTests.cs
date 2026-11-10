@@ -2142,6 +2142,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     {
         // Arrange: three cards - pinned and current, pinned with a newer version, and unpinned
         var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "0.9.0");
         CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
         var settings = new AppSettings { PackageSourcePath = sourceDir };
         var current = CreateCard(CreateTempDirectory(), "contoso-agents", "1.0.0", settings);

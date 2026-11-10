@@ -650,7 +650,16 @@ acquired or checked (`FindVerifiedSourceAsync`):
    (`-FallbackRejectsDifferentFiles`); one that fails to acquire is skipped. Acquisition happens only here, so
    nothing is downloaded or fetched when the pinned source works.
 3. No verified match gives today's behavior: the red "Package source problem" chip, or the non-blocking launch warning,
-   with the explanation described under **SourceProblem**.
+   with the explanation described under **SourceProblem**. This holds in the upgrade check too when the pinned alias
+   *is* configured but does not offer the pinned version (and the version parses as one): the card sets the source
+   problem ("The pinned source 'X' does not offer {package} {version}, and no other configured source delivers the
+   identical files.", with " Upgrade to Y to move to a version it offers." appended when it offers a newer one) and
+   never shows "up to date". Unlike an unconfigured alias this source *answered*, so a newer version it offers is
+   still offered as an upgrade (`IsUpgradeAvailable`/`LatestAvailableVersion` come from its listing): upgrading is the
+   natural way out of the state. The red status outranks the amber upgrade state in `Status` and the accent bar, but
+   the upgrade chip and the menu's Upgrade item are bound to `IsUpgradeAvailable` alone, so both stay reachable while
+   the problem chip is shown; with no newer version nothing is offered
+   (`AgentControl-RepoCardViewModel-UnresolvedPinExplained`).
 
 A verified stand-in is never written into the pin (the launch never writes it, and the alias remains the preferred
 source for the next user): the card remembers its alias, `_supplyingSource`, and `PinnedSourceLabel`, the icon, the

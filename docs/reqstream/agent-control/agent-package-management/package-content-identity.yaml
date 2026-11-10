@@ -83,6 +83,19 @@ sections:
           - PackageContentIdentity_ComputeFilesIdentity_FileChangesWhileRead_ThrowsInvalidOperationException
           - PackageContentIdentity_ComputeFilesIdentity_NullReader_ThrowsArgumentNullException
 
+      - id: AgentControl-PackageContentIdentity-FilesIdentityRejectCaseCollision
+        title: >-
+          The PackageContentIdentity class shall refuse to identify a package whose extracted files
+          include two paths that differ only in letter case, and the non-throwing form shall report
+          no identity for it.
+        justification: |
+          On a case-insensitive file system (Windows, macOS) such files are one file, so the bytes a
+          repo ends up with would depend on the order of the package entries while the identity
+          stayed the same; the identity must not vouch for a package whose result is ambiguous. The
+          extractor applies the same rule and reports the problem.
+        tests:
+          - PackageContentIdentity_ComputeFilesIdentity_PathsDifferingOnlyInCase_ThrowsAndTryReportsNone
+
       - id: AgentControl-PackageContentIdentity-RecognizeFilesIdentity
         title: >-
           The PackageContentIdentity class shall tell whether a text is a well-formed identity of

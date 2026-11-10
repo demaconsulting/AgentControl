@@ -35,6 +35,8 @@ N/A - standard test environment.
 - Comparing identities reports nothing to compare when either side is missing or is not a files identity (a legacy
   container identity, a commit), `Same` for equal files identities (ignoring letter case) and `Changed` for different
   ones.
+- Two files that differ only in letter case are refused (a message naming both, on every platform) with the repo's
+  managed folders untouched, and the content identity reports none for such a package.
 - The short description cuts a long value (also one of an unrecognized shape, after its first colon), keeps a short
   one, and reports `none` for a missing identity.
 
@@ -74,6 +76,13 @@ reader throws `ArgumentNullException`. This scenario is tested by
 `PackageContentIdentity_ComputeFilesIdentity_FileChangesWhileRead_ThrowsInvalidOperationException` and
 `PackageContentIdentity_ComputeFilesIdentity_NullReader_ThrowsArgumentNullException`, covering
 `AgentControl-PackageContentIdentity-FilesIdentityRejectUnacceptable`.
+
+**PackageContentIdentity_FilesIdentity_RejectsCaseCollisions**: Two managed files whose paths differ only in letter
+case (`.github/agents/a.md` and `.github/agents/A.md`) are refused with a message that names both and says that the
+names differ only in letter case, and the `Try` form reports no identity; the same file names in different managed
+folders are unaffected. This scenario is tested by
+`PackageContentIdentity_ComputeFilesIdentity_PathsDifferingOnlyInCase_ThrowsAndTryReportsNone`, covering
+`AgentControl-PackageContentIdentity-FilesIdentityRejectCaseCollision`.
 
 **PackageContentIdentity_RecognizeFilesIdentity**: A files identity is recognized (also in upper case or with
 surrounding white space), and a legacy `sha256:` value, a `git-commit:` value, a short or non-hexadecimal digest, empty

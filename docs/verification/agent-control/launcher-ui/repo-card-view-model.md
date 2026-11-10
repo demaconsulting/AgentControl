@@ -576,7 +576,12 @@ that no longer offers the version) and does not write the pin; a pin made from a
 zip source of the same files, and a pin made from a zip is restored at launch from a Git source of the same files
 (real repository, no source revision in the pin); the restore does not accept a source whose package has other files
 (nothing is extracted, the warning says that the pinned source is not configured and no other configured source
-delivers the identical files); the card of such a pin shows the source problem with the same explanation; a pin with no
+delivers the identical files); the card of such a pin shows the source problem with the same explanation - also when
+the pinned alias is configured
+but does not offer the pinned version the problem says that the pinned source
+does not offer the version and the card is not "up to date"; a newer version that source offers stays available as an
+upgrade (the upgrade chip data, the shared command and the agent-file actions), and with nothing newer no upgrade is
+offered; a pin with no
 files identity (also one that is a schema 3 pin with the identity of a container) never falls back, even to a source
 with that package name and version - on the card the source problem is shown, at launch nothing is extracted - and a
 schema 3 pin's old identity is never a reason to refuse the restore; and a pinned source that is configured and offers
@@ -588,6 +593,8 @@ This scenario is tested by
 `RepoCardViewModel_Refresh_PinnedAliasConfigured_ShowsPinnedSourceWithoutSubstitution`,
 `RepoCardViewModel_Refresh_PinnedAliasConfiguredAgain_DropsSubstitute`,
 `RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasDifferentFiles_ShowsSourceProblem`,
+`RepoCardViewModel_Refresh_PinnedAliasDoesNotOfferVersionAndNoOtherSourceHasIdenticalFiles_ShowsSourceProblemAndStillOffersNewerVersion`,
+`RepoCardViewModel_Refresh_PinnedAliasDoesNotOfferVersionAndNothingNewer_ShowsSourceProblemAndNoUpgrade`,
 `RepoCardViewModel_Refresh_PinWithoutFilesIdentityAndAliasNotConfigured_NeverFallsBack`,
 `RepoCardViewModel_Refresh_PinMadeFromNuGetAndTeammateHasZipSource_IsSuppliedByZip`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAliasNotConfigured_RestoresFromIdenticalSourceWithoutWritingPin`,

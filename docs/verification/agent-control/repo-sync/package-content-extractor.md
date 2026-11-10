@@ -37,6 +37,8 @@ skipped). Junction tests run on Windows only (they skip elsewhere) and need no p
 - A zip package given an invalid or unsupported path is reported as an `InvalidOperationException`
   rather than a path exception.
 - Release notes and the AGENTS.md template are read from a folder package, or reported absent.
+- A package whose files include two paths that differ only in letter case is refused before anything in the repo is
+  deleted or written (the same rule the content identity applies).
 - A zip reader reports the files identity of the agent files in the zip, computed from the same handle its entries are
   read from, and releases the handle when opening fails; a folder reader reports the files identity of the agent files
   in the folder and the source revision its opener supplied, or none; the extractor says which paths are extracted
@@ -165,6 +167,15 @@ extraction makes. This scenario is tested by
 `PackageContentExtractor_GetManagedPackagePath_ManagedAndOtherPaths_ReportsCanonicalPathOrNull` and
 `PackageContentExtractor_GetManagedPackagePath_PathEscapingPackage_ThrowsInvalidOperationException`, covering
 `AgentControl-PackageContentExtractor-ManagedPackagePath`.
+
+**PackageContentExtractor_RefuseCaseCollision_BeforeAnythingIsDeleted**: A zip with `.github/agents/a.md` and
+`.github/agents/A.md` makes `Extract` fail with a message that says the names differ only in letter case and names
+both files, while an existing managed file of the repo survives, nothing is written, and the reader reports no content
+identity; the shared rule refuses only whole paths that fold together (folders that differ in case but hold differently
+named files, and an identical path, are accepted). This scenario is tested by
+`PackageContentExtractor_Extract_ZipWithPathsDifferingOnlyInCase_ThrowsBeforeDeletingManagedFolders` and
+`PackageContentExtractor_RejectCaseCollisions_OnlyWholePathsThatFoldTogetherAreRefused`, covering
+`AgentControl-PackageContentExtractor-RefuseCaseCollision`.
 
 **PackageContentExtractor_ZipOpenFailure_InvalidPathIsReportedAsInvalidOperation**: Opening a zip
 package with an invalid path (an argument the operating system rejects as a path) throws

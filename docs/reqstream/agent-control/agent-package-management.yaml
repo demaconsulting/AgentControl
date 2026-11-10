@@ -456,6 +456,7 @@ sections:
           - AgentControl-PackageContentIdentity-FilesIdentityCoversExtractedFilesOnly
           - AgentControl-PackageContentIdentity-FilesIdentityDetectsChange
           - AgentControl-PackageContentIdentity-FilesIdentityRejectUnacceptable
+          - AgentControl-PackageContentIdentity-FilesIdentityRejectCaseCollision
           - AgentControl-ZipFolderSourceProvider-ReportContentIdentity
           - AgentControl-NuGetSourceProvider-ReportContentIdentity
           - AgentControl-GitSourceProvider-ReportContentIdentity

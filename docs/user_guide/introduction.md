@@ -232,10 +232,13 @@ button](images/card-color-palette.png)
   other configured source delivers the identical files - or the pin recorded no fingerprint of its files (as with a
   pin written by an older AgentControl), so there is nothing to check another source against. The tooltip states
   the problem, for example "The pinned source 'Contoso' is not configured and no other configured source delivers the
-  identical files". No upgrade is offered and no source whose files are not proven identical is ever used; add a
+  identical files". No upgrade is offered when the source is not configured, and no source whose files are not
+  proven identical is ever used; add a
   source that delivers the package (any alias or kind), or restore the source with the same alias in Settings, to
-  resolve it. When another configured source *does* deliver the identical files, there is no problem: the package
-  chip names that source instead (see *Sharing a Repo With a Team*).
+  resolve it. If the source *is* configured but no longer offers the pinned version (for example a feed deleted old
+  versions), the problem chip is shown, yet a newer version the source offers is still offered as an **Upgrade**,
+  which is the way out. When another configured source *does* deliver the identical files, there is no problem: the
+  package chip names that source instead (see *Sharing a Repo With a Team*).
 - **Sign-in needed** (red) — the repo is pinned to a server or a Git repository that needs a sign-in, and the
   background check never asks. Use the card's "..." menu > **Refresh** to sign in (see *Signing In* and *Adding a
   Git Repository*).

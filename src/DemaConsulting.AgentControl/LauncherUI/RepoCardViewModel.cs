@@ -3188,9 +3188,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
         if (pinnedSourceConfigured)
         {
             return hasFilesIdentity
-                ? $"Pinned package '{packageName} {version}' was not found at the configured source '{alias}', " +
+                ? $"The pinned source '{alias}' does not offer {packageName} {version}, " +
                   "and no other configured source delivers the identical files."
-                : $"Pinned package '{packageName} {version}' was not found at the configured source '{alias}'.";
+                : $"The pinned source '{alias}' does not offer {packageName} {version}.";
         }
 
         return hasFilesIdentity
@@ -3709,7 +3709,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see cref="IsPinnedSourceSubstituted"/>); then the configured sources that offer the
     ///     package are checked for a newer version (the newest wins, a tie keeps Settings order).
     ///     A pin whose source cannot be replaced that way is an error state:
-    ///     <see cref="SourceProblem"/> explains it and no upgrade is offered. The sources are read
+    ///     <see cref="SourceProblem"/> explains it. No upgrade is offered when the pinned source is
+    ///     not configured; when it is configured but no longer offers the pinned version, a newer
+    ///     version it does offer is still offered as an upgrade (the way out of the problem). The sources are read
     ///     asynchronously, so a slow or unreachable source never freezes the window;
     ///     <see cref="IsCheckingUpgrade"/> is set meanwhile. When several checks overlap (for
     ///     example after the sources were edited while an earlier check was still waiting) only the
@@ -3786,12 +3788,36 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     registry, sourceAlias, pinnedPackageName, pinnedVersion, cancellationToken);
 
                 // A pinned source that does not offer the pinned version may still have another
-                // source that delivers the identical files: say which one supplies them
-                if (check.Pinned is null)
+                // source that delivers the identical files: say which one supplies them. When no
+                // source does, the pinned files cannot be obtained anywhere - the same problem as an
+                // unconfigured alias, which the card shows (never "up to date") - but unlike that
+                // case the pinned source answered, so a newer version it offers stays available as
+                // an upgrade: upgrading is the natural way out of this state. With no newer
+                // version nothing is offered.
+                // (A pin whose version does not parse as a version is left to the normal result:
+                // "not listed" says nothing about it.)
+                if (check.Pinned is null && PackageVersion.TryParse(pinnedVersion, out _))
                 {
                     using var verified = await FindVerifiedSourceAsync(
                         registry, pinnedPackageName, pinnedVersion, _pinnedContentIdentity, cancellationToken);
-                    supplier = verified?.Package.SourceAlias;
+                    if (verified is null)
+                    {
+                        if (generation == _upgradeCheckGeneration)
+                        {
+                            SetSourceProblem(
+                                DescribeUnresolvedPinnedPackage(
+                                    pinnedSourceConfigured: true, sourceAlias, pinnedPackageName, pinnedVersion,
+                                    PackageContentIdentity.IsFilesIdentity(_pinnedContentIdentity)) +
+                                (check.IsNewerAvailable
+                                    ? $" Upgrade to {check.Latest?.Version} to move to a version it offers."
+                                    : string.Empty),
+                                needsSignIn: false);
+                        }
+                    }
+                    else
+                    {
+                        supplier = verified.Package.SourceAlias;
+                    }
                 }
             }
             else
