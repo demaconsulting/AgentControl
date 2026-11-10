@@ -33,7 +33,9 @@ namespace DemaConsulting.AgentControl.RepoSync;
 /// <param name="Url">The absolute <c>http</c>/<c>https</c> address the run links to, or
 ///     <see langword="null"/> for ordinary text; only an address that passed
 ///     <see cref="ReleaseNotesViewerViewModel.IsOpenableUrl"/> is ever set.</param>
-internal sealed record MarkdownRun(string Text, bool Bold, bool Italic, string? Url = null);
+/// <param name="Code">Whether the run was an inline code span wrapped in <c>`backticks`</c>; its
+///     text is shown literally, without the backticks, and is never emphasis or a link.</param>
+internal sealed record MarkdownRun(string Text, bool Bold, bool Italic, string? Url = null, bool Code = false);
 
 /// <summary>
 ///     A single rendered line of release notes: either a heading, a bullet-list item, or a plain
@@ -167,6 +169,23 @@ internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
 
         while (index < text.Length)
         {
+            // A code span is literal text, so nothing inside it is emphasis or a link
+            var backticks = LiteralBacktickRunLength(text, index);
+            if (backticks > 0)
+            {
+                plain.Append(text, index, backticks);
+                index += backticks;
+                continue;
+            }
+
+            if (TryParseCodeSpan(text, index, bold: false, italic: false, out var codeLength, out var codeRun))
+            {
+                FlushPlain(runs, plain, bold: false, italic: false);
+                runs.Add(codeRun);
+                index += codeLength;
+                continue;
+            }
+
             // A link is recognized before emphasis so that its text and address are never
             // split by an asterisk that happens to occur inside them
             if (TryParseLink(text, index, bold: false, italic: false, out var linkLength, out var linkRun))
@@ -223,6 +242,22 @@ internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
         var index = 0;
         while (index < text.Length)
         {
+            var backticks = LiteralBacktickRunLength(text, index);
+            if (backticks > 0)
+            {
+                plain.Append(text, index, backticks);
+                index += backticks;
+                continue;
+            }
+
+            if (TryParseCodeSpan(text, index, bold, italic, out var codeLength, out var codeRun))
+            {
+                FlushPlain(runs, plain, bold, italic);
+                runs.Add(codeRun);
+                index += codeLength;
+                continue;
+            }
+
             if (TryParseLink(text, index, bold, italic, out var linkLength, out var linkRun))
             {
                 FlushPlain(runs, plain, bold, italic);
@@ -236,6 +271,58 @@ internal sealed class ReleaseNotesViewerViewModel : ViewModelBase
         }
 
         FlushPlain(runs, plain, bold, italic);
+    }
+
+    /// <summary>
+    ///     Recognizes an inline code span - text between a pair of single backticks, such as
+    ///     <c>`contoso-agents`</c> - starting at <paramref name="index"/>. A backtick with no closing
+    ///     backtick later on the line, or an empty pair, is not a code span and stays literal text.
+    /// </summary>
+    /// <param name="text">The text being parsed.</param>
+    /// <param name="index">The position to try.</param>
+    /// <param name="bold">Whether the surrounding span is bold.</param>
+    /// <param name="italic">Whether the surrounding span is italic.</param>
+    /// <param name="consumed">The number of characters the code span occupies, backticks included.</param>
+    /// <param name="run">The code run (its text without the backticks).</param>
+    /// <returns><see langword="true"/> when a code span starts at <paramref name="index"/>.</returns>
+    private static bool TryParseCodeSpan(
+        string text, int index, bool bold, bool italic, out int consumed, out MarkdownRun run)
+    {
+        consumed = 0;
+        run = null!;
+        if (text[index] != '`')
+        {
+            return false;
+        }
+
+        var end = text.IndexOf('`', index + 1);
+        if (end <= index + 1)
+        {
+            return false;
+        }
+
+        consumed = end - index + 1;
+        run = new MarkdownRun(text[(index + 1)..end], bold, italic, Code: true);
+        return true;
+    }
+
+    /// <summary>
+    ///     Gets the length of a run of two or more backticks starting at <paramref name="index"/>
+    ///     (an empty pair or a multi-backtick fence), which is kept as literal text as a whole so
+    ///     its backticks never pair with a later one; 0 when there is no such run.
+    /// </summary>
+    /// <param name="text">The text being parsed.</param>
+    /// <param name="index">The position to look at.</param>
+    /// <returns>The number of consecutive backticks, or 0 when fewer than two start there.</returns>
+    private static int LiteralBacktickRunLength(string text, int index)
+    {
+        var end = index;
+        while (end < text.Length && text[end] == '`')
+        {
+            end++;
+        }
+
+        return end - index >= 2 ? end - index : 0;
     }
 
     /// <summary>

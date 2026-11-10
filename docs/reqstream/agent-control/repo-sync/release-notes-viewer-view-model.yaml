@@ -42,6 +42,18 @@ sections:
           - ReleaseNotesViewerViewModel_Blocks_BlankLines_AreSkipped
           - ReleaseNotesViewerViewModel_Blocks_UnterminatedAsterisk_TreatedAsLiteralText
 
+      - id: AgentControl-ReleaseNotesViewerViewModel-CodeSpans
+        title: >-
+          The ReleaseNotesViewerViewModel class shall show text between a pair of single backticks
+          as literal inline code without the backticks, in a monospace font.
+        justification: |
+          Release notes name packages, files and commands in `code` spans; showing the raw
+          backticks makes the notes look broken.
+        tests:
+          - ReleaseNotesViewerViewModel_Blocks_CodeSpan_ParsesIntoLiteralCodeRun
+          - ReleaseNotesViewerViewModel_Blocks_UnterminatedOrEmptyBackticks_StayLiteral
+          - ReleaseNotesViewer_BuildBlockTextBlock_CodeRun_RendersMonospace
+
       - id: AgentControl-ReleaseNotesViewerViewModel-Links
         title: >-
           The ReleaseNotesViewerViewModel class shall parse a Markdown link - [text](url), a

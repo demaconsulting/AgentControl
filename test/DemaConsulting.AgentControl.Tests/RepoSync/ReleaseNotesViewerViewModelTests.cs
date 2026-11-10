@@ -247,6 +247,72 @@ public class ReleaseNotesViewerViewModelTests
     }
 
     /// <summary>
+    ///     Test that <c>`code`</c> spans parse into code runs without their backticks, and that
+    ///     asterisks and link syntax inside a code span stay literal.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewerViewModel_Blocks_CodeSpan_ParsesIntoLiteralCodeRun()
+    {
+        // Act: a line with a code span, and one whose code span holds emphasis and link syntax
+        var viewModel = new ReleaseNotesViewerViewModel(
+            "my-repo",
+            "Initial release of the `contoso-agents` package.\n**Bold `a*b` code** and `[x](https://example.com)`");
+
+        // Assert: the backticks are gone and the code text is one literal code run
+        var first = viewModel.Blocks[0].Runs;
+        Assert.Equal(3, first.Count);
+        Assert.Equal("Initial release of the ", first[0].Text);
+        Assert.False(first[0].Code);
+        Assert.Equal("contoso-agents", first[1].Text);
+        Assert.True(first[1].Code);
+        Assert.Equal(" package.", first[2].Text);
+
+        var second = viewModel.Blocks[1].Runs;
+        var boldCode = Assert.Single(second, run => run.Code && run.Bold);
+        Assert.Equal("a*b", boldCode.Text);
+        var linkCode = Assert.Single(second, run => run.Code && !run.Bold);
+        Assert.Equal("[x](https://example.com)", linkCode.Text);
+        Assert.Null(linkCode.Url);
+    }
+
+    /// <summary>
+    ///     Test that a backtick with no closing backtick, or an empty pair, stays literal text.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewerViewModel_Blocks_UnterminatedOrEmptyBackticks_StayLiteral()
+    {
+        // Act
+        var viewModel = new ReleaseNotesViewerViewModel("my-repo", "Use `` or a ` alone.");
+
+        // Assert: one plain run holding the original text
+        var run = Assert.Single(Assert.Single(viewModel.Blocks).Runs);
+        Assert.Equal("Use `` or a ` alone.", run.Text);
+        Assert.False(run.Code);
+    }
+
+    /// <summary>
+    ///     Test that a code run renders in a monospace font, and other runs keep the default font.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewer_BuildBlockTextBlock_CodeRun_RendersMonospace() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var block = new MarkdownBlock(
+            [new MarkdownRun("Install ", false, false), new MarkdownRun("contoso-agents", false, false, Code: true)],
+            HeadingLevel: 0,
+            IsBullet: false);
+
+        // Act
+        var textBlock = ReleaseNotesViewer.BuildBlockTextBlock(block);
+
+        // Assert
+        var runs = textBlock.Inlines!.OfType<Run>().ToList();
+        Assert.Equal("contoso-agents", runs[1].Text);
+        Assert.Contains("monospace", runs[1].FontFamily.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("monospace", runs[0].FontFamily.ToString(), StringComparison.Ordinal);
+    });
+
+    /// <summary>
     ///     Test that <c>[text](url)</c> with an https or http address parses into a link run carrying
     ///     the link text and the exact address, between the surrounding plain text.
     /// </summary>

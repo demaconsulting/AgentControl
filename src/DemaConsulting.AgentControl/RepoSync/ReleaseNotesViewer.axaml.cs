@@ -22,6 +22,7 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Markup.Xaml;
+using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using DemaConsulting.AgentControl.Logging;
 using Microsoft.Extensions.Logging;
@@ -49,6 +50,12 @@ internal sealed partial class ReleaseNotesViewer : Window
     ///     Base font size used for a non-heading, non-bullet paragraph line.
     /// </summary>
     private const double BaseFontSize = 13;
+
+    /// <summary>
+    ///     The monospace fonts used for an inline code span, in order of preference across
+    ///     Windows, macOS and Linux.
+    /// </summary>
+    private static readonly FontFamily CodeFontFamily = new("Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono, monospace");
 
     /// <summary>
     ///     Opens an address in the user's browser: the platform launcher in production, a test
@@ -211,7 +218,14 @@ internal sealed partial class ReleaseNotesViewer : Window
                 continue;
             }
 
-            textBlock.Inlines.Add(new Run(run.Text) { FontWeight = weight, FontStyle = style });
+            var inline = new Run(run.Text) { FontWeight = weight, FontStyle = style };
+            if (run.Code)
+            {
+                inline.FontFamily = CodeFontFamily;
+                inline[!TextElement.BackgroundProperty] = new DynamicResourceExtension("ChipNeutralBackground");
+            }
+
+            textBlock.Inlines.Add(inline);
         }
 
         return textBlock;

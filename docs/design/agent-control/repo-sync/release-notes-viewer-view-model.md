@@ -11,7 +11,8 @@ zip entry); this view model's own job is the lightweight line-by-line Markdown p
 turns that raw text into headings, bullet items, and bold/italic inline runs for
 `ReleaseNotesViewer` to render — not a full CommonMark implementation, just the handful of
 constructs release notes actually use (`#` through `######` headings, `-`/`*` bullets,
-`**bold**`/`*italic*` inline emphasis and links; a line with more than six leading `#` is plain text).
+`**bold**`/`*italic*` inline emphasis, `` `code` `` spans and links; a line with more than six leading `#` is plain
+text).
 
 #### Data Model
 
@@ -28,7 +29,10 @@ source line (`AgentControl-ReleaseNotesViewerViewModel-Display`). Each `Markdown
 - `Runs`: `IReadOnlyList<MarkdownRun>` — the line's inline text spans, in display order. Each
   `MarkdownRun` carries `Text`, and `Bold`/`Italic` flags parsed from `**double**`/`*single*`
   asterisk markers (an unterminated marker is treated as literal text rather than emphasis),
-  and `Url`, the address of a link run (see below), `null` for ordinary text.
+  and `Url`, the address of a link run (see below), `null` for ordinary text, and `Code`, set for
+  text between a pair of single backticks: the backticks are dropped, the text is literal (never emphasis or a
+  link), and `ReleaseNotesViewer` renders it in a monospace font on the neutral chip background; a backtick
+  without a closing one, or an empty pair, stays literal text (`AgentControl-ReleaseNotesViewerViewModel-CodeSpans`).
 - `HeadingLevel`: `int` — the Markdown heading level (1 for `#`, 2 for `##`, etc.), or 0 for a
   non-heading line.
 - `IsBullet`: `bool` — whether the line was a `-`/`*` bullet-list item.

@@ -157,6 +157,9 @@ nothing changes). After a separator come **Rename group...** (the same prompt; a
 group's name is refused) and **Remove group**, which asks for confirmation and leaves the group's repos in the
 list, ungrouped. Nothing on disk changes. The built-in **Favorites** and **Ungrouped** headers have no menu.
 
+![The open "..." menu of the Client Work group header: Add repository..., then Rename group... and Remove
+group](images/group-menu.png)
+
 The **filter box** always searches all repos: while it has text, every section is shown expanded and a section
 without a match disappears, so a repo is never hidden inside a collapsed group; clear the filter and your collapsed
 sections are back as you left them (the headers' toggles are disabled while filtering). While no repo is in a group
@@ -878,6 +881,7 @@ upgrade chip, which you can also click to start the upgrade). Upgrading:
    over it to see the full address, then click it (or focus it with **Tab** and press **Enter** or **Space**) to open
    it in your default web browser. Only `http` and `https` addresses become links; anything else (a `file:` path,
    `mailto:`, a relative path) is shown as plain text and is never opened, because release notes come from packages.
+   Inline `` `code` `` is shown in a monospace font, without the backticks.
 
 There is no rollback if a step fails partway through — a message box reports the error, and
 you are expected to resolve it manually. Any local customizations you may have added inside
