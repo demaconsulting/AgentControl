@@ -551,6 +551,12 @@ internal sealed partial class MainWindow : Window
         {
             confirmed = await new ConfirmationWindow(request.Message).ShowDialog<bool>(this);
         }
+        catch (Exception ex)
+        {
+            // This runs from an async void handler: an escaping exception would be unhandled on the
+            // UI thread, so a failure to show the dialog is logged and counts as No
+            _logger.LogError(ex, "Could not show the committed-agent-files conversion question");
+        }
         finally
         {
             request.Respond(confirmed);

@@ -2720,9 +2720,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
             catch when (untracked)
             {
                 // The package could not be applied: put the folders back in git's index so a failed
-                // apply never leaves their removal from git staged
+                // apply never leaves their removal from git staged. The flag stays set so the
+                // finally block reports what git says either way, even if restoring failed.
                 await RestoreAgentFolderTrackingAsync(trackedFolders);
-                untracked = false;
                 throw;
             }
 
