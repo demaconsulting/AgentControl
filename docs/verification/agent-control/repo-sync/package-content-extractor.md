@@ -171,9 +171,11 @@ extraction makes. This scenario is tested by
 **PackageContentExtractor_RefuseCaseCollision_BeforeAnythingIsDeleted**: A zip with `.github/agents/a.md` and
 `.github/agents/A.md` makes `Extract` fail with a message that says the names differ only in letter case and names
 both files, while an existing managed file of the repo survives, nothing is written, and the reader reports no content
-identity; the shared rule refuses only whole paths that fold together (folders that differ in case but hold differently
-named files, and an identical path, are accepted). This scenario is tested by
-`PackageContentExtractor_Extract_ZipWithPathsDifferingOnlyInCase_ThrowsBeforeDeletingManagedFolders` and
+identity; a zip holding `.github/agents/a.md` twice is refused the same way, saying there is more than one file at
+that path; the shared rule refuses only whole paths that fold together or repeat (folders that differ in case but hold
+differently named files are accepted). This scenario is tested by
+`PackageContentExtractor_Extract_ZipWithPathsDifferingOnlyInCase_ThrowsBeforeDeletingManagedFolders`,
+`PackageContentExtractor_Extract_ZipWithDuplicateEntries_ThrowsBeforeDeletingManagedFolders` and
 `PackageContentExtractor_RejectCaseCollisions_OnlyWholePathsThatFoldTogetherAreRefused`, covering
 `AgentControl-PackageContentExtractor-RefuseCaseCollision`.
 

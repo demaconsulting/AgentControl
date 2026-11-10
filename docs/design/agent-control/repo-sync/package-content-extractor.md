@@ -126,14 +126,17 @@ would write the file into a managed folder and under which canonical path.
 - *Errors*: `InvalidOperationException` for a path `Extract` would refuse (one that resolves outside the package),
   `ArgumentNullException` for a null path. Performs no I/O.
 
-**RejectCaseCollisions** (internal): The one rule that refuses a package holding two files whose canonical paths
-differ only in letter case (compared with `OrdinalIgnoreCase`; exactly equal paths are not its business, and folders
-that differ in case do not collide unless the whole path does).
+**RejectCaseCollisions** (internal): The one rule that refuses a package holding two files at the same canonical path,
+or at canonical paths that differ only in letter case (compared with `OrdinalIgnoreCase`; folders that differ in case
+do not collide unless the whole path does). A zip may hold duplicate entry names, so an exact repeat is refused too:
+which copy ends up in the repo would depend on the entry order, and the identity could not describe it.
 
 - *Parameters*: the package description and the canonical paths of the files that go into the managed folders.
-- *Postconditions*: Throws `InvalidOperationException` "Package '...' contains files whose names differ only in
-  letter case: 'a' and 'b'. They would overwrite each other on a case-insensitive file system, so the package is not
-  accepted." Checked on every platform, like the Git source's refusal of colliding names, because the package may be
+- *Postconditions*: Throws `InvalidOperationException` "Package '...' contains more than one file at 'a', so which
+  one is applied would depend on their order; the package is not accepted." for a repeated path, and "Package '...'
+  contains files whose names differ only in letter case: 'a' and 'b'. They would overwrite each other on a
+  case-insensitive file system, so the package is not accepted." for a case collision. Checked on every platform, like
+  the Git source's refusal of colliding names, because the package may be
   applied on a file system that folds case, and the extracted bytes would otherwise depend on the order of the
   entries. `Extract` calls it with the canonical paths of every file it would write, in step 2 before any step 3
   check or deletion, so a refused package leaves the repo untouched

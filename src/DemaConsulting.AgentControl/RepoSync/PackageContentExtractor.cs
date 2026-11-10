@@ -159,34 +159,45 @@ internal static class PackageContentExtractor
     }
 
     /// <summary>
-    ///     Refuses a package that holds two files whose canonical paths differ only in letter case.
+    ///     Refuses a package that holds two files at the same canonical path, or at canonical paths
+    ///     that differ only in letter case.
     /// </summary>
     /// <param name="packageDescription">The package's description, for the message.</param>
     /// <param name="canonicalPaths">The canonical paths of the files that would be written into the
     ///     managed folders (see <see cref="GetManagedPackagePath"/>).</param>
     /// <remarks>
-    ///     The one rule both <see cref="Extract"/> and the content identity apply. On a
-    ///     case-insensitive file system (Windows, macOS) such files are one file, so what ends up in
-    ///     the repo would depend on the order of the entries while the identity stayed the same;
-    ///     the package is therefore refused on every platform, as the Git source already refuses
-    ///     such a layout. Only the whole path matters - two folders that differ in case but hold
-    ///     differently named files do not collide. Exactly equal paths are not reported here.
+    ///     The one rule both <see cref="Extract"/> and the content identity apply. Two entries for
+    ///     the same path (a zip may hold duplicate entry names), or for paths that are one file on a
+    ///     case-insensitive file system (Windows, macOS), would leave what ends up in the repo
+    ///     depending on the order of the entries, so such a package has no reliable identity and is
+    ///     refused on every platform, as the Git source already refuses a case-colliding layout.
+    ///     Only the whole path matters - two folders that differ in case but hold differently named
+    ///     files do not collide.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">Thrown when two paths differ only in letter
-    ///     case.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when two paths are equal or differ only in
+    ///     letter case.</exception>
     internal static void RejectCaseCollisions(string packageDescription, IEnumerable<string> canonicalPaths)
     {
         var collision = canonicalPaths
             .GroupBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.Distinct(StringComparer.Ordinal).Take(2).ToList())
-            .FirstOrDefault(spellings => spellings.Count > 1);
-        if (collision is not null)
+            .Select(group => group.Take(2).ToList())
+            .FirstOrDefault(entries => entries.Count > 1);
+        if (collision is null)
+        {
+            return;
+        }
+
+        if (string.Equals(collision[0], collision[1], StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                $"Package '{packageDescription}' contains files whose names differ only in letter case: " +
-                $"'{collision[0]}' and '{collision[1]}'. They would overwrite each other on a case-insensitive file " +
-                "system, so the package is not accepted.");
+                $"Package '{packageDescription}' contains more than one file at '{collision[0]}', so which one is " +
+                "applied would depend on their order; the package is not accepted.");
         }
+
+        throw new InvalidOperationException(
+            $"Package '{packageDescription}' contains files whose names differ only in letter case: " +
+            $"'{collision[0]}' and '{collision[1]}'. They would overwrite each other on a case-insensitive file " +
+            "system, so the package is not accepted.");
     }
 
     /// <summary>

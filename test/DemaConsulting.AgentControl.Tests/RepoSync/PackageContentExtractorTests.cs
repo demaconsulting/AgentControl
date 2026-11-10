@@ -291,21 +291,59 @@ public sealed class PackageContentExtractorTests : IDisposable
 
     /// <summary>
     ///     Test that folders whose names differ only in letter case do not count as a collision as long as
-    ///     the files in them have different names, and that exactly the same file name in the same folder
-    ///     is not reported as a case collision.
+    ///     the files in them have different names, while the same whole path in another case, or twice in
+    ///     the same case, is refused.
     /// </summary>
     [Fact]
     public void PackageContentExtractor_RejectCaseCollisions_OnlyWholePathsThatFoldTogetherAreRefused()
     {
         // Arrange / Act / Assert: different file names in folders that differ in case are fine
         PackageContentExtractor.RejectCaseCollisions(
-            "pkg", [".github/skills/Sub/a.md", ".github/skills/sub/b.md", ".github/agents/a.md", ".github/agents/a.md"]);
+            "pkg", [".github/skills/Sub/a.md", ".github/skills/sub/b.md", ".github/agents/a.md"]);
 
         // Assert: the same whole path in another case is refused
         var ex = Assert.Throws<InvalidOperationException>(
             () => PackageContentExtractor.RejectCaseCollisions(
                 "pkg", [".github/skills/Sub/a.md", ".github/skills/sub/A.md"]));
         Assert.Contains("'.github/skills/Sub/a.md' and '.github/skills/sub/A.md'", ex.Message, StringComparison.Ordinal);
+
+        // Assert: the same whole path twice is refused
+        var duplicate = Assert.Throws<InvalidOperationException>(
+            () => PackageContentExtractor.RejectCaseCollisions("pkg", [".github/agents/a.md", ".github/agents/a.md"]));
+        Assert.Contains("more than one file at '.github/agents/a.md'", duplicate.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a zip holding two entries with the same name in a managed folder is refused before
+    ///     anything in the repo is deleted or written, and has no identity.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_ZipWithDuplicateEntries_ThrowsBeforeDeletingManagedFolders()
+    {
+        // Arrange: a zip with .github/agents/a.md twice, and a repo with existing managed content
+        var zipPath = Path.Combine(CreateTempDirectory(), "pkg-1.0.0.zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            foreach (var content in new[] { "first", "second" })
+            {
+                using var writer = new StreamWriter(archive.CreateEntry(".github/agents/a.md").Open());
+                writer.Write(content);
+            }
+        }
+
+        var repo = CreateTempDirectory();
+        var agents = Path.Combine(repo, ".github", "agents");
+        Directory.CreateDirectory(agents);
+        File.WriteAllText(Path.Combine(agents, "keep.md"), "keep me");
+        using var reader = ZipPackageContentReader.Open(zipPath);
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => PackageContentExtractor.Extract(reader, repo));
+
+        // Assert: refused with a clear message, the repo untouched, and no identity
+        Assert.Contains("more than one file at '.github/agents/a.md'", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(["keep.md"], Directory.GetFiles(agents).Select(Path.GetFileName));
+        Assert.Null(reader.ContentIdentity);
     }
 
     /// <summary>

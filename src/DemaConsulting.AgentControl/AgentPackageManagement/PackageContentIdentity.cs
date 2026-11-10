@@ -159,16 +159,8 @@ internal static class PackageContentIdentity
         }
 
         files.Sort((left, right) => string.CompareOrdinal(left.CanonicalPath, right.CanonicalPath));
-        for (var index = 1; index < files.Count; index++)
-        {
-            if (string.Equals(files[index].CanonicalPath, files[index - 1].CanonicalPath, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"Package '{reader.Description}' contains more than one file for '{files[index].CanonicalPath}', " +
-                    "so its content cannot be identified.");
-            }
-        }
 
+        // Duplicate or case-colliding paths are refused by the same rule the extractor applies
         PackageContentExtractor.RejectCaseCollisions(reader.Description, files.Select(file => file.CanonicalPath));
 
         // Frame every file as path, 0x00, length (8 bytes, little-endian), bytes; the framing keeps

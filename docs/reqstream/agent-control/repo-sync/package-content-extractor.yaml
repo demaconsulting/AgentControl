@@ -89,14 +89,16 @@ sections:
       - id: AgentControl-PackageContentExtractor-RefuseCaseCollision
         title: >-
           The PackageContentExtractor class shall refuse a package whose files for the managed
-          folders include two paths that differ only in letter case, with a message that names both
-          files, before deleting or writing anything in the repo.
+          folders include the same path twice or two paths that differ only in letter case, with a
+          message that names the files, before deleting or writing anything in the repo.
         justification: |
-          On a case-insensitive file system such files are one file, so the extracted content would
-          depend on the order of the entries in the package; a package that cannot be applied
-          unambiguously must not be applied, on any platform, and must leave the repo untouched.
+          A zip may hold duplicate entry names, and on a case-insensitive file system paths that
+          differ only in case are one file; either way the extracted content would depend on the
+          order of the entries in the package. A package that cannot be applied unambiguously must
+          not be applied, on any platform, and must leave the repo untouched.
         tests:
           - PackageContentExtractor_Extract_ZipWithPathsDifferingOnlyInCase_ThrowsBeforeDeletingManagedFolders
+          - PackageContentExtractor_Extract_ZipWithDuplicateEntries_ThrowsBeforeDeletingManagedFolders
           - PackageContentExtractor_RejectCaseCollisions_OnlyWholePathsThatFoldTogetherAreRefused
 
       - id: AgentControl-PackageContentExtractor-RejectPathOutsideContent
