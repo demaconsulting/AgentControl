@@ -51,7 +51,6 @@ Running an AgentControl installer always replaces the AgentControl that is insta
 the same version, or an older version (a downgrade) - so there is only ever one installed copy.
 
 The installed application is **self-contained and single-file**: it bundles its own copy of
-The installed application is **self-contained and single-file**: it bundles its own copy of
 the .NET 10 runtime (matching the app's `net10.0` target framework and the Avalonia UI
 framework's Windows desktop requirements), so the target machine needs no pre-installed
 runtime.
