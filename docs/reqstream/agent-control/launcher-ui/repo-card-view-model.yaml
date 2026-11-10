@@ -885,6 +885,100 @@ sections:
           - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedWithoutSubscriber_IsRefused
           - RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommitWithoutSubscriber_AdvisesChangePackage
 
+      - id: AgentControl-RepoCardViewModel-CheckTrackedFoldersFresh
+        title: >-
+          The RepoCardViewModel class shall, when a package is selected, changed or upgraded to,
+          ask git at that moment which of the repo's managed agent folders have files tracked by
+          git, without relying on the committed-agent-files indicator shown on the card, and shall
+          treat a git that cannot answer as nothing being tracked.
+        justification: |
+          The indicator reflects an earlier moment and is not refreshed by staging or committing;
+          the decision to take folders out of git must rest on what git reports now, and a repo
+          that git cannot be asked about must keep working as it always did.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_BadgeStaleBecauseFilesStagedLater_ChecksGitFreshAndAsks
+          - RepoCardViewModel_ApplySelectedPackage_GitCannotAnswer_AppliesAsBefore
+
+      - id: AgentControl-RepoCardViewModel-ConfirmBeforeConverting
+        title: >-
+          The RepoCardViewModel class shall, when a package is selected, changed or upgraded to for
+          a repo whose managed agent folders are tracked by git, request the user's confirmation
+          before downloading or changing anything, naming the repo, the tracked folders and the
+          package, and explaining that git will stop tracking the folders and the result is to be
+          committed.
+        justification: |
+          Taking committed files out of git changes the team's repository; the user must know
+          which folders are affected and what is expected of them before it happens, and the
+          question must come before any download so that declining costs nothing.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_TrackedAgentFolders_AsksBeforeAcquiringAnything
+          - RepoCardViewModel_UpgradeCommand_TrackedAgentFoldersAccepted_StopsTrackingThenUpgrades
+
+      - id: AgentControl-RepoCardViewModel-DeclineConvertChangesNothing
+        title: >-
+          The RepoCardViewModel class shall, when the user declines to have the tracked managed
+          agent folders taken out of git, change nothing - no download, no change to what git
+          tracks, no file, no .gitignore and no pin - and say that the action was canceled.
+        justification: |
+          Declining must be safe and complete; a half-applied package in a repo that still tracks
+          its agent files is the very state the confirmation exists to prevent.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersDeclined_ChangesNothing
+
+      - id: AgentControl-RepoCardViewModel-NeverConvertWithoutAsking
+        title: >-
+          The RepoCardViewModel class shall, when the user cannot be asked, stop with an
+          explanation and change nothing rather than take managed agent folders out of git.
+        justification: |
+          Changing what git tracks must never happen without an explicit yes.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersWithoutSubscriber_StopsAndChangesNothing
+
+      - id: AgentControl-RepoCardViewModel-ConvertTrackedFolders
+        title: >-
+          The RepoCardViewModel class shall, once the user has agreed, stop git tracking only the
+          managed agent folders that are tracked, immediately before replacing the repo's agent
+          files with the package, and then apply the package.
+        justification: |
+          A package can only manage folders that git does not track; stopping the tracking of just
+          the tracked folders, and only after the package has been fetched and accepted, keeps the
+          change as small as it can be and leaves the repo as it was if the package cannot be used.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersAccepted_StopsTrackingThenAppliesPackageAndAsksToCommit
+          - RepoCardViewModel_UpgradeCommand_TrackedAgentFoldersAccepted_StopsTrackingThenUpgrades
+
+      - id: AgentControl-RepoCardViewModel-ConvertedRepoStatus
+        title: >-
+          The RepoCardViewModel class shall, after taking managed agent folders out of git, show
+          that the repo no longer has committed agent files and tell the user to commit the change
+          to finish it.
+        justification: |
+          The removal from git is only staged; the user must be told that committing it is what
+          completes the change, and the card must not keep warning about files git no longer tracks.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersAccepted_StopsTrackingThenAppliesPackageAndAsksToCommit
+
+      - id: AgentControl-RepoCardViewModel-StopWhenUntrackFails
+        title: >-
+          The RepoCardViewModel class shall, when git cannot stop tracking the managed agent
+          folders, report why and stop before replacing any file, writing the pin or changing
+          .gitignore.
+        justification: |
+          A repo whose files were replaced while git still tracks them is the broken half-converted
+          state the conversion exists to avoid.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_UntrackFails_StopsBeforeExtractingAndChangesNothingElse
+
+      - id: AgentControl-RepoCardViewModel-NoConvertWhenNotTracked
+        title: >-
+          The RepoCardViewModel class shall apply a package to a repo that has no managed agent
+          files tracked by git without any question and without changing what git tracks.
+        justification: |
+          The conversion concerns only repos that committed their agent files; every other repo
+          must keep working exactly as it did.
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_NoTrackedAgentFiles_AppliesWithoutAskingOrTouchingGit
+
       - id: AgentControl-RepoCardViewModel-AdoptMissingIdentity
         title: >-
           The RepoCardViewModel class shall apply a package without any warning, recording its

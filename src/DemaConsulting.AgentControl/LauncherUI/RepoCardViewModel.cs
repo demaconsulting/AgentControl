@@ -1870,6 +1870,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         SelectPackageRequested = null;
         AgentsMdTemplateOfferRequested = null;
         ContentChangeConfirmationRequested = null;
+        CommittedFilesConversionRequested = null;
 
         // The picture is disposed here, once the view has been told it is gone
         RepoImage = null;
@@ -1907,6 +1908,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     view-layer concern, like <see cref="AgentsMdTemplateOfferRequested"/>.
     /// </summary>
     public event EventHandler<ContentChangeConfirmationRequest>? ContentChangeConfirmationRequested;
+
+    /// <summary>
+    ///     Raised when a package is about to be applied (Select Package, Change package or Upgrade)
+    ///     to a repo that has managed agent folders tracked by git: asks the user, before anything is
+    ///     downloaded or changed, whether AgentControl may stop git tracking those folders so the
+    ///     repo can be managed from the package. The view layer shows the request's message in a
+    ///     modal <see cref="ConfirmationWindow"/> and answers through
+    ///     <see cref="CommittedFilesConversionRequest.Respond"/>; the package operation waits for the
+    ///     answer while it holds the card busy. Does not itself show any dialog - that is a
+    ///     view-layer concern, like <see cref="ContentChangeConfirmationRequested"/>. Without a
+    ///     subscriber nobody can be asked, so the operation stops and changes nothing.
+    /// </summary>
+    public event EventHandler<CommittedFilesConversionRequest>? CommittedFilesConversionRequested;
 
     /// <summary>
     ///     What to do when a package version that the repo is already pinned to is delivered with
@@ -2612,6 +2626,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Cancellation is honored only while the package is being acquired; the copy into the
     ///     repo runs on a worker thread and, once started, is never interrupted, so a repo is
     ///     never left half extracted.
+    /// <para>
+    ///     A repo whose managed agent folders are tracked by git cannot be managed from the package:
+    ///     <c>.gitignore</c> has no effect on tracked files, so replacing them would leave git showing
+    ///     modified and deleted files while the new files stayed invisible. Before anything is
+    ///     acquired this therefore re-checks the tracking with git (never trusting the cached badge)
+    ///     and, when some folders are tracked, asks the user through
+    ///     <see cref="CommittedFilesConversionRequested"/>; declining changes nothing at all. After
+    ///     the user agrees, and the package has passed the content checks, only the folders that are
+    ///     tracked are removed from git's index just before the copy, so nothing has changed if the
+    ///     package turns out to be unusable, and a failure to do so stops the apply before any file is
+    ///     replaced. The user commits the result afterwards.
+    ///     </para>
     /// </remarks>
     /// <param name="provider">The provider of the source the package was discovered at.</param>
     /// <param name="package">The resolved package to apply.</param>
@@ -2640,6 +2666,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 package.PackageName, package.Version, package.SourceAlias, RepoName, RepoPath);
         }
 
+        // Set once the agent folders have been removed from git's index, so every way out of the
+        // apply (success or failure) leaves the card's git chips showing what git now reports
+        var untracked = false;
         try
         {
             // Read the existing pin first: a newer-schema pin must stop the apply before the repo
@@ -2654,6 +2683,17 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 existingPin = null;
             }
 
+            // Managed folders tracked by git must be converted (taken out of git) for the package to
+            // manage them, and only with the user's consent: ask before anything is downloaded, and
+            // change nothing at all when the user declines. The check is made now, with git, rather
+            // than trusting the possibly stale "Committed agent files" badge.
+            var trackedFolders = await FindTrackedAgentFoldersAsync();
+            if (trackedFolders.Count > 0 &&
+                !await ConfirmCommittedFilesConversionAsync(package, trackedFolders, failureVerb, cancellationToken))
+            {
+                return;
+            }
+
             using var reader = await provider.AcquireAsync(package, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -2662,6 +2702,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 !ResolveContentChange(existingPin, package, reader, contentChange, failureVerb))
             {
                 return;
+            }
+
+            // The package is acquired and accepted: only now is git told to stop tracking the
+            // folders, immediately before the files are replaced, so a package that could not be
+            // fetched or was refused leaves git exactly as it was. A failure stops here, before any
+            // file is replaced.
+            if (trackedFolders.Count > 0)
+            {
+                untracked = await UntrackAgentFoldersAsync(trackedFolders);
             }
 
             await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
@@ -2687,7 +2736,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
             EvaluatePinnedSource();
             await RefreshUpgradeStatusAsync(CancellationToken.None, relistGitSource: true);
             RaisePackageChipChanged();
-            StatusMessage = successMessage;
+
+            // A converted repo needs one more step from the user: the removal from git is only
+            // staged, and committing it is what finishes the change
+            StatusMessage = untracked
+                ? $"{successMessage} The agent folders are no longer tracked by git - commit the change " +
+                  "(deletions, .gitignore and .agentcontrol.json) to finish."
+                : successMessage;
 
             if (_logger.IsEnabled(LogLevel.Information))
             {
@@ -2725,6 +2780,134 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             ErrorOccurred?.Invoke(this, $"Package source is unreachable: {SecretRedactor.SafeMessage(ex)}");
         }
+        finally
+        {
+            // Git's index changed, so whatever the apply went on to do (or failed to do), the card
+            // must report what git now says: the cached committed-files answer is keyed by the
+            // commit and would otherwise keep showing the badge
+            if (untracked)
+            {
+                _committedAgentFilesCache.Invalidate(RepoPath);
+                RefreshBranchAndCommittedFiles();
+                RefreshGitStatus();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Asks git, right now, which of the managed agent folders have files tracked by git.
+    /// </summary>
+    /// <returns>The tracked folders as repo-relative paths (for example <c>.github/agents</c>), or an
+    ///     empty list when none is tracked or git cannot tell.</returns>
+    /// <remarks>
+    ///     Deliberately does not use the cached "Committed agent files" badge: the conversion removes
+    ///     tracked files from the repo's history-facing state, so the decision must rest on what git
+    ///     reports at this moment, not on what it reported for an earlier commit. A failing git (not
+    ///     installed, not a repository) is treated as "nothing tracked", exactly as the badge itself
+    ///     treats it, so such a repo is applied as it always was.
+    /// </remarks>
+    private async Task<IReadOnlyList<string>> FindTrackedAgentFoldersAsync()
+    {
+        try
+        {
+            var git = new GitClient(ResolveGitExecutablePath(_getSettings()));
+            return await Task.Run(() => git.GetTrackedAgentFolders(RepoPath), CancellationToken.None);
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (_logger.IsEnabled(LogLevel.Debug))
+            {
+                _logger.LogDebug(ex, "Could not determine which agent folders git tracks for repo '{RepoName}'", RepoName);
+            }
+
+            return [];
+        }
+    }
+
+    /// <summary>
+    ///     Asks the user, through <see cref="CommittedFilesConversionRequested"/>, whether AgentControl
+    ///     may stop git tracking the repo's tracked agent folders so the package can manage them.
+    /// </summary>
+    /// <param name="package">The package that will be applied if the user agrees.</param>
+    /// <param name="trackedFolders">The folders that have tracked files; never empty.</param>
+    /// <param name="failureVerb">The action name used in messages.</param>
+    /// <param name="cancellationToken">Cancels waiting for the answer.</param>
+    /// <returns><see langword="true"/> when the user agreed; <see langword="false"/> when the user
+    ///     declined or nobody could be asked, in which case nothing has been changed and the user has
+    ///     been told so.</returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is cancelled while the question is open.</exception>
+    private async Task<bool> ConfirmCommittedFilesConversionAsync(
+        DiscoveredPackage package,
+        IReadOnlyList<string> trackedFolders,
+        string failureVerb,
+        CancellationToken cancellationToken)
+    {
+        var folders = string.Join(", ", trackedFolders);
+        var handler = CommittedFilesConversionRequested;
+        if (handler is null)
+        {
+            // Changing what git tracks is never done without an explicit yes
+            ErrorOccurred?.Invoke(
+                this,
+                $"{failureVerb} stopped. '{RepoName}' has agent files committed to git in {folders}, and " +
+                "AgentControl needs your confirmation to stop tracking them. Nothing was changed.");
+            return false;
+        }
+
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation(
+                "Repo '{RepoName}' has agent files tracked by git in {Folders}; asking whether to stop tracking them",
+                RepoName, folders);
+        }
+
+        StatusMessage = "Waiting for your confirmation to stop git tracking the agent folders.";
+        var request = new CommittedFilesConversionRequest(
+            $"'{RepoName}' has agent files committed to git in {folders}. " +
+            "AgentControl manages these folders from the package and keeps them out of git. " +
+            "To continue, AgentControl will stop tracking them in git (the files stay on disk until the " +
+            $"package replaces them), add them to .gitignore, and apply {package.PackageName} {package.Version}. " +
+            "Commit the result afterwards to finish the change.\n\nContinue?");
+        handler(this, request);
+
+        if (await request.Answer.WaitAsync(cancellationToken))
+        {
+            return true;
+        }
+
+        StatusMessage = $"{failureVerb} canceled. The agent files are still committed to git; nothing was changed.";
+        return false;
+    }
+
+    /// <summary>
+    ///     Stops git tracking the given agent folders (index only; the files stay on disk).
+    /// </summary>
+    /// <param name="trackedFolders">The folders that have tracked files; never empty.</param>
+    /// <returns><see langword="true"/> once git has removed the folders from its index.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when git could not do it; the message
+    ///     explains that nothing was changed and carries git's own explanation, so the apply stops
+    ///     before any file is replaced.</exception>
+    private async Task<bool> UntrackAgentFoldersAsync(IReadOnlyList<string> trackedFolders)
+    {
+        var git = new GitClient(ResolveGitExecutablePath(_getSettings()));
+        try
+        {
+            await Task.Run(() => git.UntrackAgentFolders(RepoPath, trackedFolders), CancellationToken.None);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidOperationException(
+                $"AgentControl could not stop git tracking the agent folders, so nothing was changed. {ex.Message}", ex);
+        }
+
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation(
+                "Stopped git tracking {Folders} for repo '{RepoName}'", string.Join(", ", trackedFolders), RepoName);
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -3054,9 +3237,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     Never touches git tracking state itself and never invokes git - see
     ///     <see cref="GitIgnoreEnsurer"/>'s remarks for the marker-comment-only idempotency
-    ///     rationale. This is a deliberate, narrow exception to the "Committed agent files"
-    ///     badge's advisory-only stance (architecture.md), not a contradiction of it: the badge
-    ///     remains purely advisory and unaffected by this method.
+    ///     rationale. Ignoring a folder only hides untracked files, which is why
+    ///     <see cref="ApplyPackageAndShowReleaseNotesAsync"/> first stops git tracking any
+    ///     managed folder that is tracked (with the user's consent) - a step this method never
+    ///     takes. The "Committed agent files" badge remains purely advisory and unaffected by this
+    ///     method.
     /// </remarks>
     private void EnsureGitIgnoreCoversManagedFolders()
     {

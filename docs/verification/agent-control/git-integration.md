@@ -78,6 +78,17 @@ level, covering `AgentControl-GitIntegration-DetectCommittedFiles` (children:
 `AgentControl-GitClient-DetectCommittedFiles`, `AgentControl-CommittedAgentFilesCache-Cache`,
 `AgentControl-GitClient-HeadHash`).
 
+**GitIntegration_UntrackAgentFolders_SubsystemTestUsesTheRealGit**: Against a real temporary
+repository that tracks two managed agent folders and unrelated files, the folders are reported as
+tracked, stopping the tracking of them leaves them reported as no longer tracked (and
+`HasCommittedAgentFiles` false), every other path is still tracked and every file is still on
+disk. This scenario is tested by
+`GitIntegrationSubsystem_CommittedAgentFolders_ReportedThenUntrackedWithoutTouchingFilesOrOtherPaths`,
+covering `AgentControl-GitIntegration-UntrackAgentFolders`; the exact behavior of each operation, its refusals and its
+failures are verified by the `GitClient` unit tests (see the `GitClient` unit verification design), covering the
+children `AgentControl-GitClient-ListTrackedAgentFolders`, `AgentControl-GitClient-UntrackAgentFolders` and
+`AgentControl-GitClient-UntrackOnlyAgentFolders`.
+
 **GitIntegration_CurrentBranch_UnitTestsCoverFastPathResolution**: Current-branch resolution
 is verified by the `GitClient` unit tests (see the `GitClient` unit verification design), with
 `GitClient_GetCurrentBranch_FastPathNormalBranch_ReturnsBranchNameWithoutInvokingGit` cited

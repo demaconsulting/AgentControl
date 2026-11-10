@@ -224,6 +224,15 @@ tested by
 `windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip`, covering
 `AgentControl-System-SelectPackage`.
 
+**AgentControl_ConvertCommittedAgentFiles_AsksFirstAndStopsGitTrackingOnlyWhenConfirmed**: The user applies a
+package to a repo whose agent folders are committed to git. A modal question appears before anything is downloaded or
+changed, while the card is busy; answering No leaves git, the files and the pin as they were; applying again and
+answering Yes stops git tracking the folders, applies the package, writes the pin, clears the committed-files badge and
+tells the user to commit the change. The evidence is the headless test of the real main window and card over a real
+git repository, `MainWindow_ApplyingToRepoWithTrackedAgentFolders_AsksFirstAndConvertsOnlyWhenConfirmed`, which is not
+a UI-automation test (the other system scenarios above are) and so carries no `windows@` filter; it covers
+`AgentControl-System-ConvertCommittedAgentFiles`.
+
 **AgentControl_ServerSignIn_SelectPackageFromServer_AsksForSignInOnce**: A NuGet server source that needs
 credentials is added; the user starts an operation on it (testing the connection, then selecting a package) and the
 sign-in dialog opens, naming the server's origin and saying the credential is used for this session only. After

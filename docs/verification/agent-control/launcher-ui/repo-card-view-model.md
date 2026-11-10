@@ -6,12 +6,18 @@
 sources, `RepoCardServerSourceTests.cs`, for the signature indicator, `RepoCardSignatureTests.cs`, for the
 card color and group chip, `RepoCardColorTests.cs` (and, for moving into groups, `RepoGroupingTests.cs`), for the
 Git source (the Git icon and tooltip, the moved tag, Change package and the git version problem)
-`RepoCardGitAwarenessTests.cs`, for the Git source's registry options `RepoCardGitSourceTests.cs` and, for the
+`RepoCardGitAwarenessTests.cs`, for the Git source's registry options `RepoCardGitSourceTests.cs`, for applying a
+package to a repo whose agent folders are tracked by git `RepoCardCommittedFilesTests.cs` and, for the
 repo picture, `RepoCardImageTests.cs`. Every
 test substitutes a stub script for the git executable (via `GitStub`, mirroring
 `GitClientTests`) and uses real temporary directories/zip fixtures for package-source and
 pin-file checks, so these tests never depend on a real git installation, a real repository,
-or a real package source. The tests that must control exactly when a package source answers (stale and retired
+or a real package source. The exception is `RepoCardCommittedFilesTests.cs`, which builds a real temporary git repository
+(`GitRepositoryFixture`; skipped where git is not installed and failed when the environment variable `CI` is set), so
+that what git tracks before and after is observed rather than assumed, and serves its packages from an in-memory
+source that counts how often a package is acquired, so "before anything is downloaded" is checked directly; the
+question to the user is answered by a handler subscribed to the card's event. The tests that must control exactly when
+a package source answers (stale and retired
 upgrade checks, the busy guard) give the card an in-memory source whose answer a test releases, or that signals when it
 is read and then never answers, so no timing assumption is needed. One test gives the card an owner callback that
 accepts the first change and refuses the rest; the other tests build cards without an owner. The server-source
@@ -54,6 +60,13 @@ invocations are not parallelized with other tests using real process launches).
   Select Package of that version asks first and applies it, recording the new
   identity, only after the user confirmed, a pin or a source without an identity is never treated as changed, and the
   launch-time restore never writes the pin.
+- A package applied to a repo whose managed agent folders are tracked by git (checked with git at that moment, not
+  from the badge) is preceded by a question that names the repo, the tracked folders and the package and is asked
+  before any package is acquired; declining changes nothing (git, files, `.gitignore`, pin) and says so; agreeing
+  stops git tracking exactly the tracked folders (the files stay until the package replaces them), applies the
+  package, clears the committed-files badge and tells the user to commit; a failure to untrack stops before any file
+  is replaced; with nobody to ask nothing changes; a repo with no tracked agent files, or one git cannot be asked
+  about, is applied as always without a question.
 - A card pinned to a Git source shows the Git icon and the alias, names the tag and the first seven characters of the
   commit in its chip tooltip, shows "Tag moved" - and applies nothing - when the tag now points to a different commit
   than the one recorded, never reports a move for a pin without a recorded commit or a source that is not Git, and
@@ -576,6 +589,37 @@ the Upgrade refusal also asserts that neither `sha256` nor the recorded hash app
 Refusing an Upgrade of a republished version is, in the application, reachable only by a race (an Upgrade is offered
 only for a version newer than the pin), so this refusal is verified at this unit level only; the confirmation, by
 contrast, is reachable through Change package... and is shown end to end in the system verification.
+
+**RepoCardViewModel_ConvertCommittedAgentFiles_AsksStopsTrackingOnlyTrackedFoldersAndAsksToCommit**: Against a real temporary
+git repository that tracks the agents and standards folders (and unrelated files, with the templates folder present
+only as an untracked folder on disk): applying a package (Select Package) raises
+`CommittedFilesConversionRequested` while the card is busy and before the package source was asked to acquire
+anything, with a message naming the repo, `in .github/agents, .github/standards.` (not the untracked templates
+folder) and the package and version; declining acquires nothing, leaves git's index, the old file, the pin and
+`.gitignore` untouched, raises no error and sets a status message saying it was canceled and nothing was changed;
+agreeing leaves in git's index only the paths outside the managed folders, replaces the old files with the
+package's, writes the pin and `.gitignore`, clears `HasCommittedAgentFiles` (which was `true` before) and sets a status
+message that contains the success message and says to commit the change; Upgrade of a pinned repo does the same and
+names the newer version in its question; with an index lock present (git cannot remove the folders) the agreed apply
+raises one error that says nothing was changed and carries git's `rm --cached` message, leaving the old files, the
+index, the pin and `.gitignore` unchanged; a repo that tracks nothing under the managed folders is applied with no
+question, no change to the index and the plain success message; a file staged after the badge was computed for the
+same commit is still found, so the question is asked although the badge was clear; with no subscriber to the question
+the apply stops with an error saying confirmation is needed and changes nothing; and in a folder that is not a git
+repository the package is applied without a question. This scenario is tested by
+`RepoCardViewModel_ApplySelectedPackage_TrackedAgentFolders_AsksBeforeAcquiringAnything`,
+`RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersDeclined_ChangesNothing`,
+`RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersAccepted_StopsTrackingThenAppliesPackageAndAsksToCommit`,
+`RepoCardViewModel_UpgradeCommand_TrackedAgentFoldersAccepted_StopsTrackingThenUpgrades`,
+`RepoCardViewModel_ApplySelectedPackage_UntrackFails_StopsBeforeExtractingAndChangesNothingElse`,
+`RepoCardViewModel_ApplySelectedPackage_NoTrackedAgentFiles_AppliesWithoutAskingOrTouchingGit`,
+`RepoCardViewModel_ApplySelectedPackage_BadgeStaleBecauseFilesStagedLater_ChecksGitFreshAndAsks`,
+`RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersWithoutSubscriber_StopsAndChangesNothing` and
+`RepoCardViewModel_ApplySelectedPackage_GitCannotAnswer_AppliesAsBefore` (in `RepoCardCommittedFilesTests.cs`),
+covering `AgentControl-RepoCardViewModel-CheckTrackedFoldersFresh`, `-ConfirmBeforeConverting`,
+`-DeclineConvertChangesNothing`, `-NeverConvertWithoutAsking`, `-ConvertTrackedFolders`, `-ConvertedRepoStatus`,
+`-StopWhenUntrackFails` and `-NoConvertWhenNotTracked`. The modal question itself, and that the card stays busy while
+it is open, are shown with the real window in the `LauncherUI` subsystem verification.
 
 **RepoCardViewModel_GitSourceAwareness_IconAliasTagAndShortCommit**: A card pinned to a Git source shows the Git icon
 and the source's alias beside the package and version; its chip tooltip reads "Agent files: {package} {version} from

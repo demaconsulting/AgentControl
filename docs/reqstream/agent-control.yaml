@@ -390,6 +390,26 @@ sections:
           - windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders
           - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
 
+      - id: AgentControl-System-ConvertCommittedAgentFiles
+        title: >-
+          The tool shall, when the user selects, changes or upgrades the agent package of a repo
+          that has its agent folders committed to git, ask before anything is downloaded or
+          changed, change nothing when the user declines, and otherwise stop git tracking those
+          folders, apply the package and tell the user to commit the result.
+        tags: [system]
+        justification: |
+          Files that git tracks cannot be managed from a package (ignoring them has no effect),
+          so replacing them in place would leave the repo with phantom modifications and the new
+          files invisible to git; the user must be able to move such a repo to package management
+          deliberately, without losing what was committed and without the tool changing the
+          repository unasked.
+        children:
+          - AgentControl-LauncherUI-ConvertCommittedAgentFiles
+          - AgentControl-GitIntegration-UntrackAgentFolders
+        tests:
+          # Evidence is the headless main-window test: the real window and card with a real git repo.
+          - MainWindow_ApplyingToRepoWithTrackedAgentFolders_AsksFirstAndConvertsOnlyWhenConfirmed
+
       - id: AgentControl-System-ServerSignIn
         title: >-
           The tool shall ask the user to sign in when the user starts an operation on a package

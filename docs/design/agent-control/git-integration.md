@@ -5,7 +5,8 @@
 ### Overview
 
 The `GitIntegration` subsystem spans `GitClient.cs` (invokes the configured git executable
-for status, pull, branch, and committed-files queries), `CommittedAgentFilesCache.cs`
+for status, pull, branch, and committed-files queries and for stopping git tracking managed agent
+folders), `CommittedAgentFilesCache.cs`
 (caches the committed-agent-files-changed check keyed by HEAD commit hash),
 `GitCredentialClient.cs` (keeps, finds and removes a package feed's sign-in in the user's own Git
 credential helper) and `GitRemoteClient.cs` (runs hardened git against untrusted remote repositories for the Git
@@ -95,6 +96,20 @@ resolves the cache key for that check.
   key `CommittedAgentFilesCache` (`AgentControl-GitIntegration-DetectCommittedFiles`,
   `AgentControl-GitClient-DetectCommittedFiles`, `AgentControl-GitClient-HeadHash`).
 - *Constraints*: Both raise `InvalidOperationException` on query failure.
+
+**GitClient.GetTrackedAgentFolders / UntrackAgentFolders**: Reports which managed agent
+folders git tracks and stops git tracking chosen ones.
+
+- *Type*: In-process .NET instance methods.
+- *Role*: Provider.
+- *Contract*: `GetTrackedAgentFolders` lists, from git's current index, which of the four managed
+  folders have tracked files; `UntrackAgentFolders` removes the given folders from the index only,
+  leaving every file on disk and every other tracked path as it was
+  (`AgentControl-GitIntegration-UntrackAgentFolders`, `AgentControl-GitClient-ListTrackedAgentFolders`,
+  `AgentControl-GitClient-UntrackAgentFolders`, `AgentControl-GitClient-UntrackOnlyAgentFolders`).
+- *Constraints*: `UntrackAgentFolders` accepts only the four known folders (anything else is
+  refused before git runs) and raises `InvalidOperationException` with git's explanation when git
+  fails; both raise `InvalidOperationException` when the query cannot run.
 
 **GitClient.GetCurrentBranch**: Resolves a repo's current branch name.
 

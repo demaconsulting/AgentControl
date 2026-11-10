@@ -915,6 +915,85 @@ public sealed class UsabilityWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that applying a package to a repo whose agent folders are tracked by git asks in a modal
+    ///     question before anything is downloaded or changed: No leaves git, the files and the pin as
+    ///     they were, Yes stops git tracking the folders and applies the package.
+    /// </summary>
+    [Fact]
+    public void MainWindow_ApplyingToRepoWithTrackedAgentFolders_AsksFirstAndConvertsOnlyWhenConfirmed() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a real repo that tracks an agents folder, and a source with one package
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(
+            new Dictionary<string, string> { [".github/agents/old.md"] = "old", ["README.md"] = "readme" },
+            "Track agent files");
+        var sourceDir = CreateTempDirectory();
+        CreateZip(sourceDir, "contoso-agents", "1.0.0", releaseNotes: "# Notes");
+        var (window, viewModel) = CreateWindow([new RecentRepo { Path = fixture.WorkPath }], new AppSettings { PackageSourcePath = sourceDir });
+
+        try
+        {
+            var card = viewModel.RepoCards.Single();
+            var selection = new PackageReference("Default", "contoso-agents", "1.0.0");
+
+            // Act 1: apply; the question appears while the card is busy
+            var applying = card.ApplySelectedPackageAsync(selection);
+            await PumpUntilAsync(() => window.OwnedWindows.OfType<ConfirmationWindow>().Any());
+            var question = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+
+            // Assert 1: the card is still busy, and nothing has changed yet
+            Assert.True(card.IsBusy);
+            Assert.False(applying.IsCompleted);
+            Assert.False(File.Exists(Path.Combine(fixture.WorkPath, ".agentcontrol.json")));
+
+            // Act 2: answer No
+            DialogWindowTests.Click(question, "ConfirmationNoButton");
+            await PumpUntilAsync(() => applying.IsCompleted);
+
+            // Assert 2: No changed nothing in git, on disk or in the pin
+            Assert.Empty(window.OwnedWindows);
+            Assert.Contains(".github/agents/old.md", fixture.Git(fixture.WorkPath, "ls-files"), StringComparison.Ordinal);
+            Assert.Equal("old", File.ReadAllText(Path.Combine(fixture.WorkPath, ".github", "agents", "old.md")));
+            Assert.False(File.Exists(Path.Combine(fixture.WorkPath, ".agentcontrol.json")));
+            Assert.False(card.IsBusy);
+
+            // Act 3: apply again and answer Yes
+            applying = card.ApplySelectedPackageAsync(selection);
+            await PumpUntilAsync(() => window.OwnedWindows.OfType<ConfirmationWindow>().Any());
+            DialogWindowTests.Click(window.OwnedWindows.OfType<ConfirmationWindow>().Single(), "ConfirmationYesButton");
+            await PumpUntilAsync(() => applying.IsCompleted);
+
+            // Assert 3: git no longer tracks the folder, the package is applied and the user is told to commit
+            Assert.DoesNotContain(".github/agents", fixture.Git(fixture.WorkPath, "ls-files"), StringComparison.Ordinal);
+            Assert.Equal("1.0.0", RepoPinStore.Load(fixture.WorkPath)?.Version);
+            Assert.False(File.Exists(Path.Combine(fixture.WorkPath, ".github", "agents", "old.md")));
+            Assert.Contains("commit the change", card.StatusMessage, StringComparison.Ordinal);
+            Assert.False(card.HasCommittedAgentFiles);
+        }
+        finally
+        {
+            CloseChildWindows(window);
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Lets the dispatcher and background work run until a condition holds, giving up after about
+    ///     five seconds so a test that would hang fails instead.
+    /// </summary>
+    /// <param name="condition">What to wait for.</param>
+    private static async Task PumpUntilAsync(Func<bool> condition)
+    {
+        for (var attempt = 0; attempt < 100 && !condition(); attempt++)
+        {
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.True(condition(), "The condition did not become true in time.");
+    }
+
+    /// <summary>
     ///     Closes the release-notes windows a main window still has open.
     /// </summary>
     /// <param name="window">The main window.</param>

@@ -1536,6 +1536,32 @@ sections:
           - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing
           - MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed
 
+      - id: AgentControl-LauncherUI-ConvertCommittedAgentFiles
+        title: >-
+          The LauncherUI subsystem shall, when a package is selected, changed or upgraded to for a
+          repo whose managed agent folders are tracked by git, ask the user in a modal question
+          before anything is downloaded or changed, change nothing when the user declines, and
+          otherwise stop git tracking exactly the tracked folders before applying the package and
+          tell the user to commit the result.
+        justification: |
+          A package cannot manage folders that git tracks - ignoring them has no effect - so
+          applying one over committed agent files would leave the repo half converted, with git
+          showing modifications and the new files hidden. Converting deliberately, with the user's
+          consent and only for the folders involved, avoids that without ever changing a team's
+          repository unasked.
+        children:
+          - AgentControl-RepoCardViewModel-CheckTrackedFoldersFresh
+          - AgentControl-RepoCardViewModel-ConfirmBeforeConverting
+          - AgentControl-RepoCardViewModel-DeclineConvertChangesNothing
+          - AgentControl-RepoCardViewModel-NeverConvertWithoutAsking
+          - AgentControl-RepoCardViewModel-ConvertTrackedFolders
+          - AgentControl-RepoCardViewModel-ConvertedRepoStatus
+          - AgentControl-RepoCardViewModel-StopWhenUntrackFails
+          - AgentControl-RepoCardViewModel-NoConvertWhenNotTracked
+        tests:
+          - RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersDeclined_ChangesNothing
+          - MainWindow_ApplyingToRepoWithTrackedAgentFolders_AsksFirstAndConvertsOnlyWhenConfirmed
+
       - id: AgentControl-LauncherUI-ContentChangeAdoption
         title: >-
           The LauncherUI subsystem shall apply a package silently, recording its identity, when the

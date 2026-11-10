@@ -92,8 +92,8 @@ new section is collapsed) has no star to focus.)
   files are confirmed synced (`AgentControl-LauncherUI-Launch`), Upgrade only when a newer
   version exists at the source (`AgentControl-LauncherUI-Upgrade`) — and raises a view-model
   event (`LaunchRecorded`, `SelectPackageRequested`, `ReleaseNotesReady`,
-  `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `ErrorOccurred`, `RemoveRequested`)
-  reporting the outcome.
+  `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `CommittedFilesConversionRequested`,
+  `ErrorOccurred`, `RemoveRequested`) reporting the outcome.
   An asynchronous command ignores a second request while it runs and can be cancelled through
   `CancelOperationCommand` (`AgentControl-LauncherUI-OneOperationPerRepo`,
   `AgentControl-LauncherUI-CancelOperation`, `AgentControl-LauncherUI-OperationProgress`). The card also
@@ -409,6 +409,24 @@ never asks: it refuses and reports through `ErrorOccurred`, and the message name
 package...** as the way to accept the change - it no longer suggests deleting the repo's pin file
 (`AgentControl-LauncherUI-ContentChangeRefusal`, `AgentControl-LauncherUI-ChangePackage`).
 
+**Converting committed agent files.** A repo can have its managed agent folders (`.github/agents`,
+`.github/standards`, `.github/templates`, `.github/skills`) tracked by git. `.gitignore` has no effect on tracked files,
+so applying a package over them would leave git showing them modified or deleted and the new files invisible, with a
+commit of everything recording a broken mix. Select Package, Change package... and Upgrade therefore convert such a
+repo, with the user's consent: `RepoCardViewModel` asks git at that moment which of the four folders are tracked (not
+the cached "Committed agent files" chip), and when some are, raises `CommittedFilesConversionRequested` with a
+`CommittedFilesConversionRequest` - before anything is downloaded - naming the repo, the tracked folders and the
+package, saying that AgentControl will stop tracking the folders in git (the files stay on disk until the package
+replaces them), add them to `.gitignore` and apply the package, and that the result is to be committed afterwards.
+`MainWindow` shows the question in a modal `ConfirmationWindow` (the safe answer, No, is the default) and answers the
+request in place; the card's package operation waits for the answer while the card stays busy, so its other actions
+stay disabled and the operation stays serialized. Declining changes nothing at all. Agreeing lets the operation go on:
+only after the package has been acquired and accepted, and immediately before it replaces the files, git stops
+tracking exactly the tracked folders (`GitClient.UntrackAgentFolders`, index only); a failure of that stops the apply
+before any file is replaced. Afterwards the card's committed-files chip clears, the "Uncommitted changes" chip shows,
+and the status message tells the user to commit the change. Launch is unchanged: it still skips the sync for such a
+repo and never converts it (`AgentControl-LauncherUI-ConvertCommittedAgentFiles`).
+
 **Change package.** A repo that already has a pin is offered **Change package...** in the card menu's *Agent files*
 group (`ChangePackageMenuItem`, shown while `HasPinnedPackage`; the group is shown whenever a package is pinned,
 `HasAgentFileActions`). It is the same `SelectPackageCommand` as **Select Package...**, which is now executable for
@@ -550,8 +568,8 @@ as a cancel, or opening the folder picker; all behavior
 lives in the view models above. `MainWindow`'s code-behind is the one exception: it owns
 dialog-orchestration, view-layer plumbing that requires a live Avalonia `Window` — subscribing
 to each `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`,
-`ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `ErrorOccurred`) and
-deciding which
+`ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`,
+`CommittedFilesConversionRequested`, `ErrorOccurred`) and deciding which
 dialog/window to show and how to route the user's response back into the view model (e.g.
 calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the `ConfirmationWindow` shown
 for the AGENTS.md template offer). `AboutWindow` (opened via a
