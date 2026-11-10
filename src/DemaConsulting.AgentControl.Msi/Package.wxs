@@ -23,8 +23,9 @@
 <!--
   Minimal functional v1 MSI package for AgentControl: installs the self-contained,
   single-file publish output of DemaConsulting.AgentControl under Program Files and creates a single
-  Start Menu shortcut. No custom UI, no code signing, no MajorUpgrade logic beyond a basic
-  UpgradeCode reservation for future use - per architecture.md's explicit v1 packaging scope.
+  Start Menu shortcut. No custom UI and no code signing - per architecture.md's explicit v1 packaging
+  scope. Running any AgentControl installer always replaces whatever AgentControl is installed (see
+  the MajorUpgrade element below).
 
   The published payload embeds directly into the .msi (see <MediaTemplate EmbedCab="yes" />
   below), so the build produces a single, self-contained .msi file with no external .cab
@@ -37,7 +38,15 @@
     Version="$(ProductVersion)"
     UpgradeCode="EF6D37A6-9EA8-426A-B034-5C4923C4E651">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of AgentControl is already installed." />
+    <!-- Running an installer means "I want this version": it always replaces the installed
+         AgentControl - older, newer (a downgrade) or the same ProductVersion. The same
+         ProductVersion is common, because pre-release suffixes are stripped from it
+         (2.0.0-beta.2, 2.0.0-beta.3 and 2.0.0 are all 2.0.0, and every untagged build is 0.0.0);
+         with the default MajorUpgrade such an install was not detected as an upgrade and ended up
+         side by side with the old one, giving two "AgentControl" entries. AllowDowngrades="yes"
+         makes the upgrade find every installed product with this UpgradeCode, whatever its
+         version, and remove it. -->
+    <MajorUpgrade AllowDowngrades="yes" />
 
     <!-- Windows Installer requires Package/@Version (ProductVersion) to be strictly numeric
          "major.minor.build" (ICE24), so any semver pre-release suffix (e.g. "-beta.1") is

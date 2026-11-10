@@ -4,8 +4,9 @@
   Per architecture.md's Phase 3 scope note, a "functional packaging approach is enough for v1":
   this project packages the self-contained, single-file `dotnet publish` output of the main
   DemaConsulting.AgentControl project into an installable MSI with a Start Menu shortcut.
-  There is intentionally no code signing, no custom UI, and no complex upgrade/versioning
-  logic - those are explicitly out of scope for v1.
+  There is intentionally no code signing and no custom UI - those are explicitly out of scope
+  for v1. Upgrades are simple: an installer always replaces any installed AgentControl, whatever
+  its version (see Package.wxs's MajorUpgrade).
 
   Self-contained, single-file publish output was chosen so the target machine needs no
   pre-installed .NET 10 desktop runtime; the trade-off is a larger packaged payload (the full
@@ -22,6 +23,9 @@
     <SelfContained>true</SelfContained>
     <Platform>x64</Platform>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
+    <!-- ICE61 warns that the upgrade has no maximum version; that is deliberate - an installer
+         replaces any installed AgentControl, including a newer or same-version one. -->
+    <SuppressIces>ICE61</SuppressIces>
     <!-- Distributed installer file name: "AgentControl-{version}.msi" rather than the
          default project-name-derived "DemaConsulting.AgentControl.Msi.msi". MsiPackageVersion
          is deliberately a custom property name (not the well-known "Version"/"ProductVersion"
