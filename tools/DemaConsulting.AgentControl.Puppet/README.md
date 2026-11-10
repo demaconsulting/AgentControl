@@ -150,7 +150,7 @@ without it.
 
 ### AutomationIds
 
-- **Main** (`AgentControl`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`, `AddRepoButton`,
+- **Main** (`Agent Control`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`, `AddRepoButton`,
   `OpenSettingsButton`, `OpenAboutButton`,
   `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`.
 - **Group header** (repeated, one per section, in `RepoListBox`; only present once a repo is in a group):
@@ -198,7 +198,7 @@ without it.
   controls).
 - **About** (`About Agent Control`): `AboutTaglineText`, `AboutVersionText`, `AboutCopyrightText`, `AboutLicenseText`,
   `AboutDependenciesList`, `AboutCloseButton`.
-- **Confirmation** (`AgentControl`): `ConfirmationMessageText`, `ConfirmationNoButton`, `ConfirmationYesButton`.
+- **Confirmation** (`Agent Control`): `ConfirmationMessageText`, `ConfirmationNoButton`, `ConfirmationYesButton`.
 - **Message box**: `MessageText`, `MessageBoxOkButton`.
 - **Release notes**: `ReleaseNotesPanel`, `ReleaseNotesHeading`.
 
