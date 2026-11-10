@@ -862,15 +862,18 @@ sections:
       - id: AgentControl-RepoCardViewModel-ConfirmChangedContent
         title: >-
           The RepoCardViewModel class shall, when the user selects the version the repo is pinned
-          to and that version's content differs from the recorded identity (a package republished
-          with other files, or a Git tag that now points to another commit), change nothing and
-          request the user's confirmation.
+          to - from any source - and that version's content differs from the recorded identity (a
+          package republished with other files, a Git tag that now points to another commit, or
+          another source delivering other files), change nothing and request the user's confirmation.
         justification: |
           Selecting the version again with Change package is the deliberate way to accept a
-          republished package or a moved tag; the decision belongs to the user.
+          republished package or a moved tag; the decision belongs to the user. The identity
+          describes the delivered files, so choosing another source is only silent when it delivers
+          identical files.
         tests:
           - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing
           - RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommit_AsksAndChangesNothing
+          - RepoCardViewModel_ApplySelectedPackage_SameVersionFromOtherSource_AsksOnlyWhenFilesDiffer
 
       - id: AgentControl-RepoCardViewModel-ApplyConfirmedContent
         title: >-

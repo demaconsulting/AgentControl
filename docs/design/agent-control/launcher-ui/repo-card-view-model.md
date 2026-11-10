@@ -488,8 +488,9 @@ aborts here with its actionable message while the repo is still untouched; a cor
 tolerated and replaced), then - before anything is acquired - asks git which managed folders are tracked and, if
 any are, asks the user (see **Converting committed agent files** below), acquires the package from its provider,
 compares the acquired content's identity with the
-pin's when the pin is for this very package version (`ContentChangedSincePinned`; a different version, a pin
-without an identity and a reader without one are never a change) and, on a change, applies the requested
+pin's when the pin is for this very package version from any source (`ContentChangedSincePinned`; the files
+identity does not depend on the source, so the same version from another source is compared too; a different
+version, a pin without an identity and a reader without one are never a change) and, on a change, applies the requested
 `ContentChangeHandling` before anything is touched - `Refuse` (Upgrade: log a warning, `ErrorOccurred` saying the
 package may have been republished, that nothing was changed and that "Change package..." accepts it, without a hash
 or any advice to edit the pin file;

@@ -157,6 +157,58 @@ public sealed class RepoCardContentIdentityTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that selecting the pinned version from another source asks for confirmation when that
+    ///     source delivers different files, and switches to it without asking when the files are identical.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackage_SameVersionFromOtherSource_AsksOnlyWhenFilesDiffer()
+    {
+        // Arrange: a repo applied from source 'Default', and two other sources offering the same version -
+        // one with different files, one with identical files
+        var repo = CreateTempDirectory();
+        var defaultDir = CreateTempDirectory();
+        var differentDir = CreateTempDirectory();
+        var identicalDir = CreateTempDirectory();
+        CreateZip(defaultDir, "1.0.0", "v1");
+        CreateZip(differentDir, "1.0.0", "different");
+        CreateZip(identicalDir, "1.0.0", "v1");
+        var settings = new AppSettings
+        {
+            Sources =
+            [
+                new PackageSourceDefinition { Alias = "Default", Type = PackageSourceType.Zip, Location = defaultDir },
+                new PackageSourceDefinition { Alias = "Different", Type = PackageSourceType.Zip, Location = differentDir },
+                new PackageSourceDefinition { Alias = "Identical", Type = PackageSourceType.Zip, Location = identicalDir }
+            ]
+        };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+        await card.ApplySelectedPackageAsync(
+            new PackageReference("Default", "contoso-agents", "1.0.0"), TestContext.Current.CancellationToken);
+        var pinBefore = await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken);
+        var requests = new List<ContentChangeConfirmationRequest>();
+        card.ContentChangeConfirmationRequested += (_, request) => requests.Add(request);
+
+        // Act: select the same version from the source with different files
+        await card.ApplySelectedPackageAsync(
+            new PackageReference("Different", "contoso-agents", "1.0.0"), TestContext.Current.CancellationToken);
+
+        // Assert: asked, and nothing changed
+        Assert.Contains("now contains different files", Assert.Single(requests).Message, StringComparison.Ordinal);
+        Assert.Equal("v1", ReadMarker(repo));
+        Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
+
+        // Act: select the same version from the source with identical files
+        await card.ApplySelectedPackageAsync(
+            new PackageReference("Identical", "contoso-agents", "1.0.0"), TestContext.Current.CancellationToken);
+
+        // Assert: no further question, and the pin now names that source with the same identity
+        Assert.Single(requests);
+        var pin = RepoPinStore.Load(repo);
+        Assert.Equal("Identical", pin?.Source);
+        Assert.Equal(FilesIdentity("v1"), pin?.ContentIdentity);
+    }
+
+    /// <summary>
     ///     Test that, once the user has confirmed, the changed package is applied and the new
     ///     identity replaces the recorded one.
     /// </summary>

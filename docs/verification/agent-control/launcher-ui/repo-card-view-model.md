@@ -630,7 +630,10 @@ and leaves the pin file byte for byte unchanged; the restore of missing managed 
 unchanged; selecting the same version raises `ContentChangeConfirmationRequested` (carrying the selection and a
 question naming the package), raises no error and changes nothing, and selecting it with the user's confirmation
 applies the changed content and records its new identity; selecting it with nobody subscribed to the confirmation is
-refused with the same error. A pin written without an identity applies silently and has an identity recorded; a schema 3
+refused with the same error; selecting the same version from another source that delivers different files asks the same
+question and changes nothing, while selecting it from a source that delivers identical files applies without asking and
+records that source with the same identity. A pin written without an identity applies silently and has an identity
+recorded; a schema 3
 pin that recorded the identity of a container (read as having none) is restored at launch without any refusal; an
 Upgrade to a newer version records the new version's identity without a warning; the restore at launch of such a pin,
 and of an unchanged package, extracts and leaves the pin file untouched; a source whose reader reports no identity
@@ -640,6 +643,7 @@ is applied without any warning and the pin then records none. This scenario is t
 `RepoCardViewModel_UpgradeCommand_SameVersionRepublished_RefusesWithoutChangingRepoOrPin`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SameVersionRepublished_RefusesWithoutExtractingOrWritingPin`,
 `RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing`,
+`RepoCardViewModel_ApplySelectedPackage_SameVersionFromOtherSource_AsksOnlyWhenFilesDiffer`,
 `RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedAndAccepted_AppliesAndRecordsNewIdentity`,
 `RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedWithoutSubscriber_IsRefused`,
 `RepoCardViewModel_ApplySelectedPackage_PinWithoutIdentity_AdoptsIdentityWithoutWarning`,

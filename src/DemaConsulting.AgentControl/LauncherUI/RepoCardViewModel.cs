@@ -3227,13 +3227,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="pin">The repo's current pin, or <see langword="null"/> when there is none.</param>
     /// <param name="package">The package that was acquired.</param>
     /// <param name="reader">The acquired package's content, which names its identity.</param>
-    /// <returns><see langword="true"/> only when the pin names the same source, package and version
-    ///     and both identities are known and differ. A different version, a pin without an
-    ///     identity (a pin made before identities were recorded) and a source that reports no
-    ///     identity are never a change.</returns>
+    /// <returns><see langword="true"/> only when the pin names the same package and version (from any
+    ///     source: the identity describes the delivered files, not the source) and both identities are
+    ///     known and differ. A different version, a pin without a files identity (a pin made before
+    ///     files identities were recorded) and a source that reports no identity are never a change.</returns>
     private static bool ContentChangedSincePinned(RepoPin? pin, DiscoveredPackage package, IPackageContentReader reader) =>
         pin is not null &&
-        string.Equals(pin.Source, package.SourceAlias, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(pin.PackageName, package.PackageName, StringComparison.OrdinalIgnoreCase) &&
         IsVersion(package, pin.Version) &&
         PackageContentIdentity.Compare(pin.ContentIdentity, reader.ContentIdentity) == ContentIdentityComparison.Changed;
