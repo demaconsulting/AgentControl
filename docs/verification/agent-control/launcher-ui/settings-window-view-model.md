@@ -35,8 +35,9 @@ N/A - standard test environment.
   that cannot be examined shows as missing and pending checks are abandoned on dispose; a server source is
   shown as an "Online source" without any check.
 - A NuGet server source can be added and edited through the server editor.
-- A Git repository source can be added through the Git editor, is listed with the Git icon and kind name, as "Not
-  checked" (without any folder check) when its address is remote and with its folder status when it is a local path, is
+- A Git repository source can be added through the Git editor, is listed with the Git icon and kind name, as an
+  "Online source" (without any folder check) when its address is remote and with its folder status when it is a local
+  path, is
   saved with its address, tag pattern, folder and package name, and a Git source with unusable settings is refused on
   save with a message.
 - Add, edit and remove change the list as documented, and a removal's warning names the repos

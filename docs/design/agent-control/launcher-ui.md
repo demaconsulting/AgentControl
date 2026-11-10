@@ -649,8 +649,8 @@ folder inside the repository, each explained by examples and validated while the
 settings save applies, a sign-in note, and a connection test that lists the repository's tags and previews which of
 them match the pattern (`AgentControl-LauncherUI-GitSourceEditor`, `AgentControl-LauncherUI-GitSignInGuidance`). The
 test's provider is the owner's (`MainWindowViewModel.CreateConnectionTestProvider`): the configured git, interactive,
-refusing a git that is too old. A Git source is listed with the Git icon and the kind name "Git repository": "Not
-checked" when its address is remote, the folder status when it is a local path; the Select Package list and the repo
+refusing a git that is too old. A Git source is listed with the Git icon and the kind name "Git repository": "Online
+source" when its address is remote, the folder status when it is a local path; the Select Package list and the repo
 card use the same icon, and the card's package chip tooltip names the tag the pinned version has under the source's
 current tag pattern and the first seven characters of the commit the files came from
 (`AgentControl-LauncherUI-GitSourcePresentation`).
