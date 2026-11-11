@@ -270,8 +270,8 @@ repo's pin does not record it, so teammates can call the same source anything th
    **Zip-package folder**, **NuGet-package folder**, **NuGet-package server** or **Git repository** from the menu
    (each item shows its icon and a one-line description; see *Adding a NuGet-Package Server* and *Adding a Git
    Repository* for the last two).
-2. Type an **alias**. It must be unique (letters are compared ignoring case) and cannot be
-   changed later, because repo pins refer to it.
+2. Type an **alias** - the name shown for this source on repo cards. It must be unique (letters are compared ignoring
+   case) and cannot be changed later.
 3. For a folder, enter the **location** as a full folder path, or use **Browse** to pick the
    folder. A location that contains a user name or password is refused, and so is a web address
    (a web address is a server, which has its own button).
@@ -584,8 +584,8 @@ sign-in note and a successful Test connection that lists the tags matching the p
 
 ### Source, package and versions
 
-- **Alias** — as for any source: unique, and fixed once the source is saved, because each repo card remembers which
-  source supplies its files by this alias.
+- **Alias** — as for any source: unique, and fixed once the source is saved. The repo cards that get their files from
+  this source show the alias in the package chip.
 - **Repository URL** — where the repository is. Three forms of address are accepted, plus a local path:
 
   ```text
@@ -694,6 +694,13 @@ AgentControl runs Git with a locked-down command line, because the contents of a
 Like the other kinds, a Git source is saved in your `settings.json` (see *What Is Stored*). A repo's pin records the
 package name, the version and a fingerprint of the agent files - not the source, the tag or the commit - see
 *Version Immutability and Trust* for what happens when a tag is moved.
+
+On a repo card, the package chip of a repo whose files come from a Git repository shows the Git icon and the alias of
+your source that supplies them:
+
+![A repo card whose agent package comes from a Git repository: the package chip shows contoso-agents 1.1.0 with a check
+mark for up to date, the Git icon and the source's alias Contoso Git, followed by the branch
+chip](images/repo-card-git.png)
 
 ## Editing and Removing a Source
 
