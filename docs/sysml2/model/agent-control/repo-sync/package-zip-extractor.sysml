@@ -5,7 +5,6 @@ package AgentControl {
         doc /* Facade over the shared package content extractor for zip packages; extracts managed folders (blind delete-replace) and reads release notes without extracting. */
 
         metadata info : SoftwareInfo {
-            description = "Facade over the shared package content extractor for zip packages; extracts managed folders (blind delete-replace) and reads release notes without extracting.";
             sourceFiles = ("src/DemaConsulting.AgentControl/RepoSync/PackageZipExtractor.cs");
             testFiles = ("test/DemaConsulting.AgentControl.Tests/RepoSync/PackageZipExtractorTests.cs");
             designFiles = ("docs/design/agent-control/repo-sync/package-zip-extractor.md");

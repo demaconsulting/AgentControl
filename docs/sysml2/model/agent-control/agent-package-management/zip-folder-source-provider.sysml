@@ -5,7 +5,6 @@ package AgentControl {
         doc /* Provider over a folder of name-semver zip packages, adapting the static PackageSource scan. */
 
         metadata info : SoftwareInfo {
-            description = "Provider over a folder of name-semver zip packages, adapting the static PackageSource scan.";
             sourceFiles = ("src/DemaConsulting.AgentControl/AgentPackageManagement/ZipFolderSourceProvider.cs");
             testFiles = ("test/DemaConsulting.AgentControl.Tests/AgentPackageManagement/ZipFolderSourceProviderTests.cs");
             designFiles = ("docs/design/agent-control/agent-package-management/zip-folder-source-provider.md");

@@ -5,7 +5,6 @@ package AgentControl {
         doc /* Proactively ensures a repo's .gitignore covers the four managed agent folders via a marker-comment scan; additive-only, no git dependency. */
 
         metadata info : SoftwareInfo {
-            description = "Proactively ensures a repo's .gitignore covers the four managed agent folders via a marker-comment scan; additive-only, no git dependency.";
             sourceFiles = ("src/DemaConsulting.AgentControl/RepoSync/GitIgnoreEnsurer.cs");
             testFiles = ("test/DemaConsulting.AgentControl.Tests/RepoSync/GitIgnoreEnsurerTests.cs");
             designFiles = ("docs/design/agent-control/repo-sync/git-ignore-ensurer.md");

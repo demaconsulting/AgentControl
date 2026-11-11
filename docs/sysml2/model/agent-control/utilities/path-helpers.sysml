@@ -5,7 +5,6 @@ package AgentControl {
         doc /* Safe path-combination utility guarding against path-traversal. */
 
         metadata info : SoftwareInfo {
-            description = "Safe path-combination utility guarding against path-traversal.";
             sourceFiles = ("src/DemaConsulting.AgentControl/Utilities/PathHelpers.cs");
             testFiles = ("test/DemaConsulting.AgentControl.Tests/Utilities/PathHelpersTests.cs");
             designFiles = ("docs/design/agent-control/utilities/path-helpers.md");

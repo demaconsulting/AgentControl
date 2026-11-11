@@ -14,7 +14,6 @@ package AgentControl {
 
         // Note - test/DemaConsulting.AgentControl.UiTests/: all files
         metadata info : SoftwareInfo {
-            description = "The AgentControl system as a whole.";
             testFiles = ("test/DemaConsulting.AgentControl.UiTests/");
             designFiles = ("docs/design/agent-control.md");
             verificationFiles = ("docs/verification/agent-control.md");

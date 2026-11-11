@@ -5,7 +5,6 @@ package AgentControl {
         doc /* Builds process-start information to run the agent tool inside a detected shell. */
 
         metadata info : SoftwareInfo {
-            description = "Builds process-start information to run the agent tool inside a detected shell.";
             sourceFiles = ("src/DemaConsulting.AgentControl/AgentToolLauncher/AgentToolLauncher.cs");
             testFiles = ("test/DemaConsulting.AgentControl.Tests/AgentToolLauncher/AgentToolLauncherTests.cs");
             designFiles = ("docs/design/agent-control/agent-tool-launcher/agent-tool-launcher.md");
