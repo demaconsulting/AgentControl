@@ -190,7 +190,11 @@ internal static class GitIgnoreEnsurer
             return (string.Empty, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         }
 
-        using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        // The default encoding (used when the file has no byte-order mark) must be UTF-8 WITHOUT a
+        // BOM: StreamReader reports it as CurrentEncoding when no BOM is detected, and writing back
+        // with a BOM-emitting encoding would add one to a file that never had it
+        using var reader = new StreamReader(
+            path, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), detectEncodingFromByteOrderMarks: true);
         var content = reader.ReadToEnd();
         return (content, reader.CurrentEncoding);
     }

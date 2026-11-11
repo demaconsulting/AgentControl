@@ -26,4 +26,5 @@ sections:
           - GitIgnoreEnsurer_Ensure_ExistingContentEndsWithBlankLine_AppendsBlockWithoutExtraBlankLine
           - GitIgnoreEnsurer_Ensure_ExistingContentUsesCrLf_AppendsBlockWithCrLf
           - GitIgnoreEnsurer_Ensure_ExistingFileHasUtf8Bom_PreservesBomOnWrite
+          - GitIgnoreEnsurer_Ensure_ExistingFileWithoutBom_DoesNotAddBom
           - GitIgnoreEnsurer_Ensure_PathIsDirectory_ThrowsInvalidOperationException
