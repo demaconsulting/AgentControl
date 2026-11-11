@@ -22,7 +22,7 @@ N/A - standard test environment.
 - Appended lines match the existing file's newline style (CRLF or LF) rather than always using
   the current OS's convention.
 - The file's existing encoding (including a UTF-8 byte-order mark, if present) is preserved
-  when the file is rewritten.
+  when the file is rewritten, and a file without a byte-order mark never gains one.
 - A write failure surfaces as `InvalidOperationException` naming the `.gitignore` path.
 
 #### Test Scenarios
@@ -44,9 +44,11 @@ covering `AgentControl-GitIgnoreEnsurer-Ensure`.
 
 **GitIgnoreEnsurer_Ensure_PreservesNewlineStyleAndEncoding**: Appending to a CRLF-only
 `.gitignore` uses CRLF (not the current OS's `Environment.NewLine`) for the separator and
-appended block, and rewriting a `.gitignore` with a UTF-8 byte-order mark preserves that BOM.
-This scenario is tested by `GitIgnoreEnsurer_Ensure_ExistingContentUsesCrLf_AppendsBlockWithCrLf`
-and `GitIgnoreEnsurer_Ensure_ExistingFileHasUtf8Bom_PreservesBomOnWrite`, covering
+appended block, rewriting a `.gitignore` with a UTF-8 byte-order mark preserves that BOM, and rewriting one without
+a BOM adds none (its original bytes are unchanged, with the block appended).
+This scenario is tested by `GitIgnoreEnsurer_Ensure_ExistingContentUsesCrLf_AppendsBlockWithCrLf`,
+`GitIgnoreEnsurer_Ensure_ExistingFileHasUtf8Bom_PreservesBomOnWrite` and
+`GitIgnoreEnsurer_Ensure_ExistingFileWithoutBom_DoesNotAddBom`, covering
 `AgentControl-GitIgnoreEnsurer-Ensure`.
 
 **GitIgnoreEnsurer_Ensure_PathIsDirectory_ThrowsInvalidOperationException**: A `.gitignore`

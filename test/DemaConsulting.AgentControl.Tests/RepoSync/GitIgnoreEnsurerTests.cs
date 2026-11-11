@@ -255,6 +255,37 @@ public class GitIgnoreEnsurerTests
     }
 
     /// <summary>
+    ///     Test that an existing .gitignore without a byte-order mark is written back without one: its
+    ///     original bytes are unchanged and the managed-folders block is only appended, so the update
+    ///     never shows up as a change to the file's first line.
+    /// </summary>
+    [Fact]
+    public void GitIgnoreEnsurer_Ensure_ExistingFileWithoutBom_DoesNotAddBom()
+    {
+        // Arrange: a .gitignore written without a BOM
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var gitIgnorePath = Path.Combine(repoRoot, ".gitignore");
+            var original = Encoding.ASCII.GetBytes("# Node.js\nnode_modules/\n");
+            File.WriteAllBytes(gitIgnorePath, original);
+
+            // Act: ensure
+            GitIgnoreEnsurer.Ensure(repoRoot);
+
+            // Assert: no BOM, and the file starts with exactly its original bytes
+            var bytes = File.ReadAllBytes(gitIgnorePath);
+            Assert.NotEqual(Encoding.UTF8.GetPreamble(), bytes[..3]);
+            Assert.Equal(original, bytes[..original.Length]);
+            Assert.True(bytes.Length > original.Length);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Creates a unique temporary directory for test isolation.
     /// </summary>
     /// <returns>The created directory's path.</returns>

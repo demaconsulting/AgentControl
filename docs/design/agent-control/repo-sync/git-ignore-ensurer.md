@@ -49,7 +49,9 @@ the four managed agent folders, creating the file if it does not yet exist.
   (`AgentControl-GitIgnoreEnsurer-Ensure`). The appended lines match the existing file's
   newline style (CRLF/LF) rather than always using the current OS's convention, and the file
   is rewritten using its existing encoding (detected via a byte-order mark, if present) rather
-  than always normalizing to UTF-8. The update is written atomically via a temp file in the
+  than always normalizing to UTF-8; a file without a byte-order mark is written back as UTF-8 without one, so the
+  update never adds a BOM (which would show up as a change to the file's first line). The update is written
+  atomically via a temp file in the
   same directory followed by an atomic replace/move, so a mid-write failure can never leave a
   truncated or corrupted `.gitignore` behind.
 
