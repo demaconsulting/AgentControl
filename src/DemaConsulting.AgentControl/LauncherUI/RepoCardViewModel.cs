@@ -2229,12 +2229,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // never refused.
             var pinnedVersion = PinnedPackageVersion;
             var recordedPin = LoadPinForComparison();
-            var (offering, _) = await FindOfferingSourcesAsync(registry, pinnedPackageName, pinnedVersion, cancellationToken);
+            var (offering, firstFailure) = await FindOfferingSourcesAsync(
+                registry, pinnedPackageName, pinnedVersion, cancellationToken);
             if (offering.Count == 0)
             {
-                ErrorOccurred?.Invoke(
-                    this,
-                    DescribeNoSourceOffers(pinnedPackageName, pinnedVersion) + " Launching without syncing agent files.");
+                // A source that could not be read is not proof that no source offers the package:
+                // report why it could not be read instead
+                var reason = firstFailure is not null
+                    ? $"A package source could not be read: {SecretRedactor.SafeMessage(firstFailure)}"
+                    : DescribeNoSourceOffers(pinnedPackageName, pinnedVersion);
+                ErrorOccurred?.Invoke(this, reason + " Launching without syncing agent files.");
                 return false;
             }
 

@@ -1123,6 +1123,7 @@ sections:
           - RepoCardViewModel_Refresh_NoSourcesConfigured_ShowsNoSourceOffersProblem
           - RepoCardViewModel_RefreshCheap_NoSourceConfigured_ShowsNoSourceOffersProblemAndOffersNoUpgrade
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoSourceOffersVersion_ReportsNoSourceOffers
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceUnreadable_ReportsReadFailure
           - RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason
 
       - id: AgentControl-RepoCardViewModel-UnresolvedPinExplained

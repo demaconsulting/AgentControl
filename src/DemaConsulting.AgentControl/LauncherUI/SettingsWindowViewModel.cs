@@ -446,8 +446,8 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
                       "Nothing is deleted from the source itself; AgentControl only forgets it.";
         if (source.PinnedRepoCount > 0)
         {
-            var repos = source.PinnedRepoCount == 1 ? "1 repo gets" : $"{source.PinnedRepoCount} repos get";
-            message += $"\n\nWarning: {repos} its agent package from '{source.Alias}'. Without it those repos " +
+            var repos = source.PinnedRepoCount == 1 ? "1 repo gets its" : $"{source.PinnedRepoCount} repos get their";
+            message += $"\n\nWarning: {repos} agent package from '{source.Alias}'. Without it those repos " +
                        "use another configured source that delivers the identical files; if there is none " +
                        "they will show a \"Package source problem\".";
         }

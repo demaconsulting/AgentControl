@@ -405,7 +405,7 @@ public class SettingsWindowViewModelTests
         // Assert: the warning counts the repos the source supplies and says another source delivering the
         // identical files is used, else a source problem is shown
         Assert.Contains("'Contoso'", warning, StringComparison.Ordinal);
-        Assert.Contains("2 repos get its agent package from 'Contoso'", warning, StringComparison.Ordinal);
+        Assert.Contains("2 repos get their agent package from 'Contoso'", warning, StringComparison.Ordinal);
         Assert.Contains("another configured source that delivers the identical files", warning, StringComparison.Ordinal);
         Assert.Contains("Package source problem", warning, StringComparison.Ordinal);
         Assert.Contains("1 repo gets its agent package from 'Other'", otherWarning, StringComparison.Ordinal);

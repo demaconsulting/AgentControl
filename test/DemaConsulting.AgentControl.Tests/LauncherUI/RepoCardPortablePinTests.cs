@@ -572,6 +572,37 @@ public sealed class RepoCardPortablePinTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that the launch re-sync, when one configured source cannot be read and the readable ones
+    ///     do not offer the version, reports that a source could not be read rather than claiming that no
+    ///     source offers the version (the unreadable one might).
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceUnreadable_ReportsReadFailure()
+    {
+        // Arrange: a missing source folder, and a readable source with only another version
+        var (repo, _) = CreatePinnedRepo("v1");
+        Directory.Delete(Path.Combine(repo, ".github"), recursive: true);
+        var missing = Path.Combine(CreateTempDirectory(), "missing");
+        var other = CreateTempDirectory();
+        WriteZip(other, "2.0.0", "v2");
+        var settings = new AppSettings { Sources = [ZipSource("Artifactory", missing), ZipSource("Mirror", other)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+        var errors = new List<string>();
+        card.ErrorOccurred += (_, message) => errors.Add(message);
+
+        // Act
+        var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the read failure is reported, not "no source offers"
+        Assert.False(result);
+        var message = Assert.Single(errors);
+        Assert.Contains("A package source could not be read", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("No configured source offers", message, StringComparison.Ordinal);
+        Assert.Contains("Launching without syncing agent files", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Test that the launch re-sync of a pin that recorded no files identity is never refused: it takes
     ///     the source an older version named when that is configured, and otherwise the first source that
     ///     offers the version.
