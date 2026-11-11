@@ -427,6 +427,13 @@ card - reuses the remembered credential without asking. This scenario is tested 
 `RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential`,
 in `RepoCardServerSourceTests.cs`, covering `AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`.
 
+**RepoCardViewModel_AccessDenied_ShownOnTheCardWithoutSignInOffer**: A pinned card whose source throws a
+`PackageSourceAccessException` of kind `AccessDenied` shows the message (with the server's reason) as its source
+problem, sets `SourceNeedsSignIn` false and offers no sign-in, for a background check and for a check the user
+asked for alike. This scenario is tested by
+`RepoCardViewModel_RefreshUpgradeStatusAsync_ServerRefusesAccess_ShowsReasonWithoutSignInOffer`, covering
+`AgentControl-RepoCardViewModel-AccessDeniedShown`.
+
 **RepoCardViewModel_SignatureIndicator_ShieldOnlyForNuGetSourcesThatRequireSignatures**: A card whose package is
 supplied by a NuGet
 source that requires signed packages reports `RequiresSignature` and a tooltip that says signatures are required and

@@ -373,7 +373,11 @@ credentials and **never opens the sign-in dialog**. A server that then answers t
 followed by *Use the card's "..." menu > Refresh to sign in*, so the card says what to do instead of
 interrupting the user. The card's **Refresh** command runs the same check with `allowPrompt` true, and the
 Select Package and Upgrade actions the user chooses use a source registry that may open the dialog
-(`AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`). A source that cannot be read is skipped, so one
+(`AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`). A server that answers 403
+(`PackageSourceFailureKind.AccessDenied`: signed in, no permission to read the feed) sets `SourceProblem` to the
+provider's message (which carries the server's reason) whether or not the check may prompt, with no sign-in offer and
+`SourceNeedsSignIn` false, because signing in cannot help
+(`AgentControl-RepoCardViewModel-AccessDeniedShown`). A source that cannot be read is skipped, so one
 unreachable share never hides what the others offer; but when nothing offers the pinned version and a source
 failed, nothing is known ("no source offers it" would be a false statement), so the check fails like any other read
 failure ("Update check failed", or the sign-in hint above) instead of showing the "no source offers" problem. A pin

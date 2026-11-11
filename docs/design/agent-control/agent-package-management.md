@@ -56,7 +56,8 @@ OTS item.
 - *Constraints*: Missing folders surface as `DirectoryNotFoundException`, other failures as
   `InvalidOperationException` with a user-safe message. A server source reports the cause as a
   `PackageSourceAccessException` (derived from `InvalidOperationException`), whose `PackageSourceFailureKind`
-  - `AuthenticationFailed`, `SignInCanceled`, `NotFound`, `Unreachable`, `TimedOut`, `SignatureRejected` - lets a
+  - `AuthenticationFailed`, `AccessDenied`, `SignInCanceled`, `NotFound`, `Unreachable`, `TimedOut`,
+  `SignatureRejected` - lets a
   caller react
   (the connection test, the Select Package window, the card's background check) and whose message never
   contains a secret or more of the server's address than its scheme, host and port.

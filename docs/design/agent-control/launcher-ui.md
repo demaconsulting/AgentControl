@@ -333,7 +333,7 @@ list of package
 identifiers, reusing the `PackageSourceDefinition` validation of `AgentPackageManagement`;
 its Save command stays disabled while anything is invalid. For a server it also offers
 **Test connection**, which lists the versions of the first package ID with progress and Cancel, and states
-the result in words (*Connection OK* with the version count and newest; *Sign-in failed*; *Sign-in canceled*;
+the result in words (*Connection OK* with the version count and newest; *Sign-in failed*; *Access denied*; *Sign-in canceled*;
 *Package not found*; *Timed out*; *Server unreachable*; *Connection failed*), and shows example addresses for
 JFrog Artifactory and Azure Artifacts
 (`AgentControl-LauncherUI-TestConnection`, `AgentControl-LauncherUI-ServerSourceEditor`,

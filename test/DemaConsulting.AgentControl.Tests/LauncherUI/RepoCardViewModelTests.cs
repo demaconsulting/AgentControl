@@ -2450,6 +2450,44 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a pinned card whose server refuses access (HTTP 403: signed in, no permission) says so
+    ///     on the card, with the server's reason and no offer to sign in - for the background check and for a
+    ///     check the user asked for alike.
+    /// </summary>
+    /// <param name="allowPrompt">Whether the check is one the user asked for.</param>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RepoCardViewModel_RefreshUpgradeStatusAsync_ServerRefusesAccess_ShowsReasonWithoutSignInOffer(bool allowPrompt)
+    {
+        // Arrange: a source that reports an access denial
+        var provider = new FakePackageSourceProvider("Default", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new PackageSourceAccessException(
+                PackageSourceFailureKind.AccessDenied, "Signed in, but 'feed.example' refused access: You need ReadPackages.")
+        };
+        var registry = new PackageSourceRegistry([ZipSource("Default", CreateTempDirectory())], _ => provider);
+        var repoRoot = CreateTempDirectory();
+        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot, PinnedSource = "Default", PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0" },
+            () => new AppSettings(),
+            new PackageVersionCache(),
+            registryFactory: _ => registry);
+        card.RefreshCheap();
+
+        // Act
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken, allowPrompt: allowPrompt);
+
+        // Assert: the reason is on the card and no sign-in is offered
+        Assert.True(card.HasSourceProblem);
+        Assert.Contains("refused access: You need ReadPackages.", card.SourceProblem, StringComparison.Ordinal);
+        Assert.DoesNotContain("sign in", card.SourceProblem, StringComparison.OrdinalIgnoreCase);
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.True(card.IsUpgradeStatusUnknown);
+    }
+
+    /// <summary>
     ///     Test that a missing repo folder and a pin no configured source can supply are both a
     ///     problem (red) that outranks an available upgrade, with the reason in the tooltip.
     /// </summary>

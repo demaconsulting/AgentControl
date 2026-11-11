@@ -404,6 +404,26 @@ sections:
           - NuGetSourceProvider_ListVersions_AddressIsNotANuGetFeed_ThrowsUnreachable
           - PackageSourceAccessException_Constructor_CarriesKindMessageAndInnerException
 
+      - id: AgentControl-NuGetSourceProvider-AccessDenied
+        title: >-
+          The NuGetSourceProvider class shall, when a server answers HTTP 403 (it knows the user
+          and refuses access), report the failure as access denied with the server's reason
+          (reduced to one short line without secrets and logged as a warning), shall never open the
+          sign-in prompt for it, and shall not forget a remembered or saved sign-in because of it;
+          a 401 shall keep asking the user once.
+        justification: |
+          A 403 means the account is signed in but lacks permission, so typing a credential cannot
+          help; asking anyway was pointless and the server's explanation (for example the missing
+          ReadPackages permission) never reached the user. The credential was accepted, so it is
+          not wrong and must be kept.
+        tests:
+          - NuGetSourceProvider_RunAsync_ForbiddenWithSavedSignIn_ReportsAccessDeniedWithoutPromptingOrForgetting
+          - NuGetSourceProvider_RunAsync_ForbiddenWithoutReason_ReportsAccessDeniedWithTheStatus
+          - NuGetSourceProvider_RunAsync_Unauthorized_StillPromptsOnce
+          - NuGetSourceProvider_RunAsync_UnauthorizedThenForbiddenAfterSignIn_ReportsAccessDeniedAfterOnePrompt
+          - NuGetSourceProvider_IsAccessDenied_MessageShapes_ParsesStatusAndReason
+          - NuGetSourceProvider_ListVersions_ServerExplainsForbidden_ShowsReasonWithoutPromptingOrForgetting
+
       - id: AgentControl-NuGetSourceProvider-RejectedCredentialForgotten
         title: >-
           The NuGetSourceProvider class shall forget a credential the server rejected, so that it

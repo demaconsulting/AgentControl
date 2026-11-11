@@ -259,6 +259,27 @@ asserted as a guarantee.) This scenario is tested by
 `NuGetSourceProvider_ListVersions_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin`, covering
 `AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin`.
 
+**NuGetSourceProvider_ServerRefusesAccess_AccessDeniedWithoutPrompting**: When the NuGet library reports that the
+server answered HTTP 403 (its message says `HTTP 403 (Forbidden) -` and, when the server explained itself,
+`Server said: "reason"`), the operation ends as `AccessDenied` at the silent attempt: the prompt is never asked, a
+saved or session sign-in that was used is kept, the message reads "Signed in, but 'host' refused access: reason"
+(secret-redacted, one line, at most 300 characters) with a hint to ask the feed's administrator for read permission,
+and a warning with the reason is logged; without a reason the message gives the status. A 401 is unchanged: the user
+is asked once and the second attempt's result is returned; a 403 that follows a sign-in (the 401 was answered by the
+prompt) ends as `AccessDenied` after that one question without keeping the typed credential. These are tested at
+the unit level, with a scripted library call (`RunAsync`), by
+`NuGetSourceProvider_RunAsync_ForbiddenWithSavedSignIn_ReportsAccessDeniedWithoutPromptingOrForgetting`,
+`NuGetSourceProvider_RunAsync_ForbiddenWithoutReason_ReportsAccessDeniedWithTheStatus`,
+`NuGetSourceProvider_RunAsync_Unauthorized_StillPromptsOnce`,
+`NuGetSourceProvider_RunAsync_UnauthorizedThenForbiddenAfterSignIn_ReportsAccessDeniedAfterOnePrompt` and
+`NuGetSourceProvider_IsAccessDenied_MessageShapes_ParsesStatusAndReason`; and end to end against the in-process
+mock server answering 403 with an `X-TFS-ServiceError` header by
+`NuGetSourceProvider_ListVersions_ServerExplainsForbidden_ShowsReasonWithoutPromptingOrForgetting`, which needs a
+`DemaConsulting.NuGet.Caching` that reports a 403's status and reason and is skipped for an older one (as of
+2.0.0-beta.2; the two earlier 403 scenarios, `...ServerAnswersForbiddenAndNoPrompt...` and
+`...ServerAnswersForbiddenToTheCredential...`, accept either behavior according to the library). Covering
+`AgentControl-NuGetSourceProvider-AccessDenied`.
+
 **NuGetSourceProvider_ServerFailures_DistinctCausesWithSecretFreeMessages**: A wrong password produces
 `AuthenticationFailed` after one question with nothing remembered and a message without the password; a
 cancelled dialog produces `SignInCanceled` after one question; a remembered credential that the server now

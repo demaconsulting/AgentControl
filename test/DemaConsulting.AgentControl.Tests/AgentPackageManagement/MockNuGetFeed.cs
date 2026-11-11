@@ -126,6 +126,12 @@ internal sealed class MockNuGetFeed : IAsyncDisposable
     public bool ForbidAllRequests { get; set; }
 
     /// <summary>
+    ///     Gets or sets the URL-encoded <c>X-TFS-ServiceError</c> header sent with every 403 (as Azure DevOps
+    ///     explains a refusal), or <see langword="null"/> for none.
+    /// </summary>
+    public string? ForbiddenServiceError { get; set; }
+
+    /// <summary>
     ///     Gets the requests received so far, as <c>METHOD /path</c>.
     /// </summary>
     public IReadOnlyList<string> Requests
@@ -292,6 +298,11 @@ internal sealed class MockNuGetFeed : IAsyncDisposable
                 }
 
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                if (ForbiddenServiceError is { } serviceError)
+                {
+                    context.Response.Headers["X-TFS-ServiceError"] = serviceError;
+                }
+
                 return;
             }
 

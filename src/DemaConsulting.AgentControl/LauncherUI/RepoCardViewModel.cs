@@ -3823,6 +3823,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
                         $"{SecretRedactor.SafeMessage(ex)} Use the card's \"...\" menu > Refresh to sign in.",
                         needsSignIn: true);
                 }
+                else if (ex is PackageSourceAccessException { Kind: PackageSourceFailureKind.AccessDenied })
+                {
+                    // Signed in, but the account may not read the feed: no sign-in can fix it, so the card
+                    // says what the server said and does not offer one
+                    SetSourceProblem(SecretRedactor.SafeMessage(ex), needsSignIn: false);
+                }
                 else if (ex is GitRemoteException { Kind: GitFailureKind.GitTooOld })
                 {
                     // Nothing can be checked until Git is updated: say so on the card

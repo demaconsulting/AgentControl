@@ -1140,6 +1140,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     private static string GetFailureTitle(PackageSourceFailureKind kind) => kind switch
     {
         PackageSourceFailureKind.AuthenticationFailed => "Sign-in failed",
+        PackageSourceFailureKind.AccessDenied => "Access denied",
         PackageSourceFailureKind.SignInCanceled => "Sign-in canceled",
         PackageSourceFailureKind.NotFound => "Package not found",
         PackageSourceFailureKind.TimedOut => "Timed out",

@@ -344,8 +344,11 @@ credential first can take several seconds to answer). The result tells you in wo
 
 - **Connection OK** — the server answered and has the package; the number of versions found and the
   latest one are shown.
-- **Sign-in failed** — the server refused access (HTTP 401 or 403): the user name, password or
-  token is wrong, or the account may not read this feed.
+- **Sign-in failed** — the server needs a sign-in or refused the one given (HTTP 401): the user name,
+  password or token is wrong.
+- **Access denied** — you are signed in, but the server refused access (HTTP 403) and says why, for
+  example that your account lacks the **ReadPackages** permission on the feed. No sign-in dialog opens,
+  because a different password cannot fix a missing permission - see *Troubleshooting a Server Source*.
 - **Sign-in canceled** — you closed the sign-in dialog without signing in.
 - **Package not found** — the server answered, but it has no package with that ID. Check the ID, and
   that your account may see it.
@@ -473,6 +476,18 @@ that needs a sign-in, that check uses a credential you already typed this sessio
 and otherwise does
 **not** ask: the card shows a **Sign-in needed** chip. Use
 the card's "..." menu > **Refresh** (or Select Package / Upgrade) - actions you start - to sign in.
+
+## Troubleshooting a Server Source
+
+- **"Signed in, but '<server>' refused access: ..."** (headline *Access denied*) — the server knows who
+  you are (for example your Windows account on an on-premises Azure DevOps Server) but your account may
+  not read this feed. AgentControl does not ask you to sign in again, and does not forget a saved sign-in,
+  because neither can help. The message repeats the reason the server gave. Ask the feed's administrator
+  to give your account the **Reader** role on the feed (on Azure DevOps this includes **ReadPackages**);
+  then choose the card's "..." menu > **Refresh**.
+- **"... needs a sign-in"** or **Sign-in failed** — the server wants a user name and password or token; sign
+  in as described above.
+- **Server unreachable** — check the address (it ends in `index.json`) and your network.
 
 ## Remembering a Sign-In
 

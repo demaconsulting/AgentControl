@@ -310,6 +310,7 @@ public class SourceEditorServerViewModelTests
     /// <param name="expectedTitle">The headline expected.</param>
     [Theory]
     [InlineData("AuthenticationFailed", "Sign-in failed")]
+    [InlineData("AccessDenied", "Access denied")]
     [InlineData("SignInCanceled", "Sign-in canceled")]
     [InlineData("NotFound", "Package not found")]
     [InlineData("TimedOut", "Timed out")]

@@ -97,6 +97,11 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     not affected.
 ///     </para>
 ///     <para>
+///     A server that answers 403 (signed in, but no permission to read the feed) is reported as
+///     <see cref="PackageSourceFailureKind.AccessDenied"/> with the server's reason and never opens
+///     the sign-in dialog, because typing a credential cannot fix a missing permission.
+///     </para>
+///     <para>
 ///     Failures that the user can act on are reported as
 ///     <see cref="PackageSourceAccessException"/> with a secret-free message.
 ///     Thread-safe: shared state is limited to a one-time, locked preparation of the per-source
@@ -554,9 +559,11 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     ///     A folder source calls the library directly (it has no credentials and its failures are
     ///     reported as before). For a server the call is made up to twice: the first attempt is
     ///     silent (a remembered session credential, then whatever NuGet itself supplies), and only
-    ///     when the server then refuses with 401/403 and a prompt is available is the call made
+    ///     when the server then refuses with 401 and a prompt is available is the call made
     ///     again with the prompt allowed, so the user is asked at most once and only when nothing
-    ///     else worked. The credential the user typed is remembered after the second attempt
+    ///     else worked. A 403 is different: the server knows the user and refuses access, so no
+    ///     prompt is opened, no remembered credential is forgotten, and the server's reason is
+    ///     reported as <see cref="PackageSourceFailureKind.AccessDenied"/>. The credential the user typed is remembered after the second attempt
     ///     succeeds, and every credential a server rejected is forgotten.
     /// </remarks>
     /// <typeparam name="T">The result type of the library call.</typeparam>
@@ -573,7 +580,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     ///     times out, a signature requirement is not met, or the server cannot be used.</exception>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is canceled.</exception>
-    private async Task<T> RunAsync<T>(
+    internal async Task<T> RunAsync<T>(
         Func<NuGetCacheOptions, Task<T>> operation,
         string failureMessage,
         CancellationToken cancellationToken,
@@ -604,6 +611,12 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         try
         {
             return await AttemptAsync(operation, silent, failureMessage, signatureFailureMessage, cancellationToken);
+        }
+        catch (NuGetAuthenticationException ex) when (IsAccessDenied(ex, out var denial))
+        {
+            // The server knows who this is and still says no: a prompt cannot help, and the credential
+            // that was used was accepted, so nothing is forgotten
+            throw CreateAccessDenied(denial, ex);
         }
         catch (NuGetAuthenticationException ex)
         {
@@ -674,6 +687,12 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
             // saved by their credential helper)
             await prompting.CommitAsync(CancellationToken.None);
             return result;
+        }
+        catch (NuGetAuthenticationException ex) when (IsAccessDenied(ex, out var denial))
+        {
+            // A 403 after the user signed in: the typed credential is not kept (it is only kept after a
+            // success), the server's reason is reported, and nothing asks the user again
+            throw CreateAccessDenied(denial, ex);
         }
         catch (NuGetAuthenticationException ex)
         {
@@ -755,6 +774,100 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     }
 
     /// <summary>
+    ///     The text the NuGet library puts before the server's reason in the message of a 403.
+    /// </summary>
+    private const string ServerSaidMarker = "Server said: \"";
+
+    /// <summary>
+    ///     The longest server reason that is shown or logged.
+    /// </summary>
+    private const int MaxReasonLength = 300;
+
+    /// <summary>
+    ///     Determines whether the NuGet library reports that the server refused access with HTTP 403
+    ///     (the account is known but not permitted) rather than needing a sign-in (HTTP 401), and
+    ///     extracts the server's reason.
+    /// </summary>
+    /// <remarks>
+    ///     The library's message for a 403 contains <c>HTTP 403 (Forbidden) - </c> and, when the server
+    ///     explained itself, <c>Server said: "reason"</c>. The message is read because the version of
+    ///     the library this build references only offers the status and the reason in its message;
+    ///     once the referenced version exposes <c>NuGetAuthenticationException.StatusCode</c> and
+    ///     <c>ServerReason</c>, this should read those properties instead. Against a library that
+    ///     reports every failure as a 401 this never matches, and the behavior is the previous one.
+    /// </remarks>
+    /// <param name="exception">The library's authentication exception.</param>
+    /// <param name="reason">The server's reason, redacted and reduced to one short line, or
+    ///     <see langword="null"/> when the server gave none.</param>
+    /// <returns><see langword="true"/> when the failure is an HTTP 403.</returns>
+    internal static bool IsAccessDenied(NuGetAuthenticationException exception, out string? reason)
+    {
+        reason = null;
+        var message = exception.Message;
+        if (!message.Contains("HTTP 403 (Forbidden) - ", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var start = message.IndexOf(ServerSaidMarker, StringComparison.Ordinal);
+        if (start >= 0)
+        {
+            start += ServerSaidMarker.Length;
+            var end = message.IndexOf('"', start);
+            if (end > start)
+            {
+                reason = SanitizeReason(message[start..end]);
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Reduces a server's explanation to one short line that is safe to show and to log.
+    /// </summary>
+    /// <param name="text">The server's text.</param>
+    /// <returns>The text with line breaks and runs of white space collapsed, secrets redacted and
+    ///     the length capped, or <see langword="null"/> when nothing is left.</returns>
+    private static string? SanitizeReason(string text)
+    {
+        var line = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        line = SecretRedactor.Redact(line);
+        if (line.Length > MaxReasonLength)
+        {
+            line = line[..(MaxReasonLength - 1)].TrimEnd() + "…";
+        }
+
+        return line.Length == 0 ? null : line;
+    }
+
+    /// <summary>
+    ///     Creates the user-readable exception for a server that knows the user and refuses access.
+    /// </summary>
+    /// <param name="reason">The server's reason, or <see langword="null"/>.</param>
+    /// <param name="inner">The library's exception, kept for diagnosis only.</param>
+    /// <returns>The exception to throw.</returns>
+    private PackageSourceAccessException CreateAccessDenied(string? reason, NuGetAuthenticationException inner)
+    {
+        _nugetLogger.LogWarning(
+            "Source {FeedOrigin} refused access although the user is signed in (HTTP 403): {Reason}",
+            _feed, reason ?? "the server gave no reason");
+
+        var host = _feed!.HostAndPort;
+        var message = reason is null
+            ? $"Signed in, but '{host}' refused access (the server answered 403 Forbidden)."
+            : $"Signed in, but '{host}' refused access: {reason}";
+        if (!message.EndsWith('.'))
+        {
+            message += ".";
+        }
+
+        message += " Signing in again will not help: ask the feed's administrator to give your account permission " +
+                   "to read the feed (Reader, which includes ReadPackages, on Azure DevOps).";
+        return new PackageSourceAccessException(PackageSourceFailureKind.AccessDenied, message, inner);
+    }
+
+    /// <summary>
     ///     Creates the user-readable exception for a server that refused access.
     /// </summary>
     /// <param name="credentialRejected">Whether a credential was supplied and rejected (as
@@ -777,7 +890,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         }
 
         var message = credentialRejected
-            ? $"Source '{Alias}' ({_feed}) rejected the credentials (the server answered 401 or 403). " +
+            ? $"Source '{Alias}' ({_feed}) rejected the credentials (the server answered 401). " +
               "Check the user name and password or token, and that the account may read this feed."
             : $"Source '{Alias}' ({_feed}) needs a sign-in.";
         return new PackageSourceAccessException(PackageSourceFailureKind.AuthenticationFailed, message, inner);
