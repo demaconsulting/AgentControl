@@ -161,7 +161,6 @@ sections:
           - MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins
           - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_ReadableSourceStillOffersUpgrades
           - MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground
-          - MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground
 
       - id: AgentControl-MainWindowViewModel-ConnectionTestProvider
         title: >-
