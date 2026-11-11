@@ -5,7 +5,8 @@
 // 'render' - is what scopes the rendered diagram content.
 package AgentControl {
     view SoftwareStructureView {
-        expose AgentControl;
+        expose AgentControl::**;
+        render asInterconnectionDiagram;
     }
 
     view AgentControlView {
