@@ -343,6 +343,74 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a pull that brings in a changed pin file and newly committed agent files is
+    ///     followed by the same full refresh as the Refresh action, so the card shows the new pinned
+    ///     version and committed-files badge at once, while the pull's own success message survives.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_PullCommand_PullChangesPinFile_RefreshesCardAndKeepsSuccessMessage()
+    {
+        // Arrange: a clone of a remote pinned to 1.0.0 with no agent files committed, shown on a card
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var clonePath = ClonePinnedRepo(fixture, "1.0.0");
+        var card = CreateCard(clonePath, null, null, new AppSettings());
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("1.0.0", card.PinnedPackageVersion);
+        Assert.False(card.HasCommittedAgentFiles);
+
+        // The remote then moves on: the pin names 2.0.0 and agent files are committed
+        fixture.Commit(
+            new Dictionary<string, string>
+            {
+                [".agentcontrol.json"] = PinFileText("2.0.0"),
+                [".github/agents/copilot.md"] = "agent"
+            },
+            "Upgrade the pin");
+        fixture.Push();
+
+        // Act: pull on the card
+        await card.PullCommand.ExecuteAsync();
+
+        // Assert: the card shows what the pull brought in, and the outcome of the pull is kept
+        Assert.Equal("contoso-agents", card.PinnedPackageName);
+        Assert.Equal("2.0.0", card.PinnedPackageVersion);
+        Assert.True(card.HasCommittedAgentFiles);
+        Assert.Equal("main", card.CurrentBranch);
+        Assert.True(card.CanPull);
+        Assert.Equal("Pull succeeded.", card.StatusMessage);
+        Assert.False(card.LastActionFailed);
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
+    ///     Test that when a pull brings in a pin file that cannot be read, the card reports the pull's
+    ///     success and the unreadable pin, and clears the stale pin it showed.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_PullCommand_PullBringsUnreadablePinFile_KeepsPullOutcomeAndReportsPin()
+    {
+        // Arrange: a clone of a remote pinned to 1.0.0, shown on a card
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var clonePath = ClonePinnedRepo(fixture, "1.0.0");
+        var card = CreateCard(clonePath, null, null, new AppSettings());
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("1.0.0", card.PinnedPackageVersion);
+
+        // The remote then commits a pin file that is not valid JSON
+        fixture.Commit(new Dictionary<string, string> { [".agentcontrol.json"] = "{ this is not valid json" }, "Break the pin");
+        fixture.Push();
+
+        // Act: pull on the card
+        await card.PullCommand.ExecuteAsync();
+
+        // Assert: the stale pin is gone, and the status carries both the pull outcome and the pin problem
+        Assert.Null(card.PinnedPackageVersion);
+        Assert.StartsWith("Pull succeeded.", card.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains("pin file", card.StatusMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(card.LastActionFailed);
+    }
+
+    /// <summary>
     ///     Test that Launch raises ErrorOccurred when no agent tool command can be resolved
     ///     (Custom selected with no command configured).
     /// </summary>
@@ -3094,6 +3162,37 @@ public sealed class RepoCardViewModelTests : IDisposable
         };
 
         return new RepoCardViewModel(recentRepo, () => settings, new PackageVersionCache());
+    }
+
+    /// <summary>
+    ///     Makes the fixture's remote hold one commit that pins <c>contoso-agents</c> to the given
+    ///     version, and clones it into a new temporary folder.
+    /// </summary>
+    /// <param name="fixture">The git fixture whose working repository plays the origin.</param>
+    /// <param name="pinnedVersion">The version the first commit's pin file names.</param>
+    /// <returns>The path of the clone.</returns>
+    private string ClonePinnedRepo(GitRepositoryFixture fixture, string pinnedVersion)
+    {
+        fixture.Commit(
+            new Dictionary<string, string> { [".agentcontrol.json"] = PinFileText(pinnedVersion) },
+            "Pin the package");
+        fixture.Push();
+
+        var clonePath = Path.Combine(fixture.Root, "clone");
+        fixture.Git(fixture.Root, "clone", "-q", "-b", "main", fixture.RemotePath, clonePath);
+        return clonePath;
+    }
+
+    /// <summary>
+    ///     Gets the text of a <c>.agentcontrol.json</c> pin file that pins <c>contoso-agents</c> to a version.
+    /// </summary>
+    /// <param name="version">The pinned version.</param>
+    /// <returns>The file's text.</returns>
+    private string PinFileText(string version)
+    {
+        var scratch = CreateTempDirectory();
+        RepoPinStore.Save(scratch, new RepoPin { PackageName = "contoso-agents", Version = version });
+        return File.ReadAllText(Path.Combine(scratch, ".agentcontrol.json"));
     }
 
     /// <summary>

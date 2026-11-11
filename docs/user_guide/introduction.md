@@ -1033,7 +1033,10 @@ as an informational side action:
 # Pulling Changes
 
 **Git Pull**, in the "..." menu of a repo card (under **Repository**), runs `git pull` in that repo's working
-directory. It stays in the menu but is disabled (with a tooltip explaining why, shown even while it is
+directory. When the pull has finished, the card refreshes itself completely - the same as **Refresh** - so a pin
+file, branch or committed agent files that the pull changed, and the upgrade chip, are current at once. The result of
+the pull ("Pull succeeded." or the reason it failed) stays shown. It stays in the menu but is disabled (with a tooltip
+explaining why, shown even while it is
 disabled) whenever the repo's working tree has
 uncommitted changes, the repo is missing, or the repo's Git status could not be determined
 (for example, the folder is not a Git repository, or git could not be run). It also starts

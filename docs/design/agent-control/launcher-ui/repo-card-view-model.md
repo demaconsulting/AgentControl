@@ -350,7 +350,8 @@ first becomes visible.
 
 **Refresh** / **RefreshAsync**: Convenience entry point equivalent to `RefreshCheap` followed by
 `RefreshDirtyStatus` and the upgrade check, for callers (e.g. adding a brand-new repo) wanting an
-immediate full refresh; `RefreshCommand` runs it asynchronously.
+immediate full refresh; `RefreshCommand` runs it asynchronously. The sequence lives in a private refresh core that
+`Pull` also uses, inside its own busy operation.
 
 **RefreshUpgradeStatusAsync**: Checks, in the background, which configured source supplies the pinned package and
 whether any configured source offers a newer version than the pinned one, using the shared cache (see *Portable
@@ -462,9 +463,20 @@ is an informational side action only — it never blocks `Launch`.
   `Launch`'s process-spawning side effect, mirroring `AgentToolLauncher.BuildProcessStartInfo`'s
   own precedent.
 
-**Pull**: Runs `git pull` in the repo, then refreshes working-tree status
+**Pull**: Runs `git pull` in the repo, then refreshes the whole card the way `RefreshAsync` does
 (`AgentControl-RepoCardViewModel-Pull`). Reports success/failure via `StatusMessage`, never
-throwing for a failed pull.
+throwing for a failed pull. A pull can change the pin file, the branch, which agent files are committed and the working
+tree, so after every completed pull - a refused one too, because a merge that stopped on a conflict has already changed
+the working tree and may have written conflict markers into the pin file - it runs the shared private refresh core
+(`RefreshCheap`, the upgrade check with `allowPrompt: true` and `relistGitSource: true`, then `RefreshDirtyStatus`,
+the very sequence behind `RefreshAsync`). The core runs inside the pull's own busy operation and does not take
+`IsBusy` again, so there is no nested operation to be refused. The user explicitly acted, so, like Refresh, the check
+may ask for a sign-in and reads the Git sources again. The refresh token is the operation's token (the pull itself is
+never interrupted and has no Cancel button; only `Retire` or the caller's token can cancel the refresh part). The
+refresh must not replace the pull's outcome: `StatusMessage` and `LastActionFailed` keep the pull's result, and the only
+status text the refresh can set - a failure to read the pin file the pull just changed - is appended after it. A pull
+that could not be started at all (`InvalidOperationException` from `GitClient.Pull`) is reported through
+`ErrorOccurred` and refreshes nothing.
 
 **Upgrade**: Finds the newest version of the pinned package across all configured sources that offer it (a tie keeps
 Settings order), then

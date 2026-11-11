@@ -201,10 +201,16 @@ covering `AgentControl-RepoCardViewModel-PullDisabledExplanation`.
 
 **RepoCardViewModel_Pull_ReportsSuccessOrFailureViaStatusMessage**: `PullCommand` is executed
 against a stub reporting success (status message updated) and a stub reporting failure (a
-failure status message is set instead). This scenario is tested by
-`RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage` and
-`RepoCardViewModel_PullCommand_FailedPull_SetsFailureStatusMessage`, covering
-`AgentControl-RepoCardViewModel-Pull`.
+failure status message is set instead). Against a real git clone, a pull that brings in a changed pin file and newly
+committed agent files leaves the card showing the new pinned version and the committed-files badge, a clean working
+tree and the branch, with the "Pull succeeded." message and an unset failure flag intact; a pull that brings in an
+unreadable pin file clears the stale pin and reports both the pull's success and the pin problem. This scenario is
+tested by `RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage`,
+`RepoCardViewModel_PullCommand_FailedPull_SetsFailureStatusMessage`,
+`RepoCardViewModel_PullCommand_PullChangesPinFile_RefreshesCardAndKeepsSuccessMessage`, and
+`RepoCardViewModel_PullCommand_PullBringsUnreadablePinFile_KeepsPullOutcomeAndReportsPin`, covering
+`AgentControl-RepoCardViewModel-Pull`. The two real-git tests are skipped on a machine without git (and fail when the
+`CI` environment variable is set), as for the other real-git tests.
 
 **RepoCardViewModel_Launch_RecordsTimestampOrRaisesErrorWhenUnconfigured**: `LaunchCommand`
 succeeds and records the launch timestamp (raising `LaunchRecorded`) when a command is
