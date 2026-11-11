@@ -53,12 +53,19 @@ internal sealed class UnsupportedPinSchemaException : InvalidOperationException
 /// </summary>
 /// <remarks>
 ///     <para>
-///     The store understands three schema versions. Version 1 (no <c>SchemaVersion</c> or
-///     <c>Source</c> property) predates configurable sources and is read as a pin to the source
-///     named <see cref="RepoPin.LegacySourceAlias"/>; version 2 adds <c>SchemaVersion</c> and
-///     <c>Source</c>; version 3 adds <c>ContentIdentity</c> and is what <see cref="Save"/> always
-///     writes (a pin read from an older file simply has no identity until it is next saved with
-///     one). A file declaring a newer schema
+///     The store understands four schema versions. Version 1 (no <c>SchemaVersion</c> or
+///     <c>Source</c> property) predates configurable sources; version 2 adds <c>SchemaVersion</c>
+///     and <c>Source</c>; version 3 added a <c>ContentIdentity</c> of the package container; version
+///     4 makes <c>ContentIdentity</c> an identity of the delivered files and is what
+///     <see cref="Save"/> always writes. A version 4 pin records the package name, the version, the
+///     files identity and the AGENTS.md decline - <em>no package source and no Git commit</em>:
+///     sources are per-user configuration and the identity alone proves the files. A <c>Source</c>
+///     an older file names is read as <see cref="RepoPin.LegacySource"/> (a hint only; "Default" for
+///     a version 1 file) and is never written back, nor is a <c>SourceRevision</c>. Reading a pin
+///     older than version 4 drops its container (or Git commit) identity - it cannot be compared
+///     with a files identity, so it means "no recorded identity", never "changed"; the files
+///     identity is recorded the next time a package is selected, changed or upgraded.
+///     A file declaring a newer schema
 ///     than <see cref="RepoPin.CurrentSchemaVersion"/> is rejected with
 ///     <see cref="UnsupportedPinSchemaException"/> by both <see cref="Load"/> and <see cref="Save"/>,
 ///     so an older AgentControl never misreads - or clobbers - a file written by a newer one (which
@@ -84,10 +91,30 @@ internal static class RepoPinStore
     private const string PinFileName = ".agentcontrol.json";
 
     /// <summary>
-    ///     The first schema version whose pins name the package source they came from; an older pin
-    ///     is read as a pin to <see cref="RepoPin.LegacySourceAlias"/>.
+    ///     The first schema version whose pins may name the package source they came from (and
+    ///     the first whose absence of one is not a legacy "Default" pin). Only a pin older than
+    ///     this is read-time hinted with <see cref="RepoPin.LegacySourceAlias"/>.
     /// </summary>
     private const int FirstSchemaWithSource = 2;
+
+    /// <summary>
+    ///     The first schema version whose <c>ContentIdentity</c> is computed from the delivered
+    ///     files; an older pin's identity (of a container, or of a Git commit) is not carried over as
+    ///     one.
+    /// </summary>
+    private const int FirstSchemaWithFilesIdentity = 4;
+
+    /// <summary>
+    ///     The name of the <c>Source</c> property older versions wrote: read as a hint, never
+    ///     written.
+    /// </summary>
+    private const string RemovedSourceProperty = "Source";
+
+    /// <summary>
+    ///     The name of the <c>SourceRevision</c> property an earlier schema 4 build wrote: neither
+    ///     read nor written.
+    /// </summary>
+    private const string RemovedSourceRevisionProperty = "SourceRevision";
 
     /// <summary>
     ///     JSON serialization options shared by <see cref="Load"/> and <see cref="Save"/>: indented
@@ -104,17 +131,16 @@ internal static class RepoPinStore
     ///     <see langword="null"/> if the repo has no pin file yet (never synced).
     /// </summary>
     /// <param name="repoRoot">Absolute path to the repository root.</param>
-    /// <returns>The parsed pin, or <see langword="null"/> when no pin file exists. A version 1 pin
-    ///     (schema older than 2) is returned with <see cref="RepoPin.Source"/> set to
-    ///     <see cref="RepoPin.LegacySourceAlias"/>; a pin older than version 3 has no
-    ///     <see cref="RepoPin.ContentIdentity"/>.</returns>
+    /// <returns>The parsed pin, or <see langword="null"/> when no pin file exists. An older
+    ///     <c>Source</c> is returned as <see cref="RepoPin.LegacySource"/> (a schema 1 pin gets
+    ///     <see cref="RepoPin.LegacySourceAlias"/>), never as an unknown property; a pin older than
+    ///     version 4 is returned without a <see cref="RepoPin.ContentIdentity"/>.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="UnsupportedPinSchemaException">Thrown when the pin file declares a schema
     ///     version newer than <see cref="RepoPin.CurrentSchemaVersion"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the pin file exists but cannot be
-    ///     read, contains invalid JSON, or is a current-schema pin that names no source (only a
-    ///     version 1 pin is mapped to <see cref="RepoPin.LegacySourceAlias"/>).</exception>
+    ///     read or contains invalid JSON.</exception>
     public static RepoPin? Load(string repoRoot)
     {
         ArgumentNullException.ThrowIfNull(repoRoot);
@@ -157,25 +183,67 @@ internal static class RepoPinStore
             throw new UnsupportedPinSchemaException(filePath, pin.SchemaVersion);
         }
 
-        // A pin written before sources existed (schema 1) names none: it belongs to the legacy
-        // "Default" source (and only that source - there is no guessing among several). From
-        // schema 2 on a pin must name its source, whatever the current schema is
-        if (pin.SchemaVersion < FirstSchemaWithSource && string.IsNullOrWhiteSpace(pin.Source))
+        // A pin written before schema 4 recorded an identity of the package container (a zip or
+        // .nupkg hash) or of a Git commit: neither can be compared with an identity computed from
+        // the delivered files, so the pin has no files identity until it is next saved with one
+        // (never a reason to refuse anything)
+        if (pin.SchemaVersion < FirstSchemaWithFilesIdentity)
         {
-            pin.Source = RepoPin.LegacySourceAlias;
+            pin.ContentIdentity = null;
         }
 
-        // A current-schema pin must name its source: falling back to the legacy alias here would
-        // resolve the pinned package from a source the pin never named
-        if (string.IsNullOrWhiteSpace(pin.Source))
+        // A pin names no package source any more: sources are per-user configuration that does not
+        // belong in a shared file. An older version's Source is kept as a read-time hint only (it
+        // helps choose among the user's own sources for a pin that has no files identity), and it
+        // - like a SourceRevision an earlier schema 4 build wrote - is taken out of the unknown
+        // properties so it can never be written back. A pin written before sources existed
+        // (schema 1) is hinted with the legacy "Default" source.
+        pin.LegacySource = TakeLegacySource(pin);
+        if (string.IsNullOrWhiteSpace(pin.LegacySource) && pin.SchemaVersion < FirstSchemaWithSource)
         {
-            throw new InvalidOperationException(
-                $"Pin file '{filePath}' uses schema version {pin.SchemaVersion} but does not name the package " +
-                "source it was pinned from, so it is not trusted to resolve against any source. " +
-                "Select the package again to repair it.");
+            pin.LegacySource = RepoPin.LegacySourceAlias;
         }
 
         return pin;
+    }
+
+    /// <summary>
+    ///     Removes the properties a pin no longer records (<c>Source</c> and <c>SourceRevision</c>,
+    ///     in any letter case) from the pin's unknown properties.
+    /// </summary>
+    /// <param name="pin">The pin whose <see cref="RepoPin.ExtensionData"/> is cleaned.</param>
+    /// <returns>The text of the <c>Source</c> property that was removed (trimmed), or
+    ///     <see langword="null"/> when there was none or it was not text.</returns>
+    private static string? TakeLegacySource(RepoPin pin)
+    {
+        if (pin.ExtensionData is null)
+        {
+            return null;
+        }
+
+        string? source = null;
+        foreach (var name in pin.ExtensionData.Keys.ToList())
+        {
+            if (name.Equals(RemovedSourceProperty, StringComparison.OrdinalIgnoreCase))
+            {
+                var value = pin.ExtensionData[name];
+                source = value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
+                    ? value.GetString()!.Trim()
+                    : null;
+                pin.ExtensionData.Remove(name);
+            }
+            else if (name.Equals(RemovedSourceRevisionProperty, StringComparison.OrdinalIgnoreCase))
+            {
+                pin.ExtensionData.Remove(name);
+            }
+        }
+
+        if (pin.ExtensionData.Count == 0)
+        {
+            pin.ExtensionData = null;
+        }
+
+        return source;
     }
 
     /// <summary>
@@ -210,6 +278,10 @@ internal static class RepoPinStore
             // Look at what is already there first: refuse to clobber a newer schema, and carry
             // over any unknown properties so another version's fields are not stripped
             MergeExistingFile(filePath, pin);
+
+            // Whatever the pin or the existing file carried as a Source or SourceRevision is never
+            // written back, even as an unknown property
+            TakeLegacySource(pin);
             pin.SchemaVersion = RepoPin.CurrentSchemaVersion;
 
             var json = JsonSerializer.Serialize(pin, JsonOptions);

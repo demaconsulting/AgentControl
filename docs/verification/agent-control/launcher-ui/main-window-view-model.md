@@ -27,7 +27,7 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
   package-version cache.
 - Applying settings drops cached package results only for sources that were edited or removed.
 - Constructing the view model reads no package source; upgrade availability is checked in the
-  background, and an unreachable source affects only the cards pinned to it.
+  background, and an unreachable source does not stop the other sources from offering their upgrades.
 - The connection-test provider shares the application's session credentials with the cards, and for a Git source is a
   Git provider that is interactive and runs the configured git after its version check.
 - With no repo in a group the list is flat and has no header; with groups it is sectioned
@@ -125,7 +125,7 @@ tracked repo. This scenario is tested by
 covering `AgentControl-MainWindowViewModel-ApplySettings`.
 
 **MainWindowViewModel_InvalidateChangedSources_OnlyEditedOrRemovedSourcesAreInvalidated**:
-`ApplySettings` replaces one package source's location; a card pinned to the unchanged source
+`ApplySettings` replaces one package source's location; a card whose files that unchanged source supplies
 keeps its cached upgrade answer even after that source's folder has disappeared (an invalidated
 cache would fail to read it and report no upgrade), while a changed source is observed afresh. This
 scenario is tested by `MainWindowViewModel_ApplySettings_OnlyEditedSourceIsInvalidated` and
@@ -147,11 +147,11 @@ covering `AgentControl-MainWindowViewModel-ApplySettings`.
 
 **MainWindowViewModel_BackgroundUpgradeCheck_ConstructionReadsNoSourceAndFailuresAreIsolated**:
 Constructing the view model with a pinned repo reads no package source until the upgrade refresh
-begins; when the refresh runs with one source unreachable, the cards pinned to the other source
-are still checked and show their upgrade; and adding a pinned repo checks its upgrade status in
+begins; when the refresh runs with one source unreachable, the other (readable) source still offers its upgrade
+to the pinned cards; and adding a pinned repo checks its upgrade status in
 the background. This scenario is tested by
 `MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins`,
-`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked`, and
+`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_ReadableSourceStillOffersUpgrades`, and
 `MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground`, covering
 `AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`.
 

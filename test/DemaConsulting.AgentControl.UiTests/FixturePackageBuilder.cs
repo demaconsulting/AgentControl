@@ -41,13 +41,16 @@ internal static class FixturePackageBuilder
     /// <param name="releaseNotes">The content of the root-level <c>release-notes.md</c> entry.</param>
     /// <param name="agentsMdTemplate">The content of a root-level <c>AGENTS.md</c> template
     ///     entry, or <see langword="null"/> (the default) to omit the entry entirely.</param>
+    /// <param name="agentFileContent">The content of <c>.github/agents/test.md</c>; a package whose
+    ///     agent files differ is a different package even when its release notes are the same.</param>
     /// <returns>The absolute path to the created zip file.</returns>
     public static string Create(
         string sourceDirectory,
         string packageName,
         string version,
         string releaseNotes = "# Release Notes\n\nInitial fixture package.\n",
-        string? agentsMdTemplate = null)
+        string? agentsMdTemplate = null,
+        string agentFileContent = "# Test Agent\n")
     {
         Directory.CreateDirectory(sourceDirectory);
 
@@ -59,7 +62,7 @@ internal static class FixturePackageBuilder
 
         using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
 
-        AddTextEntry(archive, ".github/agents/test.md", "# Test Agent\n");
+        AddTextEntry(archive, ".github/agents/test.md", agentFileContent);
         AddTextEntry(archive, ".github/standards/test.md", "# Test Standard\n");
         AddTextEntry(archive, ".github/templates/test.md", "# Test Template\n");
         AddTextEntry(archive, ".github/skills/test.md", "# Test Skill\n");

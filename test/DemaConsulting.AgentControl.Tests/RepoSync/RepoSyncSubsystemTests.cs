@@ -40,27 +40,27 @@ public sealed class RepoSyncSubsystemTests : IDisposable
     private readonly List<string> _tempPaths = [];
 
     /// <summary>
-    ///     Test that the identity a zip reader reports is that of exactly the bytes that are extracted
+    ///     Test that the identity a zip reader reports is that of exactly the files that are extracted
     ///     and that a republished zip is told apart: the identity equals an independently computed
-    ///     SHA-256 of the file, the applied files are the ones the zip held (the reader hashes and reads
-    ///     the one handle, so the identity cannot describe other bytes than the ones read), on Windows the
-    ///     file cannot be replaced while the reader holds it (elsewhere file locks are advisory, so no
-    ///     replacement is attempted), and a zip republished with other content reports another identity
-    ///     with the other content applied.
+    ///     identity of the agent files, the applied files are the ones the zip held (the reader reads
+    ///     the one handle, so the identity cannot describe other files than the ones read), on Windows
+    ///     the file cannot be replaced while the reader holds it (elsewhere file locks are advisory, so
+    ///     no replacement is attempted), and a zip republished with other content reports another
+    ///     identity with the other content applied.
     /// </summary>
     [Fact]
     public void RepoSync_ContentIdentity_ZipIdentityDescribesTheBytesThatAreApplied()
     {
-        // Arrange: a zip, and the identity computed here independently of the production hashing
+        // Arrange: a zip, and the identity computed here independently of the production code
         var folder = CreateTempDirectory();
         var zip = Path.Combine(folder, "package-1.0.0.zip");
         WriteZip(zip, "original");
-        var expectedOriginal = Sha256Identity(File.ReadAllBytes(zip));
+        var expectedOriginal = FilesIdentity((".github/agents/copilot.md", "original"));
         var repo = CreateTempDirectory();
 
         // Act: read the zip, try to replace it while it is held (Windows only: elsewhere the lock is
         // advisory and a write would succeed and corrupt the zip), and apply it
-        string identityOfRead;
+        string? identityOfRead;
         using (var reader = ZipPackageContentReader.Open(zip))
         {
             identityOfRead = reader.ContentIdentity;
@@ -76,16 +76,16 @@ public sealed class RepoSyncSubsystemTests : IDisposable
             }
         }
 
-        // Assert: the reported identity is that of the file, and the applied file is the one in the zip
+        // Assert: the reported identity is that of the files, and the applied file is the one in the zip
         Assert.Equal(expectedOriginal, identityOfRead);
         Assert.Equal("original", File.ReadAllText(Path.Combine(repo, ".github", "agents", "copilot.md")));
 
         // Act: the zip is republished with other content, read and applied to another repo
         File.Delete(zip);
         WriteZip(zip, "republished");
-        var expectedRepublished = Sha256Identity(File.ReadAllBytes(zip));
+        var expectedRepublished = FilesIdentity((".github/agents/copilot.md", "republished"));
         var otherRepo = CreateTempDirectory();
-        string identityOfRepublished;
+        string? identityOfRepublished;
         using (var reader = ZipPackageContentReader.Open(zip))
         {
             identityOfRepublished = reader.ContentIdentity;
@@ -101,33 +101,55 @@ public sealed class RepoSyncSubsystemTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a reader over a folder reports exactly the identity its opener supplied (the package
-    ///     of a NuGet source, or the commit of a Git tag) and none when it was supplied none, and that the
-    ///     reader never computes one of its own from the folder.
+    ///     Test that the same agent files report the same identity whether they are read from a zip
+    ///     (compressed or stored, in any entry order, with other timestamps and with extra files that
+    ///     are never extracted), an unpacked package folder, or a layout-root folder; that the layout
+    ///     root also carries the supplied source revision (and the folders none); and that one changed
+    ///     byte reports another identity.
     /// </summary>
     [Fact]
-    public void RepoSync_ContentIdentity_FolderReadersReportTheSuppliedIdentityOrNone()
+    public void RepoSync_ContentIdentity_SameFilesFromEveryKindOfReader_ReportTheSameIdentity()
     {
-        // Arrange: an unpacked package folder and a layout-root folder
+        // Arrange: the same two agent files delivered four ways
+        var expected = FilesIdentity((".github/agents/copilot.md", "agents"), (".github/standards/style.md", "standards"));
+        var folder = CreateTempDirectory();
+        var compressedZip = Path.Combine(folder, "compressed-1.0.0.zip");
+        WriteZipEntries(
+            compressedZip, CompressionLevel.Optimal, new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            (".github/standards/style.md", "standards"), (".github/agents/copilot.md", "agents"),
+            ("release-notes.md", "notes one"));
+        var storedZip = Path.Combine(folder, "stored-1.0.0.zip");
+        WriteZipEntries(
+            storedZip, CompressionLevel.NoCompression, new DateTimeOffset(2024, 6, 7, 8, 9, 10, TimeSpan.Zero),
+            (".github/agents/copilot.md", "agents"), ("AGENTS.md", "template"),
+            (".github/standards/style.md", "standards"), ("release-notes.md", "other notes"));
         var unpacked = CreateTempDirectory();
-        WriteFile(Path.Combine(unpacked, "content"), ".github/agents/copilot.md", "nuget");
+        WriteFile(Path.Combine(unpacked, "content"), ".github/agents/copilot.md", "agents");
+        WriteFile(Path.Combine(unpacked, "content"), ".github/standards/style.md", "standards");
+        WriteFile(Path.Combine(unpacked, "content"), "release-notes.md", "nuget notes");
+        WriteFile(unpacked, "package.nuspec", "<package />");
         var layout = CreateTempDirectory();
-        WriteFile(layout, ".github/agents/copilot.md", "git");
-        var commitIdentity = "git-commit:" + new string('e', 40);
-        var nugetIdentity = "sha256:" + new string('f', 64);
+        WriteFile(layout, ".github/agents/copilot.md", "agents");
+        WriteFile(layout, ".github/standards/style.md", "standards");
+        WriteFile(layout, "README.md", "not part of the package");
+        var changed = CreateTempDirectory();
+        WriteFile(changed, ".github/agents/copilot.md", "agents changed");
+        WriteFile(changed, ".github/standards/style.md", "standards");
 
         // Act
-        using var supplied = DirectoryPackageContentReader.Open(unpacked, nugetIdentity);
-        using var none = DirectoryPackageContentReader.Open(unpacked);
-        using var suppliedLayout = DirectoryPackageContentReader.OpenLayoutRoot(layout, commitIdentity);
-        using var noneLayout = DirectoryPackageContentReader.OpenLayoutRoot(layout);
+        using var compressed = ZipPackageContentReader.Open(compressedZip);
+        using var stored = ZipPackageContentReader.Open(storedZip);
+        using var folderReader = DirectoryPackageContentReader.Open(unpacked);
+        using var layoutReader = DirectoryPackageContentReader.OpenLayoutRoot(layout);
+        using var changedReader = DirectoryPackageContentReader.OpenLayoutRoot(changed);
 
-        // Assert
+        // Assert: one identity for the same files, another for changed files
         Assert.Multiple(
-            () => Assert.Equal(nugetIdentity, supplied.ContentIdentity),
-            () => Assert.Null(none.ContentIdentity),
-            () => Assert.Equal(commitIdentity, suppliedLayout.ContentIdentity),
-            () => Assert.Null(noneLayout.ContentIdentity));
+            () => Assert.Equal(expected, compressed.ContentIdentity),
+            () => Assert.Equal(expected, stored.ContentIdentity),
+            () => Assert.Equal(expected, folderReader.ContentIdentity),
+            () => Assert.Equal(expected, layoutReader.ContentIdentity),
+            () => Assert.NotEqual(expected, changedReader.ContentIdentity));
     }
 
     /// <summary>
@@ -135,7 +157,7 @@ public sealed class RepoSyncSubsystemTests : IDisposable
     ///     content next to it - is read and applied as a package: only the four managed folders and the
     ///     two root files are listed and readable, a path outside the layout is refused, applying it
     ///     writes only the managed folders, the release notes and the template are readable, and the
-    ///     identity of the folder's content (a commit) is carried along.
+    ///     identity of the folder's content is the one of its managed files.
     /// </summary>
     [Fact]
     public void RepoSync_LayoutRoot_OnlyTheLayoutIsSeenReadAndApplied()
@@ -152,15 +174,14 @@ public sealed class RepoSyncSubsystemTests : IDisposable
         WriteFile(root, "README.md", "not part of the package");
         WriteFile(root, "src/app.txt", "not part of the package");
         WriteFile(root, ".git/config", "repository metadata");
-        var identity = "git-commit:" + new string('1', 40);
         var repo = CreateTempDirectory();
 
         // Act
-        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root, identity);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
         var listed = reader.ListFiles().Order(StringComparer.Ordinal).ToList();
         PackageContentExtractor.Extract(reader, repo);
 
-        // Assert: only the layout is seen, outside paths are refused, and the identity is carried
+        // Assert: only the layout is seen and outside paths are refused
         Assert.Multiple(
             () => Assert.Equal(
                 new[]
@@ -172,7 +193,11 @@ public sealed class RepoSyncSubsystemTests : IDisposable
             () => Assert.Throws<InvalidOperationException>(() => reader.OpenRead("README.md")),
             () => Assert.Throws<InvalidOperationException>(() => reader.OpenRead(".git/config")),
             () => Assert.Throws<InvalidOperationException>(() => reader.OpenRead(".github/workflows/ci.yml")),
-            () => Assert.Equal(identity, reader.ContentIdentity),
+            () => Assert.Equal(
+                FilesIdentity(
+                    (".github/agents/copilot.md", "agents"), (".github/skills/s.md", "skills"),
+                    (".github/standards/style.md", "standards"), (".github/templates/t.md", "templates")),
+                reader.ContentIdentity),
             () => Assert.Equal("# Notes", PackageContentExtractor.ReadReleaseNotes(reader)),
             () => Assert.Equal("# Template", PackageContentExtractor.ReadAgentsMdTemplate(reader)));
 
@@ -239,12 +264,47 @@ public sealed class RepoSyncSubsystemTests : IDisposable
     }
 
     /// <summary>
-    ///     Computes the expected <c>sha256:</c> identity of some bytes directly with the platform's hash.
+    ///     Writes a zip whose entries are given in the order listed, with a chosen compression and
+    ///     timestamp, so the same files can be packed in different ways.
     /// </summary>
-    /// <param name="bytes">The bytes of the package file.</param>
-    /// <returns><c>sha256:</c> followed by the lower-case hexadecimal digest.</returns>
-    private static string Sha256Identity(byte[] bytes) =>
-        "sha256:" + Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    /// <param name="zipPath">The zip file to create.</param>
+    /// <param name="compression">How the entries are compressed.</param>
+    /// <param name="timestamp">The last-write time of every entry.</param>
+    /// <param name="entries">The entries: path and text.</param>
+    private static void WriteZipEntries(
+        string zipPath, CompressionLevel compression, DateTimeOffset timestamp, params (string Path, string Text)[] entries)
+    {
+        using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+        foreach (var (path, text) in entries)
+        {
+            var entry = archive.CreateEntry(path, compression);
+            entry.LastWriteTime = timestamp;
+            using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false));
+            writer.Write(text);
+        }
+    }
+
+    /// <summary>
+    ///     Computes the expected files identity of some agent files independently of the production
+    ///     code: SHA-256 of, for each file in ordinal path order, the UTF-8 path, a zero byte, the
+    ///     length as eight little-endian bytes and the bytes.
+    /// </summary>
+    /// <param name="files">The files: package-relative path and text (UTF-8, no byte-order mark).</param>
+    /// <returns><c>files-sha256:</c> followed by the lower-case hexadecimal digest.</returns>
+    private static string FilesIdentity(params (string Path, string Text)[] files)
+    {
+        using var stream = new MemoryStream();
+        foreach (var (path, text) in files.OrderBy(file => file.Path, StringComparer.Ordinal))
+        {
+            var content = new UTF8Encoding(false).GetBytes(text);
+            stream.Write(Encoding.UTF8.GetBytes(path));
+            stream.WriteByte(0);
+            stream.Write(BitConverter.GetBytes((long)content.Length));
+            stream.Write(content);
+        }
+
+        return "files-sha256:" + Convert.ToHexStringLower(SHA256.HashData(stream.ToArray()));
+    }
 
     /// <summary>
     ///     Writes a text file below a folder, creating the folders on the way.

@@ -28,12 +28,12 @@ nothing.
 tag
 name, `Revision` = the commit, `SourceAlias` = the source alias.
 
-**The tag is derived, not stored.** A pin to this source records the commit (`git-commit:` identity) and the version,
-never the tag: the tag of a version is whatever the source's tag pattern, as configured now, maps that version to. If
-the pattern of a source is edited, a pinned version maps to a different tag, whose commit may differ from the one the
-pin recorded; the listing then carries that other commit as the package's `Revision`, the comparison with the pin
-reports changed content, and the application shows it as a moved tag and applies nothing until the user accepts it
-with Change package (see the `RepoCardViewModel` design). No schema or provider change is needed for this.
+**The tag is derived, not stored.** A pin never records a tag, a commit or the source: the tag of a version is
+whatever the source's tag pattern, as configured now, maps that version to, and the files the tag delivers are
+recognized by their content identity. If the pattern of a source is edited, or a tag is moved, the pinned version
+may map to other files; the identity check of the application then refuses them (at launch and Upgrade) or asks
+(Change package), and files that are identical are no concern whichever commit delivers them (see the
+`RepoCardViewModel` design). The commit is used here only for the listing and the fetch, to keep the two consistent.
 
 **Cache layout** (`-CacheByAddressAndCommit`, `-CacheSeparatesRepositories`, `-CacheTrustsOnlyCompleteFolders`,
 `-CacheSweepsTemporaryFolders`): `{CacheRoot}/{addressKey}/{commit}/` holds the written layout (below `{subfolder}` when
@@ -161,8 +161,11 @@ and show its actionable message; it derives from `InvalidOperationException`, so
 works (`-MinimumGitVersion`, `-GitTooOldReportedUnwrapped`; the version is checked once per executable,
 `-MinimumGitVersionCheckedOnce`).
 
-The reader is `DirectoryPackageContentReader.OpenLayoutRoot(root[/subfolder], "git-commit:{commit}")`
-(`-ReportContentIdentity`), wrapped with the lease described above. After a successful acquisition the oldest cached
+The reader is `DirectoryPackageContentReader.OpenLayoutRoot(root[/subfolder])`
+(`-ReportContentIdentity`): its `ContentIdentity`
+is the identity of the agent files in the layout, computed like every other source's; the reader carries no commit.
+It is wrapped with the lease
+described above. After a successful acquisition the oldest cached
 commits beyond `MaxCachedCommits` are deleted, never the one just used and never one a reader holds (so the cache can
 temporarily hold more while readers are open, `-CachePruningSparesOpenReaders`); failures are logged and ignored
 (`-CachePruning`).

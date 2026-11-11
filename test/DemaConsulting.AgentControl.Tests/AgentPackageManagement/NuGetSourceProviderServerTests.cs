@@ -128,11 +128,11 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
     }
 
     /// <summary>
-    ///     Test that a package from an anonymous server reports, as its content identity, the SHA-256
-    ///     of the package file that was downloaded into the source's private cache.
+    ///     Test that a package from an anonymous server reports, as its content identity, the identity
+    ///     of the agent files that were downloaded into the source's private cache.
     /// </summary>
     [Fact]
-    public async Task NuGetSourceProvider_Acquire_AnonymousServer_ReportsSha256OfDownloadedPackageFile()
+    public async Task NuGetSourceProvider_Acquire_AnonymousServer_ReportsFilesIdentityOfDownloadedPackage()
     {
         // Arrange
         var id = UniqueId();
@@ -143,12 +143,10 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
         // Act
         using var reader = await provider.AcquireAsync(package, CancellationToken.None);
 
-        // Assert: the identity is the SHA-256 of the downloaded .nupkg, computed here independently
-        var downloaded = Assert.Single(Directory.GetFiles(reader.Description, "*.nupkg"));
-        var expected = "sha256:" + Convert.ToHexStringLower(
-            System.Security.Cryptography.SHA256.HashData(
-                await File.ReadAllBytesAsync(downloaded, TestContext.Current.CancellationToken)));
-        Assert.Equal(expected, reader.ContentIdentity);
+        // Assert: a files identity, the same one the downloaded files give when read as a plain folder
+        Assert.True(PackageContentIdentity.IsFilesIdentity(reader.ContentIdentity));
+        using var folderReader = DirectoryPackageContentReader.Open(reader.Description);
+        Assert.Equal(folderReader.ContentIdentity, reader.ContentIdentity);
     }
 
     /// <summary>

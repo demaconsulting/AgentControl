@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using Avalonia.Media.Imaging;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.GitIntegration;
@@ -142,21 +143,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private const int MaxLaunchToolNameLength = 10;
 
     /// <summary>
-    ///     How many characters of a commit the card shows, the length git itself uses by default.
-    /// </summary>
-    private const int ShortCommitLength = 7;
-
-    /// <summary>
-    ///     The <c>git-commit:</c> identity the pin recorded for the pinned version, read from the
-    ///     pin file; <see langword="null"/> when none.
+    ///     The <c>files-sha256:</c> content identity the pin recorded for the pinned version, read
+    ///     from the pin file; <see langword="null"/> when none (an older pin, or a source that
+    ///     reported none). What a configured source's files are verified against.
     /// </summary>
     private string? _pinnedContentIdentity;
 
     /// <summary>
-    ///     The commit the pinned tag points to now when it differs from the recorded one, else
-    ///     <see langword="null"/>.
+    ///     The <c>Source</c> an older version of AgentControl recorded in the pin file, read as a
+    ///     hint only (never written back); <see langword="null"/> when the file names none. Used
+    ///     only to choose among the user's own sources for a pin that has no files identity.
     /// </summary>
-    private string? _movedTagCommit;
+    private string? _pinLegacySource;
 
     /// <summary>
     ///     Cancels the package operation currently running for this card (the one that holds
@@ -627,11 +625,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Gets the alias of the package source the pinned package comes from, or
-    ///     <see langword="null"/> if the repo has never been synced. A pin file written before
-    ///     sources existed reports the legacy <c>Default</c> alias.
+    ///     Gets the alias of the configured source that supplies the pinned package on this
+    ///     machine, or <see langword="null"/> when none is known (not resolved yet, or no
+    ///     configured source delivers it).
     /// </summary>
-    public string? PinnedSource
+    /// <remarks>
+    ///     A per-user cache in the recent-repos settings (<see cref="RecentRepo.PinnedSource"/>),
+    ///     never part of the repo's pin file: the pin names no source, because sources are each
+    ///     user's own configuration. It is a hint that saves re-reading every source on each check
+    ///     and what Select Package / Change package start on; it is set whenever a source is
+    ///     resolved or a package is applied, and cleared when the source is no longer configured.
+    /// </remarks>
+    public string? SupplyingSource
     {
         get => _recentRepo.PinnedSource;
         private set
@@ -648,14 +653,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Gets a user-readable description of why the pinned package's source cannot be used (for
-    ///     example the pin names a source that is not configured), or <see langword="null"/> when
-    ///     there is no such problem.
+    ///     Gets a user-readable description of why the pinned package cannot be obtained (for example
+    ///     no configured source delivers it), or <see langword="null"/> when there is no such
+    ///     problem.
     /// </summary>
     /// <remarks>
-    ///     This is the card's error state for a pin whose source alias is missing from the
-    ///     configured sources. The card never substitutes another source: upgrade checking is
-    ///     disabled and every action that needs the source reports this problem instead.
+    ///     This is the card's error state for a pin that no configured source can supply. The card
+    ///     never uses a source whose files are not verified to be the ones the pin recorded: every
+    ///     action that needs the package reports this problem instead.
     /// </remarks>
     public string? SourceProblem
     {
@@ -815,7 +820,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public RepoCardStatus Status => this switch
     {
         { IsMissing: true } or { HasSourceProblem: true } or { LastActionFailed: true } => RepoCardStatus.Problem,
-        { IsPinnedTagMoved: true } => RepoCardStatus.TagMoved,
         { IsUpgradeAvailable: true } => RepoCardStatus.UpgradeAvailable,
         { IsPackageSelectionNeeded: true } => RepoCardStatus.NoPackage,
         { IsCheckingUpgrade: true } => RepoCardStatus.Checking,
@@ -842,7 +846,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RepoCardStatus.Problem => "Needs attention",
         RepoCardStatus.NoPackage => "No agent package",
         RepoCardStatus.Unknown => "Update check failed",
-        RepoCardStatus.TagMoved => "Tag moved",
         _ => "Checking for updates"
     };
 
@@ -856,7 +859,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RepoCardStatus.NoPackage => "No agent package is pinned for this repo.",
         RepoCardStatus.Checking => "Checking whether a newer agent package version is available...",
         RepoCardStatus.Unknown => "Update check failed: the package source could not be read, so it is not known whether a newer agent package version is available. Use Refresh in the card menu to try again.",
-        RepoCardStatus.TagMoved => PinnedTagMovedTooltip,
         _ when IsMissing => "Needs attention: this repo's folder could not be found on disk. Use Check again in the card menu once it is back.",
         _ when HasSourceProblem => $"Needs attention: {SourceProblem}",
         _ => "Needs attention: the last action failed."
@@ -1133,43 +1135,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public bool ShowUpToDateCue => HasPinnedPackage && Status == RepoCardStatus.UpToDate;
 
     /// <summary>
-    ///     Gets the commit a Git source's pinned version was set up from, as recorded in the pin
-    ///     (<c>git-commit:</c> identity), or <see langword="null"/> when the pin is not from a Git
-    ///     source or recorded none. Read from the pin file by <see cref="RefreshPin"/>; not part of
-    ///     the recent-repos settings.
-    /// </summary>
-    private string? PinnedContentIdentity => _pinnedContentIdentity;
-
-    /// <summary>
-    ///     Gets the commit of the pinned Git version shortened to seven characters, or
-    ///     <see langword="null"/> when the pin recorded none.
-    /// </summary>
-    public string? PinnedCommitShort
-    {
-        get
-        {
-            const string prefix = PackageContentIdentity.GitCommitPrefix;
-            var identity = PinnedContentIdentity?.Trim();
-            if (identity is null || !identity.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-
-            var commit = identity[prefix.Length..];
-            return commit.Length >= ShortCommitLength ? commit[..ShortCommitLength].ToLowerInvariant() : null;
-        }
-    }
-
-    /// <summary>
-    ///     Gets the tag the pinned version has in its Git source (the source's tag pattern applied to
-    ///     the pinned version), or <see langword="null"/> when the pin is not from a configured Git
-    ///     source.
+    ///     Gets the tag the pinned version has in the Git source that supplies it (the source's tag
+    ///     pattern applied to the pinned version), or <see langword="null"/> when the supplying
+    ///     source is not a configured Git source.
     /// </summary>
     public string? PinnedTagName
     {
         get
         {
-            if (PinnedSourceDefinition is not { Type: PackageSourceType.Git } source ||
+            if (SupplyingSourceDefinition is not { Type: PackageSourceType.Git } source ||
                 !PackageVersion.TryParseStrict(PinnedPackageVersion, out var version) || version is null ||
                 !GitTagPattern.TryCreate(source.TagPattern, out var pattern, out _) || pattern is null)
             {
@@ -1179,25 +1153,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return pattern.Format(version);
         }
     }
-
-    /// <summary>
-    ///     Gets a value indicating whether the tag of the pinned Git version now points to a
-    ///     different commit than the one the repo was set up from (a "moved tag"). Set by the
-    ///     background upgrade check; it never applies anything by itself.
-    /// </summary>
-    public bool IsPinnedTagMoved => _movedTagCommit is not null;
-
-    /// <summary>
-    ///     Gets the tooltip of the moved-tag chip: which tag moved, from which commit to which, and
-    ///     what the user can do, or an empty string when the tag has not moved.
-    /// </summary>
-    public string PinnedTagMovedTooltip => _movedTagCommit is null
-        ? string.Empty
-        : $"The tag {PinnedTagName ?? PinnedPackageVersion} of source '{PinnedSource}' now points to a different commit " +
-          $"({PinnedCommitShort ?? "unknown"} -> {_movedTagCommit[..Math.Min(ShortCommitLength, _movedTagCommit.Length)]}) " +
-          "than the one this repo's agent files came from. AgentControl keeps using the files you have and " +
-          "applies nothing by itself. If you trust the change, accept it with the \"...\" menu > Change package... " +
-          "and choose this version again; otherwise ask the maintainer to publish a new version instead of moving a tag.";
 
     /// <summary>
     ///     Gets the part of <see cref="RepoPath"/> before its last directory separator (for example
@@ -1244,15 +1199,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public string UpgradeChipText => LatestAvailableVersion ?? string.Empty;
 
     /// <summary>
-    ///     Gets the definition of the source the pinned package comes from, or
-    ///     <see langword="null"/> when the repo is not pinned or the source is not configured
-    ///     (the card never substitutes another source).
+    ///     Gets the definition of the source that supplies the pinned package on this machine (see
+    ///     <see cref="SupplyingSource"/>), or <see langword="null"/> when none is known or it is no
+    ///     longer configured.
     /// </summary>
-    private PackageSourceDefinition? PinnedSourceDefinition
+    private PackageSourceDefinition? SupplyingSourceDefinition
     {
         get
         {
-            var alias = PinnedSource;
+            var alias = SupplyingSource;
             return alias is null
                 ? null
                 : _getSettings().GetEffectiveSources().FirstOrDefault(
@@ -1261,25 +1216,31 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Gets the icon of the pinned package's source type, shown inside the agent package chip.
+    ///     Gets a value indicating whether the card knows which configured source supplies the
+    ///     pinned package, so the agent package chip can name it.
     /// </summary>
-    public MaterialIconKind PinnedSourceIcon => PackageSourceIcons.GetIcon(PinnedSourceDefinition);
+    public bool HasSupplyingSource => SupplyingSourceDefinition is not null;
 
     /// <summary>
-    ///     Gets the alias of the pinned package's source, shown as muted text beside the source
-    ///     icon in the agent package chip so the source is recognizable at a glance without
-    ///     hovering (a pin written before sources existed reports the legacy <c>Default</c>
-    ///     alias).
+    ///     Gets the icon of the source that supplies the pinned package, shown inside the agent
+    ///     package chip.
     /// </summary>
-    public string PinnedSourceLabel => PinnedSource ?? RepoPin.LegacySourceAlias;
+    public MaterialIconKind PinnedSourceIcon => PackageSourceIcons.GetIcon(SupplyingSourceDefinition);
 
     /// <summary>
-    ///     Gets a value indicating whether the pinned package's source requires signed packages,
-    ///     so the agent package chip shows a small shield. A zip source, a source that is not
-    ///     configured and a source without the requirement show none.
+    ///     Gets the alias of the source that supplies the pinned package, shown as muted text beside
+    ///     the source icon in the agent package chip so the source is recognizable at a glance
+    ///     without hovering; empty when no configured source is known to supply it.
+    /// </summary>
+    public string PinnedSourceLabel => SupplyingSourceDefinition?.Alias ?? string.Empty;
+
+    /// <summary>
+    ///     Gets a value indicating whether the source that supplies the pinned package requires
+    ///     signed packages, so the agent package chip shows a small shield. A zip source, a source
+    ///     that is not configured and a source without the requirement show none.
     /// </summary>
     public bool RequiresSignature =>
-        PinnedSourceDefinition is { Type: PackageSourceType.NuGet, RequireSignedPackages: true };
+        SupplyingSourceDefinition is { Type: PackageSourceType.NuGet, RequireSignedPackages: true };
 
     /// <summary>
     ///     Gets the tooltip of the signature shield: that signed packages are required and, when
@@ -1289,7 +1250,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     {
         get
         {
-            var source = PinnedSourceDefinition;
+            var source = SupplyingSourceDefinition;
             if (source is null || !PackageSourceDefinition.TryNormalizeFingerprint(source.SignerFingerprint, out var fingerprint))
             {
                 return "Signature required (any trusted signer)";
@@ -1301,21 +1262,27 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets the tooltip of the agent package chip: which package and version the agent files
-    ///     came from and from which source (by alias and kind).
+    ///     came from and, when a configured source is known to supply them, which source (by alias
+    ///     and kind) - plus, for a Git source, the tag the version has under the source's pattern.
     /// </summary>
     public string PackageChipTooltip
     {
         get
         {
-            var tooltip = $"Agent files: {PackageChipText} from source '{PinnedSource ?? RepoPin.LegacySourceAlias}' " +
-                          $"({PackageSourceIcons.GetShortName(PinnedSourceDefinition)})";
+            var source = SupplyingSourceDefinition;
+            if (source is null)
+            {
+                return $"Agent files: {PackageChipText}.";
+            }
 
-            // A Git source is told apart by the tag and the commit the files came from
+            var tooltip = $"Agent files: {PackageChipText} from source '{source.Alias}' " +
+                          $"({PackageSourceIcons.GetShortName(source)})";
+
+            // A Git source is told apart by the tag the version has
             var tag = PinnedTagName;
-            var commit = PinnedCommitShort;
             if (tag is not null)
             {
-                tooltip += commit is null ? $", tag {tag}" : $", tag {tag} @ {commit}";
+                tooltip += $", tag {tag}";
             }
 
             return tooltip + ".";
@@ -1555,8 +1522,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(PackageChipText));
         OnPropertyChanged(nameof(PackageChipTooltip));
         OnPropertyChanged(nameof(PinnedTagName));
-        OnPropertyChanged(nameof(PinnedCommitShort));
-        OnPropertyChanged(nameof(PinnedTagMovedTooltip));
+        OnPropertyChanged(nameof(HasSupplyingSource));
         OnPropertyChanged(nameof(PinnedSourceIcon));
         OnPropertyChanged(nameof(PinnedSourceLabel));
         OnPropertyChanged(nameof(RequiresSignature));
@@ -1956,8 +1922,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     the single full-refresh entry point behind <see cref="RefreshCommand"/>, rather than
     ///     the split eager/lazy sequencing <see cref="MainWindowViewModel"/> uses at app launch.
     ///     It holds <see cref="IsBusy"/> while it runs so no other card action starts meanwhile.
-    ///     Because the user asked for it, a Git source is read again rather than answered from the
-    ///     session's cached listing, so a tag that was moved since the last listing is noticed.
+    ///     Because the user asked for it, the Git sources are read again rather than answered from the
+    ///     session's cached listing, so a tag that was pushed since the last listing (a new version)
+    ///     is offered at once.
     /// </remarks>
     /// <param name="cancellationToken">Cancels the package-source part of the refresh.</param>
     /// <returns>A task that completes when every property is current; a failing source is
@@ -2010,10 +1977,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
             SetSourceProblem(null, needsSignIn: false);
-
-            // A tag-moved warning belongs to a repo that can be checked: a missing folder
-            // has no package chip to carry it, and nothing is known about it once it returns
-            SetMovedTag(null);
 
             // The repo just disappeared (or was already missing): any previously-cached Git
             // status is no longer trustworthy, so invalidate it rather than let it linger and
@@ -2207,8 +2170,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <para>
     ///     If a pin exists but one or more managed folders are missing (e.g. a freshly cloned
     ///     repo whose <c>.gitignore</c>'d agent folders were never unpacked on this machine), this
-    ///     resolves the <em>currently pinned</em> package at the source the pin names (never the
-    ///     latest - upgrading remains a deliberate, separate user action) and re-extracts it
+    ///     resolves the <em>currently pinned</em> package and version (never the
+    ///     latest - upgrading remains a deliberate, separate user action) among the user's own
+    ///     configured sources, in Settings order: the first source whose files have exactly the
+    ///     pin's recorded files identity supplies it; a pin without one takes the source it was
+    ///     last supplied from (else the first that offers it) - and re-extracts it
     ///     directly via <see cref="PackageContentExtractor.Extract"/>, deliberately without going
     ///     through <see cref="ApplyPackageAndShowReleaseNotesAsync"/> - architecture.md's
     ///     ensure-synced-before-launch bullet never mentions showing release notes, unlike its
@@ -2253,55 +2219,76 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return false;
             }
 
-            // Resolve the pinned package at the source the pin names - and only that source. A
-            // pin whose source is not configured fails here (UnknownSourceException) rather than
-            // being served by any other source.
-            var provider = registry.Resolve(PinnedSource ?? RepoPin.LegacySourceAlias);
+            // The pin names no source (sources are per-user configuration), so the configured
+            // sources are asked what they offer of the pinned package and version, in Settings
+            // order. A pin that recorded a files identity gets the first source whose acquired
+            // files have exactly that identity - a package name and version is never enough, and a
+            // source whose files differ is never used. A pin without one (an older pin) has
+            // nothing to verify against: it takes the source it was last supplied from, else the
+            // source an older version recorded in the file, else the first that offers it, and is
+            // never refused.
             var pinnedVersion = PinnedPackageVersion;
-            var pinnedPackage = (await provider.ListVersionsAsync(pinnedPackageName, cancellationToken))
-                .FirstOrDefault(p => IsVersion(p, pinnedVersion));
-            if (pinnedPackage is null)
+            var recordedPin = LoadPinForComparison();
+            var (offering, firstFailure) = await FindOfferingSourcesAsync(
+                registry, pinnedPackageName, pinnedVersion, cancellationToken);
+            if (offering.Count == 0)
             {
-                ErrorOccurred?.Invoke(
-                    this,
-                    $"Pinned package '{pinnedPackageName} {pinnedVersion}' was not found at the configured source. Launching without syncing agent files.");
+                // A source that could not be read is not proof that no source offers the package:
+                // report why it could not be read instead
+                var reason = firstFailure is not null
+                    ? $"A package source could not be read: {SecretRedactor.SafeMessage(firstFailure)}"
+                    : DescribeNoSourceOffers(pinnedPackageName, pinnedVersion);
+                ErrorOccurred?.Invoke(this, reason + " Launching without syncing agent files.");
                 return false;
+            }
+
+            DiscoveredPackage pinnedPackage;
+            IPackageContentReader reader;
+            if (PackageContentIdentity.IsFilesIdentity(recordedPin?.ContentIdentity))
+            {
+                var verified = await FindVerifiedSourceAsync(
+                    offering, recordedPin!.ContentIdentity, SupplyingSource, registry, cancellationToken);
+                if (verified is null)
+                {
+                    if (_logger.IsEnabled(LogLevel.Warning))
+                    {
+                        _logger.LogWarning(
+                            "Not re-syncing repo '{RepoName}' before launch: no configured source delivers '{PackageName} {Version}' with the files the pin recorded ({Pinned})",
+                            RepoName, pinnedPackageName, pinnedVersion,
+                            PackageContentIdentity.Describe(recordedPin.ContentIdentity));
+                    }
+
+                    ErrorOccurred?.Invoke(
+                        this,
+                        $"The agent files were not synced. {DescribeNoMatchingFiles(pinnedPackageName, pinnedVersion)} " +
+                        $"Launching without them. {ContentChangeAdvice}");
+                    return false;
+                }
+
+                pinnedPackage = verified.Package;
+                reader = verified.Reader;
+            }
+            else
+            {
+                pinnedPackage = ChooseUnverifiedOffer(offering);
+                reader = await registry.Resolve(pinnedPackage.SourceAlias).AcquireAsync(pinnedPackage, cancellationToken);
             }
 
             if (_logger.IsEnabled(LogLevel.Information))
             {
                 _logger.LogInformation(
-                    "Re-syncing missing managed agent folders for repo '{RepoName}' from pinned package '{PackageName} {Version}' (source '{Source}')",
+                    "Re-syncing missing managed agent folders for repo '{RepoName}' from package '{PackageName} {Version}' of source '{Source}'",
                     RepoName, pinnedPackage.PackageName, pinnedPackage.Version, pinnedPackage.SourceAlias);
             }
 
-            using var reader = await provider.AcquireAsync(pinnedPackage, cancellationToken);
+            using var ownedReader = reader;
             cancellationToken.ThrowIfCancellationRequested();
 
-            // The re-sync restores what the pin was made from, so a republished version is
-            // refused here rather than quietly replacing the agent files. Only the check is done
-            // at launch: the pin is never written (recording an identity here would dirty the
-            // working tree on every launch), so a pin without an identity is simply synced
-            var recordedPin = LoadPinForComparison();
-            if (ContentChangedSincePinned(recordedPin, pinnedPackage, reader))
-            {
-                if (_logger.IsEnabled(LogLevel.Warning))
-                {
-                    _logger.LogWarning(
-                        "Not re-syncing repo '{RepoName}' before launch: package '{PackageName} {Version}' from source '{Source}' changed content ({Pinned} -> {Actual})",
-                        RepoName, pinnedPackage.PackageName, pinnedPackage.Version, pinnedPackage.SourceAlias,
-                        PackageContentIdentity.Describe(recordedPin?.ContentIdentity),
-                        PackageContentIdentity.Describe(reader.ContentIdentity));
-                }
-
-                ErrorOccurred?.Invoke(
-                    this,
-                    $"The agent files were not synced. {DescribeContentChange(pinnedPackage)} " +
-                    $"Launching without them. {ContentChangeAdvice}");
-                return false;
-            }
-
+            // Only the check is done at launch: the pin is never written (recording an identity
+            // here would dirty the working tree on every launch). The source that supplied the
+            // files is remembered in the user's own settings, never in the pin.
             await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
+            SupplyingSource = pinnedPackage.SourceAlias;
             MaybeOfferAgentsMdTemplate(reader, fromLaunchResync: true);
             return true;
         }
@@ -2386,13 +2373,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Runs the full upgrade sequence for this repo: finds the latest package at the source the
-    ///     pin names, then applies it via <see cref="ApplyPackageAndShowReleaseNotesAsync"/>.
+    ///     Runs the full upgrade sequence for this repo: finds the latest package across the
+    ///     configured sources, then applies it via <see cref="ApplyPackageAndShowReleaseNotesAsync"/>.
     /// </summary>
     /// <remarks>
-    ///     The upgrade is resolved only at the pin's own source; if that source is not configured
-    ///     the upgrade is refused with an explanatory message rather than offered from another
-    ///     source.
+    ///     The pin names no source, so the upgrade is resolved among all the user's configured
+    ///     sources that offer the package: the newest version wins and a tie keeps Settings order.
     /// </remarks>
     /// <param name="cancellationToken">Signaled when the command itself is cancelled.</param>
     /// <returns>A task that completes when the upgrade has finished or failed.</returns>
@@ -2425,22 +2411,31 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return;
         }
 
-        var sourceAlias = PinnedSource ?? RepoPin.LegacySourceAlias;
         if (_logger.IsEnabled(LogLevel.Information))
         {
             _logger.LogInformation(
-                "Checking for an upgrade to package '{PackageName}' for repo '{RepoName}' at source '{SourceAlias}'",
-                packageName, RepoName, sourceAlias);
+                "Checking for an upgrade to package '{PackageName}' for repo '{RepoName}' across the configured sources",
+                packageName, RepoName);
         }
 
-        IPackageSourceProvider provider;
+        IPackageSourceProvider? provider;
         DiscoveredPackage? latest;
         try
         {
-            provider = registry.Resolve(sourceAlias);
-            latest = (await provider.ListVersionsAsync(packageName, cancellationToken))
-                .OrderByDescending(p => p.Version)
-                .FirstOrDefault();
+            // The user started the upgrade, so the sources are listed afresh: a version published
+            // since the last (cached) background check must be the one that is applied
+            foreach (var definition in registry.Definitions)
+            {
+                _packageVersionCache.Invalidate(definition.Alias);
+            }
+
+            // The pin names no source: every configured source that offers the package is asked,
+            // the newest version wins and a tie keeps Settings order. Upgrading is a deliberate
+            // action, so the source that was actually used is the one the card remembers.
+            var check = await _packageVersionCache.IsNewerVersionAvailableAcrossSourcesAsync(
+                registry, packageName, PinnedPackageVersion ?? string.Empty, cancellationToken);
+            latest = check.Latest;
+            provider = latest is null ? null : registry.Resolve(latest.SourceAlias);
         }
         catch (DirectoryNotFoundException ex)
         {
@@ -2484,7 +2479,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
 
         await ApplyPackageAndShowReleaseNotesAsync(
-            provider, latest, $"Upgraded to {latest.Version}.", "Upgrade", ContentChangeHandling.Refuse, cancellationToken);
+            provider!, latest, $"Upgraded to {latest.Version}.", "Upgrade", ContentChangeHandling.Refuse, cancellationToken);
     }
 
     /// <summary>
@@ -2730,11 +2725,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             // Preserve a prior AGENTS.md template decline (and any unknown fields) across
             // re-pinning by updating the loaded pin in place: those fields are orthogonal to the
-            // selected package/version and must never be silently reset. The content identity
-            // is recorded here (and only on Select Package / Upgrade, never on the launch
-            // re-sync), replacing whatever the previous pin recorded - including nothing.
+            // selected package/version and must never be silently reset. The content identity is
+            // recorded here (and only on Select Package / Change package / Upgrade, never on the
+            // launch re-sync), replacing whatever the previous pin recorded - including nothing, and
+            // including the older kinds of identity. The pin names no source and no commit: the
+            // identity of the files is all that is needed to prove they were not tampered with.
             var pin = existingPin ?? new RepoPin();
-            pin.Source = package.SourceAlias;
             pin.PackageName = package.PackageName;
             pin.Version = package.Version.ToString();
             pin.ContentIdentity = reader.ContentIdentity;
@@ -2743,10 +2739,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
             var releaseNotes = PackageContentExtractor.ReadReleaseNotes(reader) ?? string.Empty;
 
             // The package is applied; the follow-up status refresh is no longer cancelable so
-            // the card never shows the old pin's upgrade state next to the new pin
+            // the card never shows the old pin's upgrade state next to the new pin. The source it
+            // came from is remembered in the user's own settings (never in the pin)
             RefreshPin();
+            SupplyingSource = package.SourceAlias;
             EvaluatePinnedSource();
-            await RefreshUpgradeStatusAsync(CancellationToken.None, relistGitSource: true);
+            await RefreshUpgradeStatusAsync(CancellationToken.None);
             RaisePackageChipChanged();
 
             // A converted repo needs one more step from the user: the removal from git is only
@@ -2944,6 +2942,158 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     A package from a configured source that was verified to deliver the identical files the
+    ///     repo's pin recorded, with its content opened for reading.
+    /// </summary>
+    /// <param name="Package">The package as that source lists it.</param>
+    /// <param name="Reader">The opened content; disposed with this value.</param>
+    private sealed record VerifiedSource(DiscoveredPackage Package, IPackageContentReader Reader) : IDisposable
+    {
+        /// <summary>
+        ///     Releases the opened content.
+        /// </summary>
+        public void Dispose() => Reader.Dispose();
+    }
+
+    /// <summary>
+    ///     Asks every configured source, in Settings order, which of them offer the pinned package
+    ///     and version.
+    /// </summary>
+    /// <param name="registry">The configured sources.</param>
+    /// <param name="packageName">The pinned package name.</param>
+    /// <param name="version">The pinned version text.</param>
+    /// <param name="cancellationToken">Cancels the listing.</param>
+    /// <returns>The offers of the package at exactly that version in Settings order (a source
+    ///     with several spellings of the version lists each), and the first failure of a source
+    ///     that could not be read (and was skipped), or <see langword="null"/>.</returns>
+    /// <exception cref="IOException">Thrown when every source failed to list; see
+    ///     <see cref="PackageVersionCache.GetVersionsAcrossSourcesAsync"/>.</exception>
+    private async Task<(List<DiscoveredPackage> Offering, Exception? FirstFailure)> FindOfferingSourcesAsync(
+        PackageSourceRegistry registry, string packageName, string? version, CancellationToken cancellationToken)
+    {
+        Exception? firstFailure = null;
+        var offers = await _packageVersionCache.GetVersionsAcrossSourcesAsync(
+            registry, packageName, excludeAlias: null, cancellationToken, failure => firstFailure ??= failure);
+        return ([.. offers.Where(candidate => IsVersion(candidate, version))], firstFailure);
+    }
+
+    /// <summary>
+    ///     Chooses, for a pin that recorded no files identity (so nothing can be verified), which of
+    ///     the sources that offer the pinned package and version supplies it.
+    /// </summary>
+    /// <param name="offering">The offers in Settings order; not empty.</param>
+    /// <returns>The offer of the source this card was last supplied from, else of the source an
+    ///     older version recorded in the pin file (a hint only), else the first offer.</returns>
+    private DiscoveredPackage ChooseUnverifiedOffer(IReadOnlyList<DiscoveredPackage> offering) =>
+        new[] { SupplyingSource, _pinLegacySource }
+            .Where(hint => hint is not null)
+            .Select(hint => offering.FirstOrDefault(
+                offer => string.Equals(offer.SourceAlias, hint, StringComparison.OrdinalIgnoreCase)))
+            .FirstOrDefault(offer => offer is not null) ?? offering[0];
+
+    /// <summary>
+    ///     Looks, among the sources that offer the pinned package and version, for the first one that
+    ///     delivers the identical files the repo's pin recorded.
+    /// </summary>
+    /// <param name="offering">The offers of the package at the pinned version in Settings order.</param>
+    /// <param name="pinnedIdentity">The files identity the pin recorded; without one there is
+    ///     nothing to verify against and no source is accepted.</param>
+    /// <param name="preferredAlias">The source this card was last supplied from, tried first (the
+    ///     files it delivers are checked like any other's), or <see langword="null"/>.</param>
+    /// <param name="registry">The configured sources.</param>
+    /// <param name="cancellationToken">Cancels the search.</param>
+    /// <returns>The first source whose acquired files have exactly the recorded identity;
+    ///     <see langword="null"/> when there is none. The caller disposes the result.</returns>
+    /// <remarks>
+    ///     A candidate is acquired only because it lists the package and version, and the sources are
+    ///     tried in Settings order (the last supplier first, which is only a saving: identical files
+    ///     are identical whichever source delivers them). A candidate that cannot be read or acquired
+    ///     is skipped (the next one may still match), and one that delivers other files is
+    ///     rejected - a package name and version is never enough. Credentials are whatever the
+    ///     registry was built with: a background check never prompts.
+    /// </remarks>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is canceled.</exception>
+    private async Task<VerifiedSource?> FindVerifiedSourceAsync(
+        IReadOnlyList<DiscoveredPackage> offering,
+        string? pinnedIdentity,
+        string? preferredAlias,
+        PackageSourceRegistry registry,
+        CancellationToken cancellationToken)
+    {
+        // A pin without a files identity (an older pin, or a source that named none) has nothing
+        // to verify a source against: trust nothing rather than guess
+        if (!PackageContentIdentity.IsFilesIdentity(pinnedIdentity))
+        {
+            return null;
+        }
+
+        foreach (var offer in offering.OrderBy(
+                     candidate => string.Equals(candidate.SourceAlias, preferredAlias, StringComparison.OrdinalIgnoreCase) ? 0 : 1))
+        {
+            IPackageContentReader? reader = null;
+            try
+            {
+                var provider = registry.Resolve(offer.SourceAlias);
+                reader = await provider.AcquireAsync(offer, cancellationToken);
+                if (PackageContentIdentity.Compare(pinnedIdentity, reader.ContentIdentity) == ContentIdentityComparison.Same)
+                {
+                    var verified = new VerifiedSource(offer, reader);
+                    reader = null;
+                    return verified;
+                }
+
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation(
+                        "Source '{Source}' offers '{PackageName} {Version}' but its files differ from the pin of repo '{RepoName}' ({Pinned} vs {Actual}); not used",
+                        offer.SourceAlias, offer.PackageName, offer.Version, RepoName,
+                        PackageContentIdentity.Describe(pinnedIdentity), PackageContentIdentity.Describe(reader.ContentIdentity));
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+                                           or ArgumentException)
+            {
+                // A source that cannot deliver the package says nothing about the others
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation(
+                        ex, "Source '{Source}' could not deliver '{PackageName} {Version}' for repo '{RepoName}'; trying the next source",
+                        offer.SourceAlias, offer.PackageName, offer.Version, RepoName);
+                }
+            }
+            finally
+            {
+                reader?.Dispose();
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    ///     Explains, for the user, that no configured source offers the pinned package and version.
+    /// </summary>
+    /// <param name="packageName">The pinned package name.</param>
+    /// <param name="version">The pinned version text.</param>
+    /// <returns>A plain-language sentence or two; it contains no hashes.</returns>
+    private static string DescribeNoSourceOffers(string packageName, string? version) =>
+        $"No configured source offers {packageName} {version}. Add a source that delivers it in Settings, or use " +
+        "Change package... to select the package from a configured source.";
+
+    /// <summary>
+    ///     Explains, for the user, that sources offer the pinned package and version but none of
+    ///     them delivers the files the repo was set up with.
+    /// </summary>
+    /// <param name="packageName">The pinned package name.</param>
+    /// <param name="version">The pinned version text.</param>
+    /// <returns>A plain-language sentence or two; it contains no hashes.</returns>
+    private static string DescribeNoMatchingFiles(string packageName, string? version) =>
+        $"No configured source delivers {packageName} {version} with the files this repo was set up with: it now " +
+        "contains different files than the copy this repo was set up with, although the version number is the " +
+        "same. The package may have been republished.";
+
+    /// <summary>
     ///     Reads the repo's pin for a content-identity comparison, tolerating an unreadable file.
     /// </summary>
     /// <returns>The pin, or <see langword="null"/> when there is none or it cannot be read (in
@@ -2968,13 +3118,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="pin">The repo's current pin, or <see langword="null"/> when there is none.</param>
     /// <param name="package">The package that was acquired.</param>
     /// <param name="reader">The acquired package's content, which names its identity.</param>
-    /// <returns><see langword="true"/> only when the pin names the same source, package and version
-    ///     and both identities are known and differ. A different version, a pin without an
-    ///     identity (a pin made before identities were recorded) and a source that reports no
-    ///     identity are never a change.</returns>
+    /// <returns><see langword="true"/> only when the pin names the same package and version (from any
+    ///     source: the identity describes the delivered files, not the source) and both identities are
+    ///     known and differ. A different version, a pin without a files identity (a pin made before
+    ///     files identities were recorded) and a source that reports no identity are never a change.</returns>
     private static bool ContentChangedSincePinned(RepoPin? pin, DiscoveredPackage package, IPackageContentReader reader) =>
         pin is not null &&
-        string.Equals(pin.Source, package.SourceAlias, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(pin.PackageName, package.PackageName, StringComparison.OrdinalIgnoreCase) &&
         IsVersion(package, pin.Version) &&
         PackageContentIdentity.Compare(pin.ContentIdentity, reader.ContentIdentity) == ContentIdentityComparison.Changed;
@@ -3236,7 +3385,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             var pin = RepoPinStore.Load(RepoPath) ?? new RepoPin
             {
-                Source = PinnedSource,
                 PackageName = PinnedPackageName ?? string.Empty,
                 Version = PinnedPackageVersion ?? string.Empty
             };
@@ -3321,19 +3469,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Re-reads the repo's <c>.agentcontrol.json</c> pin file, updating
-    ///     <see cref="PinnedPackageName"/>, <see cref="PinnedPackageVersion"/> and
-    ///     <see cref="PinnedSource"/>.
+    ///     <see cref="PinnedPackageName"/> and <see cref="PinnedPackageVersion"/> (and the recorded
+    ///     content identity and the legacy source hint the card keeps).
     /// </summary>
     private void RefreshPin()
     {
-        var previous = (PinnedPackageName, PinnedPackageVersion, PinnedSource, _pinnedContentIdentity);
+        var previous = (PinnedPackageName, PinnedPackageVersion, _pinnedContentIdentity);
         try
         {
             var pin = RepoPinStore.Load(RepoPath);
             PinnedPackageName = pin?.PackageName;
             PinnedPackageVersion = pin?.Version;
-            PinnedSource = pin?.Source;
             _pinnedContentIdentity = pin?.ContentIdentity;
+            _pinLegacySource = pin?.LegacySource;
         }
         catch (InvalidOperationException ex)
         {
@@ -3344,19 +3492,26 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // can no longer be confirmed from disk.
             PinnedPackageName = null;
             PinnedPackageVersion = null;
-            PinnedSource = null;
             _pinnedContentIdentity = null;
+            _pinLegacySource = null;
             StatusMessage = $"Failed to read pin file: {ex.Message}";
         }
 
         // A different pin makes everything learned about upgrades for the old one meaningless: drop
-        // it and ignore any check still running for it (the caller starts a new one)
-        if ((PinnedPackageName, PinnedPackageVersion, PinnedSource, _pinnedContentIdentity) != previous)
+        // it and ignore any check still running for it (the caller starts a new one). The source
+        // that supplied the old package is forgotten only when the package or version changed (the
+        // card's remembered supplier survives an app restart, when only the identity is read for
+        // the first time).
+        if ((PinnedPackageName, PinnedPackageVersion, _pinnedContentIdentity) != previous)
         {
             InvalidateUpgradeCheck();
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
-            SetMovedTag(null);
+            if (previous.PinnedPackageName != PinnedPackageName || previous.PinnedPackageVersion != PinnedPackageVersion)
+            {
+                SupplyingSource = null;
+            }
+
             RaisePackageChipChanged();
         }
     }
@@ -3433,20 +3588,29 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Re-checks whether a newer package version is available at the source the pin names (via
-    ///     the shared <see cref="PackageVersionCache"/>), updating <see cref="IsUpgradeAvailable"/>,
-    ///     <see cref="LatestAvailableVersion"/> and <see cref="SourceProblem"/>. Any failure
+    ///     Re-checks, in the background, whether a configured source supplies the pinned package
+    ///     (and a newer version than the pinned one is available), via the shared
+    ///     <see cref="PackageVersionCache"/>, updating <see cref="IsUpgradeAvailable"/>,
+    ///     <see cref="LatestAvailableVersion"/>, <see cref="SupplyingSource"/> and
+    ///     <see cref="SourceProblem"/>. Any failure
     ///     (source unreachable or failing) is treated as "no upgrade available" rather than
     ///     propagated.
     /// </summary>
     /// <remarks>
-    ///     A pin naming a source that is not configured is an error state, not a reason to look
-    ///     elsewhere: <see cref="SourceProblem"/> explains it and no upgrade is offered. Only the
-    ///     pin's own source is ever consulted. The source is read asynchronously, so a slow or
-    ///     unreachable source never freezes the window; <see cref="IsCheckingUpgrade"/> is set
-    ///     meanwhile. When several checks overlap (for example after the sources were edited
-    ///     while an earlier check was still waiting) only the most recently started one updates
-    ///     the card.
+    ///     The pin names no source, so the user's configured sources are asked, in Settings order,
+    ///     which of them offer the pinned package and version. For a pin that recorded a files
+    ///     identity, the source this card was last supplied from is accepted as it is, and otherwise
+    ///     the first source whose files have exactly that identity supplies it; a pin without one
+    ///     takes the source it was last supplied from, else the one an older version recorded, else
+    ///     the first that offers it. The newest version across all the sources that offer the
+    ///     package (a tie keeps Settings order) decides whether an upgrade is offered. A pin that no
+    ///     source can supply is an error state: <see cref="SourceProblem"/> explains it and the card
+    ///     is never "up to date", yet a newer version a source offers is still offered as an upgrade
+    ///     (the way out of the problem). The sources are read
+    ///     asynchronously, so a slow or unreachable source never freezes the window;
+    ///     <see cref="IsCheckingUpgrade"/> is set meanwhile. When several checks overlap (for
+    ///     example after the sources were edited while an earlier check was still waiting) only the
+    ///     most recently started one updates the card.
     /// </remarks>
     /// <param name="cancellationToken">Cancels reading the source.</param>
     /// <param name="allowPrompt">Whether a server that needs a sign-in may open the sign-in
@@ -3454,12 +3618,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     after settings change, which must never interrupt the user with a dialog: it uses a
     ///     remembered credential if there is one and otherwise reports that a sign-in is needed.
     ///     <see langword="true"/> when the user asked for the check.</param>
-    /// <param name="relistGitSource">Whether a Git source is read again instead of answered from
-    ///     the session's cached listing. <see langword="true"/> when the user asked for the check
-    ///     (a tag can be moved at any time, and the cached listing would still show the old
-    ///     commit) and after a package was applied; <see langword="false"/> (the default) for the
-    ///     background check, which may reuse the cache. Has no effect for other kinds of source,
-    ///     whose versions are immutable by convention.</param>
+    /// <param name="relistGitSource">Whether the Git sources are read again instead of answered
+    ///     from the session's cached listing. <see langword="true"/> when the user asked for the
+    ///     check (so a tag pushed since the last listing - a new version - is offered at once);
+    ///     <see langword="false"/> (the default) for the background check, which may reuse the
+    ///     cache. Has no effect for other kinds of source, whose versions are immutable by
+    ///     convention.</param>
     /// <returns>A task that completes when the card's upgrade state is current.</returns>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is cancelled; the card keeps its previous upgrade state.</exception>
@@ -3482,7 +3646,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
             IsUpgradeStatusUnknown = false;
             LatestAvailableVersion = null;
             IsCheckingUpgrade = false;
-            SetMovedTag(null);
             return;
         }
 
@@ -3490,36 +3653,97 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             IsUpgradeStatusUnknown = false;
             IsCheckingUpgrade = false;
-            SetMovedTag(null);
             return;
         }
 
         var pinnedPackageName = PinnedPackageName!;
         var pinnedVersion = PinnedPackageVersion ?? string.Empty;
-        var sourceAlias = PinnedSource ?? RepoPin.LegacySourceAlias;
         IsCheckingUpgrade = true;
         try
         {
-            // A moved tag is only visible in a fresh listing: when the user asked, drop what the
-            // session learned about this Git source so the check below reads it again. The
-            // cache discards the entries of just this source, and a read that was already running
-            // for it cannot put its older answer back.
-            if (relistGitSource && PinnedSourceDefinition is { Type: PackageSourceType.Git })
+            var registry = CreateSourceRegistry(allowPrompt);
+
+            // A newly pushed tag is only visible in a fresh listing: when the user asked, drop what
+            // the session learned about the Git sources so the check below reads them again. The
+            // cache discards the entries of just those sources, and a read that was already running
+            // for one cannot put its older answer back.
+            if (relistGitSource)
             {
-                _packageVersionCache.Invalidate(sourceAlias);
+                foreach (var git in registry.Definitions.Where(definition => definition.Type == PackageSourceType.Git))
+                {
+                    _packageVersionCache.Invalidate(git.Alias);
+                }
             }
 
-            var registry = CreateSourceRegistry(allowPrompt);
-            var check = await _packageVersionCache.IsNewerVersionAvailableAsync(
-                registry, sourceAlias, pinnedPackageName, pinnedVersion, cancellationToken);
+            // The pin names no source: the user's configured sources, in Settings order, are asked
+            // what they offer of the pinned package and version
+            var (offering, firstFailure) = await FindOfferingSourcesAsync(
+                registry, pinnedPackageName, pinnedVersion, cancellationToken);
+
+            // Nothing offers it and a source could not be read: nothing is known (a sign-in that is
+            // needed, a share that is down), which is not "no source offers it"
+            if (offering.Count == 0 && firstFailure is not null)
+            {
+                ExceptionDispatchInfo.Capture(firstFailure).Throw();
+            }
+
+            string? supplier = null;
+            string? problem = null;
+            if (offering.Count == 0)
+            {
+                // (A pin whose version does not parse as a version is left to the normal result:
+                // "not listed" says nothing about it.)
+                if (PackageVersion.TryParse(pinnedVersion, out _))
+                {
+                    problem = DescribeNoSourceOffers(pinnedPackageName, pinnedVersion);
+                }
+            }
+            else if (PackageContentIdentity.IsFilesIdentity(_pinnedContentIdentity))
+            {
+                // The source this card was last supplied from is accepted as it is (the files are
+                // checked whenever they are applied); otherwise the sources are asked for their
+                // files, in Settings order, and the first with exactly the recorded identity wins
+                supplier = offering.FirstOrDefault(
+                    offer => string.Equals(offer.SourceAlias, SupplyingSource, StringComparison.OrdinalIgnoreCase))?.SourceAlias;
+                if (supplier is null)
+                {
+                    using var verified = await FindVerifiedSourceAsync(
+                        offering, _pinnedContentIdentity, SupplyingSource, registry, cancellationToken);
+                    supplier = verified?.Package.SourceAlias;
+                    if (supplier is null)
+                    {
+                        problem = DescribeNoMatchingFiles(pinnedPackageName, pinnedVersion);
+                    }
+                }
+            }
+            else
+            {
+                // Nothing to verify against (an older pin): the source it was last supplied from,
+                // else the one an older version recorded in the file, else the first that offers it
+                supplier = ChooseUnverifiedOffer(offering).SourceAlias;
+            }
+
+            // The newest version across all the configured sources that offer the package (a tie
+            // keeps Settings order). With a problem it is still offered when newer: upgrading is the
+            // natural way out of it.
+            var check = await _packageVersionCache.IsNewerVersionAvailableAcrossSourcesAsync(
+                registry, pinnedPackageName, pinnedVersion, cancellationToken);
+
             if (generation == _upgradeCheckGeneration)
             {
+                SupplyingSource = supplier;
+                if (problem is not null)
+                {
+                    SetSourceProblem(
+                        check.IsNewerAvailable
+                            ? $"{problem} Upgrade to {check.Latest?.Version} to move to a version a configured source offers."
+                            : problem,
+                        needsSignIn: false);
+                }
+
                 LatestAvailableVersion = check.Latest?.Version.ToString();
                 IsUpgradeAvailable = check.IsNewerAvailable;
                 IsUpgradeStatusUnknown = false;
-
-                // A Git tag that now names another commit is shown, never applied
-                SetMovedTag(FindMovedTagCommit(check));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
@@ -3533,10 +3757,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 IsUpgradeAvailable = false;
                 IsUpgradeStatusUnknown = true;
                 LatestAvailableVersion = null;
-
-                // Whether the tag moved is unknown too: a "Tag moved" warning from an earlier
-                // check must not stay up as if this check had confirmed it
-                SetMovedTag(null);
 
                 // A server that needs a sign-in is worth telling the user about, because the
                 // background check must not ask: the card says what to do instead
@@ -3563,83 +3783,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Sets the commit a moved tag now points to and notifies everything derived from it.
-    /// </summary>
-    /// <param name="commit">The commit the pinned tag points to now, or <see langword="null"/>
-    ///     when the tag has not moved (or the question does not apply).</param>
-    private void SetMovedTag(string? commit)
-    {
-        if (string.Equals(_movedTagCommit, commit, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        _movedTagCommit = commit;
-        OnPropertyChanged(nameof(IsPinnedTagMoved));
-        OnPropertyChanged(nameof(PinnedTagMovedTooltip));
-        RaiseStatusChanged();
-    }
-
-    /// <summary>
-    ///     Finds out whether the tag of the pinned version of a Git source now points to another
-    ///     commit than the one the pin recorded.
-    /// </summary>
-    /// <param name="check">The result of the upgrade check, which carries the listing's entry for
-    ///     the pinned version.</param>
-    /// <returns>The commit the tag points to now when it differs from the recorded commit;
-    ///     <see langword="null"/> when the source is not a Git source, the pin did not record a
-    ///     valid <c>git-commit:</c> identity (an older pin adopts one the next time a package is
-    ///     applied, and an identity of another kind or shape is no commit to compare with - a
-    ///     tag did not move because of it), the listing does not show the pinned version, or the
-    ///     commit is the same.</returns>
-    /// <remarks>
-    ///     A pin does not record the tag, only the commit: the tag is derived from the source's
-    ///     tag pattern as it is configured now (see <see cref="PinnedTagName"/>). Editing the
-    ///     pattern therefore maps the pinned version to another tag, and when that tag names a
-    ///     different commit it is reported here like a moved tag - the files are not what the
-    ///     pin recorded - and the user accepts it with Change package.
-    /// </remarks>
-    private string? FindMovedTagCommit(UpgradeCheck check)
-    {
-        var revision = check.Pinned?.Revision;
-        if (PinnedSourceDefinition is not { Type: PackageSourceType.Git } ||
-            revision is null || !GitRemoteClient.ObjectIdPattern().IsMatch(revision) ||
-            !IsGitCommitIdentity(PinnedContentIdentity))
-        {
-            return null;
-        }
-
-        return PackageContentIdentity.Compare(PinnedContentIdentity, PackageContentIdentity.FromGitCommit(revision)) ==
-               ContentIdentityComparison.Changed
-            ? revision
-            : null;
-    }
-
-    /// <summary>
-    ///     Tells whether a pin's content identity is a well-formed <c>git-commit:</c> identity.
-    /// </summary>
-    /// <param name="identity">The identity the pin recorded, or <see langword="null"/>.</param>
-    /// <returns><see langword="true"/> when it is the <c>git-commit:</c> prefix followed by 40 or
-    ///     64 hexadecimal digits; otherwise <see langword="false"/>.</returns>
-    private static bool IsGitCommitIdentity(string? identity)
-    {
-        var trimmed = identity?.Trim();
-        if (trimmed is null || !trimmed.StartsWith(PackageContentIdentity.GitCommitPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var commit = trimmed[PackageContentIdentity.GitCommitPrefix.Length..];
-        return (commit.Length == 40 || commit.Length == 64) && commit.All(Uri.IsHexDigit);
-    }
-
-    /// <summary>
     ///     Applies the parts of the upgrade check that need no package source: a repo with no pin
-    ///     has no upgrade, and a pin naming a source that is not configured is an error state.
+    ///     has no upgrade, and a pin that can never be supplied because no source is configured
+    ///     (or the source configuration is invalid) is an error state.
     /// </summary>
-    /// <returns><see langword="true"/> when the pin's source is configured and must be consulted
-    ///     to learn whether a newer version exists; <see langword="false"/> when the state was
-    ///     fully decided here (no pin, unconfigured source, or invalid source configuration).</returns>
+    /// <returns><see langword="true"/> when the package sources must be consulted to learn which
+    ///     one supplies the pinned package and whether a newer version exists;
+    ///     <see langword="false"/> when the state was fully decided here (no pin, no source at all,
+    ///     or invalid source configuration).</returns>
     private bool EvaluatePinnedSource()
     {
         SetSourceProblem(null, needsSignIn: false);
@@ -3647,16 +3798,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             IsUpgradeAvailable = false;
             LatestAvailableVersion = null;
+            SupplyingSource = null;
             return false;
         }
 
-        var sourceAlias = PinnedSource ?? RepoPin.LegacySourceAlias;
         try
         {
-            if (!CreateSourceRegistry().Contains(sourceAlias))
+            var registry = CreateSourceRegistry();
+
+            // A remembered supplier that is no longer configured supplies nothing
+            if (SupplyingSource is not null && !registry.Contains(SupplyingSource))
             {
-                // No fallback: the pin's source is simply not available, and the card says so
-                SetSourceProblem(new UnknownSourceException(sourceAlias).Message, needsSignIn: false);
+                SupplyingSource = null;
+            }
+
+            if (registry.Definitions.Count == 0)
+            {
+                SupplyingSource = null;
+                SetSourceProblem(DescribeNoSourceOffers(PinnedPackageName, PinnedPackageVersion), needsSignIn: false);
                 IsUpgradeAvailable = false;
                 LatestAvailableVersion = null;
                 return false;

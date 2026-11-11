@@ -161,8 +161,10 @@ without it.
   to start with a particular group collapsed, list it in `CollapsedGroups` in the settings file before `launch`.
 - **Repo card** (repeated, one per list item): `RepoNameText`, `RepoStatusAccent` (the status bar; its name is the
   status in words), `RepoAvatarText`, `RepoAvatarImage`, `UpgradeAvailableBadge` (a button: click it to upgrade),
-  `TagMovedChip` (a button, with `TagMovedBadge`: a Git tag that now names another commit; click it to open
-  Change package), `PackageSourceIcon` and `PackageSourceAliasText` (the source's icon and alias in the package chip),
+  `SourceProblemChip` (with `SourceProblemBadge`: the red
+  package-source-problem or sign-in-needed chip; it can be shown together with `UpgradeAvailableBadge`),
+  `PackageSourceIcon` and `PackageSourceAliasText` (the icon and alias of the source that currently supplies the
+  files, in the package chip; hidden when no source is known),
   CommittedAgentFilesBadge, DirtyWorkingTreeBadge, MissingRepoBadge, RepoPathText (a text control whose name is the
   full path; the path is shortened to fit, a long folder name in the middle), RepoPinnedVersionText,
   `CurrentBranchText`, `GroupChipText` (a favorite's group), `FavoriteToggleButton` (accessible name `Favorite`; a
@@ -290,27 +292,31 @@ Creates a ready-to-use sandbox in a new (or empty) folder for manual exploration
   locally with `git` from the PATH (a scratch work repository that is deleted afterwards, then a push into the bare
   repository) with a fixed author identity, signing off, no user or system git configuration and no prompts. Nothing
   touches the network: the source's address is the local path. `--packages git` writes no package files into
-  `<dir>\packages\`. To get a "moved tag" for a screenshot, move the tag after the first sync, for example
-  `git --git-dir <dir>\git-source.git tag -f release/1.0.0 "release/1.1.0^{commit}"`.
+  `<dir>\packages\`. A moved tag has no chip of its own: moving it to other files is only caught when the files would
+  be applied (see the fixture example below).
 - `<dir>\repo\` (with `--repo`, implied by `--pin`) - a git repository (`git` from the PATH: `git init -b main` and one
   commit). `--pin contoso-agents@1.0.0` also commits an `.agentcontrol.json` pin (schema 2, naming the `Default`
   source, else `NuGet` with `--packages nupkg`, else `Git` with `--packages git`; no content identity is written), so
   the card shows a pinned version and
-  an upgrade badge; without a pin the repo is "never synced" and its card offers `SelectPackageMenuItem`.
+  an upgrade badge (the current application reads the source the fixture names only as a legacy hint, never writes it
+  back, and finds the supplying source among the configured ones); without a pin the repo is "never synced" and its
+  card offers `SelectPackageMenuItem`.
 - `<dir>\config\settings.json` - the application's settings: `Sources` (the zip, NuGet and/or Git source above, the
   NuGet one naming the sample package IDs it offers, the Git one its `contoso-agents` package) and, with a repo,
   `RecentRepos` with the
   repo (and its pin). Nothing else is written, so every other setting keeps its default and the file loads in any
   version of the application. Start the application on it with `launch --config-dir <dir>\config`.
 
-A Git package source fixture, with the tag moved after the first sync (the safety rules are the same: local paths only):
+A Git package source fixture, with the tag moved to other files after the first sync (the safety rules are the same:
+local paths only):
 
 ```powershell
 & $puppet fixture "$env:TEMP\acp-git" --packages git --repo
 & $puppet launch --config-dir "$env:TEMP\acp-git\config"
 # ... select Git / contoso-agents / 1.0.0 on the card, pull, then move the tag to the other commit:
 git --git-dir "$env:TEMP\acp-git\git-source.git" tag -f release/1.0.0 "release/1.1.0^{commit}"
-# ... relaunch: the card shows TagMovedChip; card menu > ChangePackageMenuItem, same version, Yes accepts the change
+# ... delete the repo's managed agent folders and press Launch: the files are refused (no configured source delivers the
+# recorded files); card menu > ChangePackageMenuItem, same version, Yes accepts the change
 ```
 
 ## Exit codes

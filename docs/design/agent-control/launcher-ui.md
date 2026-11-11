@@ -90,7 +90,7 @@ new section is collapsed) has no star to focus.)
   delegates to the relevant subsystem
   (`GitIntegration`, `RepoSync`, `AgentToolLauncher`, `RepoConfig`) — Launch only once agent
   files are confirmed synced (`AgentControl-LauncherUI-Launch`), Upgrade only when a newer
-  version exists at the source (`AgentControl-LauncherUI-Upgrade`) — and raises a view-model
+  version exists at a configured source (`AgentControl-LauncherUI-Upgrade`) — and raises a view-model
   event (`LaunchRecorded`, `SelectPackageRequested`, `ReleaseNotesReady`,
   `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `CommittedFilesConversionRequested`,
   `ErrorOccurred`, `RemoveRequested`) reporting the outcome.
@@ -175,17 +175,21 @@ while preserving the existing recent-repos list and invalidates the shared
 `PackageVersionCache` for each package source that was edited or removed.
 
 Each `RepoCardViewModel` is independently responsible for one repo's status and actions: it reads
-the pin via `RepoPinStore`, checks upgrade availability via `PackageSourceRegistry`/
-`PackageVersionCache` at the source the pin names (showing an error state, never using another
-source, when that source is not configured - `AgentControl-LauncherUI-SourceAwareActions`), resolves
+the pin via `RepoPinStore`, resolves which of the user's configured sources supplies the pinned package (asking
+them through `PackageSourceRegistry`/`PackageVersionCache`, matching by the files identity the pin recorded - a pin
+names no source - and showing an error state, never using a source whose files are not the recorded ones, when none
+does: `AgentControl-LauncherUI-SourceAwareActions`), resolves
 git status/branch via `GitClient`/`CommittedAgentFilesCache`, and drives
 Launch/Pull/Upgrade/Select-Package/Favorite/Remove. The card presents its state as chips: a package
-chip (robot icon, package name and version, the source's alias as muted text beside a small icon for the
-source kind - a server has its own network-server icon - and a tooltip naming the source), an amber
-upgrade chip reading "Upgrade to" and the version an upgrade would move to, a grey "No agent
+chip (robot icon, package name and version, the alias of the source that currently supplies the files as muted text
+beside a small icon for the
+source kind - a server has its own network-server icon - and a tooltip naming the source; hidden alias when no source
+is known), an amber
+upgrade chip reading "Upgrade to" and the version an upgrade would move to (also shown beside a red source problem),
+a grey "No agent
 package" chip when nothing is pinned, a branch chip, and color-coded status chips (uncommitted
 changes, committed agent files, folder missing, and a red chip for a source problem with the actual problem in
-its tooltip - "Sign-in needed" when the pinned server needs a sign-in, otherwise "Package source problem"
+its tooltip - "Sign-in needed" when the server needs a sign-in, otherwise "Package source problem"
 (`SourceProblemChipText`)); the outcome of the last Launch/Pull/Upgrade action (`StatusMessage`) is shown
 under the repo path; a repo whose folder is missing offers no upgrade; the Launch button is labeled with a
 short name of the configured agent tool
@@ -283,7 +287,8 @@ leaves `RepoCards` and forgets its bookkeeping for it.
 
 `SelectPackageWindowViewModel` backs the package-selection dialog opened from a card's **Select Package...**
 (a repo with no pin) or **Change package...** (a repo with a pin). It shows three columns - source, package, version.
-For Change package it is given the pin's source, package and version and, once that source has been read, selects the
+For Change package it is given the source that supplies the repo's files, the package and the version and, once that
+source has been read, selects the
 package and its version (keeping the newest version when the pinned one is no longer listed, and selecting nothing
 when the source failed, does not offer the package or is not configured), so choosing the version the repo already
 uses again is one click; it never overrides a choice the user made while the source was loading
@@ -297,8 +302,10 @@ words, naming the folder; until a package is selected the version column says "S
 versions." (`ShowVersionsHint`); each source row has a UI Automation name made of its alias, kind and status
 (`AutomationName`). Selecting a package lists its versions in
 descending order (defaulting to latest), and
-confirming reports the full package reference - source alias, name and version - so the pin
-records the source. The three-column layout was chosen over a grouped single list because the
+confirming reports the full package reference - source alias, name and version - from which the card applies the
+package and records only its name, version and files identity (the source it was selected from is remembered as the
+card's supplier in the user's own settings, not in the pin). The three-column layout was chosen over a grouped single
+list because the
 same package name can exist in several sources and the user must see which source they pick from.
 `SettingsWindowViewModel` seeds its editable properties from the current `AppSettings` on
 construction and exposes `IsCustomAgentToolSelected` to drive the settings window's
@@ -317,7 +324,8 @@ source types (zip-package folder, NuGet-package folder, NuGet-package server, Gi
 on the selected row) beside it on the list's header line, and also exposes the **Theme** choice (system
 default, light or dark) saved with the other settings, and asks the window to open a
 `SourceEditorViewModel` dialog for adding and editing; removal asks for confirmation and warns
-that repos pinned to the source will show a source problem. `SourceEditorViewModel` validates the alias
+that repos that get their agent package from the source will use another configured source that delivers the
+identical files, or show a source problem if there is none. `SourceEditorViewModel` validates the alias
 (required, unique ignoring case, fixed once the source exists), the location (absolute folder
 path, no embedded credentials; for a server an `https` address ending in `index.json`, or `http` only after an
 explicit "Allow insecure HTTP" tick, whose warning is shown while it is on) and, for a NuGet source, a non-empty
@@ -350,8 +358,9 @@ package or pulling never runs on the UI thread, and shows a busy message with a 
 while one runs. Upgrade availability is determined by a separate background check per card
 (`RefreshUpgradeStatusAsync`, where a newer check supersedes an older one), which
 `MainWindowViewModel` starts a few cards at a time after construction, after a repo is added
-and after settings are applied, so that one slow or unreachable source delays only the cards
-pinned to it (`AgentControl-LauncherUI-ResponsiveOperations`, `AgentControl-LauncherUI-SourceFailureIsolation`,
+and after settings are applied, so that one slow or unreachable source holds up only the cards' own checks, never the
+window, and never hides what the other sources offer (`AgentControl-LauncherUI-ResponsiveOperations`,
+`AgentControl-LauncherUI-SourceFailureIsolation`,
 `AgentControl-LauncherUI-StaleResultsDiscarded`). That background check never opens the
 sign-in dialog (`RefreshUpgradeStatusAsync` defaults to `allowPrompt: false`): for a server it uses the
 credentials already typed this session or saved with the user's Git credential helper (read without any dialog)
@@ -398,8 +407,9 @@ model raises the offer before `ReleaseNotesReady`, `MainWindow` remembers the op
 it, so the question never covers the notes and the notes window - which has no owner - is not lost behind the
 modal question; the notes are not opened at all when the main window has closed meanwhile.
 
-A package version republished with different content (the same version, other bytes) - or, for a Git source, a tag
-that now points to another commit - is handled the same way: when **Change package...** (or **Select Package...**)
+A package version republished with different files (the same version, other content) - or, for a Git source, a tag
+that was moved to other files - is handled the same way: when **Change package...** (or
+**Select Package...**)
 of the version the repo is pinned to would replace its agent files with changed content,
 `RepoCardViewModel` changes nothing and raises `ContentChangeConfirmationRequested` with the selection and a
 plain-language question; `MainWindow` shows it in the same modal `ConfirmationWindow` (the safe answer, No, is the
@@ -430,8 +440,9 @@ repo and never converts it (`AgentControl-LauncherUI-ConvertCommittedAgentFiles`
 **Change package.** A repo that already has a pin is offered **Change package...** in the card menu's *Agent files*
 group (`ChangePackageMenuItem`, shown while `HasPinnedPackage`; the group is shown whenever a package is pinned,
 `HasAgentFileActions`). It is the same `SelectPackageCommand` as **Select Package...**, which is now executable for
-any present, idle repo; `MainWindow` opens `SelectPackageWindow` with a view model that is given the pin's source
-alias, package and version, so the dialog opens on the current choice, and applies the confirmed selection through
+any present, idle repo; `MainWindow` opens `SelectPackageWindow` with a view model that is given the source that
+supplies the repo's files (when known), the pinned package and the version, so the dialog opens on the current choice,
+and applies the confirmed selection through
 `ApplySelectedPackageAsync` like any other. Choosing the current version again is the user's explicit way to accept
 changed content (the confirmation above); choosing another version or package pins it as usual. Requesting the
 dialog never touches the pin.
@@ -457,13 +468,10 @@ input changed is never shown. Save refuses a Git source whose settings the appli
 (`AgentControl-LauncherUI-GitSourceEditor`, `AgentControl-LauncherUI-GitSignInGuidance`). Everywhere a source is shown
 it carries the Git icon and the name "Git repository" (`PackageSourceIcons`); `PackageSourceItemViewModel.IsRemote`
 makes a remote Git source an "Online source" like a server and a Git source on a local path show its folder status
-(`AgentControl-LauncherUI-GitSourcePresentation`). On a repo card the package chip shows the Git icon and the alias;
-its tooltip adds the tag (the source's tag pattern applied to the pinned version) and the first seven characters of
-the commit the pin recorded as its `git-commit:` identity. When the background check finds that the tag of the pinned
-version now points to a different commit (`UpgradeCheck.Pinned.Revision` against that identity) the card shows the
-amber **Tag moved** chip (`TagMovedChip`, `RepoCardStatus.TagMoved`, which outranks "upgrade available" and hides the
-up-to-date cue); the chip's tooltip names the tag and both commits, its click only opens **Change package...**, and
-nothing is ever applied by it (`AgentControl-LauncherUI-TagMovedWarning`). A git older than the supported version
+(`AgentControl-LauncherUI-GitSourcePresentation`). On a repo card the package chip shows the Git icon and the alias of
+the source that supplies the files; its tooltip adds the tag (the source's tag pattern applied to the pinned
+version). There is no separate chip for a moved tag: files that differ are caught by the content identity check (see
+*Portable pins* and the content-change paragraph above). A git older than the supported version
 makes the editor's test say *Git is too old* and the background check set the card's source problem to the same
 explanation (without a sign-in hint) (`AgentControl-LauncherUI-GitTooOld`).
 
@@ -670,18 +678,30 @@ test's provider is the owner's (`MainWindowViewModel.CreateConnectionTestProvide
 refusing a git that is too old. A Git source is listed with the Git icon and the kind name "Git repository": "Online
 source" when its address is remote, the folder status when it is a local path; the Select Package list and the repo
 card use the same icon, and the card's package chip tooltip names the tag the pinned version has under the source's
-current tag pattern and the first seven characters of the commit the files came from
-(`AgentControl-LauncherUI-GitSourcePresentation`).
+current tag pattern (`AgentControl-LauncherUI-GitSourcePresentation`).
 
-**Tag moved and Change package.** A Git pin records the commit of the content it was set up from as a `git-commit:`
-identity, not the tag. When a check finds that the tag of the pinned version now points to another commit, the card
-shows an amber "Tag moved" chip, explains what happened and applies nothing; because a tag can move at any time, the
-card's Refresh command, which the user starts, reads the Git source again instead of reusing the session's cached
-listing, while the background check may use the cache, and a warning is cleared again whenever a later check fails or
-the repo's folder is missing, since the state is then unknown (`AgentControl-LauncherUI-TagMovedWarning`). Editing a
-source's tag pattern re-maps a pinned version to another tag, which is reported the same way when that tag names a
-different commit. The way to accept the change is the card menu's "Change package...", which opens the Select Package
-dialog on the repo's own source, package and version; choosing the pinned version again asks for confirmation before
-the changed content replaces the files (`AgentControl-LauncherUI-ChangePackage`,
-`AgentControl-LauncherUI-ContentChangeConfirmation`). The Select Package dialog never replaces a choice the
+**Portable pins.** A repo's pin names no source - aliases and kinds of source are each user's own configuration, and a
+teammate may use any of them for the same files - so `RepoCardViewModel` resolves the pin purely from the user's own
+Settings: it asks the configured sources (Settings order) which of them offer the pinned package and version, and a
+pin that recorded a `files-sha256:` identity gets the first whose acquired files have exactly that identity (the
+source that last supplied the card is tried first, and is accepted as it is by the background check). The supplier is
+remembered per user in `settings.json` (`RecentRepo.PinnedSource`), never in the pin. The package chip then shows that
+source's alias and kind icon, and its tooltip names it ("Agent files: pkg ver from source 'alias' (kind).", plus the
+tag for a Git source); the chip is hidden when no source is known. When no configured source offers the version, or
+sources offer it but none delivers the recorded files, the red "Package source problem" chip shows with a message
+saying so. A newer version a source offers is still offered as an upgrade then (the upgrade chip and the problem
+chip coexist, the accent bar is red), and Upgrade resolves across all configured sources, the newest version winning
+and a tie keeping Settings order (`AgentControl-LauncherUI-PinnedSourceSupplierShown`, `-UpgradeAcrossSources`).
+
+**Moved tags and Change package.** A Git tag that is moved, or a package that is republished, so that the same
+version delivers other files has another files identity, whichever source delivers it: the restore before launch
+and Upgrade refuse it (nothing is applied), and Change package asks for confirmation before the changed files replace
+the repo's (a moved tag that delivers identical files is irrelevant, and nothing is shown for it). There is no
+separate warning chip. The card's Refresh command, which the user starts, reads every configured Git source again
+instead of reusing the session's cached listing, so that a newly pushed tag - a new version - shows up at once, while
+the background check may use the cache. The way to accept changed files is the card menu's "Change package...", which
+opens the Select Package dialog on the source that supplies the repo's files (when known), its package and version;
+choosing the pinned version again asks for confirmation before the changed content replaces the files
+(`AgentControl-LauncherUI-ChangePackage`, `AgentControl-LauncherUI-ContentChangeConfirmation`). The Select Package
+dialog never replaces a choice the
 user made while the sources were loading with the repo's own source and package.

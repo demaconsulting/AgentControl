@@ -121,6 +121,95 @@ internal static class PackageContentExtractor
     internal static IReadOnlyList<string> LayoutPaths { get; } = [.. LayoutFolders, .. LayoutRootFiles];
 
     /// <summary>
+    ///     A fixed, purely lexical stand-in for a repo root, used to apply the extraction's own
+    ///     containment and managed-folder rules to a package path without any real repo (see
+    ///     <see cref="GetManagedPackagePath"/>). Nothing is ever read from or written to it.
+    /// </summary>
+    private static readonly string ProbeRoot =
+        Path.GetFullPath(Path.DirectorySeparatorChar + "agentcontrol-package-root");
+
+    /// <summary>
+    ///     Applies the extraction's membership rule to one package path: says whether
+    ///     <see cref="Extract"/> would write the file into one of the four managed folders and, if
+    ///     so, under what canonical package-relative path.
+    /// </summary>
+    /// <param name="relativePath">A path as listed by <see cref="IPackageContentReader.ListFiles"/>
+    ///     (<c>/</c> separators, relative to the package content root).</param>
+    /// <returns>The canonical path - <c>..</c> and <c>.</c> segments resolved, <c>/</c> separators -
+    ///     of a file that falls within a managed folder; <see langword="null"/> for a file that is
+    ///     not extracted (the root-level <c>release-notes.md</c> and <c>AGENTS.md</c>, anything
+    ///     outside the four folders).</returns>
+    /// <remarks>
+    ///     Exists so that the content identity (see <c>PackageContentIdentity</c>) covers exactly the
+    ///     files <see cref="Extract"/> writes, by running the very same check rather than a copy of
+    ///     it: a rule that existed twice could drift, and an identity over a different set of files
+    ///     than the one delivered would vouch for the wrong thing. Performs no I/O.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="relativePath"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the path is invalid, including a
+    ///     path that resolves outside the package root - the same files <see cref="Extract"/>
+    ///     rejects.</exception>
+    internal static string? GetManagedPackagePath(string relativePath)
+    {
+        ArgumentNullException.ThrowIfNull(relativePath);
+
+        var destination = ResolveManagedDestination(relativePath, ProbeRoot);
+        return destination is null ? null : ToPackagePath(ProbeRoot, destination);
+    }
+
+    /// <summary>
+    ///     Refuses a package that holds two files at the same canonical path, or at canonical paths
+    ///     that differ only in letter case.
+    /// </summary>
+    /// <param name="packageDescription">The package's description, for the message.</param>
+    /// <param name="canonicalPaths">The canonical paths of the files that would be written into the
+    ///     managed folders (see <see cref="GetManagedPackagePath"/>).</param>
+    /// <remarks>
+    ///     The one rule both <see cref="Extract"/> and the content identity apply. Two entries for
+    ///     the same path (a zip may hold duplicate entry names), or for paths that are one file on a
+    ///     case-insensitive file system (Windows, macOS), would leave what ends up in the repo
+    ///     depending on the order of the entries, so such a package has no reliable identity and is
+    ///     refused on every platform, as the Git source already refuses a case-colliding layout.
+    ///     Only the whole path matters - two folders that differ in case but hold differently named
+    ///     files do not collide.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Thrown when two paths are equal or differ only in
+    ///     letter case.</exception>
+    internal static void RejectCaseCollisions(string packageDescription, IEnumerable<string> canonicalPaths)
+    {
+        var collision = canonicalPaths
+            .GroupBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Take(2).ToList())
+            .FirstOrDefault(entries => entries.Count > 1);
+        if (collision is null)
+        {
+            return;
+        }
+
+        if (string.Equals(collision[0], collision[1], StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Package '{packageDescription}' contains more than one file at '{collision[0]}', so which one is " +
+                "applied would depend on their order; the package is not accepted.");
+        }
+
+        throw new InvalidOperationException(
+            $"Package '{packageDescription}' contains files whose names differ only in letter case: " +
+            $"'{collision[0]}' and '{collision[1]}'. They would overwrite each other on a case-insensitive file " +
+            "system, so the package is not accepted.");
+    }
+
+    /// <summary>
+    ///     Expresses a resolved destination as a package-relative path with <c>/</c> separators.
+    /// </summary>
+    /// <param name="root">The root the destination was resolved against.</param>
+    /// <param name="destination">The resolved destination path.</param>
+    /// <returns>The canonical package-relative path.</returns>
+    private static string ToPackagePath(string root, string destination) =>
+        Path.GetRelativePath(root, destination).Replace(Path.DirectorySeparatorChar, '/');
+
+    /// <summary>
     ///     Validates every file path in the package, deletes the four managed folders under
     ///     <paramref name="repoRoot"/> if present, and copies the same four folders from the
     ///     package into the repo.
@@ -176,6 +265,11 @@ internal static class PackageContentExtractor
                 managedFiles.Add((relativePath, destinationPath));
             }
         }
+
+        // Two files whose names differ only in letter case would be one file on some file systems,
+        // so what the repo ends up with would depend on the entry order: refuse before deleting
+        RejectCaseCollisions(
+            reader.Description, managedFiles.Select(file => ToPackagePath(repoRoot, file.DestinationPath)));
 
         // Step 3: refuse to touch a repo whose managed-folder chain is redirected. Destination
         // containment above is purely lexical: if <repo>/.github (or a managed folder, or a

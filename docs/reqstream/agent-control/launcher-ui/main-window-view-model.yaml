@@ -152,14 +152,14 @@ sections:
           The MainWindowViewModel class shall not read any package source while it is being
           constructed, shall check every card's upgrade availability in the background when
           asked, when a repo is added and after settings are applied - a few cards at a time,
-          with a source that cannot be read affecting only the cards pinned to it.
+          with a source that cannot be read hiding nothing the readable sources offer.
         justification: |
           Starting the window must not wait for package sources, which may be slow network
-          locations; one offline source must not hide the upgrade state of repos pinned to
+          locations; one offline source must not hide the upgrade state of repos served by
           other sources.
         tests:
           - MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins
-          - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked
+          - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_ReadableSourceStillOffersUpgrades
           - MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground
 
       - id: AgentControl-MainWindowViewModel-ConnectionTestProvider

@@ -28,8 +28,9 @@ does not run at all the test is skipped rather than reported as proof.
   versions (`v01.2.3` is not one), with duplicates resolved and unknown package IDs empty; the preview separates
   versions
   from other tags.
-- An acquired package holds exactly the layout, no `.git`, the identity `git-commit:{sha}`, and is cached by commit so a
-  second acquisition needs no remote; a moved tag shows as another revision and a stale listing is refused.
+- An acquired package holds exactly the layout, no `.git` and the files identity of its agent files, and is cached by
+  commit so a second acquisition needs no remote; a moved tag lists with another commit and a stale listing is
+  refused.
 - A package that the repository would not list - a listed tag at another commit, a version that is not listed, a tag
   that
   lost to a smaller name for its version - is refused before anything is fetched.
@@ -75,16 +76,17 @@ and the preview counts versions and other tags. This scenario is tested by
 `AgentControl-GitSourceProvider-ListVersionsDuplicateVersionKeepsSmallestTag`,
 `AgentControl-GitSourceProvider-ResolveAnnotatedTags` and `AgentControl-GitSourceProvider-TagPreview`.
 
-**GitSourceProvider_Acquire_DeliversLayoutWithIdentityCachesByCommitAndDetectsMovedTags**: the layout (four folders and
-two root files) is delivered without `.git` or the repository's other files, the content identity is
-`git-commit:{sha}`, the package extracts into a repo, the cache folder is named by the commit with a marker and no
-temporary folder remains; a second acquisition succeeds with the remote deleted; a moved tag lists as a new revision,
+**GitSourceProvider_Acquire_DeliversLayoutWithIdentityCachesByCommitAndRefusesStaleListings**: the layout (four folders
+and two root files) is delivered without `.git` or the repository's other files, the content identity is the
+`files-sha256:` identity of the agent files (no commit is reported by the package), the package extracts into a repo,
+the cache folder is named by the commit with a marker and no
+temporary folder remains; a second acquisition succeeds with the remote deleted; a moved tag lists with the new commit,
 the
 stale listing entry is refused before anything is fetched ("Refresh the list"), the new one gets its own folder and the
 old folder stays; sources over different repositories have different cache folders under one root, and the same
 repository spelled with another case of scheme and host has the same folder; an unmarked or stale-temporary folder is
 replaced or swept. This scenario is tested by
-`GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder`,
+`GitSourceProvider_Acquire_DeliversOnlyLayoutWithFilesIdentityAndNoGitFolder`,
 `GitSourceProvider_Acquire_SecondTime_UsesCacheWithoutRemote`,
 `GitSourceProvider_MovedTag_ShowsNewRevisionAndRefusesStaleListing`,
 `GitSourceProvider_RepositoryCacheFolder_DiffersForDifferentRepositories` and

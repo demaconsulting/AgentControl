@@ -17,9 +17,12 @@ repo's agent files to a package's contents. It contains four units: `PackageCont
 `PackageZipExtractor`, `ReleaseNotesViewerViewModel`, and `GitIgnoreEnsurer`; the content
 reader types are folded into the `PackageContentExtractor` unit. Every reader also reports the content identity of
 the package it reads (`AgentControl-RepoSync-ContentIdentity` and `-ContentIdentityOfAppliedBytes`, which support
-`AgentControl-System-PackageContentIntegrity`): a zip reader hashes the zip and reads its entries from the one open
-handle, so the identity recorded in a pin is always that of the bytes that were extracted; a folder reader carries
-the identity its source supplied. The subsystem only reports the identity - what a difference means is decided by
+`AgentControl-System-PackageContentIntegrity`): the identity of the *agent files* it delivers - the files `Extract`
+writes into the four managed folders, computed centrally by `PackageContentIdentity` - so a zip, an unpacked package
+folder and a layout folder with the same agent files report the same identity, whatever their compression, entry
+order or container; a zip reader reads its entries from the one open handle, so the identity recorded in a pin is
+always that of the files that were extracted. The subsystem only reports the identity - what a difference means is
+decided by
 the `LauncherUI` card. A Git package is delivered as a folder of the provider's cache whose root *is* the package
 layout (the repository
 root, or the configured sub-folder): `GitSourceProvider` writes only the validated layout files into it, reading
@@ -39,10 +42,10 @@ belongs is refused; the reader in turn refuses a link in the layout when it list
 paths has one source of truth, `PackageContentExtractor.LayoutPaths`, shared with the Git source provider.
 
 **How the content identity reaches the extractor and the pin.** An identity belongs to the reader, not to a call: the
-provider's `AcquireAsync` returns one `IPackageContentReader` per acquisition - a zip reader that hashed the zip it
-reads, or a folder reader the source's provider opened with the identity of what it unpacked or fetched (for a Git
-package, `git-commit:<commit id>` of the commit whose blobs were written). The card passes that one reader to
-`PackageContentExtractor.Extract`, which reads every file from it, and records the same reader's `ContentIdentity` in
+provider's `AcquireAsync` returns one `IPackageContentReader` per acquisition - a zip reader, or a folder reader the
+source's provider opened over what it unpacked or fetched. The card passes that one reader to
+`PackageContentExtractor.Extract`, which reads every file from it, and records the same reader's `ContentIdentity`
+in
 the pin only after the extraction succeeded; before that it compares the identity with the one the pin recorded to
 decide whether a difference stops the sync. So the identity in the pin is, by construction, that of the content that
 was applied and never that of a second, separate read.

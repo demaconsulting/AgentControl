@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Runtime.ExceptionServices;
+
 namespace DemaConsulting.AgentControl.AgentPackageManagement;
 
 /// <summary>
@@ -29,11 +31,7 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     including when no version was found.</param>
 /// <param name="Latest">The highest-versioned discovered package whether or not it is newer than
 ///     the pin, or <see langword="null"/> if none was found.</param>
-/// <param name="Pinned">The discovered package whose version is the pinned version, from the same
-///     listing, or <see langword="null"/> when the source no longer lists it (or the pin does not
-///     parse). Lets a caller compare <see cref="DiscoveredPackage.Revision"/> to see that a Git
-///     tag now points elsewhere without another call to the source.</param>
-internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? Latest, DiscoveredPackage? Pinned = null);
+internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? Latest);
 
 /// <summary>
 ///     Session-scoped cache of what each configured package source offers, keyed by
@@ -185,7 +183,126 @@ internal sealed class PackageVersionCache
         ArgumentNullException.ThrowIfNull(pinnedVersion);
 
         var versions = await GetVersionsDescendingAsync(registry, sourceAlias, packageId, cancellationToken);
-        var latest = versions.Count > 0 ? versions[0] : null;
+        return BuildUpgradeCheck(versions, pinnedVersion);
+    }
+
+    /// <summary>
+    ///     Gets what every configured source offers of a package, in the order the sources are
+    ///     configured, consulting (and populating) the cache of each source.
+    /// </summary>
+    /// <param name="registry">The registry that lists the configured sources and resolves each to a
+    ///     provider on a cache miss.</param>
+    /// <param name="packageId">The package name or ID.</param>
+    /// <param name="excludeAlias">The alias of a source to leave out (the pinned source, already
+    ///     consulted on its own), or <see langword="null"/> to include every source.</param>
+    /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
+    /// <param name="onSourceFailure">Called with the failure of each source that could not be read
+    ///     (and was skipped), or <see langword="null"/>. Lets a caller tell "no source offers the
+    ///     package" from "a source that might have could not be read".</param>
+    /// <returns>The discovered packages source by source in configuration order (the order of
+    ///     Settings), each source's versions from highest to lowest; empty when no source offers
+    ///     the package. A source that cannot be read is skipped, so one unreachable source never
+    ///     hides what the others offer.</returns>
+    /// <remarks>
+    ///     Asks every configured source what it offers (aliases are user-specific configuration, so
+    ///     a pin names none): through the per-source cache, so no source is read twice in a
+    ///     session. Whether the content a
+    ///     source offers is the content the pin recorded is for the caller to verify - a listing
+    ///     says nothing about it.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="packageId"/> is null, empty
+    ///     or whitespace.</exception>
+    /// <exception cref="IOException">Thrown (as the first failure that occurred) only when every
+    ///     source that was consulted failed, so a check that learned nothing is not mistaken for
+    ///     "no source offers the package"; the same holds for
+    ///     <see cref="UnauthorizedAccessException"/> and <see cref="InvalidOperationException"/>,
+    ///     which include <see cref="PackageSourceAccessException"/>.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is canceled.</exception>
+    public async Task<IReadOnlyList<DiscoveredPackage>> GetVersionsAcrossSourcesAsync(
+        PackageSourceRegistry registry,
+        string packageId,
+        string? excludeAlias,
+        CancellationToken cancellationToken,
+        Action<Exception>? onSourceFailure = null)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
+
+        var offers = new List<DiscoveredPackage>();
+        Exception? firstFailure = null;
+        var consulted = 0;
+        var succeeded = 0;
+        foreach (var alias in registry.Definitions
+                     .Select(definition => definition.Alias)
+                     .Where(alias => !string.Equals(alias, excludeAlias, StringComparison.OrdinalIgnoreCase)))
+        {
+            consulted++;
+            try
+            {
+                offers.AddRange(await GetVersionsDescendingAsync(registry, alias, packageId, cancellationToken));
+                succeeded++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                firstFailure ??= ex;
+                onSourceFailure?.Invoke(ex);
+            }
+        }
+
+        // Every consulted source failing means nothing is known: say so instead of reporting an
+        // empty offer
+        if (consulted > 0 && succeeded == 0 && firstFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(firstFailure).Throw();
+        }
+
+        return offers;
+    }
+
+    /// <summary>
+    ///     Determines whether a newer version of a package is available at the configured sources
+    ///     than the version currently pinned in a repo, for a pin whose own source is not available.
+    /// </summary>
+    /// <param name="registry">The registry that lists the configured sources.</param>
+    /// <param name="packageId">The package name or ID.</param>
+    /// <param name="pinnedVersion">The repo's current pinned version text.</param>
+    /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
+    /// <returns>The upgrade check result; see <see cref="UpgradeCheck"/>. The newest version
+    ///     across the sources wins, and a version offered by several sources is attributed to the
+    ///     first of them in configuration order.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry"/> or
+    ///     <paramref name="pinnedVersion"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="packageId"/> is null, empty
+    ///     or whitespace.</exception>
+    /// <exception cref="IOException">Thrown when every source that was consulted failed; see
+    ///     <see cref="GetVersionsAcrossSourcesAsync"/>.</exception>
+    public async Task<UpgradeCheck> IsNewerVersionAvailableAcrossSourcesAsync(
+        PackageSourceRegistry registry, string packageId, string pinnedVersion, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pinnedVersion);
+
+        var offers = await GetVersionsAcrossSourcesAsync(registry, packageId, excludeAlias: null, cancellationToken);
+        return BuildUpgradeCheck(offers, pinnedVersion);
+    }
+
+    /// <summary>
+    ///     Builds the answer to "is a newer version available?" from a list of offers.
+    /// </summary>
+    /// <param name="offers">The offered packages in order of preference: when two offers have the
+    ///     same version the earlier one is the one reported.</param>
+    /// <param name="pinnedVersion">The pinned version text.</param>
+    /// <returns>The upgrade check result.</returns>
+    private static UpgradeCheck BuildUpgradeCheck(IReadOnlyList<DiscoveredPackage> offers, string pinnedVersion)
+    {
+        // The newest offer; a strictly greater version is required to replace the current choice,
+        // so a tie keeps the earlier (preferred) offer
+        var latest = offers.Aggregate(
+            (DiscoveredPackage?)null,
+            (best, offer) => best is null || offer.Version.CompareTo(best.Version) > 0 ? offer : best);
+
         if (latest is null)
         {
             return new UpgradeCheck(false, null);
@@ -197,9 +314,7 @@ internal sealed class PackageVersionCache
             return new UpgradeCheck(true, latest);
         }
 
-        // The listing entry of the pinned version itself, so a revision change can be seen
-        var pinnedPackage = versions.FirstOrDefault(package => package.Version.CompareTo(pinned) == 0);
-        return new UpgradeCheck(latest.Version.CompareTo(pinned) > 0, latest, pinnedPackage);
+        return new UpgradeCheck(latest.Version.CompareTo(pinned) > 0, latest);
     }
 
     /// <summary>

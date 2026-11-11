@@ -253,6 +253,100 @@ public sealed class PackageContentExtractorTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a zip that holds two files whose paths differ only in letter case is refused before
+    ///     anything in the repo is deleted or written: on a case-insensitive file system the two would be one
+    ///     file and the extracted bytes would depend on the entry order.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_ZipWithPathsDifferingOnlyInCase_ThrowsBeforeDeletingManagedFolders()
+    {
+        // Arrange: a zip with .github/agents/a.md and .github/agents/A.md, and a repo with existing managed content
+        var zipPath = Path.Combine(CreateTempDirectory(), "pkg-1.0.0.zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            foreach (var (path, content) in new[] { (".github/agents/a.md", "lower"), (".github/agents/A.md", "upper") })
+            {
+                using var writer = new StreamWriter(archive.CreateEntry(path).Open());
+                writer.Write(content);
+            }
+        }
+
+        var repo = CreateTempDirectory();
+        var agents = Path.Combine(repo, ".github", "agents");
+        Directory.CreateDirectory(agents);
+        File.WriteAllText(Path.Combine(agents, "keep.md"), "keep me");
+        using var reader = ZipPackageContentReader.Open(zipPath);
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => PackageContentExtractor.Extract(reader, repo));
+
+        // Assert: a clear message naming both files, nothing deleted, nothing written, and no identity
+        Assert.Contains("differ only in letter case", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(".github/agents/a.md", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(".github/agents/A.md", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("keep me", File.ReadAllText(Path.Combine(agents, "keep.md")));
+        Assert.Equal(["keep.md"], Directory.GetFiles(agents).Select(Path.GetFileName));
+        Assert.Null(reader.ContentIdentity);
+    }
+
+    /// <summary>
+    ///     Test that folders whose names differ only in letter case do not count as a collision as long as
+    ///     the files in them have different names, while the same whole path in another case, or twice in
+    ///     the same case, is refused.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_RejectCaseCollisions_OnlyWholePathsThatFoldTogetherAreRefused()
+    {
+        // Arrange / Act / Assert: different file names in folders that differ in case are fine
+        PackageContentExtractor.RejectCaseCollisions(
+            "pkg", [".github/skills/Sub/a.md", ".github/skills/sub/b.md", ".github/agents/a.md"]);
+
+        // Assert: the same whole path in another case is refused
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => PackageContentExtractor.RejectCaseCollisions(
+                "pkg", [".github/skills/Sub/a.md", ".github/skills/sub/A.md"]));
+        Assert.Contains("'.github/skills/Sub/a.md' and '.github/skills/sub/A.md'", ex.Message, StringComparison.Ordinal);
+
+        // Assert: the same whole path twice is refused
+        var duplicate = Assert.Throws<InvalidOperationException>(
+            () => PackageContentExtractor.RejectCaseCollisions("pkg", [".github/agents/a.md", ".github/agents/a.md"]));
+        Assert.Contains("more than one file at '.github/agents/a.md'", duplicate.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that a zip holding two entries with the same name in a managed folder is refused before
+    ///     anything in the repo is deleted or written, and has no identity.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_ZipWithDuplicateEntries_ThrowsBeforeDeletingManagedFolders()
+    {
+        // Arrange: a zip with .github/agents/a.md twice, and a repo with existing managed content
+        var zipPath = Path.Combine(CreateTempDirectory(), "pkg-1.0.0.zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            foreach (var content in new[] { "first", "second" })
+            {
+                using var writer = new StreamWriter(archive.CreateEntry(".github/agents/a.md").Open());
+                writer.Write(content);
+            }
+        }
+
+        var repo = CreateTempDirectory();
+        var agents = Path.Combine(repo, ".github", "agents");
+        Directory.CreateDirectory(agents);
+        File.WriteAllText(Path.Combine(agents, "keep.md"), "keep me");
+        using var reader = ZipPackageContentReader.Open(zipPath);
+
+        // Act
+        var ex = Assert.Throws<InvalidOperationException>(() => PackageContentExtractor.Extract(reader, repo));
+
+        // Assert: refused with a clear message, the repo untouched, and no identity
+        Assert.Contains("more than one file at '.github/agents/a.md'", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(["keep.md"], Directory.GetFiles(agents).Select(Path.GetFileName));
+        Assert.Null(reader.ContentIdentity);
+    }
+
+    /// <summary>
     ///     Test that a symbolic link to a file inside a managed folder of an unpacked package is
     ///     rejected before any managed folder in the repo is deleted.
     /// </summary>
@@ -374,34 +468,82 @@ public sealed class PackageContentExtractorTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a zip reader reports the SHA-256 of the zip file as its content identity, and
-    ///     that the entries it reads come from the very bytes that were hashed.
+    ///     Test that the extractor's membership rule reports the canonical path of a file that extraction
+    ///     would write into a managed folder and nothing for any other file (the root files, other
+    ///     <c>.github</c> folders, a look-alike folder name).
+    /// </summary>
+    [Theory]
+    [InlineData(".github/agents/a.md", ".github/agents/a.md")]
+    [InlineData(".github/skills/s/x.md", ".github/skills/s/x.md")]
+    [InlineData(".github/agents/./sub/../a.md", ".github/agents/a.md")]
+    [InlineData("release-notes.md", null)]
+    [InlineData("AGENTS.md", null)]
+    [InlineData(".github/workflows/ci.yml", null)]
+    [InlineData(".github/agents-extra/a.md", null)]
+    [InlineData("docs/.github/agents/a.md", null)]
+    public void PackageContentExtractor_GetManagedPackagePath_ManagedAndOtherPaths_ReportsCanonicalPathOrNull(
+        string path, string? expected)
+    {
+        // Arrange: a path as a package lists it
+
+        // Act
+        var canonical = PackageContentExtractor.GetManagedPackagePath(path);
+
+        // Assert
+        Assert.Equal(expected, canonical);
+    }
+
+    /// <summary>
+    ///     Test that a path that climbs out of the package is refused by the membership rule, as it is by
+    ///     extraction.
     /// </summary>
     [Fact]
-    public void ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries()
+    public void PackageContentExtractor_GetManagedPackagePath_PathEscapingPackage_ThrowsInvalidOperationException()
     {
-        // Arrange: a zip with one entry, and the independently computed SHA-256 of the file
+        // Arrange: a managed-looking path with too many parent segments
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(
+            () => PackageContentExtractor.GetManagedPackagePath(".github/agents/../../../outside.txt"));
+        Assert.Throws<ArgumentNullException>(() => PackageContentExtractor.GetManagedPackagePath(null!));
+    }
+
+    /// <summary>
+    ///     Test that a zip reader reports the identity of the agent files in the zip (not of the zip
+    ///     file) as its content identity, and that the entries it reads are readable.
+    /// </summary>
+    [Fact]
+    public void ZipPackageContentReader_Open_ValidZip_ReportsFilesIdentityAndReadsEntries()
+    {
+        // Arrange: a zip with an agent file and release notes, and the identity of the agent file
+        // computed here independently (path, a zero byte, the length as eight little-endian bytes, the bytes)
         var zipPath = Path.Combine(CreateTempDirectory(), "pkg-1.0.0.zip");
         using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
         {
-            using var writer = new StreamWriter(archive.CreateEntry("release-notes.md").Open());
-            writer.Write("the notes");
+            using (var notes = new StreamWriter(archive.CreateEntry("release-notes.md").Open()))
+            {
+                notes.Write("the notes");
+            }
+
+            using var agents = new StreamWriter(archive.CreateEntry(".github/agents/copilot.md").Open());
+            agents.Write("agents");
         }
 
-        var expected = "sha256:" + Convert.ToHexStringLower(
-            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(zipPath)));
+        var expected = "files-sha256:" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+            [.. System.Text.Encoding.UTF8.GetBytes(".github/agents/copilot.md"), 0, 6, 0, 0, 0, 0, 0, 0, 0,
+               .. System.Text.Encoding.UTF8.GetBytes("agents")]));
 
         // Act
         using var reader = ZipPackageContentReader.Open(zipPath);
 
-        // Assert: the identity is the file's SHA-256 and the archive is readable after hashing
+        // Assert: the identity is that of the agent file only, and the archive is readable
         Assert.Equal(expected, reader.ContentIdentity);
         Assert.Equal("the notes", reader.ReadText("release-notes.md"));
     }
 
     /// <summary>
     ///     Test that a file that is not a zip releases its file handle when the open fails (the
-    ///     hash and the archive share one handle, which must not leak on the failure path).
+    ///     archive holds the handle, which must not leak on the failure path).
     /// </summary>
     [Fact]
     public void ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle()
@@ -421,10 +563,10 @@ public sealed class PackageContentExtractorTests : IDisposable
     /// <summary>
     ///     Test that a layout-root reader lists and reads only the package layout - the managed folders
     ///     and the two root files - and never the <c>.git</c> folder, other <c>.github</c> content or
-    ///     unrelated files, carries the supplied identity, and extracts like any other package.
+    ///     unrelated files, and extracts like any other package.
     /// </summary>
     [Fact]
-    public void DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity()
+    public void DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayout()
     {
         // Arrange: a checked-out repository shape: layout plus everything a repo holds
         var root = CreateLayoutRoot(
@@ -436,10 +578,8 @@ public sealed class PackageContentExtractorTests : IDisposable
             ("README.md", "not layout"),
             ("src/app.cs", "not layout"),
             (".git/config", "[core]"));
-        var identity = "git-commit:" + new string('a', 40);
-
         // Act
-        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root, identity);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
         var files = reader.ListFiles().Order().ToList();
         var repo = CreateTempDirectory();
         PackageContentExtractor.Extract(reader, repo);
@@ -447,7 +587,7 @@ public sealed class PackageContentExtractorTests : IDisposable
         // Assert
         Assert.Equal(
             [".github/agents/copilot.md", ".github/standards/style.md", "AGENTS.md", "release-notes.md"], files);
-        Assert.Equal(identity, reader.ContentIdentity);
+        Assert.StartsWith("files-sha256:", reader.ContentIdentity, StringComparison.Ordinal);
         Assert.Equal("notes", PackageContentExtractor.ReadReleaseNotes(reader));
         Assert.Equal("template", PackageContentExtractor.ReadAgentsMdTemplate(reader));
         Assert.Equal("agents", File.ReadAllText(Path.Combine(repo, ".github", "agents", "copilot.md")));
@@ -666,58 +806,27 @@ public sealed class PackageContentExtractorTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a layout-root reader carries the identity its opener supplied, and reports none
-    ///     when it was given none.
+    ///     Test that a folder reader reports the identity of the agent files in its content folder
+    ///     (release notes and anything else outside the managed folders do not take part), never an
+    ///     identity of the package file.
     /// </summary>
     [Fact]
-    public void DirectoryPackageContentReader_OpenLayoutRoot_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull()
+    public void DirectoryPackageContentReader_Open_FolderFiles_ReportsFilesIdentity()
     {
-        // Arrange
-        var root = CreateLayoutRoot((".github/agents/copilot.md", "agents"));
-        var identity = "git-commit:" + new string('b', 40);
+        // Arrange: two package folders with the same agent file and different release notes
+        var first = CreatePackageFolder((".github/agents/copilot.md", "agents"), ("release-notes.md", "notes"));
+        var second = CreatePackageFolder((".github/agents/copilot.md", "agents"), ("release-notes.md", "other notes"));
+        var changed = CreatePackageFolder((".github/agents/copilot.md", "agents changed"), ("release-notes.md", "notes"));
 
         // Act
-        using var withIdentity = DirectoryPackageContentReader.OpenLayoutRoot(root, identity);
-        using var withoutIdentity = DirectoryPackageContentReader.OpenLayoutRoot(root);
+        using var firstReader = DirectoryPackageContentReader.Open(first);
+        using var secondReader = DirectoryPackageContentReader.Open(second);
+        using var changedReader = DirectoryPackageContentReader.Open(changed);
 
-        // Assert
-        Assert.Equal(identity, withIdentity.ContentIdentity);
-        Assert.Null(withoutIdentity.ContentIdentity);
-    }
-
-    /// <summary>
-    ///     Test that a folder reader reports no identity when its opener supplied none.
-    /// </summary>
-    [Fact]
-    public void DirectoryPackageContentReader_Open_WithoutIdentity_ReportsNone()
-    {
-        // Arrange
-        var package = CreatePackageFolder(("release-notes.md", "notes"));
-
-        // Act
-        using var reader = DirectoryPackageContentReader.Open(package);
-
-        // Assert: none - never an identity the reader made up
-        Assert.Null(reader.ContentIdentity);
-    }
-
-    /// <summary>
-    ///     Test that a folder reader carries the identity its opener supplied, and reports none
-    ///     when it was given none.
-    /// </summary>
-    [Fact]
-    public void DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull()
-    {
-        // Arrange
-        var package = CreatePackageFolder(("release-notes.md", "notes"));
-
-        // Act
-        using var withIdentity = DirectoryPackageContentReader.Open(package, "sha256:abc");
-        using var withoutIdentity = DirectoryPackageContentReader.Open(package);
-
-        // Assert
-        Assert.Equal("sha256:abc", withIdentity.ContentIdentity);
-        Assert.Null(withoutIdentity.ContentIdentity);
+        // Assert: equal for the same agent files, different for changed ones
+        Assert.StartsWith("files-sha256:", firstReader.ContentIdentity, StringComparison.Ordinal);
+        Assert.Equal(firstReader.ContentIdentity, secondReader.ContentIdentity);
+        Assert.NotEqual(firstReader.ContentIdentity, changedReader.ContentIdentity);
     }
 
     /// <summary>

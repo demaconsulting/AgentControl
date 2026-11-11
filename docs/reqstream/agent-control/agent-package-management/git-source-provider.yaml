@@ -4,7 +4,7 @@
 # GitSourceProvider is the package source provider for one Git repository whose tags that match a
 # pattern are the versions of a single package: it lists the versions without cloning, acquires
 # one tag into a cache, validates that the package layout holds no links, submodules or unsafe
-# names, and reports the commit as the content identity.
+# names, and reports the files identity as the content identity.
 #
 # The requirements state what an observer sees. How it is achieved - the shallow single-tag
 # fetch, the layout of the cache and its completeness mark, the validation order, the writing of
@@ -177,7 +177,7 @@ sections:
           Transferring one tag without its history keeps the transfer small and means nothing
           else in a repository, which may be large or hostile, is fetched.
         tests:
-          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder
+          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithFilesIdentityAndNoGitFolder
 
       - id: AgentControl-GitSourceProvider-AcquireOnlyLayout
         title: >-
@@ -188,7 +188,7 @@ sections:
           A repository holds many things that are not the package, and some of them may be hostile;
           only what is part of the package may reach the user's disk.
         tests:
-          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder
+          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithFilesIdentityAndNoGitFolder
 
       - id: AgentControl-GitSourceProvider-AcquireExactBlobBytes
         title: >-
@@ -229,13 +229,13 @@ sections:
       - id: AgentControl-GitSourceProvider-ReportContentIdentity
         title: >-
           The GitSourceProvider class shall report the content identity of an acquired package as
-          the commit the tag pointed to, in the git-commit form.
+          the identity of its agent files, like every other source.
         justification: |
-          The commit names exactly what was delivered, so a repo's pin can tell a moved tag from
-          the version it was made from.
+          The identity of the files lets the same files from another kind of source be recognized
+          as the same, and a tag that was moved to other files as a changed package; the commit
+          itself is of no interest to a repo's pin.
         tests:
-          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder
-          - GitSourceProvider_MovedTag_ShowsNewRevisionAndRefusesStaleListing
+          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithFilesIdentityAndNoGitFolder
 
       # ---- Moved tags ----
       - id: AgentControl-GitSourceProvider-TagMovedBetweenListAndFetch
@@ -250,11 +250,12 @@ sections:
 
       - id: AgentControl-GitSourceProvider-MovedTagReportedAsNewRevision
         title: >-
-          The GitSourceProvider class shall report a tag that was moved as a different revision of
-          the same version the next time it lists.
+          The GitSourceProvider class shall report, for each version it lists, the commit its tag
+          currently points to, so a tag that was moved is listed with a different commit the next
+          time it lists.
         justification: |
-          A caller compares the listed revision with the one it pinned to notice that a tag was
-          moved.
+          Acquisition delivers exactly the commit that was listed; the listing is what lets a stale
+          entry be told from a current one.
         tests:
           - GitSourceProvider_MovedTag_ShowsNewRevisionAndRefusesStaleListing
 
@@ -429,7 +430,7 @@ sections:
           The repository metadata is not part of the package, and a .git folder inside a delivered
           tree could be used to attack tools that later run inside it.
         tests:
-          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithCommitIdentityAndNoGitFolder
+          - GitSourceProvider_Acquire_DeliversOnlyLayoutWithFilesIdentityAndNoGitFolder
 
       - id: AgentControl-GitSourceProvider-RejectGitEntryInLayout
         title: >-

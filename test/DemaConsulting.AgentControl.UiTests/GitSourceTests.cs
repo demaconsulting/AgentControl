@@ -26,7 +26,7 @@ namespace DemaConsulting.AgentControl.UiTests;
 
 /// <summary>
 ///     End-to-end tests for the Git repository package source: adding one through the Settings window,
-///     choosing a package from it, the moved-tag warning on a repo card and "Change package...".
+///     choosing a package from it and "Change package...".
 /// </summary>
 /// <remarks>
 ///     Every test builds a real local bare Git repository (see <see cref="GitFixtureRepository"/>; the
@@ -232,11 +232,12 @@ public sealed class GitSourceTests
 
     /// <summary>
     ///     A never-pinned repo is offered "Select Package..." (not "Change package..."); choosing a version
-    ///     of the pre-configured Git source applies that tag's files, records the source, package, version
-    ///     and the tag's commit in the pin file, and the card shows the Git source icon and alias.
+    ///     of the pre-configured Git source applies that tag's files, records the package, version and the
+    ///     files identity (no source and no commit) in the pin file, and the card shows the Git source icon
+    ///     and alias.
     /// </summary>
     [Fact]
-    public void SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip()
+    public void SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip()
     {
         if (!System.OperatingSystem.IsWindows())
         {
@@ -245,7 +246,6 @@ public sealed class GitSourceTests
         }
 
         using var fixture = GitFixtureRepository.CreateOrSkip();
-        var tagCommit = fixture.ResolveTag("release/1.0.0");
         using var context = new AgentControlTestContext(gitSource: fixture.CreateSource())
         {
             LaunchEnvironment = fixture.IsolationEnvironment
@@ -281,12 +281,13 @@ public sealed class GitSourceTests
         Assert.True(File.Exists(Path.Combine(context.RepoPath, ".github", "templates", "git.md")));
         Assert.True(File.Exists(Path.Combine(context.RepoPath, ".github", "skills", "git.md")));
 
-        // Assert: the pin names the source, package, version and the commit the tag points to
+        // Assert: the pin names the package, version and the files identity - no source and no commit
         using var pin = JsonDocument.Parse(File.ReadAllText(Path.Combine(context.RepoPath, ".agentcontrol.json")));
-        Assert.Equal("Repo", pin.RootElement.GetProperty("Source").GetString());
+        Assert.False(pin.RootElement.TryGetProperty("Source", out _));
+        Assert.False(pin.RootElement.TryGetProperty("SourceRevision", out _));
         Assert.Equal(GitFixtureRepository.PackageName, pin.RootElement.GetProperty("PackageName").GetString());
         Assert.Equal("1.0.0", pin.RootElement.GetProperty("Version").GetString());
-        Assert.Equal("git-commit:" + tagCommit, pin.RootElement.GetProperty("ContentIdentity").GetString());
+        Assert.Equal(GitFixtureRepository.FilesIdentity("git 1.0.0"), pin.RootElement.GetProperty("ContentIdentity").GetString());
 
         // Assert: the card's package chip shows the package and version, the Git icon and the alias
         Assert.True(WaitForText(mainWindow, "RepoPinnedVersionText", $"{GitFixtureRepository.PackageName} 1.0.0"));
@@ -306,12 +307,12 @@ public sealed class GitSourceTests
     }
 
     /// <summary>
-    ///     A repo pinned to a Git tag that was later moved to another commit shows the "Tag moved" chip
-    ///     once the background check has run, and nothing is applied: the repo's files and the pin file stay
-    ///     as they were. The pinned repo is offered "Change package..." and no longer "Select Package...".
+    ///     "Change package..." on a repo whose package a Git source supplies opens the Select Package dialog
+    ///     on that source, the pin's package and its version, so the current choice is selected without a
+    ///     click (the pin itself names no source: the card knows which configured source supplies it).
     /// </summary>
     [Fact]
-    public void RepoCard_PinnedGitTagMoved_ShowsTagMovedChipAndAppliesNothing()
+    public void ChangePackageMenuItem_OnPinnedGitRepo_OpensDialogOnTheSupplyingSourcePackageAndVersion()
     {
         if (!System.OperatingSystem.IsWindows())
         {
@@ -319,181 +320,36 @@ public sealed class GitSourceTests
             return;
         }
 
-        // Arrange: a repo pinned to 1.0.0 with the identity of the original commit, whose tag has since moved
         using var fixture = GitFixtureRepository.CreateOrSkip();
-        var originalCommit = fixture.ResolveTag("release/1.0.0");
-        var movedCommit = fixture.MoveTag("release/1.0.0", "git 1.0.0 moved");
-        Assert.NotEqual(originalCommit, movedCommit);
-        using var context = CreatePinnedContext(fixture, originalCommit);
-        var pinPath = Path.Combine(context.RepoPath, ".agentcontrol.json");
-        var pinBefore = File.ReadAllText(pinPath);
-
-        // Act: start the application, whose background check lists the tags
+        using var context = CreatePinnedContext(fixture);
         var mainWindow = context.Launch();
-
-        // Assert: the chip appears and says so
-        var chip = Retry.WhileNull(
-            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("TagMovedChip")),
-            TimeSpan.FromSeconds(30),
-            TimeSpan.FromMilliseconds(200)).Result;
-        Assert.NotNull(chip);
-        Assert.True(WaitForText(mainWindow, "TagMovedBadge", "Tag moved"));
-
-        // Assert: the warning applied nothing (no files, no release notes, the pin file as it was)
-        Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));
-        Assert.Equal(pinBefore, File.ReadAllText(pinPath));
-        Assert.Null(context.WaitForWindow(
-            title => title.StartsWith("Release Notes", StringComparison.Ordinal), TimeSpan.FromSeconds(2)));
 
         // Assert: a pinned repo is offered Change package, not Select Package
         Assert.NotNull(OpenCardMenuItem(mainWindow, "ChangePackageMenuItem"));
         Assert.Null(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("SelectPackageMenuItem")));
-        Assert.Equal(pinBefore, File.ReadAllText(pinPath));
-    }
 
-    /// <summary>
-    ///     "Change package..." opens the Select Package dialog on the pin's current source, package and
-    ///     version; choosing that same version, whose tag has moved, asks for confirmation, and answering No
-    ///     leaves the repo's files and the pin file unchanged.
-    /// </summary>
-    [Fact]
-    public void ChangePackageMenuItem_SameVersionWithMovedTag_AsksAndDecliningLeavesRepoUnchanged()
-    {
-        if (!System.OperatingSystem.IsWindows())
-        {
-            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
-            return;
-        }
-
-        using var fixture = GitFixtureRepository.CreateOrSkip();
-        var originalCommit = fixture.ResolveTag("release/1.0.0");
-        fixture.MoveTag("release/1.0.0", "git 1.0.0 moved");
-        using var context = CreatePinnedContext(fixture, originalCommit);
-        var agentFile = SeedOriginalFiles(context);
-        var pinPath = Path.Combine(context.RepoPath, ".agentcontrol.json");
-        var pinBefore = File.ReadAllText(pinPath);
-        var mainWindow = context.Launch();
-        Assert.NotNull(Retry.WhileNull(
-            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("TagMovedChip")),
-            TimeSpan.FromSeconds(30),
-            TimeSpan.FromMilliseconds(200)).Result);
-
-        // Act: open Change package and choose what is already selected
+        // Act / Assert: the dialog opens on the source, package and version that are in use
         var dialog = OpenChangePackageDialog(context, mainWindow);
-        var confirm = Find(dialog, "SelectPackageConfirmButton").AsButton();
-        Assert.True(Retry.WhileFalse(() => confirm.IsEnabled, TimeSpan.FromSeconds(15), TimeSpan.FromMilliseconds(200)).Result);
-        confirm.Invoke();
-
-        // Assert: the changed content is explained and a decision is asked for
-        var confirmation = context.WaitForWindowWithDescendant("ConfirmationMessageText", TimeSpan.FromSeconds(30));
-        Assert.NotNull(confirmation);
-        var question = Find(confirmation, "ConfirmationMessageText").Name;
-        Assert.Contains("now contains different files", question, StringComparison.Ordinal);
-        Assert.Contains("Choose Yes only if you trust the change", question, StringComparison.Ordinal);
-
-        // Act: decline
-        Find(confirmation, "ConfirmationNoButton").AsButton().Invoke();
-
-        // Assert: the dialog is gone and nothing changed - files, pin and the moved-tag warning
-        Assert.True(Retry.WhileFalse(
-            () => context.WaitForWindowWithDescendant("ConfirmationMessageText", TimeSpan.FromMilliseconds(200)) is null,
-            TimeSpan.FromSeconds(10),
-            TimeSpan.FromMilliseconds(200)).Result);
-        Assert.Null(context.WaitForWindow(
-            title => title.StartsWith("Release Notes", StringComparison.Ordinal), TimeSpan.FromSeconds(2)));
-        Assert.Equal("git 1.0.0", File.ReadAllText(agentFile));
-        Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github", "skills")));
-        Assert.Equal(pinBefore, File.ReadAllText(pinPath));
-        Assert.NotNull(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("TagMovedChip")));
-    }
-
-    /// <summary>
-    ///     Answering Yes to the confirmation of "Change package..." on the same version with a moved tag
-    ///     applies the tag's new content, records the new commit as the pin's content identity, and the
-    ///     "Tag moved" chip goes away.
-    /// </summary>
-    [Fact]
-    public void ChangePackageMenuItem_SameVersionWithMovedTag_ConfirmingAppliesNewContentAndRecordsNewCommit()
-    {
-        if (!System.OperatingSystem.IsWindows())
-        {
-            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
-            return;
-        }
-
-        using var fixture = GitFixtureRepository.CreateOrSkip();
-        var originalCommit = fixture.ResolveTag("release/1.0.0");
-        var movedCommit = fixture.MoveTag("release/1.0.0", "git 1.0.0 moved");
-        using var context = CreatePinnedContext(fixture, originalCommit);
-        var agentFile = SeedOriginalFiles(context);
-        var mainWindow = context.Launch();
-        Assert.NotNull(Retry.WhileNull(
-            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("TagMovedChip")),
-            TimeSpan.FromSeconds(30),
-            TimeSpan.FromMilliseconds(200)).Result);
-
-        // Act: open Change package, choose what is already selected and confirm the changed content
-        var dialog = OpenChangePackageDialog(context, mainWindow);
-        var confirm = Find(dialog, "SelectPackageConfirmButton").AsButton();
-        Assert.True(Retry.WhileFalse(() => confirm.IsEnabled, TimeSpan.FromSeconds(15), TimeSpan.FromMilliseconds(200)).Result);
-        confirm.Invoke();
-        var confirmation = context.WaitForWindowWithDescendant("ConfirmationMessageText", TimeSpan.FromSeconds(30));
-        Assert.NotNull(confirmation);
-        Find(confirmation, "ConfirmationYesButton").AsButton().Invoke();
-
-        // Assert: the new content is applied and its release notes open
-        Assert.NotNull(context.WaitForWindow(
-            title => title.StartsWith("Release Notes", StringComparison.Ordinal), TimeSpan.FromSeconds(30)));
-        Assert.Equal("git 1.0.0 moved", File.ReadAllText(agentFile));
-        Assert.True(File.Exists(Path.Combine(context.RepoPath, ".github", "skills", "git.md")));
-
-        // Assert: the pin keeps its version and records the commit the tag points to now
-        using (var pin = JsonDocument.Parse(File.ReadAllText(Path.Combine(context.RepoPath, ".agentcontrol.json"))))
-        {
-            Assert.Equal("1.0.0", pin.RootElement.GetProperty("Version").GetString());
-            Assert.Equal("Repo", pin.RootElement.GetProperty("Source").GetString());
-            Assert.Equal("git-commit:" + movedCommit, pin.RootElement.GetProperty("ContentIdentity").GetString());
-        }
-
-        // Assert: the warning is gone, because the pin now matches the tag
-        Assert.True(Retry.WhileNotNull(
-            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("TagMovedChip")),
-            TimeSpan.FromSeconds(20),
-            TimeSpan.FromMilliseconds(200)).Success);
+        Assert.NotNull(dialog);
     }
 
     /// <summary>
     ///     Creates a test context for a repo pinned to version 1.0.0 of the fixture's Git source with the
-    ///     identity of the given commit, with the real git isolated from the user's configuration.
+    ///     identity of its files (the pin names no source; the card remembers that the Git source supplies
+    ///     it), with the real git isolated from the user's configuration.
     /// </summary>
     /// <param name="fixture">The Git fixture the source points at.</param>
-    /// <param name="commit">The commit the pin records as the delivered content.</param>
     /// <returns>The context, not yet launched.</returns>
-    private static AgentControlTestContext CreatePinnedContext(GitFixtureRepository fixture, string commit) =>
+    private static AgentControlTestContext CreatePinnedContext(GitFixtureRepository fixture) =>
         new(
             pinnedPackageName: GitFixtureRepository.PackageName,
             pinnedPackageVersion: "1.0.0",
             pinnedSource: "Repo",
-            pinnedContentIdentity: "git-commit:" + commit,
+            pinnedContentIdentity: GitFixtureRepository.FilesIdentity("git 1.0.0"),
             gitSource: fixture.CreateSource())
         {
             LaunchEnvironment = fixture.IsolationEnvironment
         };
-
-    /// <summary>
-    ///     Writes the agent file the repo got from version 1.0.0 as originally delivered, so a test can tell
-    ///     whether it was replaced.
-    /// </summary>
-    /// <param name="context">The context whose repo receives the file.</param>
-    /// <returns>The path of the file.</returns>
-    private static string SeedOriginalFiles(AgentControlTestContext context)
-    {
-        var agents = Path.Combine(context.RepoPath, ".github", "agents");
-        Directory.CreateDirectory(agents);
-        var agentFile = Path.Combine(agents, "git.md");
-        File.WriteAllText(agentFile, "git 1.0.0");
-        return agentFile;
-    }
 
     /// <summary>
     ///     Opens the card's "Change package..." dialog and checks that it opens on the pin's current

@@ -67,8 +67,9 @@ internal sealed class AgentControlTestContext : IDisposable
     /// <param name="nuGetFeedPath">A NuGet package folder to configure as the additional
     ///     <c>Feed</c> source, or <see langword="null"/> for none.</param>
     /// <param name="nuGetPackageIds">The package IDs offered by the <c>Feed</c> source.</param>
-    /// <param name="pinnedSource">The source alias to record in the repo's pin file, or
-    ///     <see langword="null"/> to write a pin that names no source.</param>
+    /// <param name="pinnedSource">The alias of the source that last supplied the package: recorded in the
+    ///     user's settings (the per-user cache of which configured source supplies the repo's package),
+    ///     never in the pin file, which names no source; <see langword="null"/> for none.</param>
     /// <param name="nuGetRequireSigned">Whether the <c>Feed</c> source requires signed
     ///     packages.</param>
     /// <param name="nuGetServerIndexUrl">The service-index address of a NuGet package server to
@@ -76,8 +77,8 @@ internal sealed class AgentControlTestContext : IDisposable
     /// <param name="customizeSettings">Edits the settings dictionary just before it is written, with
     ///     this context (whose <see cref="RootDirectory"/> and <see cref="RepoPath"/> are set), or
     ///     <see langword="null"/> for none; used to seed groups, collapsed groups and more repos.</param>
-    /// <param name="pinnedContentIdentity">The content identity (for example <c>sha256:...</c> of the
-    ///     zip) to record in the repo's pin file, which is then written as the current schema, or
+    /// <param name="pinnedContentIdentity">The content identity (<c>files-sha256:...</c> of the agent
+    ///     files) to record in the repo's pin file, which is then written as the current schema, or
     ///     <see langword="null"/> to write a pin that records none.</param>
     /// <param name="gitSource">A Git repository to configure as an additional source (which makes the
     ///     application run the real <c>git</c> instead of the arg-logger stub), or
@@ -121,12 +122,12 @@ internal sealed class AgentControlTestContext : IDisposable
             nuGetServerIndexUrl,
             customizeSettings is null ? null : settings => customizeSettings(settings, this),
             gitSource,
-            useRealGit);
+            useRealGit,
+            pinnedSource);
 
         if (pinnedPackageName is not null && pinnedPackageVersion is not null)
         {
-            TestRepoPinWriter.Write(
-                RepoPath, pinnedPackageName, pinnedPackageVersion, pinnedSource, pinnedContentIdentity);
+            TestRepoPinWriter.Write(RepoPath, pinnedPackageName, pinnedPackageVersion, pinnedContentIdentity);
         }
 
         _shellCleaner = new LaunchedShellCleaner(argLoggerStubExe, LogCleanup);

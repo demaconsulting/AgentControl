@@ -18,7 +18,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Buffers.Binary;
 using System.Security.Cryptography;
+using System.Text;
+using DemaConsulting.AgentControl.RepoSync;
 
 namespace DemaConsulting.AgentControl.AgentPackageManagement;
 
@@ -29,18 +32,19 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 internal enum ContentIdentityComparison
 {
     /// <summary>
-    ///     There is nothing to compare: the pin recorded no identity (it predates identity
-    ///     recording) or the source reported none. Never a reason to warn.
+    ///     There is nothing to compare: the pin recorded no files identity (it predates identity
+    ///     recording, or was made before identities were computed from the files) or the source
+    ///     reported none. Never a reason to warn.
     /// </summary>
     NotComparable,
 
     /// <summary>
-    ///     Both identities are known and equal: the same bytes the pin was made from.
+    ///     Both identities are known and equal: the same files the pin was made from.
     /// </summary>
     Same,
 
     /// <summary>
-    ///     Both identities are known and differ: the content behind the same package version is not
+    ///     Both identities are known and differ: the files behind the same package version are not
     ///     what the pin was made from (for example the package was republished).
     /// </summary>
     Changed
@@ -48,38 +52,48 @@ internal enum ContentIdentityComparison
 
 /// <summary>
 ///     Computes, formats and compares the <em>content identity</em> of an agent package: a short
-///     text that names exactly which bytes a package version delivered, so a repo's pin can tell a
-///     republished package from the one it was made from.
+///     text that names exactly which agent files a package version delivered, so a repo's pin can
+///     tell a republished package from the one it was made from - and recognize the same files
+///     delivered by a different source.
 /// </summary>
 /// <remarks>
 ///     <para>
 ///     Package versions are meant to be immutable, but nothing in a zip folder or a NuGet feed
 ///     enforces that. An identity makes a silent change of a version detectable: a pin records the
 ///     identity when a package is applied, and later syncs of the same version are compared with it.
-///     The text is <c>{algorithm}:{value}</c>. <c>sha256:{64 lower-case hex}</c> is the SHA-256 of
-///     the package file (the zip, or the <c>.nupkg</c> a NuGet source unpacked). The
-///     <c>git-commit:{hex}</c> form is the commit a Git tag pointed to; <see cref="GitSourceProvider"/>
-///     delivers it through <see cref="FromGitCommit"/> for a package it fetched, so a Git source
-///     takes part in the same comparison as the others.
+///     The identity has the form <c>files-sha256:{64 lower-case hex}</c> and is computed from the
+///     <em>delivered agent files themselves</em> - exactly the files AgentControl writes into the
+///     four managed folders - and not from the zip, <c>.nupkg</c> or Git repository they came in.
+///     It is therefore the same for the same files whatever kind of source, container format,
+///     compression, timestamps or entry order delivered them: a teammate whose source is a NuGet
+///     feed, a zip folder or a Git tag gets the same identity as long as the files are identical.
 ///     </para>
 ///     <para>
-///     Pure functions of their parameters (plus the stream that is read) and thread-safe. The
-///     identity is an integrity check against accidental or unannounced republishing; it is not a
+///     <b>Canonical encoding.</b> The identity is the SHA-256 of one byte stream built as follows.
+///     The files considered are those <see cref="PackageContentExtractor.GetManagedPackagePath"/>
+///     accepts (the single rule that also decides what <see cref="PackageContentExtractor.Extract"/>
+///     writes, so <c>release-notes.md</c>, <c>AGENTS.md</c> and anything outside the managed folders
+///     are excluded). They are sorted by ordinal (UTF-16 code unit) comparison of their normalized,
+///     <c>/</c>-separated, package-relative path. For each file in that order the stream receives
+///     the UTF-8 bytes of the path, one <c>0x00</c> byte, the file's length in bytes as an 8-byte
+///     little-endian unsigned integer, and then the file's raw bytes. The path and length framing
+///     means that moving bytes between files, or renaming a file, changes the identity. Nothing else
+///     (timestamps, permissions, directory entries, entry order) takes part.
+///     </para>
+///     <para>
+///     Pure functions of their parameters (plus the content that is read) and thread-safe. The
+///     identity is an integrity check against accidental or unannounced republishing - and, because
+///     it describes the files and nothing else, it is all that is needed to notice a package whose
+///     files were replaced, including a Git tag moved to a commit with other files; it is not a
 ///     signature and does not prove who published the package.
 ///     </para>
 /// </remarks>
 internal static class PackageContentIdentity
 {
     /// <summary>
-    ///     The prefix of an identity that is the SHA-256 of a package file.
+    ///     The prefix of an identity computed from a package's delivered agent files.
     /// </summary>
-    internal const string Sha256Prefix = "sha256:";
-
-    /// <summary>
-    ///     The prefix of an identity that is the commit a Git tag pointed to (produced by the Git
-    ///     package source).
-    /// </summary>
-    internal const string GitCommitPrefix = "git-commit:";
+    internal const string FilesSha256Prefix = "files-sha256:";
 
     /// <summary>
     ///     How many characters of the value <see cref="Describe"/> shows, enough to tell two
@@ -88,43 +102,184 @@ internal static class PackageContentIdentity
     private const int DescribedValueLength = 12;
 
     /// <summary>
-    ///     Computes the <c>sha256:</c> identity of the bytes a stream delivers from its current
-    ///     position to its end.
+    ///     The number of hexadecimal digits in a SHA-256 value.
     /// </summary>
-    /// <param name="content">The readable stream to hash. Left open; its position is at the end
-    ///     afterwards.</param>
-    /// <returns>The identity, <c>sha256:</c> followed by 64 lower-case hex digits.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="content"/> is
-    ///     <see langword="null"/>.</exception>
-    /// <exception cref="IOException">Thrown when the stream cannot be read.</exception>
-    public static string ComputeSha256(Stream content)
-    {
-        ArgumentNullException.ThrowIfNull(content);
+    private const int Sha256HexLength = 64;
 
-        // The caller keeps the stream: the zip reader hashes and then reads the very same handle,
-        // so the bytes that were hashed are the bytes that are later extracted
-        return Sha256Prefix + Convert.ToHexStringLower(SHA256.HashData(content));
+    /// <summary>
+    ///     The size of the buffer a file is streamed through; the only memory a computation holds
+    ///     however large the package is.
+    /// </summary>
+    private const int ReadBufferSize = 81920;
+
+    /// <summary>
+    ///     Computes the <c>files-sha256:</c> identity of the agent files a reader delivers.
+    /// </summary>
+    /// <param name="reader">The package content to identify. Read only; not disposed.</param>
+    /// <returns>The identity, <c>files-sha256:</c> followed by 64 lower-case hex digits, encoded as
+    ///     described in the class remarks. A package that delivers no managed file has the identity
+    ///     of the empty stream.</returns>
+    /// <remarks>
+    ///     Computed centrally from <see cref="IPackageContentReader"/> so every kind of source -
+    ///     zip, NuGet, Git - produces the identity the same way. Each file is streamed, so memory
+    ///     use is bounded by one buffer however large the package is. The file's length has to be
+    ///     hashed before its bytes: a seekable stream states it, and any other stream (an entry of
+    ///     a compressed zip) is read once to count it and then opened again to hash it.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="reader"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the package cannot be listed or
+    ///     read, lists a path <see cref="PackageContentExtractor.Extract"/> would also reject, lists
+    ///     two files with the same canonical path (the identity would depend on which one wins) or
+    ///     with paths that differ only in letter case (they would be one file on a case-insensitive
+    ///     file system), or a file changes length while it is being read.</exception>
+    public static string ComputeFilesIdentity(IPackageContentReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        // Select the files with the extraction's own rule, so the identity covers exactly what
+        // would be written - then put them into the canonical order
+        var files = new List<(string CanonicalPath, string ListedPath)>();
+        foreach (var listedPath in reader.ListFiles())
+        {
+            var canonicalPath = PackageContentExtractor.GetManagedPackagePath(listedPath);
+            if (canonicalPath is not null)
+            {
+                files.Add((canonicalPath, listedPath));
+            }
+        }
+
+        files.Sort((left, right) => string.CompareOrdinal(left.CanonicalPath, right.CanonicalPath));
+
+        // Duplicate or case-colliding paths are refused by the same rule the extractor applies
+        PackageContentExtractor.RejectCaseCollisions(reader.Description, files.Select(file => file.CanonicalPath));
+
+        // Frame every file as path, 0x00, length (8 bytes, little-endian), bytes; the framing keeps
+        // two different sets of files from ever producing the same stream
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[ReadBufferSize];
+        Span<byte> lengthBytes = stackalloc byte[sizeof(long)];
+        try
+        {
+            foreach (var (canonicalPath, listedPath) in files)
+            {
+                var length = MeasureLength(reader, listedPath, buffer);
+                hash.AppendData(Encoding.UTF8.GetBytes(canonicalPath));
+                hash.AppendData("\0"u8);
+                BinaryPrimitives.WriteInt64LittleEndian(lengthBytes, length);
+                hash.AppendData(lengthBytes);
+                AppendContent(hash, reader, listedPath, length, buffer);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException(
+                $"Package '{reader.Description}' could not be read to identify its content: {ex.Message}", ex);
+        }
+
+        return FilesSha256Prefix + Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 
     /// <summary>
-    ///     Formats a commit hash as a <c>git-commit:</c> identity.
+    ///     Computes the <c>files-sha256:</c> identity of a reader's files, or reports that none can
+    ///     be named.
     /// </summary>
-    /// <param name="commit">The commit hash: 40 (SHA-1) or 64 (SHA-256 object format) hex digits,
-    ///     in either case.</param>
-    /// <returns>The identity with the hash lower-cased.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="commit"/> is
+    /// <param name="reader">The package content to identify.</param>
+    /// <returns>The identity (see <see cref="ComputeFilesIdentity"/>), or <see langword="null"/>
+    ///     when the content cannot be identified (it cannot be read, or holds a path that extraction
+    ///     rejects). That is "nothing to compare", never "changed": extracting such a package fails
+    ///     with the specific reason, which is how the user learns about it.</returns>
+    /// <remarks>
+    ///     What <see cref="IPackageContentReader.ContentIdentity"/> implementations use, so a reader
+    ///     that is opened only to read release notes never has to read the whole package, and a
+    ///     reader over an unacceptable package still opens (the extractor reports the problem).
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="reader"/> is
     ///     <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="commit"/> is not 40 or 64
-    ///     hex digits (an unchecked value would let a malformed identity into a pin).</exception>
-    public static string FromGitCommit(string commit)
+    public static string? TryComputeFilesIdentity(IPackageContentReader reader)
     {
-        ArgumentNullException.ThrowIfNull(commit);
-        if ((commit.Length != 40 && commit.Length != 64) || !commit.All(Uri.IsHexDigit))
+        try
         {
-            throw new ArgumentException("A commit hash must be 40 or 64 hexadecimal digits.", nameof(commit));
+            return ComputeFilesIdentity(reader);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    ///     Determines the length of one package file in bytes.
+    /// </summary>
+    /// <param name="reader">The package content.</param>
+    /// <param name="listedPath">The path as listed by the reader.</param>
+    /// <param name="buffer">A scratch buffer for a stream that does not state its length.</param>
+    /// <returns>The file's length.</returns>
+    private static long MeasureLength(IPackageContentReader reader, string listedPath, byte[] buffer)
+    {
+        using var stream = reader.OpenRead(listedPath);
+        if (stream.CanSeek)
+        {
+            return stream.Length;
         }
 
-        return GitCommitPrefix + commit.ToLowerInvariant();
+        // A compressed entry cannot state its length: count it by reading it through once
+        long length = 0;
+        int read;
+        while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            length += read;
+        }
+
+        return length;
+    }
+
+    /// <summary>
+    ///     Feeds the bytes of one package file into the running hash.
+    /// </summary>
+    /// <param name="hash">The running hash.</param>
+    /// <param name="reader">The package content.</param>
+    /// <param name="listedPath">The path as listed by the reader.</param>
+    /// <param name="expectedLength">The length that was hashed ahead of the bytes.</param>
+    /// <param name="buffer">The buffer the file is streamed through.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the file does not hold exactly
+    ///     <paramref name="expectedLength"/> bytes (it changed while it was being read).</exception>
+    private static void AppendContent(
+        IncrementalHash hash, IPackageContentReader reader, string listedPath, long expectedLength, byte[] buffer)
+    {
+        using var stream = reader.OpenRead(listedPath);
+        long total = 0;
+        int read;
+        while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            hash.AppendData(buffer, 0, read);
+            total += read;
+        }
+
+        if (total != expectedLength)
+        {
+            throw new InvalidOperationException(
+                $"'{listedPath}' in package '{reader.Description}' changed while its content was being identified.");
+        }
+    }
+
+    /// <summary>
+    ///     Determines whether a text is a well-formed files identity.
+    /// </summary>
+    /// <param name="identity">The text to test; <see langword="null"/> or blank is not an
+    ///     identity.</param>
+    /// <returns><see langword="true"/> when the text (ignoring surrounding whitespace and letter
+    ///     case) is <c>files-sha256:</c> followed by exactly 64 hexadecimal digits; otherwise
+    ///     <see langword="false"/> - including for an identity recorded by an older version
+    ///     (<c>sha256:</c>, <c>git-commit:</c>), which cannot be compared with one computed from
+    ///     the files.</returns>
+    public static bool IsFilesIdentity(string? identity)
+    {
+        var trimmed = identity?.Trim();
+        return trimmed is not null &&
+               trimmed.StartsWith(FilesSha256Prefix, StringComparison.OrdinalIgnoreCase) &&
+               trimmed.Length == FilesSha256Prefix.Length + Sha256HexLength &&
+               trimmed[FilesSha256Prefix.Length..].All(Uri.IsHexDigit);
     }
 
     /// <summary>
@@ -134,22 +289,23 @@ internal static class PackageContentIdentity
     ///     a pin that recorded none.</param>
     /// <param name="actual">The identity of the content a source delivered, or
     ///     <see langword="null"/>/empty when the source reports none.</param>
-    /// <returns><see cref="ContentIdentityComparison.NotComparable"/> when either side is missing;
-    ///     otherwise <see cref="ContentIdentityComparison.Same"/> when they are equal (hex digits
-    ///     compared without regard to case, so a hand-edited pin is not a false alarm) or
-    ///     <see cref="ContentIdentityComparison.Changed"/> when they differ - including when they
-    ///     are of different kinds, which means the same version is now delivered by a different
-    ///     kind of source.</returns>
+    /// <returns><see cref="ContentIdentityComparison.NotComparable"/> when either side is not a
+    ///     files identity (missing, or of an older kind such as <c>sha256:</c> that was computed
+    ///     from a container and cannot be compared with one computed from the files); otherwise
+    ///     <see cref="ContentIdentityComparison.Same"/> when they are equal (hex digits compared
+    ///     without regard to case, so a hand-edited pin is not a false alarm) or
+    ///     <see cref="ContentIdentityComparison.Changed"/> when they differ.</returns>
     public static ContentIdentityComparison Compare(string? pinned, string? actual)
     {
-        // A missing side is never a mismatch: a pin made before identities existed adopts one
-        // silently, and a source that reports none cannot be checked
-        if (string.IsNullOrWhiteSpace(pinned) || string.IsNullOrWhiteSpace(actual))
+        // Only two files identities can be told apart: a pin made before identities existed (or
+        // before they were computed from the files) adopts one silently, and a source that reports
+        // none cannot be checked
+        if (!IsFilesIdentity(pinned) || !IsFilesIdentity(actual))
         {
             return ContentIdentityComparison.NotComparable;
         }
 
-        return string.Equals(pinned.Trim(), actual.Trim(), StringComparison.OrdinalIgnoreCase)
+        return string.Equals(pinned!.Trim(), actual!.Trim(), StringComparison.OrdinalIgnoreCase)
             ? ContentIdentityComparison.Same
             : ContentIdentityComparison.Changed;
     }

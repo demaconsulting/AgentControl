@@ -155,7 +155,7 @@ public sealed class NuGetServerSourceTests
         Assert.Null(context.WaitForWindowWithDescendant("CredentialPromptUserNameTextBox", TimeSpan.FromSeconds(1)));
         confirm.Invoke();
 
-        // Assert: the package was applied from the server and the pin names the source
+        // Assert: the package was applied from the server and the pin names no source (the card does)
         Assert.NotNull(context.WaitForWindow(
             title => title.StartsWith("Release Notes", StringComparison.Ordinal), TimeSpan.FromSeconds(30)));
         Assert.Equal(
@@ -163,7 +163,8 @@ public sealed class NuGetServerSourceTests
             ReadSharedText(Path.Combine(context.RepoPath, ".github", "agents", "copilot.md")));
         var pinPath = Path.Combine(context.RepoPath, ".agentcontrol.json");
         var pinJson = ReadSharedText(pinPath);
-        Assert.Contains("\"Source\": \"Feed\"", pinJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Source", pinJson, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"\"PackageName\": \"{packageName}\"", pinJson, StringComparison.Ordinal);
 
         // Assert: the card's chip shows the package, version and the source's alias
         Assert.True(WaitForText(mainWindow, "RepoPinnedVersionText", $"{packageName} 1.0.0"));

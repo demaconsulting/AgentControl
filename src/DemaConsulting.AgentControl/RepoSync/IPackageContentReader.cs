@@ -47,17 +47,20 @@ internal interface IPackageContentReader : IDisposable
     string Description { get; }
 
     /// <summary>
-    ///     Gets the content identity of the package this reader delivers (see
+    ///     Gets the content identity of the package this reader delivers: the
+    ///     <c>files-sha256:</c> identity of the agent files it would extract (see
     ///     <see cref="DemaConsulting.AgentControl.AgentPackageManagement.PackageContentIdentity"/>),
     ///     or <see langword="null"/> when the implementation cannot name one.
     /// </summary>
     /// <remarks>
-    ///     Lets a repo's pin record which bytes a package version delivered, so a later sync of the
-    ///     same version can detect that the package was republished. The identity describes the
-    ///     very content this reader reads (a zip reader hashes and reads one open handle), never a
-    ///     separate look at the source. A default implementation returns <see langword="null"/> so
-    ///     readers that predate identities keep working; <see langword="null"/> means "nothing to
-    ///     compare", never "changed".
+    ///     Lets a repo's pin record which files a package version delivered, so a later sync of the
+    ///     same version can detect that the package was republished - whichever kind of source
+    ///     delivers it, because the identity is computed from the files (through
+    ///     <see cref="DemaConsulting.AgentControl.AgentPackageManagement.PackageContentIdentity.ComputeFilesIdentity"/>)
+    ///     and not from the zip, <c>.nupkg</c> or repository they came in. It describes the very
+    ///     content this reader reads, never a separate look at the source. A default implementation
+    ///     returns <see langword="null"/> so readers that predate identities keep working;
+    ///     <see langword="null"/> means "nothing to compare", never "changed".
     /// </remarks>
     string? ContentIdentity => null;
 

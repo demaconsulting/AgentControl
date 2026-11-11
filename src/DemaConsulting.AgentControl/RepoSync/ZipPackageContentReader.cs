@@ -29,11 +29,11 @@ namespace DemaConsulting.AgentControl.RepoSync;
 /// </summary>
 /// <remarks>
 ///     Holds the zip open (shared-read) until disposed so a package is read consistently across
-///     the several reads a sync performs. Never writes to the zip. The zip is opened once: its
-///     bytes are hashed to produce <see cref="ContentIdentity"/> and the archive is then built over
-///     the same rewound handle, so the identity always describes exactly the bytes that are
-///     extracted (there is no window in which the file could be swapped between hashing and
-///     reading). Not thread-safe.
+///     the several reads a sync performs. Never writes to the zip. The zip is opened once, and
+///     the same handle serves every read - including the one that computes
+///     <see cref="ContentIdentity"/> from the files the archive holds - so the identity always
+///     describes exactly the files that are extracted (the file cannot be swapped between
+///     identifying and reading, because the open handle denies writers). Not thread-safe.
 /// </remarks>
 internal sealed class ZipPackageContentReader : IPackageContentReader
 {
@@ -43,26 +43,52 @@ internal sealed class ZipPackageContentReader : IPackageContentReader
     private readonly ZipArchive _archive;
 
     /// <summary>
+    ///     The identity once it has been computed (<see langword="null"/> is a valid result:
+    ///     "cannot be named").
+    /// </summary>
+    private string? _contentIdentity;
+
+    /// <summary>
+    ///     Whether <see cref="_contentIdentity"/> has been computed.
+    /// </summary>
+    private bool _identityComputed;
+
+    /// <summary>
     ///     Initializes a reader over an already-opened archive.
     /// </summary>
     /// <param name="archive">The opened archive; ownership transfers to this reader.</param>
     /// <param name="description">The zip path, used in messages.</param>
-    /// <param name="contentIdentity">The SHA-256 identity of the zip's bytes.</param>
-    private ZipPackageContentReader(ZipArchive archive, string description, string contentIdentity)
+    private ZipPackageContentReader(ZipArchive archive, string description)
     {
         _archive = archive;
         Description = description;
-        ContentIdentity = contentIdentity;
     }
 
     /// <inheritdoc />
     public string Description { get; }
 
     /// <summary>
-    ///     Gets the <c>sha256:</c> identity of the zip file, computed from the same handle the
-    ///     archive reads.
+    ///     Gets the <c>files-sha256:</c> identity of the agent files in the zip - independent of the
+    ///     zip's compression, timestamps and entry order - or <see langword="null"/> when the zip's
+    ///     content cannot be identified (see <see cref="PackageContentIdentity.TryComputeFilesIdentity"/>).
     /// </summary>
-    public string ContentIdentity { get; }
+    /// <remarks>
+    ///     Computed on first use and remembered: a reader opened only for its release notes never
+    ///     pays for reading every file.
+    /// </remarks>
+    public string? ContentIdentity
+    {
+        get
+        {
+            if (!_identityComputed)
+            {
+                _contentIdentity = PackageContentIdentity.TryComputeFilesIdentity(this);
+                _identityComputed = true;
+            }
+
+            return _contentIdentity;
+        }
+    }
 
     /// <summary>
     ///     Opens a package zip for reading, wrapping any failure in a clear exception.
@@ -81,12 +107,9 @@ internal sealed class ZipPackageContentReader : IPackageContentReader
         FileStream? stream = null;
         try
         {
-            // One handle for both purposes: hash the whole file, rewind, then let the archive
-            // read the same handle (shared-read, as ZipFile.OpenRead does)
+            // One handle for everything the reader does (shared-read, as ZipFile.OpenRead does)
             stream = new FileStream(zipPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            var identity = PackageContentIdentity.ComputeSha256(stream);
-            stream.Position = 0;
-            return new ZipPackageContentReader(new ZipArchive(stream, ZipArchiveMode.Read), zipPath, identity);
+            return new ZipPackageContentReader(new ZipArchive(stream, ZipArchiveMode.Read), zipPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
                                        or ArgumentException or NotSupportedException

@@ -484,7 +484,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     {
         // Arrange: a repo pinned to 1.0.0, and an initial (empty) package source directory
         var repoPath = CreateTempDirectory();
-        RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(repoPath, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
         var initialSourceDir = CreateTempDirectory();
         var settings = new AppSettings
         {
@@ -516,10 +516,9 @@ public sealed class MainWindowViewModelTests : IDisposable
     [Fact]
     public async Task MainWindowViewModel_ApplySettings_OnlyEditedSourceIsInvalidated()
     {
-        // Arrange: a repo pinned (via the Default source) to 1.0.0, source "Default" offering 2.0.0,
-        // and a second, unrelated source
+        // Arrange: a repo pinned to 1.0.0, source "Default" offering 2.0.0, and a second, unrelated source
         var repoPath = CreateTempDirectory();
-        RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(repoPath, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
         var defaultDir = CreateTempDirectory();
         CreatePackageZip(defaultDir, "contoso-agents", "2.0.0");
         var otherDir = CreateTempDirectory();
@@ -669,7 +668,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     {
         // Arrange: a repo pinned to 1.0.0 whose source offers 2.0.0
         var repoPath = CreateTempDirectory();
-        RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(repoPath, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
         var sourceDir = CreateTempDirectory();
         CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
         var settings = new AppSettings
@@ -696,17 +695,20 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that one card's unreachable source does not stop the other cards' upgrade checks.
+    ///     Test that one unreachable source does not stop the cards' upgrade checks: the sources that
+    ///     can be read still offer what they have to every card.
     /// </summary>
     [Fact]
-    public async Task MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked()
+    public async Task MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_ReadableSourceStillOffersUpgrades()
     {
-        // Arrange: repo 1 is pinned to a source whose folder does not exist, repo 2 to a working one
-        var downRepo = CreateTempDirectory();
-        var upRepo = CreateTempDirectory();
-        RepoPinStore.Save(downRepo, new RepoPin { Source = "Down", PackageName = "contoso-agents", Version = "1.0.0" });
-        RepoPinStore.Save(upRepo, new RepoPin { Source = "Up", PackageName = "contoso-agents", Version = "1.0.0" });
+        // Arrange: two repos pinned to 1.0.0, one source whose folder does not exist, one working source with
+        // the pinned version and a newer one
+        var firstRepo = CreateTempDirectory();
+        var secondRepo = CreateTempDirectory();
+        RepoPinStore.Save(firstRepo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(secondRepo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
         var upDir = CreateTempDirectory();
+        CreatePackageZip(upDir, "contoso-agents", "1.0.0");
         CreatePackageZip(upDir, "contoso-agents", "2.0.0");
         var settings = new AppSettings
         {
@@ -720,15 +722,15 @@ public sealed class MainWindowViewModelTests : IDisposable
                 },
                 new PackageSourceDefinition { Alias = "Up", Type = PackageSourceType.Zip, Location = upDir }
             ],
-            RecentRepos = [new RecentRepo { Path = downRepo }, new RecentRepo { Path = upRepo }]
+            RecentRepos = [new RecentRepo { Path = firstRepo }, new RecentRepo { Path = secondRepo }]
         };
         var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
 
         // Act
         await viewModel.BeginUpgradeRefresh();
 
-        // Assert: the failing source only affects its own card
-        Assert.False(viewModel.RepoCards[0].IsUpgradeAvailable);
+        // Assert: the failing source hides nothing the working source offers, for either card
+        Assert.True(viewModel.RepoCards[0].IsUpgradeAvailable);
         Assert.True(viewModel.RepoCards[1].IsUpgradeAvailable);
     }
 
@@ -741,7 +743,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     {
         // Arrange: a pinned repo that is not yet in the list, and a source with a newer version
         var repoPath = CreateTempDirectory();
-        RepoPinStore.Save(repoPath, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(repoPath, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
         var sourceDir = CreateTempDirectory();
         CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
         var viewModel = new MainWindowViewModel(

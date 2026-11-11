@@ -9,9 +9,10 @@ the package-source provider contract. It is an adapter over the existing static 
 scan: discovery rules and behavior are exactly those of `PackageSource`, so zip sources behave as
 they always have while taking part in the multi-source model. Per architecture.md, the folder is
 a plain filesystem path (local, mapped drive, or UNC) and no authentication or signature verification is
-performed - that trust boundary belongs to whoever maintains the shared folder. The SHA-256 hash of a zip that the
-provider's reader computes is not a check of the zip against a published checksum: it is only the package's *content
-identity*, a record of which bytes were delivered so that a later republication of the same version can be noticed.
+performed - that trust boundary belongs to whoever maintains the shared folder. The identity that the provider's
+reader computes is not a check of the zip against a published checksum: it is only the package's *content
+identity*, a record of which agent files were delivered so that a later republication of the same version can be
+noticed - computed from the files, not from the zip, so the same files repacked report the same identity.
 It satisfies `AgentControl-ZipFolderSourceProvider-ListAndAcquire`,
 `AgentControl-ZipFolderSourceProvider-ListPackageNames`,
 `AgentControl-ZipFolderSourceProvider-AcquireContent`,
@@ -58,9 +59,10 @@ source alias. Zip names with a fourth version segment or build metadata are not 
   (`AgentControl-ZipFolderSourceProvider-RefusesLinkedZipOutsideFolder`,
   `AgentControl-ZipFolderSourceProvider-AllowsLinkedZipInsideFolder`).
 - *Postconditions*: The caller owns and disposes the returned `ZipPackageContentReader`. Its
-  `ContentIdentity` is the `sha256:` identity of the zip file, computed by the reader from the same
-  open handle its entries are read from, so a zip republished under the same version reports a
-  different identity (`AgentControl-ZipFolderSourceProvider-ReportContentIdentity`).
+  `ContentIdentity` is the `files-sha256:` identity of the agent files in the zip - not of the zip file - computed
+  by the reader from the same open handle its entries are read from, so a zip republished under the same version
+  with other files reports a different identity, and a repacked zip with the same files the same one
+  (`AgentControl-ZipFolderSourceProvider-ReportContentIdentity`).
 - *Residual risk*: The link check runs immediately before the zip is opened, but the check and the
   open are two steps. Someone with the same access as the person running AgentControl who replaces the
   zip with a link in that interval is not detected. This is accepted, as for the repo extractor

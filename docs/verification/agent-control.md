@@ -144,12 +144,15 @@ port, and the real `git upload-pack`).
 - A Git repository that needs a sign-in is never prompted for by a background check (the card shows "Sign-in needed",
   the user's helper was asked but could not prompt, the server saw no credential) and may be prompted for by work the
   user starts (Refresh on the card, Test connection in the editor).
-- A package's content identity is recorded in the pin for a zip, a NuGet-package and a Git source; a republished
-  zip or NuGet package of the pinned version is not synced at launch.
+- A package's content identity (a SHA-256 over its agent files, the same for every kind of source) is recorded in the
+  pin for a zip, a NuGet-package and a Git source; a republished zip or NuGet package of the pinned version is not
+  synced at launch.
 - Several package sources can be configured and carried forward from the legacy setting, a NuGet
   folder source supplies packages applied like zip packages, a NuGet server source can be added with a
-  typed sign-in and supplies packages the same way, and a repo pin is only ever resolved
-  against the source it names.
+  typed sign-in and supplies packages the same way, and a repo pin names no source: it is resolved against the user's
+  configured sources, the first of them (in Settings order) that offers the version and delivers files with the
+  identical identity supplying it, which the card then shows without reporting a problem; a repo whose pinned version
+  no configured source offers shows the problem.
 - No credential typed during an end-to-end run is found in any file the application wrote; a sign-in the user chose
   to remember is found only in the user's own (emulated) credential helper, is used again without a dialog and is
   removed by "Forget saved sign-in".
@@ -221,7 +224,7 @@ folder source in the dialog, selects its package and version, and confirms that 
 shows the package chip naming that source. These scenarios are
 tested by
 `windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders` and
-`windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip`, covering
+`windows@SelectPackage_FromNuGetFolderSource_PinsThePackageAndCardShowsPackageChip`, covering
 `AgentControl-System-SelectPackage`.
 
 **AgentControl_ConvertCommittedAgentFiles_AsksFirstAndStopsGitTrackingOnlyWhenConfirmed**: The user applies a
@@ -237,7 +240,8 @@ a UI-automation test (the other system scenarios above are) and so carries no `w
 credentials is added; the user starts an operation on it (testing the connection, then selecting a package) and the
 sign-in dialog opens, naming the server's origin and saying the credential is used for this session only. After
 signing in, the operation continues, and selecting a package from the server asks for no second sign-in; the
-pin then names the server source and the card chip shows its alias. This scenario is tested by
+pin then holds no source and the card chip shows the alias of the server source that supplies it. This scenario is
+tested by
 `windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`, covering
 `AgentControl-System-ServerSignIn`.
 
@@ -352,10 +356,10 @@ covering `AgentControl-Platform-Net10`.
 source and a NuGet folder source configured side by side, sources of both kinds are added through the Settings
 dialogs, and a package is selected from the NuGet sources, proving the tool supports several configured sources.
 This scenario is tested by
-`windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly`,
+`windows@UpgradeMenuItem_Click_NuGetFolderSourceOffersNewestVersion_UpgradesFromThatSource`,
 `windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt`,
 `windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt`,
-`windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip` and
+`windows@SelectPackage_FromNuGetFolderSource_PinsThePackageAndCardShowsPackageChip` and
 `windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`, covering
 `AgentControl-System-MultipleSources`.
 
@@ -378,8 +382,8 @@ given a package chosen from a real NuGet folder feed; the managed folders, relea
 are produced as for a zip package. The published application is run against a real NuGet folder feed and upgrades
 a pinned repo from it, and against an in-process NuGet server from which it applies a package. This scenario is
 tested by
-`windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly`,
-`windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip` and
+`windows@UpgradeMenuItem_Click_NuGetFolderSourceOffersNewestVersion_UpgradesFromThatSource`,
+`windows@SelectPackage_FromNuGetFolderSource_PinsThePackageAndCardShowsPackageChip` and
 `windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`, covering
 `AgentControl-System-NuGetSources`.
 
@@ -449,25 +453,46 @@ tested by
 `windows@UpgradeMenuItem_Click_NuGetSourceRequiresSignaturesAndPackageUnsigned_IsRefusedAndRepoUnchanged`, covering
 `AgentControl-System-PackageAuthenticity`.
 
-**AgentControl_SourcePinIntegrity_PinBoundToSource_NoSubstitution**: With the same package id
-offered by two sources, a pin to the second source resolves only against it and the first source
-is never contacted; a pin naming a source that is not configured gives an error state for the repo
-and offers no upgrade from any other source. The published application shows both behaviors: a repo
-pinned to the NuGet source is upgraded from it although the zip source offers a higher version of
-the same package name, and a repo pinned to an unconfigured source shows a package source problem
-badge, offers no upgrade, and keeps its pin file unchanged. This scenario is tested by
-`windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly` and
-`windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade`,
-covering `AgentControl-System-SourcePinIntegrity`.
+**AgentControl_PinNamesNoSource_OnlyPackageVersionAndIdentityAreRecorded**: A pin never names a package source: the pin
+file written after choosing a package from a NuGet-package folder source, and from a Git source, holds the package,
+the version and the files identity and no `Source` or `SourceRevision` property, while the card shows the package chip
+with the source that supplies it (kept in the user's own settings). A repo whose pin was recorded without any identity
+of its files (an older pin) is still served from the configured source (here `Default`) and is never refused. The
+published application shows both behaviors: Upgrade from a NuGet folder source, which offers a newer version than
+the zip source does for the package name, upgrades from that source and writes a pin without a source, and a repo with
+a pin that no configured source offers shows a package source problem together with the upgrade to the newer version
+a source does offer, and keeps its pin file unchanged. This scenario is tested by
+`windows@SelectPackage_FromNuGetFolderSource_PinsThePackageAndCardShowsPackageChip`,
+`windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip`,
+`windows@UpgradeMenuItem_Click_NuGetFolderSourceOffersNewestVersion_UpgradesFromThatSource`,
+`windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes` and
+`windows@RepoCard_NoConfiguredSourceOffersPinnedVersion_ShowsSourceProblemAndStillOffersNewerVersion`, covering
+`AgentControl-System-PinNamesNoSource`, `AgentControl-System-LegacyPinSourceHint`,
+`AgentControl-System-NoSourceOffersProblem` and `AgentControl-System-UpgradeAcrossSources`.
+
+**AgentControl_PortablePin_AnotherSourceWithTheIdenticalFilesSuppliesThePackage**: A repo whose committed pin was made
+from a source this machine does not have, while a configured source - of the same or another kind - delivers the
+identical files, shows its package on the card with the supplying source named instead of a package source problem, and
+the pin file is left as it was; for such a repo the upgrade chip is offered for the newest version of the configured
+sources and the same files are restored on a fresh clone from the verified source only; a source whose files differ is
+never used. The published application is not run for this scenario (it needs two differently named configurations of
+one repo, which the FlaUI fixtures do not model, and the application is not started during this change); it is
+verified end to end through the real main window, headless, with real zip sources and a pin written by a real apply:
+`MainWindow_PinNamesNoSourceAndIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem` and
+`MainWindow_PinNamesNoSource_UpgradeChipOffersNewestVersionFromConfiguredSource`, covering
+`AgentControl-System-PortablePin` and `AgentControl-System-UpgradeAcrossSources`. The rules (the order of the sources,
+the identical-files check, the hints for a pin without an identity, the unchanged pin) are verified at the unit and
+subsystem levels (see the `LauncherUI` and `RepoCardViewModel` verification designs).
 
 **AgentControl_PackageContentIntegrity_IdentityIsRecordedForEveryKindOfSource**: In the published application,
-selecting a package for a never-pinned repo writes a pin (schema version 3) whose content identity names what was
-applied, computed independently by the test: for a zip source the SHA-256 of the zip, for a NuGet-package folder
-source the SHA-256 of the `.nupkg` file, and for a Git source `git-commit:` plus the commit the chosen tag points to
-(the Git run is `SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip`, described with the Git
-scenarios below). This scenario is tested by `windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile`,
-`windows@SelectPackage_FromNuGetFolderSource_RecordsSha256OfNupkgInPinFile` and
-`windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip`, covering
+selecting a package for a never-pinned repo writes a pin (schema version 4) whose content identity names what was
+applied, computed independently by the test: for a zip source, for a NuGet-package folder source and for a Git source
+the `files-sha256:` identity of the agent files the package delivers (the same value whatever the container). The pin
+holds nothing else about the source (the Git run is
+`SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip`, described with the Git
+scenarios below). This scenario is tested by `windows@SelectPackageMenuItem_Click_RecordsFilesIdentityInPinFile`,
+`windows@SelectPackage_FromNuGetFolderSource_RecordsFilesIdentityInPinFile` and
+`windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip`, covering
 `AgentControl-System-PackageContentIntegrity` and `AgentControl-System-PinFile`. For a NuGet package the identity
 describes the copy held on this machine (see the NuGet source unit verification), so a republish in the feed of a
 version already held is not noticed until that copy is cleared; the NuGet scenario of the next paragraph republishes
@@ -489,28 +514,23 @@ scenario is tested by `windows@LaunchButton_Click_PinnedVersionRepublished_Expla
 
 **AgentControl_IdentityAdoptedOnUpgrade_PinWithoutIdentityRecordsOneWithoutWarning**: A repo whose pin has no identity
 (as written before identities existed) is upgraded from 1.0.0 to 1.1.0 with the upgrade chip: the release notes open,
-no message is shown, and the pin now holds the SHA-256 of the 1.1.0 zip. This scenario is tested by
+no message is shown, and the pin now holds the files identity of the 1.1.0 package. This scenario is tested by
 `windows@UpgradeChip_Click_PinWithoutIdentity_AdoptsIdentityOfNewVersionWithoutWarning`, covering
 `AgentControl-System-IdentityAdoptedOnUpgrade`.
 
-**AgentControl_MovedGitTag_IsShownNeverAppliedAndAcceptedOnlyByChangePackage**: In the published
-application, run against a real local bare Git repository (git isolated from the user's configuration and
-credential helpers, no network), a repo is pinned to 1.0.0 of a Git source with the commit the tag pointed to when
-the repo was set up, and the tag has since been moved to another commit. In the first run the background check makes
-the amber "Tag moved" chip appear on the card (`TagMovedChip`, with the text "Tag moved"); nothing is applied: no
-managed folder is created, no release notes open and the pin file is byte for byte unchanged; and the card menu
-offers "Change package..." and no longer "Select Package...". This run is tested by
-`windows@RepoCard_PinnedGitTagMoved_ShowsTagMovedChipAndAppliesNothing`, covering
-`AgentControl-System-MovedTagWarning`. In the second run Change package... opens the Select
-Package dialog on the pin's source, package and version, choosing that version again shows the plain-language
-question that the package now contains different files, and answering No changes nothing (the repo's file, the pin
-and the warning are as before). In the third run answering Yes applies the tag's new content, opens its release notes,
-keeps the version and records the commit the tag points to now as the pin's identity, and the "Tag moved" chip goes
-away. These two runs are tested by
-`windows@ChangePackageMenuItem_SameVersionWithMovedTag_AsksAndDecliningLeavesRepoUnchanged` and
-`windows@ChangePackageMenuItem_SameVersionWithMovedTag_ConfirmingAppliesNewContentAndRecordsNewCommit`, covering
-`AgentControl-System-ChangedContentAcceptedDeliberately`. The confirmation for a republished zip is covered at the
-subsystem and unit levels.
+**AgentControl_ChangedContentAcceptedDeliberately_ChangePackageOnAPinnedRepoAsksFirst**: A pinned repo's card menu
+offers "Change package...", which opens the Select Package dialog on the source, package and version that supply the
+repo's files (run against a real local bare Git repository, git isolated from the user's configuration and credential
+helpers, no network, in the published application). Choosing the version a repo already uses when its content has
+changed (a republished package, or a Git tag moved to a commit with other files) shows the plain-language question
+that the package now contains different files, changes nothing when declined and applies the new content, recording
+its new identity, only when the user confirms; a changed version is never applied by a background check, an Upgrade
+or the restore at launch, and no "Tag moved" state exists. This scenario is tested by
+`windows@ChangePackageMenuItem_OnPinnedGitRepo_OpensDialogOnTheSupplyingSourcePackageAndVersion` (the dialog in the
+published application) and `MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed` (the
+question and its answers through the real main window, headless), covering
+`AgentControl-System-ChangedContentAcceptedDeliberately`. The confirmation for a republished zip and for a Git tag is
+covered at the subsystem and unit levels.
 
 **AgentControl_UpgradeFromChip_ClickStartsTheUpgrade**: On a repo pinned to 1.0.0 with 1.1.0 at the source, the
 real application shows the upgrade chip as a button (invocable through UI Automation); invoking it runs the same
@@ -686,15 +706,15 @@ tag (`release/1.0.0`) and says the fixed parts are case-sensitive, no preview li
 makes the same test succeed. In a third run, with the Git source preconfigured, a never-pinned repo is offered Select
 Package... (and not Change package...); choosing the package and version 1.0.0 applies the tag's files,
 opens its release
-notes and writes a pin holding the source, package, version and `git-commit:` plus the commit the tag points to, and the
+notes and writes a pin holding the package, version and the files identity (no source and no commit), and the
 card shows the package and version, the alias and (as drawn ink beside the alias - the icon itself is decorative and
 not in the UI Automation tree) the Git icon. This scenario is tested by
 `windows@SettingsWindow_AddGitRepositoryViaDialog_TestsConnectionListsTagsAndPersistsIt`,
 `windows@SettingsWindow_AddGitRepositoryWithWrongCasePattern_ShowsNoMatchingTagsThenSucceedsWhenFixed` and
-`windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip`, covering
+`windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip`, covering
 `AgentControl-System-GitSources`, `AgentControl-System-GitSourceSetup` (the first two),
-`AgentControl-System-GitSourceSelection` and `AgentControl-System-GitSourcePresentation` (the third). The tag and the
-shortened commit that the card shows in its tooltip are not read back end to end - the tooltip is not reliably
+`AgentControl-System-GitSourceSelection` and `AgentControl-System-GitSourcePresentation` (the third). The tag that the
+card shows in its tooltip is not read back end to end - the tooltip is not reliably
 reachable through UI Automation - so `AgentControl-System-GitSourcePresentation` states only the Git origin (the icon
 and the alias), and the tooltip is verified in the `LauncherUI` subsystem and unit tests.
 
@@ -730,7 +750,7 @@ helpers, no network), through the same windows a user uses. They cover the follo
 - `AgentControl-System-GitSourceLayoutOnly`: the repository of the first bullet also holds a `README.md` and a `docs`
   folder; after the package is applied the repo holds neither, nor a `.git` folder - only the package layout. This part
   is tested by `windows@SelectPackage_FromGitRepositoryUnderHostileUserConfiguration_RunsNoCodeAndAppliesRawBytes` and
-  `windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip`.
+  `windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip`.
 - `AgentControl-System-GitSourceRefusesLinks` and `AgentControl-System-GitSourceRefusesCollisions`: a tag whose layout
   holds a symbolic link in a managed folder (staged without creating a link on disk, which needs no privilege), a
   submodule, or two files whose names differ only in letter case is chosen in Select Package; a message explains that
@@ -754,7 +774,8 @@ network are involved. This part is the only evidence of sign-in behavior against
 Git Credential Manager's own dialog (whether it can be shown from a hidden-console process) is not exercised: that is
 a manual check on a machine with a private https repository.
 
-- `AgentControl-System-GitSignInBackgroundNeverPrompts`: a repo is pinned to a Git source at the private server; the
+- `AgentControl-System-GitSignInBackgroundNeverPrompts`: a repo whose package a Git source at the private server
+  supplies (the card remembers that source); the
   application's background check at start-up asks git, git asks the helper, which may not prompt (`asked`, never
   `prompted`), the server receives only anonymous requests and no signed-in one, the card shows the red "Sign-in
   needed" chip, and no sign-in dialog opens. This part is tested by

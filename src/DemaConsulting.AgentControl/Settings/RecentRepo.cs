@@ -60,12 +60,16 @@ internal sealed class RecentRepo
     public string? PinnedPackageVersion { get; set; }
 
     /// <summary>
-    ///     Gets or sets the alias of the package source the pin last seen in this repo's
-    ///     <c>.agentcontrol.json</c> names, or <see langword="null"/> if the repo has never been
-    ///     synced (or was last seen before pins named a source).
+    ///     Gets or sets the alias of the package source that last supplied this repo's agent
+    ///     package on this machine, or <see langword="null"/> if none is known. A per-user cache
+    ///     only: the repo's pin file names no source (sources are each user's own configuration), so
+    ///     this is never read from or written to <c>.agentcontrol.json</c>.
     /// </summary>
     /// <remarks>
-    ///     Cached copy; see <see cref="PinnedPackageName"/> remarks for the authoritative source.
+    ///     It saves reading every source on each check and is where Select Package starts; it is
+    ///     cleared when the source is no longer configured or the pinned package changes. The
+    ///     property keeps its historical settings name (<c>PinnedSource</c>) so existing settings
+    ///     files stay readable.
     /// </remarks>
     public string? PinnedSource { get; set; }
 

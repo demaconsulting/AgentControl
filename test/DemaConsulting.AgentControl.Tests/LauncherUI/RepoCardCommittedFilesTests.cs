@@ -160,7 +160,7 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
         // Arrange: a repo pinned to 1.0.0 whose source also offers 2.0.0
         var (fixture, card, provider) = CreateTrackedRepo(versions: ["1.0.0", "2.0.0"]);
         RepoPinStore.Save(
-            fixture.WorkPath, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+            fixture.WorkPath, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
         card.RefreshCheap();
         var questions = new List<string>();
         card.CommittedFilesConversionRequested += (_, request) =>

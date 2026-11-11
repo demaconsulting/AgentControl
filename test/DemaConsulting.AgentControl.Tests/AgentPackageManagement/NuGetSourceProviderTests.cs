@@ -226,51 +226,54 @@ public sealed class NuGetSourceProviderTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that the reader of an acquired NuGet package reports the SHA-256 of the package
-    ///     file as its content identity.
+    ///     Test that the reader of an acquired NuGet package reports the identity of the agent files in
+    ///     the package (not of the package file), the same one a zip of the same files reports.
     /// </summary>
     [Fact]
-    public async Task NuGetSourceProvider_Acquire_ExistingPackage_ReportsSha256OfNupkgAsContentIdentity()
+    public async Task NuGetSourceProvider_Acquire_ExistingPackage_ReportsFilesIdentityIndependentOfNupkg()
     {
-        // Arrange: a feed holding a package, and the independently computed SHA-256 of its file
+        // Arrange: two feeds holding the same agent files, one of them packed with a different nuspec
+        // and extra entries, so their package files differ in bytes
         var feed = CreateTempDirectory();
+        var otherFeed = CreateTempDirectory();
         var id = UniqueId();
         NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "agents v1");
-        var nupkg = Assert.Single(Directory.GetFiles(feed, "*.nupkg"));
-        var expected = "sha256:" + Convert.ToHexStringLower(
-            System.Security.Cryptography.SHA256.HashData(
-                await File.ReadAllBytesAsync(nupkg, TestContext.Current.CancellationToken)));
+        NuGetFeedBuilder.CreatePackage(
+            otherFeed, id, "1.0.0",
+            ("content/.github/skills/skill.md", "skills content"),
+            ("content/.github/templates/template.md", "templates content"),
+            ("content/.github/standards/style.md", "standards content"),
+            ("content/.github/agents/copilot.md", "agents v1"),
+            ("content/release-notes.md", "different notes"),
+            ("lib/readme.txt", "unrelated"));
         var provider = CreateProvider("Feed", feed);
+        var otherProvider = CreateProvider("Other", otherFeed);
         var package = Assert.Single(await provider.ListVersionsAsync(id, CancellationToken.None));
+        var otherPackage = Assert.Single(await otherProvider.ListVersionsAsync(id, CancellationToken.None));
 
         // Act
         using var reader = await provider.AcquireAsync(package, CancellationToken.None);
+        using var otherReader = await otherProvider.AcquireAsync(otherPackage, CancellationToken.None);
 
-        // Assert: the identity names the very bytes of the package file
-        Assert.Equal(expected, reader.ContentIdentity);
+        // Assert: a files identity, equal for the same files although the package files differ
+        Assert.True(PackageContentIdentity.IsFilesIdentity(reader.ContentIdentity));
+        Assert.Equal(reader.ContentIdentity, otherReader.ContentIdentity);
+        Assert.NotEqual(
+            await File.ReadAllBytesAsync(Assert.Single(Directory.GetFiles(feed, "*.nupkg")), TestContext.Current.CancellationToken),
+            await File.ReadAllBytesAsync(Assert.Single(Directory.GetFiles(otherFeed, "*.nupkg")), TestContext.Current.CancellationToken));
     }
 
     /// <summary>
-    ///     Test that two versions of one package report different identities, each the SHA-256 of
-    ///     its own package file.
+    ///     Test that two versions of one package with different agent files report different identities.
     /// </summary>
     [Fact]
-    public async Task NuGetSourceProvider_Acquire_TwoVersions_ReportTheIdentityOfTheirOwnPackageFile()
+    public async Task NuGetSourceProvider_Acquire_TwoVersions_ReportDifferentIdentities()
     {
-        // Arrange: two versions with different content, and the independently computed SHA-256 of each file
+        // Arrange: two versions with different content
         var feed = CreateTempDirectory();
         var id = UniqueId();
         NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "agents v1");
         NuGetFeedBuilder.CreateAgentPackage(feed, id, "2.0.0", marker: "agents v2");
-        var expected = new Dictionary<string, string>();
-        foreach (var file in Directory.GetFiles(feed, "*.nupkg"))
-        {
-            var version = Path.GetFileNameWithoutExtension(file).EndsWith("2.0.0", StringComparison.Ordinal) ? "2.0.0" : "1.0.0";
-            expected[version] = "sha256:" + Convert.ToHexStringLower(
-                System.Security.Cryptography.SHA256.HashData(
-                    await File.ReadAllBytesAsync(file, TestContext.Current.CancellationToken)));
-        }
-
         var provider = CreateProvider("Feed", feed);
         var packages = await provider.ListVersionsAsync(id, CancellationToken.None);
 
@@ -282,9 +285,9 @@ public sealed class NuGetSourceProviderTests : IDisposable
             identities[package.Version.ToString()] = reader.ContentIdentity;
         }
 
-        // Assert: each version names its own bytes, and the two differ
-        Assert.Equal(expected["1.0.0"], identities["1.0.0"]);
-        Assert.Equal(expected["2.0.0"], identities["2.0.0"]);
+        // Assert: each version names its own files, and the two differ
+        Assert.True(PackageContentIdentity.IsFilesIdentity(identities["1.0.0"]));
+        Assert.True(PackageContentIdentity.IsFilesIdentity(identities["2.0.0"]));
         Assert.NotEqual(identities["1.0.0"], identities["2.0.0"]);
     }
 
@@ -302,9 +305,6 @@ public sealed class NuGetSourceProviderTests : IDisposable
         var id = UniqueId();
         NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "agents v1");
         var nupkg = Assert.Single(Directory.GetFiles(feed, "*.nupkg"));
-        var original = "sha256:" + Convert.ToHexStringLower(
-            System.Security.Cryptography.SHA256.HashData(
-                await File.ReadAllBytesAsync(nupkg, TestContext.Current.CancellationToken)));
         var provider = CreateProvider("Feed", feed);
         var package = Assert.Single(await provider.ListVersionsAsync(id, CancellationToken.None));
         string? first;
@@ -319,37 +319,9 @@ public sealed class NuGetSourceProviderTests : IDisposable
         using var again = await provider.AcquireAsync(package, CancellationToken.None);
 
         // Assert: the identity is that of the cached copy that was unpacked, the same both times
-        Assert.Equal(original, first);
-        Assert.Equal(original, again.ContentIdentity);
+        Assert.True(PackageContentIdentity.IsFilesIdentity(first));
+        Assert.Equal(first, again.ContentIdentity);
         Assert.Equal("agents v1", again.ReadText(".github/agents/copilot.md"));
-    }
-
-    /// <summary>
-    ///     Test that a package folder holding more than one package file cannot be identified and
-    ///     is refused, rather than recorded under an arbitrarily chosen file's hash.
-    /// </summary>
-    [Fact]
-    public async Task NuGetSourceProvider_Acquire_AmbiguousPackageFile_ThrowsInvalidOperationException()
-    {
-        // Arrange: a package acquired once, so it sits in the private cache, with a second package file added beside it
-        var feed = CreateTempDirectory();
-        var id = UniqueId();
-        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0", marker: "agents v1");
-        var provider = CreateProvider("Feed", feed);
-        var package = Assert.Single(await provider.ListVersionsAsync(id, CancellationToken.None));
-        string packageFolder;
-        using (var first = await provider.AcquireAsync(package, CancellationToken.None))
-        {
-            packageFolder = first.Description;
-        }
-
-        await File.WriteAllTextAsync(
-            Path.Combine(packageFolder, "other.nupkg"), "not the package", TestContext.Current.CancellationToken);
-
-        // Act / Assert: the identity cannot be established, so the package is refused
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => provider.AcquireAsync(package, CancellationToken.None));
-        Assert.Contains("identity cannot be established", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

@@ -88,7 +88,7 @@ public sealed class RepoCardServerSourceTests : IAsyncLifetime
     }
 
     /// <summary>
-    ///     Test that the package chip names the pinned source by alias and shows the server icon,
+    ///     Test that the package chip names the source that supplies the package by alias and shows the server icon,
     ///     which is different from the zip and NuGet-folder icons.
     /// </summary>
     [Fact]
@@ -223,7 +223,7 @@ public sealed class RepoCardServerSourceTests : IAsyncLifetime
     private RepoCardViewModel CreateCard(MockNuGetFeed feed, PackageCredentialContext? credentials)
     {
         var repoRoot = CreateTempDirectory();
-        RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = PackageId, Version = "1.0.0" });
+        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = PackageId, Version = "1.0.0" });
         var settings = new AppSettings
         {
             Sources =

@@ -43,20 +43,23 @@ public sealed class RepoCardContentIdentityTests : IDisposable
     private readonly List<string> _tempPaths = [];
 
     /// <summary>
-    ///     Test that applying a package records the SHA-256 of its zip file in the pin.
+    ///     Test that applying a package records the identity of its files in the pin, and neither a source
+    ///     nor a source revision.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin()
+    public void RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsFilesIdentityInPin()
     {
         // Arrange: an unpinned repo and a source with one zip
         var (repo, sourceDir, card) = CreateRepoWithSource();
-        var zipPath = CreateZip(sourceDir, "1.0.0", "v1");
+        CreateZip(sourceDir, "1.0.0", "v1");
 
         // Act
         card.ApplySelectedPackage("contoso-agents", "1.0.0");
 
-        // Assert: the pin names the zip's SHA-256
-        Assert.Equal(Sha256Of(zipPath), RepoPinStore.Load(repo)?.ContentIdentity);
+        // Assert: the pin names the identity of the four agent files and no source
+        var pin = RepoPinStore.Load(repo);
+        Assert.Equal(FilesIdentity("v1"), pin?.ContentIdentity);
+        Assert.DoesNotContain("source", File.ReadAllText(PinPath(repo)), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -86,7 +89,7 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         Assert.DoesNotContain(".agentcontrol.json", message, StringComparison.Ordinal);
         Assert.DoesNotContain("sha256", message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(
-            RepoPinStore.Load(repo)!.ContentIdentity!["sha256:".Length..], message, StringComparison.OrdinalIgnoreCase);
+            RepoPinStore.Load(repo)!.ContentIdentity!["files-sha256:".Length..], message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("v1", ReadMarker(repo));
         Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
     }
@@ -154,6 +157,59 @@ public sealed class RepoCardContentIdentityTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that selecting the pinned version from another source asks for confirmation when that
+    ///     source delivers different files, and switches to it without asking when the files are identical.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackage_SameVersionFromOtherSource_AsksOnlyWhenFilesDiffer()
+    {
+        // Arrange: a repo applied from source 'Default', and two other sources offering the same version -
+        // one with different files, one with identical files
+        var repo = CreateTempDirectory();
+        var defaultDir = CreateTempDirectory();
+        var differentDir = CreateTempDirectory();
+        var identicalDir = CreateTempDirectory();
+        CreateZip(defaultDir, "1.0.0", "v1");
+        CreateZip(differentDir, "1.0.0", "different");
+        CreateZip(identicalDir, "1.0.0", "v1");
+        var settings = new AppSettings
+        {
+            Sources =
+            [
+                new PackageSourceDefinition { Alias = "Default", Type = PackageSourceType.Zip, Location = defaultDir },
+                new PackageSourceDefinition { Alias = "Different", Type = PackageSourceType.Zip, Location = differentDir },
+                new PackageSourceDefinition { Alias = "Identical", Type = PackageSourceType.Zip, Location = identicalDir }
+            ]
+        };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+        await card.ApplySelectedPackageAsync(
+            new PackageReference("Default", "contoso-agents", "1.0.0"), TestContext.Current.CancellationToken);
+        var pinBefore = await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken);
+        var requests = new List<ContentChangeConfirmationRequest>();
+        card.ContentChangeConfirmationRequested += (_, request) => requests.Add(request);
+
+        // Act: select the same version from the source with different files
+        await card.ApplySelectedPackageAsync(
+            new PackageReference("Different", "contoso-agents", "1.0.0"), TestContext.Current.CancellationToken);
+
+        // Assert: asked, and nothing changed
+        Assert.Contains("now contains different files", Assert.Single(requests).Message, StringComparison.Ordinal);
+        Assert.Equal("v1", ReadMarker(repo));
+        Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
+
+        // Act: select the same version from the source with identical files
+        await card.ApplySelectedPackageAsync(
+            new PackageReference("Identical", "contoso-agents", "1.0.0"), TestContext.Current.CancellationToken);
+
+        // Assert: no further question, and the pin keeps the identity of the (identical) files; the card
+        // now remembers that source
+        Assert.Single(requests);
+        var pin = RepoPinStore.Load(repo);
+        Assert.Equal(FilesIdentity("v1"), pin?.ContentIdentity);
+        Assert.Equal("Identical", card.SupplyingSource);
+    }
+
+    /// <summary>
     ///     Test that, once the user has confirmed, the changed package is applied and the new
     ///     identity replaces the recorded one.
     /// </summary>
@@ -164,7 +220,7 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         var (repo, sourceDir, card) = CreateRepoWithSource();
         CreateZip(sourceDir, "1.0.0", "v1");
         card.ApplySelectedPackage("contoso-agents", "1.0.0");
-        var republishedZip = Republish(sourceDir, "1.0.0", "tampered");
+        Republish(sourceDir, "1.0.0", "tampered");
         var errors = new List<string>();
         card.ErrorOccurred += (_, message) => errors.Add(message);
 
@@ -177,7 +233,7 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         // Assert: the changed content is in the repo and the pin names its identity
         Assert.Empty(errors);
         Assert.Equal("tampered", ReadMarker(repo));
-        Assert.Equal(Sha256Of(republishedZip), RepoPinStore.Load(repo)?.ContentIdentity);
+        Assert.Equal(FilesIdentity("tampered"), RepoPinStore.Load(repo)?.ContentIdentity);
     }
 
     /// <summary>
@@ -211,8 +267,8 @@ public sealed class RepoCardContentIdentityTests : IDisposable
     {
         // Arrange: a v2-style pin (no identity) for 1.0.0, and the zip as it is now
         var (repo, sourceDir, card) = CreateRepoWithSource();
-        var zipPath = CreateZip(sourceDir, "1.0.0", "v1");
-        RepoPinStore.Save(repo, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        CreateZip(sourceDir, "1.0.0", "v1");
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
         var events = new List<string>();
         card.ErrorOccurred += (_, message) => events.Add("error: " + message);
         card.ContentChangeConfirmationRequested += (_, _) => events.Add("confirmation");
@@ -223,7 +279,7 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         // Assert: applied silently and the identity is now recorded
         Assert.Empty(events);
         Assert.Equal("v1", ReadMarker(repo));
-        Assert.Equal(Sha256Of(zipPath), RepoPinStore.Load(repo)?.ContentIdentity);
+        Assert.Equal(FilesIdentity("v1"), RepoPinStore.Load(repo)?.ContentIdentity);
     }
 
     /// <summary>
@@ -233,11 +289,11 @@ public sealed class RepoCardContentIdentityTests : IDisposable
     [Fact]
     public async Task RepoCardViewModel_UpgradeCommand_NewerVersion_RecordsNewIdentityWithoutWarning()
     {
-        // Arrange: applied from 1.0.0, and a 2.0.0 zip appears
+        // Arrange: a source with 1.0.0 and 2.0.0, and a repo that the user applied 1.0.0 to
         var (repo, sourceDir, card) = CreateRepoWithSource();
         CreateZip(sourceDir, "1.0.0", "v1");
+        CreateZip(sourceDir, "2.0.0", "v2");
         card.ApplySelectedPackage("contoso-agents", "1.0.0");
-        var newerZip = CreateZip(sourceDir, "2.0.0", "v2");
         var events = new List<string>();
         card.ErrorOccurred += (_, message) => events.Add("error: " + message);
         card.ContentChangeConfirmationRequested += (_, _) => events.Add("confirmation");
@@ -249,7 +305,7 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         Assert.Empty(events);
         var pin = RepoPinStore.Load(repo);
         Assert.Equal("2.0.0", pin?.Version);
-        Assert.Equal(Sha256Of(newerZip), pin?.ContentIdentity);
+        Assert.Equal(FilesIdentity("v2"), pin?.ContentIdentity);
         Assert.Equal("v2", ReadMarker(repo));
     }
 
@@ -369,10 +425,9 @@ public sealed class RepoCardContentIdentityTests : IDisposable
             repo,
             new RepoPin
             {
-                Source = "Default",
                 PackageName = "contoso-agents",
                 Version = "1.0.0",
-                ContentIdentity = "sha256:" + new string('a', 64)
+                ContentIdentity = "files-sha256:" + new string('a', 64)
             });
         var provider = new NoIdentityProvider();
         var settings = new AppSettings { Sources = [new PackageSourceDefinition { Alias = "Default", Type = PackageSourceType.Zip, Location = "unused" }] };
@@ -441,8 +496,7 @@ public sealed class RepoCardContentIdentityTests : IDisposable
     /// <summary>
     ///     Creates a package zip of <c>contoso-agents</c> whose agents file holds the given marker.
     /// </summary>
-    /// <returns>The zip's path.</returns>
-    private static string CreateZip(string sourceDir, string version, string marker, bool includeAgentsMd = false)
+    private static void CreateZip(string sourceDir, string version, string marker, bool includeAgentsMd = false)
     {
         var zipPath = Path.Combine(sourceDir, $"contoso-agents-{version}.zip");
         using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
@@ -463,26 +517,46 @@ public sealed class RepoCardContentIdentityTests : IDisposable
             using var writer = new StreamWriter(archive.CreateEntry(name).Open());
             writer.Write(content);
         }
-
-        return zipPath;
     }
 
     /// <summary>
     ///     Replaces a version's zip with one holding different content, as a republishing
     ///     maintainer would.
     /// </summary>
-    /// <returns>The zip's path.</returns>
-    private static string Republish(string sourceDir, string version, string marker)
+    private static void Republish(string sourceDir, string version, string marker)
     {
         File.Delete(Path.Combine(sourceDir, $"contoso-agents-{version}.zip"));
-        return CreateZip(sourceDir, version, marker);
+        CreateZip(sourceDir, version, marker);
     }
 
     /// <summary>
-    ///     Computes the <c>sha256:</c> identity of a file independently of the code under test.
+    ///     Computes the files identity of the four agent files <see cref="CreateZip"/> writes, independently
+    ///     of the code under test: SHA-256 of, per file in ordinal path order, the UTF-8 path, a zero byte,
+    ///     the length as eight little-endian bytes and the bytes.
     /// </summary>
-    private static string Sha256Of(string path) =>
-        "sha256:" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
+    /// <param name="marker">The text of the agents file.</param>
+    /// <returns><c>files-sha256:</c> followed by the lower-case hexadecimal digest.</returns>
+    private static string FilesIdentity(string marker)
+    {
+        var files = new (string Path, string Text)[]
+        {
+            (".github/agents/copilot.md", marker),
+            (".github/skills/skill.md", "skills"),
+            (".github/standards/style.md", "standards"),
+            (".github/templates/template.md", "templates")
+        };
+        using var stream = new MemoryStream();
+        foreach (var (path, text) in files)
+        {
+            var content = System.Text.Encoding.UTF8.GetBytes(text);
+            stream.Write(System.Text.Encoding.UTF8.GetBytes(path));
+            stream.WriteByte(0);
+            stream.Write(BitConverter.GetBytes((long)content.Length));
+            stream.Write(content);
+        }
+
+        return "files-sha256:" + Convert.ToHexStringLower(SHA256.HashData(stream.ToArray()));
+    }
 
     /// <summary>
     ///     Reads the marker the package wrote into the repo's agents file.

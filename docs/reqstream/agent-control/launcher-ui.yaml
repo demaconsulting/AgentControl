@@ -1292,7 +1292,7 @@ sections:
       - id: AgentControl-LauncherUI-SignatureIndicator
         title: >-
           The LauncherUI subsystem shall show, in the agent package chip of a repo card whose
-          pinned package comes from a NuGet source that requires signed packages, a shield with a
+          package is supplied by a NuGet source that requires signed packages, a shield with a
           tooltip that says signatures are required and whether any trusted signer is accepted or
           the publisher is pinned, and no shield otherwise.
         justification: |
@@ -1302,7 +1302,7 @@ sections:
           - AgentControl-RepoCardViewModel-SignatureIndicator
         tests:
           - MainWindow_PackageChip_ShowsShieldOnlyWhenSignaturesAreRequired
-          - RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip
+          - RepoCardViewModel_SupplyingSourceRequiresSignatures_ShowsShieldWithTooltip
 
       - id: AgentControl-LauncherUI-BackgroundChecksDoNotPrompt
         title: >-
@@ -1335,7 +1335,7 @@ sections:
           - AgentControl-RepoCardViewModel-UpgradeBadge
           - AgentControl-RepoCardViewModel-LaunchLabel
         tests:
-          - RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip
+          - RepoCardViewModel_PackageChip_SuppliedByZipSource_ShowsNameVersionAndSourceInTooltip
           - RepoCardViewModel_PinnedToServerSource_ChipShowsAliasAndServerIcon
           - RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions
           - RepoCardViewModel_BranchChip_BranchKnown_ShowsBranchWithTooltip
@@ -1402,12 +1402,12 @@ sections:
           problem without affecting other sources or repos.
         justification: |
           With several sources configured, one share or server being offline is expected; it must
-          not stop the developer from using a source that works or hide the state of repos
-          pinned to other sources.
+          not stop the developer from using a source that works or hide what the sources that
+          work offer to repos.
         children:
           - AgentControl-SelectPackageWindowViewModel-SourceFailureIsolation
         tests:
-          - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked
+          - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_ReadableSourceStillOffersUpgrades
           - SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline
 
       - id: AgentControl-LauncherUI-RetryFailedRead
@@ -1474,33 +1474,100 @@ sections:
       - id: AgentControl-LauncherUI-SourceAwareActions
         title: >-
           The LauncherUI subsystem shall perform select-package, upgrade, launch-time sync and
-          upgrade-available checks for a repo only at the package source named in the repo's
-          pin, shall record that source in the pin when a package is applied, shall show an
-          error state instead of offering anything when the pinned source is not configured, and
-          shall keep cached source results only for sources that have not changed.
+          upgrade-available checks for a repo against the sources the user has configured (a repo's
+          pin names none), shall remember the source that was actually used for a repo on its card
+          without writing it into the pin, shall show an error state instead of offering anything
+          when no configured source can supply the pinned package, and shall keep cached source
+          results only for sources that have not changed.
         justification: |
-          A repo's pin binds it to one source; quietly using a different source because the
-          pinned one is missing or renamed would install content the pin never named, and the
-          user needs to see that the source is missing so they can restore it.
+          A repo's pin is shared by a team and sources are each user's own configuration, so the
+          pin cannot say which source to use; quietly using a source whose files differ would
+          install content the pin never named, and the user needs to see that the package cannot be
+          obtained so they can add a source or choose the package again.
         children:
           - AgentControl-RepoCardViewModel-SourceAwareness
           - AgentControl-MainWindowViewModel-InvalidateChangedSources
           - AgentControl-SelectPackageWindowViewModel-SourceScoped
         tests:
-          - RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
-          - RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent
+          - RepoCardViewModel_RefreshCheap_NoSourceConfigured_ShowsNoSourceOffersProblemAndOffersNoUpgrade
+          - RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_ExtractsThatSourcesContentAndRemembersIt
+
+      - id: AgentControl-LauncherUI-ResolveSourceByFiles
+        title: >-
+          The LauncherUI subsystem shall find the source that supplies a repo's pinned package among
+          all the sources the user has configured, in Settings order, choosing the first that offers
+          the pinned package and version with exactly the files the pin recorded - whatever its
+          alias or kind - and, for a pin that recorded no files identity, the source that last
+          supplied it, then the one an older pin file named, then the first that offers it; it shall
+          never use a source whose files differ from the recorded ones.
+        justification: |
+          Source aliases belong to each user's own configuration, so the same repo reaches the same
+          agent files through different sources on different machines; verifying the files, rather
+          than trusting a name, is what makes that safe, and an older pin that has nothing to verify
+          must still keep working.
+        children:
+          - AgentControl-RepoCardViewModel-ResolveByFilesIdentity
+          - AgentControl-RepoCardViewModel-PreferLastSupplier
+          - AgentControl-RepoCardViewModel-ResolveRejectsDifferentFiles
+          - AgentControl-RepoCardViewModel-ResolveWithoutIdentityByHints
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceNamedDifferently_RestoresFromIdenticalSourceWithoutWritingPin
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_OnlyOtherFilesAvailable_RefusesWithExplanation
+          - RepoCardViewModel_Refresh_PinWithoutFilesIdentity_UsesLegacySourceHintWhenConfigured
+          - MainWindow_PinNamesNoSourceAndIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem
+
+      - id: AgentControl-LauncherUI-SupplyingSourceShown
+        title: >-
+          The LauncherUI subsystem shall show on a repo's package chip which of the user's sources
+          currently supplies its pinned package, without a source problem, and shall explain a pinned
+          package that no configured source offers, or that no configured source delivers with the
+          files the repo was set up with.
+        justification: |
+          A teammate whose configuration differs must see a working repo, and see where its files
+          come from; when nothing can supply them the card must say why in terms the user can act
+          on.
+        children:
+          - AgentControl-RepoCardViewModel-ChipNamesSupplyingSource
+          - AgentControl-RepoCardViewModel-NoSourceOffersProblem
+          - AgentControl-RepoCardViewModel-UnresolvedPinExplained
+          - AgentControl-RepoCardViewModel-UnreadableSourceIsNotAProblem
+        tests:
+          - RepoCardViewModel_Refresh_SourceNamedDifferentlyHasIdenticalFiles_NamesSupplierWithoutProblem
+          - RepoCardViewModel_Refresh_OnlySourceHasDifferentFiles_ShowsNoMatchingFilesProblem
+          - RepoCardViewModel_Refresh_NoSourceOffersPinnedVersion_ShowsNoSourceOffersProblem
+          - MainWindow_PinNamesNoSourceAndIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem
+
+      - id: AgentControl-LauncherUI-UpgradeAcrossSources
+        title: >-
+          The LauncherUI subsystem shall offer an upgrade to the newest version that any of the
+          user's configured sources offers (a tie keeping Settings order), keep offering it while a
+          package source problem is shown, and apply it from the source that offers it, recording
+          only the package, version and files identity in the pin.
+        justification: |
+          A pin names no source, so the next version of the team's agent package may come from any
+          of the user's sources, and a source problem must not take away the upgrade that resolves
+          it; upgrading is a deliberate action.
+        children:
+          - AgentControl-RepoCardViewModel-UpgradeAcrossSources
+          - AgentControl-RepoCardViewModel-ProblemKeepsUpgradeOffered
+        tests:
+          - RepoCardViewModel_UpgradeCommand_SeveralSources_UsesNewestVersionAcrossSourcesAndRecordsNoSource
+          - RepoCardViewModel_Refresh_NoSourceOffersPinnedVersionButNewerOffered_ShowsProblemAndStillOffersUpgrade
+          - MainWindow_PinNamesNoSource_UpgradeChipOffersNewestVersionFromConfiguredSource
 
       - id: AgentControl-LauncherUI-ContentChangeProtection
         title: >-
-          The LauncherUI subsystem shall record the content identity of a package in the repo's pin
-          when the package is selected or upgraded to.
+          The LauncherUI subsystem shall record the content identity of the agent files of a package
+          in the repo's pin when the package is selected or upgraded to.
         justification: |
           A package republished under the version a repo is pinned to would silently change the
-          instructions an agent follows; recording what was applied is what makes that detectable.
+          instructions an agent follows; recording what was applied is what makes that detectable,
+          and what lets the user's configured sources be matched to the files the repo was set up
+          with.
         children:
           - AgentControl-RepoCardViewModel-RecordContentIdentity
         tests:
-          - RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin
+          - RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsFilesIdentityInPin
 
       - id: AgentControl-LauncherUI-ContentChangeRefusal
         title: >-
@@ -1566,10 +1633,12 @@ sections:
       - id: AgentControl-LauncherUI-ContentChangeAdoption
         title: >-
           The LauncherUI subsystem shall apply a package silently, recording its identity, when the
-          pin recorded none or the source reports none.
+          pin recorded no identity of agent files (including one an older version recorded from a
+          package file) or the source reports none.
         justification: |
-          Pins made before identities existed, and sources that cannot name an identity, must keep
-          working without warnings that mean nothing.
+          Pins made before identities were recorded or before they were computed from the files,
+          and sources that cannot name an identity, must keep working without warnings that mean
+          nothing.
         children:
           - AgentControl-RepoCardViewModel-AdoptMissingIdentity
           - AgentControl-RepoCardViewModel-IgnoreMissingSourceIdentity
@@ -1704,8 +1773,8 @@ sections:
         tests:
           - PackageSourceIcons_GitSource_HasGitIconAndNames
           - SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName
-          - RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias
-          - MainWindow_PinnedGitSourceCard_ChipShowsGitIconAliasTagAndShortCommit
+          - RepoCardViewModel_SuppliedByGitSource_ShowsGitIconAndAlias
+          - MainWindow_GitSourceCard_ChipShowsGitIconAliasAndTag
 
       - id: AgentControl-LauncherUI-GitSourceRowStatus
         title: >-
@@ -1727,65 +1796,27 @@ sections:
 
       - id: AgentControl-LauncherUI-GitSourceCardTooltip
         title: >-
-          The LauncherUI subsystem shall show on the card of a repo pinned to a Git source the tag
-          and the shortened commit its files came from.
+          The LauncherUI subsystem shall show on the card of a repo whose package a Git source
+          supplies the tag the pinned version has in that source.
         justification: |
-          Knowing the exact tag and commit a repo's files came from is what makes a later change
-          to that tag recognizable.
+          Knowing the exact tag the repo's files came from lets the user find them in the
+          repository.
         children:
           - AgentControl-RepoCardViewModel-GitSourceTooltip
         tests:
-          - RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit
-          - MainWindow_PinnedGitSourceCard_ChipShowsGitIconAliasTagAndShortCommit
+          - RepoCardViewModel_PackageChipTooltip_GitSource_NamesTagOnly
+          - MainWindow_GitSourceCard_ChipShowsGitIconAliasAndTag
 
-      - id: AgentControl-LauncherUI-TagMovedWarning
+      - id: AgentControl-LauncherUI-RefreshRelistsGitSources
         title: >-
-          The LauncherUI subsystem shall show, on the card of a repo pinned to a Git source, a "Tag
-          moved" warning when the tag of the pinned version now points to a different commit than
-          the one the repo's files came from, explaining what happened and how to accept it.
+          The LauncherUI subsystem shall read the user's Git sources again when the user starts a
+          refresh, so that a tag pushed during the session (a new version) is not missed.
         justification: |
-          A moved tag changes the instructions an agent follows without a new version, so the user
-          must be told.
+          A cached listing would hide a newly pushed version.
         children:
-          - AgentControl-RepoCardViewModel-TagMovedWarning
-          - AgentControl-RepoCardViewModel-TagMovedNeedsEvidence
-          - AgentControl-RepoCardViewModel-TagMovedClearedByNewPin
-          - AgentControl-RepoCardViewModel-TagMovedFollowsTagPattern
+          - AgentControl-RepoCardViewModel-RefreshRelistsGitSources
         tests:
-          - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip
-
-      - id: AgentControl-LauncherUI-TagMovedAppliesNothing
-        title: >-
-          The LauncherUI subsystem shall never apply anything because a tag moved.
-        justification: |
-          Applying a moved tag silently would defeat the point of pinning, so the decision stays
-          with the user.
-        children:
-          - AgentControl-RepoCardViewModel-TagMovedAppliesNothing
-        tests:
-          - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing
-
-      - id: AgentControl-LauncherUI-TagMovedFreshListing
-        title: >-
-          The LauncherUI subsystem shall read the Git source again when the user starts a refresh,
-          so that a tag moved during the session is not missed.
-        justification: |
-          A cached listing would hide a tag moved later in the session.
-        children:
-          - AgentControl-RepoCardViewModel-TagMovedFreshListing
-        tests:
-          - RepoCardViewModel_RefreshAsync_GitSourceTagMovedAfterCachedListing_ListsAgainAndShowsTagMoved
-
-      - id: AgentControl-LauncherUI-TagMovedClearedWhenUnknown
-        title: >-
-          The LauncherUI subsystem shall not keep a "Tag moved" warning up once a later check could
-          not confirm it.
-        justification: |
-          A warning kept after a failed check would claim something nothing established.
-        children:
-          - AgentControl-RepoCardViewModel-TagMovedClearedWhenUnknown
-        tests:
-          - RepoCardViewModel_RefreshAsync_FailsAfterTagMoved_ClearsTagMovedAndShowsCheckFailed
+          - RepoCardViewModel_RefreshAsync_GitSourceNewTagPushedAfterCachedListing_ListsAgainAndOffersNewVersion
 
       - id: AgentControl-LauncherUI-ChangePackage
         title: >-

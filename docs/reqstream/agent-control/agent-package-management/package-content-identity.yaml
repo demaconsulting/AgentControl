@@ -2,66 +2,110 @@
 # Software Unit Requirements for the PackageContentIdentity Class
 #
 # PackageContentIdentity computes, formats and compares the content identity of an agent
-# package: the short text a repo's pin records to name exactly which bytes a package version
-# delivered, so that a version republished with different content can be told apart.
+# package: the short text a repo's pin records to name exactly which agent files a package
+# version delivered - the files that are written into the repo's managed folders, and nothing
+# about the container they came in - so that a version republished with different files can be
+# told apart, and the same files delivered by another source are recognized as the same.
 #
 # Each requirement states one observable outcome and is linked to the test that shows it.
 
 sections:
   - title: PackageContentIdentity Unit Requirements
     requirements:
-      - id: AgentControl-PackageContentIdentity-Sha256
+      - id: AgentControl-PackageContentIdentity-FilesIdentity
         title: >-
-          The PackageContentIdentity class shall compute the identity of a stream's content as the
-          SHA-256 hash of its bytes, written as lower-case hexadecimal after a short prefix naming
-          the algorithm.
+          The PackageContentIdentity class shall compute the identity of an agent package as the
+          SHA-256 hash of its agent files - each file's path, length and bytes, in the ordinal
+          order of the paths - written as lower-case hexadecimal after a short prefix naming the
+          kind of identity, and shall give a package that delivers no agent file the identity of
+          nothing.
         justification: |
-          A cryptographic hash makes an accidental or deliberate change of a package file
-          detectable, and the written form names the algorithm so identities of different kinds are
-          never mistaken for each other.
+          A cryptographic hash of the files themselves makes an accidental or deliberate change of
+          an agent file detectable, and the written form names the kind so identities of other
+          kinds are never mistaken for it. Fixing the exact encoding is what lets two machines that
+          hold the same files agree on the identity.
         tests:
-          - PackageContentIdentity_ComputeSha256_KnownContent_ReturnsPrefixedLowerCaseHash
+          - PackageContentIdentity_ComputeFilesIdentity_KnownFiles_MatchesCanonicalEncoding
+          - PackageContentIdentity_ComputeFilesIdentity_NoManagedFiles_IsIdentityOfEmptyStream
 
-      - id: AgentControl-PackageContentIdentity-Sha256StreamOpen
+      - id: AgentControl-PackageContentIdentity-FilesIdentityIndependentOfPackaging
         title: >-
-          The PackageContentIdentity class shall leave a stream open after computing its identity.
+          The PackageContentIdentity class shall give the same identity to the same agent files
+          however they are packaged: whatever order the package lists them in, whether their
+          streams can state their length or not, and however a path with redundant segments is
+          spelled.
         justification: |
-          The zip reader hashes and then reads the very same handle, so the identity always
-          describes the bytes that are used; closing the stream would force a second open of the
-          file, which could be replaced in between.
+          A teammate whose source is a zip folder, a NuGet feed or a Git tag must get the same
+          identity for the same files; the way a container happens to order, compress or spell its
+          entries must not leak into it.
         tests:
-          - PackageContentIdentity_ComputeSha256_Stream_StaysOpenAtEndAndHashesFromCurrentPosition
+          - PackageContentIdentity_ComputeFilesIdentity_EntryOrderDiffers_IsEqual
+          - PackageContentIdentity_ComputeFilesIdentity_NonSeekableStreams_IsEqualToSeekable
+          - PackageContentIdentity_ComputeFilesIdentity_EquivalentSpellingOfPath_IsEqual
 
-      - id: AgentControl-PackageContentIdentity-Sha256RejectNull
+      - id: AgentControl-PackageContentIdentity-FilesIdentityCoversExtractedFilesOnly
         title: >-
-          The PackageContentIdentity class shall reject a null stream when computing an identity.
+          The PackageContentIdentity class shall leave out of an identity every file that is not
+          written into a repo's managed folders - the release notes, the AGENTS.md template and any
+          other file of the package - so that changing them never changes the identity.
         justification: |
-          A missing stream is a programming error; failing at once keeps it from becoming an
-          identity of nothing.
+          The identity vouches for the agent files a repo ends up with; release notes or a template
+          that is never extracted must not make the same agent files look like a changed package.
         tests:
-          - PackageContentIdentity_ComputeSha256_NullStream_ThrowsArgumentNullException
+          - PackageContentIdentity_ComputeFilesIdentity_NonExtractedFiles_AreExcluded
 
-      - id: AgentControl-PackageContentIdentity-Format
+      - id: AgentControl-PackageContentIdentity-FilesIdentityDetectsChange
         title: >-
-          The PackageContentIdentity class shall format a Git commit hash as a lower-case
-          identity of its own kind.
+          The PackageContentIdentity class shall give a different identity to a package in which
+          one byte of a file changed, a file was renamed, added or removed, or bytes moved from one
+          file to another.
         justification: |
-          A source that delivers a tag of a Git repository names its content by the commit the tag
-          points to; the identity form must be unambiguous (the kind is part of the text) so that
-          identities of different kinds are never mistaken for each other.
+          Any real change of the agent files must always be reported, because it is the evidence
+          that a version was republished; bytes that move between files must not cancel out.
         tests:
-          - PackageContentIdentity_FromGitCommit_ValidHash_ReturnsLowerCasePrefixedIdentity
+          - PackageContentIdentity_ComputeFilesIdentity_OneByteChanged_Differs
+          - PackageContentIdentity_ComputeFilesIdentity_PathOrMembershipChanged_Differs
+          - PackageContentIdentity_ComputeFilesIdentity_BytesMovedBetweenFiles_Differs
 
-      - id: AgentControl-PackageContentIdentity-FormatRejectMalformed
+      - id: AgentControl-PackageContentIdentity-FilesIdentityRejectUnacceptable
         title: >-
-          The PackageContentIdentity class shall refuse a value that is not a well-formed commit
-          hash, and a null value, when formatting a Git identity.
+          The PackageContentIdentity class shall refuse to identify a package that lists two files
+          for the same path, a path that resolves outside the package, a file that changes while it
+          is read, or no package at all, and shall offer a form that reports no identity instead of
+          failing.
         justification: |
-          A malformed value must never reach a pin, where it would be compared with every later
-          delivery of the version.
+          A package that extraction would reject, or whose files are not stable, has no meaningful
+          identity; reporting none, never a guess, keeps it from being recorded as if it had been
+          verified, while the extractor still reports the specific problem.
         tests:
-          - PackageContentIdentity_FromGitCommit_MalformedHash_ThrowsArgumentException
-          - PackageContentIdentity_FromGitCommit_NullCommit_ThrowsArgumentNullException
+          - PackageContentIdentity_ComputeFilesIdentity_DuplicateCanonicalPath_ThrowsInvalidOperationException
+          - PackageContentIdentity_ComputeFilesIdentity_PathEscapesPackageRoot_ThrowsAndTryReportsNone
+          - PackageContentIdentity_ComputeFilesIdentity_FileChangesWhileRead_ThrowsInvalidOperationException
+          - PackageContentIdentity_ComputeFilesIdentity_NullReader_ThrowsArgumentNullException
+
+      - id: AgentControl-PackageContentIdentity-FilesIdentityRejectCaseCollision
+        title: >-
+          The PackageContentIdentity class shall refuse to identify a package whose extracted files
+          include two paths that differ only in letter case, and the non-throwing form shall report
+          no identity for it.
+        justification: |
+          On a case-insensitive file system (Windows, macOS) such files are one file, so the bytes a
+          repo ends up with would depend on the order of the package entries while the identity
+          stayed the same; the identity must not vouch for a package whose result is ambiguous. The
+          extractor applies the same rule and reports the problem.
+        tests:
+          - PackageContentIdentity_ComputeFilesIdentity_PathsDifferingOnlyInCase_ThrowsAndTryReportsNone
+
+      - id: AgentControl-PackageContentIdentity-RecognizeFilesIdentity
+        title: >-
+          The PackageContentIdentity class shall tell whether a text is a well-formed identity of
+          agent files, and shall not accept one of an older kind, one of the wrong length or one
+          with non-hexadecimal digits.
+        justification: |
+          A pin may hold an identity written by an older version or edited by hand; only a
+          well-formed identity of agent files can be compared, or used to verify another source.
+        tests:
+          - PackageContentIdentity_IsFilesIdentity_VariousTexts_RecognizesOnlyFilesIdentity
 
       - id: AgentControl-PackageContentIdentity-Describe
         title: >-
@@ -87,12 +131,15 @@ sections:
       - id: AgentControl-PackageContentIdentity-Compare
         title: >-
           The PackageContentIdentity class shall report that there is nothing to compare when
-          either the recorded identity or the identity of the content now delivered is missing.
+          either the recorded identity or the identity of the content now delivered is missing or
+          is not an identity of agent files (for example one an older version recorded from a
+          package file or a Git commit).
         justification: |
-          A missing identity (a pin made before identities were recorded, or a source that reports
-          none) must never raise a false alarm about a republished version.
+          A missing identity, or one computed from something else, can neither confirm nor refute
+          that the files are the same; it must never raise a false alarm about a republished
+          version, and an old identity must never be taken for a change.
         tests:
-          - PackageContentIdentity_Compare_EitherIdentityMissing_IsNotComparable
+          - PackageContentIdentity_Compare_EitherIdentityMissingOrLegacy_IsNotComparable
 
       - id: AgentControl-PackageContentIdentity-CompareSame
         title: >-
@@ -107,19 +154,9 @@ sections:
       - id: AgentControl-PackageContentIdentity-CompareChanged
         title: >-
           The PackageContentIdentity class shall report that the content changed when two
-          identities of the same kind differ.
+          identities of agent files differ.
         justification: |
-          Any real difference between the recorded and the delivered content must always be
+          Any real difference between the recorded and the delivered files must always be
           reported, because it is the evidence that a version was republished.
         tests:
           - PackageContentIdentity_Compare_DifferentValues_IsChanged
-
-      - id: AgentControl-PackageContentIdentity-CompareDifferentKinds
-        title: >-
-          The PackageContentIdentity class shall report that the content changed when two
-          identities are of different kinds.
-        justification: |
-          The same version delivered by a different kind of source (a zip hash now, a Git commit
-          before) is not the content the pin was made from.
-        tests:
-          - PackageContentIdentity_Compare_DifferentKinds_IsChanged

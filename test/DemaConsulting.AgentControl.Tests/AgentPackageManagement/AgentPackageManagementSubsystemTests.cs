@@ -111,19 +111,20 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
     }
 
     /// <summary>
-    ///     Test that, through the registry, zip and NuGet sources each report the identity of the
-    ///     package bytes they deliver, that the identity is stable across acquisitions, and that a
-    ///     zip republished under the same version is reported as a changed identity.
+    ///     Test that, through the registry, zip and NuGet sources report the same content identity for the
+    ///     same agent files (it is computed from the files, not from the zip or <c>.nupkg</c> they came
+    ///     in), that the identity is stable across acquisitions, and that a zip republished under the same
+    ///     version with other content is reported as a changed identity.
     /// </summary>
     [Fact]
-    public async Task AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportContentIdentityAndDetectRepublishedZip()
+    public async Task AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportFilesIdentityAndDetectRepublishedZip()
     {
-        // Arrange: a zip source and a NuGet folder source, each with one package
+        // Arrange: a zip source and a NuGet folder source, each with the same four agent files
         var zipFolder = CreateTempDirectory();
         var feed = CreateTempDirectory();
         var id = UniqueId();
         var zipPath = Path.Combine(zipFolder, "contoso-agents-1.0.0.zip");
-        WriteZip(zipPath, "original");
+        WriteZip(zipPath, "agents content");
         NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0");
         var registry = PackageSourceRegistry.Create(
             [
@@ -149,35 +150,147 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
             nugetFirst = reader.ContentIdentity;
         }
 
-        var expectedZipFirst = Sha256Identity(await File.ReadAllBytesAsync(zipPath, TestContext.Current.CancellationToken));
-        var expectedNuGet = Sha256Identity(await File.ReadAllBytesAsync(
-            Assert.Single(Directory.GetFiles(feed, "*.nupkg", SearchOption.AllDirectories)), TestContext.Current.CancellationToken));
         File.Delete(zipPath);
         WriteZip(zipPath, "republished");
-        var expectedZipRepublished = Sha256Identity(await File.ReadAllBytesAsync(zipPath, TestContext.Current.CancellationToken));
         using var zipAgain = await zips.AcquireAsync(zipPackage, CancellationToken.None);
         using var nugetAgain = await nuget.AcquireAsync(nugetPackage, CancellationToken.None);
 
-        // Assert: each identity is exactly the SHA-256 of the delivered file's bytes, computed here
-        // independently of the production hashing code
-        Assert.Equal(expectedZipFirst, zipFirst);
-        Assert.Equal(expectedNuGet, nugetFirst);
-        Assert.Equal(expectedZipRepublished, zipAgain.ContentIdentity);
-        Assert.NotEqual(expectedZipFirst, expectedZipRepublished);
+        // Assert: both kinds report exactly the identity of the four files, computed here independently
+        // of the production code, so the same files compare as the same whichever source delivers them
+        var expected = FilesIdentity(AgentFiles("agents content"));
+        Assert.Equal(expected, zipFirst);
+        Assert.Equal(expected, nugetFirst);
+        Assert.Equal(ContentIdentityComparison.Same, PackageContentIdentity.Compare(zipFirst, nugetFirst));
 
-        // Assert: the NuGet identity is stable, and only the zip changed
+        // Assert: the NuGet identity is stable, and only the republished zip changed
         Assert.Equal(ContentIdentityComparison.Same, PackageContentIdentity.Compare(nugetFirst, nugetAgain.ContentIdentity));
+        Assert.Equal(FilesIdentity(AgentFiles("republished")), zipAgain.ContentIdentity);
         Assert.Equal(ContentIdentityComparison.Changed, PackageContentIdentity.Compare(zipFirst, zipAgain.ContentIdentity));
     }
 
     /// <summary>
-    ///     Computes the expected <c>sha256:</c> identity of some bytes directly with the platform's
-    ///     hash, so a test does not rely on the code it checks.
+    ///     Test that a Git source reports the same content identity as a zip and a NuGet source for the
+    ///     same agent files - a real local repository supplies the Git layout - whatever kind delivered them.
     /// </summary>
-    /// <param name="bytes">The bytes of the delivered file.</param>
-    /// <returns><c>sha256:</c> followed by the lower-case hexadecimal digest.</returns>
-    private static string Sha256Identity(byte[] bytes) =>
-        "sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+    [Fact]
+    public async Task AgentPackageManagementSubsystem_SameFilesFromZipNuGetAndGit_ReportTheSameIdentity()
+    {
+        // Arrange: the four agent files as a zip, a NuGet package and a tag of a repository
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var zipFolder = CreateTempDirectory();
+        var feed = CreateTempDirectory();
+        var id = UniqueId();
+        WriteZip(Path.Combine(zipFolder, "contoso-agents-1.0.0.zip"), "agents content");
+        NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0");
+        var files = AgentFiles("agents content").ToDictionary(file => file.Path, file => file.Text);
+        files["release-notes.md"] = "notes that are never part of the identity";
+        fixture.Commit(files, "one");
+        fixture.Tag("v1.0.0");
+        fixture.Push();
+        var registry = PackageSourceRegistry.Create(
+            [
+                new PackageSourceDefinition { Alias = "Zips", Type = PackageSourceType.Zip, Location = zipFolder },
+                Definition("Feed", feed, requireSigned: false),
+                fixture.CreateDefinition()
+            ],
+            CreateTempDirectory(),
+            git: fixture.CreateOptions());
+
+        // Act: acquire the version from each kind of source
+        var identities = new Dictionary<string, string?>();
+        foreach (var (alias, packageId) in new[] { ("Zips", "contoso-agents"), ("Feed", id), ("Repo", "contoso-agents") })
+        {
+            var provider = registry.Resolve(alias);
+            var package = Assert.Single(await provider.ListVersionsAsync(packageId, TestContext.Current.CancellationToken));
+            using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+            identities[alias] = reader.ContentIdentity;
+        }
+
+        // Assert: one identity for the same files, whichever kind of source delivered them
+        var expected = FilesIdentity(AgentFiles("agents content"));
+        Assert.Multiple(
+            () => Assert.Equal(expected, identities["Zips"]),
+            () => Assert.Equal(expected, identities["Feed"]),
+            () => Assert.Equal(expected, identities["Repo"]));
+    }
+
+    /// <summary>
+    ///     The four agent files every kind of source in these tests delivers.
+    /// </summary>
+    /// <param name="marker">The text of the agents file.</param>
+    /// <returns>The files as package-relative path and text.</returns>
+    private static (string Path, string Text)[] AgentFiles(string marker) =>
+    [
+        (".github/agents/copilot.md", marker),
+        (".github/standards/style.md", "standards content"),
+        (".github/templates/template.md", "templates content"),
+        (".github/skills/skill.md", "skills content")
+    ];
+
+    /// <summary>
+    ///     Test that, through the registry and the cache, the offers of every configured zip source are
+    ///     listed in the order the sources are configured (the excluded source is not read at all), an
+    ///     unreadable source is skipped, and the newest version across the sources is found with a tie
+    ///     attributed to the source configured first.
+    /// </summary>
+    [Fact]
+    public async Task AgentPackageManagementSubsystem_AcrossSources_ListsOffersInConfigurationOrderAndNewestWins()
+    {
+        // Arrange: three zip sources with the same package (the first is "pinned" and left out), and a
+        // fourth source whose folder does not exist
+        var pinned = CreateTempDirectory();
+        var first = CreateTempDirectory();
+        var second = CreateTempDirectory();
+        foreach (var (folder, version) in new[] { (pinned, "9.0.0"), (first, "1.0.0"), (first, "2.0.0"), (second, "2.0.0"), (second, "1.5.0") })
+        {
+            await File.WriteAllBytesAsync(
+                Path.Combine(folder, $"contoso-agents-{version}.zip"), [], TestContext.Current.CancellationToken);
+        }
+
+        var registry = PackageSourceRegistry.Create(
+            [
+                new PackageSourceDefinition { Alias = "Pinned", Type = PackageSourceType.Zip, Location = pinned },
+                new PackageSourceDefinition { Alias = "First", Type = PackageSourceType.Zip, Location = first },
+                new PackageSourceDefinition { Alias = "Gone", Type = PackageSourceType.Zip, Location = Path.Combine(first, "missing") },
+                new PackageSourceDefinition { Alias = "Second", Type = PackageSourceType.Zip, Location = second }
+            ]);
+        var cache = new PackageVersionCache();
+
+        // Act
+        var offers = await cache.GetVersionsAcrossSourcesAsync(
+            registry, "contoso-agents", "Pinned", TestContext.Current.CancellationToken);
+        var check = await cache.IsNewerVersionAvailableAcrossSourcesAsync(
+            registry, "contoso-agents", "1.0.0", TestContext.Current.CancellationToken);
+
+        // Assert: configuration order without the excluded and unreadable sources; the 2.0.0 tie goes to the first
+        Assert.Equal(
+            ["First 2.0.0", "First 1.0.0", "Second 2.0.0", "Second 1.5.0"],
+            offers.Select(offer => $"{offer.SourceAlias} {offer.Version}"));
+        Assert.True(check.IsNewerAvailable);
+        Assert.Equal("9.0.0", check.Latest?.Version.ToString());
+        Assert.Equal("Pinned", check.Latest?.SourceAlias);
+    }
+
+    /// <summary>
+    ///     Computes the expected files identity of some agent files directly with the platform's hash,
+    ///     following the documented encoding, so a test does not rely on the code it checks.
+    /// </summary>
+    /// <param name="files">The files: package-relative path and text (UTF-8, no byte-order mark).</param>
+    /// <returns><c>files-sha256:</c> followed by the lower-case hexadecimal digest.</returns>
+    private static string FilesIdentity(IEnumerable<(string Path, string Text)> files)
+    {
+        using var stream = new MemoryStream();
+        foreach (var (path, text) in files.OrderBy(file => file.Path, StringComparer.Ordinal))
+        {
+            var content = new UTF8Encoding(false).GetBytes(text);
+            stream.Write(Encoding.UTF8.GetBytes(path));
+            stream.WriteByte(0);
+            stream.Write(BitConverter.GetBytes((long)content.Length));
+            stream.Write(content);
+        }
+
+        return "files-sha256:" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(stream.ToArray()));
+    }
 
     /// <summary>
     ///     Test that on a platform that cannot verify signatures a source whose settings require
@@ -749,26 +862,29 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
         };
 
     /// <summary>
-    ///     Writes a minimal agent package zip whose agents file holds the given text.
+    ///     Writes a minimal agent package zip with the four agent files (<see cref="AgentFiles"/>), whose
+    ///     agents file holds the given text.
     /// </summary>
     /// <param name="zipPath">The zip file to create.</param>
     /// <param name="marker">The text of the agents file.</param>
     private static void WriteZip(string zipPath, string marker)
     {
         using var archive = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create);
-        using var writer = new StreamWriter(archive.CreateEntry(".github/agents/copilot.md").Open());
-        writer.Write(marker);
+        foreach (var (path, text) in AgentFiles(marker))
+        {
+            using var writer = new StreamWriter(archive.CreateEntry(path).Open(), new UTF8Encoding(false));
+            writer.Write(text);
+        }
     }
 
     /// <summary>
     ///     Test the Git source through the subsystem's own parts, against a real local repository:
-    ///     the registry resolves the source, the cache lists tag versions with their commits and
-    ///     reports the pinned version's listing entry, a moved tag shows as a different revision on
-    ///     the next listing, and an acquired package reports the commit as its content identity (and
-    ///     compares as changed against the identity of the original commit).
+    ///     the registry resolves the source, the cache lists tag versions and reports the newer one,
+    ///     the listing carries the commit each tag points to, and an acquired package reports the
+    ///     identity of its files.
     /// </summary>
     [Fact]
-    public async Task AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag()
+    public async Task AgentPackageManagementSubsystem_GitSource_ListsTagsAndAcquiresTheTaggedFiles()
     {
         // Arrange: v1.0.0 and v1.1.0 in a local bare repository
         using var fixture = GitRepositoryFixture.CreateOrSkip();
@@ -785,37 +901,22 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
         fixture.Push();
         var registry = PackageSourceRegistry.Create([fixture.CreateDefinition()], git: fixture.CreateOptions());
 
-        // Act: the version cache lists versions through the registry
+        // Act: the version cache lists versions through the registry, and the pinned version is acquired
         var cache = new PackageVersionCache();
         var check = await cache.IsNewerVersionAvailableAsync(
             registry, "Repo", "contoso-agents", "1.0.0", TestContext.Current.CancellationToken);
+        var provider = registry.Resolve("Repo");
+        var listed = await provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
+        var pinned = listed.Single(package => package.Version.ToString() == "1.0.0");
+        using var reader = await provider.AcquireAsync(pinned, TestContext.Current.CancellationToken);
 
-        // Assert: the newer version is offered, and the pinned one carries its commit
+        // Assert: the newer version is offered, the pinned one carries its commit, and the content identity is
+        // that of the files
         Assert.True(check.IsNewerAvailable);
         Assert.Equal("1.1.0", check.Latest?.Version.ToString());
-        Assert.Equal(first, check.Pinned?.Revision);
-
-        // Act: the pinned version is acquired
-        using var reader = await registry.Resolve("Repo").AcquireAsync(check.Pinned!, TestContext.Current.CancellationToken);
-
-        // Assert: the content identity is the commit
-        Assert.Equal(PackageContentIdentity.FromGitCommit(first), reader.ContentIdentity);
+        Assert.Equal(first, pinned.Revision);
+        Assert.True(PackageContentIdentity.IsFilesIdentity(reader.ContentIdentity));
         Assert.Equal("one", reader.ReadText(".github/agents/copilot.md"));
-
-        // Act: the maintainer moves v1.0.0 and a new session lists again
-        files[".github/agents/copilot.md"] = "moved";
-        fixture.Commit(files, "moved");
-        fixture.Tag("v1.0.0", force: true);
-        fixture.Push();
-        var later = await new PackageVersionCache().IsNewerVersionAvailableAsync(
-            registry, "Repo", "contoso-agents", "1.0.0", TestContext.Current.CancellationToken);
-
-        // Assert: the pinned version is now at another commit, which compares as changed
-        Assert.NotEqual(check.Pinned!.Revision, later.Pinned?.Revision);
-        Assert.Equal(
-            ContentIdentityComparison.Changed,
-            PackageContentIdentity.Compare(
-                reader.ContentIdentity, PackageContentIdentity.FromGitCommit(later.Pinned!.Revision!)));
     }
 
     /// <summary>

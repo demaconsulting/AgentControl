@@ -25,7 +25,7 @@ N/A - standard test environment.
 - A plain-`http` server source without the insecure-HTTP opt-in is refused when resolved.
 - Changing a definition, or the list it was built from, after construction - or changing a definition
   obtained from `Definitions` - does not change which source an alias resolves to.
-- With the same package ID at two sources, resolving the pinned source contacts only that source.
+- With the same package ID at two sources, resolving the chosen source contacts only that source.
 
 #### Test Scenarios
 
@@ -76,7 +76,7 @@ This scenario is tested by
 **PackageSourceRegistry_NoFallback_NeverUsesAnotherSource**: With a single configured source
 named `Default`, resolving a different alias fails and that source receives no calls; with the
 same package ID at sources A (higher version) and B, resolving and listing through B returns only
-B's version and A receives no calls; with the pinned source B removed, resolving it fails and A
+B's version and A receives no calls; with the chosen source B removed, resolving it fails and A
 receives no calls. This scenario is tested by
 `PackageSourceRegistry_Resolve_MissingAliasWithSingleConfiguredSource_DoesNotFallBack`,
 `PackageSourceRegistry_PinToSourceB_SamePackageIdAtBothSources_OnlyBIsContacted`, and

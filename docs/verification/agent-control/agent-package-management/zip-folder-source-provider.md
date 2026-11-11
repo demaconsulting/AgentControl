@@ -103,8 +103,10 @@ or null definition is rejected by the constructor. This scenario is tested by
 `ZipFolderSourceProvider_Constructor_InvalidDefinition_Throws`, covering
 `AgentControl-ZipFolderSourceProvider-ValidateDefinition`.
 
-**ZipFolderSourceProvider_ReportContentIdentity_IsTheSha256OfTheZip**: An acquired package's reader reports the
-`sha256:` identity of the zip file, equal to a SHA-256 computed independently by the test, and a zip deleted and
-written again with other content under the same name reports a different identity. This scenario is tested by
-`ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReportsSha256OfZipAsContentIdentity`, covering
+**ZipFolderSourceProvider_ReportContentIdentity_IsTheFilesIdentityOfTheZipContent**: An acquired package's reader
+reports the `files-sha256:` identity of the agent files in the zip, equal to an identity the test computes
+independently from the same files, and a zip deleted and written again with other file content under the same name
+reports a different identity (the same files re-zipped would report the same one, which the subsystem tests check
+across source kinds). This scenario is tested by
+`ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReportsFilesIdentityOfZipContent`, covering
 `AgentControl-ZipFolderSourceProvider-ReportContentIdentity`.

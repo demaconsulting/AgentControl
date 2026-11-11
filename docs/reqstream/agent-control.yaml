@@ -388,7 +388,7 @@ sections:
           - AgentControl-AgentPackageManagement-DiscoverPackages
         tests:
           - windows@SelectPackageMenuItem_Click_AppliesChosenPackageAndSyncsManagedFolders
-          - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
+          - windows@SelectPackage_FromNuGetFolderSource_PinsThePackageAndCardShowsPackageChip
 
       - id: AgentControl-System-ConvertCommittedAgentFiles
         title: >-
@@ -464,8 +464,8 @@ sections:
       - id: AgentControl-System-PinFile
         title: >-
           The tool shall persist each repo's pinned agent package name, exact version,
-          package source and content identity, so that upgrades are an explicit user action
-          rather than an automatic version float.
+          preferred package source and content identity, so that upgrades are an explicit user
+          action rather than an automatic version float.
         tags: [system]
         justification: |
           Per architecture.md's "Mandatory version pinning" decision, package upgrades can
@@ -478,10 +478,10 @@ sections:
         tests:
           - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
           # The pin file records the content identity of what was applied, for every kind of source:
-          # the SHA-256 of the zip, the SHA-256 of the NuGet package, the commit of a Git tag.
-          - windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile
-          - windows@SelectPackage_FromNuGetFolderSource_RecordsSha256OfNupkgInPinFile
-          - windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip
+          # the identity of the package's agent files (no source and no commit are recorded).
+          - windows@SelectPackageMenuItem_Click_RecordsFilesIdentityInPinFile
+          - windows@SelectPackage_FromNuGetFolderSource_RecordsFilesIdentityInPinFile
+          - windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip
 
       - id: AgentControl-System-AgentsMdTemplate
         title: >-
@@ -537,10 +537,10 @@ sections:
           # End to end: the published application runs with a zip source and a NuGet folder
           # source configured side by side, sources are added through the Settings dialogs
           # (including a NuGet server) and a package is selected from the NuGet sources.
-          - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
+          - windows@UpgradeMenuItem_Click_NuGetFolderSourceOffersNewestVersion_UpgradesFromThatSource
           - windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt
           - windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt
-          - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
+          - windows@SelectPackage_FromNuGetFolderSource_PinsThePackageAndCardShowsPackageChip
           - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
 
       - id: AgentControl-System-AddSourceMenu
@@ -615,8 +615,8 @@ sections:
         tests:
           # End to end through the published application against a real NuGet folder feed and
           # against an in-process NuGet server (plain HTTP, explicitly allowed).
-          - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
-          - windows@SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip
+          - windows@UpgradeMenuItem_Click_NuGetFolderSourceOffersNewestVersion_UpgradesFromThatSource
+          - windows@SelectPackage_FromNuGetFolderSource_PinsThePackageAndCardShowsPackageChip
           - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
 
       - id: AgentControl-System-NuGetTransportSecurity
@@ -653,36 +653,115 @@ sections:
           # End to end: a repo with its own NuGet configuration pointing at an unreachable source
           # and a redirected package folder is upgraded from the configured source, and the
           # configuration is left byte for byte as it was.
-          - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
+          - windows@UpgradeMenuItem_Click_NuGetFolderSourceOffersNewestVersion_UpgradesFromThatSource
 
-      - id: AgentControl-System-SourcePinIntegrity
+      - id: AgentControl-System-PinNamesNoSource
         title: >-
-          The tool shall record in each repo's pin the alias of the source its package came
-          from and shall resolve that pin only against that source; when the source is not
-          configured the tool shall report an error for that repo and shall never substitute
-          another source.
+          The tool shall record in each repo's pin only the package, its exact version and the
+          identity of its files - never the name of a package source - and shall read a source that
+          an older pin names only as a hint.
         tags: [system]
         justification: |
-          A package name is not unique across sources, so resolving a pin by name alone could
-          install a different source's package under the repo's pin (a dependency-confusion
-          attack, or just an accident). Pins must therefore be bound to their source, and a
-          missing source must stop the operation rather than be quietly replaced.
+          A repo's pin is committed and shared by a team, but package sources and their aliases are
+          every user's own configuration: a pin that named one user's source would be wrong for
+          everybody else, and a stale name could mislead. The identity of the files is what proves
+          that any user's source delivers the same package.
         children:
-          - AgentControl-RepoConfig-SourcePin
+          - AgentControl-RepoConfig-PinNamesNoSource
+        tests:
+          # End to end: the pin file written after choosing a package holds no source (from a NuGet
+          # folder source, and from a Git source).
+          - windows@SelectPackage_FromNuGetFolderSource_PinsThePackageAndCardShowsPackageChip
+          - windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip
+
+      - id: AgentControl-System-PortablePin
+        title: >-
+          The tool shall obtain a repo's pinned agent files from the first of the user's configured
+          package sources, in Settings order, that delivers files identical to the files the pin
+          recorded - whatever the source's alias or kind - shall show on the repo's card which source
+          supplies them without reporting a problem, and shall never obtain them from a source whose
+          files differ.
+        tags: [system, security]
+        justification: |
+          A repo's pin is committed and shared by a team, but source aliases are every user's own
+          configuration. Teammates who get the same agent files from a differently named source, a
+          different kind of source or a re-packed mirror must not see a broken repo, lose upgrades
+          or be unable to restore the files on a fresh clone; the identical files are the evidence
+          that makes this safe, and a source whose files differ must never be used on the strength
+          of its package name alone.
+        children:
+          - AgentControl-LauncherUI-ResolveSourceByFiles
+          - AgentControl-LauncherUI-SupplyingSourceShown
           - AgentControl-AgentPackageManagement-SourceResolution
+          - AgentControl-AgentPackageManagement-ContentIdentity
+          - AgentControl-RepoConfig-LegacyIdentityMigration
+        tests:
+          # Headless end to end through the main window: a repo whose pin names no source, whose
+          # files a configured source delivers, shows that source on its chip and no source problem.
+          - MainWindow_PinNamesNoSourceAndIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem
+
+      - id: AgentControl-System-LegacyPinSourceHint
+        title: >-
+          The tool shall keep a repo whose pin recorded no identity of its files (a pin written by an
+          earlier version) working with the user's configured sources, using the source that last
+          supplied the package, then the source the older pin named, then the first source that
+          offers it, and shall never refuse such a pin for want of an identity.
+        tags: [system]
+        justification: |
+          Repos pinned before identities were recorded must keep working without any step from the
+          user; with nothing to verify a source against, the sources the user used before are the
+          best evidence of where the package comes from, and the next deliberate apply records the
+          identity.
+        children:
+          - AgentControl-LauncherUI-ResolveSourceByFiles
+          - AgentControl-RepoConfig-PinNamesNoSource
+        tests:
+          # End to end and headless: a pin that records no identity is served from the configured
+          # Default source, and cards of such pins are checked against the configured source.
+          - windows@UpgradeMenuItem_Click_SyncsManagedFoldersAndShowsReleaseNotes
+          - MainWindow_UpToDateCue_ShownOnlyForPinnedAndUpToDateCard
+
+      - id: AgentControl-System-NoSourceOffersProblem
+        title: >-
+          The tool shall show a package source problem on a repo's card when no configured source
+          offers the pinned package version (or none delivers the files the repo was set up with),
+          shall still offer a newer version that a configured source does offer, and shall change
+          nothing in the repo because of it.
+        tags: [system]
+        justification: |
+          A card that claimed to be healthy for files nothing can supply would hide that they cannot
+          be restored; the user needs to see the problem, and the newer version a source does offer
+          is the way out of it.
+        children:
+          - AgentControl-LauncherUI-SupplyingSourceShown
+          - AgentControl-LauncherUI-UpgradeAcrossSources
           - AgentControl-LauncherUI-SourceAwareActions
         tests:
-          # End to end: a pin to the NuGet source is upgraded from that source although the zip
-          # source offers a higher version of the same package name, and a pin to an
-          # unconfigured source shows an error and offers no upgrade from another source.
-          - windows@UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly
-          - windows@RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
+          - windows@RepoCard_NoConfiguredSourceOffersPinnedVersion_ShowsSourceProblemAndStillOffersNewerVersion
+
+      - id: AgentControl-System-UpgradeAcrossSources
+        title: >-
+          The tool shall offer a repo an upgrade to the newest version that any of the user's
+          configured sources offers, apply it from the source that offers it, and record only the
+          package, version and files identity in the repo's pin.
+        tags: [system]
+        justification: |
+          A pin names no source, so a teammate with differently named sources must still be told
+          about, and be able to take, the next version of the team's agent package, without every
+          user having to name sources alike.
+        children:
+          - AgentControl-LauncherUI-UpgradeAcrossSources
+          - AgentControl-AgentPackageManagement-OffersAcrossSources
+        tests:
+          - MainWindow_PinNamesNoSource_UpgradeChipOffersNewestVersionFromConfiguredSource
+          - windows@UpgradeMenuItem_Click_NuGetFolderSourceOffersNewestVersion_UpgradesFromThatSource
 
       - id: AgentControl-System-PackageContentIntegrity
         title: >-
           The tool shall record in each repo's pin a content identity - a fingerprint of the
-          package that was applied - whenever it applies a package from any kind of package
-          source (a zip folder, a NuGet package folder or server, or a Git repository).
+          agent files of the package that was applied, the same whatever kind of package source
+          delivered them - whenever it applies a package from any kind of package source (a zip
+          folder, a NuGet package folder or server, or a Git repository).
         tags: [system, security]
         justification: |
           A package version is meant to be immutable, but a folder of zip files, a package feed or
@@ -690,7 +769,8 @@ sections:
           version would silently change the instructions an agent follows in every repo pinned to
           that version (a supply-chain risk as well as an honest mistake). Recording what was
           applied is what makes a republished version detectable, so it must happen for every kind
-          of source.
+          of source - and computing it from the files, not from the container, is what keeps the
+          same files from different sources from looking like a change.
         children:
           - AgentControl-AgentPackageManagement-ContentIdentity
           - AgentControl-AgentPackageManagement-ContentIdentityComparable
@@ -700,16 +780,17 @@ sections:
           - AgentControl-LauncherUI-ContentChangeProtection
           - AgentControl-AgentPackageManagement-GitSourceContentIdentity
         tests:
-          - windows@SelectPackageMenuItem_Click_RecordsSha256OfZipInPinFile
-          - windows@SelectPackage_FromNuGetFolderSource_RecordsSha256OfNupkgInPinFile
-          - windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip
+          - windows@SelectPackageMenuItem_Click_RecordsFilesIdentityInPinFile
+          - windows@SelectPackage_FromNuGetFolderSource_RecordsFilesIdentityInPinFile
+          - windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip
 
       - id: AgentControl-System-ChangedContentRefusedAtLaunch
         title: >-
           The tool shall not replace a repo's agent files, when it restores missing agent files
           at launch, with a package of the same version whose content differs from the recorded
-          identity (whatever kind of source it comes from), shall tell the user in plain language
-          and shall change nothing.
+          identity (a republished package, or a Git tag moved to a commit with other files,
+          whatever kind of source it comes from), shall tell the user in plain language and shall
+          change nothing.
         tags: [system, security]
         justification: |
           A package republished under the version a repo is pinned to would silently change the
@@ -723,30 +804,12 @@ sections:
           - windows@LaunchButton_Click_PinnedVersionRepublished_ExplainsAndSyncsNothing
           - windows@LaunchButton_Click_NuGetPinnedVersionRepublished_ExplainsAndSyncsNothing
 
-      - id: AgentControl-System-MovedTagWarning
-        title: >-
-          The tool shall, when a Git tag of the version a repo uses now points to a different
-          commit than the one the repo's files came from, show a warning on the repo's card and
-          shall apply nothing because of it.
-        tags: [system, security]
-        justification: |
-          A moved tag changes the instructions an agent follows without a new version, so the user
-          must be told; applying it silently would defeat the point of pinning.
-        children:
-          - AgentControl-LauncherUI-TagMovedWarning
-          - AgentControl-LauncherUI-TagMovedAppliesNothing
-          - AgentControl-LauncherUI-TagMovedFreshListing
-          - AgentControl-LauncherUI-TagMovedClearedWhenUnknown
-          - AgentControl-AgentPackageManagement-GitSourceContentIdentity
-        tests:
-          - windows@RepoCard_PinnedGitTagMoved_ShowsTagMovedChipAndAppliesNothing
-
       - id: AgentControl-System-ChangedContentAcceptedDeliberately
         title: >-
           The tool shall let the user accept changed content of the version a repo uses (a
-          republished package or a moved Git tag) only deliberately, by choosing the same version
-          again with the card's Change package action and confirming, and shall change nothing
-          unless the user confirms.
+          republished package, or a Git tag moved to a commit with other files) only deliberately,
+          by choosing the same version again with the card's Change package action and confirming,
+          and shall change nothing unless the user confirms.
         tags: [system, security]
         justification: |
           The decision to trust changed content belongs to the user; making it a deliberate,
@@ -756,21 +819,23 @@ sections:
           - AgentControl-LauncherUI-ChangePackage
           - AgentControl-LauncherUI-ChangePackageStartsOnCurrentChoice
         tests:
-          - windows@ChangePackageMenuItem_SameVersionWithMovedTag_AsksAndDecliningLeavesRepoUnchanged
-          - windows@ChangePackageMenuItem_SameVersionWithMovedTag_ConfirmingAppliesNewContentAndRecordsNewCommit
+          - MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed
+          - windows@ChangePackageMenuItem_OnPinnedGitRepo_OpensDialogOnTheSupplyingSourcePackageAndVersion
 
       - id: AgentControl-System-IdentityAdoptedOnUpgrade
         title: >-
-          The tool shall record a content identity, without any warning, when the user upgrades a
-          repo whose pin has none.
+          The tool shall record a content identity of the agent files, without any warning, when the
+          user upgrades a repo whose pin has none, including a pin whose identity an older version
+          recorded from a package file.
         tags: [system]
         justification: |
-          Pins made before identities existed must keep working without nagging; the next
-          deliberate upgrade is the moment an identity can be recorded without claiming anything
-          changed.
+          Pins made before identities were recorded, or before they were computed from the files,
+          must keep working without nagging; the next deliberate upgrade is the moment an identity
+          can be recorded without claiming anything changed.
         children:
           - AgentControl-LauncherUI-ContentChangeAdoption
           - AgentControl-RepoConfig-LegacyPinWithoutIdentity
+          - AgentControl-RepoConfig-LegacyIdentityMigration
         tests:
           - windows@UpgradeChip_Click_PinWithoutIdentity_AdoptsIdentityOfNewVersionWithoutWarning
 
@@ -794,13 +859,14 @@ sections:
           - AgentControl-GitIntegration-RemoteGitMinimumVersion
           - AgentControl-LauncherUI-GitSourceSetup
           - AgentControl-LauncherUI-GitTooOld
+          - AgentControl-LauncherUI-RefreshRelistsGitSources
         tests:
           # The published application against a real local repository: tags matching the pattern are
           # listed as the versions (and the hint when a wrong-case pattern matches nothing), and a
           # chosen version delivers the files of its tag.
           - windows@SettingsWindow_AddGitRepositoryViaDialog_TestsConnectionListsTagsAndPersistsIt
           - windows@SettingsWindow_AddGitRepositoryWithWrongCasePattern_ShowsNoMatchingTagsThenSucceedsWhenFixed
-          - windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip
+          - windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip
 
       - id: AgentControl-System-GitSourceSettings
         title: >-
@@ -844,24 +910,24 @@ sections:
         children:
           - AgentControl-AgentPackageManagement-GitSourceAcquire
         tests:
-          - windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip
+          - windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip
 
       - id: AgentControl-System-GitSourcePresentation
         title: >-
-          The tool shall show on the card of a repo pinned to a Git source that the package comes
-          from a Git repository.
+          The tool shall show on the card of a repo whose package a Git source supplies that the
+          package comes from a Git repository.
         tags: [system]
         justification: |
           The same package name can exist in several sources, so the user must be able to tell a
-          Git source from a folder or a server at a glance. The tag and the shortened commit the
-          files came from are shown too; that detail is a tooltip of the card, verified in the
-          LauncherUI subsystem and unit tests, not end to end.
+          Git source from a folder or a server at a glance. The tag the version has is shown too;
+          that detail is a tooltip of the card, verified in the LauncherUI subsystem and unit tests,
+          not end to end.
         children:
           - AgentControl-LauncherUI-GitSourcePresentation
           - AgentControl-LauncherUI-GitSourceRowStatus
           - AgentControl-LauncherUI-GitSourceCardTooltip
         tests:
-          - windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip
+          - windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip
 
       - id: AgentControl-System-GitSourceSafety
         title: >-
@@ -918,7 +984,7 @@ sections:
           - AgentControl-AgentPackageManagement-GitSourceAcquire
         tests:
           - windows@SelectPackage_FromGitRepositoryUnderHostileUserConfiguration_RunsNoCodeAndAppliesRawBytes
-          - windows@SelectPackage_FromGitSource_PinsTagCommitAndCardShowsGitSourceChip
+          - windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip
 
       - id: AgentControl-System-GitSourceRefusesLinks
         title: >-

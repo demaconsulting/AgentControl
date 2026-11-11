@@ -37,8 +37,12 @@ skipped). Junction tests run on Windows only (they skip elsewhere) and need no p
 - A zip package given an invalid or unsupported path is reported as an `InvalidOperationException`
   rather than a path exception.
 - Release notes and the AGENTS.md template are read from a folder package, or reported absent.
-- A zip reader reports the SHA-256 identity of the zip it reads from the same handle its entries are read from and
-  releases the handle when opening fails; a folder reader reports the identity its opener supplied, or none.
+- A package whose files include two paths that differ only in letter case is refused before anything in the repo is
+  deleted or written (the same rule the content identity applies).
+- A zip reader reports the files identity of the agent files in the zip, computed from the same handle its entries are
+  read from, and releases the handle when opening fails; a folder reader reports the files identity of the agent files
+  in the folder; the extractor says which paths are extracted
+  into the managed folders and under which canonical path.
 - A repo whose `.github` folder, a managed folder, or a folder on a destination path is a symbolic
   link or junction is refused with nothing deleted or written (the link target is unchanged and
   other managed folders survive), a linked managed folder is not reported as existing, and a repo
@@ -137,10 +141,11 @@ is tested by
 `PackageContentExtractor_Extract_NullArguments_ThrowsArgumentNullException` is a defensive test that no
 requirement cites.
 
-**PackageContentExtractor_ReaderContentIdentity_ZipHashedFromTheReadHandle**: A zip reader reports the SHA-256
-identity of the zip file (compared with a hash computed independently by the test) and still reads its entries
-afterwards, because the hash and the archive share one handle. This scenario is tested by
-`ZipPackageContentReader_Open_ValidZip_ReportsSha256OfFileAndReadsEntries`, covering
+**PackageContentExtractor_ReaderContentIdentity_ZipHashedFromTheReadHandle**: A zip reader reports the files identity
+of the agent files in the zip (compared with an identity computed independently by the test from the files it put into
+the zip) and still reads its entries afterwards, because the identity is computed lazily from the same handle the
+archive is read from. This scenario is tested by
+`ZipPackageContentReader_Open_ValidZip_ReportsFilesIdentityAndReadsEntries`, covering
 `AgentControl-PackageContentExtractor-ReaderContentIdentity`.
 
 **PackageContentExtractor_ReaderContentIdentity_ZipHandleReleasedOnFailure**: A file that is not a zip releases the
@@ -148,12 +153,31 @@ handle when opening fails (the file can be deleted straight away). This scenario
 `ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle`, covering
 `AgentControl-PackageContentExtractor-ZipReaderReleasesHandleOnFailure`.
 
-**PackageContentExtractor_ReaderContentIdentity_FolderCarriesSuppliedIdentityOrNone**: A folder reader reports the
-identity its opener supplied, and none when none was supplied. This scenario is tested by
-`DirectoryPackageContentReader_Open_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull`, covering
-`AgentControl-PackageContentExtractor-FolderReaderIdentity`, and by
-`DirectoryPackageContentReader_Open_WithoutIdentity_ReportsNone`, covering
-`AgentControl-PackageContentExtractor-FolderReaderNoIdentity`.
+**PackageContentExtractor_ReaderContentIdentity_FolderReportsFilesIdentity**: A reader over an unpacked
+package folder reports the files identity of the agent files in its content folder (not of the folder's other
+content). This scenario is tested by
+`DirectoryPackageContentReader_Open_FolderFiles_ReportsFilesIdentity`, covering
+`AgentControl-PackageContentExtractor-FolderReaderIdentity`.
+
+**PackageContentExtractor_ManagedPackagePath_SaysWhetherAndWhereAFileIsExtracted**: A path in a managed folder is
+reported under its canonical `/`-separated path (also when it contains `.` or `..` segments), a root file, release
+notes, the other `.github` folders and look-alike folder names are reported as not extracted (none), and a path that
+escapes the package throws `InvalidOperationException` (a null path `ArgumentNullException`), the same decision the
+extraction makes. This scenario is tested by
+`PackageContentExtractor_GetManagedPackagePath_ManagedAndOtherPaths_ReportsCanonicalPathOrNull` and
+`PackageContentExtractor_GetManagedPackagePath_PathEscapingPackage_ThrowsInvalidOperationException`, covering
+`AgentControl-PackageContentExtractor-ManagedPackagePath`.
+
+**PackageContentExtractor_RefuseCaseCollision_BeforeAnythingIsDeleted**: A zip with `.github/agents/a.md` and
+`.github/agents/A.md` makes `Extract` fail with a message that says the names differ only in letter case and names
+both files, while an existing managed file of the repo survives, nothing is written, and the reader reports no content
+identity; a zip holding `.github/agents/a.md` twice is refused the same way, saying there is more than one file at
+that path; the shared rule refuses only whole paths that fold together or repeat (folders that differ in case but hold
+differently named files are accepted). This scenario is tested by
+`PackageContentExtractor_Extract_ZipWithPathsDifferingOnlyInCase_ThrowsBeforeDeletingManagedFolders`,
+`PackageContentExtractor_Extract_ZipWithDuplicateEntries_ThrowsBeforeDeletingManagedFolders` and
+`PackageContentExtractor_RejectCaseCollisions_OnlyWholePathsThatFoldTogetherAreRefused`, covering
+`AgentControl-PackageContentExtractor-RefuseCaseCollision`.
 
 **PackageContentExtractor_ZipOpenFailure_InvalidPathIsReportedAsInvalidOperation**: Opening a zip
 package with an invalid path (an argument the operating system rejects as a path) throws
@@ -175,16 +199,14 @@ package with an invalid path (an argument the operating system rejects as a path
   verify that a link present before the operation starts is always refused.
 
 **PackageContentExtractor_LayoutRoot_ReadsOnlyLayout**: A folder shaped like a checked-out repository is read through
-`OpenLayoutRoot`: only the layout is listed (no `.git`, workflows, README or sources), the supplied identity is carried,
+`OpenLayoutRoot`: only the layout is listed (no `.git`, workflows, README or sources),
 the package extracts and its notes and template are read, and paths outside the layout (including
 `.github/agents/../../.git/config`) are refused. This scenario is tested by
-`DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesIdentity`, covering
+`DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayout`, covering
 `AgentControl-PackageContentExtractor-ReadLayoutRoot` and `AgentControl-PackageContentExtractor-ExcludeGitFolder`;
 by `DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused`, covering
 `AgentControl-PackageContentExtractor-RefuseOutsideLayoutPaths`
-and `AgentControl-PackageContentExtractor-ExcludeGitFolder`;
-by `DirectoryPackageContentReader_OpenLayoutRoot_WithAndWithoutIdentity_ReportsSuppliedIdentityOrNull`, covering
-`AgentControl-PackageContentExtractor-LayoutRootIdentity`; and by
+and `AgentControl-PackageContentExtractor-ExcludeGitFolder`; and by
 `DirectoryPackageContentReader_OpenLayoutRoot_MissingFolderOrLink_ThrowsInvalidOperationException`, covering
 `AgentControl-PackageContentExtractor-RefuseMissingOrLinkedLayoutRoot`.
 

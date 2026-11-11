@@ -65,12 +65,32 @@ using the cached descending list; the highest entry is the latest
 - *Postconditions*: A query already in flight for that source captured the old entry; it writes
   its result into that detached entry, so a stale answer never repopulates the cache.
 
-**UpgradeCheck.Pinned**: `IsNewerVersionAvailableAsync` also returns the listing entry of the pinned version -
-found in the
-same cached list, so with no further call - or none when the source no longer lists it or the pin does not
-parse. For a Git
-source it carries the commit the tag points to now, which the card compares with the pinned commit to notice a moved tag
-(`AgentControl-PackageVersionCache-ReportPinnedListing`).
+**GetVersionsAcrossSourcesAsync**: Lists what every configured source offers of a package
+(`AgentControl-PackageVersionCache-ListAcrossSources`).
+
+- *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string? excludeAlias`, `CancellationToken`,
+  and an
+  optional `Action<Exception>? onSourceFailure`.
+- *Returns*: `Task<IReadOnlyList<DiscoveredPackage>>` - the offers source by source in the order of
+  `registry.Definitions` (the order the user configured), each source's versions highest first.
+- *Algorithm*: For each definition other than `excludeAlias` (which is never contacted), calls
+  `GetVersionsDescendingAsync`, so every source is read through - and once per session cached in - its own entry.
+  The repo card passes no `excludeAlias`: a pin names no source, so every configured source is asked.
+- *Postconditions*: A source that fails with an I/O, permission or `InvalidOperationException` error (which includes
+  `PackageSourceAccessException`) is skipped, remembering the first failure and passing each one to
+  `onSourceFailure`, so the others' offers still arrive and a caller can tell "nobody offers it" from "a source that
+  might have could not be read"
+  (`AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure`); when at least one source was consulted and
+  every one failed, that first failure is rethrown with its original stack (an empty answer would say that nobody
+  offers the package). Cancellation always propagates.
+
+**IsNewerVersionAvailableAcrossSourcesAsync**: The upgrade question across all configured sources, which is how a
+repo's upgrade is resolved because its pin names no source (`AgentControl-PackageVersionCache-NewestAcrossSources`).
+
+- *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string pinnedVersion`, `CancellationToken`.
+- *Returns*: `Task<UpgradeCheck>` built by the same private `BuildUpgradeCheck` as the single-source method: the latest
+  is the first offer that no later offer exceeds - a later offer replaces the choice only when strictly newer, so a
+  tie keeps the earlier source, i.e. Settings order.
 
 #### Error Handling
 
@@ -81,7 +101,8 @@ unconfigured alias; argument checks throw `ArgumentNullException`/`ArgumentExcep
 hit returns the previously observed result instead, even if the source has since become
 unreachable — a deliberate staleness trade-off to avoid re-querying a potentially slow or
 offline location on every UI refresh. Two simultaneous misses for the same key may both query;
-the later result wins.
+the later result wins. The across-sources methods catch a single source's failure (see their descriptions) instead
+of propagating it, unless every consulted source failed.
 
 #### Dependencies
 
@@ -94,7 +115,9 @@ the later result wins.
 - **MainWindowViewModel** — constructs the single shared instance for the app session and
   calls `Invalidate(sourceAlias)` for each source that is edited or removed when settings are
   applied.
-- **RepoCardViewModel** — calls `IsNewerVersionAvailableAsync` when refreshing the upgrade
-  badge.
+- **RepoCardViewModel** — calls `GetVersionsAcrossSourcesAsync` (which configured sources offer the pinned package and
+  version) and `IsNewerVersionAvailableAcrossSourcesAsync` (the upgrade check and Upgrade) over all configured
+  sources, and `Invalidate(sourceAlias)` for every configured Git source when the card is refreshed, so that newly
+  pushed tags show up at once.
 - **SelectPackageWindowViewModel** — calls `GetPackageIdsAsync`/`GetVersionsDescendingAsync` to
   populate its picker lists.

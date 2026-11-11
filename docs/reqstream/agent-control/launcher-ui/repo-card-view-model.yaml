@@ -12,21 +12,24 @@ sections:
         title: >-
           The RepoCardViewModel class shall expose the repo's leaf folder name as its display
           name, and - when a pin file exists - a chip text naming the pinned package and its
-          version together with a tooltip and icon that say which configured source it came
-          from and of what kind (a zip folder, a NuGet folder or a NuGet server, or not
-          configured), the source's alias as text beside the icon so the source is recognizable
-          at a glance, and - when no package is pinned - a distinct "no agent package" state.
+          version together with, when a configured source is known to supply the package, a
+          tooltip and icon that say which source it is and of what kind (a zip folder, a NuGet
+          folder or a NuGet server) and the source's alias as text beside the icon so the source
+          is recognizable at a glance - with the icon, the alias and the source in the tooltip left
+          out when no configured source is known to supply it - and - when no package is pinned - a
+          distinct "no agent package" state.
         justification: |
           A developer identifies a repo card primarily by its folder name; the chip tells them
           at a glance which agent package, which version and from where, instead of an
-          unlabeled version number.
+          unlabeled version number. A source that is not known to supply the package must not be
+          named, or the chip would claim something nothing established.
         tests:
           - RepoCardViewModel_RepoName_ReturnsLeafFolderName
           - RepoCardViewModel_Refresh_PinFileExists_PopulatesPinnedFields
-          - RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip
-          - RepoCardViewModel_PackageChip_PinnedToNuGetFolderSource_ShowsNuGetFolderIconAndKind
+          - RepoCardViewModel_PackageChip_SuppliedByZipSource_ShowsNameVersionAndSourceInTooltip
+          - RepoCardViewModel_PackageChip_SuppliedByNuGetFolderSource_ShowsNuGetFolderIconAndKind
           - RepoCardViewModel_PinnedToServerSource_ChipShowsAliasAndServerIcon
-          - RepoCardViewModel_PackageChip_PinnedSourceNotConfigured_ShowsUnknownSource
+          - RepoCardViewModel_PackageChip_NoSupplyingSource_HidesSourceAndNamesNone
           - RepoCardViewModel_NoPackageChip_NeverPinnedRepo_ShowsNoPackageChipOnly
           - RepoCardViewModel_Chips_MissingRepo_ShowNeitherPackageChip
 
@@ -407,29 +410,25 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-SourceAwareness
         title: >-
-          The RepoCardViewModel class shall resolve its pinned package, check for upgrades and
-          repair missing managed folders only at the source named in the repo's pin (a pin
-          without a source is a pin to the source named Default), shall record the source in
-          the pin when a package is applied while keeping the pin's other fields, shall refuse to
-          apply a package to a repo whose pin was written by a newer version of the tool, and shall
-          expose an error state - with no upgrade offered and nothing extracted - when the
-          pinned source is not configured.
+          The RepoCardViewModel class shall apply a selected package from the source the user chose,
+          record in the repo's pin only the package, its version and the content identity of its
+          files - never a source - while keeping the pin's other fields, remember the source it
+          applied from as the card's supplying source in the user's own settings, report an error
+          and change nothing when the chosen source is not configured, and refuse to apply a package
+          to a repo whose pin was written by a newer version of the tool.
         justification: |
-          The pin binds the repo to one source; resolving it anywhere else, or overwriting a
-          pin the tool does not understand, could change what is installed without the user
-          knowing.
+          A pin is shared by a team while sources are each user's own configuration, so what the pin
+          records must not depend on one user's source names; the card still remembers which of the
+          user's sources supplied the package, and overwriting a pin the tool does not understand
+          could change what is installed without the user knowing.
         tests:
-          - RepoCardViewModel_ApplySelectedPackage_LegacySinglePath_PinRecordsDefaultSourceAlias
-          - RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent
-          - RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade
+          - RepoCardViewModel_ApplySelectedPackage_LegacySinglePath_PinRecordsNoSourceAndCardRemembersDefault
+          - RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_ExtractsThatSourcesContentAndRemembersIt
+          - RepoCardViewModel_ApplySelectedPackage_FromOtherSourceWithSameFiles_KeepsIdentityAndRecordsNoSource
           - RepoCardViewModel_ApplySelectedPackage_UnconfiguredSourceAlias_RaisesErrorAndChangesNothing
-          - RepoCardViewModel_EnsureAgentFilesSynced_PinNamesUnconfiguredSource_ReturnsFalseWithoutExtracting
-          - RepoCardViewModel_Refresh_SamePackageNameInTwoSources_ComparesOnlyAgainstPinnedSource
-          - RepoCardViewModel_Refresh_LegacyV1PinFile_ResolvesAgainstDefaultSource
-          - RepoCardViewModel_Refresh_LegacyV1PinFileAndNoDefaultSource_ShowsSourceProblem
           - RepoCardViewModel_ApplySelectedPackage_PinWithUnknownFieldAndDecline_PreservesBoth
           - RepoCardViewModel_ApplySelectedPackage_NewerSchemaPinFile_RaisesErrorAndChangesNothing
-          - RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsPinsAliasAndRaisesReleaseNotes
+          - RepoCardViewModel_ApplySelectedPackage_NuGetFolderSource_ExtractsRemembersSourceAndRaisesReleaseNotes
           - RepoCardViewModel_UpgradeCommand_NuGetFolderSource_UpgradesToHighestVersion
 
       - id: AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt
@@ -451,8 +450,8 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-SignatureIndicator
         title: >-
-          The RepoCardViewModel class shall indicate that the pinned package's source requires
-          signed packages - only when the pinned source is a NuGet source that requires them, not
+          The RepoCardViewModel class shall indicate that the source supplying the pinned package
+          requires signed packages - only when that source is a NuGet source that requires them, not
           for a zip source, a source that is not configured or a source without the requirement -
           with a tooltip that says signatures are required and either that any trusted signer is
           accepted or the start and end of the pinned publisher's certificate fingerprint, and
@@ -462,7 +461,9 @@ sections:
           that its packages are checked and how strictly, so a source whose requirement was
           switched off or never pinned is noticed.
         tests:
-          - RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip
+          - RepoCardViewModel_SupplyingSourceRequiresSignatures_ShowsShieldWithTooltip
+          - RepoCardViewModel_NoSignatureRequirement_ShowsNoShield
+          - RepoCardViewModel_SourceRequirementChanges_RaisesChangeNotificationsForTheShield
           - RepoCardViewModel_NoSignatureRequirement_ShowsNoShield
           - RepoCardViewModel_SourceRequirementChanges_RaisesChangeNotificationsForTheShield
 
@@ -819,12 +820,13 @@ sections:
       - id: AgentControl-RepoCardViewModel-RecordContentIdentity
         title: >-
           The RepoCardViewModel class shall record, in the repo's pin, the content identity of the
-          package that was applied by selecting a package or by upgrading, replacing any identity
-          recorded before.
+          agent files of the package that was applied by selecting a package or by upgrading
+          (none for a source that reports none), replacing whatever was recorded before.
         justification: |
-          The recorded identity is what later syncs of the same version are compared with.
+          The recorded identity is what later syncs of the same version are compared with and what
+          every configured source's files are verified against.
         tests:
-          - RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsZipSha256InPin
+          - RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsFilesIdentityInPin
           - RepoCardViewModel_UpgradeCommand_NewerVersion_RecordsNewIdentityWithoutWarning
 
       - id: AgentControl-RepoCardViewModel-RefuseChangedContent
@@ -855,15 +857,20 @@ sections:
       - id: AgentControl-RepoCardViewModel-ConfirmChangedContent
         title: >-
           The RepoCardViewModel class shall, when the user selects the version the repo is pinned
-          to and that version's content differs from the recorded identity (a package republished
-          with other files, or a Git tag that now points to another commit), change nothing and
-          request the user's confirmation.
+          to - from any source - and that version's content differs from the recorded identity (a
+          package republished with other files, a Git tag that was moved to a commit with other
+          files, or another source delivering other files), change nothing and request the user's
+          confirmation.
         justification: |
           Selecting the version again with Change package is the deliberate way to accept a
-          republished package or a moved tag; the decision belongs to the user.
+          republished package or a moved tag; the decision belongs to the user. The identity
+          describes the delivered files, so choosing another source is only silent when it delivers
+          identical files.
         tests:
           - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublished_RequestsConfirmationAndChangesNothing
-          - RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommit_AsksAndChangesNothing
+          - RepoCardViewModel_ApplySelectedPackage_GitVersionWithOtherFiles_AsksAndChangesNothing
+          - RepoCardViewModel_ApplySelectedPackage_SameVersionFromOtherSource_AsksOnlyWhenFilesDiffer
+          - RepoCardViewModel_ApplySelectedPackage_SameVersionFromRepublishedSource_AsksForConfirmation
 
       - id: AgentControl-RepoCardViewModel-ApplyConfirmedContent
         title: >-
@@ -873,7 +880,7 @@ sections:
           A change the user accepted must take effect and be what later syncs are compared with.
         tests:
           - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedAndAccepted_AppliesAndRecordsNewIdentity
-          - RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommitAccepted_AppliesAndRecordsCommit
+          - RepoCardViewModel_ApplySelectedPackage_GitVersionWithOtherFilesAccepted_AppliesAndRecordsIdentity
 
       - id: AgentControl-RepoCardViewModel-RefuseChangeWithoutAsking
         title: >-
@@ -883,7 +890,7 @@ sections:
           A change that cannot be put to the user must not go ahead.
         tests:
           - RepoCardViewModel_ApplySelectedPackage_SameVersionRepublishedWithoutSubscriber_IsRefused
-          - RepoCardViewModel_ApplySelectedPackage_GitVersionAtNewCommitWithoutSubscriber_AdvisesChangePackage
+          - RepoCardViewModel_ApplySelectedPackage_GitVersionWithOtherFilesWithoutSubscriber_AdvisesChangePackage
 
       - id: AgentControl-RepoCardViewModel-CheckTrackedFoldersFresh
         title: >-
@@ -993,13 +1000,15 @@ sections:
       - id: AgentControl-RepoCardViewModel-AdoptMissingIdentity
         title: >-
           The RepoCardViewModel class shall apply a package without any warning, recording its
-          identity, when the pin recorded no identity.
+          identity, when the pin recorded no identity of agent files - including a pin whose
+          identity an older version recorded from a package file, which is read as none.
         justification: |
-          Pins made before identities were recorded must keep working, and a missing identity
-          carries no evidence of a change, so warning about it would only teach users to ignore
-          the warning.
+          Pins made before identities were recorded, or before they were computed from the files,
+          must keep working, and a missing identity carries no evidence of a change, so warning
+          about it would only teach users to ignore the warning.
         tests:
           - RepoCardViewModel_ApplySelectedPackage_PinWithoutIdentity_AdoptsIdentityWithoutWarning
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_Schema3PinWithContainerIdentity_SyncsWithoutRefusing
 
       - id: AgentControl-RepoCardViewModel-IgnoreMissingSourceIdentity
         title: >-
@@ -1009,6 +1018,176 @@ sections:
           A source that cannot name an identity gives no evidence of a change.
         tests:
           - RepoCardViewModel_ApplySelectedPackage_SourceReportsNoIdentity_IsNeverTreatedAsChanged
+
+      # ---- Portable pins: a pin names no source; the user's own sources are matched by the files ----
+      - id: AgentControl-RepoCardViewModel-ResolveByFilesIdentity
+        title: >-
+          The RepoCardViewModel class shall find the source that supplies a repo's pinned package -
+          for the restore of missing agent files before launch and for the check of what supplies
+          the repo's files - among all the sources the user has configured, in Settings order,
+          choosing the first source that offers the pinned package name and version and whose files
+          have exactly the content identity the pin recorded, whatever its alias or kind of source.
+        justification: |
+          A repo's pin is shared by a team and names no source, because source aliases are each
+          user's own configuration: a teammate whose source has another name, is another kind of
+          source or is a re-packed mirror must still get the same agent files. Identical files are
+          the evidence that it is the same package; the order the user chose in Settings decides
+          between equals.
+        tests:
+          - RepoCardViewModel_Refresh_SourceNamedDifferentlyHasIdenticalFiles_NamesSupplierWithoutProblem
+          - RepoCardViewModel_Refresh_SeveralSources_UsesFirstSourceWithIdenticalFilesInSettingsOrder
+          - RepoCardViewModel_Refresh_PinMadeFromNuGetAndTeammateHasZipSource_IsSuppliedByZip
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceNamedDifferently_RestoresFromIdenticalSourceWithoutWritingPin
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_RepublishedSourceFirst_SkipsItAndRestoresFromMatchingSource
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinMadeFromZipAndTeammateHasGitSource_RestoresFromGit
+
+      - id: AgentControl-RepoCardViewModel-PreferLastSupplier
+        title: >-
+          The RepoCardViewModel class shall try the source that last supplied the pinned package
+          first when it restores missing agent files before launch, and shall accept that source
+          in the background check, without reading its files again, as long as it is still
+          configured and still offers the pinned version.
+        justification: |
+          Identical files are identical whichever source delivers them, so preferring the source
+          that worked before only saves reading every source on each check and each launch, and
+          the source is dropped as soon as it no longer offers the version.
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SeveralIdenticalSources_PrefersLastSupplierThenSettingsOrder
+          - RepoCardViewModel_Refresh_CachedSupplierStillOffersVersion_IsAcceptedWithoutAcquiring
+          - RepoCardViewModel_Refresh_CachedSupplierNoLongerConfigured_IsReplacedByAnotherSource
+
+      - id: AgentControl-RepoCardViewModel-ResolveRejectsDifferentFiles
+        title: >-
+          The RepoCardViewModel class shall never obtain a pinned package from a source whose files
+          differ from the identity the pin recorded, and shall refuse - rather than use the source
+          that offers the version - when sources offer the pinned version but none delivers the
+          recorded files, leaving the repo and its pin as they were.
+        justification: |
+          A package name and version are not unique across sources: using a source's package on the
+          strength of its name alone could put content into the repo that the pin never named (a
+          dependency-confusion attack, or an accident). Only identical files are evidence enough,
+          and a source that changed its files is a republished package, not the package the repo
+          was set up with.
+        tests:
+          - RepoCardViewModel_Refresh_OnlySourceHasDifferentFiles_ShowsNoMatchingFilesProblem
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_OnlyOtherFilesAvailable_RefusesWithExplanation
+          - RepoCardViewModel_EnsureAgentFilesSynced_NoSourceDeliversThePinnedFiles_ReturnsFalseWithoutExtracting
+
+      - id: AgentControl-RepoCardViewModel-ResolveWithoutIdentityByHints
+        title: >-
+          The RepoCardViewModel class shall, for a pin that recorded no content identity of agent
+          files (including a pin whose identity an older version recorded from a package file), use
+          the source that last supplied the package when it offers the pinned version, otherwise the
+          source an older version named in the pin file when that is configured and offers it,
+          otherwise the first configured source that offers it, and shall never refuse such a pin
+          for want of an identity.
+        justification: |
+          Without a recorded identity there is nothing to verify a source's files against, yet an
+          older pin must keep working; the sources the user used before are the best evidence of
+          where the package comes from, and the identity is recorded the next time a package is
+          applied.
+        tests:
+          - RepoCardViewModel_Refresh_PinWithoutFilesIdentity_UsesLegacySourceHintWhenConfigured
+          - RepoCardViewModel_Refresh_PinWithoutFilesIdentityAndLegacyHintNotConfigured_UsesFirstOfferingSource
+          - RepoCardViewModel_Refresh_PinWithoutFilesIdentity_LastSupplierWinsOverLegacyHint
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutFilesIdentity_UsesLegacyHintThenFirstOfferingSource
+          - RepoCardViewModel_Refresh_LegacyV1PinFile_IsSuppliedByDefaultSource
+          - RepoCardViewModel_Refresh_LegacyV1PinFileAndNoDefaultSource_UsesFirstOfferingSource
+
+      - id: AgentControl-RepoCardViewModel-ChipNamesSupplyingSource
+        title: >-
+          The RepoCardViewModel class shall show on the package chip the alias and kind of the
+          configured source that currently supplies the pinned package, whatever name the pin's
+          author gave their own source, without a source problem and without any wording about a
+          pinned source, and shall leave the pin unchanged.
+        justification: |
+          The user should see which of their own sources really supplies their files, and a repo
+          that works must not look broken just because a teammate's source has another name. The
+          pin is not touched because a launch never writes it.
+        tests:
+          - RepoCardViewModel_Refresh_SourceNamedDifferentlyHasIdenticalFiles_NamesSupplierWithoutProblem
+          - RepoCardViewModel_Refresh_SeveralSources_UsesFirstSourceWithIdenticalFilesInSettingsOrder
+
+      - id: AgentControl-RepoCardViewModel-NoSourceOffersProblem
+        title: >-
+          The RepoCardViewModel class shall, when no configured source offers the pinned package and
+          version - or no source is configured at all - show a package source problem saying so and
+          what to do about it, tell the user before a launch that agent files were not synced, and
+          extract nothing; the card is not shown as up to date meanwhile.
+        justification: |
+          The user needs to know why the files cannot be restored and what to do (add a source that
+          delivers the package, or choose the package again from a configured source); a card that
+          claimed to be up to date for files nothing can supply would hide the problem.
+        tests:
+          - RepoCardViewModel_Refresh_NoSourceOffersPinnedVersion_ShowsNoSourceOffersProblem
+          - RepoCardViewModel_Refresh_NoSourcesConfigured_ShowsNoSourceOffersProblem
+          - RepoCardViewModel_RefreshCheap_NoSourceConfigured_ShowsNoSourceOffersProblemAndOffersNoUpgrade
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoSourceOffersVersion_ReportsNoSourceOffers
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceUnreadable_ReportsReadFailure
+          - RepoCardViewModel_Status_MissingFolderOrSourceProblem_IsProblemWithReason
+
+      - id: AgentControl-RepoCardViewModel-UnresolvedPinExplained
+        title: >-
+          The RepoCardViewModel class shall, when configured sources offer the pinned version but
+          none delivers the files the repo was set up with, show a package source problem - and tell
+          the user before a launch that agent files were not synced - saying that the version now
+          contains different files than the copy the repo was set up with, that the package may
+          have been republished, and how to accept it deliberately with Change package; the card is
+          not shown as up to date meanwhile.
+        justification: |
+          A package republished under the version a repo uses changes what an agent is told to do;
+          the user needs to know that and how to accept the change if they trust it, in terms they
+          can act on, without hashes.
+        tests:
+          - RepoCardViewModel_Refresh_OnlySourceHasDifferentFiles_ShowsNoMatchingFilesProblem
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_OnlyOtherFilesAvailable_RefusesWithExplanation
+
+      - id: AgentControl-RepoCardViewModel-ProblemKeepsUpgradeOffered
+        title: >-
+          The RepoCardViewModel class shall keep offering a newer version that a configured source
+          offers - through the upgrade chip data and the shared upgrade command - while it shows a
+          package source problem, saying in the problem that upgrading moves the repo to a version a
+          configured source offers, and shall offer no upgrade when nothing newer is offered.
+        justification: |
+          A source that answered and offers a newer version gives the user a way out of the problem
+          - upgrading - that the problem must not take away; with nothing newer there is nothing to
+          offer.
+        tests:
+          - RepoCardViewModel_Refresh_NoSourceOffersPinnedVersionButNewerOffered_ShowsProblemAndStillOffersUpgrade
+          - RepoCardViewModel_Refresh_OnlyDifferentFilesButNewerOffered_ShowsProblemAndStillOffersUpgrade
+          - RepoCardViewModel_Refresh_NoSourceOffersPinnedVersion_ShowsNoSourceOffersProblem
+          - RepoCardViewModel_UpgradeCommand_FromSourceProblem_AppliesNewerVersionAndClearsProblem
+
+      - id: AgentControl-RepoCardViewModel-UnreadableSourceIsNotAProblem
+        title: >-
+          The RepoCardViewModel class shall, when nothing offers the pinned version and a configured
+          source could not be read, show the check as failed (unknown, or that a sign-in is needed)
+          instead of claiming that no configured source offers the package.
+        justification: |
+          A source that is down or needs a sign-in might well offer the package: saying that none
+          does would be a claim nothing established.
+        tests:
+          - RepoCardViewModel_Refresh_NothingOffersAndASourceCannotBeRead_IsUnknownNotAProblem
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains
+
+      - id: AgentControl-RepoCardViewModel-UpgradeAcrossSources
+        title: >-
+          The RepoCardViewModel class shall check for a newer version across all the configured
+          sources that offer the package (the newest version winning, a tie keeping Settings order),
+          and shall upgrade from the source that offers it, recording only the package, version and
+          files identity in the pin and remembering that source as the card's supplying source. The
+          upgrade, being user-initiated, shall list the sources afresh rather than use a listing
+          cached by an earlier background check.
+        justification: |
+          A pin names no source, so a newer version may come from any of the user's sources; the
+          upgrade is a deliberate action, and the source that was actually used is the one the card
+          remembers. A version published since the last check must not be missed by an action the
+          user just asked for.
+        tests:
+          - RepoCardViewModel_UpgradeCommand_SeveralSources_UsesNewestVersionAcrossSourcesAndRecordsNoSource
+          - RepoCardViewModel_UpgradeCommand_VersionPublishedAfterCachedCheck_AppliesTheNewVersion
+          - RepoCardViewModel_UpgradeCommand_SameNewestVersionInSeveralSources_KeepsSettingsOrder
+          - RepoCardViewModel_Refresh_SamePackageNameInTwoSources_OffersNewestAcrossAllSources
 
       - id: AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin
         title: >-
@@ -1023,6 +1202,7 @@ sections:
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutIdentity_SyncsSilentlyAndNeverWritesPin
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UnchangedContent_SyncsAndNeverWritesPin
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AgentsMdOfferDeclined_NeverWritesPin
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceNamedDifferently_RestoresFromIdenticalSourceWithoutWritingPin
 
       - id: AgentControl-RepoCardViewModel-GitSourceOptions
         title: >-
@@ -1057,110 +1237,41 @@ sections:
       # ---- Git source on the card ----
       - id: AgentControl-RepoCardViewModel-GitSourceAwareness
         title: >-
-          The RepoCardViewModel class shall present a repo pinned to a Git source with the Git icon
-          and the source's alias.
+          The RepoCardViewModel class shall present a repo whose package a Git source supplies with
+          the Git icon and the source's alias.
         justification: |
           A Git source is told apart from a folder or a server by its icon.
         tests:
-          - RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias
+          - RepoCardViewModel_SuppliedByGitSource_ShowsGitIconAndAlias
 
       - id: AgentControl-RepoCardViewModel-GitSourceTooltip
         title: >-
           The RepoCardViewModel class shall name in the package chip's tooltip the tag the pinned
-          version has in a Git source (the source's current tag pattern applied to the version) and
-          the first seven characters of the commit the repo's agent files came from, the tag alone
-          when the pin recorded no commit, and neither for a source that is not a Git source.
+          version has in a Git source that supplies it (the source's current tag pattern applied to
+          the version), and no tag for a source that is not a Git source.
         justification: |
-          The tag and commit say exactly which content the repo has, which is what a later change
-          to the tag is measured against.
+          The tag says exactly which content of the repository the repo has; a pin records the files
+          and not the tag, so the tag follows the source's current tag pattern.
         tests:
-          - RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit
-          - RepoCardViewModel_PackageChipTooltip_GitPinWithoutIdentity_NamesTagOnly
-          - RepoCardViewModel_PackageChipTooltip_ZipPin_HasNoTagOrCommit
+          - RepoCardViewModel_PackageChipTooltip_GitSource_NamesTagOnly
+          - RepoCardViewModel_PackageChipTooltip_ZipSource_HasNoTag
+          - RepoCardViewModel_PinnedTagName_TagPatternEdited_FollowsTheSourcesPattern
 
-      - id: AgentControl-RepoCardViewModel-TagMovedWarning
+      - id: AgentControl-RepoCardViewModel-RefreshRelistsGitSources
         title: >-
-          The RepoCardViewModel class shall, when a check finds that the tag of the version a repo
-          is pinned to in a Git source now points to a different commit than the one recorded in
-          the pin, show the "Tag moved" status with a tooltip naming the tag and both commits and
-          how to accept the change.
-        justification: |
-          A tag that is moved changes the instructions an agent follows without a new version; the
-          user must be told.
-        tests:
-          - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip
-
-      - id: AgentControl-RepoCardViewModel-TagMovedAppliesNothing
-        title: >-
-          The RepoCardViewModel class shall, when it shows that a tag moved, apply nothing and
-          change no pin.
-        justification: |
-          Acting on a moved tag without being asked would defeat pinning; the decision stays with
-          the user.
-        tests:
-          - RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing
-
-      - id: AgentControl-RepoCardViewModel-TagMovedNeedsEvidence
-        title: >-
-          The RepoCardViewModel class shall not show the "Tag moved" status when the tag still
-          points to the commit recorded in the pin, when the pin recorded no commit or an identity
-          that is not a commit, or when the source is not a Git source.
-        justification: |
-          A missing, non-Git or malformed identity carries no evidence of a move, so it must not
-          raise the warning.
-        tests:
-          - RepoCardViewModel_RefreshUpgradeStatus_SameCommit_IsNotMoved
-          - RepoCardViewModel_RefreshUpgradeStatus_ZipSourceWithRevision_IsNotMoved
-          - RepoCardViewModel_RefreshUpgradeStatus_PinWithoutIdentity_IsNotMoved
-          - RepoCardViewModel_RefreshUpgradeStatus_GitSourceWithNonCommitIdentity_IsNotMoved
-
-      - id: AgentControl-RepoCardViewModel-TagMovedClearedByNewPin
-        title: >-
-          The RepoCardViewModel class shall clear the "Tag moved" status when the pin is updated to
-          the new commit.
-        justification: |
-          Once the user has accepted the change the warning no longer applies.
-        tests:
-          - RepoCardViewModel_RefreshUpgradeStatus_PinUpdatedAfterTagMoved_ClearsMovedTag
-
-      - id: AgentControl-RepoCardViewModel-TagMovedFreshListing
-        title: >-
-          The RepoCardViewModel class shall, when the user refreshes a card pinned to a Git source,
-          read the source's tags again instead of reusing the listing cached earlier in the
-          session, so that a tag moved during the session is shown, while a check that runs in the
+          The RepoCardViewModel class shall, when the user refreshes a card, read every configured
+          Git source's tags again instead of reusing the listing cached earlier in the session, so
+          that a tag pushed since then (a new version) is offered, while a check that runs in the
           background may use the cached listing.
         justification: |
-          A tag can be moved at any time, and a cached listing would keep showing the old commit
-          for the rest of the session; the user who asks for a refresh expects the current answer,
-          while background checks must stay cheap.
+          Tags can be pushed at any time, and a cached listing would hide a new version for the rest
+          of the session; the user who asks for a refresh expects the current answer, while
+          background checks must stay cheap. A newer version may be in any of the user's Git
+          sources, not only the one that supplies the repo's files.
         tests:
-          - RepoCardViewModel_RefreshAsync_GitSourceTagMovedAfterCachedListing_ListsAgainAndShowsTagMoved
+          - RepoCardViewModel_RefreshAsync_GitSourceNewTagPushedAfterCachedListing_ListsAgainAndOffersNewVersion
+          - RepoCardViewModel_RefreshAsync_SeveralGitSources_ListsEachOfThemAgain
           - RepoCardViewModel_RefreshAsync_ZipSource_KeepsUsingCachedListing
-
-      - id: AgentControl-RepoCardViewModel-TagMovedClearedWhenUnknown
-        title: >-
-          The RepoCardViewModel class shall clear the "Tag moved" status, rather than keep showing
-          it as confirmed, when a later check of the source fails or the repo's folder is missing.
-        justification: |
-          After a failed check, or for a repo that cannot be checked, it is not known whether the
-          tag moved; an earlier warning must not stay up as if the current check had confirmed it.
-        tests:
-          - RepoCardViewModel_RefreshAsync_FailsAfterTagMoved_ClearsTagMovedAndShowsCheckFailed
-          - RepoCardViewModel_RefreshCheap_RepoFolderGoesMissingAfterTagMoved_ClearsTagMoved
-
-      - id: AgentControl-RepoCardViewModel-TagMovedFollowsTagPattern
-        title: >-
-          The RepoCardViewModel class shall derive the tag of a pinned Git version from the source's
-          current tag pattern, so that after the pattern was edited a pinned version whose new tag
-          points to another commit than the pin recorded is shown as "Tag moved" and is accepted
-          only through Change package.
-        justification: |
-          A pin records the commit, not the tag; editing the pattern re-maps the version to another
-          tag, and content that differs from what the repo was set up from must never be taken
-          silently.
-        tests:
-          - RepoCardViewModel_RefreshUpgradeStatus_TagPatternEdited_RemappedTagAtOtherCommitIsReportedAsTagMoved
-
       - id: AgentControl-RepoCardViewModel-GitTooOldProblem
         title: >-
           The RepoCardViewModel class shall, when the background check finds that the installed git

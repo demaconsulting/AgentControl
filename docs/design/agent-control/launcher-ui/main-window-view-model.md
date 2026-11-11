@@ -141,7 +141,7 @@ with many tracked repos.
 - *Returns*: A task that completes when the checks have finished (the window ignores it; tests
   await it).
 - *Postconditions*: Each card's `RefreshUpgradeStatusAsync` runs a few cards at a time, so a slow or
-  unreachable source delays only the cards pinned to it, and a check still running for earlier
+  unreachable source holds up only the cards' own checks, never the window, and a check still running for earlier
   settings is cancelled. The window calls it once it is shown; `AddRepo` checks the new card's
   upgrade status the same way, and `ApplySettings` starts a new round against the new sources
   (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`).

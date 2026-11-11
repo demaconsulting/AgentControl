@@ -85,16 +85,45 @@ sections:
           - PackageVersionCache_InvalidateSingleSource_LeavesOtherSourcesCached
           - PackageVersionCache_InvalidateDuringInFlightFetch_DoesNotCacheStaleResult
 
-      - id: AgentControl-PackageVersionCache-ReportPinnedListing
+      - id: AgentControl-PackageVersionCache-ListAcrossSources
         title: >-
-          The PackageVersionCache class shall include in the upgrade check the discovered package
-          of the pinned version from the same listing, with the revision its source reported, or
-          none when the source does not list it or the pin does not parse.
+          The PackageVersionCache class shall list what every configured source offers of a package
+          in the order the sources are configured, each source's versions from highest to lowest,
+          leaving out a source it is told to exclude without contacting it, and reading each source
+          only once however often it is asked.
         justification: |
-          A Git tag that was moved is seen as a different revision of the pinned version; handing
-          the pinned listing entry to the caller lets it compare revisions without another call to
-          a source that may be slow.
+          A repo's pin names no source, because aliases are per-user configuration: every configured
+          source is a candidate that may deliver the package, and their order is the order the user
+          chose in Settings.
         tests:
-          - PackageVersionCache_IsNewerVersionAvailable_PinnedVersionListed_ReturnsPinnedPackageWithRevision
-          - PackageVersionCache_IsNewerVersionAvailable_PinnedVersionNotListed_ReturnsNoPinnedPackage
-          - PackageVersionCache_IsNewerVersionAvailable_PinDoesNotParse_ReturnsNoPinnedPackage
+          - PackageVersionCache_GetVersionsAcrossSources_ReturnsOffersInConfigurationOrderAndExcludesAlias
+
+      - id: AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure
+        title: >-
+          The PackageVersionCache class shall skip a source that cannot be read when listing across
+          sources, so that the offers of the others are still returned, shall tell a caller that
+          asks which sources failed, and shall report the first failure when every source that was
+          consulted failed.
+        justification: |
+          One unreachable share or server must not hide what the others offer; but when nothing
+          could be read, an empty answer would wrongly claim that no source offers the package, and
+          a caller that finds nothing must be able to tell "no source offers it" from "a source that
+          might have could not be read".
+        tests:
+          - PackageVersionCache_GetVersionsAcrossSources_OneSourceFails_ReturnsTheOthersOffers
+          - PackageVersionCache_GetVersionsAcrossSources_EverySourceFails_ThrowsTheFirstFailure
+          - PackageVersionCache_GetVersionsAcrossSources_SourceFailureCallback_ReportsEachSkippedSource
+
+      - id: AgentControl-PackageVersionCache-NewestAcrossSources
+        title: >-
+          The PackageVersionCache class shall determine, across all configured sources, the newest
+          version of a package and whether it is newer than a pinned version, attributing a version
+          that several sources offer to the first of them in configuration order, and shall report
+          no upgrade and no latest version when no source offers the package.
+        justification: |
+          A repo's pin names no source, so the upgrade check has to consider every source that
+          offers the package; the newest version wins, and a tie must resolve the same way every
+          time, by the order the user set.
+        tests:
+          - PackageVersionCache_IsNewerVersionAvailableAcrossSources_NewestWinsAndTieKeepsConfigurationOrder
+          - PackageVersionCache_IsNewerVersionAvailableAcrossSources_NobodyOffersPackage_ReportsNoUpgrade

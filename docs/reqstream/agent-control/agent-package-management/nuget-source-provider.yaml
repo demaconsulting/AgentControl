@@ -126,7 +126,7 @@ sections:
           The NuGetSourceProvider class shall refuse to supply the content of a package that was
           discovered at a different source.
         justification: |
-          Content must only ever come from the source whose alias the pin names.
+          Content must only ever come from the source the caller resolved.
         tests:
           - NuGetSourceProvider_Acquire_PackageFromOtherSource_ThrowsArgumentException
 
@@ -628,25 +628,17 @@ sections:
       - id: AgentControl-NuGetSourceProvider-ReportContentIdentity
         title: >-
           The NuGetSourceProvider class shall report, as the content identity of a package it
-          supplies, the SHA-256 identity of the package file held in its private package cache -
-          the copy that was unpacked and is applied.
+          supplies, the identity of the agent files of the copy held in its private package cache
+          - the copy that was unpacked and is applied - and not of the package file, so that the
+          same files packed differently report the same identity.
         justification: |
-          A feed can serve different bytes under a version number that was already published; the
-          identity of the package file this source unpacked is what lets a repo's pin notice the
-          difference. NuGet versions are immutable by convention and the private cache is what
-          avoids downloading them again, so the identity describes the local copy that is applied.
+          A feed can serve different files under a version number that was already published; the
+          identity of the files this source unpacked is what lets a repo's pin notice the
+          difference, and what lets the same files from another kind of source be recognized as
+          the same. NuGet versions are immutable by convention and the private cache is what avoids
+          downloading them again, so the identity describes the local copy that is applied.
         tests:
-          - NuGetSourceProvider_Acquire_ExistingPackage_ReportsSha256OfNupkgAsContentIdentity
-          - NuGetSourceProvider_Acquire_TwoVersions_ReportTheIdentityOfTheirOwnPackageFile
+          - NuGetSourceProvider_Acquire_ExistingPackage_ReportsFilesIdentityIndependentOfNupkg
+          - NuGetSourceProvider_Acquire_TwoVersions_ReportDifferentIdentities
           - NuGetSourceProvider_Acquire_SameVersionTwice_ReportsIdentityOfTheCachedCopy
-          - NuGetSourceProvider_Acquire_AnonymousServer_ReportsSha256OfDownloadedPackageFile
-
-      - id: AgentControl-NuGetSourceProvider-RefuseUnidentifiablePackage
-        title: >-
-          The NuGetSourceProvider class shall refuse to supply a package whose package file cannot
-          be identified.
-        justification: |
-          A package that cannot be identified must not be recorded as if it had been; recording an
-          arbitrarily chosen file's hash would give a pin an identity that is not the package's.
-        tests:
-          - NuGetSourceProvider_Acquire_AmbiguousPackageFile_ThrowsInvalidOperationException
+          - NuGetSourceProvider_Acquire_AnonymousServer_ReportsFilesIdentityOfDownloadedPackage

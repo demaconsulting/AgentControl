@@ -35,11 +35,11 @@ public sealed class PackageVersionCacheTests : IDisposable
     private readonly List<string> _tempPaths = [];
 
     /// <summary>
-    ///     Test that the upgrade check carries the discovered package of the pinned version from the same
-    ///     listing - with its revision - so a caller can see that a tag was moved without another call.
+    ///     Test that the upgrade check carries the discovered package of the latest version - with its
+    ///     revision - from a single listing call of the source.
     /// </summary>
     [Fact]
-    public async Task PackageVersionCache_IsNewerVersionAvailable_PinnedVersionListed_ReturnsPinnedPackageWithRevision()
+    public async Task PackageVersionCache_IsNewerVersionAvailable_NewerListed_ReturnsLatestWithRevisionFromOneListing()
     {
         // Arrange: 1.0.0 (pinned) and 1.1.0, each with a revision
         var provider = new FakePackageSourceProvider("Repo", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
@@ -52,21 +52,18 @@ public sealed class PackageVersionCacheTests : IDisposable
         var check = await cache.IsNewerVersionAvailableAsync(
             registry, "Repo", "contoso-agents", "1.0.0", CancellationToken.None);
 
-        // Assert: the latest and the pinned entries each carry their revision, from one listing call
+        // Assert: the latest entry carries its revision, from one listing call
         Assert.True(check.IsNewerAvailable);
         Assert.Equal("1.1.0", check.Latest?.Version.ToString());
-        Assert.Equal("1.0.0", check.Pinned?.Version.ToString());
-        Assert.Equal(new string('a', 40), check.Pinned?.Revision);
         Assert.Equal(new string('b', 40), check.Latest?.Revision);
         Assert.Equal(1, provider.ListVersionsCalls);
     }
 
     /// <summary>
-    ///     Test that a pinned version the source does not list gives no pinned entry, while the latest
-    ///     version is still reported.
+    ///     Test that a pinned version the source does not list does not hide the latest version.
     /// </summary>
     [Fact]
-    public async Task PackageVersionCache_IsNewerVersionAvailable_PinnedVersionNotListed_ReturnsNoPinnedPackage()
+    public async Task PackageVersionCache_IsNewerVersionAvailable_PinnedVersionNotListed_StillReportsLatest()
     {
         // Arrange: a source that lists 1.0.0 and 1.1.0, and a pin to 0.9.0
         var provider = new FakePackageSourceProvider("Repo", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
@@ -78,16 +75,16 @@ public sealed class PackageVersionCacheTests : IDisposable
             registry, "Repo", "contoso-agents", "0.9.0", CancellationToken.None);
 
         // Assert
-        Assert.Null(check.Pinned);
         Assert.True(check.IsNewerAvailable);
         Assert.Equal("1.1.0", check.Latest?.Version.ToString());
     }
 
     /// <summary>
-    ///     Test that a pin that does not parse as a version gives no pinned entry.
+    ///     Test that a pin that does not parse as a version is treated as needing attention: the latest
+    ///     version is offered.
     /// </summary>
     [Fact]
-    public async Task PackageVersionCache_IsNewerVersionAvailable_PinDoesNotParse_ReturnsNoPinnedPackage()
+    public async Task PackageVersionCache_IsNewerVersionAvailable_PinDoesNotParse_OffersLatest()
     {
         // Arrange: a source that lists two versions, and a pin that is not a version
         var provider = new FakePackageSourceProvider("Repo", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
@@ -99,7 +96,8 @@ public sealed class PackageVersionCacheTests : IDisposable
             registry, "Repo", "contoso-agents", "not-a-version", CancellationToken.None);
 
         // Assert
-        Assert.Null(check.Pinned);
+        Assert.True(check.IsNewerAvailable);
+        Assert.Equal("1.1.0", check.Latest?.Version.ToString());
     }
 
     /// <summary>
@@ -412,6 +410,145 @@ public sealed class PackageVersionCacheTests : IDisposable
         await Assert.ThrowsAsync<UnknownSourceException>(() => cache.GetVersionsDescendingAsync(
             registry, "B", "contoso-agents", CancellationToken.None));
         Assert.Equal(0, sourceA.TotalCalls);
+    }
+
+    /// <summary>
+    ///     Test that the cross-source listing returns every source's offers in the order the sources are
+    ///     configured (each source's versions highest first), leaves out the excluded alias without
+    ///     contacting it, and reads each source once however often it is asked.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_GetVersionsAcrossSources_ReturnsOffersInConfigurationOrderAndExcludesAlias()
+    {
+        // Arrange: three sources, the first of which is the one to leave out
+        var pinned = new FakePackageSourceProvider("Pinned", ("contoso-agents", "1.0.0"));
+        var first = new FakePackageSourceProvider("First", ("contoso-agents", "1.0.0"), ("contoso-agents", "2.0.0"));
+        var second = new FakePackageSourceProvider("Second", ("contoso-agents", "1.5.0"), ("other-agents", "9.0.0"));
+        var registry = CreateRegistry(pinned, first, second);
+        var cache = new PackageVersionCache();
+
+        // Act: asked twice
+        var offers = await cache.GetVersionsAcrossSourcesAsync(registry, "contoso-agents", "pinned", CancellationToken.None);
+        await cache.GetVersionsAcrossSourcesAsync(registry, "contoso-agents", "pinned", CancellationToken.None);
+
+        // Assert: configuration order, highest first within a source, no contact with the excluded source
+        Assert.Equal(
+            ["First 2.0.0", "First 1.0.0", "Second 1.5.0"],
+            offers.Select(offer => $"{offer.SourceAlias} {offer.Version}"));
+        Assert.Equal(0, pinned.TotalCalls);
+        Assert.Equal(1, first.ListVersionsCalls);
+        Assert.Equal(1, second.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that a source that cannot be read is skipped, so one unreachable source never hides what the
+    ///     others offer.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_GetVersionsAcrossSources_OneSourceFails_ReturnsTheOthersOffers()
+    {
+        // Arrange: the first source is unreachable
+        var broken = new FakePackageSourceProvider("Broken", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("unreachable")
+        };
+        var working = new FakePackageSourceProvider("Working", ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(broken, working);
+        var cache = new PackageVersionCache();
+
+        // Act
+        var offers = await cache.GetVersionsAcrossSourcesAsync(registry, "contoso-agents", null, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Working", Assert.Single(offers).SourceAlias);
+    }
+
+    /// <summary>
+    ///     Test that when every consulted source fails the failure is reported instead of an empty answer,
+    ///     so a check that learned nothing is not mistaken for "nobody offers the package".
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_GetVersionsAcrossSources_EverySourceFails_ThrowsTheFirstFailure()
+    {
+        // Arrange: both sources fail
+        var one = new FakePackageSourceProvider("One") { ListVersionsException = new IOException("first failure") };
+        var two = new FakePackageSourceProvider("Two") { ListVersionsException = new InvalidOperationException("second failure") };
+        var registry = CreateRegistry(one, two);
+        var cache = new PackageVersionCache();
+
+        // Act / Assert
+        var failure = await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsAcrossSourcesAsync(registry, "contoso-agents", null, CancellationToken.None));
+        Assert.Equal("first failure", failure.Message);
+    }
+
+    /// <summary>
+    ///     Test that a caller that asks is told about each source that was skipped because it could not be
+    ///     read, so it can tell "no source offers the package" from "a source that might have could not be
+    ///     read".
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_GetVersionsAcrossSources_SourceFailureCallback_ReportsEachSkippedSource()
+    {
+        // Arrange: two failing sources around a working one
+        var one = new FakePackageSourceProvider("One") { ListVersionsException = new IOException("first failure") };
+        var working = new FakePackageSourceProvider("Working", ("contoso-agents", "1.0.0"));
+        var two = new FakePackageSourceProvider("Two") { ListVersionsException = new InvalidOperationException("second failure") };
+        var registry = CreateRegistry(one, working, two);
+        var cache = new PackageVersionCache();
+        var failures = new List<string>();
+
+        // Act
+        var offers = await cache.GetVersionsAcrossSourcesAsync(
+            registry, "contoso-agents", null, CancellationToken.None, failure => failures.Add(failure.Message));
+
+        // Assert
+        Assert.Equal("Working", Assert.Single(offers).SourceAlias);
+        Assert.Equal(["first failure", "second failure"], failures);
+    }
+
+    /// <summary>
+    ///     Test that the cross-source upgrade check reports the newest version across the sources, that a
+    ///     version offered by several sources is attributed to the first of them in configuration order.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_IsNewerVersionAvailableAcrossSources_NewestWinsAndTieKeepsConfigurationOrder()
+    {
+        // Arrange: 3.0.0 is offered by both the second and third source, 2.0.0 by the first
+        var first = new FakePackageSourceProvider("First", ("contoso-agents", "1.0.0"), ("contoso-agents", "2.0.0"));
+        var second = new FakePackageSourceProvider("Second", ("contoso-agents", "3.0.0"));
+        var third = new FakePackageSourceProvider("Third", ("contoso-agents", "3.0.0"), ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(first, second, third);
+        var cache = new PackageVersionCache();
+
+        // Act
+        var check = await cache.IsNewerVersionAvailableAcrossSourcesAsync(
+            registry, "contoso-agents", "1.0.0", CancellationToken.None);
+
+        // Assert
+        Assert.True(check.IsNewerAvailable);
+        Assert.Equal("3.0.0", check.Latest?.Version.ToString());
+        Assert.Equal("Second", check.Latest?.SourceAlias);
+    }
+
+    /// <summary>
+    ///     Test that the cross-source upgrade check reports no upgrade, and no latest version, when no
+    ///     source offers the package.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_IsNewerVersionAvailableAcrossSources_NobodyOffersPackage_ReportsNoUpgrade()
+    {
+        // Arrange
+        var registry = CreateRegistry(new FakePackageSourceProvider("Only", ("other-agents", "1.0.0")));
+        var cache = new PackageVersionCache();
+
+        // Act
+        var check = await cache.IsNewerVersionAvailableAcrossSourcesAsync(
+            registry, "contoso-agents", "1.0.0", CancellationToken.None);
+
+        // Assert
+        Assert.False(check.IsNewerAvailable);
+        Assert.Null(check.Latest);
     }
 
     /// <summary>

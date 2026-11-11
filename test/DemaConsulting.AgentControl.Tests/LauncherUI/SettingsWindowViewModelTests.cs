@@ -375,13 +375,13 @@ public class SettingsWindowViewModelTests
     }
 
     /// <summary>
-    ///     Test that the removal warning names the source and says how many repos are pinned to it,
-    ///     and that removing the source clears the selection and the list.
+    ///     Test that the removal warning names the source and says how many repos get their package
+    ///     from it, and that removing the source clears the selection and the list.
     /// </summary>
     [Fact]
     public void SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves()
     {
-        // Arrange: two repos pinned to "Contoso" (matched ignoring case) and one to another source
+        // Arrange: two repos supplied by "Contoso" (matched ignoring case) and one by another source
         var initial = new AppSettings
         {
             Sources = [ZipSource("Contoso", @"C:\contoso"), ZipSource("Other", @"C:\other")],
@@ -402,11 +402,13 @@ public class SettingsWindowViewModelTests
         var otherWarning = SettingsWindowViewModel.GetRemovalWarning(other);
         viewModel.RemoveSource(contoso);
 
-        // Assert: the warning counts the pinned repos and mentions the source problem
+        // Assert: the warning counts the repos the source supplies and says another source delivering the
+        // identical files is used, else a source problem is shown
         Assert.Contains("'Contoso'", warning, StringComparison.Ordinal);
-        Assert.Contains("2 repos are pinned", warning, StringComparison.Ordinal);
+        Assert.Contains("2 repos get their agent package from 'Contoso'", warning, StringComparison.Ordinal);
+        Assert.Contains("another configured source that delivers the identical files", warning, StringComparison.Ordinal);
         Assert.Contains("Package source problem", warning, StringComparison.Ordinal);
-        Assert.Contains("1 repo is pinned", otherWarning, StringComparison.Ordinal);
+        Assert.Contains("1 repo gets its agent package from 'Other'", otherWarning, StringComparison.Ordinal);
         Assert.Equal(["Other"], viewModel.Sources.Select(source => source.Alias));
         Assert.Null(viewModel.SelectedSource);
     }

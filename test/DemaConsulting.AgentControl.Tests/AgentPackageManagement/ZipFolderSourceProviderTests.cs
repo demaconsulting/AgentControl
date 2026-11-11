@@ -314,22 +314,22 @@ public sealed class ZipFolderSourceProviderTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that the reader of an acquired zip reports the SHA-256 of the zip file as its
-    ///     content identity, and that a republished zip with different bytes reports another one.
+    ///     Test that the reader of an acquired zip reports the identity of the agent files in the zip as its
+    ///     content identity, that a repacked zip with the same files reports the same one, and that a
+    ///     republished zip with different content reports another.
     /// </summary>
     [Fact]
-    public async Task ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReportsSha256OfZipAsContentIdentity()
+    public async Task ZipFolderSourceProvider_Acquire_DiscoveredPackage_ReportsFilesIdentityOfZipContent()
     {
-        // Arrange: a zip, and its independently computed SHA-256
+        // Arrange: a zip with an agent file and release notes
         var folder = CreateTempDirectory();
-        var zipPath = CreateZip(folder, "contoso-agents-1.0.0.zip", (".github/agents/copilot.md", "original"));
-        var expected = "sha256:" + Convert.ToHexStringLower(
-            System.Security.Cryptography.SHA256.HashData(
-                await File.ReadAllBytesAsync(zipPath, TestContext.Current.CancellationToken)));
+        var zipPath = CreateZip(
+            folder, "contoso-agents-1.0.0.zip", (".github/agents/copilot.md", "original"), ("release-notes.md", "the notes"));
         var provider = CreateProvider("Zips", folder);
         var package = Assert.Single(await provider.ListVersionsAsync("contoso-agents", CancellationToken.None));
 
-        // Act: acquire it, then republish the same version with different content and acquire again
+        // Act: acquire it, then repack the same files (other notes, other order) and acquire again, then
+        // republish the same version with different content and acquire again
         string? first;
         using (var reader = await provider.AcquireAsync(package, CancellationToken.None))
         {
@@ -337,13 +337,23 @@ public sealed class ZipFolderSourceProviderTests : IDisposable
         }
 
         File.Delete(zipPath);
+        CreateZip(
+            folder, "contoso-agents-1.0.0.zip", ("release-notes.md", "other notes"), (".github/agents/copilot.md", "original"));
+        string? repacked;
+        using (var reader = await provider.AcquireAsync(package, CancellationToken.None))
+        {
+            repacked = reader.ContentIdentity;
+        }
+
+        File.Delete(zipPath);
         CreateZip(folder, "contoso-agents-1.0.0.zip", (".github/agents/copilot.md", "republished"));
         using var republished = await provider.AcquireAsync(package, CancellationToken.None);
 
         // Assert
-        Assert.Equal(expected, first);
-        Assert.StartsWith("sha256:", republished.ContentIdentity, StringComparison.Ordinal);
-        Assert.NotEqual(expected, republished.ContentIdentity);
+        Assert.True(PackageContentIdentity.IsFilesIdentity(first));
+        Assert.Equal(first, repacked);
+        Assert.True(PackageContentIdentity.IsFilesIdentity(republished.ContentIdentity));
+        Assert.NotEqual(first, republished.ContentIdentity);
     }
 
     /// <summary>
