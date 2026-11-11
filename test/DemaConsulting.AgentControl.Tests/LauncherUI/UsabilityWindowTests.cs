@@ -241,14 +241,14 @@ public sealed class UsabilityWindowTests : IDisposable
     });
 
     /// <summary>
-    ///     Test that the card of a repo pinned to a Git source draws the Git icon and the source's alias
-    ///     in its package chip, and that the chip's tooltip names the tag and the first seven
-    ///     characters of the commit the files came from: the chip as the user sees it in the main window.
+    ///     Test that the card of a repo supplied by a Git source draws the Git icon and the source's alias
+    ///     in its package chip, and that the chip's tooltip names the tag the version has under the source's
+    ///     pattern: the chip as the user sees it in the main window.
     /// </summary>
     [Fact]
-    public void MainWindow_PinnedGitSourceCard_ChipShowsGitIconAliasTagAndShortCommit() => HeadlessTestApp.Run(() =>
+    public void MainWindow_GitSourceCard_ChipShowsGitIconAliasAndTag() => HeadlessTestApp.Run(() =>
     {
-        // Arrange: a Git source (a local folder, so nothing is fetched) and a repo pinned to its tag
+        // Arrange: a Git source (a local folder, so nothing is fetched) and a repo whose package it supplies
         var source = new PackageSourceDefinition
         {
             Alias = "Repo",
@@ -258,17 +258,17 @@ public sealed class UsabilityWindowTests : IDisposable
             PackageIds = ["contoso-agents"]
         };
         var repo = CreateRepoDirectory("git-pinned");
-        RepoPinStore.Save(repo, new RepoPin
-        {
-            Source = "Repo",
-            PackageName = "contoso-agents",
-            Version = "1.2.3",
-            SourceRevision = "git-commit:abcdef0123456789abcdef0123456789abcdef01"
-        });
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.2.3" });
 
         // Act: the main window shows the repo's card
         var (window, viewModel) = CreateWindow(
-            [new RecentRepo { Path = repo }], new AppSettings { Sources = [source] });
+            [
+                new RecentRepo
+                {
+                    Path = repo, PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.2.3", PinnedSource = "Repo"
+                }
+            ],
+            new AppSettings { Sources = [source] });
 
         try
         {
@@ -282,7 +282,7 @@ public sealed class UsabilityWindowTests : IDisposable
             Assert.Equal("Repo", Assert.Single(chip.GetVisualDescendants().OfType<TextBlock>(), text => text.Name == "PackageSourceAliasText").Text);
             Assert.Equal("contoso-agents 1.2.3", Assert.Single(chip.GetVisualDescendants().OfType<TextBlock>(), text => text.Name == "RepoPinnedVersionText").Text);
             Assert.Equal(
-                "Agent files: contoso-agents 1.2.3 from source 'Repo' (git repository), tag release/1.2.3 @ abcdef0.",
+                "Agent files: contoso-agents 1.2.3 from source 'Repo' (git repository), tag release/1.2.3.",
                 ToolTip.GetTip(chip));
             Assert.Equal(viewModel.RepoCards[0].PackageChipTooltip, ToolTip.GetTip(chip));
         }
@@ -293,16 +293,16 @@ public sealed class UsabilityWindowTests : IDisposable
     });
 
     /// <summary>
-    ///     Test that the card of a repo whose pinned source alias is not configured on this machine, while
-    ///     another configured source delivers the identical files, draws the alias of the source that supplies
-    ///     them in its package chip (with a tooltip that says why) and no red "Package source problem" chip:
-    ///     the card as a teammate with other source names sees it in the main window.
+    ///     Test that the card of a repo whose pin names no source, while a configured source delivers the
+    ///     identical files, draws the alias of the source that supplies them in its package chip (with a
+    ///     tooltip that names it) and no red "Package source problem" chip: the card as a teammate with
+    ///     other source names sees it in the main window.
     /// </summary>
     [Fact]
-    public void MainWindow_PinnedAliasNotConfiguredButIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem() => HeadlessTestApp.RunAsync(async () =>
+    public void MainWindow_PinNamesNoSourceAndIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem() => HeadlessTestApp.RunAsync(async () =>
     {
-        // Arrange: a pin to "Contoso" that recorded the identity of the files of 1.0.0, and a source
-        // named "Artifactory" that delivers the very same files
+        // Arrange: a pin that recorded the identity of the files of 1.0.0, and a source named
+        // "Artifactory" that delivers the very same files
         var contoso = CreateTempDirectory();
         CreateZip(contoso, "contoso-agents", "1.0.0", releaseNotes: "# Original");
         var artifactory = CreateTempDirectory();
@@ -317,7 +317,7 @@ public sealed class UsabilityWindowTests : IDisposable
         var repo = CreateRepoDirectory("portable-pin");
         RepoPinStore.Save(
             repo,
-            new RepoPin { Source = "Contoso", PackageName = "contoso-agents", Version = "1.0.0", ContentIdentity = identity });
+            new RepoPin { PackageName = "contoso-agents", Version = "1.0.0", ContentIdentity = identity });
         var source = new PackageSourceDefinition { Alias = "Artifactory", Type = PackageSourceType.Zip, Location = artifactory };
 
         // Act: the main window shows the card and its upgrade check runs
@@ -328,13 +328,10 @@ public sealed class UsabilityWindowTests : IDisposable
             await viewModel.RepoCards[0].RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
             Dispatcher.UIThread.RunJobs();
 
-            // Assert: the chip names the supplier and explains it; the red chip is not shown
+            // Assert: the chip names the supplier and its tooltip does too; the red chip is not shown
             var chip = Assert.Single(window.GetVisualDescendantsOf<Border>("PackageChip"));
             Assert.Equal("Artifactory", Assert.Single(chip.GetVisualDescendants().OfType<TextBlock>(), text => text.Name == "PackageSourceAliasText").Text);
-            Assert.Contains(
-                "Pinned source 'Contoso' is not configured; the identical files come from 'Artifactory'.",
-                ToolTip.GetTip(chip)?.ToString(),
-                StringComparison.Ordinal);
+            Assert.Contains("from source 'Artifactory'", ToolTip.GetTip(chip)?.ToString(), StringComparison.Ordinal);
             Assert.All(window.GetVisualDescendantsOf<Border>("SourceProblemChip"), problem => Assert.False(problem.IsVisible));
             Assert.Equal(RepoCardStatus.UpToDate, viewModel.RepoCards[0].Status);
         }
@@ -345,14 +342,14 @@ public sealed class UsabilityWindowTests : IDisposable
     });
 
     /// <summary>
-    ///     Test that the card of a repo whose pinned source alias is not configured, while another configured
-    ///     source delivers the identical files and also offers a newer version, shows the upgrade chip with
-    ///     that newer version: the upgrade is offered from the configured sources that offer the package.
+    ///     Test that the card of a repo whose pin names no source, while a configured source delivers the
+    ///     identical files and also offers a newer version, shows the upgrade chip with that newer version:
+    ///     the upgrade is offered from the configured sources that offer the package.
     /// </summary>
     [Fact]
-    public void MainWindow_PinnedAliasNotConfigured_UpgradeChipOffersNewestVersionFromAnotherSource() => HeadlessTestApp.RunAsync(async () =>
+    public void MainWindow_PinNamesNoSource_UpgradeChipOffersNewestVersionFromConfiguredSource() => HeadlessTestApp.RunAsync(async () =>
     {
-        // Arrange: a pin to "Contoso" 1.0.0 that recorded the identity of its files, and a source named
+        // Arrange: a pin to 1.0.0 that recorded the identity of its files, and a source named
         // "Artifactory" with the same 1.0.0 files and a 2.0.0
         var contoso = CreateTempDirectory();
         CreateZip(contoso, "contoso-agents", "1.0.0");
@@ -369,7 +366,7 @@ public sealed class UsabilityWindowTests : IDisposable
         var repo = CreateRepoDirectory("portable-pin-upgrade");
         RepoPinStore.Save(
             repo,
-            new RepoPin { Source = "Contoso", PackageName = "contoso-agents", Version = "1.0.0", ContentIdentity = identity });
+            new RepoPin { PackageName = "contoso-agents", Version = "1.0.0", ContentIdentity = identity });
         var source = new PackageSourceDefinition { Alias = "Artifactory", Type = PackageSourceType.Zip, Location = artifactory };
 
         // Act
@@ -1328,7 +1325,7 @@ public sealed class UsabilityWindowTests : IDisposable
     }
 
     /// <summary>
-    ///     Creates a repo folder whose pin file records a package of the <c>Default</c> source.
+    ///     Creates a repo folder whose pin file records a package (and names no source).
     /// </summary>
     /// <param name="name">The folder name.</param>
     /// <param name="version">The pinned version.</param>
@@ -1336,7 +1333,7 @@ public sealed class UsabilityWindowTests : IDisposable
     private string CreatePinnedRepo(string name, string version)
     {
         var path = CreateRepoDirectory(name);
-        RepoPinStore.Save(path, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = version });
+        RepoPinStore.Save(path, new RepoPin { PackageName = "contoso-agents", Version = version });
         return path;
     }
 

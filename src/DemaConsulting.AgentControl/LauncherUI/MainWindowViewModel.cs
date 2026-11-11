@@ -379,8 +379,7 @@ internal sealed class MainWindowViewModel : ViewModelBase
             Path = repoPath,
             GroupName = groupName,
             PinnedPackageName = pin?.PackageName,
-            PinnedPackageVersion = pin?.Version,
-            PinnedSource = pin?.Source
+            PinnedPackageVersion = pin?.Version
         };
 
         // Prepare the card first, then persist; only a successful save puts the repo in the live

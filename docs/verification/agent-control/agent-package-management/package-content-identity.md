@@ -28,10 +28,7 @@ N/A - standard test environment.
   different identity.
 - Two files with the same canonical path, a path that escapes the package root, a file whose length changes while it
   is read and a null reader are refused; the `Try` form reports no identity instead of throwing.
-- Only `files-sha256:` plus 64 hexadecimal digits is recognized as a files identity; only a well-formed
-  `git-commit:` text is recognized as a source revision.
-- A well-formed 40- or 64-digit commit hash is formatted as a lower-case `git-commit:` text, and a malformed or
-  null one is refused.
+- Only `files-sha256:` plus 64 hexadecimal digits is recognized as a files identity.
 - Comparing identities reports nothing to compare when either side is missing or is not a files identity (a legacy
   container identity, a commit), `Same` for equal files identities (ignoring letter case) and `Changed` for different
   ones.
@@ -89,18 +86,6 @@ surrounding white space), and a legacy `sha256:` value, a `git-commit:` value, a
 and null text are not. This scenario is tested by
 `PackageContentIdentity_IsFilesIdentity_VariousTexts_RecognizesOnlyFilesIdentity`, covering
 `AgentControl-PackageContentIdentity-RecognizeFilesIdentity`.
-
-**PackageContentIdentity_Format_GitCommit**: Commit hashes of both object-format widths are lower-cased and
-prefixed with `git-commit:`, and only such text is recognized as a source revision. This scenario is tested by
-`PackageContentIdentity_FromGitCommit_ValidHash_ReturnsLowerCasePrefixedIdentity` and
-`PackageContentIdentity_IsGitCommitRevision_VariousTexts_RecognizesOnlyCommitRevision`, covering
-`AgentControl-PackageContentIdentity-Format`.
-
-**PackageContentIdentity_Format_MalformedOrNullCommit**: Hashes that are empty, too short, not hexadecimal or of
-the wrong length throw `ArgumentException`, and a null hash throws `ArgumentNullException`. This scenario is tested
-by `PackageContentIdentity_FromGitCommit_MalformedHash_ThrowsArgumentException` and
-`PackageContentIdentity_FromGitCommit_NullCommit_ThrowsArgumentNullException`, covering
-`AgentControl-PackageContentIdentity-FormatRejectMalformed`.
 
 **PackageContentIdentity_Describe_ShortForms**: A long value is cut to twelve characters after its prefix, a short
 value is kept, and an identity of an unrecognized shape is cut after its first colon rather than echoed. This

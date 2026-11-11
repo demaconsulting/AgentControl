@@ -63,13 +63,5 @@ internal enum RepoCardStatus
     ///     be read) so it is not known whether an upgrade exists (grey); the card does not claim
     ///     "up to date" on the strength of a check that did not succeed.
     /// </summary>
-    Unknown,
-
-    /// <summary>
-    ///     The pinned version of a Git source now points to a different commit than the one the
-    ///     repo was set up from (amber): the card never claims "up to date" for content that is
-    ///     no longer what the repo has, and nothing is applied until the user accepts it with
-    ///     "Change package...".
-    /// </summary>
-    TagMoved
+    Unknown
 }

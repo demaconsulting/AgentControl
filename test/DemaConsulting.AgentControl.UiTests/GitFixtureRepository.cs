@@ -148,21 +148,6 @@ internal sealed class GitFixtureRepository : IDisposable
     }
 
     /// <summary>
-    ///     Moves an existing tag of the bare repository to a new commit with different content, as
-    ///     a force-pushed tag does.
-    /// </summary>
-    /// <param name="tag">The tag to move, for example <c>release/1.0.0</c>.</param>
-    /// <param name="marker">The content of <c>.github/agents/git.md</c> in the new commit.</param>
-    /// <returns>The id of the commit the tag points to now.</returns>
-    public string MoveTag(string tag, string marker)
-    {
-        var commit = CommitVersion(marker, "# Release Notes\n\nGit fixture package, tag moved.\n");
-        Git(_workPath, "tag", "-f", tag);
-        Push();
-        return commit;
-    }
-
-    /// <summary>
     ///     Publishes a version whose tag holds a package layout that a safe reader must refuse, and
     ///     leaves the repository's branch where it was, so later versions do not inherit the hostile
     ///     entry.
@@ -308,14 +293,6 @@ internal sealed class GitFixtureRepository : IDisposable
             "-c", "core.ignorecase=false", "-c", "core.precomposeunicode=false",
             "-c", "core.protectNTFS=false", "-c", "core.protectHFS=false",
             "update-index", "--add", "--cacheinfo", $"{mode},{objectId},{path}");
-
-    /// <summary>
-    ///     Gets the commit a tag points to in the bare repository.
-    /// </summary>
-    /// <param name="tag">The tag name, for example <c>release/1.0.0</c>.</param>
-    /// <returns>The commit id (the commit an annotated tag points at, not the tag object).</returns>
-    public string ResolveTag(string tag) =>
-        Git(Root, "--git-dir", BarePath, "rev-parse", $"refs/tags/{tag}^{{commit}}").Trim();
 
     /// <inheritdoc />
     public void Dispose() => DeleteTree(Root);

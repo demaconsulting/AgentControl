@@ -65,18 +65,6 @@ internal interface IPackageContentReader : IDisposable
     string? ContentIdentity => null;
 
     /// <summary>
-    ///     Gets the source revision the content came from - for a Git source the
-    ///     <c>git-commit:{sha}</c> of the tag's commit - or <see langword="null"/> when the source
-    ///     has no such notion (a zip or NuGet package).
-    /// </summary>
-    /// <remarks>
-    ///     Not part of the content identity: the same files can be reached through different
-    ///     revisions. A pin records it next to the identity so a Git tag that was moved to another
-    ///     commit can be noticed.
-    /// </remarks>
-    string? SourceRevision => null;
-
-    /// <summary>
     ///     Lists every file in the package content.
     /// </summary>
     /// <returns>Relative file paths using <c>/</c> separators; directories are not listed.</returns>

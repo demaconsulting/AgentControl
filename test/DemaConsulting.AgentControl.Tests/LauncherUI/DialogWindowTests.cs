@@ -355,7 +355,8 @@ public class DialogWindowTests
     });
 
     /// <summary>
-    ///     Test that removing a source asks for confirmation (naming the pinned repos) and removes
+    ///     Test that removing a source asks for confirmation (naming the repos that get their package from
+    ///     it) and removes
     ///     the source only after the user answers Yes.
     /// </summary>
     [Fact]
@@ -378,7 +379,7 @@ public class DialogWindowTests
         Click(window, "RemoveSourceButton");
         Dispatcher.UIThread.RunJobs();
         var confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
-        Assert.Contains("1 repo is pinned", confirmation.FindControl<TextBlock>("ConfirmationMessageText")!.Text);
+        Assert.Contains("1 repo gets its agent package from 'Contoso'", confirmation.FindControl<TextBlock>("ConfirmationMessageText")!.Text);
         Click(confirmation, "ConfirmationNoButton");
         Dispatcher.UIThread.RunJobs();
 

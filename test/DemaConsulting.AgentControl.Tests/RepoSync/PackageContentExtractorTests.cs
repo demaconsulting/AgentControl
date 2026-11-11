@@ -563,10 +563,10 @@ public sealed class PackageContentExtractorTests : IDisposable
     /// <summary>
     ///     Test that a layout-root reader lists and reads only the package layout - the managed folders
     ///     and the two root files - and never the <c>.git</c> folder, other <c>.github</c> content or
-    ///     unrelated files, carries the supplied source revision, and extracts like any other package.
+    ///     unrelated files, and extracts like any other package.
     /// </summary>
     [Fact]
-    public void DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesRevision()
+    public void DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayout()
     {
         // Arrange: a checked-out repository shape: layout plus everything a repo holds
         var root = CreateLayoutRoot(
@@ -578,10 +578,8 @@ public sealed class PackageContentExtractorTests : IDisposable
             ("README.md", "not layout"),
             ("src/app.cs", "not layout"),
             (".git/config", "[core]"));
-        var revision = "git-commit:" + new string('a', 40);
-
         // Act
-        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root, revision);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
         var files = reader.ListFiles().Order().ToList();
         var repo = CreateTempDirectory();
         PackageContentExtractor.Extract(reader, repo);
@@ -589,7 +587,6 @@ public sealed class PackageContentExtractorTests : IDisposable
         // Assert
         Assert.Equal(
             [".github/agents/copilot.md", ".github/standards/style.md", "AGENTS.md", "release-notes.md"], files);
-        Assert.Equal(revision, reader.SourceRevision);
         Assert.StartsWith("files-sha256:", reader.ContentIdentity, StringComparison.Ordinal);
         Assert.Equal("notes", PackageContentExtractor.ReadReleaseNotes(reader));
         Assert.Equal("template", PackageContentExtractor.ReadAgentsMdTemplate(reader));
@@ -809,33 +806,12 @@ public sealed class PackageContentExtractorTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a layout-root reader carries the source revision its opener supplied, and reports
-    ///     none when it was given none.
-    /// </summary>
-    [Fact]
-    public void DirectoryPackageContentReader_OpenLayoutRoot_WithAndWithoutRevision_ReportsSuppliedRevisionOrNull()
-    {
-        // Arrange
-        var root = CreateLayoutRoot((".github/agents/copilot.md", "agents"));
-        var revision = "git-commit:" + new string('b', 40);
-
-        // Act
-        using var withRevision = DirectoryPackageContentReader.OpenLayoutRoot(root, revision);
-        using var withoutRevision = DirectoryPackageContentReader.OpenLayoutRoot(root);
-
-        // Assert: the revision is only what the opener said, and the identity is of the files either way
-        Assert.Equal(revision, withRevision.SourceRevision);
-        Assert.Null(withoutRevision.SourceRevision);
-        Assert.Equal(withRevision.ContentIdentity, withoutRevision.ContentIdentity);
-    }
-
-    /// <summary>
     ///     Test that a folder reader reports the identity of the agent files in its content folder
     ///     (release notes and anything else outside the managed folders do not take part), never an
-    ///     identity of the package file, and carries no source revision.
+    ///     identity of the package file.
     /// </summary>
     [Fact]
-    public void DirectoryPackageContentReader_Open_FolderFiles_ReportsFilesIdentityAndNoRevision()
+    public void DirectoryPackageContentReader_Open_FolderFiles_ReportsFilesIdentity()
     {
         // Arrange: two package folders with the same agent file and different release notes
         var first = CreatePackageFolder((".github/agents/copilot.md", "agents"), ("release-notes.md", "notes"));
@@ -851,7 +827,6 @@ public sealed class PackageContentExtractorTests : IDisposable
         Assert.StartsWith("files-sha256:", firstReader.ContentIdentity, StringComparison.Ordinal);
         Assert.Equal(firstReader.ContentIdentity, secondReader.ContentIdentity);
         Assert.NotEqual(firstReader.ContentIdentity, changedReader.ContentIdentity);
-        Assert.Null(firstReader.SourceRevision);
     }
 
     /// <summary>

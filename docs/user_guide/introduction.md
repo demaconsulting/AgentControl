@@ -104,7 +104,8 @@ Each repo card shows:
   visible (hover over either for the full text)
 - The "..." menu is grouped. **Repository**: **Git Pull** (see *Pulling Changes*) and **Refresh** (re-checks
   the repo's git state, upgrade status and committed-agent-files chip without waiting for the next app
-  launch; for a repo whose folder is missing it reads **Check again** and checks whether the folder is
+  launch, and re-reads your Git repository sources so that a newly pushed tag - a new version - shows up at
+  once; for a repo whose folder is missing it reads **Check again** and checks whether the folder is
   available again). **Agent files**: **Select Package...** (a repo with no package yet), **Change package...** (a
   repo that already has one) and **Upgrade to x.y.z** (when a newer version exists); the group is hidden when none
   of them applies - see below. **Organize**: **Move to group** and **Card color...** (see
@@ -186,30 +187,25 @@ button](images/card-color-palette.png)
 
 - **Agent package chip** (robot icon) — the agent package the repo is pinned to and its
   version, for example `contoso-agents 1.0.0`. Beside the version, a small icon shows the kind of
-  source the package came from (a folder of zips, a folder of NuGet packages, a NuGet server or a Git repository)
-  and the source's **alias** is shown as muted text next to it, so you can see where the package came
-  from without hovering. The tooltip names the source in full: "Agent files: contoso-agents 1.0.0
-  from source 'Default' (zip folder)". For a Git repository the tooltip also names the tag and the first seven
-  characters of the commit the files came from, for example "..., tag v1.0.0 @ 3f9c2e1". If the source named in the
-  repo's pin is not configured on your computer but another source of yours delivers the identical files, the chip shows
-  **that** source and the tooltip explains it, for example "Pinned source 'Contoso' is not configured; the identical
-  files come from 'Artifactory'." When the pinned
+  source that currently supplies the files (a folder of zips, a folder of NuGet packages, a NuGet server or a Git
+  repository) and that source's **alias** is shown as muted text next to it, so you can see where the files
+  come from without hovering. The icon and the alias are left out when no source of yours is known to supply the
+  files. The tooltip names the source in full: "Agent files: contoso-agents 1.0.0 from source 'Default' (zip
+  folder)." For a Git repository the tooltip also names the tag, for example "Agent files: contoso-agents 1.0.0 from
+  source 'Contoso' (git repository), tag v1.0.0." The source shown is one of **your** configured sources that delivers
+  the files the repo was set up with, whatever it is called on a teammate's computer (see *Sharing a Repo With a
+  Team*). When the pinned
   package is the newest one available, a small green **check mark** inside the chip (tooltip "Agent files are
   up to date") says so, in addition to the green bar on the card's left edge; it is not shown while an upgrade is
   available, while AgentControl is still checking, or when there is a problem.
 - **Upgrade chip** (amber, up arrow) — **Upgrade to** and the version an upgrade would move to, for example
-  `Upgrade to 1.1.0`. It appears only when the source the repo is pinned to (or, when that source is not
-  configured on your computer, the sources that deliver the repo's files) has a newer version. **Click
+  `Upgrade to 1.1.0`. It appears only when one of your configured sources offers a newer version of the package (the
+  newest one across all of them). **Click
   the chip** (its tooltip says "Upgrade the agent files to 1.1.0"), or use the card's "..." menu >
   **Upgrade to 1.1.0**, to apply it: both do exactly the same thing, with the same confirmations, and both are
   unavailable while another operation is running on the card. While AgentControl is still checking the
   source, the chip is not shown yet (the card shows "checking for updates..."); a slow or unreachable
   source never blocks the window.
-- **Tag moved** (amber, tag icon) — the repo is pinned to a version of a **Git repository** source, and that
-  version's tag now points to a different commit than the one the repo's agent files came from (someone moved the
-  tag). AgentControl keeps using the files you have and applies nothing by itself; the tooltip names the tag and
-  both commits. If you trust the change, click the chip or use the card's "..." menu > **Change package...** and
-  choose the same version again (see *Version Immutability and Trust*).
 - **No agent package chip** (grey) — the repo has no pin yet. Click it, or use "..." > **Select
   Package...**, to choose one.
 - **Branch chip** — the repo's current git branch.
@@ -227,24 +223,23 @@ button](images/card-color-palette.png)
   actions, and offers a "Remove from list" action instead (the card is never auto-removed, since
   the path may reappear, such as a drive being remounted). When the folder is back, choose the card's "..." menu >
   **Check again**; the badge goes away and the card's actions return, without restarting AgentControl.
-- **Package source problem** (red) — the package the repo is pinned to cannot be obtained: the source named in the
-  pin is not configured (for example it was removed, or a teammate named it differently in Settings) **and** no
-  other configured source delivers the identical files - or the pin recorded no fingerprint of its files (as with a
-  pin written by an older AgentControl), so there is nothing to check another source against. The tooltip states
-  the problem, for example "The pinned source 'Contoso' is not configured and no other configured source delivers the
-  identical files". No upgrade is offered when the source is not configured, and no source whose files are not
-  proven identical is ever used; add a
-  source that delivers the package (any alias or kind), or restore the source with the same alias in Settings, to
-  resolve it. If the source *is* configured but no longer offers the pinned version (for example a feed deleted old
-  versions), the problem chip is shown, yet a newer version the source offers is still offered as an **Upgrade**,
-  which is the way out. When another configured source *does* deliver the identical files, there is no problem: the
-  package chip names that source instead (see *Sharing a Repo With a Team*).
-- **Sign-in needed** (red) — the repo is pinned to a server or a Git repository that needs a sign-in, and the
+- **Package source problem** (red) — the package the repo is pinned to cannot be obtained from your configured
+  sources. The tooltip states which of two problems it is. "No configured source offers contoso-agents 1.0.0. Add a
+  source that delivers it in Settings, or use Change package... to select the package from a configured source."
+  means that none of your sources (or no source at all) lists that version - for example the source was removed, or a
+  feed deleted old versions. "No configured source delivers contoso-agents 1.0.0 with the files this repo was set
+  up with" means that some source lists the version, but its files are not the ones the repo was set up with: the
+  package may have been republished (see *Version Immutability and Trust*). A source whose files are not proven
+  identical to the recorded ones is never used. A repo
+  whose pin has no recorded fingerprint (written by an older AgentControl) has nothing to check, so it is never
+  refused for that reason. A newer version that one of your sources offers is **still** offered as an **Upgrade**,
+  which is the way out of either problem (the tooltip then ends "Upgrade to 1.1.0 to move to a version a
+  configured source offers."), so the red chip and the amber upgrade chip can be shown together. When one of your
+  sources *does* deliver the identical files, there is no problem: the package chip names that source instead (see
+  *Sharing a Repo With a Team*).
+- **Sign-in needed** (red) — a server or a Git repository of yours needs a sign-in, and the
   background check never asks. Use the card's "..." menu > **Refresh** to sign in (see *Signing In* and *Adding a
   Git Repository*).
-
-![A card whose package comes from a Git repository: the package chip shows the Git icon and the source's alias, and
-an amber Tag moved chip warns that the pinned version's tag now names another commit](images/repo-card-git.png)
 
 Below the chips, a card shows the outcome of the last action you started on it - for example the reason a
 **Git Pull** failed - in small text under the repo's path (hover for the full text).
@@ -266,7 +261,8 @@ Settings. Four kinds of source are supported:
   whose versions are the repository's **tags** (for example `v1.2.0`). It uses your own Git installation and
   sign-in (see *Adding a Git Repository*).
 
-Each source has an **alias**, the short name shown in the app and recorded in a repo's pin.
+Each source has an **alias**, the short name shown in the app. An alias belongs to **your** configuration only: a
+repo's pin does not record it, so teammates can call the same source anything they like.
 
 ## Adding a Source
 
@@ -405,7 +401,8 @@ was, and a message names the package and the source. For a source with no pinned
 may be unsigned, its signature may be invalid, or its certificate may not be trusted on this computer."* For
 a source with a pinned publisher it reads *"... is not signed by the trusted publisher (certificate
 A3AF7AF1…7641). It may be unsigned, signed by someone else, or its signature may be invalid."* - only the
-start and end of the fingerprint are shown. A repo card whose pinned source requires signatures shows a small
+start and end of the fingerprint are shown. A repo card whose package comes from a source that requires signatures
+shows a small
 **shield** in its package chip; hover over it to see whether any trusted signer is accepted or the signer is
 pinned.
 
@@ -470,7 +467,8 @@ Only one sign-in dialog is shown at a time; if two sources need one at once, the
 first.
 
 **Background checks never open the dialog.** When AgentControl starts, after you change Settings, and
-when you add a repo, it checks each repo's pinned source for upgrades in the background. For a server
+when you add a repo, it checks each repo's package against your configured sources for upgrades in the background.
+For a server
 that needs a sign-in, that check uses a credential you already typed this session (or saved, see below)
 and otherwise does
 **not** ask: the card shows a **Sign-in needed** chip. Use
@@ -586,7 +584,8 @@ sign-in note and a successful Test connection that lists the tags matching the p
 
 ### Source, package and versions
 
-- **Alias** — as for any source: unique, and fixed once the source is saved, because repo pins refer to it.
+- **Alias** — as for any source: unique, and fixed once the source is saved, because each repo card remembers which
+  source supplies its files by this alias.
 - **Repository URL** — where the repository is. Three forms of address are accepted, plus a local path:
 
   ```text
@@ -693,8 +692,8 @@ AgentControl runs Git with a locked-down command line, because the contents of a
 ### Where Git Sources Are Recorded
 
 Like the other kinds, a Git source is saved in your `settings.json` (see *What Is Stored*). A repo's pin records the
-package name, the version, the source alias, a fingerprint of the agent files and the **commit** the tag pointed to -
-see *Version Immutability and Trust* for what happens when a tag is moved.
+package name, the version and a fingerprint of the agent files - not the source, the tag or the commit - see
+*Version Immutability and Trust* for what happens when a tag is moved.
 
 ## Editing and Removing a Source
 
@@ -706,10 +705,9 @@ adding, including the **Sign-in** section with **Forget saved sign-in** (see
 *Remembering a Sign-In*), the signature options and **Test connection**; a Git repository opens the Git dialog
 (see *Adding a Git Repository*).
 **Remove** asks for confirmation. Removing a source is allowed
-even when repos are pinned to it, but the confirmation tells you how many are: those repos will show a
-**Package source problem** chip until a source with that alias is configured again - or, if another configured source
-delivers the identical files, they keep working and show that source on their package chip (see *Sharing a Repo With
-a Team*).
+even when repos get their agent package from it, but the confirmation tells you how many do: "N repo(s) get its agent
+package from 'Contoso'. Without it those repos use another configured source that delivers the identical files; if
+there is none they will show a "Package source problem"." (see *Sharing a Repo With a Team*).
 
 ## What Is Stored
 
@@ -717,20 +715,25 @@ Sources are saved in your per-user `settings.json` (in AgentControl's folder und
 profile) as alias, kind, location, package IDs and - for a server - the insecure-HTTP choice, - for a
 NuGet source - whether signed packages are required and the optional publisher fingerprint (a fingerprint is
 public information, not a secret) and - for a Git repository - the tag pattern (`TagPattern`), the optional folder
-in the repository (`Subfolder`) and its one package name. Each
-repo's `.agentcontrol.json` pin records the package name, exact version, **the alias of its
-source** (the source you chose, which is the *preferred* source - see *Sharing a Repo With a Team*), a **content
+in the repository (`Subfolder`) and its one package name. The same file also remembers, for each repo in your
+list, the alias of the source that last supplied its agent files (a per-user cache, so AgentControl need not
+read every source again at each check). Each
+repo's `.agentcontrol.json` pin records only the package name, the exact version and a **content
 identity** of the agent files that were applied (`ContentIdentity`: `files-sha256:` and a SHA-256 over the files
 themselves, the same whether they came from a zip, a NuGet package or a Git tag; see *Version Immutability and
-Trust*) and, for a Git repository, the **commit** the tag pointed to (`SourceRevision`: `git-commit:` and the
-commit id).
+Trust*), plus whether you declined the `AGENTS.md` template offer and a schema version (4). It records **no package
+source and no Git commit**: a pin is committed and shared, while sources and their aliases are each user's own
+configuration. A pin an older AgentControl wrote may still name a source (`Source`) or a commit (`SourceRevision`);
+AgentControl reads the source only as a hint for choosing among your own sources and removes both the next time it
+saves the pin.
 AgentControl never reads or writes a repo's own `nuget.config`, and keeps its NuGet caches
 in its own folder under your user profile.
 
 | Item | Stored? |
 | :--- | :--- |
 | Alias, kind, location, feed address, package IDs, signature options, Git tag pattern and folder | In `settings.json` |
-| Package name, version, source alias, content identity and Git commit | In the repo's `.agentcontrol.json` |
+| Which source last supplied a repo's agent files | In your `settings.json` only, never in the repo |
+| Package name, version and content identity | In the repo's `.agentcontrol.json` |
 | The user name and password or token you type in the sign-in dialog | **Never by AgentControl** - memory only |
 | The same sign-in, when you tick **Remember on this computer** | Only by **your Git credential helper** |
 | A Git repository's sign-in (https credentials, SSH keys) | **Never by AgentControl** - your Git setup holds it |
@@ -746,41 +749,44 @@ secret cannot end up in `settings.json` by being pasted into an address.
 ## Moving From a Single Package Source Folder
 
 Earlier versions had a single "package source folder". If your settings still have one, it
-appears automatically as a zip-package folder source named **Default**, and repos pinned before
-sources existed are treated as pinned to `Default`, so nothing needs to be redone.
+appears automatically as a zip-package folder source named **Default**. Repos pinned before
+sources existed keep working: when such a pin has no fingerprint to check, AgentControl prefers `Default` among the
+sources that offer the version, so nothing needs to be redone.
 
 ## Sharing a Repo With a Team
 
 A repo's `.agentcontrol.json` is committed and shared, but the sources in Settings belong to each person: you may
 have called a source `Contoso` while a teammate reaches the same agent files through a NuGet server they named
-`Artifactory`, a folder of zips, or a Git repository. So the **alias in the pin is only the preferred source**; what
-really identifies the package is its **content identity**, which is computed from the agent files themselves (see
-*Version Immutability and Trust*). Teammates may therefore use **any alias and any kind of source**, as long as the
-source delivers the same package name, the same version and - verified - the identical files:
+`Artifactory`, a folder of zips, or a Git repository. So the pin names **no source at all** - only the package, the
+version and the **content identity**, which is computed from the agent files themselves (see *Version Immutability and
+Trust*). Teammates may therefore use **any alias and any kind of source**, as long as one of their sources offers the
+same package name and version and - verified - delivers the identical files. The files are matched by **content**,
+never by name:
 
-1. If the pinned alias is configured on your computer and offers that package version, it is used - exactly as
-   before, including the republished-version check.
-2. Otherwise (the alias is not configured, or that source does not offer the version) AgentControl looks at your
-   **other** sources, in the order of your list in Settings, for ones that offer the same package name and version,
-   fetches them and uses the **first whose files are identical** to what the pin recorded. A source whose files
-   differ is never used, however well its package name and version match, and a pin that recorded no content identity
-   (for example one written by an older AgentControl) never falls back - there is nothing to check against.
-3. If there is no such source you see the red **Package source problem** chip, which says that the pinned source is not
-   configured and no other configured source delivers the identical files.
+1. AgentControl asks **your** configured sources, in the order of your list in Settings, which of them offer the
+   package name and version the pin names.
+2. It fetches them - the one that last supplied this repo's files on your computer first - and uses the **first whose
+   files are identical** to what the pin recorded. A source whose files differ is never used, however well its
+   package name and version match. A pin that recorded no content identity (for example one written by an older
+   AgentControl) has nothing to check, so it is never refused: AgentControl uses the source that last supplied the
+   repo, else the source an older pin file named, else the first of your sources that offers the version.
+3. If no source of yours offers the version you see the red **Package source problem** chip saying that no configured
+   source offers it; if some offer it but none delivers the recorded files, the chip says that no configured source
+   delivers it with the files this repo was set up with.
 
-When another source supplies the files, the card shows no problem. The package chip names the source that is really
-used (its alias, kind icon and tooltip - for example "Pinned source 'Contoso' is not configured; the identical files
-come from 'Artifactory'."), the **Upgrade** check looks at the sources that offer the package (the newest version
-wins; with equal versions the source higher in your list wins), and **launching** a freshly cloned repo restores
-the agent files from that source. AgentControl never rewrites the pin for this - it stays as your teammate committed
-it, so launching never changes a file in your working tree. **Select Package...**, **Change package...** and
-**Upgrade** are deliberate actions and record the alias of the source you actually used, as always. Sign-in rules are
+When a source supplies the files, the card shows no problem. The package chip names the source that is really
+used (its alias, kind icon and tooltip), the **Upgrade** check looks at all the sources that offer the package (the
+newest version wins; with equal versions the source higher in your list wins), and **launching** a freshly cloned repo
+restores the agent files from that source. AgentControl remembers which source supplied the files in **your own**
+settings, never in the pin. Launching never rewrites the pin, so it never changes a file in your working tree.
+**Select Package...**, **Change package...** and **Upgrade** are deliberate actions: they record the package name, the
+version and the identity of the files, and make the source you used the one remembered for the repo. Sign-in rules are
 unchanged: the background check never asks you to sign in, so a source that needs one is simply not used for the check
 until you refresh it.
 
 ## Version Immutability and Trust
 
-A pin names a package, a version and a source, but a version number is only a label: whether the content behind
+A pin names a package and a version, but a version number is only a label: whether the content behind
 `contoso-agents 1.1.0` can change later depends on the source. AgentControl therefore also records a **content
 identity** in the pin: `files-sha256:` followed by a SHA-256 computed over the **agent files themselves** - exactly the
 files AgentControl writes into `.github/agents`, `.github/standards`, `.github/templates` and `.github/skills`, each
@@ -788,11 +794,10 @@ with its path, size and bytes, in a fixed order. Release notes, the `AGENTS.md` 
 package are not part of it. Because it describes the files rather than the container, the identity is **the same for the
 same files** whether they came from a zip, a NuGet package or a Git tag, however they were compressed or ordered, and
 whichever source delivered them - which is what lets teammates use different sources (see *Sharing a Repo With a
-Team*). For a Git repository the pin also records the **commit** the version's tag pointed to (`SourceRevision`:
-`git-commit:` and the commit id), only to notice a moved tag.
+Team*), and what proves that the files you apply are the ones the repo was set up with.
 
-AgentControl uses the identity to notice when a version you already applied has been **republished** with different
-files, or its Git tag **moved** (see *Republished Versions* below). The
+AgentControl uses the identity to refuse a version you already applied that has been **republished** with different
+files, or whose Git tag was **moved** to other files (see *Republished Versions* below). The
 identity detects a changed package; it does not tell you who published it. For a NuGet package the identity describes
 the files of the copy **cached on this computer**, so a **server-side republish of a version that this computer already
 has cached is not detected** until that cached copy is cleared (AgentControl's NuGet caches live in its own folder under
@@ -810,8 +815,10 @@ the first one keeps the old copy. This is why a published version number must ne
   version that is already published, but some servers can be configured to allow a redeploy, or a delete followed
   by a push of the same version.
 - **Git repositories** - a tag is only a name for a commit, and it can be **moved** to a different commit (a forced
-  tag), or deleted and created again. AgentControl records the commit, so a moved tag is noticed: the card shows an
-  amber **Tag moved** chip (see below). Annotated tags are recommended, but they can be moved too.
+  tag), or deleted and created again. AgentControl does not record the commit or watch the tag: it checks the
+  **files** the tag delivers. A moved tag that delivers other files is refused exactly like a republished package (see
+  below); one that delivers the identical files makes no difference. Annotated tags are recommended, but they can be
+  moved too.
 
 To keep a version trustworthy:
 
@@ -826,36 +833,35 @@ To keep a version trustworthy:
 ### Republished Versions
 
 When AgentControl is about to apply or restore the exact version your repo is pinned to and finds that its files
-no longer match the identity in the pin, it does **not** quietly replace your agent files:
+no longer match the identity in the pin - because the package was republished, or its Git tag was moved to other
+files - it does **not** quietly replace your agent files:
 
 - **Upgrade** and the **restore of missing agent files when you launch** stop, change nothing and tell you in a
-  message that the package "now contains different files than the copy this repo was set up with, although the
-  version number is the same" and may have been republished. The launch still starts your tool, without the files.
-  The right fix is for the package's maintainer to publish the changed files as a **new version**. If you trust the
+  message that no configured source delivers the package "with the files this repo was set up with" (it "now contains
+  different files than the copy this repo was set up with, although the version number is the same") and may have been
+  republished. The launch still starts your tool, without the files. The right fix is for the package's maintainer
+  to publish the changed files as a **new version**. If you trust the
   change and want the new content anyway, use the card's "..." menu > **Change package...** and choose the same
-  version again, as described next; the new content's identity is then recorded. (This applies to the source
-  that supplies the version. A *different* source that merely has another file set for that version is not used in
-  its place - see *Sharing a Repo With a Team*.)
+  version again, as described next; the new content's identity is then recorded. (The source does not matter: a
+  version of the same name that has another file set is never used just because it has the same version number - see
+  *Sharing a Repo With a Team*.)
 - **Change package...** (and **Select Package...**) of that same version asks you to confirm first (a question that
   names the package and defaults to **No**); only **Yes** replaces the agent files and records the new identity.
-- **A moved Git tag** is noticed earlier, by the background check: the card shows an amber **Tag moved** chip whose
-  tooltip names the tag and the old and new commit (first seven characters each). AgentControl keeps using the files
-  you already have and applies **nothing** by itself - not even at launch. Clicking
-  the chip (or the card's "..." menu > **Change package...**) opens the Select Package dialog on the current
-  choice; choose the same version again and confirm to accept the new commit. If the tag moved to a commit with
-  the very same files, there is nothing to confirm. An upgrade to a **newer** version is
-  still possible while a tag is flagged.
+  The check compares the package, the version and the files, whichever source delivers them.
+- **A moved Git tag** is handled in exactly the same way, because only the files matter: there is no separate warning
+  chip, and a tag that was moved to a commit with the very same files is not a concern at all. An upgrade to a
+  **newer** version is still possible while the files of the pinned version cannot be matched.
 - A pin made before identities existed, or by a source that cannot provide one, has nothing to compare, so you are
   **never warned** about it: the identity is simply recorded the next time you select a package or upgrade. The
   restore at launch never writes the pin, so it never changes a file in your working tree.
 
 Content identities are recorded in the pin file with **schema version 4**. An older AgentControl refuses to read or
 change such a pin (it tells you to update), so keep the same AgentControl version across the people who share a
-repo's pin. Pins made by earlier versions still load: a version 3 pin recorded a fingerprint of the zip or NuGet
-*file*, which cannot be compared with the identity of the files, so it is read as having **no identity** - you are
-never warned because of it, but it also cannot be used to match another source - and the identity of the files is
-recorded the next time you select a package, change it or upgrade. (A version 3 pin of a Git repository keeps its
-commit, so a moved tag is still noticed.)
+repo's pin. Pins made by earlier versions still load: an older pin recorded a fingerprint of the zip or NuGet *file*,
+or the commit of a Git tag, which cannot be compared with the identity of the files, so it is read as having **no
+identity** - you are never warned because of it, but it also cannot be used to match a source - and the identity of
+the files is recorded the next time you select a package, change it or upgrade. The source and the commit that older
+pins named are no longer stored.
 
 # Selecting and Upgrading Agent Packages
 
@@ -887,8 +893,9 @@ selected](images/select-package.png)
 
 On confirm, AgentControl runs the same extract-and-pin sequence as an upgrade: validate the
 package, delete the four managed folders if present, extract the new files, ensure your
-`.gitignore` covers the four managed folders, write the `.agentcontrol.json` pin (naming the
-source), offer the `AGENTS.md` template if applicable (see *AGENTS.md Template Offer* below), then show the
+`.gitignore` covers the four managed folders, write the `.agentcontrol.json` pin (the package name, version and
+content identity - no source), offer the `AGENTS.md` template if applicable (see *AGENTS.md Template Offer* below),
+then show the
 release notes. While this runs the card shows
 that it is busy and offers **Cancel**. If the repo has agent folders committed to git, AgentControl asks first
 (see *Repos with Committed Agent Files* below).
@@ -896,14 +903,15 @@ that it is busy and offers **Cancel**. If the repo has agent folders committed t
 ## Changing the Package or Version of a Pinned Repo
 
 A repo that already has a package shows **Change package...** in the "..." menu's **Agent files** group. It opens the
-same Select Package dialog, **preselected** on the repo's current source, package and version. Use it to:
+same Select Package dialog, **preselected** on the source that supplies the repo's files, the package and the version.
+Use it to:
 
 - **Move to another version or package** (for example an older version, or a package from another source): pick it
   and confirm; AgentControl runs the same extract-and-pin sequence as an upgrade and nothing more is asked (unless the
   repo has agent folders committed to git, see *Repos with Committed Agent Files*).
 - **Accept changed content of the version you already use**: choose the **same** version again. If its content has
-  not changed there is nothing to confirm; if it has changed (a moved Git tag, a republished zip or NuGet package;
-  the card's **Tag moved** chip leads here too), AgentControl asks you to confirm, with **No** as the default - only
+  not changed there is nothing to confirm; if it has changed (a republished zip or NuGet package, or a Git tag moved
+  to other files), AgentControl asks you to confirm, with **No** as the default - only
   **Yes** replaces the agent files and records the new content identity (see *Republished Versions*).
 
 The messages of **Upgrade** and of the restore at launch, when they refuse a changed package, point to this
@@ -912,8 +920,10 @@ action: use the card's "..." menu > **Change package...** and choose the same ve
 ## Upgrading an Already-Pinned Repo
 
 Once a repo has a pin, the "..." menu's **Agent files** group shows **Upgrade to x.y.z** instead, appearing
-whenever a newer version of the pinned package is available at the source named in the pin (shown by the
-upgrade chip, which you can also click to start the upgrade). Upgrading:
+whenever one of your configured sources offers a newer version of the pinned package - the newest across all of them
+wins, and with equal versions the source higher in your list does (shown by the
+upgrade chip, which you can also click to start the upgrade). It is offered even while the card shows a **Package
+source problem**, because upgrading is the way out. Upgrading:
 
 1. Opens and validates the new package. If it opens without error, its contents are
    assumed good - unless the source requires signed packages (see
@@ -923,9 +933,8 @@ upgrade chip, which you can also click to start the upgrade). Upgrading:
 3. Extracts the new files into those same four folders.
 4. Ensures your `.gitignore` covers the four managed folders (adding them if not already
    covered), so they are far less likely to be committed by accident.
-5. Rewrites the `.agentcontrol.json` pin to the new package name, version, source alias (the source actually used) and
-   content identity (for a Git
-   source also the commit of the version's tag). (If the
+5. Rewrites the `.agentcontrol.json` pin to the new package name, version and
+   content identity (no source and no commit). (If the
    version is the one you are already pinned to but its content changed, the upgrade stops before step 2 - see
    *Republished Versions*.)
 6. Offers the package's `AGENTS.md` template if applicable (see
@@ -998,14 +1007,16 @@ as an informational side action:
   (`.github/agents`, `.github/standards`, `.github/templates`, `.github/skills`) exist on
   disk. If any are missing — the common case for a freshly cloned repo whose `.gitignore`'d
   agent folders were never unpacked on this machine — AgentControl silently re-extracts the
-  **currently pinned** version before proceeding - from the source named in the pin or, when that source is not
-  configured on your computer, from another configured source that delivers the identical files (see *Sharing a Repo
-  With a Team*). It never auto-upgrades to a newer version
+  **currently pinned** version before proceeding - from whichever of your configured sources delivers the files the
+  pin recorded (the one that last supplied this repo first; see *Sharing a Repo With a Team*). It never auto-upgrades
+  to a newer version
   during this check; upgrading always remains a separate, deliberate action. If this
-  re-extraction attempt fails (for example, the package source is unreachable, or the pinned
-  version is no longer available), a non-blocking warning is shown, but the tool is still
-  launched. If you cancel the wait, the tool is launched as well. If the pinned version has been republished with
-  different files (see *Republished Versions*), nothing is re-extracted and a warning says so. This re-extraction
+  re-extraction attempt fails (for example, the package source is unreachable, or no configured source offers the
+  pinned version any more - "No configured source offers ..."), a non-blocking warning is shown, but the tool is still
+  launched. If you cancel the wait, the tool is launched as well. If sources offer the pinned version but none
+  delivers the files this repo was set up with (the version has been republished with
+  different files, or its Git tag moved to other files; see *Republished Versions*), nothing is re-extracted and a
+  warning says so. This re-extraction
   never
   rewrites the pin file. A successful re-extraction
   here also offers the package's `AGENTS.md` template if
@@ -1369,9 +1380,10 @@ the versions. Package authors need to know four things:
 3. **The package name** is not in the repository: consumers give it when they add the source (it defaults to the
    source's alias), so one repository delivers exactly one package.
 4. **Never move a tag, and never delete and re-create one.** Publish a new version instead, even for a small fix.
-   AgentControl records the commit a version came from, so a tag moved after it was used is flagged on **every**
-   user's card with a **Tag moved** chip, and each of them has to decide deliberately whether to accept the new
-   content (see *Version Immutability and Trust*). If a published tag was a mistake, publish the correction as the
+   AgentControl records a fingerprint of the files a version delivered, so a tag moved to other files after it was
+   used is refused on **every** user's computer when the files would be applied (at launch or Upgrade), and each of
+   them has to decide deliberately, with **Change package...**, whether to accept the new content (see *Version
+   Immutability and Trust*). If a published tag was a mistake, publish the correction as the
    next version and say so in its `release-notes.md`.
 
 ## References

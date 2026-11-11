@@ -126,7 +126,7 @@ sections:
           The NuGetSourceProvider class shall refuse to supply the content of a package that was
           discovered at a different source.
         justification: |
-          Content must only ever come from the source whose alias the pin names.
+          Content must only ever come from the source the caller resolved.
         tests:
           - NuGetSourceProvider_Acquire_PackageFromOtherSource_ThrowsArgumentException
 

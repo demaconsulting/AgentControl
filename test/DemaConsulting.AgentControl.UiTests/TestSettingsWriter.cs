@@ -87,6 +87,9 @@ internal static class TestSettingsWriter
     /// <param name="useRealGit">Whether the application runs the real <c>git</c> executable instead of
     ///     the arg-logger stub; implied by <paramref name="gitSource"/>, since a Git source cannot be
     ///     read through the stub.</param>
+    /// <param name="pinnedSource">The alias of the source that last supplied the repo's package, seeded
+    ///     into the recent-repos entry (the user's own per-repo cache; a pin file names no source), or
+    ///     <see langword="null"/> for none.</param>
     public static void Write(
         string configDirectory,
         string argLoggerStubExePath,
@@ -100,7 +103,8 @@ internal static class TestSettingsWriter
         string? nuGetServerIndexUrl = null,
         Action<Dictionary<string, object?>>? customize = null,
         GitSourceSettings? gitSource = null,
-        bool useRealGit = false)
+        bool useRealGit = false,
+        string? pinnedSource = null)
     {
         Directory.CreateDirectory(configDirectory);
 
@@ -120,7 +124,8 @@ internal static class TestSettingsWriter
                 {
                     Path = repoPath,
                     PinnedPackageName = pinnedPackageName,
-                    PinnedPackageVersion = pinnedPackageVersion
+                    PinnedPackageVersion = pinnedPackageVersion,
+                    PinnedSource = pinnedSource
                 }
             }
         };

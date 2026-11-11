@@ -26,21 +26,21 @@ namespace DemaConsulting.AgentControl.UiTests;
 /// <summary>
 ///     End-to-end tests for several configured package sources used side by side: a zip package
 ///     folder and a NuGet package folder offering the same package name, with each repo's pin
-///     resolved only against the source it names.
+///     (which names no source) resolved against the user's own configured sources.
 /// </summary>
 /// <remarks>
-///     Both tests drive the published application through the same "Upgrade" menu flow as
+///     The tests drive the published application through the same "Upgrade" menu flow as
 ///     <see cref="UpgradeTests"/>, so they share its reliance on UI Automation popup timing.
 /// </remarks>
 public sealed class MultipleSourcesTests
 {
     /// <summary>
-    ///     A repo pinned to the NuGet folder source is upgraded from that source - never from the
-    ///     zip source, which offers a higher version of the same package name - and the pin file
-    ///     keeps recording the NuGet source's alias.
+    ///     A repo supplied by the NuGet folder source is upgraded to the newest version across the configured
+    ///     sources, which the NuGet source offers (the zip source offers only an older one), and the pin file
+    ///     records the package, version and files identity but no source.
     /// </summary>
     [Fact]
-    public void UpgradeMenuItem_Click_PinnedToNuGetFolderSource_UpgradesFromThatSourceOnly()
+    public void UpgradeMenuItem_Click_NuGetFolderSourceOffersNewestVersion_UpgradesFromThatSource()
     {
         if (!System.OperatingSystem.IsWindows())
         {
@@ -54,8 +54,8 @@ public sealed class MultipleSourcesTests
 
         try
         {
-            // The zip source offers a higher version of the same package name; it must be ignored
-            FixturePackageBuilder.Create(zipDirectory, packageName, "9.0.0", "# zip 9.0.0\n");
+            // The zip source offers an older version of the same package name than the NuGet source's newest
+            FixturePackageBuilder.Create(zipDirectory, packageName, "1.5.0", "# zip 1.5.0\n");
             NuGetFixturePackageBuilder.Create(feedDirectory, packageName, "1.0.0", "feed 1.0.0");
             NuGetFixturePackageBuilder.Create(feedDirectory, packageName, "2.0.0", "feed 2.0.0", "# feed 2.0.0\n");
 
@@ -106,14 +106,14 @@ public sealed class MultipleSourcesTests
             Assert.NotNull(releaseNotesWindow);
 
             // The repo holds the NuGet package's files, none of the zip package's, and the pin
-            // still names the NuGet source at its new version
+            // records the new version and no source
             var agentFile = Path.Combine(context.RepoPath, ".github", "agents", "feed.md");
             Assert.True(File.Exists(agentFile));
             Assert.Equal("feed 2.0.0", File.ReadAllText(agentFile));
             Assert.False(File.Exists(Path.Combine(context.RepoPath, ".github", "agents", "test.md")));
 
             var pinJson = File.ReadAllText(Path.Combine(context.RepoPath, ".agentcontrol.json"));
-            Assert.Contains("\"Source\": \"Feed\"", pinJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("Source", pinJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"Version\": \"2.0.0\"", pinJson, StringComparison.Ordinal);
 
             // The repo's own NuGet configuration was neither used (the upgrade came from the
@@ -204,12 +204,12 @@ public sealed class MultipleSourcesTests
     }
 
     /// <summary>
-    ///     A repo pinned to a source that is not configured shows a package source problem and is
-    ///     offered no upgrade from another source, even though the configured zip source has a
-    ///     higher version of the same package name; its pin file is left unchanged.
+    ///     A repo whose pinned version no configured source offers shows a package source problem, and the
+    ///     newer version the configured zip source does offer is still offered as an upgrade (the way out
+    ///     of the problem) next to it; its pin file is left unchanged and nothing is applied.
     /// </summary>
     [Fact]
-    public void RepoCard_PinnedToUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade()
+    public void RepoCard_NoConfiguredSourceOffersPinnedVersion_ShowsSourceProblemAndStillOffersNewerVersion()
     {
         if (!System.OperatingSystem.IsWindows())
         {
@@ -227,14 +227,13 @@ public sealed class MultipleSourcesTests
             using var context = new AgentControlTestContext(
                 packageSourcePath: zipDirectory,
                 pinnedPackageName: packageName,
-                pinnedPackageVersion: "1.0.0",
-                pinnedSource: "Gone");
+                pinnedPackageVersion: "1.0.0");
             var pinPath = Path.Combine(context.RepoPath, ".agentcontrol.json");
             var pinBefore = File.ReadAllText(pinPath);
             var mainWindow = context.Launch();
 
-            // The card reports a package source problem for the unconfigured source, and no
-            // upgrade badge appears even though another source has a higher version
+            // The card reports a package source problem (no configured source offers 1.0.0), and the
+            // upgrade badge appears as well because a source has a higher version
             Assert.NotNull(Retry.WhileNull(
                 () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MoreActionsButton")),
                 timeout: TimeSpan.FromSeconds(10),
@@ -245,7 +244,10 @@ public sealed class MultipleSourcesTests
                 interval: TimeSpan.FromMilliseconds(200)).Result;
             Assert.NotNull(problemBadge);
             Assert.Equal("Package source problem", problemBadge.Name);
-            Assert.Null(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeAvailableBadge")));
+            Assert.NotNull(Retry.WhileNull(
+                () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeAvailableBadge")),
+                timeout: TimeSpan.FromSeconds(10),
+                interval: TimeSpan.FromMilliseconds(200)).Result);
             Assert.Equal(pinBefore, File.ReadAllText(pinPath));
             Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));
         }

@@ -21,8 +21,8 @@ the package it reads (`AgentControl-RepoSync-ContentIdentity` and `-ContentIdent
 writes into the four managed folders, computed centrally by `PackageContentIdentity` - so a zip, an unpacked package
 folder and a layout folder with the same agent files report the same identity, whatever their compression, entry
 order or container; a zip reader reads its entries from the one open handle, so the identity recorded in a pin is
-always that of the files that were extracted; a folder reader also carries the source revision its source supplied
-(for a Git tag, the commit). The subsystem only reports the identity - what a difference means is decided by
+always that of the files that were extracted. The subsystem only reports the identity - what a difference means is
+decided by
 the `LauncherUI` card. A Git package is delivered as a folder of the provider's cache whose root *is* the package
 layout (the repository
 root, or the configured sub-folder): `GitSourceProvider` writes only the validated layout files into it, reading
@@ -43,10 +43,9 @@ paths has one source of truth, `PackageContentExtractor.LayoutPaths`, shared wit
 
 **How the content identity reaches the extractor and the pin.** An identity belongs to the reader, not to a call: the
 provider's `AcquireAsync` returns one `IPackageContentReader` per acquisition - a zip reader, or a folder reader the
-source's provider opened over what it unpacked or fetched (for a Git package with the `git-commit:<commit id>` of the
-commit whose blobs were written as its source revision). The card passes that one reader to
+source's provider opened over what it unpacked or fetched. The card passes that one reader to
 `PackageContentExtractor.Extract`, which reads every file from it, and records the same reader's `ContentIdentity`
-and `SourceRevision` in
+in
 the pin only after the extraction succeeded; before that it compares the identity with the one the pin recorded to
 decide whether a difference stops the sync. So the identity in the pin is, by construction, that of the content that
 was applied and never that of a second, separate read.

@@ -65,9 +65,12 @@ treats it as a `Default` zip source when the list is empty, `MigrateLegacySource
 `SettingsStore.Load`) materializes that source and clears the path, and a persisted copy
 (`CreatePersistedCopy`) is what `Save` serializes so the legacy field is never written back and
 the caller's instance is left unchanged. `RecentRepo` records one tracked repo's path, cached pin
-display fields (`PinnedPackageName`/`PinnedPackageVersion`/`PinnedSource` — copies for quick
+display fields (`PinnedPackageName`/`PinnedPackageVersion` — copies for quick
 display; the repo's own
-`.agentcontrol.json` via `RepoConfig` remains authoritative), favorite status, last-launch
+`.agentcontrol.json` via `RepoConfig` remains authoritative), `PinnedSource` (not a copy of anything in the pin: the
+alias of the configured package source that last supplied this repo's agent files on this machine, a per-user cache
+that the pin file never carries and that is cleared when the source is no longer configured; the property keeps its
+historical name so existing settings files stay readable), favorite status, last-launch
 timestamp used by `LauncherUI`'s sort order, and the user's own organizing choices: an optional `GroupName` (at most
 one group per repo) and an optional `CardColor` (a palette color's name; absent means the automatic color). These
 and `AppSettings.CollapsedGroups` (the names of the collapsed list sections, including the built-in *Favorites* and

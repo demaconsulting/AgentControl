@@ -21,6 +21,9 @@ N/A - standard test environment.
   mixed, and an unconfigured alias fails without contacting any source.
 - Invalidating one source leaves the others cached, and an in-flight query for the invalidated
   source does not repopulate the cache.
+- Listing across the configured sources returns their offers in configuration order, skips a source that cannot be
+  read (telling a caller that asks), reports the first failure when every source failed, and attributes the newest
+  version - a tie to the first source configured.
 - Cached results are reused on repeated calls without redundant re-scanning.
 - Invalidation forces the next call to re-scan and reflects updated source-folder contents.
 - An uncached call against a missing source folder throws `DirectoryNotFoundException`.
@@ -75,16 +78,33 @@ repopulating the cache, so the next query fetches again. This scenario is tested
 `PackageVersionCache_InvalidateDuringInFlightFetch_DoesNotCacheStaleResult`, covering
 `AgentControl-PackageVersionCache-InvalidateBySource`.
 
-**PackageVersionCache_PinnedListing_CarriesRevisionOfThePinnedVersion**: With a fake source that reports a revision per
-version, the upgrade check returns the latest version and the listing entry of the pinned version,
-each with its revision,
-from one listing call. This scenario is tested by
-`PackageVersionCache_IsNewerVersionAvailable_PinnedVersionListed_ReturnsPinnedPackageWithRevision`, covering
-`AgentControl-PackageVersionCache-ReportPinnedListing`.
+**PackageVersionCache_UpgradeCheck_LatestCarriesRevisionFromOneListing**: With a fake source that reports a revision per
+version, the upgrade check returns the latest version with its revision from one listing call. This scenario is tested
+by `PackageVersionCache_IsNewerVersionAvailable_NewerListed_ReturnsLatestWithRevisionFromOneListing`.
 
-**PackageVersionCache_PinnedListing_NoneWhenNotListedOrNotParsable**: A pinned version the source does not list gives no
-pinned entry (the latest version is still reported), and a pin that does not parse as a version gives no pinned entry.
-This
-scenario is tested by `PackageVersionCache_IsNewerVersionAvailable_PinnedVersionNotListed_ReturnsNoPinnedPackage` and
-`PackageVersionCache_IsNewerVersionAvailable_PinDoesNotParse_ReturnsNoPinnedPackage`, covering
-`AgentControl-PackageVersionCache-ReportPinnedListing`.
+**PackageVersionCache_UpgradeCheck_PinNotListedOrNotParsable_StillOffersLatest**: A pinned version the source does not
+list does not hide the latest version, and a pin that does not parse as a version is treated as needing attention (the
+latest version is offered). This scenario is tested by
+`PackageVersionCache_IsNewerVersionAvailable_PinnedVersionNotListed_StillReportsLatest` and
+`PackageVersionCache_IsNewerVersionAvailable_PinDoesNotParse_OffersLatest`.
+
+**PackageVersionCache_ListAcrossSources_ConfigurationOrderAndExclusion**: Through a registry of fake sources, listing
+across sources returns each source's offers in the order the sources are configured, each source's versions from
+highest to lowest, leaves out the source it is told to exclude without contacting it, and reads each source only once.
+This scenario is tested by `PackageVersionCache_GetVersionsAcrossSources_ReturnsOffersInConfigurationOrderAndExcludesAlias`,
+covering `AgentControl-PackageVersionCache-ListAcrossSources`.
+
+**PackageVersionCache_ListAcrossSources_ToleratesFailingSources**: A source that cannot be read is skipped and the
+others' offers are returned; a caller that passes a failure callback is told about each skipped source's failure; when
+every consulted source fails the first failure is thrown instead of an empty answer. This scenario is tested by
+`PackageVersionCache_GetVersionsAcrossSources_OneSourceFails_ReturnsTheOthersOffers`,
+`PackageVersionCache_GetVersionsAcrossSources_EverySourceFails_ThrowsTheFirstFailure` and
+`PackageVersionCache_GetVersionsAcrossSources_SourceFailureCallback_ReportsEachSkippedSource`, covering
+`AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure`.
+
+**PackageVersionCache_NewestAcrossSources_NewestWinsAndTieKeepsConfigurationOrder**: The upgrade check across sources
+reports the newest version offered by any source, attributes a version that several sources offer to the first of them
+in configuration order, and reports no upgrade and no latest version when no source offers the package. This scenario
+is tested by `PackageVersionCache_IsNewerVersionAvailableAcrossSources_NewestWinsAndTieKeepsConfigurationOrder` and
+`PackageVersionCache_IsNewerVersionAvailableAcrossSources_NobodyOffersPackage_ReportsNoUpgrade`, covering
+`AgentControl-PackageVersionCache-NewestAcrossSources`.

@@ -40,8 +40,9 @@ N/A - standard test environment.
   path, is
   saved with its address, tag pattern, folder and package name, and a Git source with unusable settings is refused on
   save with a message.
-- Add, edit and remove change the list as documented, and a removal's warning names the repos
-  pinned to the source.
+- Add, edit and remove change the list as documented, and a removal's warning names the repos that get their
+  agent package from the source and says that those repos use another configured source delivering the identical
+  files, or show a package source problem if there is none.
 - A new source's alias must differ from every configured alias, ignoring case.
 - The theme choices are system default, light and dark in that order; the theme starts from the saved choice, the
   system default when none was saved; and the chosen theme reaches the owner's save callback with the other settings.
@@ -111,7 +112,8 @@ requests an editor in Git mode for a new source (titled "Add Git Repository"); s
 a tag pattern, a folder and a package name lists the source with the Git icon and the kind name "Git repository", as
 "Online source" - the folder check is never asked about it - and saving the settings passes the source to the owner with
 its address, tag pattern, folder and package name; a Git source on a local path gets the folder status instead (found
-or not found). Removing a Git source warns, like any source, by name and by how many repos are pinned to it, and
+or not found). Removing a Git source warns, like any source, by name and by how many repos get their agent package
+from it, and
 saving settings that hold a Git source whose tag pattern has no version placeholder, whose address embeds a credential,
 whose folder inside the repository leaves the repository or whose package name has characters a name may not have (as
 a hand-edited settings file could) is refused, one test per field: the owner's callback is not invoked, the window does
@@ -141,8 +143,11 @@ factory. This scenario is tested by
 `SettingsWindowViewModel_EditServerSource_OpensServerEditorThatTestsThroughTheFactory`, covering
 `AgentControl-SettingsWindowViewModel-EditSource`.
 
-**SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposBeforeRemoval**: The remove command requests a removal
-for the selected source, and a removal's warning names the pinned repos before the source is removed. This scenario
+**SettingsWindowViewModel_RemoveSource_WarnsAboutDependentReposBeforeRemoval**: The remove command requests a removal
+for the selected source, and a removal's warning counts the repos that get their agent package from the source
+("1 repo gets its agent package from 'X'. Without it those repos use another configured source that delivers the
+identical files; if there is none they will show a "Package source problem"."), or says in general that repos that
+get their package from the source will use another configured source, before the source is removed. This scenario
 is tested by
 `SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource` and
 `SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves`, covering

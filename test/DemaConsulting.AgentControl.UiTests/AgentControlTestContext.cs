@@ -67,8 +67,9 @@ internal sealed class AgentControlTestContext : IDisposable
     /// <param name="nuGetFeedPath">A NuGet package folder to configure as the additional
     ///     <c>Feed</c> source, or <see langword="null"/> for none.</param>
     /// <param name="nuGetPackageIds">The package IDs offered by the <c>Feed</c> source.</param>
-    /// <param name="pinnedSource">The source alias to record in the repo's pin file, or
-    ///     <see langword="null"/> to write a pin that names no source.</param>
+    /// <param name="pinnedSource">The alias of the source that last supplied the package: recorded in the
+    ///     user's settings (the per-user cache of which configured source supplies the repo's package),
+    ///     never in the pin file, which names no source; <see langword="null"/> for none.</param>
     /// <param name="nuGetRequireSigned">Whether the <c>Feed</c> source requires signed
     ///     packages.</param>
     /// <param name="nuGetServerIndexUrl">The service-index address of a NuGet package server to
@@ -84,9 +85,6 @@ internal sealed class AgentControlTestContext : IDisposable
     ///     <see langword="null"/> for none.</param>
     /// <param name="useRealGit">Whether the application runs the real <c>git</c> executable even
     ///     though no Git source is pre-configured (for example to add one through the dialog).</param>
-    /// <param name="pinnedSourceRevision">The source revision (for a Git source, <c>git-commit:...</c>)
-    ///     to record in the repo's pin file, which is then written as the current schema, or
-    ///     <see langword="null"/> to record none.</param>
     public AgentControlTestContext(
         string? packageSourcePath = null,
         string? pinnedPackageName = null,
@@ -99,8 +97,7 @@ internal sealed class AgentControlTestContext : IDisposable
         Action<Dictionary<string, object?>, AgentControlTestContext>? customizeSettings = null,
         string? pinnedContentIdentity = null,
         GitSourceSettings? gitSource = null,
-        bool useRealGit = false,
-        string? pinnedSourceRevision = null)
+        bool useRealGit = false)
     {
         var root = Directory.CreateTempSubdirectory("AgentControlUiTests-");
         RootDirectory = root.FullName;
@@ -125,12 +122,12 @@ internal sealed class AgentControlTestContext : IDisposable
             nuGetServerIndexUrl,
             customizeSettings is null ? null : settings => customizeSettings(settings, this),
             gitSource,
-            useRealGit);
+            useRealGit,
+            pinnedSource);
 
         if (pinnedPackageName is not null && pinnedPackageVersion is not null)
         {
-            TestRepoPinWriter.Write(
-                RepoPath, pinnedPackageName, pinnedPackageVersion, pinnedSource, pinnedContentIdentity, pinnedSourceRevision);
+            TestRepoPinWriter.Write(RepoPath, pinnedPackageName, pinnedPackageVersion, pinnedContentIdentity);
         }
 
         _shellCleaner = new LaunchedShellCleaner(argLoggerStubExe, LogCleanup);

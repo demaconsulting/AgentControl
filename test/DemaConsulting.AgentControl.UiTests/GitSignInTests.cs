@@ -66,10 +66,9 @@ public sealed class GitSignInTests
 
         // Arrange: a private repository, and a repo pinned to its version 1.0.0
         using var fixture = GitFixtureRepository.CreateOrSkip();
-        var commit = fixture.ResolveTag("release/1.0.0");
         await using var server = await GitHttpsServer.StartAsync(fixture.BarePath, User, Password);
         var (configuration, helperLog) = GitHttpsServer.CreateUserConfiguration(fixture.Root, User, Password);
-        using var context = CreatePinnedContext(server, configuration, commit);
+        using var context = CreatePinnedContext(server, configuration);
 
         // Act: start the application; the background check of the pinned source runs on its own
         var mainWindow = context.Launch();
@@ -104,10 +103,9 @@ public sealed class GitSignInTests
 
         // Arrange: the same repo; the background check has already reported "sign-in needed"
         using var fixture = GitFixtureRepository.CreateOrSkip();
-        var commit = fixture.ResolveTag("release/1.0.0");
         await using var server = await GitHttpsServer.StartAsync(fixture.BarePath, User, Password);
         var (configuration, helperLog) = GitHttpsServer.CreateUserConfiguration(fixture.Root, User, Password);
-        using var context = CreatePinnedContext(server, configuration, commit);
+        using var context = CreatePinnedContext(server, configuration);
         var mainWindow = context.Launch();
         Assert.True(GitSourceTests.WaitForText(mainWindow, "SourceProblemBadge", "Sign-in needed"));
         Assert.Equal(0, server.SignedInRequestCount);
@@ -190,14 +188,12 @@ public sealed class GitSignInTests
     /// </summary>
     /// <param name="server">The private Git server.</param>
     /// <param name="configuration">The isolated global git configuration with the test helper.</param>
-    /// <param name="commit">The commit the pin records as the delivered content.</param>
     /// <returns>The context, not yet launched.</returns>
-    private static AgentControlTestContext CreatePinnedContext(GitHttpsServer server, string configuration, string commit) =>
+    private static AgentControlTestContext CreatePinnedContext(GitHttpsServer server, string configuration) =>
         new(
             pinnedPackageName: GitFixtureRepository.PackageName,
             pinnedPackageVersion: "1.0.0",
             pinnedSource: "Private",
-            pinnedSourceRevision: "git-commit:" + commit,
             gitSource: new GitSourceSettings(
                 "Private", server.RepositoryUrl, "release/{version}", GitFixtureRepository.PackageName))
         {

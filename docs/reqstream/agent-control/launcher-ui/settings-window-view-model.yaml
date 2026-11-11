@@ -182,8 +182,9 @@ sections:
           The SettingsWindowViewModel class shall let the user edit the selected source in place,
           keeping its alias, and shall carry settings it does not show through the edit unchanged.
         justification: |
-          Sources are corrected over time, but repos pin to a source by alias, so an edit must never
-          rename it or lose settings that are managed elsewhere.
+          Sources are corrected over time, but each repo card remembers the source that supplies its
+          package by alias, so an edit must never rename it or lose settings that are managed
+          elsewhere.
         tests:
           - SettingsWindowViewModel_EditSource_EditorSaved_ReplacesSourceInPlaceKeepingAlias
           - SettingsWindowViewModel_EditServerSource_OpensServerEditorThatTestsThroughTheFactory
@@ -191,11 +192,12 @@ sections:
       - id: AgentControl-SettingsWindowViewModel-RemoveSource
         title: >-
           The SettingsWindowViewModel class shall let the user remove the selected source, and
-          shall describe - before the removal - how many repos are pinned to it and that they will
-          show a package source problem.
+          shall describe - before the removal - how many repos get their package from it and that
+          they will use another configured source that delivers the identical files, or else show a
+          package source problem.
         justification: |
-          Removing a source that repos are pinned to is allowed (the pin is the repos' own record)
-          but the developer must be told what will happen to those repos first.
+          Removing a source that repos get their package from is allowed (a repo's pin names no
+          source) but the developer must be told what will happen to those repos first.
         tests:
           - SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource
           - SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves

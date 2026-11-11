@@ -456,7 +456,7 @@ internal sealed partial class MainWindow : Window
                 : new SelectPackageWindowViewModel(
                     card.CreateSourceRegistry(),
                     card.PackageVersionCache,
-                    card.PinnedSource ?? RepoPin.LegacySourceAlias,
+                    card.SupplyingSource,
                     card.PinnedPackageName,
                     card.PinnedPackageVersion);
         }

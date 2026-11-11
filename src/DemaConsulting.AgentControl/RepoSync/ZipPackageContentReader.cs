@@ -91,11 +91,6 @@ internal sealed class ZipPackageContentReader : IPackageContentReader
     }
 
     /// <summary>
-    ///     Gets <see langword="null"/>: a zip file has no source revision.
-    /// </summary>
-    public string? SourceRevision => null;
-
-    /// <summary>
     ///     Opens a package zip for reading, wrapping any failure in a clear exception.
     /// </summary>
     /// <param name="zipPath">Path to the zip file.</param>

@@ -7,17 +7,16 @@
 #   the RepoPin.cs data record, which is folded into this subsystem-level description as it
 #   has no dedicated test file
 # - Subsystem requirements describe the observable behavior of persisting a repo's pinned
-#   package name/version/source and the content identity of what was applied, and whether the
-#   user has declined the AGENTS.md template offer
+#   package name/version and the content identity of what was applied - never a package source -
+#   and whether the user has declined the AGENTS.md template offer
 
 sections:
   - title: RepoConfig Subsystem Requirements
     requirements:
       - id: AgentControl-RepoConfig-PinPersistence
         title: >-
-          The RepoConfig subsystem shall persist a repo's pinned package name, exact version
-          and source alias in a per-repo pin file, and shall report no pin for a repo that has
-          none.
+          The RepoConfig subsystem shall persist a repo's pinned package name and exact version
+          in a per-repo pin file, and shall report no pin for a repo that has none.
         justification: |
           Per architecture.md's mandatory version-pinning decision, the pinned package/version
           must survive across application restarts and be readable per-repo without any
@@ -25,6 +24,7 @@ sections:
         children:
           - AgentControl-RepoPinStore-Load
           - AgentControl-RepoPinStore-Save
+          - AgentControl-RepoPinStore-WriteAtomically
         tests:
           - RepoPinStore_SaveThenLoad_RoundTripsAllFields
           - RepoPinStore_Load_NoPinFile_ReturnsNull
@@ -43,28 +43,26 @@ sections:
           - RepoPinStore_SaveThenLoad_AgentsMdTemplateDeclinedTrue_RoundTrips
           - RepoPinStore_Load_LegacyPinFileMissingAgentsMdTemplateDeclinedField_DefaultsToFalse
 
-      - id: AgentControl-RepoConfig-SourcePin
+      - id: AgentControl-RepoConfig-PinNamesNoSource
         title: >-
-          The RepoConfig subsystem shall record the alias of the package source in a repo's
-          pin as the preferred source, shall read a pin written before sources existed as a pin
-          to the source named Default, shall reject a pin of the current schema version that
-          names no source, shall preserve pin-file properties it does not understand when
-          rewriting, and shall neither interpret nor overwrite a pin file written by a newer
-          version of the tool.
+          The RepoConfig subsystem shall keep a package source out of a repo's pin - never
+          writing one, and reading the one an older pin names only as a hint - shall read a pin
+          written before sources existed as hinted to the source named Default, shall preserve
+          pin-file properties it does not understand when rewriting, and shall neither interpret
+          nor overwrite a pin file written by a newer version of the tool.
         justification: |
-          Recording the source a pin came from is what lets every later operation try that source
-          first; existing pins must keep working, a pin file may be shared with other tool
-          versions, and an older tool must never damage a file it does not understand.
+          Package sources and their aliases are each user's own configuration, so a committed pin
+          shared by a team must not carry one user's setting; existing pins must keep working, a pin
+          file may be shared with other tool versions, and an older tool must never damage a file it
+          does not understand.
         children:
-          - AgentControl-RepoPinStore-SourceAlias
+          - AgentControl-RepoPinStore-NeverWriteSource
+          - AgentControl-RepoPinStore-LegacySourceHint
           - AgentControl-RepoPinStore-LegacyV1
-          - AgentControl-RepoPinStore-RejectUnnamedSource
           - AgentControl-RepoPinStore-PreserveUnknownFields
           - AgentControl-RepoPinStore-RejectNewerSchema
         tests:
-          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion4AndRoundTripsSource
-          - RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource
-          - RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault
+          - RepoConfig_PinNamesNoSource_ReadsLegacySourceAsAHintAndNeverWritesIt
           - RepoPinStore_Save_UnknownProperties_ArePreserved
           - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage
 
@@ -72,13 +70,12 @@ sections:
         title: >-
           The RepoConfig subsystem shall record in a repo's pin the content identity of the
           agent files of the package that was applied, whatever kind of source delivered them,
-          and the source revision (for a Git source, the commit) the files came from, and shall
-          omit each when none is known.
+          and shall omit it when none is known.
         justification: |
           The identity is what lets a later sync notice a republished package version and lets
-          another source with the identical files stand in for the pinned one, so it must survive
-          across sessions with the pin; the revision is what lets a moved Git tag be noticed. A pin
-          whose source reported none must not claim one.
+          any configured source with the identical files stand in for the one the files came from,
+          so it must survive across sessions with the pin. A pin whose source reported none must
+          not claim one.
         children:
           - AgentControl-RepoPinStore-SaveContentIdentity
         tests:
@@ -101,8 +98,7 @@ sections:
         title: >-
           The RepoConfig subsystem shall read a pin whose identity an older version recorded from a
           package file or a Git commit as a pin with no identity of its files, never as an identity
-          that can differ from the files, carrying a recorded Git commit over as the source
-          revision.
+          that can differ from the files.
         justification: |
           An identity computed from something other than the files can neither confirm nor refute
           that the files are the same: treating it as a mismatch would refuse files that are

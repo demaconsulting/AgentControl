@@ -406,9 +406,8 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
             var layoutRoot = _subfolder is null
                 ? final
                 : Path.Combine(final, _subfolder.Replace('/', Path.DirectorySeparatorChar));
-            // The commit travels with the reader as its source revision (a moved tag is detected by
-            // it); the identity of the files is computed from the files themselves, like any source's
-            var reader = DirectoryPackageContentReader.OpenLayoutRoot(layoutRoot, PackageContentIdentity.FromGitCommit(commit));
+            // The identity of the files is computed from the files themselves, like any source's
+            var reader = DirectoryPackageContentReader.OpenLayoutRoot(layoutRoot);
             await Task.Run(() => Prune(commit), CancellationToken.None);
 
             // The reader owns the lease from here on: it is released when the reader is disposed
@@ -1257,9 +1256,6 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
 
         /// <inheritdoc />
         public string? ContentIdentity => inner.ContentIdentity;
-
-        /// <inheritdoc />
-        public string? SourceRevision => inner.SourceRevision;
 
         /// <inheritdoc />
         public IReadOnlyList<string> ListFiles() => inner.ListFiles();

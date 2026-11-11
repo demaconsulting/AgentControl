@@ -35,11 +35,11 @@ public sealed class PackageVersionCacheTests : IDisposable
     private readonly List<string> _tempPaths = [];
 
     /// <summary>
-    ///     Test that the upgrade check carries the discovered package of the pinned version from the same
-    ///     listing - with its revision - so a caller can see that a tag was moved without another call.
+    ///     Test that the upgrade check carries the discovered package of the latest version - with its
+    ///     revision - from a single listing call of the source.
     /// </summary>
     [Fact]
-    public async Task PackageVersionCache_IsNewerVersionAvailable_PinnedVersionListed_ReturnsPinnedPackageWithRevision()
+    public async Task PackageVersionCache_IsNewerVersionAvailable_NewerListed_ReturnsLatestWithRevisionFromOneListing()
     {
         // Arrange: 1.0.0 (pinned) and 1.1.0, each with a revision
         var provider = new FakePackageSourceProvider("Repo", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
@@ -52,21 +52,18 @@ public sealed class PackageVersionCacheTests : IDisposable
         var check = await cache.IsNewerVersionAvailableAsync(
             registry, "Repo", "contoso-agents", "1.0.0", CancellationToken.None);
 
-        // Assert: the latest and the pinned entries each carry their revision, from one listing call
+        // Assert: the latest entry carries its revision, from one listing call
         Assert.True(check.IsNewerAvailable);
         Assert.Equal("1.1.0", check.Latest?.Version.ToString());
-        Assert.Equal("1.0.0", check.Pinned?.Version.ToString());
-        Assert.Equal(new string('a', 40), check.Pinned?.Revision);
         Assert.Equal(new string('b', 40), check.Latest?.Revision);
         Assert.Equal(1, provider.ListVersionsCalls);
     }
 
     /// <summary>
-    ///     Test that a pinned version the source does not list gives no pinned entry, while the latest
-    ///     version is still reported.
+    ///     Test that a pinned version the source does not list does not hide the latest version.
     /// </summary>
     [Fact]
-    public async Task PackageVersionCache_IsNewerVersionAvailable_PinnedVersionNotListed_ReturnsNoPinnedPackage()
+    public async Task PackageVersionCache_IsNewerVersionAvailable_PinnedVersionNotListed_StillReportsLatest()
     {
         // Arrange: a source that lists 1.0.0 and 1.1.0, and a pin to 0.9.0
         var provider = new FakePackageSourceProvider("Repo", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
@@ -78,16 +75,16 @@ public sealed class PackageVersionCacheTests : IDisposable
             registry, "Repo", "contoso-agents", "0.9.0", CancellationToken.None);
 
         // Assert
-        Assert.Null(check.Pinned);
         Assert.True(check.IsNewerAvailable);
         Assert.Equal("1.1.0", check.Latest?.Version.ToString());
     }
 
     /// <summary>
-    ///     Test that a pin that does not parse as a version gives no pinned entry.
+    ///     Test that a pin that does not parse as a version is treated as needing attention: the latest
+    ///     version is offered.
     /// </summary>
     [Fact]
-    public async Task PackageVersionCache_IsNewerVersionAvailable_PinDoesNotParse_ReturnsNoPinnedPackage()
+    public async Task PackageVersionCache_IsNewerVersionAvailable_PinDoesNotParse_OffersLatest()
     {
         // Arrange: a source that lists two versions, and a pin that is not a version
         var provider = new FakePackageSourceProvider("Repo", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
@@ -99,7 +96,8 @@ public sealed class PackageVersionCacheTests : IDisposable
             registry, "Repo", "contoso-agents", "not-a-version", CancellationToken.None);
 
         // Assert
-        Assert.Null(check.Pinned);
+        Assert.True(check.IsNewerAvailable);
+        Assert.Equal("1.1.0", check.Latest?.Version.ToString());
     }
 
     /// <summary>
@@ -485,9 +483,33 @@ public sealed class PackageVersionCacheTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a caller that asks is told about each source that was skipped because it could not be
+    ///     read, so it can tell "no source offers the package" from "a source that might have could not be
+    ///     read".
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_GetVersionsAcrossSources_SourceFailureCallback_ReportsEachSkippedSource()
+    {
+        // Arrange: two failing sources around a working one
+        var one = new FakePackageSourceProvider("One") { ListVersionsException = new IOException("first failure") };
+        var working = new FakePackageSourceProvider("Working", ("contoso-agents", "1.0.0"));
+        var two = new FakePackageSourceProvider("Two") { ListVersionsException = new InvalidOperationException("second failure") };
+        var registry = CreateRegistry(one, working, two);
+        var cache = new PackageVersionCache();
+        var failures = new List<string>();
+
+        // Act
+        var offers = await cache.GetVersionsAcrossSourcesAsync(
+            registry, "contoso-agents", null, CancellationToken.None, failure => failures.Add(failure.Message));
+
+        // Assert
+        Assert.Equal("Working", Assert.Single(offers).SourceAlias);
+        Assert.Equal(["first failure", "second failure"], failures);
+    }
+
+    /// <summary>
     ///     Test that the cross-source upgrade check reports the newest version across the sources, that a
-    ///     version offered by several sources is attributed to the first of them in configuration order, and
-    ///     that it carries the entry of the pinned version.
+    ///     version offered by several sources is attributed to the first of them in configuration order.
     /// </summary>
     [Fact]
     public async Task PackageVersionCache_IsNewerVersionAvailableAcrossSources_NewestWinsAndTieKeepsConfigurationOrder()
@@ -507,7 +529,6 @@ public sealed class PackageVersionCacheTests : IDisposable
         Assert.True(check.IsNewerAvailable);
         Assert.Equal("3.0.0", check.Latest?.Version.ToString());
         Assert.Equal("Second", check.Latest?.SourceAlias);
-        Assert.Equal("First", check.Pinned?.SourceAlias);
     }
 
     /// <summary>

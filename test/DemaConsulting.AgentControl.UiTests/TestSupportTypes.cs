@@ -110,46 +110,28 @@ internal static class TestRepoPinWriter
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
 
     /// <summary>
-    ///     Writes <c>.agentcontrol.json</c> at the root of <paramref name="repoPath"/>.
+    ///     Writes <c>.agentcontrol.json</c> at the root of <paramref name="repoPath"/>. A pin names no
+    ///     package source (sources are the user's own configuration): it records the package, the
+    ///     version and, when given, the identity of the agent files.
     /// </summary>
     /// <param name="repoPath">Absolute path to the repository root; must already exist.</param>
     /// <param name="packageName">The pinned package name.</param>
     /// <param name="version">The pinned package version.</param>
-    /// <param name="sourceAlias">The alias of the source the package came from, or
-    ///     <see langword="null"/> to write a pin file in the older format that names no source.</param>
     /// <param name="contentIdentity">The content identity to record, or <see langword="null"/> for a
-    ///     pin that records none; a pin that records one is written as schema version 4 and, if
-    ///     <paramref name="sourceAlias"/> is <see langword="null"/>, names the <c>Default</c> source.</param>
-    /// <param name="sourceRevision">The source revision (for a Git source, <c>git-commit:...</c>) to
-    ///     record, or <see langword="null"/> to record none; handled like
-    ///     <paramref name="contentIdentity"/>.</param>
+    ///     pin that records none (written in the oldest format, which the application treats as a pin
+    ///     with nothing to verify a source against); a pin that records one is written as the current
+    ///     schema version.</param>
     public static void Write(
         string repoPath,
         string packageName,
         string version,
-        string? sourceAlias = null,
-        string? contentIdentity = null,
-        string? sourceRevision = null)
+        string? contentIdentity = null)
     {
         var pin = new Dictionary<string, object?> { ["PackageName"] = packageName, ["Version"] = version };
-        if (contentIdentity is not null || sourceRevision is not null)
+        if (contentIdentity is not null)
         {
             pin["SchemaVersion"] = 4;
-            pin["Source"] = sourceAlias ?? "Default";
-            if (contentIdentity is not null)
-            {
-                pin["ContentIdentity"] = contentIdentity;
-            }
-
-            if (sourceRevision is not null)
-            {
-                pin["SourceRevision"] = sourceRevision;
-            }
-        }
-        else if (sourceAlias is not null)
-        {
-            pin["SchemaVersion"] = 2;
-            pin["Source"] = sourceAlias;
+            pin["ContentIdentity"] = contentIdentity;
         }
 
         var json = JsonSerializer.Serialize(pin, SerializerOptions);

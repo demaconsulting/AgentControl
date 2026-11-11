@@ -11,9 +11,10 @@ package selection" decision. It lets a repo with no existing pin acquire its fir
 package, and lets a repo that already has a pin choose another package or version - or the same
 version again, which is the user's explicit way to accept content that changed behind it. Confirming reports the full
 package reference - source alias, package name and
-version - so the pin records which source the package came from
-(`AgentControl-SelectPackageWindowViewModel-SourceScoped`). For a pinned repo the dialog is given the pin's source,
-package and version and opens on them
+version - which the card applies; the pin then records only the package name, version and files identity, and the
+card remembers the source it was chosen from as its supplier in the user's own settings
+(`AgentControl-SelectPackageWindowViewModel-SourceScoped`). For a pinned repo the dialog is given the source that
+supplies the repo's files (when known), the package and the version and opens on them
 (`AgentControl-SelectPackageWindowViewModel-PreselectCurrentPackage`). Sources are shown side by side rather
 than merged into one list because the same package name can exist in several sources and the
 user must see which one they are choosing from.
@@ -26,7 +27,8 @@ configured order, each with its alias, kind icon and label (the Git logo and "Gi
 with a package list, failed with a message, or empty.
 
 **Preferred package and version** (constructor arguments, not properties): the alias of the source to start on, and
-the package name and version to select once that source has been read. They are the pin of a repo being changed;
+the package name and version to select once that source has been read. They describe the repo being changed (the
+source that supplies its files, if known, and its pinned package and version);
 `null` means no preference.
 
 **SelectedSource**: `SelectPackageSourceViewModel?` — The source whose packages the second column
@@ -154,7 +156,8 @@ already prevent that call.
 
 - **RepoCardViewModel** — constructs this view model (via `SelectPackageRequested`, handled by `MainWindow`) when the
   user chooses "Select Package..." for a repo with no existing pin (no preference) or "Change package..." for a
-  pinned repo (the pin's source, package and version as the preference), and subscribes to
+  pinned repo (the source that supplies its files, and the pinned package and version, as the preference), and
+  subscribes to
   `Confirmed` to apply the chosen package (`ApplySelectedPackageAsync`).
 - **SelectPackageWindow** (code-behind) — starts `LoadAsync` when the window opens and
   cancels it when the window closes.

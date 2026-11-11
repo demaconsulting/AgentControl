@@ -228,7 +228,6 @@
                                      Classes.statusUpToDate="{Binding Status, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static vm:RepoCardStatus.UpToDate}}"
                                      Classes.statusUpgrade="{Binding Status, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static vm:RepoCardStatus.UpgradeAvailable}}"
                                      Classes.statusProblem="{Binding Status, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static vm:RepoCardStatus.Problem}}"
-                                     Classes.statusTagMoved="{Binding Status, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static vm:RepoCardStatus.TagMoved}}"
                                      ToolTip.Tip="{Binding StatusTooltip}" />
 
                             <!-- Card body. Row 0 is the identity line - favorite star, then the repo
@@ -589,10 +588,12 @@
                                                                       Kind="{Binding PinnedSourceIcon}"
                                                                       Width="16" Height="16"
                                                                       Margin="4,0,0,0"
+                                                                      IsVisible="{Binding HasSupplyingSource}"
                                                                       Opacity="0.9" />
                                         <TextBlock Name="PackageSourceAliasText"
                                                     AutomationProperties.AutomationId="PackageSourceAliasText"
                                                     Text="{Binding PinnedSourceLabel}"
+                                                    IsVisible="{Binding HasSupplyingSource}"
                                                     Opacity="0.7"
                                                     MaxWidth="120" TextTrimming="CharacterEllipsis" />
                                         <materialIcons:MaterialIcon Name="PackageSignatureIcon"
@@ -623,26 +624,6 @@
                                             <TextBlock Name="UpgradeChipText"
                                                         AutomationProperties.AutomationId="UpgradeChipText"
                                                         Text="{Binding UpgradeChipText}" />
-                                        </StackPanel>
-                                    </Border>
-                                </Button>
-
-                                <!-- A Git tag that now names another commit than the one the repo's files
-                                     came from: amber, explains itself in the tooltip, and a click only opens
-                                     "Change package..." - nothing is ever applied by itself -->
-                                <Button Name="TagMovedChip"
-                                         AutomationProperties.AutomationId="TagMovedChip"
-                                         AutomationProperties.Name="Tag moved"
-                                         Classes="chipButton"
-                                         IsVisible="{Binding IsPinnedTagMoved}"
-                                         Command="{Binding SelectPackageCommand}"
-                                         ToolTip.Tip="{Binding PinnedTagMovedTooltip}">
-                                    <Border Classes="Chip amber">
-                                        <StackPanel Orientation="Horizontal" Spacing="4">
-                                            <materialIcons:MaterialIcon Kind="TagArrowRightOutline" />
-                                            <TextBlock Name="TagMovedBadge"
-                                                        AutomationProperties.AutomationId="TagMovedBadge"
-                                                        Text="Tag moved" />
                                         </StackPanel>
                                     </Border>
                                 </Button>

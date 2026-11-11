@@ -433,9 +433,9 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     ///     it is removed.
     /// </summary>
     /// <param name="source">The row about to be removed.</param>
-    /// <returns>A question naming the source, with a warning when repos are pinned to it: they
-    ///     will show a package source problem until a source with that alias is configured
-    ///     again.</returns>
+    /// <returns>A question naming the source, with a warning when repos currently get their agent
+    ///     package from it: they will use another configured source that delivers the identical
+    ///     files, or show a package source problem.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="source"/> is
     ///     <see langword="null"/>.</exception>
     public static string GetRemovalWarning(PackageSourceItemViewModel source)
@@ -446,15 +446,16 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
                       "Nothing is deleted from the source itself; AgentControl only forgets it.";
         if (source.PinnedRepoCount > 0)
         {
-            var repos = source.PinnedRepoCount == 1 ? "1 repo is" : $"{source.PinnedRepoCount} repos are";
-            message += $"\n\nWarning: {repos} pinned to '{source.Alias}'. Until a source with that " +
-                       "alias is configured again, those repos will show a \"Package source problem\" " +
-                       "and cannot be upgraded.";
+            var repos = source.PinnedRepoCount == 1 ? "1 repo gets" : $"{source.PinnedRepoCount} repos get";
+            message += $"\n\nWarning: {repos} its agent package from '{source.Alias}'. Without it those repos " +
+                       "use another configured source that delivers the identical files; if there is none " +
+                       "they will show a \"Package source problem\".";
         }
         else
         {
-            message += "\n\nRepos pinned to this alias will show a \"Package source problem\" until a " +
-                       "source with that alias is configured again.";
+            message += "\n\nRepos that get their agent package from this source will use another configured " +
+                       "source that delivers the identical files; if there is none they will show a " +
+                       "\"Package source problem\".";
         }
 
         return message;

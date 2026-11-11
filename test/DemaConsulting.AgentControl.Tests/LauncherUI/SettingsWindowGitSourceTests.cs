@@ -189,7 +189,7 @@ public class SettingsWindowGitSourceTests
 
     /// <summary>
     ///     Test that removing a Git source warns the same way as for any source: it names the source
-    ///     and counts the repos pinned to it.
+    ///     and counts the repos that get their package from it.
     /// </summary>
     [Fact]
     public void SettingsWindowViewModel_RemoveGitSource_WarnsAboutPinnedRepos()
@@ -211,7 +211,7 @@ public class SettingsWindowGitSourceTests
 
         // Assert
         Assert.Contains("'Agents'", warning, StringComparison.Ordinal);
-        Assert.Contains("1 repo is pinned", warning, StringComparison.Ordinal);
+        Assert.Contains("1 repo gets its agent package from 'Agents'", warning, StringComparison.Ordinal);
         Assert.Empty(viewModel.Sources);
     }
 

@@ -41,7 +41,7 @@ skipped). Junction tests run on Windows only (they skip elsewhere) and need no p
   deleted or written (the same rule the content identity applies).
 - A zip reader reports the files identity of the agent files in the zip, computed from the same handle its entries are
   read from, and releases the handle when opening fails; a folder reader reports the files identity of the agent files
-  in the folder and the source revision its opener supplied, or none; the extractor says which paths are extracted
+  in the folder; the extractor says which paths are extracted
   into the managed folders and under which canonical path.
 - A repo whose `.github` folder, a managed folder, or a folder on a destination path is a symbolic
   link or junction is refused with nothing deleted or written (the link target is unchanged and
@@ -153,10 +153,10 @@ handle when opening fails (the file can be deleted straight away). This scenario
 `ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle`, covering
 `AgentControl-PackageContentExtractor-ZipReaderReleasesHandleOnFailure`.
 
-**PackageContentExtractor_ReaderContentIdentity_FolderReportsFilesIdentityAndNoRevision**: A reader over an unpacked
+**PackageContentExtractor_ReaderContentIdentity_FolderReportsFilesIdentity**: A reader over an unpacked
 package folder reports the files identity of the agent files in its content folder (not of the folder's other
-content) and no source revision. This scenario is tested by
-`DirectoryPackageContentReader_Open_FolderFiles_ReportsFilesIdentityAndNoRevision`, covering
+content). This scenario is tested by
+`DirectoryPackageContentReader_Open_FolderFiles_ReportsFilesIdentity`, covering
 `AgentControl-PackageContentExtractor-FolderReaderIdentity`.
 
 **PackageContentExtractor_ManagedPackagePath_SaysWhetherAndWhereAFileIsExtracted**: A path in a managed folder is
@@ -199,17 +199,14 @@ package with an invalid path (an argument the operating system rejects as a path
   verify that a link present before the operation starts is always refused.
 
 **PackageContentExtractor_LayoutRoot_ReadsOnlyLayout**: A folder shaped like a checked-out repository is read through
-`OpenLayoutRoot`: only the layout is listed (no `.git`, workflows, README or sources), the supplied source revision is
-carried,
+`OpenLayoutRoot`: only the layout is listed (no `.git`, workflows, README or sources),
 the package extracts and its notes and template are read, and paths outside the layout (including
 `.github/agents/../../.git/config`) are refused. This scenario is tested by
-`DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayoutAndCarriesRevision`, covering
+`DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayout`, covering
 `AgentControl-PackageContentExtractor-ReadLayoutRoot` and `AgentControl-PackageContentExtractor-ExcludeGitFolder`;
 by `DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused`, covering
 `AgentControl-PackageContentExtractor-RefuseOutsideLayoutPaths`
-and `AgentControl-PackageContentExtractor-ExcludeGitFolder`;
-by `DirectoryPackageContentReader_OpenLayoutRoot_WithAndWithoutRevision_ReportsSuppliedRevisionOrNull`, covering
-`AgentControl-PackageContentExtractor-LayoutRootIdentity`; and by
+and `AgentControl-PackageContentExtractor-ExcludeGitFolder`; and by
 `DirectoryPackageContentReader_OpenLayoutRoot_MissingFolderOrLink_ThrowsInvalidOperationException`, covering
 `AgentControl-PackageContentExtractor-RefuseMissingOrLinkedLayoutRoot`.
 

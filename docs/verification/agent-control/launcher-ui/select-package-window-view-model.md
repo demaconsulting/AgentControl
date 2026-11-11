@@ -27,7 +27,8 @@ N/A - standard test environment.
 - Confirmation is permitted only when a source, a package name and a version are selected.
 - The confirmed package reference matches exactly what the user selected, including the source.
 - A failed read of a source or of a package's versions can be retried on its own.
-- Given the source, package and version a repo is pinned to, the dialog selects them once the source has been read
+- Given the source, package and version a repo gets its files from (the card's supplying source, which may be none),
+  the dialog selects them once the source has been read
   (the newest version stays selected when the pinned one is no longer listed), selects nothing when the source failed,
   does not offer the package or is not configured, and never overrides a choice the user made first; a Git source is
   shown with the Git icon and its type name.
@@ -103,9 +104,11 @@ in progress. This scenario is tested by
 `SelectPackageWindowViewModel_Retry_NothingFailed_DoesNothing`, covering
 `AgentControl-SelectPackageWindowViewModel-Retry`.
 
-**SelectPackageWindowViewModel_PreselectCurrentPackage_OpensOnThePinnedChoice**: Given the source, package and
+**SelectPackageWindowViewModel_PreselectCurrentPackage_OpensOnThePinnedChoice**: Given the source (the card's
+supplying source), package and
 version of
-a pin, loading selects that package and version in the preferred source; when the pinned version is no longer listed the
+a pin, loading selects that package and version in the preferred source (with no supplying source the first source
+is selected); when the pinned version is no longer listed the
 newest stays selected; when the source's package list does not offer the package, when the source could not be read and
 when the alias names no configured source nothing is selected; and a package chosen by the user before the load ends is
 not replaced by the preference, nor is the preference applied when the user switched to another source and back to the

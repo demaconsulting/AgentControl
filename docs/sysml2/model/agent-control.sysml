@@ -35,15 +35,15 @@ package AgentControl {
         part utilities : UtilitiesSubsystem;
 
         // Git repository source: the provider runs hardened git through the remote client; the editor validates the
-        // address and the tag pattern; the content identity (of the agent files) and the source revision the provider reports flow through the extractor to the
+        // address and the tag pattern; the content identity (of the agent files) the provider reports flows through the extractor to the
         // pin the card writes
         connect agentPackageManagement.gitSourceProvider to gitIntegration.gitRemoteClient;
         connect launcherUi.sourceEditorViewModel to agentPackageManagement.gitRepositoryAddress;
         connect launcherUi.sourceEditorViewModel to agentPackageManagement.gitTagPattern;
         connect repoSync.packageContentExtractor to agentPackageManagement.packageContentIdentity;
         connect launcherUi.repoCardViewModel to repoConfig.repoPinStore;
-        // the card verifies another configured source by the files identity and asks the version cache what all
-        // configured sources offer when the pinned source alias is not available
+        // the pin names no source: the card asks the version cache what all configured sources offer and finds the one
+        // that delivers the files with the recorded identity
         connect launcherUi.repoCardViewModel to agentPackageManagement.packageVersionCache;
     }
 }

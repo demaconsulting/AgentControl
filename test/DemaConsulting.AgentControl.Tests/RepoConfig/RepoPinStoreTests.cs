@@ -38,7 +38,7 @@ public class RepoPinStoreTests
         var repoRoot = CreateTempDirectory();
         try
         {
-            var pin = new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "2.1.0" };
+            var pin = new RepoPin { PackageName = "contoso-agents", Version = "2.1.0" };
 
             // Act: save then reload from the same repo root
             RepoPinStore.Save(repoRoot, pin);
@@ -87,10 +87,10 @@ public class RepoPinStoreTests
         var repoRoot = CreateTempDirectory();
         try
         {
-            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
 
             // Act: overwrite with a newer version
-            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "2.0.0" });
+            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "2.0.0" });
             var loaded = RepoPinStore.Load(repoRoot);
 
             // Assert: the loaded pin reflects the overwrite, not the original value
@@ -142,7 +142,7 @@ public class RepoPinStoreTests
         var repoRoot = CreateTempDirectory();
         try
         {
-            var pin = new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0", AgentsMdTemplateDeclined = true };
+            var pin = new RepoPin { PackageName = "contoso-agents", Version = "1.0.0", AgentsMdTemplateDeclined = true };
 
             // Act: save then reload from the same repo root
             RepoPinStore.Save(repoRoot, pin);
@@ -189,10 +189,10 @@ public class RepoPinStoreTests
 
     /// <summary>
     ///     Test that a legacy (version 1) pin file with no source and no schema version loads with
-    ///     its source mapped to the legacy Default alias, and the original fields intact.
+    ///     the legacy Default alias as its read-time source hint, and the original fields intact.
     /// </summary>
     [Fact]
-    public void RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource()
+    public void RepoPinStore_Load_LegacyV1PinFile_HintsDefaultSource()
     {
         // Arrange: a hand-written v1 pin file
         var repoRoot = CreateTempDirectory();
@@ -205,9 +205,9 @@ public class RepoPinStoreTests
             // Act
             var loaded = RepoPinStore.Load(repoRoot);
 
-            // Assert: Default source, v1 fields preserved
+            // Assert: Default source hint, v1 fields preserved
             Assert.NotNull(loaded);
-            Assert.Equal("Default", loaded.Source);
+            Assert.Equal("Default", loaded.LegacySource);
             Assert.Equal("contoso-agents", loaded.PackageName);
             Assert.Equal("1.0.0", loaded.Version);
             Assert.True(loaded.AgentsMdTemplateDeclined);
@@ -219,27 +219,27 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
-    ///     Test that saving writes schema version 4 and the source alias, and that a pin
-    ///     round-trips with its source.
+    ///     Test that saving writes schema version 4 and never a source or source revision: a pin
+    ///     names no source, so the committed file carries nothing of one user's settings.
     /// </summary>
     [Fact]
-    public void RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion4AndRoundTripsSource()
+    public void RepoPinStore_SaveThenLoad_WritesSchemaVersion4AndNeverASource()
     {
         // Arrange
         var repoRoot = CreateTempDirectory();
         try
         {
             // Act
-            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Team Feed", PackageName = "contoso-agents", Version = "1.2.3.4+b5" });
+            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.2.3.4+b5" });
             var loaded = RepoPinStore.Load(repoRoot);
             var json = File.ReadAllText(Path.Combine(repoRoot, ".agentcontrol.json"));
 
-            // Assert: the file declares schema 4 and the source, and the pin round-trips
+            // Assert: the file declares schema 4 and no source, and the pin round-trips with no hint
             Assert.Contains("\"SchemaVersion\": 4", json, StringComparison.Ordinal);
-            Assert.Contains("\"Source\": \"Team Feed\"", json, StringComparison.Ordinal);
+            Assert.DoesNotContain("Source", json, StringComparison.OrdinalIgnoreCase);
             Assert.NotNull(loaded);
             Assert.Equal(4, loaded.SchemaVersion);
-            Assert.Equal("Team Feed", loaded.Source);
+            Assert.Null(loaded.LegacySource);
             Assert.Equal("1.2.3.4+b5", loaded.Version);
         }
         finally
@@ -249,11 +249,11 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
-    ///     Test that a recorded content identity and source revision round-trip through save and
-    ///     load, and neither is written at all when the pin has none.
+    ///     Test that a recorded content identity round-trips through save and load, and is not
+    ///     written at all when the pin has none.
     /// </summary>
     [Fact]
-    public void RepoPinStore_SaveThenLoad_ContentIdentityAndSourceRevision_RoundTripAndAreOmittedWhenAbsent()
+    public void RepoPinStore_SaveThenLoad_ContentIdentity_RoundTripsAndIsOmittedWhenAbsent()
     {
         // Arrange
         var repoRoot = CreateTempDirectory();
@@ -261,36 +261,24 @@ public class RepoPinStoreTests
         {
             var path = Path.Combine(repoRoot, ".agentcontrol.json");
             var identity = "files-sha256:" + new string('a', 64);
-            var revision = "git-commit:" + new string('b', 40);
 
-            // Act 1: save a pin that records both, then reload it
+            // Act 1: save a pin that records an identity, then reload it
             RepoPinStore.Save(
                 repoRoot,
-                new RepoPin
-                {
-                    Source = "Feed",
-                    PackageName = "p",
-                    Version = "1.0.0",
-                    ContentIdentity = identity,
-                    SourceRevision = revision
-                });
+                new RepoPin { PackageName = "p", Version = "1.0.0", ContentIdentity = identity });
             var withIdentity = RepoPinStore.Load(repoRoot);
             var jsonWithIdentity = File.ReadAllText(path);
 
             // Act 2: save a pin that records none
-            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" });
+            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "p", Version = "1.0.0" });
             var withoutIdentity = RepoPinStore.Load(repoRoot);
             var jsonWithoutIdentity = File.ReadAllText(path);
 
-            // Assert: both are written and read back, and are absent when not recorded
+            // Assert: the identity is written and read back, and is absent when not recorded
             Assert.Contains($"\"ContentIdentity\": \"{identity}\"", jsonWithIdentity, StringComparison.Ordinal);
-            Assert.Contains($"\"SourceRevision\": \"{revision}\"", jsonWithIdentity, StringComparison.Ordinal);
             Assert.Equal(identity, withIdentity?.ContentIdentity);
-            Assert.Equal(revision, withIdentity?.SourceRevision);
             Assert.DoesNotContain("ContentIdentity", jsonWithoutIdentity, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("SourceRevision", jsonWithoutIdentity, StringComparison.OrdinalIgnoreCase);
             Assert.Null(withoutIdentity?.ContentIdentity);
-            Assert.Null(withoutIdentity?.SourceRevision);
         }
         finally
         {
@@ -300,7 +288,7 @@ public class RepoPinStoreTests
 
     /// <summary>
     ///     Test that pin files written before identities existed (version 1 and version 2) still
-    ///     load, with no content identity, and are written back as schema version 4.
+    ///     load, with no content identity, and are written back as schema version 4 without a source.
     /// </summary>
     [Theory]
     [InlineData("""{ "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
@@ -318,12 +306,13 @@ public class RepoPinStoreTests
             var loaded = RepoPinStore.Load(repoRoot);
             Assert.NotNull(loaded);
             RepoPinStore.Save(repoRoot, loaded);
+            var rewritten = File.ReadAllText(path);
 
-            // Assert: no identity was invented, and the rewritten file is schema 4
+            // Assert: no identity was invented, and the rewritten file is schema 4 without a source
             Assert.Null(loaded.ContentIdentity);
-            Assert.Null(loaded.SourceRevision);
             Assert.Equal("contoso-agents", loaded.PackageName);
-            Assert.Contains("\"SchemaVersion\": 4", File.ReadAllText(path), StringComparison.Ordinal);
+            Assert.Contains("\"SchemaVersion\": 4", rewritten, StringComparison.Ordinal);
+            Assert.DoesNotContain("Source", rewritten, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -334,7 +323,7 @@ public class RepoPinStoreTests
     /// <summary>
     ///     Test that a schema 3 pin's identity of a container (<c>sha256:</c> of a zip or package file)
     ///     is not carried over as an identity - it cannot be compared with one computed from the files, so
-    ///     it means "no recorded identity" - and that the rewritten file is schema 4 without it.
+    ///     it means "no recorded identity" - and that the rewritten file is schema 4 without it or a source.
     /// </summary>
     [Fact]
     public void RepoPinStore_Load_Schema3PinWithContainerIdentity_DropsIdentityAndRewritesAsSchema4()
@@ -354,13 +343,14 @@ public class RepoPinStoreTests
             RepoPinStore.Save(repoRoot, loaded);
             var rewritten = File.ReadAllText(path);
 
-            // Assert: no identity, no revision, other fields kept, and the file is schema 4 without the old text
+            // Assert: no identity, other fields kept, and the file is schema 4 without the old text
             Assert.Null(loaded.ContentIdentity);
-            Assert.Null(loaded.SourceRevision);
+            Assert.Equal("Feed", loaded.LegacySource);
             Assert.True(loaded.AgentsMdTemplateDeclined);
             Assert.Contains("\"SchemaVersion\": 4", rewritten, StringComparison.Ordinal);
             Assert.DoesNotContain("ContentIdentity", rewritten, StringComparison.Ordinal);
             Assert.DoesNotContain("sha256", rewritten, StringComparison.Ordinal);
+            Assert.DoesNotContain("Source", rewritten, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -369,11 +359,11 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
-    ///     Test that a schema 3 pin's Git commit identity becomes the migrated pin's source revision (so a
-    ///     moved tag stays detectable) and not a content identity, and that it is written back as such.
+    ///     Test that a schema 3 pin's Git commit identity is dropped (it is not a files identity, and a
+    ///     Git commit is no longer recorded), and that the rewritten file has neither it nor the source.
     /// </summary>
     [Fact]
-    public void RepoPinStore_Load_Schema3PinWithGitCommitIdentity_CarriesItAsSourceRevision()
+    public void RepoPinStore_Load_Schema3PinWithGitCommitIdentity_DropsItAndRewritesWithoutIt()
     {
         // Arrange: a schema 3 pin from a Git source
         var repoRoot = CreateTempDirectory();
@@ -389,14 +379,15 @@ public class RepoPinStoreTests
             var loaded = RepoPinStore.Load(repoRoot);
             Assert.NotNull(loaded);
             RepoPinStore.Save(repoRoot, loaded);
+            var rewritten = File.ReadAllText(path);
             var reloaded = RepoPinStore.Load(repoRoot);
 
-            // Assert: the commit is the source revision, there is no content identity, and it round-trips as schema 4
+            // Assert: no identity anywhere, and it round-trips as schema 4 with no source
             Assert.Null(loaded.ContentIdentity);
-            Assert.Equal(commit, loaded.SourceRevision);
             Assert.Equal(4, reloaded?.SchemaVersion);
-            Assert.Equal(commit, reloaded?.SourceRevision);
             Assert.Null(reloaded?.ContentIdentity);
+            Assert.DoesNotContain("git-commit", rewritten, StringComparison.Ordinal);
+            Assert.DoesNotContain("Source", rewritten, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -405,7 +396,7 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
-    ///     Test that a hand-written camelCase <c>contentIdentity</c> and <c>sourceRevision</c> are read.
+    ///     Test that a hand-written camelCase <c>contentIdentity</c> is read.
     /// </summary>
     [Fact]
     public void RepoPinStore_Load_CamelCaseContentIdentity_IsRead()
@@ -416,14 +407,13 @@ public class RepoPinStoreTests
         {
             File.WriteAllText(
                 Path.Combine(repoRoot, ".agentcontrol.json"),
-                """{ "schemaVersion": 4, "source": "Feed", "packageName": "p", "version": "1.0.0", "contentIdentity": "files-sha256:abc", "sourceRevision": "git-commit:def" }""");
+                """{ "schemaVersion": 4, "packageName": "p", "version": "1.0.0", "contentIdentity": "files-sha256:abc" }""");
 
             // Act
             var loaded = RepoPinStore.Load(repoRoot);
 
             // Assert
             Assert.Equal("files-sha256:abc", loaded?.ContentIdentity);
-            Assert.Equal("git-commit:def", loaded?.SourceRevision);
         }
         finally
         {
@@ -451,7 +441,7 @@ public class RepoPinStoreTests
 
             // Assert
             Assert.NotNull(loaded);
-            Assert.Equal("Feed", loaded.Source);
+            Assert.Equal("Feed", loaded.LegacySource);
             Assert.Equal("p", loaded.PackageName);
             Assert.Equal(2, loaded.SchemaVersion);
         }
@@ -484,17 +474,23 @@ public class RepoPinStoreTests
             RepoPinStore.Save(repoRoot, loaded);
             var afterLoadedSave = File.ReadAllText(path);
 
-            // Act 2: save a brand-new pin object (as a caller that did not load would)
-            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "3.0.0" });
+            // Act 2: save a brand-new pin object (as a caller that did not load would) over a file that
+            // still carries a source
+            File.WriteAllText(
+                path,
+                """{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "Version": "1.0.0", "FutureField": { "a": [1, 2] }, "Note": "keep" }""");
+            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "p", Version = "3.0.0" });
             var afterFreshSave = File.ReadAllText(path);
 
-            // Assert: the unknown properties are still there in both cases
+            // Assert: the unknown properties are still there in both cases, the source in neither
             Assert.Contains("\"FutureField\"", afterLoadedSave, StringComparison.Ordinal);
             Assert.Contains("\"Note\": \"keep\"", afterLoadedSave, StringComparison.Ordinal);
             Assert.Contains("\"2.0.0\"", afterLoadedSave, StringComparison.Ordinal);
+            Assert.DoesNotContain("Source", afterLoadedSave, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"FutureField\"", afterFreshSave, StringComparison.Ordinal);
             Assert.Contains("\"a\": [", afterFreshSave.Replace("\r\n", "\n").Replace("\n", string.Empty), StringComparison.Ordinal);
             Assert.Contains("\"3.0.0\"", afterFreshSave, StringComparison.Ordinal);
+            Assert.DoesNotContain("Source", afterFreshSave, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -503,13 +499,52 @@ public class RepoPinStoreTests
     }
 
     /// <summary>
-    ///     Test that a pin file of the current schema that names no source is rejected instead of
-    ///     being read as a pin to the legacy Default source.
+    ///     Test that a schema 4 pin an earlier build wrote with a <c>Source</c> and a <c>SourceRevision</c>
+    ///     (PascalCase or camelCase) is read with the source as a hint only and re-saved without either:
+    ///     neither is written back, not even as an unknown property, while the files identity and other
+    ///     unknown fields are kept.
     /// </summary>
     [Theory]
-    [InlineData("""{ "SchemaVersion": 2, "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
-    [InlineData("""{ "SchemaVersion": 2, "Source": "  ", "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
-    public void RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault(string json)
+    [InlineData("""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "Version": "1.0.0", "ContentIdentity": "files-sha256:abc", "SourceRevision": "git-commit:def", "Note": "keep" }""")]
+    [InlineData("""{ "schemaVersion": 4, "source": "Feed", "packageName": "p", "version": "1.0.0", "contentIdentity": "files-sha256:abc", "sourceRevision": "git-commit:def", "Note": "keep" }""")]
+    public void RepoPinStore_Load_Schema4PinWithSourceAndSourceRevision_ReadsHintAndNeverWritesThemBack(string json)
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(repoRoot, ".agentcontrol.json");
+            File.WriteAllText(path, json);
+
+            // Act: load it, then save it back
+            var loaded = RepoPinStore.Load(repoRoot);
+            Assert.NotNull(loaded);
+            RepoPinStore.Save(repoRoot, loaded);
+            var rewritten = File.ReadAllText(path);
+
+            // Assert: the source is a hint, the identity is kept, and the file has neither property
+            Assert.Equal("Feed", loaded.LegacySource);
+            Assert.Equal("files-sha256:abc", loaded.ContentIdentity);
+            Assert.DoesNotContain("source", rewritten, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"ContentIdentity\": \"files-sha256:abc\"", rewritten, StringComparison.Ordinal);
+            Assert.Contains("\"Note\": \"keep\"", rewritten, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the source an older pin named is read as the hint (trimmed) whatever the schema, and
+    ///     that a pin naming none has no hint.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "SchemaVersion": 2, "Source": "Feed", "PackageName": "p", "Version": "1.0.0" }""", "Feed")]
+    [InlineData("""{ "SchemaVersion": 3, "Source": "  Team Feed ", "PackageName": "p", "Version": "1.0.0" }""", "Team Feed")]
+    [InlineData("""{ "SchemaVersion": 4, "PackageName": "p", "Version": "1.0.0" }""", null)]
+    [InlineData("""{ "SchemaVersion": 2, "Source": "  ", "PackageName": "p", "Version": "1.0.0" }""", null)]
+    public void RepoPinStore_Load_Source_IsReadOnlyAsALegacyHint(string json, string? expectedHint)
     {
         // Arrange
         var repoRoot = CreateTempDirectory();
@@ -518,12 +553,42 @@ public class RepoPinStoreTests
             File.WriteAllText(Path.Combine(repoRoot, ".agentcontrol.json"), json);
 
             // Act
-            var ex = Assert.Throws<InvalidOperationException>(() => RepoPinStore.Load(repoRoot));
+            var loaded = RepoPinStore.Load(repoRoot);
 
-            // Assert
-            Assert.IsNotType<UnsupportedPinSchemaException>(ex);
-            Assert.Contains(".agentcontrol.json", ex.Message, StringComparison.Ordinal);
-            Assert.Contains("source", ex.Message, StringComparison.OrdinalIgnoreCase);
+            // Assert: the file's source is the hint; none means no hint, never a rejection
+            Assert.NotNull(loaded);
+            Assert.Equal(expectedHint, loaded.LegacySource);
+            Assert.Equal("p", loaded.PackageName);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a pin file that names no source (the normal form now) loads without being
+    ///     rejected, whatever its schema version.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "SchemaVersion": 2, "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
+    [InlineData("""{ "SchemaVersion": 3, "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
+    [InlineData("""{ "SchemaVersion": 4, "PackageName": "contoso-agents", "Version": "1.0.0" }""")]
+    public void RepoPinStore_Load_PinWithoutSource_LoadsWithoutRejection(string json)
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(repoRoot, ".agentcontrol.json"), json);
+
+            // Act
+            var loaded = RepoPinStore.Load(repoRoot);
+
+            // Assert: a normal pin, with no source hint
+            Assert.NotNull(loaded);
+            Assert.Equal("contoso-agents", loaded.PackageName);
+            Assert.Null(loaded.LegacySource);
         }
         finally
         {
@@ -578,7 +643,7 @@ public class RepoPinStoreTests
 
             // Act / Assert
             Assert.Throws<UnsupportedPinSchemaException>(
-                () => RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" }));
+                () => RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "p", Version = "1.0.0" }));
             Assert.Equal(newerContent, File.ReadAllText(path));
             Assert.Equal([path], Directory.GetFiles(repoRoot));
         }
@@ -642,7 +707,7 @@ public class RepoPinStoreTests
 
             // Act
             var ex = Assert.Throws<UnsupportedPinSchemaException>(
-                () => RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" }));
+                () => RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "p", Version = "1.0.0" }));
 
             // Assert: refused for the schema, and the file and its folder are untouched
             Assert.Equal(5, ex.SchemaVersion);
@@ -673,7 +738,7 @@ public class RepoPinStoreTests
 
             // Act
             var ex = Assert.Throws<UnsupportedPinSchemaException>(
-                () => RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" }));
+                () => RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "p", Version = "1.0.0" }));
             var loadFailure = Assert.Throws<UnsupportedPinSchemaException>(() => RepoPinStore.Load(repoRoot));
 
             // Assert: refused as newer in both directions, and the file and its folder are untouched
@@ -746,7 +811,7 @@ public class RepoPinStoreTests
 
             // Act
             var loadFailure = Assert.Throws<InvalidOperationException>(() => RepoPinStore.Load(repoRoot));
-            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" });
+            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "p", Version = "1.0.0" });
 
             // Assert: unreadable, not newer; and replaced by a valid current pin
             Assert.IsNotType<UnsupportedPinSchemaException>(loadFailure);
@@ -773,7 +838,7 @@ public class RepoPinStoreTests
             File.WriteAllText(path, "{ this is not json");
 
             // Act
-            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" });
+            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "p", Version = "1.0.0" });
 
             // Assert
             Assert.Equal("p", RepoPinStore.Load(repoRoot)?.PackageName);

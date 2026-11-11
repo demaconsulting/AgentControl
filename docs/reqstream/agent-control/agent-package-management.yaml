@@ -153,11 +153,10 @@ sections:
           or missing entries, and shall report an error for an alias that is not configured
           without ever consulting, or falling back to, any other source.
         justification: |
-          A package name is not unique across sources; resolving a pin or a request by anything
-          weaker than the source alias could fetch another source's package under the wrong
-          identity, so a missing source must be an error rather than be quietly replaced, and
-          the configuration an alias is resolved against must be unambiguous and unable to change
-          underneath a caller.
+          A package name is not unique across sources; resolving a request by anything weaker than
+          the source alias could fetch another source's package under the wrong identity, so a
+          missing source must be an error rather than be quietly replaced, and the configuration an
+          alias is resolved against must be unambiguous and unable to change underneath a caller.
         children:
           - AgentControl-PackageSourceRegistry-ResolveAlias
           - AgentControl-PackageSourceRegistry-MissingAliasIsError
@@ -476,8 +475,6 @@ sections:
           must never be mistaken for a change.
         children:
           - AgentControl-PackageContentIdentity-RecognizeFilesIdentity
-          - AgentControl-PackageContentIdentity-Format
-          - AgentControl-PackageContentIdentity-FormatRejectMalformed
           - AgentControl-PackageContentIdentity-Describe
           - AgentControl-PackageContentIdentity-DescribeNone
           - AgentControl-PackageContentIdentity-Compare
@@ -485,18 +482,19 @@ sections:
           - AgentControl-PackageContentIdentity-CompareChanged
         tests:
           - AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportFilesIdentityAndDetectRepublishedZip
-          - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag
+          - AgentPackageManagementSubsystem_SameFilesFromZipNuGetAndGit_ReportTheSameIdentity
 
       - id: AgentControl-AgentPackageManagement-OffersAcrossSources
         title: >-
           The AgentPackageManagement subsystem shall list what all the configured sources offer of
-          a package in the order the sources are configured, skipping a source that cannot be read,
-          and shall determine the newest version offered across them, with a version that several
-          sources offer attributed to the first of them in configuration order.
+          a package in the order the sources are configured, skipping a source that cannot be read
+          (and telling a caller that asks which were skipped), and shall determine the newest
+          version offered across them, with a version that several sources offer attributed to the
+          first of them in configuration order.
         justification: |
-          A repo's pin names a source alias that another user's configuration may not have; the
-          other configured sources are then the candidates for supplying the pinned files and for
-          offering an upgrade, and the order the user chose in Settings decides between equals.
+          A repo's pin names no source, because aliases are per-user configuration; every configured
+          source is a candidate for supplying the pinned files and for offering an upgrade, and the
+          order the user chose in Settings decides between equals.
         children:
           - AgentControl-PackageVersionCache-ListAcrossSources
           - AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure
@@ -590,7 +588,7 @@ sections:
         tests:
           # Subsystem test with a real local repository: the registry, the version cache and the
           # provider together list tag versions with their commits.
-          - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag
+          - AgentPackageManagementSubsystem_GitSource_ListsTagsAndAcquiresTheTaggedFiles
 
       - id: AgentControl-AgentPackageManagement-GitSourceAcquire
         title: >-
@@ -623,26 +621,26 @@ sections:
           - AgentControl-GitSourceProvider-CachePruningSparesOpenReaders
           - AgentControl-GitSourceProvider-CacheReleasesCommitWhenReaderDisposed
         tests:
-          - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag
+          - AgentPackageManagementSubsystem_GitSource_ListsTagsAndAcquiresTheTaggedFiles
           - AgentPackageManagementSubsystem_GitSource_HostileLayoutIsRefusedAndNothingIsCached
 
       - id: AgentControl-AgentPackageManagement-GitSourceContentIdentity
         title: >-
-          The AgentPackageManagement subsystem shall name the commit of a Git version's tag as the
-          source revision of the package it supplies, in addition to the identity of its files, and
-          shall show a moved tag as another commit for the same version, so that a moved tag can
-          be noticed.
+          The AgentPackageManagement subsystem shall report the identity of the files of a Git
+          version's tag as the content identity of the package it supplies, like every other kind
+          of source, so that a tag moved to other files is recognized as a changed package, and
+          shall list each version with the commit its tag currently points to and refuse to
+          deliver another commit in place of the one that was listed.
         justification: |
-          A tag is mutable; the commit it pointed to when the package was applied is the revision
-          that cannot change unless the tag is moved, and the same files can be reached through
-          different commits, so the revision is kept apart from the identity of the files.
+          A tag is mutable; the identity of the files is what makes a tag moved to other files
+          detectable and lets the same files reached through different commits count as the same,
+          and content the user confirmed must never be replaced by another commit's.
         children:
           - AgentControl-GitSourceProvider-ReportContentIdentity
           - AgentControl-GitSourceProvider-TagMovedBetweenListAndFetch
           - AgentControl-GitSourceProvider-MovedTagReportedAsNewRevision
-          - AgentControl-PackageVersionCache-ReportPinnedListing
         tests:
-          - AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag
+          - AgentPackageManagementSubsystem_GitSource_ListsTagsAndAcquiresTheTaggedFiles
 
       - id: AgentControl-AgentPackageManagement-GitSourceNoRepositoryCode
         title: >-

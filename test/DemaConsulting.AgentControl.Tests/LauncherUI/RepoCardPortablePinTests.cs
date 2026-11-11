@@ -1,15 +1,15 @@
 // Copyright (c) DEMA Consulting
-//
+// 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-//
+// 
 // The above copyright notice and this permission notice shall be included in all
 // copies or substantial portions of the Software.
-//
+// 
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -30,11 +30,12 @@ using Material.Icons;
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
 /// <summary>
-///     Tests of the "portable pin" behavior of <see cref="RepoCardViewModel"/>: a repo's pin names a
-///     preferred source alias, but teammates whose configuration has another alias (or another kind of
-///     source) still get the same agent files, because a pin that recorded the identity of its files
-///     accepts any configured source that delivers files with exactly that identity - and never a source
-///     whose files differ, or any source at all for a pin that recorded no files identity.
+///     Tests of the "portable pin" behavior of <see cref="RepoCardViewModel"/>: a repo's pin names no
+///     package source (sources and their aliases are each user's own configuration), so the card finds
+///     the source locally - the first configured source, in Settings order, that delivers files with
+///     exactly the identity the pin recorded - whatever its alias or kind; never a source whose files
+///     differ; and, for an older pin that recorded no files identity, by the hint order of last supplier,
+///     the source an older version named, then the first source that offers it.
 /// </summary>
 /// <remarks>
 ///     Uses real zip-folder sources (and, for the cross-kind cases, a real NuGet folder feed and a real
@@ -54,15 +55,16 @@ public sealed class RepoCardPortablePinTests : IDisposable
     private readonly List<string> _tempPaths = [];
 
     /// <summary>
-    ///     Test that a pin whose alias is not configured here but whose files another configured source
-    ///     delivers identically (repacked, with other release notes) shows no source problem, names the
-    ///     source that supplies the files on its chip with an explaining tooltip, and leaves the pin as it was.
+    ///     Test that a source named differently from the one the pin was made with, whose files are the
+    ///     identical files (repacked, with other release notes), supplies the package without a source
+    ///     problem: the chip names the source that supplies it, the tooltip names it without any "pinned
+    ///     source" wording, and the pin is left as it was.
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasIdenticalFiles_NamesSupplierWithoutProblem()
+    public async Task RepoCardViewModel_Refresh_SourceNamedDifferentlyHasIdenticalFiles_NamesSupplierWithoutProblem()
     {
-        // Arrange: a repo pinned to "Contoso", and a teammate who only has "Artifactory" with the same files repacked
-        var (repo, pinBefore) = CreatePinnedRepo("Contoso", "v1");
+        // Arrange: a repo made from "Contoso", and a teammate who only has "Artifactory" with the same files repacked
+        var (repo, pinBefore) = CreatePinnedRepo("v1");
         var artifactory = CreateSourceFolder("v1", repack: true);
         var settings = new AppSettings { Sources = [ZipSource("Artifactory", artifactory)] };
         var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
@@ -74,14 +76,12 @@ public sealed class RepoCardPortablePinTests : IDisposable
         // Assert: no problem, the supplier is named, and the pin is exactly as it was
         Assert.False(card.HasSourceProblem);
         Assert.Equal(RepoCardStatus.UpToDate, card.Status);
-        Assert.True(card.IsPinnedSourceSubstituted);
+        Assert.Equal("Artifactory", card.SupplyingSource);
+        Assert.True(card.HasSupplyingSource);
         Assert.Equal("Artifactory", card.PinnedSourceLabel);
-        Assert.Equal("Contoso", card.PinnedSource);
         Assert.Equal(MaterialIconKind.FolderZip, card.PinnedSourceIcon);
-        Assert.Contains(
-            "Pinned source 'Contoso' is not configured; the identical files come from 'Artifactory'.",
-            card.PackageChipTooltip,
-            StringComparison.Ordinal);
+        Assert.Contains("from source 'Artifactory'", card.PackageChipTooltip, StringComparison.Ordinal);
+        Assert.DoesNotContain("pinned source", card.PackageChipTooltip, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
     }
 
@@ -94,7 +94,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
     public async Task RepoCardViewModel_Refresh_SeveralSources_UsesFirstSourceWithIdenticalFilesInSettingsOrder()
     {
         // Arrange: Mirror1 has other files under the same version, Mirror2 and Mirror3 have the pinned files
-        var (repo, _) = CreatePinnedRepo("Contoso", "v1");
+        var (repo, _) = CreatePinnedRepo("v1");
         var settings = new AppSettings
         {
             Sources =
@@ -113,18 +113,19 @@ public sealed class RepoCardPortablePinTests : IDisposable
         // Assert
         Assert.False(card.HasSourceProblem);
         Assert.Equal("Mirror2", card.PinnedSourceLabel);
+        Assert.Equal("Mirror2", card.SupplyingSource);
     }
 
     /// <summary>
-    ///     Test that a pin whose alias is not configured and whose files no other configured source
-    ///     delivers identically is a source problem that says so: the pinned source is not configured and
-    ///     no other configured source delivers the identical files, and no source is substituted.
+    ///     Test that a pin whose version a configured source offers only with other files is a source
+    ///     problem that says no configured source delivers the files the repo was set up with: nothing is
+    ///     substituted, the chip names no source, and no upgrade is offered when nothing is newer.
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasDifferentFiles_ShowsSourceProblem()
+    public async Task RepoCardViewModel_Refresh_OnlySourceHasDifferentFiles_ShowsNoMatchingFilesProblem()
     {
         // Arrange: the teammate's only source offers the same package name and version with other files
-        var (repo, _) = CreatePinnedRepo("Contoso", "v1");
+        var (repo, _) = CreatePinnedRepo("v1");
         var settings = new AppSettings { Sources = [ZipSource("Artifactory", CreateSourceFolder("other files"))] };
         var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
 
@@ -132,58 +133,57 @@ public sealed class RepoCardPortablePinTests : IDisposable
         card.RefreshCheap();
         await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
 
-        // Assert: the red chip with an explanation, no substitute, no upgrade
+        // Assert: the red chip with an explanation, no supplier, no upgrade
         Assert.True(card.HasSourceProblem);
         Assert.Equal("Package source problem", card.SourceProblemChipText);
-        Assert.Contains("'Contoso' is not configured", card.SourceProblem, StringComparison.Ordinal);
-        Assert.Contains("no other configured source delivers the identical files", card.SourceProblem, StringComparison.Ordinal);
-        Assert.False(card.IsPinnedSourceSubstituted);
-        Assert.Equal("Contoso", card.PinnedSourceLabel);
+        Assert.Contains(
+            "No configured source delivers contoso-agents 1.0.0 with the files this repo was set up with",
+            card.SourceProblem,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("pinned source", card.SourceProblem, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(card.SupplyingSource);
+        Assert.False(card.HasSupplyingSource);
+        Assert.Equal(string.Empty, card.PinnedSourceLabel);
         Assert.Equal(RepoCardStatus.Problem, card.Status);
         Assert.False(card.IsUpgradeAvailable);
     }
 
     /// <summary>
-    ///     Test that a pin that recorded no files identity never falls back to another source, however
-    ///     well another source's package name and version match: there is nothing to verify it against.
+    ///     Test that a pin whose package version no configured source offers at all is a source problem
+    ///     that says so, and that a version older than the pin does not make it an upgrade.
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_Refresh_PinWithoutFilesIdentityAndAliasNotConfigured_NeverFallsBack()
+    public async Task RepoCardViewModel_Refresh_NoSourceOffersPinnedVersion_ShowsNoSourceOffersProblem()
     {
-        // Arrange: a pin without an identity (schema 2) to "Contoso", and another source with that very package
-        var repo = CreateTempDirectory();
-        await File.WriteAllTextAsync(
-            PinPath(repo),
-            $$"""{ "SchemaVersion": 2, "Source": "Contoso", "PackageName": "{{PackageId}}", "Version": "1.0.0" }""",
-            TestContext.Current.CancellationToken);
-        var settings = new AppSettings { Sources = [ZipSource("Artifactory", CreateSourceFolder("v1"))] };
+        // Arrange: the only source has the package, but only an older version than the pinned one
+        var (repo, _) = CreatePinnedRepo("v1");
+        var older = CreateTempDirectory();
+        WriteZip(older, "0.5.0", "old");
+        var settings = new AppSettings { Sources = [ZipSource("Artifactory", older)] };
         var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
 
         // Act
         card.RefreshCheap();
         await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
 
-        // Assert: a source problem that explains why nothing else was tried, and nothing substituted
+        // Assert
         Assert.True(card.HasSourceProblem);
-        Assert.Contains("'Contoso' is not configured", card.SourceProblem, StringComparison.Ordinal);
-        Assert.Contains("no file fingerprint", card.SourceProblem, StringComparison.Ordinal);
-        Assert.False(card.IsPinnedSourceSubstituted);
+        Assert.Contains("No configured source offers contoso-agents 1.0.0", card.SourceProblem, StringComparison.Ordinal);
+        Assert.Equal(RepoCardStatus.Problem, card.Status);
         Assert.False(card.IsUpgradeAvailable);
+        Assert.False(card.UpgradeCommand.CanExecute(null));
     }
 
     /// <summary>
-    ///     Test that a pin whose alias is configured and offers the pinned version is served by that
-    ///     source as always: its alias is on the chip and the tooltip says nothing about a substitute.
+    ///     Test that a pin with no source configured at all shows the same "no configured source offers it"
+    ///     problem (the user has nothing to supply the files from).
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_Refresh_PinnedAliasConfigured_ShowsPinnedSourceWithoutSubstitution()
+    public async Task RepoCardViewModel_Refresh_NoSourcesConfigured_ShowsNoSourceOffersProblem()
     {
-        // Arrange: the pin's own alias is configured, besides another source with the same files
-        var (repo, _) = CreatePinnedRepo("Contoso", "v1", out var contosoFolder);
-        var settings = new AppSettings
-        {
-            Sources = [ZipSource("Artifactory", CreateSourceFolder("v1")), ZipSource("Contoso", contosoFolder)]
-        };
+        // Arrange: a pinned repo and settings without any source
+        var (repo, _) = CreatePinnedRepo("v1");
+        var settings = new AppSettings { Sources = [] };
         var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
 
         // Act
@@ -191,75 +191,36 @@ public sealed class RepoCardPortablePinTests : IDisposable
         await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.False(card.HasSourceProblem);
-        Assert.False(card.IsPinnedSourceSubstituted);
-        Assert.Equal("Contoso", card.PinnedSourceLabel);
-        Assert.DoesNotContain("Pinned source", card.PackageChipTooltip, StringComparison.Ordinal);
-        Assert.Equal(string.Empty, card.SourceSubstitutionNote);
-    }
-
-    /// <summary>
-    ///     Test that a pin whose alias is configured but does not offer the pinned version is supplied by
-    ///     another source with the identical files, and that the tooltip says the pinned source does not
-    ///     offer the version.
-    /// </summary>
-    [Fact]
-    public async Task RepoCardViewModel_Refresh_PinnedAliasDoesNotOfferVersionAndOtherSourceHasIdenticalFiles_NamesSupplier()
-    {
-        // Arrange: "Contoso" is configured but now only has another version; "Artifactory" has the pinned files
-        var (repo, _) = CreatePinnedRepo("Contoso", "v1", out var contosoFolder);
-        File.Delete(Path.Combine(contosoFolder, $"{PackageId}-1.0.0.zip"));
-        WriteZip(contosoFolder, "2.0.0", "v2");
-        var settings = new AppSettings
-        {
-            Sources = [ZipSource("Contoso", contosoFolder), ZipSource("Artifactory", CreateSourceFolder("v1"))]
-        };
-        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
-
-        // Act
-        card.RefreshCheap();
-        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
-
-        // Assert
-        Assert.False(card.HasSourceProblem);
-        Assert.True(card.IsPinnedSourceSubstituted);
-        Assert.Equal("Artifactory", card.PinnedSourceLabel);
-        Assert.Contains(
-            "Pinned source 'Contoso' does not offer contoso-agents 1.0.0; the identical files come from 'Artifactory'.",
-            card.PackageChipTooltip,
-            StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    ///     Test that a pin whose alias is configured but does not offer the pinned version, while no other
-    ///     source delivers the identical files, is a source problem like an unconfigured alias (the card is
-    ///     not "up to date"), but that a newer version the pinned source does offer is still offered as an
-    ///     upgrade - the way out of the problem - through the chip and the menu command.
-    /// </summary>
-    [Fact]
-    public async Task RepoCardViewModel_Refresh_PinnedAliasDoesNotOfferVersionAndNoOtherSourceHasIdenticalFiles_ShowsSourceProblemAndStillOffersNewerVersion()
-    {
-        // Arrange: "Contoso" is configured but only has 2.0.0 now; "Artifactory" has 1.0.0 with other files
-        var (repo, _) = CreatePinnedRepo("Contoso", "v1", out var contosoFolder);
-        File.Delete(Path.Combine(contosoFolder, $"{PackageId}-1.0.0.zip"));
-        WriteZip(contosoFolder, "2.0.0", "v2");
-        var settings = new AppSettings
-        {
-            Sources = [ZipSource("Contoso", contosoFolder), ZipSource("Artifactory", CreateSourceFolder("other files"))]
-        };
-        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
-
-        // Act
-        card.RefreshCheap();
-        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
-
-        // Assert: a problem that says the pinned source does not offer the version, nothing substituted,
-        // and the upgrade the source does offer stays available (chip data and the shared command)
         Assert.True(card.HasSourceProblem);
+        Assert.Contains("No configured source offers contoso-agents 1.0.0", card.SourceProblem, StringComparison.Ordinal);
+        Assert.Equal(RepoCardStatus.Problem, card.Status);
+        Assert.False(card.HasSupplyingSource);
+    }
+
+    /// <summary>
+    ///     Test that a source problem and a newer version coexist: when no configured source offers the
+    ///     pinned version but one offers a newer one, the problem says upgrading is the way out, the status
+    ///     is a problem, and the upgrade is offered through the chip data and the shared command.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_NoSourceOffersPinnedVersionButNewerOffered_ShowsProblemAndStillOffersUpgrade()
+    {
+        // Arrange: the teammate's source only has 2.0.0 now
+        var (repo, _) = CreatePinnedRepo("v1");
+        var folder = CreateTempDirectory();
+        WriteZip(folder, "2.0.0", "v2");
+        var settings = new AppSettings { Sources = [ZipSource("Artifactory", folder)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the red chip and the upgrade coexist
+        Assert.True(card.HasSourceProblem);
+        Assert.Contains("No configured source offers contoso-agents 1.0.0", card.SourceProblem, StringComparison.Ordinal);
         Assert.Contains(
-            "The pinned source 'Contoso' does not offer contoso-agents 1.0.0", card.SourceProblem, StringComparison.Ordinal);
-        Assert.Contains("no other configured source delivers the identical files", card.SourceProblem, StringComparison.Ordinal);
-        Assert.False(card.IsPinnedSourceSubstituted);
+            "Upgrade to 2.0.0 to move to a version a configured source offers.", card.SourceProblem, StringComparison.Ordinal);
         Assert.Equal(RepoCardStatus.Problem, card.Status);
         Assert.True(card.IsUpgradeAvailable);
         Assert.Equal("2.0.0", card.LatestAvailableVersion);
@@ -269,20 +230,16 @@ public sealed class RepoCardPortablePinTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that the same pin whose configured source has no newer version either shows the source
-    ///     problem and offers no upgrade, and is not "up to date".
+    ///     Test that a source problem about changed files also still offers a newer version the source has.
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_Refresh_PinnedAliasDoesNotOfferVersionAndNothingNewer_ShowsSourceProblemAndNoUpgrade()
+    public async Task RepoCardViewModel_Refresh_OnlyDifferentFilesButNewerOffered_ShowsProblemAndStillOffersUpgrade()
     {
-        // Arrange: "Contoso" only has an older 0.5.0 now; no other source delivers the identical files
-        var (repo, _) = CreatePinnedRepo("Contoso", "v1", out var contosoFolder);
-        File.Delete(Path.Combine(contosoFolder, $"{PackageId}-1.0.0.zip"));
-        WriteZip(contosoFolder, "0.5.0", "old");
-        var settings = new AppSettings
-        {
-            Sources = [ZipSource("Contoso", contosoFolder), ZipSource("Artifactory", CreateSourceFolder("other files"))]
-        };
+        // Arrange: the teammate's source has 1.0.0 with other files, and 2.0.0
+        var (repo, _) = CreatePinnedRepo("v1");
+        var folder = CreateSourceFolder("other files");
+        WriteZip(folder, "2.0.0", "v2");
+        var settings = new AppSettings { Sources = [ZipSource("Artifactory", folder)] };
         var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
 
         // Act
@@ -291,46 +248,180 @@ public sealed class RepoCardPortablePinTests : IDisposable
 
         // Assert
         Assert.True(card.HasSourceProblem);
+        Assert.Contains("with the files this repo was set up with", card.SourceProblem, StringComparison.Ordinal);
         Assert.Equal(RepoCardStatus.Problem, card.Status);
-        Assert.False(card.IsUpgradeAvailable);
-        Assert.False(card.UpgradeCommand.CanExecute(null));
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("2.0.0", card.LatestAvailableVersion);
+        Assert.True(card.UpgradeCommand.CanExecute(null));
     }
 
     /// <summary>
-    ///     Test that the substitute is dropped when the pinned alias is configured again: the chip shows
-    ///     the pinned source once more.
+    ///     Test that when nothing offers the pinned version and a configured source could not be read,
+    ///     nothing is known: the check is "unknown", never the "no configured source offers it" problem.
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_Refresh_PinnedAliasConfiguredAgain_DropsSubstitute()
+    public async Task RepoCardViewModel_Refresh_NothingOffersAndASourceCannotBeRead_IsUnknownNotAProblem()
     {
-        // Arrange: the substitute is in use
-        var (repo, _) = CreatePinnedRepo("Contoso", "v1", out var contosoFolder);
-        var settings = new AppSettings { Sources = [ZipSource("Artifactory", CreateSourceFolder("v1"))] };
+        // Arrange: one source whose folder is gone, and one that does not have the package
+        var (repo, _) = CreatePinnedRepo("v1");
+        var empty = CreateTempDirectory();
+        var settings = new AppSettings
+        {
+            Sources = [ZipSource("Gone", Path.Combine(empty, "missing")), ZipSource("Empty", empty)]
+        };
         var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+
+        // Act
         card.RefreshCheap();
         await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
-        Assert.True(card.IsPinnedSourceSubstituted);
 
-        // Act: the user adds the "Contoso" source to Settings
-        settings.Sources = [ZipSource("Artifactory", CreateSourceFolder("v1")), ZipSource("Contoso", contosoFolder)];
+        // Assert: the failure handling, not a claim that no source offers the version
+        Assert.False(card.HasSourceProblem);
+        Assert.True(card.IsUpgradeStatusUnknown);
+        Assert.False(card.IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that the source the card was last supplied from is accepted by the status check as long as
+    ///     it still offers the version, without acquiring its files again: a source that lists the version
+    ///     but cannot deliver it is still named, while without that cache the same source is not trusted.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_CachedSupplierStillOffersVersion_IsAcceptedWithoutAcquiring()
+    {
+        // Arrange: the only source lists 1.0.0 but its zip is not readable
+        var (repo, _) = CreatePinnedRepo("v1");
+        var broken = CreateTempDirectory();
+        await File.WriteAllBytesAsync(Path.Combine(broken, $"{PackageId}-1.0.0.zip"), [], TestContext.Current.CancellationToken);
+        var settings = new AppSettings { Sources = [ZipSource("Broken", broken)] };
+        var cached = new RepoCardViewModel(
+            new RecentRepo { Path = repo, PinnedPackageName = PackageId, PinnedPackageVersion = "1.0.0", PinnedSource = "Broken" },
+            () => settings,
+            new PackageVersionCache());
+        var uncached = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+
+        // Act
+        cached.RefreshCheap();
+        await cached.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        uncached.RefreshCheap();
+        await uncached.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: accepted from the cache, but not verifiable (so a problem) without it
+        Assert.False(cached.HasSourceProblem);
+        Assert.Equal("Broken", cached.PinnedSourceLabel);
+        Assert.True(uncached.HasSourceProblem);
+        Assert.Equal(string.Empty, uncached.PinnedSourceLabel);
+    }
+
+    /// <summary>
+    ///     Test that a remembered supplier that is no longer configured is dropped and the package is
+    ///     supplied by a configured source that delivers the identical files.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_CachedSupplierNoLongerConfigured_IsReplacedByAnotherSource()
+    {
+        // Arrange: the card remembers "Contoso", which the user has since removed from Settings
+        var (repo, _) = CreatePinnedRepo("v1");
+        var settings = new AppSettings { Sources = [ZipSource("Artifactory", CreateSourceFolder("v1"))] };
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo, PinnedPackageName = PackageId, PinnedPackageVersion = "1.0.0", PinnedSource = "Contoso" },
+            () => settings,
+            new PackageVersionCache());
+
+        // Act
         card.RefreshCheap();
         await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.False(card.IsPinnedSourceSubstituted);
-        Assert.Equal("Contoso", card.PinnedSourceLabel);
         Assert.False(card.HasSourceProblem);
+        Assert.Equal("Artifactory", card.SupplyingSource);
     }
 
     /// <summary>
-    ///     Test that the launch re-sync of a fresh clone restores the pinned files from another configured
-    ///     source that delivers the identical files, and never writes the pin.
+    ///     Test that a pin that recorded no files identity (an older pin) is never refused: the source an
+    ///     older version recorded in the file is used as a hint when it is configured and offers the version.
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAliasNotConfigured_RestoresFromIdenticalSourceWithoutWritingPin()
+    public async Task RepoCardViewModel_Refresh_PinWithoutFilesIdentity_UsesLegacySourceHintWhenConfigured()
     {
-        // Arrange: a repo pinned to "Contoso" whose managed folders are missing, and a teammate with "Artifactory"
-        var (repo, pinBefore) = CreatePinnedRepo("Contoso", "v1");
+        // Arrange: a schema 2 pin that names "Mirror2", and two configured sources offering the version
+        var repo = CreateRepoWithLegacyPin("Mirror2");
+        var settings = new AppSettings
+        {
+            Sources = [ZipSource("Mirror1", CreateSourceFolder("v1")), ZipSource("Mirror2", CreateSourceFolder("v1"))]
+        };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(card.HasSourceProblem);
+        Assert.Equal("Mirror2", card.SupplyingSource);
+    }
+
+    /// <summary>
+    ///     Test that a pin that recorded no files identity whose legacy source hint is not configured is
+    ///     supplied by the first configured source that offers the version, and is never refused.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_PinWithoutFilesIdentityAndLegacyHintNotConfigured_UsesFirstOfferingSource()
+    {
+        // Arrange: a schema 2 pin naming "Contoso", which this machine does not configure
+        var repo = CreateRepoWithLegacyPin("Contoso");
+        var settings = new AppSettings
+        {
+            Sources = [ZipSource("Mirror1", CreateSourceFolder("v1")), ZipSource("Mirror2", CreateSourceFolder("other files"))]
+        };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: nothing to verify against, so nothing is refused
+        Assert.False(card.HasSourceProblem);
+        Assert.Equal("Mirror1", card.SupplyingSource);
+        Assert.Equal(RepoCardStatus.UpToDate, card.Status);
+    }
+
+    /// <summary>
+    ///     Test that, for a pin that recorded no files identity, the source the card was last supplied from
+    ///     wins over the legacy source hint.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_PinWithoutFilesIdentity_LastSupplierWinsOverLegacyHint()
+    {
+        // Arrange: the file's hint says "Mirror2", the card last used "Mirror1"
+        var repo = CreateRepoWithLegacyPin("Mirror2");
+        var settings = new AppSettings
+        {
+            Sources = [ZipSource("Mirror2", CreateSourceFolder("v1")), ZipSource("Mirror1", CreateSourceFolder("v1"))]
+        };
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo, PinnedPackageName = PackageId, PinnedPackageVersion = "1.0.0", PinnedSource = "Mirror1" },
+            () => settings,
+            new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal("Mirror1", card.SupplyingSource);
+    }
+
+    /// <summary>
+    ///     Test that the launch re-sync of a fresh clone restores the pinned files from a configured source
+    ///     with another alias that delivers the identical files, never writes the pin, and remembers the
+    ///     source that supplied them on the card.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceNamedDifferently_RestoresFromIdenticalSourceWithoutWritingPin()
+    {
+        // Arrange: a repo whose managed folders are missing, and a teammate with "Artifactory"
+        var (repo, pinBefore) = CreatePinnedRepo("v1");
         Directory.Delete(Path.Combine(repo, ".github"), recursive: true);
         var settings = new AppSettings { Sources = [ZipSource("Artifactory", CreateSourceFolder("v1", repack: true))] };
         var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
@@ -341,23 +432,93 @@ public sealed class RepoCardPortablePinTests : IDisposable
         // Act
         var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
 
-        // Assert: restored, no warning, and the pin keeps the alias it had
+        // Assert: restored, no warning, the pin untouched and the supplier remembered
         Assert.True(result);
         Assert.Empty(errors);
         Assert.Equal("v1", ReadMarker(repo));
         Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
+        Assert.Equal("Artifactory", card.SupplyingSource);
+    }
+
+    /// <summary>
+    ///     Test that the launch re-sync skips a source that offers the same name and version with other
+    ///     files, however early it is configured, and restores the files from the first source that delivers
+    ///     the identical files.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_RepublishedSourceFirst_SkipsItAndRestoresFromMatchingSource()
+    {
+        // Arrange: the first source republished 1.0.0 with other files; the second still has the original files
+        var (repo, _) = CreatePinnedRepo("v1");
+        Directory.Delete(Path.Combine(repo, ".github"), recursive: true);
+        var settings = new AppSettings
+        {
+            Sources = [ZipSource("Contoso", CreateSourceFolder("tampered")), ZipSource("Artifactory", CreateSourceFolder("v1"))]
+        };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+        var errors = new List<string>();
+        card.ErrorOccurred += (_, message) => errors.Add(message);
+
+        // Act
+        var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.True(result);
+        Assert.Empty(errors);
+        Assert.Equal("v1", ReadMarker(repo));
+        Assert.Equal("Artifactory", card.SupplyingSource);
+    }
+
+    /// <summary>
+    ///     Test that the launch re-sync tries the source the card was last supplied from first when several
+    ///     sources deliver the identical files, and otherwise the first in Settings order.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SeveralIdenticalSources_PrefersLastSupplierThenSettingsOrder()
+    {
+        // Arrange: two repos pinned to the same files, two sources delivering them
+        var (repoNoHistory, _) = CreatePinnedRepo("v1");
+        var (repoWithHistory, _) = CreatePinnedRepo("v1");
+        Directory.Delete(Path.Combine(repoNoHistory, ".github"), recursive: true);
+        Directory.Delete(Path.Combine(repoWithHistory, ".github"), recursive: true);
+        var settings = new AppSettings
+        {
+            Sources = [ZipSource("Mirror1", CreateSourceFolder("v1")), ZipSource("Mirror2", CreateSourceFolder("v1"))]
+        };
+        var noHistory = new RepoCardViewModel(new RecentRepo { Path = repoNoHistory }, () => settings, new PackageVersionCache());
+        var withHistory = new RepoCardViewModel(
+            new RecentRepo
+            {
+                Path = repoWithHistory,
+                PinnedPackageName = PackageId,
+                PinnedPackageVersion = "1.0.0",
+                PinnedSource = "Mirror2"
+            },
+            () => settings,
+            new PackageVersionCache());
+        noHistory.RefreshCheap();
+        withHistory.RefreshCheap();
+
+        // Act
+        await noHistory.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+        await withHistory.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal("Mirror1", noHistory.SupplyingSource);
+        Assert.Equal("Mirror2", withHistory.SupplyingSource);
     }
 
     /// <summary>
     ///     Test that the launch re-sync does not use a source whose package of that name and version has
-    ///     other files: nothing is extracted, and the warning says the pinned source is not configured and
-    ///     no other configured source delivers the identical files.
+    ///     other files: nothing is extracted, the pin is untouched, and the warning says the version now
+    ///     contains different files and what to do about it.
     /// </summary>
     [Fact]
     public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_OnlyOtherFilesAvailable_RefusesWithExplanation()
     {
         // Arrange: the teammate's source has the version, but with other files
-        var (repo, pinBefore) = CreatePinnedRepo("Contoso", "v1");
+        var (repo, pinBefore) = CreatePinnedRepo("v1");
         Directory.Delete(Path.Combine(repo, ".github"), recursive: true);
         var settings = new AppSettings { Sources = [ZipSource("Artifactory", CreateSourceFolder("other files"))] };
         var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
@@ -371,101 +532,78 @@ public sealed class RepoCardPortablePinTests : IDisposable
         // Assert
         Assert.False(result);
         var message = Assert.Single(errors);
-        Assert.Contains("'Contoso' is not configured", message, StringComparison.Ordinal);
-        Assert.Contains("no other configured source delivers the identical files", message, StringComparison.Ordinal);
+        Assert.Contains("The agent files were not synced", message, StringComparison.Ordinal);
+        Assert.Contains("now contains different files", message, StringComparison.Ordinal);
+        Assert.Contains("Launching without them", message, StringComparison.Ordinal);
+        Assert.Contains("Change package", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("pinned source", message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(Path.Combine(repo, ".github")));
+        Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that the launch re-sync of a pin whose version no configured source offers says so, and
+    ///     extracts nothing.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoSourceOffersVersion_ReportsNoSourceOffers()
+    {
+        // Arrange: the only source has another version of the package
+        var (repo, pinBefore) = CreatePinnedRepo("v1");
+        Directory.Delete(Path.Combine(repo, ".github"), recursive: true);
+        var folder = CreateTempDirectory();
+        WriteZip(folder, "2.0.0", "v2");
+        var settings = new AppSettings { Sources = [ZipSource("Artifactory", folder)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+        var errors = new List<string>();
+        card.ErrorOccurred += (_, message) => errors.Add(message);
+
+        // Act
+        var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(result);
+        var message = Assert.Single(errors);
+        Assert.Contains("No configured source offers contoso-agents 1.0.0", message, StringComparison.Ordinal);
         Assert.Contains("Launching without syncing agent files", message, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(repo, ".github")));
         Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
     }
 
     /// <summary>
-    ///     Test that the launch re-sync of a pin that recorded no files identity never uses another source,
-    ///     even one with that package name and version: nothing is extracted.
+    ///     Test that the launch re-sync of a pin that recorded no files identity is never refused: it takes
+    ///     the source an older version named when that is configured, and otherwise the first source that
+    ///     offers the version.
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutFilesIdentity_NeverFallsBack()
+    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutFilesIdentity_UsesLegacyHintThenFirstOfferingSource()
     {
-        // Arrange: a schema 3 pin whose identity is the old kind (which counts as no recorded identity)
-        var repo = CreateTempDirectory();
-        await File.WriteAllTextAsync(
-            PinPath(repo),
-            $$"""{ "SchemaVersion": 3, "Source": "Contoso", "PackageName": "{{PackageId}}", "Version": "1.0.0", "ContentIdentity": "sha256:{{new string('a', 64)}}" }""",
-            TestContext.Current.CancellationToken);
-        var settings = new AppSettings { Sources = [ZipSource("Artifactory", CreateSourceFolder("v1"))] };
-        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
-        card.RefreshCheap();
-        var errors = new List<string>();
-        card.ErrorOccurred += (_, message) => errors.Add(message);
-
-        // Act
-        var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
-
-        // Assert
-        Assert.False(result);
-        Assert.Contains("no file fingerprint", Assert.Single(errors), StringComparison.Ordinal);
-        Assert.False(Directory.Exists(Path.Combine(repo, ".github")));
-    }
-
-    /// <summary>
-    ///     Test that the launch re-sync restores from another source when the pinned alias is configured
-    ///     but no longer offers the pinned version.
-    /// </summary>
-    [Fact]
-    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAliasLacksVersion_RestoresFromIdenticalSource()
-    {
-        // Arrange: "Contoso" is configured but only has 2.0.0 now; "Artifactory" has the pinned 1.0.0 files
-        var (repo, pinBefore) = CreatePinnedRepo("Contoso", "v1", out var contosoFolder);
-        Directory.Delete(Path.Combine(repo, ".github"), recursive: true);
-        File.Delete(Path.Combine(contosoFolder, $"{PackageId}-1.0.0.zip"));
-        WriteZip(contosoFolder, "2.0.0", "v2");
+        // Arrange: two repos with an older pin each (one names "Mirror2", one names an unconfigured source)
+        var hinted = CreateRepoWithLegacyPin("Mirror2");
+        var plain = CreateRepoWithLegacyPin("Contoso");
         var settings = new AppSettings
         {
-            Sources = [ZipSource("Contoso", contosoFolder), ZipSource("Artifactory", CreateSourceFolder("v1"))]
+            Sources = [ZipSource("Mirror1", CreateSourceFolder("first source")), ZipSource("Mirror2", CreateSourceFolder("v1"))]
         };
-        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
-        card.RefreshCheap();
+        var hintedCard = new RepoCardViewModel(new RecentRepo { Path = hinted }, () => settings, new PackageVersionCache());
+        var plainCard = new RepoCardViewModel(new RecentRepo { Path = plain }, () => settings, new PackageVersionCache());
+        hintedCard.RefreshCheap();
+        plainCard.RefreshCheap();
         var errors = new List<string>();
-        card.ErrorOccurred += (_, message) => errors.Add(message);
+        hintedCard.ErrorOccurred += (_, message) => errors.Add(message);
+        plainCard.ErrorOccurred += (_, message) => errors.Add(message);
 
         // Act
-        var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+        var hintedResult = await hintedCard.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+        var plainResult = await plainCard.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
 
-        // Assert
-        Assert.True(result);
+        // Assert: never refused; the hint picks Mirror2, otherwise the first source that offers it
+        Assert.True(hintedResult);
+        Assert.True(plainResult);
         Assert.Empty(errors);
-        Assert.Equal("v1", ReadMarker(repo));
-        Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
-    }
-
-    /// <summary>
-    ///     Test that a pinned source that is configured and offers the version but now delivers other files
-    ///     is refused as a republished package, even though another configured source has the original files:
-    ///     the fallback is for a pinned source that cannot supply the version, not for one that changed it.
-    /// </summary>
-    [Fact]
-    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedSourceRepublished_IsRefusedNotServedByAnotherSource()
-    {
-        // Arrange: "Contoso" republished 1.0.0 with other files; "Artifactory" still has the original files
-        var (repo, _) = CreatePinnedRepo("Contoso", "v1", out var contosoFolder);
-        Directory.Delete(Path.Combine(repo, ".github"), recursive: true);
-        File.Delete(Path.Combine(contosoFolder, $"{PackageId}-1.0.0.zip"));
-        WriteZip(contosoFolder, "1.0.0", "tampered");
-        var settings = new AppSettings
-        {
-            Sources = [ZipSource("Contoso", contosoFolder), ZipSource("Artifactory", CreateSourceFolder("v1"))]
-        };
-        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
-        card.RefreshCheap();
-        var errors = new List<string>();
-        card.ErrorOccurred += (_, message) => errors.Add(message);
-
-        // Act
-        var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
-
-        // Assert
-        Assert.False(result);
-        Assert.Contains("now contains different files", Assert.Single(errors), StringComparison.Ordinal);
-        Assert.False(Directory.Exists(Path.Combine(repo, ".github")));
+        Assert.Equal("v1", ReadMarker(hinted));
+        Assert.Equal("first source", ReadMarker(plain));
     }
 
     /// <summary>
@@ -500,7 +638,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
 
     /// <summary>
     ///     Test that a pin made from a NuGet folder source is served by a zip source of the same files, the
-    ///     two kinds delivering identical files in different containers.
+    ///     two kinds delivering identical files in different containers, and that the pin file names neither.
     /// </summary>
     [Fact]
     public async Task RepoCardViewModel_Refresh_PinMadeFromNuGetAndTeammateHasZipSource_IsSuppliedByZip()
@@ -521,7 +659,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
             registryFactory: current => PackageSourceRegistry.Create(current.GetEffectiveSources(), nugetRoot));
         await pinnedCard.ApplySelectedPackageAsync(
             new PackageReference("Feed", PackageId, "1.0.0"), TestContext.Current.CancellationToken);
-        Assert.Equal("Feed", RepoPinStore.Load(repo)?.Source);
+        Assert.DoesNotContain("Feed", await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken), StringComparison.Ordinal);
         var settings = new AppSettings { Sources = [ZipSource("Zips", CreateSourceFolder("v1"))] };
         var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
 
@@ -532,13 +670,12 @@ public sealed class RepoCardPortablePinTests : IDisposable
         // Assert
         Assert.False(card.HasSourceProblem);
         Assert.Equal("Zips", card.PinnedSourceLabel);
-        Assert.Equal("Feed", card.PinnedSource);
+        Assert.Equal("Zips", card.SupplyingSource);
     }
 
     /// <summary>
     ///     Test that a pin made from a zip source is restored at launch from a real Git source of the same
-    ///     files (the Git layout in a real local repository), and that the pin - which has no source revision
-    ///     for a zip - is not written.
+    ///     files (the Git layout in a real local repository), and that the pin is not written.
     /// </summary>
     [Fact]
     public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinMadeFromZipAndTeammateHasGitSource_RestoresFromGit()
@@ -550,7 +687,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
         fixture.Commit(files, "one");
         fixture.Tag("v1.0.0", annotated: true);
         fixture.Push();
-        var (repo, pinBefore) = CreatePinnedRepo("Contoso", "v1");
+        var (repo, pinBefore) = CreatePinnedRepo("v1");
         Directory.Delete(Path.Combine(repo, ".github"), recursive: true);
         var settings = new AppSettings { Sources = [fixture.CreateDefinition()] };
         var card = new RepoCardViewModel(
@@ -577,15 +714,15 @@ public sealed class RepoCardPortablePinTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that, for a pin whose alias is not configured, the upgrade check considers the configured
-    ///     sources that offer the package and the newest version wins, and that Upgrade applies it from the
-    ///     source that offers it and records that source's alias.
+    ///     Test that the upgrade check considers every configured source that offers the package, the newest
+    ///     version wins, and Upgrade applies it from the source that offers it, recording only the package,
+    ///     version and files identity in the pin (no source) and remembering the source on the card.
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_UpgradeCommand_PinnedAliasNotConfigured_UsesNewestVersionAcrossSourcesAndRecordsItsAlias()
+    public async Task RepoCardViewModel_UpgradeCommand_SeveralSources_UsesNewestVersionAcrossSourcesAndRecordsNoSource()
     {
         // Arrange: Mirror1 has the pinned files and 2.0.0, Mirror2 has the pinned files and 3.0.0
-        var (repo, _) = CreatePinnedRepo("Contoso", "v1");
+        var (repo, _) = CreatePinnedRepo("v1");
         var mirror1 = CreateSourceFolder("v1");
         WriteZip(mirror1, "2.0.0", "v2");
         var mirror2 = CreateSourceFolder("v1");
@@ -602,26 +739,55 @@ public sealed class RepoCardPortablePinTests : IDisposable
         // Act
         await card.UpgradeCommand.ExecuteAsync();
 
-        // Assert: applied from Mirror2, whose alias and the new files' identity the pin now records
+        // Assert: applied from Mirror2, whose files' identity the pin now records, and no source is written
         Assert.Empty(errors);
         var pin = RepoPinStore.Load(repo);
-        Assert.Equal("Mirror2", pin?.Source);
         Assert.Equal("3.0.0", pin?.Version);
         Assert.True(PackageContentIdentity.IsFilesIdentity(pin?.ContentIdentity));
+        Assert.DoesNotContain("source", await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken), StringComparison.OrdinalIgnoreCase);
         Assert.Equal("v3", ReadMarker(repo));
-        Assert.False(card.IsPinnedSourceSubstituted);
+        Assert.Equal("Mirror2", card.SupplyingSource);
         Assert.Equal("Mirror2", card.PinnedSourceLabel);
     }
 
     /// <summary>
-    ///     Test that when several configured sources offer the same newest version, the first of them in
-    ///     Settings order is the one Upgrade uses and records.
+    ///     Test that Upgrade, being user-initiated, lists the configured sources afresh: a version published
+    ///     after the last (cached) check is the one it applies, although the chip still showed the older one.
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_UpgradeCommand_PinnedAliasNotConfiguredAndTie_KeepsSettingsOrder()
+    public async Task RepoCardViewModel_UpgradeCommand_VersionPublishedAfterCachedCheck_AppliesTheNewVersion()
     {
-        // Arrange: both sources offer 2.0.0 (with different files), and the second also has the pinned files
-        var (repo, _) = CreatePinnedRepo("Contoso", "v1");
+        // Arrange: a source with the pinned files and 2.0.0, checked once (the listing is now cached)
+        var (repo, _) = CreatePinnedRepo("v1");
+        var folder = CreateSourceFolder("v1");
+        WriteZip(folder, "2.0.0", "v2");
+        var settings = new AppSettings { Sources = [ZipSource("Mirror", folder)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("2.0.0", card.LatestAvailableVersion);
+        WriteZip(folder, "3.0.0", "v3");
+        var errors = new List<string>();
+        card.ErrorOccurred += (_, message) => errors.Add(message);
+
+        // Act
+        await card.UpgradeCommand.ExecuteAsync();
+
+        // Assert: the newly published version was found and applied
+        Assert.Empty(errors);
+        Assert.Equal("3.0.0", RepoPinStore.Load(repo)?.Version);
+        Assert.Equal("v3", ReadMarker(repo));
+    }
+
+    /// <summary>
+    ///     Test that when several configured sources offer the same newest version, the first of them in
+    ///     Settings order is the one Upgrade uses.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_UpgradeCommand_SameNewestVersionInSeveralSources_KeepsSettingsOrder()
+    {
+        // Arrange: both sources offer 2.0.0 (with different files)
+        var (repo, _) = CreatePinnedRepo("v1");
         var mirror1 = CreateSourceFolder("v1");
         WriteZip(mirror1, "2.0.0", "v2 from mirror 1");
         var mirror2 = CreateSourceFolder("v1");
@@ -635,19 +801,48 @@ public sealed class RepoCardPortablePinTests : IDisposable
         await card.UpgradeCommand.ExecuteAsync();
 
         // Assert
-        Assert.Equal("Mirror1", RepoPinStore.Load(repo)?.Source);
         Assert.Equal("v2 from mirror 1", ReadMarker(repo));
+        Assert.Equal("Mirror1", card.SupplyingSource);
     }
 
     /// <summary>
-    ///     Test that Change package from another configured source records the alias of the source that was
-    ///     actually used, with the identity of its files (which are the same files as before).
+    ///     Test that Upgrade rescues a pin no configured source offers: the newer version a source does
+    ///     offer is applied and the problem is gone.
     /// </summary>
     [Fact]
-    public async Task RepoCardViewModel_ApplySelectedPackage_FromOtherSourceWithSameFiles_RecordsThatSourceAndSameIdentity()
+    public async Task RepoCardViewModel_UpgradeCommand_FromSourceProblem_AppliesNewerVersionAndClearsProblem()
     {
-        // Arrange: a repo pinned from "Contoso", and a teammate who selects the same version from "Artifactory"
-        var (repo, _) = CreatePinnedRepo("Contoso", "v1");
+        // Arrange: the teammate's source only has 2.0.0
+        var (repo, _) = CreatePinnedRepo("v1");
+        var folder = CreateTempDirectory();
+        WriteZip(folder, "2.0.0", "v2");
+        var settings = new AppSettings { Sources = [ZipSource("Artifactory", folder)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.HasSourceProblem);
+
+        // Act
+        await card.UpgradeCommand.ExecuteAsync();
+
+        // Assert
+        Assert.False(card.HasSourceProblem);
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Equal("2.0.0", RepoPinStore.Load(repo)?.Version);
+        Assert.Equal("Artifactory", card.SupplyingSource);
+        Assert.Equal(RepoCardStatus.UpToDate, card.Status);
+    }
+
+    /// <summary>
+    ///     Test that Change package from a configured source with another alias but the same files asks for
+    ///     no confirmation (nothing changed), keeps the files identity, writes no source into the pin and
+    ///     remembers the source used on the card.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackage_FromOtherSourceWithSameFiles_KeepsIdentityAndRecordsNoSource()
+    {
+        // Arrange: a repo made from "Contoso", and a teammate who selects the same version from "Artifactory"
+        var (repo, _) = CreatePinnedRepo("v1");
         var identityBefore = RepoPinStore.Load(repo)?.ContentIdentity;
         var settings = new AppSettings { Sources = [ZipSource("Artifactory", CreateSourceFolder("v1", repack: true))] };
         var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
@@ -660,13 +855,39 @@ public sealed class RepoCardPortablePinTests : IDisposable
         await card.ApplySelectedPackageAsync(
             new PackageReference("Artifactory", PackageId, "1.0.0"), TestContext.Current.CancellationToken);
 
-        // Assert: no confirmation (nothing changed), the alias is the one used, the identity is unchanged
+        // Assert: no confirmation (nothing changed), the identity is unchanged, no source is in the file
         Assert.Empty(events);
-        var pin = RepoPinStore.Load(repo);
-        Assert.Equal("Artifactory", pin?.Source);
-        Assert.Equal(identityBefore, pin?.ContentIdentity);
-        Assert.False(card.IsPinnedSourceSubstituted);
+        Assert.Equal(identityBefore, RepoPinStore.Load(repo)?.ContentIdentity);
+        Assert.DoesNotContain("source", await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Artifactory", card.SupplyingSource);
         Assert.Equal("Artifactory", card.PinnedSourceLabel);
+    }
+
+    /// <summary>
+    ///     Test that Change package of the same version from a source that republished it with other files
+    ///     asks for confirmation instead of replacing the files - whichever source the repo was set up from -
+    ///     and changes nothing while the question is open.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackage_SameVersionFromRepublishedSource_AsksForConfirmation()
+    {
+        // Arrange: a repo made from "Contoso", and a teammate whose "Artifactory" delivers other files for 1.0.0
+        var (repo, pinBefore) = CreatePinnedRepo("v1");
+        var settings = new AppSettings { Sources = [ZipSource("Artifactory", CreateSourceFolder("republished"))] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+        var requests = new List<ContentChangeConfirmationRequest>();
+        card.ContentChangeConfirmationRequested += (_, request) => requests.Add(request);
+
+        // Act
+        await card.ApplySelectedPackageAsync(
+            new PackageReference("Artifactory", PackageId, "1.0.0"), TestContext.Current.CancellationToken);
+
+        // Assert: the user is asked, and the repo and its pin are untouched
+        var asked = Assert.Single(requests);
+        Assert.Contains("now contains different files", asked.Message, StringComparison.Ordinal);
+        Assert.Equal("v1", ReadMarker(repo));
+        Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
     }
 
     /// <inheritdoc />
@@ -743,31 +964,35 @@ public sealed class RepoCardPortablePinTests : IDisposable
     }
 
     /// <summary>
-    ///     Creates a repo that was really applied from version 1.0.0 of a zip source with the given alias,
-    ///     so its pin is exactly what the application writes.
+    ///     Creates a repo that was really applied from version 1.0.0 of a zip source (aliased "Contoso"
+    ///     on the machine that made it), so its pin is exactly what the application writes.
     /// </summary>
-    /// <param name="alias">The alias of the source the repo is pinned to.</param>
     /// <param name="marker">The text of the agents file.</param>
     /// <returns>The repo folder and the text of its pin file.</returns>
-    private (string Repo, string PinJson) CreatePinnedRepo(string alias, string marker) =>
-        CreatePinnedRepo(alias, marker, out _);
-
-    /// <summary>
-    ///     Creates a repo that was really applied from version 1.0.0 of a zip source with the given alias.
-    /// </summary>
-    /// <param name="alias">The alias of the source the repo is pinned to.</param>
-    /// <param name="marker">The text of the agents file.</param>
-    /// <param name="sourceFolder">Receives the folder of the source the repo was pinned from.</param>
-    /// <returns>The repo folder and the text of its pin file.</returns>
-    private (string Repo, string PinJson) CreatePinnedRepo(string alias, string marker, out string sourceFolder)
+    private (string Repo, string PinJson) CreatePinnedRepo(string marker)
     {
         var repo = CreateTempDirectory();
-        sourceFolder = CreateSourceFolder(marker);
-        var settings = new AppSettings { Sources = [ZipSource(alias, sourceFolder)] };
+        var settings = new AppSettings { Sources = [ZipSource("Contoso", CreateSourceFolder(marker))] };
         var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache());
-        card.ApplySelectedPackage(PackageId, "1.0.0", alias);
-        Assert.Equal(alias, RepoPinStore.Load(repo)?.Source);
-        return (repo, File.ReadAllText(PinPath(repo)));
+        card.ApplySelectedPackage(PackageId, "1.0.0", "Contoso");
+        var pinJson = File.ReadAllText(PinPath(repo));
+        Assert.DoesNotContain("source", pinJson, StringComparison.OrdinalIgnoreCase);
+        Assert.True(PackageContentIdentity.IsFilesIdentity(RepoPinStore.Load(repo)?.ContentIdentity));
+        return (repo, pinJson);
+    }
+
+    /// <summary>
+    ///     Creates a repo with an older pin (schema 2) that names a source and recorded no files identity.
+    /// </summary>
+    /// <param name="legacySource">The source alias the older pin names.</param>
+    /// <returns>The repo folder.</returns>
+    private string CreateRepoWithLegacyPin(string legacySource)
+    {
+        var repo = CreateTempDirectory();
+        File.WriteAllText(
+            PinPath(repo),
+            $$"""{ "SchemaVersion": 2, "Source": "{{legacySource}}", "PackageName": "{{PackageId}}", "Version": "1.0.0" }""");
+        return repo;
     }
 
     /// <summary>

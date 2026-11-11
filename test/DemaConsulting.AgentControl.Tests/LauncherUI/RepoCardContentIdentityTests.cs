@@ -43,8 +43,8 @@ public sealed class RepoCardContentIdentityTests : IDisposable
     private readonly List<string> _tempPaths = [];
 
     /// <summary>
-    ///     Test that applying a package records the identity of its files in the pin, and no source
-    ///     revision for a zip.
+    ///     Test that applying a package records the identity of its files in the pin, and neither a source
+    ///     nor a source revision.
     /// </summary>
     [Fact]
     public void RepoCardViewModel_ApplySelectedPackage_FirstApply_RecordsFilesIdentityInPin()
@@ -56,10 +56,10 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         // Act
         card.ApplySelectedPackage("contoso-agents", "1.0.0");
 
-        // Assert: the pin names the identity of the four agent files, and the zip has no source revision
+        // Assert: the pin names the identity of the four agent files and no source
         var pin = RepoPinStore.Load(repo);
         Assert.Equal(FilesIdentity("v1"), pin?.ContentIdentity);
-        Assert.Null(pin?.SourceRevision);
+        Assert.DoesNotContain("source", File.ReadAllText(PinPath(repo)), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -201,11 +201,12 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         await card.ApplySelectedPackageAsync(
             new PackageReference("Identical", "contoso-agents", "1.0.0"), TestContext.Current.CancellationToken);
 
-        // Assert: no further question, and the pin now names that source with the same identity
+        // Assert: no further question, and the pin keeps the identity of the (identical) files; the card
+        // now remembers that source
         Assert.Single(requests);
         var pin = RepoPinStore.Load(repo);
-        Assert.Equal("Identical", pin?.Source);
         Assert.Equal(FilesIdentity("v1"), pin?.ContentIdentity);
+        Assert.Equal("Identical", card.SupplyingSource);
     }
 
     /// <summary>
@@ -267,7 +268,7 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         // Arrange: a v2-style pin (no identity) for 1.0.0, and the zip as it is now
         var (repo, sourceDir, card) = CreateRepoWithSource();
         CreateZip(sourceDir, "1.0.0", "v1");
-        RepoPinStore.Save(repo, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
         var events = new List<string>();
         card.ErrorOccurred += (_, message) => events.Add("error: " + message);
         card.ContentChangeConfirmationRequested += (_, _) => events.Add("confirmation");
@@ -288,11 +289,11 @@ public sealed class RepoCardContentIdentityTests : IDisposable
     [Fact]
     public async Task RepoCardViewModel_UpgradeCommand_NewerVersion_RecordsNewIdentityWithoutWarning()
     {
-        // Arrange: applied from 1.0.0, and a 2.0.0 zip appears
+        // Arrange: a source with 1.0.0 and 2.0.0, and a repo that the user applied 1.0.0 to
         var (repo, sourceDir, card) = CreateRepoWithSource();
         CreateZip(sourceDir, "1.0.0", "v1");
-        card.ApplySelectedPackage("contoso-agents", "1.0.0");
         CreateZip(sourceDir, "2.0.0", "v2");
+        card.ApplySelectedPackage("contoso-agents", "1.0.0");
         var events = new List<string>();
         card.ErrorOccurred += (_, message) => events.Add("error: " + message);
         card.ContentChangeConfirmationRequested += (_, _) => events.Add("confirmation");
@@ -424,7 +425,6 @@ public sealed class RepoCardContentIdentityTests : IDisposable
             repo,
             new RepoPin
             {
-                Source = "Default",
                 PackageName = "contoso-agents",
                 Version = "1.0.0",
                 ContentIdentity = "files-sha256:" + new string('a', 64)

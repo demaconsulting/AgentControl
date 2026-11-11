@@ -327,13 +327,14 @@ public sealed class MainWindowTests : IDisposable
         Assert.IsType<App>(Avalonia.Application.Current));
 
     /// <summary>
-    ///     Test that "Change package..." on a pinned repo opens the Select Package dialog on the pin's
-    ///     own source, package and version, so the current choice is selected without a click.
+    ///     Test that "Change package..." on a pinned repo opens the Select Package dialog on the source
+    ///     that currently supplies the pin's package (the card's remembered supplier - the pin names no
+    ///     source) and on the pin's own package and version, so the current choice is selected without a click.
     /// </summary>
     [Fact]
     public void MainWindow_ChangePackageOnPinnedRepo_OpensSelectPackageOnThePinnedChoice() => HeadlessTestApp.RunAsync(async () =>
     {
-        // Arrange: a source with two versions and a repo pinned to the older one
+        // Arrange: a second source with two versions and a repo pinned to the older one, supplied by it
         var sourceDir = CreateTempDirectory();
         foreach (var version in new[] { "1.0.0", "1.1.0" })
         {
@@ -344,11 +345,21 @@ public sealed class MainWindowTests : IDisposable
         }
 
         var repo = CreateTempDirectory();
-        RepoPinStore.Save(repo, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
         var settings = new AppSettings
         {
-            Sources = [PackageSourceDefinition.CreateDefaultZip(sourceDir)],
-            RecentRepos = [new RecentRepo { Path = repo }]
+            Sources =
+            [
+                PackageSourceDefinition.CreateDefaultZip(CreateTempDirectory()),
+                new PackageSourceDefinition { Alias = "Second", Type = PackageSourceType.Zip, Location = sourceDir }
+            ],
+            RecentRepos =
+            [
+                new RecentRepo
+                {
+                    Path = repo, PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0", PinnedSource = "Second"
+                }
+            ]
         };
         var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
         var window = new MainWindow { DataContext = viewModel };
@@ -369,7 +380,7 @@ public sealed class MainWindowTests : IDisposable
             }
 
             // Assert: the pin's choice is selected, although a newer version exists
-            Assert.Equal("Default", dialogModel.SelectedSource?.Alias);
+            Assert.Equal("Second", dialogModel.SelectedSource?.Alias);
             Assert.Equal("contoso-agents", dialogModel.SelectedPackageName);
             Assert.Equal("1.0.0", dialogModel.SelectedVersion);
             dialog.Close();

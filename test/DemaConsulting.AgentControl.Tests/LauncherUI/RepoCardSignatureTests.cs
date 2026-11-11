@@ -25,6 +25,7 @@ using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.Settings;
 using DemaConsulting.AgentControl.Startup;
+using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
@@ -41,12 +42,12 @@ public sealed class RepoCardSignatureTests : IDisposable
     private readonly List<string> _tempPaths = [];
 
     /// <summary>
-    ///     Test that a card pinned to a NuGet source that requires signatures shows the shield, and
-    ///     that its tooltip says whether a signer is pinned (naming the start and end of the
+    ///     Test that a card whose package is supplied by a NuGet source that requires signatures shows the
+    ///     shield, and that its tooltip says whether a signer is pinned (naming the start and end of the
     ///     fingerprint only) or any trusted signer is accepted.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip()
+    public void RepoCardViewModel_SupplyingSourceRequiresSignatures_ShowsShieldWithTooltip()
     {
         // Arrange
         var anySigner = new PackageSourceDefinition
@@ -78,7 +79,7 @@ public sealed class RepoCardSignatureTests : IDisposable
 
     /// <summary>
     ///     Test that no shield is shown for a source without the requirement, for a zip source (a zip
-    ///     has no signature), or when the pinned source is not configured.
+    ///     has no signature), or when the source that supplied the package is no longer configured.
     /// </summary>
     [Fact]
     public void RepoCardViewModel_NoSignatureRequirement_ShowsNoShield()
@@ -130,19 +131,23 @@ public sealed class RepoCardSignatureTests : IDisposable
     [Fact]
     public void MainWindow_PackageChip_ShowsShieldOnlyWhenSignaturesAreRequired() => HeadlessTestApp.Run(() =>
     {
-        // Arrange: two repos pinned to two sources, one requiring signatures
+        // Arrange: two repos supplied by two sources (each offering the package), one requiring signatures
+        var signedFeed = CreateTempDirectory();
+        var openFeed = CreateTempDirectory();
+        NuGetFeedBuilder.CreateAgentPackage(signedFeed, "contoso-agents", "1.0.0");
+        NuGetFeedBuilder.CreateAgentPackage(openFeed, "contoso-agents", "1.0.0");
         var required = new PackageSourceDefinition
         {
             Alias = "Signed",
             Type = PackageSourceType.NuGet,
-            Location = Path.GetTempPath(),
+            Location = signedFeed,
             RequireSignedPackages = true,
             SignerFingerprint = "A3AF7AF11EBB8EF729D2D91548509717E7E0FF55A129ABC3AEAA8A6940267641"
         };
-        var lenient = new PackageSourceDefinition { Alias = "Open", Type = PackageSourceType.NuGet, Location = Path.GetTempPath() };
+        var lenient = new PackageSourceDefinition { Alias = "Open", Type = PackageSourceType.NuGet, Location = openFeed };
         var settings = new AppSettings { Sources = [required, lenient] };
-        var signedRepo = CreateRepoWithPin("Signed");
-        var openRepo = CreateRepoWithPin("Open");
+        var signedRepo = CreateRepoWithPin();
+        var openRepo = CreateRepoWithPin();
         settings.RecentRepos =
         [
             new RecentRepo { Path = signedRepo, PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0", PinnedSource = "Signed" },
@@ -167,35 +172,35 @@ public sealed class RepoCardSignatureTests : IDisposable
     });
 
     /// <summary>
-    ///     Creates a card pinned to a source alias, over a settings object with the given source (the
-    ///     source is configured only when its alias matches the pin).
+    ///     Creates a card supplied by a source alias (remembered in the user's own settings, not in the pin),
+    ///     over a settings object with the given source (the source is configured only when its alias
+    ///     matches the supplier).
     /// </summary>
-    /// <param name="pinnedAlias">The alias the repo is pinned to.</param>
+    /// <param name="supplyingAlias">The alias of the source that supplies the package.</param>
     /// <param name="source">The configured source.</param>
     /// <returns>The card.</returns>
-    private RepoCardViewModel CreateCard(string pinnedAlias, PackageSourceDefinition source)
+    private RepoCardViewModel CreateCard(string supplyingAlias, PackageSourceDefinition source)
     {
         var settings = new AppSettings { Sources = [source] };
         var recentRepo = new RecentRepo
         {
-            Path = CreateRepoWithPin(pinnedAlias),
+            Path = CreateRepoWithPin(),
             PinnedPackageName = "contoso-agents",
             PinnedPackageVersion = "1.0.0",
-            PinnedSource = pinnedAlias
+            PinnedSource = supplyingAlias
         };
         var startupOptions = StartupOptions.Parse(["--config-dir", CreateTempDirectory()]);
         return new RepoCardViewModel(recentRepo, () => settings, new PackageVersionCache(), startupOptions);
     }
 
     /// <summary>
-    ///     Creates a repo folder whose pin file names a source.
+    ///     Creates a repo folder whose pin file names a package and version (and no source).
     /// </summary>
-    /// <param name="alias">The source alias.</param>
     /// <returns>The repo folder.</returns>
-    private string CreateRepoWithPin(string alias)
+    private string CreateRepoWithPin()
     {
         var repo = CreateTempDirectory();
-        RepoPinStore.Save(repo, new RepoPin { Source = alias, PackageName = "contoso-agents", Version = "1.0.0" });
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
         return repo;
     }
 

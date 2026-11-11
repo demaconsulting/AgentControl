@@ -48,8 +48,7 @@ account may not create them).
 - The content identity a reader reports is the identity of the agent files it delivers - the same for the same files
   whether they are read from a zip (in any compression, order or timestamps), an unpacked package folder or a layout
   folder, different for other files, and for a zip that of exactly the files read and applied (the zip is hashed and
-  read through one handle, which Windows also protects from replacement while it is held); the source revision is the
-  one the opener supplied, or none.
+  read through one handle, which Windows also protects from replacement while it is held).
 - A folder whose root is the package layout is read and applied as a package: only the four managed folders and the two
   root files are seen and written, never the folder's metadata or other content; a link in the layout is refused before
   the repo is touched and a link outside it is ignored.
@@ -156,8 +155,7 @@ described in the `PackageContentExtractor` unit verification design).
 and real zips, the same agent files read from a compressed zip, a stored zip with another entry order, other timestamps
 and extra files (release notes, an `AGENTS.md` template), an unpacked package folder (with its own release notes and
 package metadata) and a layout-root folder (with a README that is not part of the package) all report the identity the
-test computes independently from the files; one changed byte reports another identity; the layout-root reader reports
-the source revision its opener supplied and the others report none. This scenario is tested by
+test computes independently from the files; one changed byte reports another identity. This scenario is tested by
 `RepoSync_ContentIdentity_SameFilesFromEveryKindOfReader_ReportTheSameIdentity` in `RepoSyncSubsystemTests.cs`, covering
 `AgentControl-RepoSync-ContentIdentity` (children: `AgentControl-PackageContentExtractor-FolderReaderIdentity` and
 `AgentControl-PackageContentExtractor-ManagedPackagePath`).
@@ -178,13 +176,13 @@ recorded is always what was applied. This scenario is tested by
 `ZipPackageContentReader_Open_NotAZip_ReleasesFileHandle`).
 
 **RepoSync_LayoutRoot_OnlyTheLayoutIsSeenReadAndApplied**: A folder shaped like a repository - the layout plus `.git`,
-`.github/workflows`, a README and source files - is opened with `OpenLayoutRoot` with a source revision: only the four
+`.github/workflows`, a README and source files - is opened with `OpenLayoutRoot`: only the four
 managed folders and the two root files are listed, a path outside the layout (the README, `.git/config`, a file of
-`.github/workflows`) is refused, the revision supplied by the opener is reported, release notes and the `AGENTS.md`
+`.github/workflows`) is refused, release notes and the `AGENTS.md`
 template are read, and applying the folder with the extractor writes only the four managed folders into the repo - no
 workflows folder, no README, no `.git`. This scenario is tested by
 `RepoSync_LayoutRoot_OnlyTheLayoutIsSeenReadAndApplied`,
-covering `AgentControl-RepoSync-LayoutRoot` (children: `ReadLayoutRoot`, `LayoutRootIdentity` and
+covering `AgentControl-RepoSync-LayoutRoot` (children: `ReadLayoutRoot` and
 `RefuseMissingOrLinkedLayoutRoot`) and `AgentControl-RepoSync-LayoutRootOnlyLayout`
 (children: `RefuseOutsideLayoutPaths`
 and `ExcludeGitFolder`; each child prefixed `AgentControl-PackageContentExtractor-`). The unit tests of the missing or

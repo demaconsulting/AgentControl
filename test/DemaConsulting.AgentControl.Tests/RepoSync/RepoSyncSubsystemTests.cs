@@ -135,26 +135,21 @@ public sealed class RepoSyncSubsystemTests : IDisposable
         var changed = CreateTempDirectory();
         WriteFile(changed, ".github/agents/copilot.md", "agents changed");
         WriteFile(changed, ".github/standards/style.md", "standards");
-        var commit = "git-commit:" + new string('e', 40);
 
         // Act
         using var compressed = ZipPackageContentReader.Open(compressedZip);
         using var stored = ZipPackageContentReader.Open(storedZip);
         using var folderReader = DirectoryPackageContentReader.Open(unpacked);
-        using var layoutReader = DirectoryPackageContentReader.OpenLayoutRoot(layout, commit);
+        using var layoutReader = DirectoryPackageContentReader.OpenLayoutRoot(layout);
         using var changedReader = DirectoryPackageContentReader.OpenLayoutRoot(changed);
 
-        // Assert: one identity for the same files, another for changed files; the revision is only the layout's
+        // Assert: one identity for the same files, another for changed files
         Assert.Multiple(
             () => Assert.Equal(expected, compressed.ContentIdentity),
             () => Assert.Equal(expected, stored.ContentIdentity),
             () => Assert.Equal(expected, folderReader.ContentIdentity),
             () => Assert.Equal(expected, layoutReader.ContentIdentity),
-            () => Assert.NotEqual(expected, changedReader.ContentIdentity),
-            () => Assert.Equal(commit, layoutReader.SourceRevision),
-            () => Assert.Null(folderReader.SourceRevision),
-            () => Assert.Null(compressed.SourceRevision),
-            () => Assert.Null(changedReader.SourceRevision));
+            () => Assert.NotEqual(expected, changedReader.ContentIdentity));
     }
 
     /// <summary>
@@ -162,8 +157,7 @@ public sealed class RepoSyncSubsystemTests : IDisposable
     ///     content next to it - is read and applied as a package: only the four managed folders and the
     ///     two root files are listed and readable, a path outside the layout is refused, applying it
     ///     writes only the managed folders, the release notes and the template are readable, and the
-    ///     identity of the folder's content is the one of its managed files and the commit supplied by
-    ///     its opener is carried along as the source revision.
+    ///     identity of the folder's content is the one of its managed files.
     /// </summary>
     [Fact]
     public void RepoSync_LayoutRoot_OnlyTheLayoutIsSeenReadAndApplied()
@@ -180,15 +174,14 @@ public sealed class RepoSyncSubsystemTests : IDisposable
         WriteFile(root, "README.md", "not part of the package");
         WriteFile(root, "src/app.txt", "not part of the package");
         WriteFile(root, ".git/config", "repository metadata");
-        var revision = "git-commit:" + new string('1', 40);
         var repo = CreateTempDirectory();
 
         // Act
-        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root, revision);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(root);
         var listed = reader.ListFiles().Order(StringComparer.Ordinal).ToList();
         PackageContentExtractor.Extract(reader, repo);
 
-        // Assert: only the layout is seen, outside paths are refused, and the revision is carried
+        // Assert: only the layout is seen and outside paths are refused
         Assert.Multiple(
             () => Assert.Equal(
                 new[]
@@ -200,7 +193,6 @@ public sealed class RepoSyncSubsystemTests : IDisposable
             () => Assert.Throws<InvalidOperationException>(() => reader.OpenRead("README.md")),
             () => Assert.Throws<InvalidOperationException>(() => reader.OpenRead(".git/config")),
             () => Assert.Throws<InvalidOperationException>(() => reader.OpenRead(".github/workflows/ci.yml")),
-            () => Assert.Equal(revision, reader.SourceRevision),
             () => Assert.Equal(
                 FilesIdentity(
                     (".github/agents/copilot.md", "agents"), (".github/skills/s.md", "skills"),

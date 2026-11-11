@@ -87,8 +87,7 @@ internal interface IPackageSourceProvider
     ///     from the delivered files themselves (see <see cref="PackageContentIdentity"/>), so the
     ///     same files from a zip folder, a NuGet source or a Git source have the same identity. The
     ///     caller can pin it and later compare it with <see cref="PackageContentIdentity.Compare"/>.
-    ///     A Git source also reports the commit a tag pointed to as
-    ///     <see cref="IPackageContentReader.SourceRevision"/>. A provider that cannot name an
+    ///     A provider that cannot name an
     ///     identity leaves it <see langword="null"/>.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="package"/> was discovered
     ///     at a different source (a package is never fetched from a source it did not come

@@ -223,11 +223,12 @@ public sealed class PackageSourcesTests
 
     /// <summary>
     ///     A package can be selected from the NuGet-package folder source in the Select Package
-    ///     window (the source is chosen first); the repo is pinned to that source, its files come
-    ///     from the NuGet package, and the card's package chip shows the package name and version.
+    ///     window (the source is chosen first); the repo is pinned to that package (the pin names no
+    ///     source), its files come from the NuGet package, and the card's package chip shows the package
+    ///     name and version.
     /// </summary>
     [Fact]
-    public void SelectPackage_FromNuGetFolderSource_PinsThatSourceAndCardShowsPackageChip()
+    public void SelectPackage_FromNuGetFolderSource_PinsThePackageAndCardShowsPackageChip()
     {
         if (!System.OperatingSystem.IsWindows())
         {
@@ -294,10 +295,10 @@ public sealed class PackageSourcesTests
             Assert.NotNull(context.WaitForWindow(
                 title => title.StartsWith("Release Notes", StringComparison.Ordinal), TimeSpan.FromSeconds(30)));
 
-            // Assert: the files came from the NuGet package and the pin names the NuGet source
+            // Assert: the files came from the NuGet package and the pin names no source
             Assert.Equal("from feed", File.ReadAllText(Path.Combine(context.RepoPath, ".github", "agents", "feed.md")));
             var pinJson = File.ReadAllText(Path.Combine(context.RepoPath, ".agentcontrol.json"));
-            Assert.Contains("\"Source\": \"Feed\"", pinJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("Source", pinJson, StringComparison.OrdinalIgnoreCase);
 
             // Assert: the card's package chip shows the package name and version, and the "no
             // package" chip is gone

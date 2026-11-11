@@ -195,8 +195,7 @@ public sealed class PackageSourceErrorRedactionTests : IDisposable
                 };
                 var registry = new PackageSourceRegistry([Source("Default")], _ => provider);
                 var repoRoot = CreateTempDirectory();
-                RepoPinStore.Save(
-                    repoRoot, new RepoPin { Source = "Default", PackageName = "contoso-agents", Version = "1.0.0" });
+                RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
                 var card = new RepoCardViewModel(
                     new RecentRepo
                     {

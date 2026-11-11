@@ -31,11 +31,10 @@ namespace DemaConsulting.AgentControl.Tests.RepoConfig;
 public class RepoConfigSubsystemTests
 {
     /// <summary>
-    ///     Test that the content identity of the applied package (computed from its files) and the source
-    ///     revision survive from one session to the next and are never invented: both round-trip, a pin that
-    ///     has none writes none, a pin written before identities existed loads with none, a schema 3 pin's
-    ///     identity of a container is dropped and its Git commit becomes the source revision, and each such
-    ///     pin adopts the identity of the next package applied.
+    ///     Test that the content identity of the applied package (computed from its files) survives from one
+    ///     session to the next and is never invented: it round-trips, a pin that has none writes none, a pin
+    ///     written before identities existed loads with none, a schema 3 pin's identity of a container or of a
+    ///     Git commit is dropped, and each such pin adopts the identity of the next package applied.
     /// </summary>
     [Fact]
     public void RepoConfig_ContentIdentityPin_SurvivesSessionsMigratesOlderPinsAndIsAdoptedOnTheNextApply()
@@ -65,26 +64,18 @@ public class RepoConfigSubsystemTests
             // Act: one session saves the pins, a later session loads them
             RepoPinStore.Save(
                 filesRepo,
-                new RepoPin
-                {
-                    Source = "Repo",
-                    PackageName = "p",
-                    Version = "1.0.0",
-                    ContentIdentity = filesIdentity,
-                    SourceRevision = gitCommit
-                });
-            RepoPinStore.Save(noneRepo, new RepoPin { Source = "Feed", PackageName = "p", Version = "1.0.0" });
+                new RepoPin { PackageName = "p", Version = "1.0.0", ContentIdentity = filesIdentity });
+            RepoPinStore.Save(noneRepo, new RepoPin { PackageName = "p", Version = "1.0.0" });
             var filesPin = RepoPinStore.Load(filesRepo);
             var nonePin = RepoPinStore.Load(noneRepo);
             var oldPin = RepoPinStore.Load(oldRepo);
             var containerPin = RepoPinStore.Load(containerRepo);
             var gitV3Pin = RepoPinStore.Load(gitV3Repo);
 
-            // Assert: the recorded values came back, nothing was invented, and older identities are not
+            // Assert: the recorded value came back, nothing was invented, and older identities are not
             // carried over as files identities
             Assert.Multiple(
                 () => Assert.Equal(filesIdentity, filesPin?.ContentIdentity),
-                () => Assert.Equal(gitCommit, filesPin?.SourceRevision),
                 () => Assert.Null(nonePin?.ContentIdentity),
                 () => Assert.DoesNotContain(
                     "ContentIdentity",
@@ -92,9 +83,7 @@ public class RepoConfigSubsystemTests
                     StringComparison.OrdinalIgnoreCase),
                 () => Assert.Null(oldPin?.ContentIdentity),
                 () => Assert.Null(containerPin?.ContentIdentity),
-                () => Assert.Null(containerPin?.SourceRevision),
-                () => Assert.Null(gitV3Pin?.ContentIdentity),
-                () => Assert.Equal(gitCommit, gitV3Pin?.SourceRevision));
+                () => Assert.Null(gitV3Pin?.ContentIdentity));
 
             // Act: the next package applied to each older pin's repo records its identity
             oldPin!.ContentIdentity = adopted;
@@ -108,7 +97,6 @@ public class RepoConfigSubsystemTests
             Assert.Multiple(
                 () => Assert.Equal(adopted, adoptedPin?.ContentIdentity),
                 () => Assert.Contains($"\"SchemaVersion\": {RepoPin.CurrentSchemaVersion}", rewritten, StringComparison.Ordinal),
-                () => Assert.Equal("Feed", adoptedPin?.Source),
                 () => Assert.Equal("1.0.0", adoptedPin?.Version),
                 () => Assert.True(adoptedPin?.AgentsMdTemplateDeclined),
                 () => Assert.Equal(adopted, RepoPinStore.Load(containerRepo)?.ContentIdentity));
@@ -144,7 +132,7 @@ public class RepoConfigSubsystemTests
             var saveFailure = Assert.Throws<UnsupportedPinSchemaException>(
                 () => RepoPinStore.Save(
                     repoRoot,
-                    new RepoPin { Source = "Feed", PackageName = "p", Version = "2.0.0", ContentIdentity = "files-sha256:" + new string('d', 64) }));
+                    new RepoPin { PackageName = "p", Version = "2.0.0", ContentIdentity = "files-sha256:" + new string('d', 64) }));
 
             // Assert: the refusals name the versions and say to update, and the file is untouched
             Assert.Multiple(
@@ -157,7 +145,7 @@ public class RepoConfigSubsystemTests
 
             // Act: a pin of the schema this version writes replaces it (the user's deliberate action)
             File.Delete(path);
-            RepoPinStore.Save(repoRoot, new RepoPin { Source = "Feed", PackageName = "p", Version = "2.0.0" });
+            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "p", Version = "2.0.0" });
 
             // Assert: it is read normally
             Assert.Equal("2.0.0", RepoPinStore.Load(repoRoot)?.Version);
@@ -165,6 +153,46 @@ public class RepoConfigSubsystemTests
         finally
         {
             Directory.Delete(repoRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a pin names no package source: a pin file an earlier version wrote with a source (and
+    ///     a Git revision) is read with the source as a hint only, and whatever the application saves - over
+    ///     that file or fresh - carries neither, so one user's source settings never reach the shared file.
+    /// </summary>
+    [Fact]
+    public void RepoConfig_PinNamesNoSource_ReadsLegacySourceAsAHintAndNeverWritesIt()
+    {
+        // Arrange: a repo whose pin an earlier build wrote with a source and a source revision, and a new repo
+        var legacyRepo = CreateTempDirectory();
+        var freshRepo = CreateTempDirectory();
+        try
+        {
+            var legacyPath = Path.Combine(legacyRepo, ".agentcontrol.json");
+            File.WriteAllText(
+                legacyPath,
+                $$"""{ "SchemaVersion": 4, "Source": "Feed", "PackageName": "p", "Version": "1.0.0", "ContentIdentity": "files-sha256:{{new string('a', 64)}}", "SourceRevision": "git-commit:{{new string('b', 40)}}" }""");
+
+            // Act: load the legacy pin and save it back, and save a brand-new pin elsewhere
+            var legacyPin = RepoPinStore.Load(legacyRepo);
+            RepoPinStore.Save(legacyRepo, legacyPin!);
+            RepoPinStore.Save(freshRepo, new RepoPin { PackageName = "p", Version = "2.0.0" });
+            var legacyJson = File.ReadAllText(legacyPath);
+            var freshJson = File.ReadAllText(Path.Combine(freshRepo, ".agentcontrol.json"));
+
+            // Assert: the source was a hint, and neither file has a source or a revision
+            Assert.Multiple(
+                () => Assert.Equal("Feed", legacyPin?.LegacySource),
+                () => Assert.DoesNotContain("source", legacyJson, StringComparison.OrdinalIgnoreCase),
+                () => Assert.DoesNotContain("source", freshJson, StringComparison.OrdinalIgnoreCase),
+                () => Assert.Contains("\"ContentIdentity\"", legacyJson, StringComparison.Ordinal),
+                () => Assert.Null(RepoPinStore.Load(freshRepo)?.LegacySource));
+        }
+        finally
+        {
+            Directory.Delete(legacyRepo, recursive: true);
+            Directory.Delete(freshRepo, recursive: true);
         }
     }
 

@@ -78,8 +78,8 @@ sections:
           The ZipFolderSourceProvider class shall refuse to supply the content of a package that
           was discovered at a different source.
         justification: |
-          Content must only ever come from the source whose alias the pin names; a package object
-          that names another source must not be honored.
+          Content must only ever come from the source the caller resolved; a package object that
+          names another source must not be honored.
         tests:
           - ZipFolderSourceProvider_Acquire_PackageFromOtherSource_ThrowsArgumentException
 

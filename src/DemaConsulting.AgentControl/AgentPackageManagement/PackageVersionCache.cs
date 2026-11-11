@@ -31,11 +31,7 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 ///     including when no version was found.</param>
 /// <param name="Latest">The highest-versioned discovered package whether or not it is newer than
 ///     the pin, or <see langword="null"/> if none was found.</param>
-/// <param name="Pinned">The discovered package whose version is the pinned version, from the same
-///     listing, or <see langword="null"/> when the source no longer lists it (or the pin does not
-///     parse). Lets a caller compare <see cref="DiscoveredPackage.Revision"/> to see that a Git
-///     tag now points elsewhere without another call to the source.</param>
-internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? Latest, DiscoveredPackage? Pinned = null);
+internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? Latest);
 
 /// <summary>
 ///     Session-scoped cache of what each configured package source offers, keyed by
@@ -200,14 +196,17 @@ internal sealed class PackageVersionCache
     /// <param name="excludeAlias">The alias of a source to leave out (the pinned source, already
     ///     consulted on its own), or <see langword="null"/> to include every source.</param>
     /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
+    /// <param name="onSourceFailure">Called with the failure of each source that could not be read
+    ///     (and was skipped), or <see langword="null"/>. Lets a caller tell "no source offers the
+    ///     package" from "a source that might have could not be read".</param>
     /// <returns>The discovered packages source by source in configuration order (the order of
     ///     Settings), each source's versions from highest to lowest; empty when no source offers
     ///     the package. A source that cannot be read is skipped, so one unreachable source never
     ///     hides what the others offer.</returns>
     /// <remarks>
-    ///     Used when the source a repo's pin names is not available on this machine (an alias is
-    ///     user-specific configuration): the other sources are asked what they offer, still through
-    ///     the per-source cache, so no source is read twice in a session. Whether the content a
+    ///     Asks every configured source what it offers (aliases are user-specific configuration, so
+    ///     a pin names none): through the per-source cache, so no source is read twice in a
+    ///     session. Whether the content a
     ///     source offers is the content the pin recorded is for the caller to verify - a listing
     ///     says nothing about it.
     /// </remarks>
@@ -223,7 +222,11 @@ internal sealed class PackageVersionCache
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is canceled.</exception>
     public async Task<IReadOnlyList<DiscoveredPackage>> GetVersionsAcrossSourcesAsync(
-        PackageSourceRegistry registry, string packageId, string? excludeAlias, CancellationToken cancellationToken)
+        PackageSourceRegistry registry,
+        string packageId,
+        string? excludeAlias,
+        CancellationToken cancellationToken,
+        Action<Exception>? onSourceFailure = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
@@ -245,6 +248,7 @@ internal sealed class PackageVersionCache
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
             {
                 firstFailure ??= ex;
+                onSourceFailure?.Invoke(ex);
             }
         }
 
@@ -310,9 +314,7 @@ internal sealed class PackageVersionCache
             return new UpgradeCheck(true, latest);
         }
 
-        // The listing entry of the pinned version itself, so a revision change can be seen
-        var pinnedPackage = offers.FirstOrDefault(package => package.Version.CompareTo(pinned) == 0);
-        return new UpgradeCheck(latest.Version.CompareTo(pinned) > 0, latest, pinnedPackage);
+        return new UpgradeCheck(latest.Version.CompareTo(pinned) > 0, latest);
     }
 
     /// <summary>

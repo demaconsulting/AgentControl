@@ -84,8 +84,8 @@ supporting types of `LauncherUI`, not units.
       and log redaction
     - **RepoSync/** - package extraction (zip, unpacked NuGet package folder or a Git package's layout folder) and
       release-notes viewing
-    - **RepoConfig/** - per-repo pin file persistence (package, version, preferred source alias, content identity of
-      the files and Git source revision)
+    - **RepoConfig/** - per-repo pin file persistence (package, version and the content identity of the files; no
+      package source and no Git commit)
     - **AgentToolLauncher/** - shell detection and agent-tool process launching
     - **GitIntegration/** - git status/pull/branch queries, the user's Git credential helper
       (saved package-feed sign-ins) and hardened git against remote repositories (the Git package source)

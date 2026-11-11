@@ -143,8 +143,8 @@ sections:
 
       - id: AgentControl-SelectPackageWindowViewModel-PreselectNothingWhenNotOffered
         title: >-
-          The SelectPackageWindowViewModel class shall select no package when the source the repo
-          is pinned to does not offer the pinned package.
+          The SelectPackageWindowViewModel class shall select no package when the source that
+          supplies the repo's package does not offer the repo's package.
         justification: |
           A package that is no longer offered cannot be chosen on the user's behalf.
         tests:
@@ -152,11 +152,11 @@ sections:
 
       - id: AgentControl-SelectPackageWindowViewModel-PreselectNothingWhenSourceUnknown
         title: >-
-          The SelectPackageWindowViewModel class shall select no package when the source the repo
-          is pinned to is not configured.
+          The SelectPackageWindowViewModel class shall select no package when the source that
+          supplies the repo's package is not known or is not configured.
         justification: |
-          A pin naming a source that is not configured must not be replaced by another source's
-          package.
+          A source that is not known to supply the package must not be replaced by another
+          source's package.
         tests:
           - SelectPackageWindowViewModel_LoadAsync_PreferredAliasUnknown_SelectsNothing
 

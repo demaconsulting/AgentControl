@@ -85,13 +85,11 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     /// </summary>
     /// <param name="packageFolder">The unpacked package folder.</param>
     /// <param name="contentRoot">The validated content root inside it.</param>
-    /// <param name="sourceRevision">The revision the opener knows the content came from, if any.</param>
     /// <param name="layoutOnly">Whether only the package layout of the root is exposed.</param>
-    private DirectoryPackageContentReader(string packageFolder, string contentRoot, string? sourceRevision, bool layoutOnly)
+    private DirectoryPackageContentReader(string packageFolder, string contentRoot, bool layoutOnly)
     {
         Description = packageFolder;
         _contentRoot = contentRoot;
-        SourceRevision = sourceRevision;
         _layoutOnly = layoutOnly;
     }
 
@@ -120,13 +118,6 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
             return _contentIdentity;
         }
     }
-
-    /// <summary>
-    ///     Gets the revision the opener supplied for this content (for a Git package, the
-    ///     <c>git-commit:</c> of the tag's commit), or <see langword="null"/> when none was given.
-    ///     The reader only carries it: a folder has no revision of its own.
-    /// </summary>
-    public string? SourceRevision { get; }
 
     /// <summary>
     ///     Opens an unpacked package folder for reading.
@@ -166,7 +157,7 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
                 $"Package content folder '{contentRoot}' is a link, which is not allowed.");
         }
 
-        return new DirectoryPackageContentReader(packageFolder, contentRoot, sourceRevision: null, layoutOnly: false);
+        return new DirectoryPackageContentReader(packageFolder, contentRoot, layoutOnly: false);
     }
 
     /// <summary>
@@ -176,8 +167,6 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     /// </summary>
     /// <param name="layoutRoot">The folder that holds <c>.github/...</c>, <c>release-notes.md</c>
     ///     and <c>AGENTS.md</c> directly (the repository root or the configured sub-folder).</param>
-    /// <param name="sourceRevision">The revision the content came from, as supplied by the caller
-    ///     (for a Git tag, <c>git-commit:{sha}</c>); <see langword="null"/> when it has none.</param>
     /// <returns>A reader that lists and reads only the four managed folders under <c>.github</c>
     ///     and the two root files. Everything else in the folder (including a <c>.git</c> folder
     ///     and any link that is not part of the layout) is never listed, read or inspected.</returns>
@@ -186,7 +175,7 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     /// <exception cref="InvalidOperationException">Thrown when the folder does not exist or is
     ///     itself a link. A link inside the layout is refused when the layout is listed or read,
     ///     exactly as for <see cref="Open"/>.</exception>
-    public static DirectoryPackageContentReader OpenLayoutRoot(string layoutRoot, string? sourceRevision = null)
+    public static DirectoryPackageContentReader OpenLayoutRoot(string layoutRoot)
     {
         ArgumentNullException.ThrowIfNull(layoutRoot);
 
@@ -201,7 +190,7 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
                 $"Package folder '{layoutRoot}' is a link, which is not allowed.");
         }
 
-        return new DirectoryPackageContentReader(layoutRoot, layoutRoot, sourceRevision, layoutOnly: true);
+        return new DirectoryPackageContentReader(layoutRoot, layoutRoot, layoutOnly: true);
     }
 
     /// <inheritdoc />

@@ -158,8 +158,8 @@ AgentControl
 │                             NuGet package folder or server, or a Git
 │                             repository (its SemVer tags matching a tag
 │                             pattern are the versions; one tag is fetched
-│                             shallowly and its commit is the content
-│                             identity)
+│                             shallowly and read from its commit; the content
+│                             identity is the identity of the files)
 ├── RepoSync
 │   ├── PackageZipExtractor - opens/validates the new zip, updates the pin
 │   │                         file, deletes the 4 known folders, extracts the
@@ -171,10 +171,10 @@ AgentControl
 │                            package's release-notes.md after a successful
 │                            upgrade
 ├── RepoConfig - reads/writes the per-repo .agentcontrol.json pin file
-│                (preferred source alias + package name + pinned version +
-│                content identity of the files (files-sha256) + git source
-│                revision + whether the user declined
-│                the AGENTS.md template offer; no "latest"/unpinned mode)
+│                (package name + pinned version + content identity of the
+│                files (files-sha256) + whether the user declined
+│                the AGENTS.md template offer; no package source, no Git
+│                commit and no "latest"/unpinned mode)
 ├── AgentToolLauncher - detects installed shells (prefers highest available
 │                       PowerShell/pwsh, falls back to Windows PowerShell 5,
 │                       falls back to cmd; uses the default shell on
@@ -207,18 +207,21 @@ AgentControl
   changes without the developer's awareness. The pin also records a *content
   identity* of what was applied — a SHA-256 over the agent files themselves
   (`files-sha256:`), the same whatever zip, NuGet package or Git repository
-  delivered them — so a package republished under the same version is noticed
-  and not synced silently, and a teammate may use any source that delivers the
-  identical files; a Git pin also records the commit as its source revision, so
-  a moved tag is noticed:
-  pin = preferred source alias + package + version + content identity + source
-  revision. The
-  launch-time restore only checks it and never writes the pin (that would
-  dirty the working tree), and pins without an identity adopt one at the next
-  Select Package or Upgrade. A moved tag is flagged on the repo's card (a
-  "Tag moved" chip) but nothing is applied automatically; accepting the new
-  content is an explicit **Change package...** of the same version, which asks
-  for confirmation and records the new identity.
+  delivered them: pin = package + version + content identity. It records
+  *no package source and no Git commit*: sources and their aliases are each
+  user's own configuration, and a committed file is shared by a team. The
+  user's own configured sources are asked which offer the pinned version, and
+  one whose files have the recorded identity supplies them, whatever its alias
+  or kind; the last supplier is remembered in the user's own settings, never in
+  the pin. The identity is also the only thing needed to prove the delivered
+  files were not tampered with: a package republished under the same version,
+  or a Git tag moved to other files, has another identity and is refused at
+  launch and Upgrade, and accepted only by an explicit **Change package...**
+  of the same version, which asks for confirmation and records the new
+  identity (identical files are irrelevant, so nothing is flagged for them).
+  The launch-time restore only checks the identity and never writes the pin
+  (that would dirty the working tree), and pins without an identity adopt one
+  at the next Select Package, Change package or Upgrade.
 
 - **Blind delete of the four known folders** (`.github/agents`,
   `.github/standards`, `.github/templates`, `.github/skills`) rather than a
@@ -284,7 +287,7 @@ AgentControl
   branch name, and a row of status badges/icons, each with its own hover
   tooltip:
   - ⬆️ **Upgrade available** — pin is behind the newest version found in the
-    package source.
+    configured package sources.
   - ⚠️ **Committed agent files** — one or more of `.github/agents`,
     `.github/standards`, `.github/templates`, `.github/skills` are tracked by
     git (i.e. committed into a repo that's meant to gitignore them). For

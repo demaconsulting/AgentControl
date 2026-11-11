@@ -81,13 +81,10 @@ internal enum ContentIdentityComparison
 ///     (timestamps, permissions, directory entries, entry order) takes part.
 ///     </para>
 ///     <para>
-///     The <c>git-commit:{hex}</c> form names the commit a Git tag pointed to
-///     (<see cref="FromGitCommit"/>). It is not a content identity and is never compared as one: a
-///     pin records it separately, as the source revision, so a moved tag can be noticed.
-///     </para>
-///     <para>
 ///     Pure functions of their parameters (plus the content that is read) and thread-safe. The
-///     identity is an integrity check against accidental or unannounced republishing; it is not a
+///     identity is an integrity check against accidental or unannounced republishing - and, because
+///     it describes the files and nothing else, it is all that is needed to notice a package whose
+///     files were replaced, including a Git tag moved to a commit with other files; it is not a
 ///     signature and does not prove who published the package.
 ///     </para>
 /// </remarks>
@@ -97,12 +94,6 @@ internal static class PackageContentIdentity
     ///     The prefix of an identity computed from a package's delivered agent files.
     /// </summary>
     internal const string FilesSha256Prefix = "files-sha256:";
-
-    /// <summary>
-    ///     The prefix of a source revision that is the commit a Git tag pointed to (produced by the
-    ///     Git package source).
-    /// </summary>
-    internal const string GitCommitPrefix = "git-commit:";
 
     /// <summary>
     ///     How many characters of the value <see cref="Describe"/> shows, enough to tell two
@@ -289,45 +280,6 @@ internal static class PackageContentIdentity
                trimmed.StartsWith(FilesSha256Prefix, StringComparison.OrdinalIgnoreCase) &&
                trimmed.Length == FilesSha256Prefix.Length + Sha256HexLength &&
                trimmed[FilesSha256Prefix.Length..].All(Uri.IsHexDigit);
-    }
-
-    /// <summary>
-    ///     Tells whether a text is a well-formed <c>git-commit:</c> source revision.
-    /// </summary>
-    /// <param name="revision">The text to test, or <see langword="null"/>.</param>
-    /// <returns><see langword="true"/> when it is the <c>git-commit:</c> prefix followed by 40 or
-    ///     64 hexadecimal digits; otherwise <see langword="false"/>.</returns>
-    public static bool IsGitCommitRevision(string? revision)
-    {
-        var trimmed = revision?.Trim();
-        if (trimmed is null || !trimmed.StartsWith(GitCommitPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var commit = trimmed[GitCommitPrefix.Length..];
-        return (commit.Length == 40 || commit.Length == 64) && commit.All(Uri.IsHexDigit);
-    }
-
-    /// <summary>
-    ///     Formats a commit hash as a <c>git-commit:</c> source revision.
-    /// </summary>
-    /// <param name="commit">The commit hash: 40 (SHA-1) or 64 (SHA-256 object format) hex digits,
-    ///     in either case.</param>
-    /// <returns>The revision with the hash lower-cased.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="commit"/> is
-    ///     <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="commit"/> is not 40 or 64
-    ///     hex digits (an unchecked value would let a malformed revision into a pin).</exception>
-    public static string FromGitCommit(string commit)
-    {
-        ArgumentNullException.ThrowIfNull(commit);
-        if ((commit.Length != 40 && commit.Length != 64) || !commit.All(Uri.IsHexDigit))
-        {
-            throw new ArgumentException("A commit hash must be 40 or 64 hexadecimal digits.", nameof(commit));
-        }
-
-        return GitCommitPrefix + commit.ToLowerInvariant();
     }
 
     /// <summary>

@@ -2,7 +2,9 @@
 # Software Unit Requirements for the RepoPinStore Class
 #
 # RepoPinStore loads and saves a repo's `.agentcontrol.json` pin file, recording the pinned
-# agent package name, version and source alias for that repo.
+# agent package name, version and the identity of the agent files for that repo. A pin names no
+# package source: sources are each user's own configuration, so a source an older version of
+# the tool wrote into a pin is read only as a hint and is never written back.
 
 sections:
   - title: RepoPinStore Unit Requirements
@@ -31,40 +33,59 @@ sections:
           - RepoPinStore_Save_ExistingPinFile_OverwritesWithNewValues
           - RepoPinStore_Save_NullPin_ThrowsArgumentNullException
 
-      - id: AgentControl-RepoPinStore-SourceAlias
+      - id: AgentControl-RepoPinStore-WriteAtomically
         title: >-
-          The RepoPinStore class shall write the pin file with a schema version and the alias
-          of the pinned package's source, replacing the file atomically, and shall read the
-          alias back.
+          The RepoPinStore class shall write the pin file with a schema version, replacing the
+          file atomically, and shall read the pin back, also when the property names were
+          written by hand in a different letter case.
         justification: |
-          A pin is only meaningful together with the source it came from, and a failed write
-          must never leave a half-written pin file that loses the repo's pin.
+          A failed write must never leave a half-written pin file that loses the repo's pin, and
+          a hand-edited file must still be understood.
         tests:
-          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion4AndRoundTripsSource
+          - RepoPinStore_SaveThenLoad_WritesSchemaVersion4AndNeverASource
           - RepoPinStore_Load_CamelCasePropertyNames_AreRead
           - RepoPinStore_Save_CorruptExistingFile_IsReplacedAndLeavesNoTemporaryFile
+
+      - id: AgentControl-RepoPinStore-NeverWriteSource
+        title: >-
+          The RepoPinStore class shall never write a package source or a source revision into a
+          pin file - neither for a new pin nor when it rewrites a pin file that an earlier
+          version wrote with either, in any letter case, and not even as a property it does not
+          model.
+        justification: |
+          Package sources and their aliases are each user's own configuration; a committed,
+          shared file must not carry one user's setting, and a stale source or revision must not
+          survive a rewrite to mislead a teammate whose configuration is different.
+        tests:
+          - RepoPinStore_SaveThenLoad_WritesSchemaVersion4AndNeverASource
+          - RepoPinStore_Load_Schema4PinWithSourceAndSourceRevision_ReadsHintAndNeverWritesThemBack
+          - RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema4OnSave
+          - RepoPinStore_Save_UnknownProperties_ArePreserved
+
+      - id: AgentControl-RepoPinStore-LegacySourceHint
+        title: >-
+          The RepoPinStore class shall read the source alias that a pin file written by an earlier
+          version names as a hint only, shall report no hint for a pin file that names none, and
+          shall not reject a pin file because it names no source.
+        justification: |
+          An older pin that recorded no identity of its files has nothing to verify a source
+          against, so the source it once named is a useful hint for choosing among the user's own
+          sources; a pin that names none is how a pin is written now and is not malformed.
+        tests:
+          - RepoPinStore_Load_Source_IsReadOnlyAsALegacyHint
+          - RepoPinStore_Load_PinWithoutSource_LoadsWithoutRejection
+          - RepoPinStore_Load_CamelCasePropertyNames_AreRead
 
       - id: AgentControl-RepoPinStore-LegacyV1
         title: >-
           The RepoPinStore class shall read a pin file that has no schema version and no source
-          as a pin to the source named Default, keeping its other values.
+          as a pin hinted to the source named Default, keeping its other values.
         justification: |
           Repos pinned before sources existed must keep working without a migration step; they
           were all pinned from the single package folder, which becomes the Default source.
         tests:
-          - RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource
+          - RepoPinStore_Load_LegacyV1PinFile_HintsDefaultSource
           - RepoPinStore_Load_LegacyPinFileMissingAgentsMdTemplateDeclinedField_DefaultsToFalse
-
-      - id: AgentControl-RepoPinStore-RejectUnnamedSource
-        title: >-
-          The RepoPinStore class shall reject a pin file of the current schema version that
-          names no source, instead of reading it as a pin to the source named Default.
-        justification: |
-          Only a pin written before sources existed may fall back to the Default source; a
-          current-schema pin that names none is malformed, and resolving it against a source the
-          pin never named could supply a same-named package from a different source.
-        tests:
-          - RepoPinStore_Load_CurrentSchemaPinWithoutSource_IsRejectedInsteadOfMappedToDefault
 
       - id: AgentControl-RepoPinStore-PreserveUnknownFields
         title: >-
@@ -96,14 +117,14 @@ sections:
 
       - id: AgentControl-RepoPinStore-SaveContentIdentity
         title: >-
-          The RepoPinStore class shall write the content identity and the source revision of a pin
-          when it has them, read them back (also when the property names were written by hand in a
-          different letter case), and write nothing for a pin that has none.
+          The RepoPinStore class shall write the content identity of a pin when it has one, read
+          it back (also when the property name was written by hand in a different letter case),
+          and write nothing for a pin that has none.
         justification: |
-          The identity and the revision must persist with the pin to be of any use after the
-          application restarts, and a pin whose source reported none must not claim one.
+          The identity must persist with the pin to be of any use after the application restarts,
+          and a pin whose source reported none must not claim one.
         tests:
-          - RepoPinStore_SaveThenLoad_ContentIdentityAndSourceRevision_RoundTripAndAreOmittedWhenAbsent
+          - RepoPinStore_SaveThenLoad_ContentIdentity_RoundTripsAndIsOmittedWhenAbsent
           - RepoPinStore_Load_CamelCaseContentIdentity_IsRead
 
       - id: AgentControl-RepoPinStore-LoadWithoutIdentity
@@ -116,22 +137,20 @@ sections:
           step, and must not be treated as having a changed identity.
         tests:
           - RepoPinStore_Load_PinWithoutContentIdentity_LoadsWithNullIdentityAndUpgradesToSchema4OnSave
-          - RepoPinStore_Load_LegacyV1PinFile_MapsToDefaultSource
+          - RepoPinStore_Load_LegacyV1PinFile_HintsDefaultSource
 
       - id: AgentControl-RepoPinStore-MigrateLegacyIdentity
         title: >-
           The RepoPinStore class shall read a pin file of schema version 3 without the content
           identity it records - an identity of a package file or of a Git commit, which cannot be
-          compared with an identity of the files - and shall carry a Git commit it records over as
-          the pin's source revision.
+          compared with an identity of the files - and shall write it back without that identity.
         justification: |
           An identity computed from something other than the files can neither confirm nor refute
           that the files are the same, so it must never be taken for one and raise a false alarm;
-          the commit is still the revision the files came from, which keeps a moved tag detectable
-          for a repo that was pinned before this change.
+          a Git commit is not recorded at all any more, because only the files matter.
         tests:
           - RepoPinStore_Load_Schema3PinWithContainerIdentity_DropsIdentityAndRewritesAsSchema4
-          - RepoPinStore_Load_Schema3PinWithGitCommitIdentity_CarriesItAsSourceRevision
+          - RepoPinStore_Load_Schema3PinWithGitCommitIdentity_DropsItAndRewritesWithoutIt
 
       - id: AgentControl-RepoPinStore-SchemaVersion4
         title: >-
@@ -142,6 +161,6 @@ sections:
           forward when it re-pins a repo, so the schema version is raised for it to refuse the file
           instead of corrupting the pin.
         tests:
-          - RepoPinStore_SaveThenLoad_SourceAlias_WritesSchemaVersion4AndRoundTripsSource
+          - RepoPinStore_SaveThenLoad_WritesSchemaVersion4AndNeverASource
           - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage
           - RepoPinStore_Save_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsAndLeavesFileUnchanged

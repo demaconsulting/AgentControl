@@ -8,7 +8,7 @@ and `RepoCardImageTests.cs`,
 `SelectPackageWindowViewModelTests.cs` and `SelectPackageRetryTests.cs`,
 `SettingsWindowViewModelTests.cs`, `SettingsWindowGitSourceTests.cs`, `SourceEditorViewModelTests.cs`,
 `SourceEditorServerViewModelTests.cs`, `SourceEditorSignatureViewModelTests.cs` and `SourceEditorGitViewModelTests.cs`,
-`RepoCardGitAwarenessTests.cs` (the Git icon, tooltip, moved tag and Change package of the card) and
+`RepoCardGitAwarenessTests.cs` (the Git icon, tooltip, refresh and Change package of the card) and
 `PackageSourceGitPresentationTests.cs` (the Git icon and names, and how a source row classifies a remote Git source),
 `PackageSourceStatusPresentationTests.cs` (the "Online source" status, the folder statuses and the "Signed only"
 badge of a source row, with the Settings window showing it),
@@ -117,12 +117,13 @@ executable.
   can keep the sign-in and otherwise disabled with a tooltip that explains why, and the answer carries the choice.
 - The source editor offers the signature options for NuGet sources only (disabled with the reason where unsupported)
   and, for a server, "Forget saved sign-in" only after a confirmation; the repo card's package chip shows the signature
-  shield only when the pinned source requires signed packages.
+  shield only when the source that supplies the package requires signed packages.
 - A Git repository can be added from the Add menu; its editor explains the address, tag pattern, folder and sign-in,
   validates as the user types, lists the matching tags (or the tags that did not match, with a hint) after Test
   connection and saves only an acceptable source; a Git source is shown with the Git icon, "Online source" when remote;
-  a card pinned to one names the tag and commit, shows "Tag moved" without applying anything when the tag moved, and
-  offers Change package..., which opens on the pinned choice and asks before applying changed content.
+  a card its package comes from names the tag, a refresh the user starts reads the Git sources again (a newly pushed tag
+  is offered), and the card offers Change package..., which opens on the supplying source's choice and asks before
+  applying changed content.
 - The Settings source list shows a remote source as a neutral "Online source" (cloud icon, no warning styling, a
   tooltip saying when it is contacted), a "Signed only" badge only on NuGet sources that require signed packages
   (its tooltip naming a pinned publisher by the start and end of the fingerprint only), and, like the source editor,
@@ -251,12 +252,12 @@ and `DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat`, cove
 `AgentControl-LauncherUI-About`. The labeled Version row is the scenario
 `LauncherUI_AboutVersionRow_VersionIsLabeledShortAndFullInTooltip` below.
 
-**LauncherUI_SourceAwareActions_UnitTestsCoverPinBindingAndTargetedInvalidation**: Source-aware
+**LauncherUI_SourceAwareActions_UnitTestsCoverSourceMemoryAndTargetedInvalidation**: Source-aware
 select/upgrade/launch-sync behavior is verified by the `RepoCardViewModel`,
 `SettingsWindowViewModel`, `SourceEditorViewModel`, `MainWindowViewModel`, and `SelectPackageWindowViewModel` unit tests
 (see their unit verification designs), with
-`RepoCardViewModel_Refresh_PinNamesUnconfiguredSource_ShowsSourceProblemAndOffersNoUpgrade` and
-`RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_PinRecordsThatSourceAndItsContent`
+`RepoCardViewModel_RefreshCheap_NoSourceConfigured_ShowsNoSourceOffersProblemAndOffersNoUpgrade` and
+`RepoCardViewModel_ApplySelectedPackage_SecondSourceSelected_ExtractsThatSourcesContentAndRemembersIt`
 cited directly at the subsystem level, covering `AgentControl-LauncherUI-SourceAwareActions`
 (children: `AgentControl-RepoCardViewModel-SourceAwareness`,
 `AgentControl-MainWindowViewModel-InvalidateChangedSources`,
@@ -368,9 +369,10 @@ test. This scenario is tested by
 `SourceEditorViewModel_EditExistingSource_AliasFixedAndOtherSettingsPreserved`, covering
 `AgentControl-LauncherUI-EditPackageSource`.
 
-**LauncherUI_RemovePackageSource_WarnsAboutPinnedReposThenRemoves**: Removing the selected source first asks
-for confirmation, describing how many repos are pinned to it and that they will show a package source problem,
-and then removes it. This scenario is tested by
+**LauncherUI_RemovePackageSource_WarnsAboutDependentReposThenRemoves**: Removing the selected source first asks
+for confirmation, describing how many repos get their package from it and that they will use another configured source
+that delivers the identical files (or else show a package source problem), and then removes it. This scenario is
+tested by
 `SettingsWindowViewModel_RemoveSourceCommand_RaisesRemoveRequestedForSelectedSource` and
 `SettingsWindowViewModel_RemoveSource_WarnsAboutPinnedReposAndRemoves`, covering
 `AgentControl-LauncherUI-RemovePackageSource`.
@@ -465,10 +467,10 @@ control is disabled; a zip-package editor has no signature section. This scenari
 `AgentControl-LauncherUI-SignatureOptions`.
 
 **LauncherUI_SignatureIndicator_ShieldShownOnlyWhenSignaturesAreRequired**: The main window's package chip shows the
-shield icon, with the card's tooltip, only for a card whose pinned source requires signatures; the card's properties
+shield icon, with the card's tooltip, only for a card whose supplying source requires signatures; the card's properties
 name the start and end of a pinned fingerprint only. This scenario is tested by
 `MainWindow_PackageChip_ShowsShieldOnlyWhenSignaturesAreRequired` and
-`RepoCardViewModel_PinnedSourceRequiresSignatures_ShowsShieldWithTooltip`, covering
+`RepoCardViewModel_SupplyingSourceRequiresSignatures_ShowsShieldWithTooltip`, covering
 `AgentControl-LauncherUI-SignatureIndicator`.
 
 **LauncherUI_BackgroundChecksDoNotPrompt_UserStartedChecksMay**: A background upgrade check against a
@@ -479,14 +481,16 @@ remembered credential without asking. This scenario is tested by
 `RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential`,
 covering `AgentControl-LauncherUI-BackgroundChecksDoNotPrompt`.
 
-**LauncherUI_RepoCardChips_PackageUpgradeBranchAndLaunchLabel**: A card pinned to a zip source
-shows its package chip with name, version and source in the tooltip, a card pinned to a server source shows
-the source's alias beside the server icon (a different icon from the zip and NuGet-folder icons), an upgrade
+**LauncherUI_RepoCardChips_PackageUpgradeBranchAndLaunchLabel**: A card whose package a zip source supplies
+shows its package chip with name, version and source in the tooltip, a card supplied by a server source shows
+the source's alias beside the server icon (a different icon from the zip and NuGet-folder icons), a card with no known
+supplying source shows neither alias nor source in its chip, an upgrade
 chip names the
 target version, a branch chip shows the branch, and the Launch label names the configured tool.
 This scenario is tested by
-`RepoCardViewModel_PackageChip_PinnedToZipSource_ShowsNameVersionAndSourceInTooltip`,
+`RepoCardViewModel_PackageChip_SuppliedByZipSource_ShowsNameVersionAndSourceInTooltip`,
 `RepoCardViewModel_PinnedToServerSource_ChipShowsAliasAndServerIcon`,
+`RepoCardViewModel_PackageChip_NoSupplyingSource_HidesSourceAndNamesNone`,
 `RepoCardViewModel_UpgradeChip_NewerVersionAtSource_ShowsTargetVersionAndTooltipWithBothVersions`,
 `RepoCardViewModel_BranchChip_BranchKnown_ShowsBranchWithTooltip`, and
 `RepoCardViewModel_LaunchButtonText_ConfiguredTool_NamesToolOrFallsBack`, covering
@@ -525,7 +529,7 @@ covering `AgentControl-LauncherUI-CancelOperation`.
 **LauncherUI_SourceFailureIsolation_OneUnreachableSourceAffectsOnlyItself**: The background upgrade refresh
 keeps checking other cards when one source is unreachable, and the Select Package dialog loads the other
 sources and shows an inline error for the unreachable one. This scenario is tested by
-`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_OtherCardsStillChecked` and
+`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_ReadableSourceStillOffersUpgrades` and
 `SelectPackageWindowViewModel_LoadAsync_OneSourceUnreachable_OthersStillLoadAndErrorIsInline`, covering
 `AgentControl-LauncherUI-SourceFailureIsolation`.
 
@@ -859,28 +863,37 @@ the version without its build metadata, carries the full build version as its to
 the metadata. This scenario is tested by `AboutWindow_VersionRow_IsLabeledAndShortWithFullVersionInTooltip`, covering
 `AgentControl-LauncherUI-AboutVersionRow`.
 
-**LauncherUI_PortablePins_AnotherSourceWithTheIdenticalFilesSuppliesThePinnedPackage**: A repo whose pin names a source
-this machine has not configured, while another configured source delivers the identical files, is shown with that
-source on its package chip and no source problem; with no source that delivers the identical files (or a pin that
-recorded no files identity) the card shows the source problem and explains that the pinned source is not configured and
-that no other configured source delivers the identical files; the restore before launch uses only a source verified
-by the identical files and never writes the pin; and for such a repo the upgrade check offers the newest version the
-configured sources offer, which Upgrade applies from the source that offers it, recording that source. This scenario is
-verified by the `RepoCardViewModel` unit tests (see their unit verification design), with
-`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAliasNotConfigured_RestoresFromIdenticalSourceWithoutWritingPin`,
+**LauncherUI_PortablePins_AnotherSourceWithTheIdenticalFilesSuppliesThePinnedPackage**: A repo's pin names no source:
+the card finds the supplying source among the user's own configured sources. A configured source - whatever its alias
+or kind - that delivers the identical files (the first one in Settings order) is shown on the package chip with no
+source problem; a source that offers the same name and version with other files before it is skipped; with sources that
+offer the version but none delivering the recorded files the card shows the source problem and explains that the
+version now contains different files (the package may have been republished) and what to do; with no source offering
+the version, or no source configured, the card shows the source problem saying so, and still offers a newer version a
+source does offer (the problem and the upgrade coexist); a pin that recorded no files identity is served by the source
+that last supplied it, then the source an older pin file named, then the first source that offers it, and is never
+refused; the restore before launch uses only a source verified by the identical files (the last supplier first) and
+never writes the pin; and the upgrade check offers the newest version the configured sources offer, which Upgrade
+applies from the source that offers it, recording no source. This scenario is verified by the `RepoCardViewModel` unit
+tests (see their unit verification design), with
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceNamedDifferently_RestoresFromIdenticalSourceWithoutWritingPin`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_OnlyOtherFilesAvailable_RefusesWithExplanation`,
-`RepoCardViewModel_Refresh_PinWithoutFilesIdentityAndAliasNotConfigured_NeverFallsBack`,
-`RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasIdenticalFiles_NamesSupplierWithoutProblem`,
-`RepoCardViewModel_Refresh_PinnedAliasNotConfiguredAndOtherSourceHasDifferentFiles_ShowsSourceProblem` and
-`RepoCardViewModel_UpgradeCommand_PinnedAliasNotConfigured_UsesNewestVersionAcrossSourcesAndRecordsItsAlias` cited
+`RepoCardViewModel_Refresh_PinWithoutFilesIdentity_UsesLegacySourceHintWhenConfigured`,
+`RepoCardViewModel_Refresh_SourceNamedDifferentlyHasIdenticalFiles_NamesSupplierWithoutProblem`,
+`RepoCardViewModel_Refresh_OnlySourceHasDifferentFiles_ShowsNoMatchingFilesProblem`,
+`RepoCardViewModel_Refresh_NoSourceOffersPinnedVersion_ShowsNoSourceOffersProblem`,
+`RepoCardViewModel_Refresh_NoSourceOffersPinnedVersionButNewerOffered_ShowsProblemAndStillOffersUpgrade` and
+`RepoCardViewModel_UpgradeCommand_SeveralSources_UsesNewestVersionAcrossSourcesAndRecordsNoSource` cited
 directly at the subsystem level, and by the headless window tests
-`MainWindow_PinnedAliasNotConfiguredButIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem` (the chip names the
+`MainWindow_PinNamesNoSourceAndIdenticalFilesElsewhere_ChipNamesSupplierAndShowsNoProblem` (the chip names the
 supplying source and the problem chip is not shown, with real zip sources and a pin written by a real apply) and
-`MainWindow_PinnedAliasNotConfigured_UpgradeChipOffersNewestVersionFromAnotherSource` (the upgrade chip is offered for
-the newest version of another source), covering `AgentControl-LauncherUI-PinnedSourceFallback` (children:
-`AgentControl-RepoCardViewModel-FallbackToIdenticalSource`, `-FallbackRejectsDifferentFiles` and
-`-FallbackNeverWithoutIdentity`), `AgentControl-LauncherUI-PinnedSourceSupplierShown` (children: `-ShowSupplyingSource`
-and `-UnresolvedPinExplained`) and `AgentControl-LauncherUI-UpgradeAcrossSources` (child: `-UpgradeAcrossSources`).
+`MainWindow_PinNamesNoSource_UpgradeChipOffersNewestVersionFromConfiguredSource` (the upgrade chip is offered for
+the newest version of the configured source), covering `AgentControl-LauncherUI-ResolveSourceByFiles` (children:
+`AgentControl-RepoCardViewModel-ResolveByFilesIdentity`, `-PreferLastSupplier`, `-ResolveRejectsDifferentFiles` and
+`-ResolveWithoutIdentityByHints`), `AgentControl-LauncherUI-SupplyingSourceShown` (children:
+`-ChipNamesSupplyingSource`, `-NoSourceOffersProblem`, `-UnresolvedPinExplained` and `-UnreadableSourceIsNotAProblem`)
+and `AgentControl-LauncherUI-UpgradeAcrossSources` (children: `-UpgradeAcrossSources` and
+`-ProblemKeepsUpgradeOffered`; each child prefixed `AgentControl-RepoCardViewModel`).
 
 **LauncherUI_ContentChangeProtection_RepublishedVersionIsNeverAppliedUnnoticed**: A package version republished with
 other files is not applied silently: an Upgrade and the restore of missing agent files before launch refuse it and
@@ -983,53 +996,48 @@ connection test and Select Package, and never prompts in the background. This sc
 `SourceEditorWindow_GitSource_ShowsGitSectionsAndHidesNuGetOnes`, covering `AgentControl-LauncherUI-GitSignInGuidance`
 (child: `AgentControl-SourceEditorViewModel-GitSignInNote`).
 
-**LauncherUI_GitSourcePresentation_IconTypeNameStatusTagAndCommit**: A Git source has the Git icon and the
+**LauncherUI_GitSourcePresentation_IconTypeNameStatusAndTag**: A Git source has the Git icon and the
 type name "Git
 repository" (and the short name "git repository") in the lists that show sources; the Select Package source list shows
 the same icon and name; a Git source on a remote address is listed as an "Online source" and never asks for its folder,
 while one
 on a local path gets the folder status, and the classification of the zip, NuGet folder and server kinds is unchanged;
-and a card pinned to a Git source shows the Git icon and the alias in its package chip. This scenario is tested by
+and a card whose package a Git source supplies shows the Git icon and the alias in its package chip. This scenario is
+tested by
 `PackageSourceIcons_GitSource_HasGitIconAndNames`,
 `SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName`
-and `RepoCardViewModel_PinnedGitSource_ShowsGitIconAndAlias` (covering `AgentControl-LauncherUI-GitSourcePresentation`,
+and `RepoCardViewModel_SuppliedByGitSource_ShowsGitIconAndAlias` (covering `AgentControl-LauncherUI-GitSourcePresentation`,
 child `AgentControl-RepoCardViewModel-GitSourceAwareness`),
 `PackageSourceItemViewModel_RemoteGitSource_IsOnlineSourceAndNeverAsksTheFolder`,
 `PackageSourceItemViewModel_LocalGitSource_ChecksTheFolder` and
 `PackageSourceItemViewModel_OtherKinds_RemoteClassificationUnchanged` (covering
 `AgentControl-LauncherUI-GitSourceRowStatus`, children `AgentControl-SettingsWindowViewModel-GitSourceRowStatus`,
 `-GitSourceLocalFolderStatus` and `-GitSourcePersisted`) and
-`RepoCardViewModel_PackageChipTooltip_GitPinWithCommit_NamesTagAndShortCommit` (the tag and the seven-character commit
-in the chip's tooltip, covering `AgentControl-LauncherUI-GitSourceCardTooltip`, child
-`AgentControl-RepoCardViewModel-GitSourceTooltip`), and by the headless main window test
-`MainWindow_PinnedGitSourceCard_ChipShowsGitIconAliasTagAndShortCommit`: the chip drawn for a repo pinned to a Git
-source holds the Git icon, the alias and the pinned package, and its tooltip names the tag and the short commit (the
+`RepoCardViewModel_PackageChipTooltip_GitSource_NamesTagOnly` (the tag in the chip's tooltip, with no commit, covering
+`AgentControl-LauncherUI-GitSourceCardTooltip`, child `AgentControl-RepoCardViewModel-GitSourceTooltip`; the tag
+follows the source's current tag pattern, by `RepoCardViewModel_PinnedTagName_TagPatternEdited_FollowsTheSourcesPattern`,
+and a zip source has none, by `RepoCardViewModel_PackageChipTooltip_ZipSource_HasNoTag`), and by the headless main
+window test `MainWindow_GitSourceCard_ChipShowsGitIconAliasAndTag`: the chip drawn for a repo supplied by a Git
+source holds the Git icon, the alias and the package, and its tooltip names the tag (the
 window-level evidence of both `AgentControl-LauncherUI-GitSourcePresentation` and
 `AgentControl-LauncherUI-GitSourceCardTooltip`; the source is a local folder, so nothing is fetched).
 The drawn icon is shown only as ink in the end-to-end test (`SettingsWindow_AddMenu_OffersAllFourSourceTypes...`).
 
-**LauncherUI_TagMovedWarning_ShownNeverApplied**: When a check finds the pinned Git version at another
-commit than the pin recorded, the card's status is "Tag moved" (it outranks "upgrade available", hides the up-to-date
-cue and uses the tooltip that names the tag, both commits and Change package...), and nothing is acquired, extracted or
-written; a card refresh the user starts reads the Git source again, so a tag moved after a listing was cached is shown,
-while a failed refresh clears the warning instead of leaving it up. This scenario is tested by
-`RepoCardViewModel_RefreshUpgradeStatus_TagMoved_ShowsTagMovedStatusAndTooltip` (covering
-`AgentControl-LauncherUI-TagMovedWarning`, children `AgentControl-RepoCardViewModel-TagMovedWarning`,
-`-TagMovedNeedsEvidence`, `-TagMovedClearedByNewPin` and `-TagMovedFollowsTagPattern`),
-`RepoCardViewModel_RefreshUpgradeStatus_TagMoved_AppliesNothing` (covering
-`AgentControl-LauncherUI-TagMovedAppliesNothing`,
-child `-TagMovedAppliesNothing`),
-`RepoCardViewModel_RefreshAsync_GitSourceTagMovedAfterCachedListing_ListsAgainAndShowsTagMoved` (covering
-`AgentControl-LauncherUI-TagMovedFreshListing`, child `-TagMovedFreshListing`) and
-`RepoCardViewModel_RefreshAsync_FailsAfterTagMoved_ClearsTagMovedAndShowsCheckFailed` (covering
-`AgentControl-LauncherUI-TagMovedClearedWhenUnknown`, child `-TagMovedClearedWhenUnknown`; each child prefixed
-`AgentControl-RepoCardViewModel`). The chip itself is exercised end to end only
-(`TagMovedChip` in the system verification); no headless window test renders it.
+**LauncherUI_RefreshRelistsGitSources_NewTagIsOfferedAndBackgroundChecksUseTheCache**: A card refresh the user starts
+reads every configured Git source again, so a tag pushed after a listing was cached is offered as the upgrade (against
+a real local repository), both of two Git sources are listed again, while the background check keeps using the cached
+listing and a source that is not a Git source is never read again. This scenario is tested by
+`RepoCardViewModel_RefreshAsync_GitSourceNewTagPushedAfterCachedListing_ListsAgainAndOffersNewVersion` (covering
+`AgentControl-LauncherUI-RefreshRelistsGitSources`, child `AgentControl-RepoCardViewModel-RefreshRelistsGitSources`),
+`RepoCardViewModel_RefreshAsync_SeveralGitSources_ListsEachOfThemAgain` and
+`RepoCardViewModel_RefreshAsync_ZipSource_KeepsUsingCachedListing`.
 
 **LauncherUI_ChangePackage_PinnedRepoChoosesAgainOnTheCurrentChoice**: For a repo that has a pin the select-package
 command can execute and raises the request ("Change package..."); the main window opens the Select Package dialog on the
-pin's own source, package and version although a newer version exists; and choosing the pinned version again when its
-content changed asks for confirmation first, No changing nothing and Yes applying and recording the new identity. This
+source that supplies the package (the card's remembered supplier), the pin's own package and version although a newer
+version exists; and choosing the pinned version again when its
+content changed - a republished package, or a Git tag moved to a commit with other files - asks for confirmation first,
+No changing nothing and Yes applying and recording the new identity. This
 scenario is tested by `RepoCardViewModel_SelectPackageCommand_PinAlreadyExists_CanExecuteAsChangePackage` (covering
 `AgentControl-LauncherUI-ChangePackage`, children `AgentControl-RepoCardViewModel-ChangePackage` and
 `-ChangePackageRequest`), `MainWindow_ChangePackageOnPinnedRepo_OpensSelectPackageOnThePinnedChoice` (also covering

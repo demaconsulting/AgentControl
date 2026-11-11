@@ -24,8 +24,7 @@ both `Extract` and `AllManagedFoldersExist`.
 
 **IPackageContentReader**: a read-only view of package content — `Description` (a path for
 messages), `ContentIdentity` (the identity of the agent files the reader delivers, or `null` when it cannot name
-one; `null` means "nothing to compare", never "changed"), `SourceRevision` (the revision the source says the files
-came from - `git-commit:<commit id>` for a Git tag - or `null`), `ListFiles()` (relative paths with `/`
+one; `null` means "nothing to compare", never "changed"), `ListFiles()` (relative paths with `/`
 separators), `OpenRead(path)` and `ReadText(path)` (null when absent). Implementations never write to the package.
 
 **ZipPackageContentReader**: holds a `ZipArchive` open until disposed; `Open` opens the zip **once** and builds the
@@ -42,9 +41,9 @@ failures - an unreadable or invalid archive, and a path that is invalid or unsup
 `InvalidOperationException` naming the zip, so no path exception escapes to a caller that handles one failure type
 (`AgentControl-PackageContentExtractor-ZipOpenFailure`).
 
-**DirectoryPackageContentReader**: holds only paths, plus the `SourceRevision` its opener supplied (`OpenLayoutRoot`
-takes it as an optional argument: a Git source passes the commit of the tag whose blobs were written; `null` when
-none is given). `ContentIdentity` is computed on first use - and remembered - from the files of the folder with
+**DirectoryPackageContentReader**: holds only paths (`OpenLayoutRoot` takes just the layout root, which a Git source
+passes after it wrote the validated blobs of the tag it fetched). `ContentIdentity` is computed on first use - and
+remembered - from the files of the folder with
 `PackageContentIdentity.TryComputeFilesIdentity(this)`, so an unpacked NuGet package folder, a Git layout folder and
 a zip with the same agent files report the same identity, and nothing about the folder (the `.nupkg` next to the
 `content` folder, other files) takes part

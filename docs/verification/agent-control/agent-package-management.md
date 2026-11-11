@@ -50,8 +50,8 @@ no network. Otherwise standard test environment, with no external services or ha
   source model types pass with zero failures.
 - A Git source lists the tags that match its pattern as versions with their commits, delivers the layout of a chosen
   tag (and nothing else) from a cache keyed by repository and commit, refuses links, submodules and colliding names
-  in the layout leaving nothing in the cache, runs no hook or filter of the user's configuration, names the commit
-  as the source revision and shows a moved tag as a different revision.
+  in the layout leaving nothing in the cache, runs no hook or filter of the user's configuration, reports the files
+  identity of the tag and shows a moved tag as a different commit in the listing.
 - A Git source is described by its address, tag pattern, optional sub-folder and exactly one package ID and persisted
   with its type by name; an invalid description, an address that carries a credential or names another transport
   is refused when the source is resolved, never repeating the address.
@@ -320,14 +320,13 @@ recognition, format, description and comparison requirements).
 **AgentPackageManagement_ContentIdentity_SameFilesFromZipNuGetAndGitAreTheSame**: The same four agent files are
 delivered as a zip, as a NuGet package and as the layout of a tag in a real local Git repository (the Git fixture of
 the test project, whose commit also holds release notes that are not part of the identity); the three readers report
-the identity the test computes independently from the files, and the Git reader also reports its commit as the source
-revision while the others report none. This scenario is tested by
+the identity the test computes independently from the files. This scenario is tested by
 `AgentPackageManagementSubsystem_SameFilesFromZipNuGetAndGit_ReportTheSameIdentity`,
 covering `AgentControl-AgentPackageManagement-ContentIdentity` and
 `AgentControl-AgentPackageManagement-ContentIdentityComparable`.
 
 **AgentPackageManagement_AcrossSources_ListsOffersInConfigurationOrderAndNewestWins**: Through the registry and the
-version cache, three zip sources offer the package, one of them being excluded as the pinned source, and a fourth
+version cache, three zip sources offer the package, one of them being excluded from the listing, and a fourth
 source has no folder: the offers of the others are listed in configuration order, the excluded source is not read, the
 unreadable source is skipped, and the newest version across the sources wins (the excluded source is still considered
 for the latest), a version offered by two sources being attributed to the first in configuration order. This scenario
@@ -335,15 +334,14 @@ is tested by
 `AgentPackageManagementSubsystem_AcrossSources_ListsOffersInConfigurationOrderAndNewestWins`, covering
 `AgentControl-AgentPackageManagement-OffersAcrossSources`.
 
-**AgentPackageManagement_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag**: Against a real local bare repository, the
+**AgentPackageManagement_GitSource_ListsTagsAndAcquiresTheTaggedFiles**: Against a real local bare repository, the
 registry resolves a Git source, the version cache lists `v1.0.0` (annotated) and `v1.1.0` and reports that a newer
-version is available and the listing entry of the pinned version with its commit; acquiring the pinned version delivers
-its content with the source revision `git-commit:{commit}`; after the maintainer moves `v1.0.0` to another commit a new
-session lists the pinned version at the other commit, which differs from the revision that was
-reported. The rules of the address, the pattern, the layout checks, the cache and the failure kinds are verified by
+version is available; the listing entry of the pinned version carries its commit, and acquiring the pinned version
+delivers its content with the files identity. The rules of the address, the pattern, the layout checks, the cache and
+the failure kinds are verified by
 the unit tests of `GitRepositoryAddress`, `GitTagPattern` and `GitSourceProvider`, and the settings, registry, version
 cache and extractor rules by their own units. This scenario is tested by
-`AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag`, covering
+`AgentPackageManagementSubsystem_GitSource_ListsTagsAndAcquiresTheTaggedFiles`, covering
 `AgentControl-AgentPackageManagement-GitSource` (the versions: children `AgentControl-GitTagPattern-*` extraction,
 formatting and listing requirements and the `AgentControl-GitSourceProvider-List*`, `-ResolveAnnotatedTags` and
 `-TagPreview` requirements), `AgentControl-AgentPackageManagement-GitSourceAcquire` (children: the
@@ -352,8 +350,8 @@ tested by the hostile-layout scenario below, which acquires the ordinary tag of 
 `-CachePruningSparesOpenReaders` and `-CacheReleasesCommitWhenReaderDisposed` requirements are verified by the unit
 tests of `GitSourceProvider`) and
 `AgentControl-AgentPackageManagement-GitSourceContentIdentity` (children:
-`AgentControl-GitSourceProvider-ReportContentIdentity`, `-TagMovedBetweenListAndFetch`, `-MovedTagReportedAsNewRevision`
-and `AgentControl-PackageVersionCache-ReportPinnedListing`).
+`AgentControl-GitSourceProvider-ReportContentIdentity`, `-TagMovedBetweenListAndFetch` and
+`-MovedTagReportedAsNewRevision`).
 
 **AgentPackageManagement_GitSourceDefinition_PersistedByNameCheckedAsAWholeAndRefusedWhenInvalid**: A Git source is
 described by its address, tag pattern, optional sub-folder and exactly one package ID, serialized with its type by name

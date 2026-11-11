@@ -6,11 +6,13 @@
 
 `PackageContentIdentity` computes, formats and compares the *content identity* of an agent package: a short
 text that names exactly which agent files a package version delivered, so that a repo's pin can tell a package
-republished under the same version from the one it was made from - and can recognize the same files delivered by a
-different source (`AgentControl-AgentPackageManagement-ContentIdentity`). It exists as its own unit because
+republished under the same version (or a Git tag moved to other files) from the one it was made from - and can
+recognize the same files delivered by a different source (`AgentControl-AgentPackageManagement-ContentIdentity`).
+It exists as its own unit because
 three parties need the same format and the same comparison rule - the readers that produce identities, the pin
-that stores one, and the repo card that decides what a difference means and which other source may stand in for
-the pinned one - and none of them should own it.
+that stores one, and the repo card that decides what a difference means and which configured source delivers the
+files a pin recorded - and none of them should own it. It is also the only thing a pin records about the files:
+a Git commit, a source alias or a container hash is neither stored nor compared.
 
 The identity is computed from the *delivered files themselves* - exactly the files AgentControl writes into the
 four managed folders - and not from the zip, the `.nupkg` or the Git repository they came in. Users of one repo
@@ -39,10 +41,6 @@ format - so the identity is the same for the same files whatever delivered them
 (`AgentControl-PackageContentIdentity-FilesIdentityIndependentOfPackaging`), and it changes if one byte, a path, or
 the membership changes, or if bytes move from one file to another because the length and path are part of the
 stream (`AgentControl-PackageContentIdentity-FilesIdentityDetectsChange`).
-
-A *source revision* is a different thing and is never compared as an identity: `git-commit:` followed by a 40- or
-64-digit lower-case commit hash, the commit a tag of a Git repository pointed to. `GitSourceProvider` reports it
-for every package it delivers, and the pin records it separately so that a moved tag can be noticed.
 
 **ContentIdentityComparison**: `enum` - `NotComparable` (a side is missing or is not a files identity), `Same`,
 `Changed`.
@@ -77,14 +75,8 @@ and "no identity" means "nothing to compare", never "changed".
 
 **IsFilesIdentity**: Tells whether a text is a well-formed files identity: the prefix (ignoring letter case)
 followed by exactly 64 hexadecimal digits, ignoring surrounding white space. An identity an older version
-recorded (`sha256:`, `git-commit:`) is not
+recorded (a container hash, `sha256:`, or a Git commit, `git-commit:`) is not
 (`AgentControl-PackageContentIdentity-RecognizeFilesIdentity`).
-
-**IsGitCommitRevision** / **FromGitCommit**: Recognize and format a `git-commit:` source revision.
-`FromGitCommit` returns `git-commit:` plus the lower-cased hash
-(`AgentControl-PackageContentIdentity-Format`) and throws `ArgumentException` unless the hash is 40 or 64
-hexadecimal digits and `ArgumentNullException` for a null hash, so a malformed value never reaches a pin
-(`AgentControl-PackageContentIdentity-FormatRejectMalformed`).
 
 **Compare**: Compares the identity a pin recorded with the identity of the content now delivered.
 
@@ -108,9 +100,8 @@ hexadecimal digits and `ArgumentNullException` for a null hash, so a malformed v
 
 `ComputeFilesIdentity` throws the `InvalidOperationException` described above for a package that cannot be
 identified; I/O failures while reading a file (`IOException`, `InvalidDataException` of a corrupt zip,
-`UnauthorizedAccessException`) are wrapped in it, naming the package. `FromGitCommit` throws
-`ArgumentException`/`ArgumentNullException` for a malformed or null hash. `TryComputeFilesIdentity`, `IsFilesIdentity`,
-`IsGitCommitRevision`, `Compare` and `Describe` never throw (for valid arguments).
+`UnauthorizedAccessException`) are wrapped in it, naming the package. `TryComputeFilesIdentity`, `IsFilesIdentity`,
+`Compare` and `Describe` never throw (for valid arguments).
 
 #### Dependencies
 
@@ -122,6 +113,5 @@ identified; I/O failures while reading a file (`IOException`, `InvalidDataExcept
 
 - **ZipPackageContentReader** and **DirectoryPackageContentReader** (`RepoSync` subsystem) - `TryComputeFilesIdentity`
   over their own files, which makes every source's identity come out the same way.
-- **GitSourceProvider** - `FromGitCommit` for the source revision of the tag it fetched.
 - **RepoCardViewModel** (`LauncherUI` subsystem) - `Compare`, `Describe` and `IsFilesIdentity` when applying,
-  upgrading to or restoring a package, and when verifying another source against a pin.
+  upgrading to or restoring a package, and when verifying which configured source delivers the files a pin recorded.

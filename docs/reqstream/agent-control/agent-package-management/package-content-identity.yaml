@@ -107,29 +107,6 @@ sections:
         tests:
           - PackageContentIdentity_IsFilesIdentity_VariousTexts_RecognizesOnlyFilesIdentity
 
-      - id: AgentControl-PackageContentIdentity-Format
-        title: >-
-          The PackageContentIdentity class shall format a Git commit hash as a lower-case source
-          revision of its own kind, and shall recognize such a revision.
-        justification: |
-          A source that delivers a tag of a Git repository names the commit the tag points to; the
-          form must be unambiguous (the kind is part of the text) so that a revision is never
-          mistaken for an identity of files.
-        tests:
-          - PackageContentIdentity_FromGitCommit_ValidHash_ReturnsLowerCasePrefixedIdentity
-          - PackageContentIdentity_IsGitCommitRevision_VariousTexts_RecognizesOnlyCommitRevision
-
-      - id: AgentControl-PackageContentIdentity-FormatRejectMalformed
-        title: >-
-          The PackageContentIdentity class shall refuse a value that is not a well-formed commit
-          hash, and a null value, when formatting a Git revision.
-        justification: |
-          A malformed value must never reach a pin, where it would be compared with every later
-          delivery of the version.
-        tests:
-          - PackageContentIdentity_FromGitCommit_MalformedHash_ThrowsArgumentException
-          - PackageContentIdentity_FromGitCommit_NullCommit_ThrowsArgumentNullException
-
       - id: AgentControl-PackageContentIdentity-Describe
         title: >-
           The PackageContentIdentity class shall describe an identity in a short form that still

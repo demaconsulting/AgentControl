@@ -170,8 +170,7 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
 
     /// <summary>
     ///     Test that a Git source reports the same content identity as a zip and a NuGet source for the
-    ///     same agent files - a real local repository supplies the Git layout - and carries the commit
-    ///     separately as its source revision, which the other kinds do not have.
+    ///     same agent files - a real local repository supplies the Git layout - whatever kind delivered them.
     /// </summary>
     [Fact]
     public async Task AgentPackageManagementSubsystem_SameFilesFromZipNuGetAndGit_ReportTheSameIdentity()
@@ -185,7 +184,7 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
         NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0");
         var files = AgentFiles("agents content").ToDictionary(file => file.Path, file => file.Text);
         files["release-notes.md"] = "notes that are never part of the identity";
-        var commit = fixture.Commit(files, "one");
+        fixture.Commit(files, "one");
         fixture.Tag("v1.0.0");
         fixture.Push();
         var registry = PackageSourceRegistry.Create(
@@ -205,7 +204,6 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
             var package = Assert.Single(await provider.ListVersionsAsync(packageId, TestContext.Current.CancellationToken));
             using var reader = await provider.AcquireAsync(package, TestContext.Current.CancellationToken);
             identities[alias] = reader.ContentIdentity;
-            Assert.Equal(alias == "Repo" ? PackageContentIdentity.FromGitCommit(commit) : null, reader.SourceRevision);
         }
 
         // Assert: one identity for the same files, whichever kind of source delivered them
@@ -271,7 +269,6 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
         Assert.True(check.IsNewerAvailable);
         Assert.Equal("9.0.0", check.Latest?.Version.ToString());
         Assert.Equal("Pinned", check.Latest?.SourceAlias);
-        Assert.Equal("First", check.Pinned?.SourceAlias);
     }
 
     /// <summary>
@@ -882,13 +879,12 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
 
     /// <summary>
     ///     Test the Git source through the subsystem's own parts, against a real local repository:
-    ///     the registry resolves the source, the cache lists tag versions with their commits and
-    ///     reports the pinned version's listing entry, a moved tag shows as a different revision on
-    ///     the next listing, and an acquired package reports the commit as its source revision (which
-    ///     differs from the commit the moved tag points to now) and the identity of its files.
+    ///     the registry resolves the source, the cache lists tag versions and reports the newer one,
+    ///     the listing carries the commit each tag points to, and an acquired package reports the
+    ///     identity of its files.
     /// </summary>
     [Fact]
-    public async Task AgentPackageManagementSubsystem_GitSource_ListsTagsAcquiresCommitAndSeesMovedTag()
+    public async Task AgentPackageManagementSubsystem_GitSource_ListsTagsAndAcquiresTheTaggedFiles()
     {
         // Arrange: v1.0.0 and v1.1.0 in a local bare repository
         using var fixture = GitRepositoryFixture.CreateOrSkip();
@@ -905,35 +901,22 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
         fixture.Push();
         var registry = PackageSourceRegistry.Create([fixture.CreateDefinition()], git: fixture.CreateOptions());
 
-        // Act: the version cache lists versions through the registry
+        // Act: the version cache lists versions through the registry, and the pinned version is acquired
         var cache = new PackageVersionCache();
         var check = await cache.IsNewerVersionAvailableAsync(
             registry, "Repo", "contoso-agents", "1.0.0", TestContext.Current.CancellationToken);
+        var provider = registry.Resolve("Repo");
+        var listed = await provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
+        var pinned = listed.Single(package => package.Version.ToString() == "1.0.0");
+        using var reader = await provider.AcquireAsync(pinned, TestContext.Current.CancellationToken);
 
-        // Assert: the newer version is offered, and the pinned one carries its commit
+        // Assert: the newer version is offered, the pinned one carries its commit, and the content identity is
+        // that of the files
         Assert.True(check.IsNewerAvailable);
         Assert.Equal("1.1.0", check.Latest?.Version.ToString());
-        Assert.Equal(first, check.Pinned?.Revision);
-
-        // Act: the pinned version is acquired
-        using var reader = await registry.Resolve("Repo").AcquireAsync(check.Pinned!, TestContext.Current.CancellationToken);
-
-        // Assert: the source revision is the commit, and the content identity is that of the files
-        Assert.Equal(PackageContentIdentity.FromGitCommit(first), reader.SourceRevision);
+        Assert.Equal(first, pinned.Revision);
         Assert.True(PackageContentIdentity.IsFilesIdentity(reader.ContentIdentity));
         Assert.Equal("one", reader.ReadText(".github/agents/copilot.md"));
-
-        // Act: the maintainer moves v1.0.0 and a new session lists again
-        files[".github/agents/copilot.md"] = "moved";
-        fixture.Commit(files, "moved");
-        fixture.Tag("v1.0.0", force: true);
-        fixture.Push();
-        var later = await new PackageVersionCache().IsNewerVersionAvailableAsync(
-            registry, "Repo", "contoso-agents", "1.0.0", TestContext.Current.CancellationToken);
-
-        // Assert: the pinned version is now at another commit than the acquired package's source revision
-        Assert.NotEqual(check.Pinned!.Revision, later.Pinned?.Revision);
-        Assert.NotEqual(reader.SourceRevision, PackageContentIdentity.FromGitCommit(later.Pinned!.Revision!));
     }
 
     /// <summary>
