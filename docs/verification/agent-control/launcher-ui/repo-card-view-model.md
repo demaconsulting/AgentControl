@@ -204,12 +204,21 @@ against a stub reporting success (status message updated) and a stub reporting f
 failure status message is set instead). Against a real git clone, a pull that brings in a changed pin file and newly
 committed agent files leaves the card showing the new pinned version and the committed-files badge, a clean working
 tree and the branch, with the "Pull succeeded." message and an unset failure flag intact; a pull that brings in an
-unreadable pin file clears the stale pin and reports both the pull's success and the pin problem. This scenario is
+unreadable pin file clears the stale pin and reports both the pull's success and the pin problem; a pull that is
+refused after a merge stopped on a conflict still refreshes the card (the conflicted pin file is no longer read and
+the working tree is dirty) and reports "Pull failed"; a pull that moves the pin to a version that a newer one at the
+source supersedes makes the card offer the upgrade; and a pull that has completed keeps its "Pull succeeded." message
+when the refresh that follows is cancelled while the source is read - by the caller's token (the working-tree status
+is still read) or by the card being retired (nothing more is checked). This scenario is
 tested by `RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage`,
 `RepoCardViewModel_PullCommand_FailedPull_SetsFailureStatusMessage`,
-`RepoCardViewModel_PullCommand_PullChangesPinFile_RefreshesCardAndKeepsSuccessMessage`, and
-`RepoCardViewModel_PullCommand_PullBringsUnreadablePinFile_KeepsPullOutcomeAndReportsPin`, covering
-`AgentControl-RepoCardViewModel-Pull`. The two real-git tests are skipped on a machine without git (and fail when the
+`RepoCardViewModel_PullCommand_PullChangesPinFile_RefreshesCardAndKeepsSuccessMessage`,
+`RepoCardViewModel_PullCommand_PullBringsUnreadablePinFile_KeepsPullOutcomeAndReportsPin`,
+`RepoCardViewModel_PullCommand_FailedPullThatChangedTheRepo_RefreshesCardAndReportsFailure`,
+`RepoCardViewModel_PullCommand_PullChangesPin_RefreshesUpgradeAvailability`,
+`RepoCardViewModel_PullCommand_CancelledDuringUpgradeCheck_KeepsPullOutcomeAndChecksWorkingTree`, and
+`RepoCardViewModel_PullCommand_CardRetiredDuringUpgradeCheck_KeepsPullOutcomeAndChecksNothingMore`, covering
+`AgentControl-RepoCardViewModel-Pull`. The real-git tests are skipped on a machine without git (and fail when the
 `CI` environment variable is set), as for the other real-git tests.
 
 **RepoCardViewModel_Launch_RecordsTimestampOrRaisesErrorWhenUnconfigured**: `LaunchCommand`

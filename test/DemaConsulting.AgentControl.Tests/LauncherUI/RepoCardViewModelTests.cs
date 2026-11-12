@@ -411,6 +411,152 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a pull that is refused but has already changed the repo - a merge that stopped on
+    ///     a conflict, leaving conflict markers in the pin file and a dirty working tree - is followed
+    ///     by the full refresh too, while the card reports the failure of the pull.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_PullCommand_FailedPullThatChangedTheRepo_RefreshesCardAndReportsFailure()
+    {
+        // Arrange: a clone whose pin was changed locally (3.0.0) while the remote changed it
+        // differently (2.0.0); the clone merges (not rebases) whatever the user's git configuration
+        // says, so the pull stops on a conflict in the pin file
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var clonePath = ClonePinnedRepo(fixture, "1.0.0");
+        fixture.Git(clonePath, "config", "pull.rebase", "false");
+        await File.WriteAllTextAsync(
+            Path.Combine(clonePath, ".agentcontrol.json"), PinFileText("3.0.0"), TestContext.Current.CancellationToken);
+        fixture.Git(clonePath, "commit", "-q", "-a", "-m", "Pin 3.0.0 locally");
+        fixture.Commit(new Dictionary<string, string> { [".agentcontrol.json"] = PinFileText("2.0.0") }, "Pin 2.0.0");
+        fixture.Push();
+        var card = CreateCard(clonePath, null, null, new AppSettings());
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("3.0.0", card.PinnedPackageVersion);
+        Assert.True(card.CanPull);
+        Assert.False(card.IsWorkingTreeDirty);
+
+        // Act: pull on the card
+        await card.PullCommand.ExecuteAsync();
+
+        // Assert: the pull is reported as failed, and the card shows what it left behind: the pin file
+        // is no longer readable (conflict markers) and the working tree is dirty
+        Assert.StartsWith("Pull failed:", card.StatusMessage, StringComparison.Ordinal);
+        Assert.True(card.LastActionFailed);
+        Assert.Null(card.PinnedPackageVersion);
+        Assert.False(card.CanPull);
+        Assert.True(card.IsWorkingTreeDirty);
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
+    ///     Test that a pull runs the upgrade check against the pin it brought in: a card that was up to
+    ///     date on 2.0.0 offers an upgrade once the pull moved the pin back to 1.0.0.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_PullCommand_PullChangesPin_RefreshesUpgradeAvailability()
+    {
+        // Arrange: a source offering 1.0.0 and 2.0.0, and a clone pinned to 2.0.0, which is up to date
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var clonePath = ClonePinnedRepo(fixture, "2.0.0");
+        var card = CreateCard(clonePath, null, null, new AppSettings { PackageSourcePath = sourceDir });
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("2.0.0", card.PinnedPackageVersion);
+        Assert.False(card.IsUpgradeAvailable);
+
+        // The remote then pins 1.0.0
+        fixture.Commit(new Dictionary<string, string> { [".agentcontrol.json"] = PinFileText("1.0.0") }, "Pin 1.0.0");
+        fixture.Push();
+
+        // Act: pull on the card
+        await card.PullCommand.ExecuteAsync();
+
+        // Assert: the upgrade check ran for the new pin, and the pull's outcome is kept
+        Assert.Equal("1.0.0", card.PinnedPackageVersion);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("2.0.0", card.LatestAvailableVersion);
+        Assert.Equal("Pull succeeded.", card.StatusMessage);
+        Assert.False(card.LastActionFailed);
+    }
+
+    /// <summary>
+    ///     Test that a pull that has completed keeps its outcome when the caller cancels while the
+    ///     upgrade check that follows it waits for its source: the card shows "Pull succeeded." (not
+    ///     "The operation was canceled.") and still reads the working tree.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_PullCommand_CancelledDuringUpgradeCheck_KeepsPullOutcomeAndChecksWorkingTree()
+    {
+        // Arrange: a clone with a newer commit on the remote, and a source that signals when the
+        // upgrade check reads it and then never answers; the working tree has not been checked yet
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var clonePath = ClonePinnedRepo(fixture, "1.0.0");
+        var started = new TaskCompletionSource();
+        var provider = new DelegatePackageSourceProvider((_, token) =>
+        {
+            started.TrySetResult();
+            return WaitForCancellationAsync(token);
+        });
+        var card = CreateCardWithProvider(clonePath, null, null, provider);
+        card.RefreshCheap();
+        Assert.False(card.GitStatusChecked);
+        fixture.Commit(new Dictionary<string, string> { [".agentcontrol.json"] = PinFileText("2.0.0") }, "Pin 2.0.0");
+        fixture.Push();
+
+        // Act: the pull completes, then the caller cancels while the source is being read
+        var pulling = card.PullCommand.ExecuteAsync();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
+        card.PullCommand.Cancel();
+        await pulling;
+
+        // Assert: the pull's outcome stands, what the pull changed is shown and the card is idle
+        Assert.Equal("Pull succeeded.", card.StatusMessage);
+        Assert.False(card.LastActionFailed);
+        Assert.Equal("2.0.0", card.PinnedPackageVersion);
+        Assert.True(card.GitStatusChecked);
+        Assert.True(card.CanPull);
+        Assert.False(card.IsCheckingUpgrade);
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
+    ///     Test that a pull that has completed keeps its outcome when the card is retired (its repo
+    ///     was removed from the list) while the upgrade check that follows it waits for its source,
+    ///     and that the retired card checks nothing more.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_PullCommand_CardRetiredDuringUpgradeCheck_KeepsPullOutcomeAndChecksNothingMore()
+    {
+        // Arrange: as above, with a card that is retired while the source is being read
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var clonePath = ClonePinnedRepo(fixture, "1.0.0");
+        var started = new TaskCompletionSource();
+        var provider = new DelegatePackageSourceProvider((_, token) =>
+        {
+            started.TrySetResult();
+            return WaitForCancellationAsync(token);
+        });
+        var card = CreateCardWithProvider(clonePath, null, null, provider);
+        card.RefreshCheap();
+        fixture.Commit(new Dictionary<string, string> { [".agentcontrol.json"] = PinFileText("2.0.0") }, "Pin 2.0.0");
+        fixture.Push();
+
+        // Act: the pull completes, then the card is retired, which cancels its operation
+        var pulling = card.PullCommand.ExecuteAsync();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
+        card.Retire();
+        await pulling;
+
+        // Assert: the pull's outcome stands, the retired card did not read the working tree, and it is idle
+        Assert.Equal("Pull succeeded.", card.StatusMessage);
+        Assert.False(card.LastActionFailed);
+        Assert.False(card.GitStatusChecked);
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
     ///     Test that Launch raises ErrorOccurred when no agent tool command can be resolved
     ///     (Custom selected with no command configured).
     /// </summary>

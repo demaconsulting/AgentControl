@@ -472,7 +472,12 @@ the working tree and may have written conflict markers into the pin file - it ru
 the very sequence behind `RefreshAsync`). The core runs inside the pull's own busy operation and does not take
 `IsBusy` again, so there is no nested operation to be refused. The user explicitly acted, so, like Refresh, the check
 may ask for a sign-in and reads the Git sources again. The refresh token is the operation's token (the pull itself is
-never interrupted and has no Cancel button; only `Retire` or the caller's token can cancel the refresh part). The
+never interrupted and has no Cancel button; only `Retire` or the caller's token can cancel the refresh part). A pull that
+has completed cannot be undone, so canceling the refresh part never loses its outcome: the cancellation is caught
+inside the pull operation (it does not reach the generic "The operation was canceled." handling), the pull's
+`StatusMessage` and `LastActionFailed` are kept, the working-tree status is still read (cheap, and the most direct effect
+of a pull) unless the card was retired - a retired card checks nothing - and the upgrade state stays as it was, as for a
+cancelled Refresh. The
 refresh must not replace the pull's outcome: `StatusMessage` and `LastActionFailed` keep the pull's result, and the only
 status text the refresh can set - a failure to read the pin file the pull just changed - is appended after it. A pull
 that could not be started at all (`InvalidOperationException` from `GitClient.Pull`) is reported through

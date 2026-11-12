@@ -2346,6 +2346,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     working tree and can have written conflict markers into the pin file - the card is refreshed
     ///     in full, inside the pull's own busy operation. The pull's outcome stays the card's status:
     ///     the refresh does not replace it, and only a failure to read the pin file is added to it.
+    ///     A pull that has completed cannot be undone, so its outcome also survives the refresh being
+    ///     cancelled (the card retired, or the caller's token signaled): the cancellation is absorbed
+    ///     here instead of reaching <see cref="RunOperationAsync"/>, which would replace the outcome
+    ///     with "The operation was canceled."
     /// </remarks>
     /// <param name="token">Cancels the package-source part of the refresh that follows the pull (the
     ///     pull itself is never interrupted).</param>
@@ -2383,7 +2387,23 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             // What the pull changed (the pin, the branch, the committed agent files, the working tree)
             // is picked up by the same full refresh the Refresh action runs
-            await RefreshCoreAsync(token);
+            try
+            {
+                await RefreshCoreAsync(token);
+            }
+            catch (OperationCanceledException)
+            {
+                // The pull has already happened and cannot be undone, so canceling the package-source
+                // part of the refresh (the card was retired, or the caller gave up) must not turn its
+                // outcome into "The operation was canceled." The cheap checks have already run; the
+                // working-tree check is cheap too and is what the pull most directly affects, so it is
+                // still made - except for a retired card, which checks nothing any more. The upgrade
+                // state is left as it was, as when a Refresh is cancelled.
+                if (!_isRetired)
+                {
+                    RefreshDirtyStatus();
+                }
+            }
 
             // The refresh must not replace the pull's outcome. The only status text it can set is a
             // failure to read the pin file the pull just changed; that is kept after the outcome

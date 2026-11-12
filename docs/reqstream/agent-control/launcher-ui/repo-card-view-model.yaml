@@ -174,6 +174,10 @@ sections:
           - RepoCardViewModel_PullCommand_FailedPull_SetsFailureStatusMessage
           - RepoCardViewModel_PullCommand_PullChangesPinFile_RefreshesCardAndKeepsSuccessMessage
           - RepoCardViewModel_PullCommand_PullBringsUnreadablePinFile_KeepsPullOutcomeAndReportsPin
+          - RepoCardViewModel_PullCommand_FailedPullThatChangedTheRepo_RefreshesCardAndReportsFailure
+          - RepoCardViewModel_PullCommand_PullChangesPin_RefreshesUpgradeAvailability
+          - RepoCardViewModel_PullCommand_CancelledDuringUpgradeCheck_KeepsPullOutcomeAndChecksWorkingTree
+          - RepoCardViewModel_PullCommand_CardRetiredDuringUpgradeCheck_KeepsPullOutcomeAndChecksNothingMore
 
       - id: AgentControl-RepoCardViewModel-Launch
         title: >-
