@@ -5,7 +5,6 @@ package AgentControl {
         doc /* Scans a package source folder to enumerate packages/versions and detect upgrades. */
 
         metadata info : SoftwareInfo {
-            description = "Scans a package source folder to enumerate packages/versions and detect upgrades.";
             sourceFiles = ("src/DemaConsulting.AgentControl/AgentPackageManagement/PackageSource.cs");
             testFiles = ("test/DemaConsulting.AgentControl.Tests/AgentPackageManagement/PackageSourceTests.cs");
             designFiles = ("docs/design/agent-control/agent-package-management/package-source.md");

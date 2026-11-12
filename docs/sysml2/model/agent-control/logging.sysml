@@ -15,7 +15,6 @@ package AgentControl {
 
         // Note - test/DemaConsulting.AgentControl.Tests/TestLoggingFixture.cs: indirect only
         metadata info : SoftwareInfo {
-            description = "Process-wide ILoggerFactory holder (AppLogging) and Serilog-backed rolling diagnostic log file setup (LoggingSetup), including process-wide handlers for unhandled and unobserved exceptions that log only a secret-redacted description. The only dedicated unit test file is LoggingSetupTests.cs; see docs/reqstream/agent-control/logging.yaml's test-evidence disclosure for the indirect-only coverage of the rest (via TestLoggingFixture.cs's one-time LoggingSetup.Initialize call).";
             testFiles = ("test/DemaConsulting.AgentControl.Tests/Logging/LoggingSetupTests.cs", "test/DemaConsulting.AgentControl.Tests/TestLoggingFixture.cs");
             designFiles = ("docs/design/agent-control/logging.md");
             verificationFiles = ("docs/verification/agent-control/logging.md");

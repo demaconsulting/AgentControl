@@ -5,7 +5,6 @@ package AgentControl {
         doc /* Package source configuration model, per-source providers (zip folder, NuGet folder and server, Git repository), alias-to-provider resolution, version parsing/comparison, per-source version caching, a Git repository source (tags as versions, hardened shallow fetch of one tag), per-source signed-package enforcement with an optional publisher pin, the content identity of delivered packages, and the platform check for signature verification. */
 
         metadata info : SoftwareInfo {
-            description = "Package source configuration model, per-source providers (zip folder, NuGet folder and server, Git repository), alias-to-provider resolution, version parsing/comparison, per-source version caching, a Git repository source (tags as versions, hardened shallow fetch of one tag), per-source signed-package enforcement with an optional publisher pin, the content identity of delivered packages, and the platform check for signature verification.";
             testFiles = ("test/DemaConsulting.AgentControl.Tests/AgentPackageManagement/");
             designFiles = ("docs/design/agent-control/agent-package-management.md");
             verificationFiles = ("docs/verification/agent-control/agent-package-management.md");

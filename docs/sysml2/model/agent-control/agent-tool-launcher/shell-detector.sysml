@@ -5,7 +5,6 @@ package AgentControl {
         doc /* Chooses the shell/terminal to launch the agent tool through, per platform. */
 
         metadata info : SoftwareInfo {
-            description = "Chooses the shell/terminal to launch the agent tool through, per platform.";
             sourceFiles = ("src/DemaConsulting.AgentControl/AgentToolLauncher/ShellDetector.cs");
             testFiles = ("test/DemaConsulting.AgentControl.Tests/AgentToolLauncher/ShellDetectorTests.cs");
             designFiles = ("docs/design/agent-control/agent-tool-launcher/shell-detector.md");

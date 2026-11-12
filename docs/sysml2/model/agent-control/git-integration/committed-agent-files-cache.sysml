@@ -5,7 +5,6 @@ package AgentControl {
         doc /* Memoizes the committed-agent-files-changed result per repo path, keyed by HEAD commit hash. */
 
         metadata info : SoftwareInfo {
-            description = "Memoizes the committed-agent-files-changed result per repo path, keyed by HEAD commit hash.";
             sourceFiles = ("src/DemaConsulting.AgentControl/GitIntegration/CommittedAgentFilesCache.cs");
             testFiles = ("test/DemaConsulting.AgentControl.Tests/GitIntegration/CommittedAgentFilesCacheTests.cs");
             designFiles = ("docs/design/agent-control/git-integration/committed-agent-files-cache.md");

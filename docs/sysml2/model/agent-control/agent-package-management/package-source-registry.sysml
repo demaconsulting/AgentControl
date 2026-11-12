@@ -5,7 +5,6 @@ package AgentControl {
         doc /* Maps source aliases to providers; an alias that is not configured is an error and never falls back to another source. */
 
         metadata info : SoftwareInfo {
-            description = "Maps source aliases to providers; an alias that is not configured is an error and never falls back to another source.";
             sourceFiles = ("src/DemaConsulting.AgentControl/AgentPackageManagement/PackageSourceRegistry.cs");
             testFiles = ("test/DemaConsulting.AgentControl.Tests/AgentPackageManagement/PackageSourceRegistryTests.cs");
             designFiles = ("docs/design/agent-control/agent-package-management/package-source-registry.md");

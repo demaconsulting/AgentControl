@@ -5,7 +5,6 @@ package AgentControl {
         doc /* The rules for the names of the user's own repo groups: how a typed or stored name is cleaned up, which names are acceptable, how a stored name is repaired, and how names that differ only in letter case are treated as one group. */
 
         metadata info : SoftwareInfo {
-            description = "The rules for the names of the user's own repo groups: how a typed or stored name is cleaned up, which names are acceptable, how a stored name is repaired, and how names that differ only in letter case are treated as one group.";
             sourceFiles = ("src/DemaConsulting.AgentControl/Settings/RepoGroupName.cs");
             testFiles = ("test/DemaConsulting.AgentControl.Tests/Settings/RepoGroupNameTests.cs");
             designFiles = ("docs/design/agent-control/settings/repo-group-name.md");
