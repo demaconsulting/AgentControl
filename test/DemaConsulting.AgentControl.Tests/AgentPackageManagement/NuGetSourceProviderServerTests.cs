@@ -304,6 +304,10 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
         Assert.Equal(PackageSourceFailureKind.AccessDenied, ex.Kind);
         Assert.Contains("refused access", ex.Message, StringComparison.Ordinal);
         Assert.True(feed.ForbiddenCount > 0);
+
+        // The library's exception (whose message names the feed's full address) is not kept
+        Assert.Null(ex.InnerException);
+        Assert.DoesNotContain("/v3/index.json", ex.ToString(), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -544,6 +548,50 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
         Assert.NotNull(reason);
         Assert.True(reason.Length <= 300);
         Assert.DoesNotContain(SentinelPassword, reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that an access denial does not keep the library's exception as its inner exception, so that a
+    ///     caller that logs the whole exception cannot write the feed's full address (path included, which the
+    ///     library's message carries) to the log - for a 403 on the first attempt and for one after a sign-in.
+    /// </summary>
+    /// <param name="afterSignIn">Whether the 403 follows a 401 that the user's sign-in answered.</param>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NuGetSourceProvider_RunAsync_Forbidden_KeepsNoInnerExceptionAndNoFeedPath(bool afterSignIn)
+    {
+        // Arrange: a library exception whose message and address carry a private path
+        const string PrivateUrl = "https://feed.example/private/project/index.json";
+        var feed = await StartFeedAsync(UniqueId(), "1.0.0");
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential(FeedUser, SentinelPassword));
+        var provider = CreateProvider(feed, new PackageCredentialContext(new SessionCredentialStore(), prompt));
+
+        // Act
+        var ex = await Assert.ThrowsAsync<PackageSourceAccessException>(() => provider.RunAsync<int>(
+            async options =>
+            {
+                if (afterSignIn)
+                {
+                    var credential = await options.CredentialCallback!(new Uri(feed.IndexUrl), CancellationToken.None);
+                    if (credential is null)
+                    {
+                        throw new NuGetAuthenticationException($"Feed ({PrivateUrl}): HTTP 401 (Unauthorized)", "Feed", new Uri(PrivateUrl), 401, null);
+                    }
+                }
+
+                throw new NuGetAuthenticationException(
+                    $"Feed ({PrivateUrl}): HTTP 403 (Forbidden) - the source refused access.", "Feed", new Uri(PrivateUrl), 403, "Lacks permission.");
+            },
+            "unreachable",
+            CancellationToken.None));
+
+        // Assert: access denied, nothing inside it and no path anywhere in its text
+        Assert.Equal(PackageSourceFailureKind.AccessDenied, ex.Kind);
+        Assert.Null(ex.InnerException);
+        Assert.DoesNotContain("private", ex.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("index.json", ex.ToString(), StringComparison.Ordinal);
     }
 
     /// <summary>

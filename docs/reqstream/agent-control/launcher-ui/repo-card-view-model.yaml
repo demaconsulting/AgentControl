@@ -446,7 +446,8 @@ sections:
           The RepoCardViewModel class shall, when a package source answers that it refuses access
           (signed in, but no permission to read the feed), show a package source problem that carries
           the source's message and offers no sign-in, whether or not the check may prompt, including
-          when the refusal happens while the files of a candidate source are read to verify the
+          when the refusal happens while a source is listed or while the files of a candidate source
+          are read to verify the
           pinned package (the refusal is reported when no source verifies, not hidden behind a "no
           matching files" statement, and the launch re-sync warning carries the reason), and shall
           still use another source that does verify.
@@ -461,6 +462,9 @@ sections:
           - RepoCardViewModel_Refresh_OneSourceRefusesAccessAnotherVerifies_UsesTheWorkingSourceWithoutProblem
           - RepoCardViewModel_Refresh_OneSourceRefusesAccessAnotherHasDifferentFiles_ShowsAccessDeniedReason
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceRefusesAccess_WarnsWithTheServersReason
+          - RepoCardViewModel_Refresh_ListingRefusedAndAnotherHasDifferentFiles_ShowsAccessDeniedReason
+          - RepoCardViewModel_Refresh_ListingRefusedAndAnotherVerifies_UsesTheWorkingSourceWithoutProblem
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ListingRefused_ReportsReasonOnlyWhenNoSourceVerifies
 
       - id: AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt
         title: >-

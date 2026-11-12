@@ -618,7 +618,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         {
             // The server knows who this is and still says no: a prompt cannot help, and the credential
             // that was used was accepted, so nothing is forgotten
-            throw CreateAccessDenied(denial, ex);
+            throw CreateAccessDenied(denial);
         }
         catch (NuGetAuthenticationException ex)
         {
@@ -694,7 +694,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         {
             // A 403 after the user signed in: the typed credential is not kept (it is only kept after a
             // success), the server's reason is reported, and nothing asks the user again
-            throw CreateAccessDenied(denial, ex);
+            throw CreateAccessDenied(denial);
         }
         catch (NuGetAuthenticationException ex)
         {
@@ -910,10 +910,14 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     /// <summary>
     ///     Creates the user-readable exception for a server that knows the user and refuses access.
     /// </summary>
+    /// <remarks>
+    ///     The library's exception is deliberately not kept as the inner exception: its message can name the
+    ///     feed's full address (with its path), and callers log a whole exception. The status and the
+    ///     sanitized reason are already in the message and in the warning logged here.
+    /// </remarks>
     /// <param name="reason">The server's reason, or <see langword="null"/>.</param>
-    /// <param name="inner">The library's exception, kept for diagnosis only.</param>
     /// <returns>The exception to throw.</returns>
-    private PackageSourceAccessException CreateAccessDenied(string? reason, NuGetAuthenticationException inner)
+    private PackageSourceAccessException CreateAccessDenied(string? reason)
     {
         _nugetLogger.LogWarning(
             "Source {FeedOrigin} refused access although the user is signed in (HTTP 403): {Reason}",
@@ -930,7 +934,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
 
         message += " Signing in again will not help: ask the feed's administrator to give your account permission " +
                    "to read the feed (Reader, which includes ReadPackages, on Azure DevOps).";
-        return new PackageSourceAccessException(PackageSourceFailureKind.AccessDenied, message, inner);
+        return new PackageSourceAccessException(PackageSourceFailureKind.AccessDenied, message);
     }
 
     /// <summary>

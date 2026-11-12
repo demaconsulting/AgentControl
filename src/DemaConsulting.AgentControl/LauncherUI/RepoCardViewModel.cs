@@ -2240,7 +2240,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // never refused.
             var pinnedVersion = PinnedPackageVersion;
             var recordedPin = LoadPinForComparison();
-            var (offering, firstFailure) = await FindOfferingSourcesAsync(
+            var (offering, firstFailure, listingAccessDenied) = await FindOfferingSourcesAsync(
                 registry, pinnedPackageName, pinnedVersion, cancellationToken);
             if (offering.Count == 0)
             {
@@ -2258,7 +2258,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             if (PackageContentIdentity.IsFilesIdentity(recordedPin?.ContentIdentity))
             {
                 var verified = await FindVerifiedSourceAsync(
-                    offering, recordedPin!.ContentIdentity, SupplyingSource, registry, cancellationToken);
+                    offering, recordedPin!.ContentIdentity, SupplyingSource, registry, listingAccessDenied, cancellationToken);
                 if (verified is null)
                 {
                     if (_logger.IsEnabled(LogLevel.Warning))
@@ -3021,17 +3021,28 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="version">The pinned version text.</param>
     /// <param name="cancellationToken">Cancels the listing.</param>
     /// <returns>The offers of the package at exactly that version in Settings order (a source
-    ///     with several spellings of the version lists each), and the first failure of a source
-    ///     that could not be read (and was skipped), or <see langword="null"/>.</returns>
+    ///     with several spellings of the version lists each), the first failure of a source
+    ///     that could not be read (and was skipped), or <see langword="null"/>, and the first of those
+    ///     failures that was a refusal of access (HTTP 403), or <see langword="null"/>.</returns>
     /// <exception cref="IOException">Thrown when every source failed to list; see
     ///     <see cref="PackageVersionCache.GetVersionsAcrossSourcesAsync"/>.</exception>
-    private async Task<(List<DiscoveredPackage> Offering, Exception? FirstFailure)> FindOfferingSourcesAsync(
-        PackageSourceRegistry registry, string packageName, string? version, CancellationToken cancellationToken)
+    private async Task<(List<DiscoveredPackage> Offering, Exception? FirstFailure, PackageSourceAccessException? FirstAccessDenied)>
+        FindOfferingSourcesAsync(
+            PackageSourceRegistry registry, string packageName, string? version, CancellationToken cancellationToken)
     {
         Exception? firstFailure = null;
+        PackageSourceAccessException? firstAccessDenied = null;
         var offers = await _packageVersionCache.GetVersionsAcrossSourcesAsync(
-            registry, packageName, excludeAlias: null, cancellationToken, failure => firstFailure ??= failure);
-        return ([.. offers.Where(candidate => IsVersion(candidate, version))], firstFailure);
+            registry, packageName, excludeAlias: null, cancellationToken,
+            failure =>
+            {
+                firstFailure ??= failure;
+                if (failure is PackageSourceAccessException { Kind: PackageSourceFailureKind.AccessDenied } denied)
+                {
+                    firstAccessDenied ??= denied;
+                }
+            });
+        return ([.. offers.Where(candidate => IsVersion(candidate, version))], firstFailure, firstAccessDenied);
     }
 
     /// <summary>
@@ -3058,6 +3069,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="preferredAlias">The source this card was last supplied from, tried first (the
     ///     files it delivers are checked like any other's), or <see langword="null"/>.</param>
     /// <param name="registry">The configured sources.</param>
+    /// <param name="listingAccessDenied">The first refusal of access (HTTP 403) a source gave while it
+    ///     was listed for the offers, or <see langword="null"/>.</param>
     /// <param name="cancellationToken">Cancels the search.</param>
     /// <returns>The first source whose acquired files have exactly the recorded identity;
     ///     <see langword="null"/> when there is none. The caller disposes the result.</returns>
@@ -3071,19 +3084,22 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     is remembered, not lost: when no source verifies, the first such refusal is rethrown, so
     ///     the caller reports "access denied, and why" instead of claiming that no source has the
     ///     files (the source that refused may be the one that has them). When another source does
-    ///     verify, the refusal is only logged. Credentials are whatever the
+    ///     verify, the refusal is only logged. A refusal that a source gave while it was
+    ///     <em>listed</em> (it is then not among the offers, so it is never acquired) counts the same: it is
+    ///     passed in as <paramref name="listingAccessDenied"/> and is the first refusal. Credentials are whatever the
     ///     registry was built with: a background check never prompts.
     /// </remarks>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is canceled.</exception>
     /// <exception cref="PackageSourceAccessException">Thrown, with kind
     ///     <see cref="PackageSourceFailureKind.AccessDenied"/>, when no source verified and a source
-    ///     refused access.</exception>
+    ///     refused access, while it was listed or while it was read.</exception>
     private async Task<VerifiedSource?> FindVerifiedSourceAsync(
         IReadOnlyList<DiscoveredPackage> offering,
         string? pinnedIdentity,
         string? preferredAlias,
         PackageSourceRegistry registry,
+        PackageSourceAccessException? listingAccessDenied,
         CancellationToken cancellationToken)
     {
         // A pin without a files identity (an older pin, or a source that named none) has nothing
@@ -3093,7 +3109,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return null;
         }
 
-        PackageSourceAccessException? firstAccessDenied = null;
+        PackageSourceAccessException? firstAccessDenied = listingAccessDenied;
         foreach (var offer in offering.OrderBy(
                      candidate => string.Equals(candidate.SourceAlias, preferredAlias, StringComparison.OrdinalIgnoreCase) ? 0 : 1))
         {
@@ -3754,7 +3770,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             // The pin names no source: the user's configured sources, in Settings order, are asked
             // what they offer of the pinned package and version
-            var (offering, firstFailure) = await FindOfferingSourcesAsync(
+            var (offering, firstFailure, listingAccessDenied) = await FindOfferingSourcesAsync(
                 registry, pinnedPackageName, pinnedVersion, cancellationToken);
 
             // Nothing offers it and a source could not be read: nothing is known (a sign-in that is
@@ -3785,7 +3801,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 if (supplier is null)
                 {
                     using var verified = await FindVerifiedSourceAsync(
-                        offering, _pinnedContentIdentity, SupplyingSource, registry, cancellationToken);
+                        offering, _pinnedContentIdentity, SupplyingSource, registry, listingAccessDenied, cancellationToken);
                     supplier = verified?.Package.SourceAlias;
                     if (supplier is null)
                     {

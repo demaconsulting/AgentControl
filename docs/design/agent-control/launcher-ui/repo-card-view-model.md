@@ -379,7 +379,8 @@ provider's message (which carries the server's reason) whether or not the check 
 `SourceNeedsSignIn` false, because signing in cannot help
 (`AgentControl-RepoCardViewModel-AccessDeniedShown`). The same holds when the 403 is read while a candidate's files
 are acquired to verify the pin (`FindVerifiedSourceAsync`, below): the other candidates are still tried, but when none
-verifies the first refusal is rethrown, so the check reports it and the launch warning carries the reason.
+verifies the first refusal is rethrown (a refusal while a source was listed counts too), so the check reports it and
+the launch warning carries the reason.
 A source that cannot be read is skipped, so one
 unreachable share never hides what the others offer; but when nothing offers the pinned version and a source
 failed, nothing is known ("no source offers it" would be a false statement), so the check fails like any other read
@@ -678,12 +679,15 @@ purely local, from the user's own Settings, wherever the pinned package is acqui
 1. *Which sources offer it.* The configured sources are asked, in Settings order, through
    `PackageVersionCache.GetVersionsAcrossSourcesAsync` (no source is excluded and none is read twice per session; a
    source that cannot be read is skipped and its failure recorded), and only the sources that list the pinned package
-   and version are candidates (`FindOfferingSourcesAsync`).
+   and version are candidates (`FindOfferingSourcesAsync`, which also returns the first listing failure that was a
+   refusal of access, used in 2).
 2. *Launch re-sync, pin with a files identity* (`FindVerifiedSourceAsync`). The candidates are *acquired* - the card's
    last supplier first, otherwise Settings order - and the first whose reader's `ContentIdentity` compares `Same` with
    the pin's wins and is extracted. A candidate that delivers other files is disposed and passed over; one that fails
    to acquire is skipped, except that a refusal of access (`PackageSourceFailureKind.AccessDenied`, HTTP 403) is
-   remembered: when no candidate matches, the first such refusal is thrown (`ExceptionDispatchInfo`) instead of the
+   remembered - whether the source refused while it was *listed* (then it is no candidate; the refusal is passed in from
+   step 1) or while its files were acquired: when no candidate matches, the first such refusal is thrown
+   (`ExceptionDispatchInfo`) instead of the
    "no matching files" result, because the source that refused may be the one that has the files; the launch warning
    then reads "Failed to sync agent files: {the access-denied message with the server's reason} Launching anyway." When
    none offers the version, the launch warning is "No configured source offers {package}

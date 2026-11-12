@@ -241,7 +241,10 @@ its status, including a raw HTTP 403 whose reason it recorded for the source, so
 reason, which the library has already reduced to one line, is reduced again to one line of at most 300 characters through
 `SecretRedactor` because it comes from the server, and every URL in it is reduced to its origin
 (`scheme://host[:port]`, `[link]` for any other or unreadable URL; `ReduceUrlsToOrigins`) so that no path, query,
-fragment or user information of a server address reaches the message, the card, the dialog or the log.
+fragment or user information of a server address reaches the message, the card, the dialog or the log. The library's
+exception is not kept as the inner exception of an access denial either (`CreateAccessDenied(reason)` takes none): its
+message can name the feed's full address, and callers that log a whole exception would write that path to the log; the
+status and the sanitized reason are already in the message and in the warning.
 `CreateAccessDenied` logs a warning
 with the reason and builds "Signed in, but 'host' refused access: reason. ..." with a hint to ask the feed's
 administrator for read permission (Reader / ReadPackages on Azure DevOps). The `AccessDenied` handling of attempt 2 is
