@@ -108,7 +108,7 @@
        local/network folder feeds, and later servers) into a per-source cache that AgentControl
        owns; see docs/design/ots/nuget-caching.md. -->
   <ItemGroup>
-    <PackageReference Include="DemaConsulting.NuGet.Caching" Version="2.0.0-beta.2" />
+    <PackageReference Include="DemaConsulting.NuGet.Caching" Version="2.0.0-beta.4" />
   </ItemGroup>
 
   <!-- Avalonia UI Dependencies -->

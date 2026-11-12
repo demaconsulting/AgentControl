@@ -28,10 +28,18 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 internal enum PackageSourceFailureKind
 {
     /// <summary>
-    ///     The server answered that it needs credentials, or rejected the ones supplied (HTTP 401
-    ///     or 403).
+    ///     The server needs credentials, or rejected the ones supplied (HTTP 401). A sign-in can
+    ///     help.
     /// </summary>
     AuthenticationFailed,
+
+    /// <summary>
+    ///     The server knows who the user is but refuses access (HTTP 403): the account lacks the
+    ///     permission to read the feed. Signing in again cannot help, so the user is never asked
+    ///     for a credential and no remembered sign-in is forgotten; the feed's administrator has
+    ///     to grant the permission.
+    /// </summary>
+    AccessDenied,
 
     /// <summary>
     ///     The server needs credentials and the user declined to provide them.

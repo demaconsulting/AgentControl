@@ -483,6 +483,33 @@ public sealed class PackageVersionCacheTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that when every consulted source fails and one of them refused access (HTTP 403), that refusal
+    ///     is the failure reported, whatever order the sources failed in: it is the one a person can act on and it
+    ///     carries the server's reason.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_GetVersionsAcrossSources_EverySourceFailsOneRefusesAccess_ThrowsTheRefusal()
+    {
+        // Arrange: an unreachable source first, then one that answers 403
+        var unreachable = new FakePackageSourceProvider("One")
+        {
+            ListVersionsException = new PackageSourceAccessException(PackageSourceFailureKind.Unreachable, "unreachable")
+        };
+        var denied = new FakePackageSourceProvider("Two")
+        {
+            ListVersionsException = new PackageSourceAccessException(PackageSourceFailureKind.AccessDenied, "refused: reason")
+        };
+        var registry = CreateRegistry(unreachable, denied);
+        var cache = new PackageVersionCache();
+
+        // Act / Assert
+        var failure = await Assert.ThrowsAsync<PackageSourceAccessException>(
+            () => cache.GetVersionsAcrossSourcesAsync(registry, "contoso-agents", null, CancellationToken.None));
+        Assert.Equal(PackageSourceFailureKind.AccessDenied, failure.Kind);
+        Assert.Equal("refused: reason", failure.Message);
+    }
+
+    /// <summary>
     ///     Test that a caller that asks is told about each source that was skipped because it could not be
     ///     read, so it can tell "no source offers the package" from "a source that might have could not be
     ///     read".

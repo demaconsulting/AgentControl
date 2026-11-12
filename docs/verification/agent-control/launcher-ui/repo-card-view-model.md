@@ -427,6 +427,35 @@ card - reuses the remembered credential without asking. This scenario is tested 
 `RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential`,
 in `RepoCardServerSourceTests.cs`, covering `AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`.
 
+**RepoCardViewModel_AccessDenied_ShownOnTheCardWithoutSignInOffer**: A pinned card whose source throws a
+`PackageSourceAccessException` of kind `AccessDenied` shows the message (with the server's reason) as its source
+problem, sets `SourceNeedsSignIn` false and offers no sign-in, for a background check and for a check the user
+asked for alike. When the refusal happens while a source is listed, or while the files of a candidate source are read
+to verify the pinned package
+(`FindVerifiedSourceAsync`), another source that verifies is still used and nothing is reported; when none verifies,
+the first refusal is the outcome, so the card shows the access-denied message instead of "no configured source
+delivers ...", also when another source delivered different files, and the launch re-sync warning ("Failed to sync
+agent files: ... Launching anyway.") carries the reason. A refusal is also what is reported when nothing offers the
+pinned version because other sources failed first (an unreachable source before it) or when every source failed: the
+failure to report is the refusal, not the earlier one (`PackageVersionCache.GetVersionsAcrossSourcesAsync` and
+`FindOfferingSourcesAsync` prefer it), while a source that works still offers its newer version. This scenario is
+tested by
+`RepoCardViewModel_RefreshUpgradeStatusAsync_ServerRefusesAccess_ShowsReasonWithoutSignInOffer`, and, with a source
+that lists the package but answers 403 when it is read, or one that answers 403 when it is listed (in-test providers
+next to real zip folders), by
+`RepoCardViewModel_Refresh_OnlySourceRefusesAccessWhileVerifying_ShowsAccessDeniedReason`,
+`RepoCardViewModel_Refresh_OneSourceRefusesAccessAnotherVerifies_UsesTheWorkingSourceWithoutProblem`,
+`RepoCardViewModel_Refresh_OneSourceRefusesAccessAnotherHasDifferentFiles_ShowsAccessDeniedReason`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceRefusesAccess_WarnsWithTheServersReason`,
+`RepoCardViewModel_Refresh_ListingRefusedAndAnotherHasDifferentFiles_ShowsAccessDeniedReason`,
+`RepoCardViewModel_Refresh_ListingRefusedAndAnotherVerifies_UsesTheWorkingSourceWithoutProblem` and
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ListingRefused_ReportsReasonOnlyWhenNoSourceVerifies`,
+`RepoCardViewModel_Refresh_UnreachableThenListingRefused_ShowsAccessDeniedReason`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UnreachableThenListingRefused_WarnsWithTheReason` and
+`RepoCardViewModel_Refresh_ListingRefusedAndAnotherOffersNewer_OffersTheUpgrade` (in
+`RepoCardPortablePinTests.cs`), covering
+`AgentControl-RepoCardViewModel-AccessDeniedShown`.
+
 **RepoCardViewModel_SignatureIndicator_ShieldOnlyForNuGetSourcesThatRequireSignatures**: A card whose package is
 supplied by a NuGet
 source that requires signed packages reports `RequiresSignature` and a tooltip that says signatures are required and

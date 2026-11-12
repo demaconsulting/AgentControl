@@ -102,8 +102,10 @@ sections:
         title: >-
           The PackageVersionCache class shall skip a source that cannot be read when listing across
           sources, so that the offers of the others are still returned, shall tell a caller that
-          asks which sources failed, and shall report the first failure when every source that was
-          consulted failed.
+          asks which sources failed, and shall report a failure when every source that was
+          consulted failed - the first refusal of access (HTTP 403) when there was one, so that an
+          earlier unreachable source does not hide the reason a person can act on, otherwise the
+          first failure.
         justification: |
           One unreachable share or server must not hide what the others offer; but when nothing
           could be read, an empty answer would wrongly claim that no source offers the package, and
@@ -112,6 +114,7 @@ sections:
         tests:
           - PackageVersionCache_GetVersionsAcrossSources_OneSourceFails_ReturnsTheOthersOffers
           - PackageVersionCache_GetVersionsAcrossSources_EverySourceFails_ThrowsTheFirstFailure
+          - PackageVersionCache_GetVersionsAcrossSources_EverySourceFailsOneRefusesAccess_ThrowsTheRefusal
           - PackageVersionCache_GetVersionsAcrossSources_SourceFailureCallback_ReportsEachSkippedSource
 
       - id: AgentControl-PackageVersionCache-NewestAcrossSources

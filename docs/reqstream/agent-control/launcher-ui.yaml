@@ -1317,9 +1317,11 @@ sections:
           chose to take, with the card saying which one.
         children:
           - AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt
+          - AgentControl-RepoCardViewModel-AccessDeniedShown
         tests:
           - RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains
           - RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_ServerRefusesAccess_ShowsReasonWithoutSignInOffer
 
       - id: AgentControl-LauncherUI-RepoCardChips
         title: >-

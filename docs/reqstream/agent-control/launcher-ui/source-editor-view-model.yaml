@@ -260,7 +260,7 @@ sections:
       - id: AgentControl-SourceEditorViewModel-TestConnectionFailureReasons
         title: >-
           The SourceEditorViewModel class shall report why a connection test failed - sign-in
-          failed, sign-in canceled, timed out or server unreachable - with a headline specific to
+          failed, access denied, sign-in canceled, timed out or server unreachable - with a headline specific to
           that reason and the message the provider gave.
         justification: |
           Each reason calls for a different action by the developer; one set of failure reasons

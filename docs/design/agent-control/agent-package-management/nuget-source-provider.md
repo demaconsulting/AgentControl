@@ -229,8 +229,28 @@ failure to words). A server call is made up
 to **twice**, which is what gives the credential order (below): attempt 1 is _silent_ — a
 `PackageCredentialCallback` over the session store and the user's own credential store, without a prompt — and only
 if the server then refuses with
-HTTP 401/403 and a prompt is available does attempt 2 run with a callback that may ask the user, once
-(`PromptAndRetryAsync`). A credential the user typed is committed to the session store only after attempt 2
+HTTP 401 and a prompt is available does attempt 2 run with a callback that may ask the user, once
+(`PromptAndRetryAsync`). A refusal with **HTTP 403** is different: the server knows the user and says no, so
+neither attempt asks (attempt 2 does not run), no remembered credential is forgotten (the server accepted it) and a
+credential typed in attempt 2 is not kept; the operation ends as `AccessDenied` with the server's reason
+(`AgentControl-NuGetSourceProvider-AccessDenied`). The library fails a 403 before it asks the credential callback or any
+credential provider, so against a server that answers 403 attempt 1 never even consults the stores. `IsAccessDenied`
+(internal) recognizes a 403 from `NuGetAuthenticationException.StatusCode` and takes the server's explanation from
+`ServerReason`; the exception's message is never parsed (the library reports every 401 or 403 as this exception type with
+its status, including a raw HTTP 403 whose reason it recorded for the source, so no other shape needs handling). The
+reason, which the library has already reduced to one line, is reduced again to one line of at most 300 characters through
+`SecretRedactor` because it comes from the server, and every URL in it is reduced to its origin
+(`scheme://host[:port]`, `[link]` for any other or unreadable URL; `ReduceUrlsToOrigins`) so that no path, query,
+fragment or user information of a server address reaches the message, the card, the dialog or the log. The library's
+exception is not kept as the inner exception of an access denial either (`CreateAccessDenied(reason)` takes none): its
+message can name the feed's full address, and callers that log a whole exception would write that path to the log; the
+status and the sanitized reason are already in the message and in the warning.
+`CreateAccessDenied` logs a warning
+with the reason and builds "Signed in, but 'host' refused access: reason. ..." with a hint to ask the feed's
+administrator for read permission (Reader / ReadPackages on Azure DevOps). The `AccessDenied` handling of attempt 2 is
+still needed, for a 403 that follows a 401 the user's sign-in answered (for example the service index accepts the
+credential and the package resource then refuses it).
+A credential the user typed is committed to the session store only after attempt 2
 succeeded - and handed to the user's credential store at that moment when the user ticked "Remember on this
 computer"; a credential the server rejected (from the stores in attempt 1, or typed in attempt 2) is forgotten and,
 when it came from the user's credential store, removed from there. The removal is not abandoned just because the
@@ -311,8 +331,10 @@ reported as `PackageSourceAccessException` (derived from
 `InvalidOperationException`, so existing handlers keep working) carrying a `PackageSourceFailureKind`
 (`AgentControl-NuGetSourceProvider-ServerFailures`):
 
-- `AuthenticationFailed` — the server answered 401/403 and no credential was available (a background
+- `AuthenticationFailed` — the server answered 401 and no credential was available (a background
   operation, or no prompt), or the credential supplied was rejected (the rejected credential is forgotten);
+- `AccessDenied` — the server answered 403: it knows the user and refuses access (the account lacks the permission
+  to read the feed). No prompt is opened and no credential is forgotten; the message carries the server's reason;
 - `SignInCanceled` — the user cancelled the sign-in dialog;
 - `SignatureRejected` — a package was refused for its signature (unsigned, invalid, or not signed by the pinned
   publisher; the message names the package and the source and never a secret), or the source requires signatures on

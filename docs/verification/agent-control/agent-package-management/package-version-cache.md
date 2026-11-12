@@ -22,7 +22,8 @@ N/A - standard test environment.
 - Invalidating one source leaves the others cached, and an in-flight query for the invalidated
   source does not repopulate the cache.
 - Listing across the configured sources returns their offers in configuration order, skips a source that cannot be
-  read (telling a caller that asks), reports the first failure when every source failed, and attributes the newest
+  read (telling a caller that asks), reports a failure when every source failed (the first refusal of access when
+  there was one, otherwise the first failure), and attributes the newest
   version - a tie to the first source configured.
 - Cached results are reused on repeated calls without redundant re-scanning.
 - Invalidation forces the next call to re-scan and reflects updated source-folder contents.
@@ -96,9 +97,12 @@ covering `AgentControl-PackageVersionCache-ListAcrossSources`.
 
 **PackageVersionCache_ListAcrossSources_ToleratesFailingSources**: A source that cannot be read is skipped and the
 others' offers are returned; a caller that passes a failure callback is told about each skipped source's failure; when
-every consulted source fails the first failure is thrown instead of an empty answer. This scenario is tested by
+every consulted source fails a failure is thrown instead of an empty answer - the first refusal of access (HTTP 403)
+when a source gave one, so that an earlier unreachable source does not mask it, otherwise the first failure. This
+scenario is tested by
 `PackageVersionCache_GetVersionsAcrossSources_OneSourceFails_ReturnsTheOthersOffers`,
-`PackageVersionCache_GetVersionsAcrossSources_EverySourceFails_ThrowsTheFirstFailure` and
+`PackageVersionCache_GetVersionsAcrossSources_EverySourceFails_ThrowsTheFirstFailure`,
+`PackageVersionCache_GetVersionsAcrossSources_EverySourceFailsOneRefusesAccess_ThrowsTheRefusal` and
 `PackageVersionCache_GetVersionsAcrossSources_SourceFailureCallback_ReportsEachSkippedSource`, covering
 `AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure`.
 

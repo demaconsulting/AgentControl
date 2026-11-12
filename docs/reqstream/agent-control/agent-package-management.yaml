@@ -344,6 +344,7 @@ sections:
           hold an operation forever.
         children:
           - AgentControl-NuGetSourceProvider-ServerFailures
+          - AgentControl-NuGetSourceProvider-AccessDenied
           - AgentControl-NuGetSourceProvider-SignInTimeLimit
           - AgentControl-NuGetSourceProvider-CallerCancellationNotAFailure
         tests:

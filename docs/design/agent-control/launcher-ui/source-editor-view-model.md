@@ -184,7 +184,8 @@ definition from the dialog (a placeholder alias is used when none was typed yet)
 through the factory and lists the versions of the **first** package ID, so only a version list is read and
 nothing is saved or downloaded. The outcome is turned into a sentence that says what to do: *Connection OK*
 with the number of versions and the newest; *Package not found* when the server answered with no such
-package; *Sign-in failed*, *Sign-in canceled*, *Timed out* or *Server unreachable* from the
+package; *Sign-in failed*, *Access denied* (HTTP 403, with the server's reason), *Sign-in canceled*,
+*Timed out* or *Server unreachable* from the
 `PackageSourceAccessException.Kind`; *Connection failed* for any other failure; and a neutral *Test
 canceled* when the user cancelled. The test may open the sign-in dialog like any other use of the server.
 A result that is showing is dropped as soon as the address, the insecure choice or the package IDs change, so a
