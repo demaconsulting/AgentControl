@@ -377,7 +377,10 @@ Select Package and Upgrade actions the user chooses use a source registry that m
 (`PackageSourceFailureKind.AccessDenied`: signed in, no permission to read the feed) sets `SourceProblem` to the
 provider's message (which carries the server's reason) whether or not the check may prompt, with no sign-in offer and
 `SourceNeedsSignIn` false, because signing in cannot help
-(`AgentControl-RepoCardViewModel-AccessDeniedShown`). A source that cannot be read is skipped, so one
+(`AgentControl-RepoCardViewModel-AccessDeniedShown`). The same holds when the 403 is read while a candidate's files
+are acquired to verify the pin (`FindVerifiedSourceAsync`, below): the other candidates are still tried, but when none
+verifies the first refusal is rethrown, so the check reports it and the launch warning carries the reason.
+A source that cannot be read is skipped, so one
 unreachable share never hides what the others offer; but when nothing offers the pinned version and a source
 failed, nothing is known ("no source offers it" would be a false statement), so the check fails like any other read
 failure ("Update check failed", or the sign-in hint above) instead of showing the "no source offers" problem. A pin
@@ -679,7 +682,11 @@ purely local, from the user's own Settings, wherever the pinned package is acqui
 2. *Launch re-sync, pin with a files identity* (`FindVerifiedSourceAsync`). The candidates are *acquired* - the card's
    last supplier first, otherwise Settings order - and the first whose reader's `ContentIdentity` compares `Same` with
    the pin's wins and is extracted. A candidate that delivers other files is disposed and passed over; one that fails
-   to acquire is skipped. When none offers the version, the launch warning is "No configured source offers {package}
+   to acquire is skipped, except that a refusal of access (`PackageSourceFailureKind.AccessDenied`, HTTP 403) is
+   remembered: when no candidate matches, the first such refusal is thrown (`ExceptionDispatchInfo`) instead of the
+   "no matching files" result, because the source that refused may be the one that has the files; the launch warning
+   then reads "Failed to sync agent files: {the access-denied message with the server's reason} Launching anyway." When
+   none offers the version, the launch warning is "No configured source offers {package}
    {version}. ..."; when some offer it but none matches, the files are refused ("No configured source delivers
    {package} {version} with the files this repo was set up with: ...") and nothing is extracted, the pin is untouched
    and launch continues without the files.

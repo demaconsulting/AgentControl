@@ -274,7 +274,10 @@ the unit level, with a scripted library call (`RunAsync`), by
 `NuGetSourceProvider_RunAsync_Unauthorized_StillPromptsOnce`,
 `NuGetSourceProvider_RunAsync_UnauthorizedThenForbiddenAfterSignIn_ReportsAccessDeniedAfterOnePrompt` and
 `NuGetSourceProvider_IsAccessDenied_StatusAndReason_DetectsForbiddenAndSanitizesReason` (which also checks that a
-message that merely talks about a 403 is not one); and end to end against the in-process
+message that merely talks about a 403 is not one), `NuGetSourceProvider_IsAccessDenied_UrlsInReason_ReducedToSchemeHostAndPort`
+(each URL in the reason, with path, query, fragment or user information, becomes scheme, host and port, and another or
+unreadable URL becomes `[link]`) and `NuGetSourceProvider_RunAsync_ForbiddenReasonHasUrl_MessageAndLogShowOnlyOrigin`
+(the message and the warning log show only the origin); and end to end against the in-process
 mock server answering 403 (with an `X-TFS-ServiceError` header, and with no prompt or with a prompt that is never
 asked) by
 `NuGetSourceProvider_ListVersions_ServerExplainsForbidden_ShowsReasonWithoutPromptingOrForgetting`,

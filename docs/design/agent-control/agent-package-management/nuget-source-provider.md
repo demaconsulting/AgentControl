@@ -239,7 +239,10 @@ credential provider, so against a server that answers 403 attempt 1 never even c
 `ServerReason`; the exception's message is never parsed (the library reports every 401 or 403 as this exception type with
 its status, including a raw HTTP 403 whose reason it recorded for the source, so no other shape needs handling). The
 reason, which the library has already reduced to one line, is reduced again to one line of at most 300 characters through
-`SecretRedactor` because it comes from the server, and `CreateAccessDenied` logs a warning
+`SecretRedactor` because it comes from the server, and every URL in it is reduced to its origin
+(`scheme://host[:port]`, `[link]` for any other or unreadable URL; `ReduceUrlsToOrigins`) so that no path, query,
+fragment or user information of a server address reaches the message, the card, the dialog or the log.
+`CreateAccessDenied` logs a warning
 with the reason and builds "Signed in, but 'host' refused access: reason. ..." with a hint to ask the feed's
 administrator for read permission (Reader / ReadPackages on Azure DevOps). The `AccessDenied` handling of attempt 2 is
 still needed, for a 403 that follows a 401 the user's sign-in answered (for example the service index accepts the

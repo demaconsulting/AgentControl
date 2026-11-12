@@ -3066,11 +3066,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     tried in Settings order (the last supplier first, which is only a saving: identical files
     ///     are identical whichever source delivers them). A candidate that cannot be read or acquired
     ///     is skipped (the next one may still match), and one that delivers other files is
-    ///     rejected - a package name and version is never enough. Credentials are whatever the
+    ///     rejected - a package name and version is never enough. The exception is a refusal of
+    ///     access (the server answered 403: <see cref="PackageSourceFailureKind.AccessDenied"/>) that
+    ///     is remembered, not lost: when no source verifies, the first such refusal is rethrown, so
+    ///     the caller reports "access denied, and why" instead of claiming that no source has the
+    ///     files (the source that refused may be the one that has them). When another source does
+    ///     verify, the refusal is only logged. Credentials are whatever the
     ///     registry was built with: a background check never prompts.
     /// </remarks>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is canceled.</exception>
+    /// <exception cref="PackageSourceAccessException">Thrown, with kind
+    ///     <see cref="PackageSourceFailureKind.AccessDenied"/>, when no source verified and a source
+    ///     refused access.</exception>
     private async Task<VerifiedSource?> FindVerifiedSourceAsync(
         IReadOnlyList<DiscoveredPackage> offering,
         string? pinnedIdentity,
@@ -3085,6 +3093,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return null;
         }
 
+        PackageSourceAccessException? firstAccessDenied = null;
         foreach (var offer in offering.OrderBy(
                      candidate => string.Equals(candidate.SourceAlias, preferredAlias, StringComparison.OrdinalIgnoreCase) ? 0 : 1))
         {
@@ -3111,7 +3120,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
                                            or ArgumentException)
             {
-                // A source that cannot deliver the package says nothing about the others
+                // A source that cannot deliver the package says nothing about the others; a refusal
+                // of access is remembered so that it is reported when no source verifies
+                if (ex is PackageSourceAccessException { Kind: PackageSourceFailureKind.AccessDenied } denied)
+                {
+                    firstAccessDenied ??= denied;
+                }
+
                 if (_logger.IsEnabled(LogLevel.Information))
                 {
                     _logger.LogInformation(
@@ -3123,6 +3138,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 reader?.Dispose();
             }
+        }
+
+        if (firstAccessDenied is not null)
+        {
+            ExceptionDispatchInfo.Capture(firstAccessDenied).Throw();
         }
 
         return null;

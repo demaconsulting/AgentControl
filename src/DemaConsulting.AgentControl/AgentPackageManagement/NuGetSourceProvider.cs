@@ -817,11 +817,13 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     ///     Reduces a server's explanation to one short line that is safe to show and to log.
     /// </summary>
     /// <param name="text">The server's text.</param>
-    /// <returns>The text with line breaks and runs of white space collapsed, secrets redacted and
-    ///     the length capped, or <see langword="null"/> when nothing is left.</returns>
+    /// <returns>The text with line breaks and runs of white space collapsed, every URL reduced to its
+    ///     origin, secrets redacted and the length capped, or <see langword="null"/> when nothing is
+    ///     left.</returns>
     private static string? SanitizeReason(string text)
     {
         var line = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        line = ReduceUrlsToOrigins(line);
         line = SecretRedactor.Redact(line);
         if (line.Length > MaxReasonLength)
         {
@@ -829,6 +831,80 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         }
 
         return line.Length == 0 ? null : line;
+    }
+
+    /// <summary>
+    ///     Reduces every URL in a one-line text to its origin (<c>scheme://host[:port]</c>), so that no
+    ///     path, query string, fragment or user information of a server's address is shown or logged.
+    /// </summary>
+    /// <param name="line">The text, with its white space already collapsed to single spaces.</param>
+    /// <returns>The text with each <c>http</c> or <c>https</c> URL replaced by its origin and any
+    ///     other URL (or one that cannot be read) replaced by <c>[link]</c>.</returns>
+    private static string ReduceUrlsToOrigins(string line)
+    {
+        if (!line.Contains("://", StringComparison.Ordinal))
+        {
+            return line;
+        }
+
+        var tokens = line.Split(' ');
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            tokens[i] = ReduceUrlToken(tokens[i]);
+        }
+
+        return string.Join(' ', tokens);
+    }
+
+    /// <summary>
+    ///     Reduces the URL in one white-space-free token, keeping the text around it.
+    /// </summary>
+    /// <param name="token">The token, for example <c>(https://feed.example/a/b?x=1).</c>.</param>
+    /// <returns>The token with its URL (if any) reduced to the origin, for example
+    ///     <c>(https://feed.example).</c>.</returns>
+    private static string ReduceUrlToken(string token)
+    {
+        var marker = token.IndexOf("://", StringComparison.Ordinal);
+        if (marker <= 0)
+        {
+            return token;
+        }
+
+        // The scheme is the run of scheme characters just before "://"
+        var start = marker;
+        while (start > 0 && (char.IsAsciiLetterOrDigit(token[start - 1]) || token[start - 1] is '+' or '.' or '-'))
+        {
+            start--;
+        }
+
+        if (start == marker || !char.IsAsciiLetter(token[start]))
+        {
+            return token;
+        }
+
+        // Punctuation that ends a sentence or closes a bracket or quote is not part of the URL
+        var url = token[start..].TrimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}', '\'', '"');
+        var suffix = token[(start + url.Length)..];
+        return string.Concat(token.AsSpan(0, start), ReduceUrl(url), suffix);
+    }
+
+    /// <summary>
+    ///     Reduces one URL to its origin.
+    /// </summary>
+    /// <param name="url">The URL text.</param>
+    /// <returns>The origin of an <c>http</c> or <c>https</c> URL, otherwise <c>[link]</c>.</returns>
+    private static string ReduceUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return "[link]";
+        }
+
+        // User information is dropped (not refused, as for a feed address): it is only being hidden
+        var plain = uri.Scheme is "http" or "https"
+            ? new UriBuilder(uri) { UserName = string.Empty, Password = string.Empty }.Uri
+            : null;
+        return FeedOrigin.TryCreate(plain, out var origin) && origin is not null ? origin.ToString() : "[link]";
     }
 
     /// <summary>

@@ -547,6 +547,64 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
     }
 
     /// <summary>
+    ///     Test that every URL in a server's reason is reduced to its origin (scheme, host and port), so no
+    ///     path, query string, fragment or user information of a server address is kept, while the text around
+    ///     the URL is.
+    /// </summary>
+    [Fact]
+    public void NuGetSourceProvider_IsAccessDenied_UrlsInReason_ReducedToSchemeHostAndPort()
+    {
+        // Arrange: the text around the URLs is kept (the library itself already drops user information, query and fragment
+        // and turns double quotes into single quotes, which is why the quotes below are single)
+        const string Reason = "Cannot read https://alice:pw@feed.example:8443/private/project/index.json?token=abc#frag " +
+                              "(see http://Other.Example/a/b/c). Also 'https://third.example/x/y', ftp://files.example/z and " +
+                              "not-a-url://";
+
+        // Act
+        Assert.True(NuGetSourceProvider.IsAccessDenied(
+            new NuGetAuthenticationException("refused", "Feed", null, 403, Reason), out var reason));
+
+        // Assert
+        Assert.Equal(
+            "Cannot read https://feed.example:8443 (see http://other.example). Also 'https://third.example', " +
+            "[link] and [link]",
+            reason);
+        foreach (var leaked in new[] { "private", "project", "index.json", "token", "frag", "alice", "pw", "/a/b", "/x/y", "/z" })
+        {
+            Assert.DoesNotContain(leaked, reason, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the message the user sees and the warning that is logged for a 403 show a URL in the
+    ///     server's reason only as scheme, host and port.
+    /// </summary>
+    [Fact]
+    public async Task NuGetSourceProvider_RunAsync_ForbiddenReasonHasUrl_MessageAndLogShowOnlyOrigin()
+    {
+        // Arrange
+        var feed = await StartFeedAsync(UniqueId(), "1.0.0");
+        var log = new ListLogger();
+        var provider = CreateProvider(feed, new PackageCredentialContext(new SessionCredentialStore(), null), log);
+
+        // Act
+        var ex = await Assert.ThrowsAsync<PackageSourceAccessException>(() => provider.RunAsync<int>(
+            _ => throw Forbidden(feed, "No access to https://feed.example/private/project/index.json?x=1 (ask an admin)."),
+            "unreachable",
+            CancellationToken.None));
+
+        // Assert: scheme and host stay, the path and query never reach the message or the log
+        Assert.Equal(PackageSourceFailureKind.AccessDenied, ex.Kind);
+        Assert.Contains("refused access: No access to https://feed.example (ask an admin).", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("x=1", ex.Message, StringComparison.Ordinal);
+        var lines = log.Snapshot();
+        Assert.Contains(lines, line => line.Contains("https://feed.example", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, line => line.Contains("private", StringComparison.Ordinal)
+            || line.Contains("x=1", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     ///     Builds the exception the NuGet library throws for an HTTP 403.
     /// </summary>
     /// <param name="feed">The feed that refused.</param>

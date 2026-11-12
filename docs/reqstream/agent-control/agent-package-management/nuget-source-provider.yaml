@@ -408,7 +408,8 @@ sections:
         title: >-
           The NuGetSourceProvider class shall, when a server answers HTTP 403 (it knows the user
           and refuses access), report the failure as access denied with the server's reason
-          (reduced to one short line without secrets and logged as a warning), shall never open the
+          (reduced to one short line without secrets, with every URL in it reduced to scheme, host
+          and port, and logged as a warning), shall never open the
           sign-in prompt for it, and shall not forget a remembered or saved sign-in because of it;
           a 401 shall keep asking the user once.
         justification: |
@@ -422,6 +423,8 @@ sections:
           - NuGetSourceProvider_RunAsync_Unauthorized_StillPromptsOnce
           - NuGetSourceProvider_RunAsync_UnauthorizedThenForbiddenAfterSignIn_ReportsAccessDeniedAfterOnePrompt
           - NuGetSourceProvider_IsAccessDenied_StatusAndReason_DetectsForbiddenAndSanitizesReason
+          - NuGetSourceProvider_IsAccessDenied_UrlsInReason_ReducedToSchemeHostAndPort
+          - NuGetSourceProvider_RunAsync_ForbiddenReasonHasUrl_MessageAndLogShowOnlyOrigin
           - NuGetSourceProvider_ListVersions_ServerExplainsForbidden_ShowsReasonWithoutPromptingOrForgetting
 
       - id: AgentControl-NuGetSourceProvider-RejectedCredentialForgotten

@@ -430,8 +430,18 @@ in `RepoCardServerSourceTests.cs`, covering `AgentControl-RepoCardViewModel-Back
 **RepoCardViewModel_AccessDenied_ShownOnTheCardWithoutSignInOffer**: A pinned card whose source throws a
 `PackageSourceAccessException` of kind `AccessDenied` shows the message (with the server's reason) as its source
 problem, sets `SourceNeedsSignIn` false and offers no sign-in, for a background check and for a check the user
-asked for alike. This scenario is tested by
-`RepoCardViewModel_RefreshUpgradeStatusAsync_ServerRefusesAccess_ShowsReasonWithoutSignInOffer`, covering
+asked for alike. When the refusal happens while the files of a candidate source are read to verify the pinned package
+(`FindVerifiedSourceAsync`), another source that verifies is still used and nothing is reported; when none verifies,
+the first refusal is the outcome, so the card shows the access-denied message instead of "no configured source
+delivers ...", also when another source delivered different files, and the launch re-sync warning ("Failed to sync
+agent files: ... Launching anyway.") carries the reason. This scenario is tested by
+`RepoCardViewModel_RefreshUpgradeStatusAsync_ServerRefusesAccess_ShowsReasonWithoutSignInOffer`, and, with a source
+that lists the package but answers 403 when it is read (an in-test provider next to real zip folders), by
+`RepoCardViewModel_Refresh_OnlySourceRefusesAccessWhileVerifying_ShowsAccessDeniedReason`,
+`RepoCardViewModel_Refresh_OneSourceRefusesAccessAnotherVerifies_UsesTheWorkingSourceWithoutProblem`,
+`RepoCardViewModel_Refresh_OneSourceRefusesAccessAnotherHasDifferentFiles_ShowsAccessDeniedReason` and
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceRefusesAccess_WarnsWithTheServersReason` (in
+`RepoCardPortablePinTests.cs`), covering
 `AgentControl-RepoCardViewModel-AccessDeniedShown`.
 
 **RepoCardViewModel_SignatureIndicator_ShieldOnlyForNuGetSourcesThatRequireSignatures**: A card whose package is

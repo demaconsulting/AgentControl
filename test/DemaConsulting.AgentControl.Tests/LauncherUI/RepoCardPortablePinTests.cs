@@ -23,6 +23,7 @@ using System.Text;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoConfig;
+using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
 using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 using Material.Icons;
@@ -919,6 +920,159 @@ public sealed class RepoCardPortablePinTests : IDisposable
         Assert.Contains("now contains different files", asked.Message, StringComparison.Ordinal);
         Assert.Equal("v1", ReadMarker(repo));
         Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that a pin whose only offering source refuses access (HTTP 403 while its files are read for
+    ///     verification) shows the access-denied problem with the server's reason - not "no configured source
+    ///     delivers the files" - and offers no sign-in.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_OnlySourceRefusesAccessWhileVerifying_ShowsAccessDeniedReason()
+    {
+        // Arrange: the teammate's only source lists the pinned version but answers 403 when it is read
+        var (repo, _) = CreatePinnedRepo("v1");
+        var settings = new AppSettings { Sources = [ZipSource("Denied", CreateTempDirectory())] };
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), registryFactory: RegistryWithDeniedSource);
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the server's reason is on the card, and it is not the "no matching files" explanation
+        Assert.True(card.HasSourceProblem);
+        Assert.Contains(DeniedMessage, card.SourceProblem, StringComparison.Ordinal);
+        Assert.DoesNotContain("No configured source delivers", card.SourceProblem, StringComparison.Ordinal);
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.True(card.IsUpgradeStatusUnknown);
+        Assert.Null(card.SupplyingSource);
+    }
+
+    /// <summary>
+    ///     Test that a source that refuses access does not stop another source from verifying: the working
+    ///     source supplies the package and nothing is reported.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_OneSourceRefusesAccessAnotherVerifies_UsesTheWorkingSourceWithoutProblem()
+    {
+        // Arrange: the first source answers 403, the second delivers the pinned files
+        var (repo, _) = CreatePinnedRepo("v1");
+        var settings = new AppSettings
+        {
+            Sources = [ZipSource("Denied", CreateTempDirectory()), ZipSource("Artifactory", CreateSourceFolder("v1"))]
+        };
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), registryFactory: RegistryWithDeniedSource);
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(card.HasSourceProblem);
+        Assert.Equal("Artifactory", card.SupplyingSource);
+        Assert.False(card.IsUpgradeStatusUnknown);
+        Assert.Equal(RepoCardStatus.UpToDate, card.Status);
+    }
+
+    /// <summary>
+    ///     Test that a source that refuses access and another that delivers other files report the refusal
+    ///     (the refusing source may be the one that has the files), not "no matching files".
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_OneSourceRefusesAccessAnotherHasDifferentFiles_ShowsAccessDeniedReason()
+    {
+        // Arrange
+        var (repo, _) = CreatePinnedRepo("v1");
+        var settings = new AppSettings
+        {
+            Sources = [ZipSource("Artifactory", CreateSourceFolder("other files")), ZipSource("Denied", CreateTempDirectory())]
+        };
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), registryFactory: RegistryWithDeniedSource);
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.True(card.HasSourceProblem);
+        Assert.Contains(DeniedMessage, card.SourceProblem, StringComparison.Ordinal);
+        Assert.DoesNotContain("No configured source delivers", card.SourceProblem, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that the launch re-sync, when the only source refuses access while its files are read, warns
+    ///     with the server's reason (not "no matching files") and still lets the launch go on.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceRefusesAccess_WarnsWithTheServersReason()
+    {
+        // Arrange: a repo whose managed folders are missing, and a source that answers 403
+        var (repo, _) = CreatePinnedRepo("v1");
+        Directory.Delete(Path.Combine(repo, ".github"), recursive: true);
+        var settings = new AppSettings { Sources = [ZipSource("Denied", CreateTempDirectory())] };
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), registryFactory: RegistryWithDeniedSource);
+        card.RefreshCheap();
+        var errors = new List<string>();
+        card.ErrorOccurred += (_, message) => errors.Add(message);
+
+        // Act
+        var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+
+        // Assert: nothing restored, and the one warning carries the reason
+        Assert.False(result);
+        var warning = Assert.Single(errors);
+        Assert.Contains(DeniedMessage, warning, StringComparison.Ordinal);
+        Assert.DoesNotContain("No configured source delivers", warning, StringComparison.Ordinal);
+        Assert.Contains("Launching anyway", warning, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     The message a refusing source reports.
+    /// </summary>
+    private const string DeniedMessage = "Signed in, but 'feed.example' refused access: You need ReadPackages.";
+
+    /// <summary>
+    ///     Builds the registry of a test: the source aliased "Denied" lists the package but answers 403 when
+    ///     it is read, every other source is a real zip folder.
+    /// </summary>
+    /// <param name="settings">The settings, whose sources are configured.</param>
+    /// <returns>The registry.</returns>
+    private static PackageSourceRegistry RegistryWithDeniedSource(AppSettings settings) =>
+        new(
+            settings.Sources,
+            definition => definition.Alias == "Denied"
+                ? new AccessDeniedOnAcquireProvider()
+                : new ZipFolderSourceProvider(definition));
+
+    /// <summary>
+    ///     A source that lists version 1.0.0 of the package and refuses access (HTTP 403) when its files are
+    ///     read.
+    /// </summary>
+    private sealed class AccessDeniedOnAcquireProvider : IPackageSourceProvider
+    {
+        /// <summary>
+        ///     The in-memory source that answers the listings.
+        /// </summary>
+        private readonly FakePackageSourceProvider _listing = new("Denied", (PackageId, "1.0.0"));
+
+        /// <inheritdoc />
+        public string Alias => "Denied";
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken) =>
+            _listing.ListPackageIdsAsync(cancellationToken);
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<DiscoveredPackage>> ListVersionsAsync(string packageId, CancellationToken cancellationToken) =>
+            _listing.ListVersionsAsync(packageId, cancellationToken);
+
+        /// <inheritdoc />
+        public Task<IPackageContentReader> AcquireAsync(DiscoveredPackage package, CancellationToken cancellationToken) =>
+            throw new PackageSourceAccessException(PackageSourceFailureKind.AccessDenied, DeniedMessage);
     }
 
     /// <inheritdoc />
