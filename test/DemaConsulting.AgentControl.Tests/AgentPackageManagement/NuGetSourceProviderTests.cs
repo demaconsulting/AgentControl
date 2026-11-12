@@ -515,14 +515,20 @@ public sealed class NuGetSourceProviderTests : IDisposable
     ///     service exactly as it was, so other NuGet operations in the process authenticate as
     ///     before.
     /// </summary>
+    /// <remarks>
+    ///     The NuGet.Caching library installs its own credential dispatcher once per process, on the
+    ///     first NuGet call, by design. A first call is therefore made before the snapshot, so the
+    ///     test does not depend on whether another NuGet test already ran in the process.
+    /// </remarks>
     [Fact]
     public async Task NuGetSourceProvider_ListAndAcquire_LeavesProcessWideCredentialServiceUnchanged()
     {
-        // Arrange
+        // Arrange: a first call lets the library's once-per-process registration happen
         var feed = CreateTempDirectory();
         var id = UniqueId();
         NuGetFeedBuilder.CreateAgentPackage(feed, id, "1.0.0");
         var provider = CreateProvider("Feed", feed);
+        await provider.ListVersionsAsync(id, CancellationToken.None);
         var before = global::NuGet.Protocol.HttpHandlerResourceV3.CredentialService;
 
         // Act

@@ -190,6 +190,9 @@ covering `AgentControl-NuGetSourceProvider-NoRepoNuGetConfig`.
 **NuGetSourceProvider_NoCredentialService_ProcessWideServiceUnchanged**: After listing and
 acquiring, the process-wide NuGet credential service is the same instance as before, and the
 product assembly's type references contain no credential-service or HTTP-handler-resource type.
+The "before" instance is taken after a first listing, because the NuGet.Caching library installs
+its credential dispatcher once per process on the first NuGet call; the result therefore does not
+depend on which tests ran earlier in the process.
 This scenario is tested by
 `NuGetSourceProvider_ListAndAcquire_LeavesProcessWideCredentialServiceUnchanged` and
 `NuGetSourceProvider_ProductAssembly_DoesNotReferenceNuGetCredentialService`, covering `AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration`.
