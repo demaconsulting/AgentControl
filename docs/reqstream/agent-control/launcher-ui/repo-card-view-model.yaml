@@ -450,7 +450,9 @@ sections:
           are read to verify the
           pinned package (the refusal is reported when no source verifies, not hidden behind a "no
           matching files" statement, and the launch re-sync warning carries the reason), and shall
-          still use another source that does verify.
+          still use another source that does verify, and shall report the refusal (not an earlier,
+          less actionable failure of another source) when nothing offers the pinned version or every
+          source failed, while another source that works still offers its upgrade.
         justification: |
           A sign-in cannot fix a missing permission; the card must tell the user what the server said
           so they can ask the feed's administrator for access instead of retrying. The source that
@@ -465,6 +467,9 @@ sections:
           - RepoCardViewModel_Refresh_ListingRefusedAndAnotherHasDifferentFiles_ShowsAccessDeniedReason
           - RepoCardViewModel_Refresh_ListingRefusedAndAnotherVerifies_UsesTheWorkingSourceWithoutProblem
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ListingRefused_ReportsReasonOnlyWhenNoSourceVerifies
+          - RepoCardViewModel_Refresh_UnreachableThenListingRefused_ShowsAccessDeniedReason
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UnreachableThenListingRefused_WarnsWithTheReason
+          - RepoCardViewModel_Refresh_ListingRefusedAndAnotherOffersNewer_OffersTheUpgrade
 
       - id: AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt
         title: >-

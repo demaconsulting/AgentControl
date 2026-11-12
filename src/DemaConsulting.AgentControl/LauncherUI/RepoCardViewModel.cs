@@ -3021,9 +3021,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="version">The pinned version text.</param>
     /// <param name="cancellationToken">Cancels the listing.</param>
     /// <returns>The offers of the package at exactly that version in Settings order (a source
-    ///     with several spellings of the version lists each), the first failure of a source
-    ///     that could not be read (and was skipped), or <see langword="null"/>, and the first of those
-    ///     failures that was a refusal of access (HTTP 403), or <see langword="null"/>.</returns>
+    ///     with several spellings of the version lists each), the failure to report for a source
+    ///     that could not be read (and was skipped) - a refusal of access (HTTP 403) when there was one,
+    ///     since that is the one a person can act on, otherwise the first failure - or
+    ///     <see langword="null"/>, and the first refusal of access, or <see langword="null"/>.</returns>
     /// <exception cref="IOException">Thrown when every source failed to list; see
     ///     <see cref="PackageVersionCache.GetVersionsAcrossSourcesAsync"/>.</exception>
     private async Task<(List<DiscoveredPackage> Offering, Exception? FirstFailure, PackageSourceAccessException? FirstAccessDenied)>
@@ -3042,7 +3043,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     firstAccessDenied ??= denied;
                 }
             });
-        return ([.. offers.Where(candidate => IsVersion(candidate, version))], firstFailure, firstAccessDenied);
+        return ([.. offers.Where(candidate => IsVersion(candidate, version))], firstAccessDenied ?? firstFailure, firstAccessDenied);
     }
 
     /// <summary>

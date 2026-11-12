@@ -356,7 +356,9 @@ immediate full refresh; `RefreshCommand` runs it asynchronously. The sequence li
 **RefreshUpgradeStatusAsync**: Checks, in the background, which configured source supplies the pinned package and
 whether any configured source offers a newer version than the pinned one, using the shared cache (see *Portable
 pins*): the configured sources are asked, in Settings order, which offer the pinned package and version
-(`PackageVersionCache.GetVersionsAcrossSourcesAsync`, with a callback that records the first source failure), and
+(`PackageVersionCache.GetVersionsAcrossSourcesAsync`, with a callback that records the failures; the failure the card
+reports is the first refusal of access (HTTP 403) when a source gave one, otherwise the first failure, whether some
+sources or every source failed), and
 the supplier and any problem are settled as described there; the newest version across all the sources that offer the
 package decides whether an upgrade is offered (`IsNewerVersionAvailableAcrossSourcesAsync`; a tie keeps Settings
 order). A retired card returns

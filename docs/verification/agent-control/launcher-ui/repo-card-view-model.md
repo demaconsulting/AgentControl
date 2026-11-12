@@ -435,7 +435,11 @@ to verify the pinned package
 (`FindVerifiedSourceAsync`), another source that verifies is still used and nothing is reported; when none verifies,
 the first refusal is the outcome, so the card shows the access-denied message instead of "no configured source
 delivers ...", also when another source delivered different files, and the launch re-sync warning ("Failed to sync
-agent files: ... Launching anyway.") carries the reason. This scenario is tested by
+agent files: ... Launching anyway.") carries the reason. A refusal is also what is reported when nothing offers the
+pinned version because other sources failed first (an unreachable source before it) or when every source failed: the
+failure to report is the refusal, not the earlier one (`PackageVersionCache.GetVersionsAcrossSourcesAsync` and
+`FindOfferingSourcesAsync` prefer it), while a source that works still offers its newer version. This scenario is
+tested by
 `RepoCardViewModel_RefreshUpgradeStatusAsync_ServerRefusesAccess_ShowsReasonWithoutSignInOffer`, and, with a source
 that lists the package but answers 403 when it is read, or one that answers 403 when it is listed (in-test providers
 next to real zip folders), by
@@ -445,7 +449,10 @@ next to real zip folders), by
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_SourceRefusesAccess_WarnsWithTheServersReason`,
 `RepoCardViewModel_Refresh_ListingRefusedAndAnotherHasDifferentFiles_ShowsAccessDeniedReason`,
 `RepoCardViewModel_Refresh_ListingRefusedAndAnotherVerifies_UsesTheWorkingSourceWithoutProblem` and
-`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ListingRefused_ReportsReasonOnlyWhenNoSourceVerifies` (in
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ListingRefused_ReportsReasonOnlyWhenNoSourceVerifies`,
+`RepoCardViewModel_Refresh_UnreachableThenListingRefused_ShowsAccessDeniedReason`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UnreachableThenListingRefused_WarnsWithTheReason` and
+`RepoCardViewModel_Refresh_ListingRefusedAndAnotherOffersNewer_OffersTheUpgrade` (in
 `RepoCardPortablePinTests.cs`), covering
 `AgentControl-RepoCardViewModel-AccessDeniedShown`.
 

@@ -1134,6 +1134,112 @@ public sealed class RepoCardPortablePinTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a refusal of access (HTTP 403) is not masked by an earlier, less actionable failure of
+    ///     another source: with an unreachable source, one that refuses when listed and one that works but does
+    ///     not have the package (nothing offers it), or with only the first two (every source fails), the card
+    ///     shows the refusal and its reason.
+    /// </summary>
+    /// <param name="aSourceWorks">Whether a third source can be read (and simply lacks the package).</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RepoCardViewModel_Refresh_UnreachableThenListingRefused_ShowsAccessDeniedReason(bool aSourceWorks)
+    {
+        // Arrange
+        var (repo, _) = CreatePinnedRepo("v1");
+        var sources = new List<PackageSourceDefinition>
+        {
+            ZipSource("Unreachable", CreateTempDirectory()), ZipSource("ListDenied", CreateTempDirectory())
+        };
+        if (aSourceWorks)
+        {
+            sources.Add(ZipSource("Empty", CreateTempDirectory()));
+        }
+
+        var settings = new AppSettings { Sources = sources };
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), registryFactory: RegistryWithDeniedSource);
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the refusal, not "unreachable" and not "no source offers it"
+        Assert.True(card.HasSourceProblem);
+        Assert.Contains(DeniedMessage, card.SourceProblem, StringComparison.Ordinal);
+        Assert.DoesNotContain("No configured source offers", card.SourceProblem, StringComparison.Ordinal);
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.True(card.IsUpgradeStatusUnknown);
+    }
+
+    /// <summary>
+    ///     Test that the launch re-sync warns with the refusal's reason when an unreachable source failed before
+    ///     a source that refuses access when listed, whether or not a third source could be read.
+    /// </summary>
+    /// <param name="aSourceWorks">Whether a third source can be read (and simply lacks the package).</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UnreachableThenListingRefused_WarnsWithTheReason(
+        bool aSourceWorks)
+    {
+        // Arrange: a repo whose managed folders are missing
+        var (repo, _) = CreatePinnedRepo("v1");
+        Directory.Delete(Path.Combine(repo, ".github"), recursive: true);
+        var sources = new List<PackageSourceDefinition>
+        {
+            ZipSource("Unreachable", CreateTempDirectory()), ZipSource("ListDenied", CreateTempDirectory())
+        };
+        if (aSourceWorks)
+        {
+            sources.Add(ZipSource("Empty", CreateTempDirectory()));
+        }
+
+        var settings = new AppSettings { Sources = sources };
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), registryFactory: RegistryWithDeniedSource);
+        card.RefreshCheap();
+        var errors = new List<string>();
+        card.ErrorOccurred += (_, message) => errors.Add(message);
+
+        // Act
+        var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(result);
+        var warning = Assert.Single(errors);
+        Assert.Contains(DeniedMessage, warning, StringComparison.Ordinal);
+        Assert.DoesNotContain("unreachable", warning, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Test that a source that refuses access when listed does not stop another source from offering an
+    ///     upgrade: the newer version the working source has is offered and nothing is reported.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_ListingRefusedAndAnotherOffersNewer_OffersTheUpgrade()
+    {
+        // Arrange: the second source delivers the pinned files and a newer version
+        var (repo, _) = CreatePinnedRepo("v1");
+        var working = CreateSourceFolder("v1");
+        WriteZip(working, "2.0.0", "v2");
+        var settings = new AppSettings { Sources = [ZipSource("ListDenied", CreateTempDirectory()), ZipSource("Artifactory", working)] };
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), registryFactory: RegistryWithDeniedSource);
+
+        // Act
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(card.HasSourceProblem);
+        Assert.Equal("Artifactory", card.SupplyingSource);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("2.0.0", card.LatestAvailableVersion);
+        Assert.False(card.IsUpgradeStatusUnknown);
+    }
+
+    /// <summary>
     ///     The message a refusing source reports.
     /// </summary>
     private const string DeniedMessage = "Signed in, but 'feed.example' refused access: You need ReadPackages.";
@@ -1151,6 +1257,10 @@ public sealed class RepoCardPortablePinTests : IDisposable
             definition => definition.Alias switch
             {
                 "Denied" => new AccessDeniedOnAcquireProvider(),
+                "Unreachable" => new FakePackageSourceProvider("Unreachable", (PackageId, "1.0.0"))
+                {
+                    ListVersionsException = new PackageSourceAccessException(PackageSourceFailureKind.Unreachable, "Source is unreachable.")
+                },
                 "ListDenied" => new FakePackageSourceProvider("ListDenied", (PackageId, "1.0.0"))
                 {
                     ListVersionsException = new PackageSourceAccessException(PackageSourceFailureKind.AccessDenied, DeniedMessage)

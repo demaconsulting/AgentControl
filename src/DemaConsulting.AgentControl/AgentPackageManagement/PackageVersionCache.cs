@@ -214,7 +214,9 @@ internal sealed class PackageVersionCache
     ///     <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="packageId"/> is null, empty
     ///     or whitespace.</exception>
-    /// <exception cref="IOException">Thrown (as the first failure that occurred) only when every
+    /// <exception cref="IOException">Thrown (as the first failure that occurred, or the first refusal of
+    ///     access - HTTP 403, a <see cref="PackageSourceAccessException"/> of kind
+    ///     <see cref="PackageSourceFailureKind.AccessDenied"/> - when there was one) only when every
     ///     source that was consulted failed, so a check that learned nothing is not mistaken for
     ///     "no source offers the package"; the same holds for
     ///     <see cref="UnauthorizedAccessException"/> and <see cref="InvalidOperationException"/>,
@@ -233,6 +235,7 @@ internal sealed class PackageVersionCache
 
         var offers = new List<DiscoveredPackage>();
         Exception? firstFailure = null;
+        Exception? firstAccessDenied = null;
         var consulted = 0;
         var succeeded = 0;
         foreach (var alias in registry.Definitions
@@ -248,15 +251,21 @@ internal sealed class PackageVersionCache
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
             {
                 firstFailure ??= ex;
+                if (ex is PackageSourceAccessException { Kind: PackageSourceFailureKind.AccessDenied })
+                {
+                    firstAccessDenied ??= ex;
+                }
+
                 onSourceFailure?.Invoke(ex);
             }
         }
 
         // Every consulted source failing means nothing is known: say so instead of reporting an
-        // empty offer
+        // empty offer. A refusal of access (HTTP 403) is the failure to report when there is one: it is
+        // the one a person can act on (and carries the server's reason), whatever order the sources failed in
         if (consulted > 0 && succeeded == 0 && firstFailure is not null)
         {
-            ExceptionDispatchInfo.Capture(firstFailure).Throw();
+            ExceptionDispatchInfo.Capture(firstAccessDenied ?? firstFailure).Throw();
         }
 
         return offers;

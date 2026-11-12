@@ -81,8 +81,10 @@ using the cached descending list; the highest entry is the latest
   `onSourceFailure`, so the others' offers still arrive and a caller can tell "nobody offers it" from "a source that
   might have could not be read"
   (`AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure`); when at least one source was consulted and
-  every one failed, that first failure is rethrown with its original stack (an empty answer would say that nobody
-  offers the package). Cancellation always propagates.
+  every one failed, a failure is rethrown with its original stack (an empty answer would say that nobody
+  offers the package): the first refusal of access (a `PackageSourceAccessException` of kind `AccessDenied`, HTTP 403)
+  when there was one - it is the failure a person can act on and carries the server's reason, so an earlier
+  unreachable or sign-in failure does not mask it - otherwise the first failure. Cancellation always propagates.
 
 **IsNewerVersionAvailableAcrossSourcesAsync**: The upgrade question across all configured sources, which is how a
 repo's upgrade is resolved because its pin names no source (`AgentControl-PackageVersionCache-NewestAcrossSources`).
