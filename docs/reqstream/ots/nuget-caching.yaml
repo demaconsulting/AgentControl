@@ -153,16 +153,22 @@ sections:
 
           - id: AgentControl-OTS-NuGetCaching-ForbiddenReported
             title: >-
-              DemaConsulting.NuGet.Caching shall fail a call with its authentication exception when
-              a server answers HTTP 403 and no credential is available for the challenged address.
+              DemaConsulting.NuGet.Caching shall fail a call with its authentication exception,
+              carrying the HTTP status 403 and the server's reason (when it gave one), when a server
+              answers HTTP 403, without consulting the credential callback or any credential
+              provider.
             justification: |
-              Some servers answer 403 rather than 401 to a request that needs a sign-in, and
-              AgentControl must report it the same way. The evidence is AgentControl's
-              integration test through the NuGetSourceProvider unit against an in-process NuGet V3
-              server that answers 403 to every request, with no way to ask the user.
+              A 403 means the server knows the account and refuses access, so a sign-in cannot help
+              and AgentControl must not ask the user for one; it must also be able to tell a 403
+              from a 401 and show why the server refused. The evidence is AgentControl's
+              integration tests through the NuGetSourceProvider unit against an in-process NuGet V3
+              server that answers 403 to every request (with and without an explanation, and with
+              a prompt that is never asked).
             tags: [ots]
             tests:
-              - NuGetSourceProvider_ListVersions_ServerAnswersForbiddenAndNoPrompt_ThrowsAuthenticationFailedWithoutAsking
+              - NuGetSourceProvider_ListVersions_ServerAnswersForbiddenAndNoPrompt_ThrowsAccessDeniedWithoutAsking
+              - NuGetSourceProvider_ListVersions_ServerAnswersForbiddenToTheCredential_ThrowsAccessDeniedWithoutPrompting
+              - NuGetSourceProvider_ListVersions_ServerExplainsForbidden_ShowsReasonWithoutPromptingOrForgetting
 
           - id: AgentControl-OTS-NuGetCaching-RejectedCredentialNotRetried
             title: >-
@@ -172,12 +178,11 @@ sections:
             justification: |
               A wrong password must produce one failure and one question for the user, not a retry
               loop that locks the account or leaves the user stuck in a dialog. The evidence is
-              AgentControl's integration tests through the NuGetSourceProvider unit against an
-              in-process NuGet V3 server that rejects the credential with 401 and with 403.
+              AgentControl's integration test through the NuGetSourceProvider unit against an
+              in-process NuGet V3 server that rejects the credential with 401.
             tags: [ots]
             tests:
               - NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt
-              - NuGetSourceProvider_ListVersions_ServerAnswersForbiddenToTheCredential_ThrowsAuthenticationFailedAfterOnePrompt
 
           - id: AgentControl-OTS-NuGetCaching-NonInteractive
             title: >-

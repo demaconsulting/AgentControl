@@ -563,7 +563,9 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     ///     again with the prompt allowed, so the user is asked at most once and only when nothing
     ///     else worked. A 403 is different: the server knows the user and refuses access, so no
     ///     prompt is opened, no remembered credential is forgotten, and the server's reason is
-    ///     reported as <see cref="PackageSourceFailureKind.AccessDenied"/>. The credential the user typed is remembered after the second attempt
+    ///     reported as <see cref="PackageSourceFailureKind.AccessDenied"/>. The library fails a 403 before
+    ///     it asks the credential callback or any provider, so the user is not asked for a 403 at all.
+    ///     The credential the user typed is remembered after the second attempt
     ///     succeeds, and every credential a server rejected is forgotten.
     /// </remarks>
     /// <typeparam name="T">The result type of the library call.</typeparam>
@@ -774,11 +776,6 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     }
 
     /// <summary>
-    ///     The text the NuGet library puts before the server's reason in the message of a 403.
-    /// </summary>
-    private const string ServerSaidMarker = "Server said: \"";
-
-    /// <summary>
     ///     The longest server reason that is shown or logged.
     /// </summary>
     private const int MaxReasonLength = 300;
@@ -786,15 +783,15 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     /// <summary>
     ///     Determines whether the NuGet library reports that the server refused access with HTTP 403
     ///     (the account is known but not permitted) rather than needing a sign-in (HTTP 401), and
-    ///     extracts the server's reason.
+    ///     returns the server's reason.
     /// </summary>
     /// <remarks>
-    ///     The library's message for a 403 contains <c>HTTP 403 (Forbidden) - </c> and, when the server
-    ///     explained itself, <c>Server said: "reason"</c>. The message is read because the version of
-    ///     the library this build references only offers the status and the reason in its message;
-    ///     once the referenced version exposes <c>NuGetAuthenticationException.StatusCode</c> and
-    ///     <c>ServerReason</c>, this should read those properties instead. Against a library that
-    ///     reports every failure as a 401 this never matches, and the behavior is the previous one.
+    ///     The library reports every 401 or 403 as a <see cref="NuGetAuthenticationException"/> whose
+    ///     <see cref="NuGetAuthenticationException.StatusCode"/> is the status and whose
+    ///     <see cref="NuGetAuthenticationException.ServerReason"/> is the server's explanation of a 403,
+    ///     so those properties are read and the message is never parsed. The library has already reduced
+    ///     the reason to one line, but the reason comes from the server, so it is reduced and redacted
+    ///     again here before it is shown or logged.
     /// </remarks>
     /// <param name="exception">The library's authentication exception.</param>
     /// <param name="reason">The server's reason, redacted and reduced to one short line, or
@@ -803,21 +800,14 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     internal static bool IsAccessDenied(NuGetAuthenticationException exception, out string? reason)
     {
         reason = null;
-        var message = exception.Message;
-        if (!message.Contains("HTTP 403 (Forbidden) - ", StringComparison.Ordinal))
+        if (exception.StatusCode != 403)
         {
             return false;
         }
 
-        var start = message.IndexOf(ServerSaidMarker, StringComparison.Ordinal);
-        if (start >= 0)
+        if (exception.ServerReason is { } serverReason)
         {
-            start += ServerSaidMarker.Length;
-            var end = message.IndexOf('"', start);
-            if (end > start)
-            {
-                reason = SanitizeReason(message[start..end]);
-            }
+            reason = SanitizeReason(serverReason);
         }
 
         return true;

@@ -34,8 +34,10 @@ version is pinned exactly in the project file. The `NuGetCredential` type it def
   sources and source mapping, and `Logger` to route the library's diagnostics - wrapped so secrets are
   removed - to AgentControl's logging.
 - `NuGetCacheOptions.CredentialCallback`, a per-call delegate the library consults first for an
-  address that answers HTTP 401/403 (and, when it yields nothing, falls through to the credential
-  providers); AgentControl's `PackageCredentialCallback` is what is supplied. The library invokes it at
+  address that answers HTTP 401 (and, when it yields nothing, falls through to the credential
+  providers); AgentControl's `PackageCredentialCallback` is what is supplied. A 403 is never put to the
+  callback or a provider: the server already knows the account, so the library fails the call at once.
+  The library invokes it at
   most once per URL and request type per call, so distinct resource URLs of one operation may invoke it
   separately; AgentControl makes that safe by memoizing the answer for the operation in
   `PackageCredentialCallback` and scoping it to the feed's origin. When the credential the callback supplied
@@ -46,7 +48,9 @@ version is pinned exactly in the project file. The `NuGetCredential` type it def
   callback or the `nuget.config`, and otherwise the call fails. AgentControl relies on nothing more than that;
   the behavior of a real NuGet credential-provider plug-in (for example Azure Artifacts) is not exercised by
   AgentControl's evidence.
-- `NuGetAuthenticationException` to tell a refused access (HTTP 401 or 403) from other failures.
+- `NuGetAuthenticationException` to tell a refused access from other failures: its `StatusCode` (401 or 403) tells a
+  sign-in that is needed from an account that is refused, and, for a 403, its `ServerReason` carries the server's
+  explanation (one line of at most 300 characters; `NuGetSourceProvider.IsAccessDenied` reads both).
 - Honoring the `globalPackagesFolder` setting of the `nuget.config` discovered from the supplied
   root folder, which AgentControl uses to give each source a private package cache, and the credentials of
   a `nuget.config` source with the same address (`packageSourceCredentials`) found by the same discovery.

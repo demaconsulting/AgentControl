@@ -55,7 +55,7 @@ indirect: it proves the behavior AgentControl depends on, not the library's comp
 
 The library is maintained in the `demaconsulting/NuGetCaching` repository, which holds its own test project
 (`test/DemaConsulting.NuGet.Caching.Tests`) and runs it, with its own requirements trace, in its continuous
-integration. The referenced package version (`2.0.0-beta.2`, tag `2.0.0-beta.2`) comes from that repository.
+integration. The referenced package version (`2.0.0-beta.4`, tag `2.0.0-beta.4`) comes from that repository.
 AgentControl does not re-execute those tests, has not reviewed their results for this item and does not rely on
 them for any requirement: they are not accepted as evidence here. The library does not provide dotnet self-validation,
 and this repository holds no separate OTS test project for it. Every requirement of this item is therefore supported
@@ -187,12 +187,12 @@ proving a declined challenge is reported as a refused access without a retry loo
 
 **Requirement coverage**: `AgentControl-OTS-NuGetCaching-UnauthorizedReported`.
 
-#### NuGetSourceProvider_ListVersions_ServerAnswersForbiddenAndNoPrompt_ThrowsAuthenticationFailedWithoutAsking
+#### NuGetSourceProvider_ListVersions_ServerAnswersForbiddenAndNoPrompt_ThrowsAccessDeniedWithoutAsking
 
 **Scenario**: The mock server answers every request with HTTP 403 and no credential is available.
 
-**Expected**: The library fails the call with its authentication exception, proving a 403 is reported as a refused
-access in the same way as a 401.
+**Expected**: The library fails the call with its authentication exception carrying the status 403, which the
+`NuGetSourceProvider` unit reports as access denied, proving a 403 is told apart from a 401.
 
 **Requirement coverage**: `AgentControl-OTS-NuGetCaching-ForbiddenReported`.
 
@@ -205,15 +205,25 @@ credential instead of retrying in a loop, proving a rejected credential fails th
 
 **Requirement coverage**: `AgentControl-OTS-NuGetCaching-RejectedCredentialNotRetried`.
 
-#### NuGetSourceProvider_ListVersions_ServerAnswersForbiddenToTheCredential_ThrowsAuthenticationFailedAfterOnePrompt
+#### NuGetSourceProvider_ListVersions_ServerAnswersForbiddenToTheCredential_ThrowsAccessDeniedWithoutPrompting
 
-**Scenario**: The mock server answers every request with HTTP 403, including the one that carries the credential the
-callback supplied.
+**Scenario**: The mock server answers every request with HTTP 403 while a prompt is available and a user is ready to
+type a credential.
 
-**Expected**: The library reports a refused access after a single request for the credential instead of retrying in a
-loop, proving a credential rejected with 403 fails the call promptly too.
+**Expected**: The library fails the call with its authentication exception (status 403) without consulting the
+credential callback, so the prompt is never asked and nothing is remembered, proving a 403 does not start a sign-in.
 
-**Requirement coverage**: `AgentControl-OTS-NuGetCaching-RejectedCredentialNotRetried`.
+**Requirement coverage**: `AgentControl-OTS-NuGetCaching-ForbiddenReported`.
+
+#### NuGetSourceProvider_ListVersions_ServerExplainsForbidden_ShowsReasonWithoutPromptingOrForgetting
+
+**Scenario**: The mock server answers every request with HTTP 403 and an `X-TFS-ServiceError` header explaining the
+refusal, while the session holds a saved sign-in and a prompt is available.
+
+**Expected**: The library's authentication exception carries the status 403 and the server's reason
+(`ServerReason`), which reaches the user; the callback is not consulted and the saved sign-in is kept.
+
+**Requirement coverage**: `AgentControl-OTS-NuGetCaching-ForbiddenReported`.
 
 #### NuGetSourceProvider_Acquire_SignedPackageAndNoPinnedSigner_SignatureIsAccepted
 

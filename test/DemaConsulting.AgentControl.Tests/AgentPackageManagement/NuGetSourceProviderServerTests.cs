@@ -284,10 +284,11 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
 
     /// <summary>
     ///     Test that a server that answers HTTP 403 (Forbidden) with no credential available is
-    ///     reported as an authentication failure, the same way a 401 is, and never asks.
+    ///     reported as "access denied" (the library reports a 403 as such, not as a sign-in failure)
+    ///     and never asks.
     /// </summary>
     [Fact]
-    public async Task NuGetSourceProvider_ListVersions_ServerAnswersForbiddenAndNoPrompt_ThrowsAuthenticationFailedWithoutAsking()
+    public async Task NuGetSourceProvider_ListVersions_ServerAnswersForbiddenAndNoPrompt_ThrowsAccessDeniedWithoutAsking()
     {
         // Arrange: a feed that refuses every request with 403, and no prompt available
         var id = UniqueId();
@@ -299,31 +300,21 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
         var ex = await Assert.ThrowsAsync<PackageSourceAccessException>(
             () => provider.ListVersionsAsync(id, CancellationToken.None));
 
-        // Assert: a library that reports the 403 says "access denied"; an older one reports it like a 401
-        if (LibraryReportsForbidden)
-        {
-            Assert.Equal(PackageSourceFailureKind.AccessDenied, ex.Kind);
-            Assert.Contains("refused access", ex.Message, StringComparison.Ordinal);
-        }
-        else
-        {
-            Assert.Equal(PackageSourceFailureKind.AuthenticationFailed, ex.Kind);
-            Assert.Contains("needs a sign-in", ex.Message, StringComparison.Ordinal);
-        }
-
+        // Assert
+        Assert.Equal(PackageSourceFailureKind.AccessDenied, ex.Kind);
+        Assert.Contains("refused access", ex.Message, StringComparison.Ordinal);
         Assert.True(feed.ForbiddenCount > 0);
     }
 
     /// <summary>
-    ///     Test that a server that answers HTTP 403 (Forbidden) even to the credential the user
-    ///     typed is reported as an authentication failure after a single prompt, with no retry loop
-    ///     and nothing remembered. A library that reports the 403 as such ends the operation at the
-    ///     silent attempt as "access denied", without any prompt.
+    ///     Test that a server that answers HTTP 403 (Forbidden), even with a prompt available and a
+    ///     user ready to type a credential, is reported as "access denied" without any prompt (the
+    ///     library fails a 403 before it asks the credential callback) and with nothing remembered.
     /// </summary>
     [Fact]
-    public async Task NuGetSourceProvider_ListVersions_ServerAnswersForbiddenToTheCredential_ThrowsAuthenticationFailedAfterOnePrompt()
+    public async Task NuGetSourceProvider_ListVersions_ServerAnswersForbiddenToTheCredential_ThrowsAccessDeniedWithoutPrompting()
     {
-        // Arrange: a feed that refuses every request with 403, and a user who types a credential
+        // Arrange: a feed that refuses every request with 403, and a user who would type a credential
         var id = UniqueId();
         var feed = await StartFeedAsync(id, "1.0.0");
         feed.ForbidAllRequests = true;
@@ -337,34 +328,19 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
             () => provider.ListVersionsAsync(id, CancellationToken.None));
 
         // Assert
-        if (LibraryReportsForbidden)
-        {
-            Assert.Equal(PackageSourceFailureKind.AccessDenied, ex.Kind);
-            Assert.Equal(0, prompt.AskCount);
-        }
-        else
-        {
-            Assert.Equal(PackageSourceFailureKind.AuthenticationFailed, ex.Kind);
-            Assert.Equal(1, prompt.AskCount);
-            Assert.Contains("rejected the credentials", ex.Message, StringComparison.Ordinal);
-        }
-
+        Assert.Equal(PackageSourceFailureKind.AccessDenied, ex.Kind);
+        Assert.Equal(0, prompt.AskCount);
         Assert.Equal(0, store.Count);
         Assert.DoesNotContain(SentinelPassword, ex.ToString(), StringComparison.Ordinal);
     }
 
     /// <summary>
     ///     Test, against a server that explains its 403 the way Azure DevOps does, that the explanation reaches
-    ///     the user, nobody is asked for a credential and a saved sign-in is not forgotten. It needs a NuGet
-    ///     library that reports a 403's status and reason, and is skipped for one that does not.
+    ///     the user, nobody is asked for a credential and a saved sign-in is not forgotten.
     /// </summary>
     [Fact]
     public async Task NuGetSourceProvider_ListVersions_ServerExplainsForbidden_ShowsReasonWithoutPromptingOrForgetting()
     {
-        Assert.SkipUnless(
-            LibraryReportsForbidden,
-            "The referenced NuGet library does not report the status and reason of an HTTP 403 yet.");
-
         // Arrange: a feed that refuses everything with an explanation, a saved session sign-in and a prompt
         var feed = await StartFeedAsync(UniqueId(), "1.0.0");
         feed.ForbidAllRequests = true;
@@ -392,15 +368,6 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
     }
 
     /// <summary>
-    ///     Gets a value indicating whether the referenced NuGet library reports the status code and the
-    ///     reason of an HTTP 403 (<c>NuGetAuthenticationException.StatusCode</c> and <c>ServerReason</c>, with
-    ///     the message that <see cref="NuGetSourceProvider"/> reads). It is read by reflection because the
-    ///     property does not exist in older versions of the library.
-    /// </summary>
-    private static bool LibraryReportsForbidden =>
-        typeof(NuGetAuthenticationException).GetProperty("ServerReason") is not null;
-
-    /// <summary>
     ///     Test that a server that refuses access with HTTP 403 (the account is known but not
     ///     permitted) is reported as "access denied" with the server's reason, never opens the
     ///     prompt, and does not forget the saved sign-in that was used.
@@ -409,6 +376,7 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
     public async Task NuGetSourceProvider_RunAsync_ForbiddenWithSavedSignIn_ReportsAccessDeniedWithoutPromptingOrForgetting()
     {
         // Arrange: a sign-in the session already holds, a prompt that could ask, and a library that answers 403
+        // after the saved sign-in was accepted for an earlier request of the same call
         var feed = await StartFeedAsync(UniqueId(), "1.0.0");
         var origin = FeedOrigin.Create(new Uri(feed.IndexUrl));
         var store = new SessionCredentialStore();
@@ -425,7 +393,7 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
             {
                 attempts++;
                 await options.CredentialCallback!(new Uri(feed.IndexUrl), CancellationToken.None);
-                throw new NuGetAuthenticationException(ForbiddenMessage("You need 'ReadPackages' on this feed."), "Feed", new Uri(feed.IndexUrl));
+                throw Forbidden(feed, "You need 'ReadPackages' on this feed.");
             },
             "unreachable",
             CancellationToken.None));
@@ -455,7 +423,7 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
 
         // Act
         var ex = await Assert.ThrowsAsync<PackageSourceAccessException>(() => provider.RunAsync<int>(
-            _ => throw new NuGetAuthenticationException(ForbiddenMessage(null), "Feed", new Uri(feed.IndexUrl)),
+            _ => throw Forbidden(feed, null),
             "unreachable",
             CancellationToken.None));
 
@@ -488,7 +456,9 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
                     ? throw new NuGetAuthenticationException(
                         "Feed (http://localhost/index.json): HTTP 401 (Unauthorized) - the source requires authentication.",
                         "Feed",
-                        new Uri(feed.IndexUrl))
+                        new Uri(feed.IndexUrl),
+                        401,
+                        null)
                     : 42;
             },
             "unreachable",
@@ -521,12 +491,14 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
             {
                 attempts++;
                 var credential = await options.CredentialCallback!(new Uri(feed.IndexUrl), CancellationToken.None);
-                throw new NuGetAuthenticationException(
-                    credential is null
-                        ? "Feed (http://localhost/index.json): HTTP 401 (Unauthorized) - the source requires authentication."
-                        : ForbiddenMessage("Lacks permission."),
-                    "Feed",
-                    new Uri(feed.IndexUrl));
+                throw credential is null
+                    ? new NuGetAuthenticationException(
+                        "Feed (http://localhost/index.json): HTTP 401 (Unauthorized) - the source requires authentication.",
+                        "Feed",
+                        new Uri(feed.IndexUrl),
+                        401,
+                        null)
+                    : Forbidden(feed, "Lacks permission.");
             },
             "unreachable",
             CancellationToken.None));
@@ -540,43 +512,53 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
     }
 
     /// <summary>
-    ///     Test that only a message that says HTTP 403 is an access denial, and that the reason is read, shortened
-    ///     and cleared of secrets.
+    ///     Test that only a 403 is an access denial (by the exception's status code, never by its message),
+    ///     and that the reason is read from <c>ServerReason</c>, shortened and cleared of secrets.
     /// </summary>
     [Fact]
-    public void NuGetSourceProvider_IsAccessDenied_MessageShapes_ParsesStatusAndReason()
+    public void NuGetSourceProvider_IsAccessDenied_StatusAndReason_DetectsForbiddenAndSanitizesReason()
     {
-        // Act / Assert: a 401 and a message with no status are not denials
+        // Act / Assert: a 401, an unknown status and a 401 whose message talks about a 403 are not denials
         Assert.False(NuGetSourceProvider.IsAccessDenied(
-            new NuGetAuthenticationException("Feed (x): HTTP 401 (Unauthorized) - needs a sign-in.", "Feed", null), out _));
+            new NuGetAuthenticationException("Feed (x): HTTP 401 (Unauthorized) - needs a sign-in.", "Feed", null, 401, null), out _));
         Assert.False(NuGetSourceProvider.IsAccessDenied(new NuGetAuthenticationException("failed", "Feed", null), out _));
+        Assert.False(NuGetSourceProvider.IsAccessDenied(
+            new NuGetAuthenticationException("HTTP 403 (Forbidden) - Server said: \"x\"", "Feed", null, 401, null), out var notDenied));
+        Assert.Null(notDenied);
 
         // A 403 without a reason
         Assert.True(NuGetSourceProvider.IsAccessDenied(
-            new NuGetAuthenticationException(ForbiddenMessage(null), "Feed", null), out var none));
+            new NuGetAuthenticationException("refused", "Feed", null, 403, null), out var none));
         Assert.Null(none);
+
+        // A reason with line breaks is reduced to one line
+        Assert.True(NuGetSourceProvider.IsAccessDenied(
+            new NuGetAuthenticationException("refused", "Feed", null, 403, "Needs  ReadPackages.\r\nAsk an admin."), out var oneLine));
+        Assert.Equal("Needs ReadPackages. Ask an admin.", oneLine);
 
         // A long reason is capped, and a registered secret in it is redacted
         using var lease = SecretRedactor.Lease(new NuGetCredential(FeedUser, SentinelPassword));
         var longReason = $"Token {SentinelPassword} is not allowed. " + new string('x', 600);
         Assert.True(NuGetSourceProvider.IsAccessDenied(
-            new NuGetAuthenticationException(ForbiddenMessage(longReason), "Feed", null), out var reason));
+            new NuGetAuthenticationException("refused", "Feed", null, 403, longReason), out var reason));
         Assert.NotNull(reason);
         Assert.True(reason.Length <= 300);
         Assert.DoesNotContain(SentinelPassword, reason, StringComparison.Ordinal);
     }
 
     /// <summary>
-    ///     Builds the message the NuGet library gives for an HTTP 403.
+    ///     Builds the exception the NuGet library throws for an HTTP 403.
     /// </summary>
+    /// <param name="feed">The feed that refused.</param>
     /// <param name="reason">The server's reason, or <see langword="null"/> for none.</param>
-    /// <returns>The message.</returns>
-    private static string ForbiddenMessage(string? reason) =>
-        "Feed (http://localhost/index.json): HTTP 403 (Forbidden) - the source refused access: the request was understood " +
-        "and the account or credentials in use are not permitted to read it, so signing in again will not help; ask the " +
-        "source's administrator for read permission. " +
-        (reason is null ? string.Empty : $"Server said: \"{reason}\". ") +
-        "(Response status code does not indicate success: 403 (Forbidden).)";
+    /// <returns>The exception.</returns>
+    private static NuGetAuthenticationException Forbidden(MockNuGetFeed feed, string? reason) =>
+        new(
+            "Feed (http://localhost/index.json): HTTP 403 (Forbidden) - the source refused access.",
+            "Feed",
+            new Uri(feed.IndexUrl),
+            403,
+            reason);
 
     /// <summary>
     ///     Test that a session credential the server rejects is forgotten, the user is asked again

@@ -233,15 +233,17 @@ HTTP 401 and a prompt is available does attempt 2 run with a callback that may a
 (`PromptAndRetryAsync`). A refusal with **HTTP 403** is different: the server knows the user and says no, so
 neither attempt asks (attempt 2 does not run), no remembered credential is forgotten (the server accepted it) and a
 credential typed in attempt 2 is not kept; the operation ends as `AccessDenied` with the server's reason
-(`AgentControl-NuGetSourceProvider-AccessDenied`). `IsAccessDenied` (internal) recognizes a 403 from the NuGet
-library's message (`HTTP 403 (Forbidden) -` and, when the server explained itself, `Server said: "reason"`), reduces
-the reason to one line of at most 300 characters through `SecretRedactor`, and `CreateAccessDenied` logs a warning
+(`AgentControl-NuGetSourceProvider-AccessDenied`). The library fails a 403 before it asks the credential callback or any
+credential provider, so against a server that answers 403 attempt 1 never even consults the stores. `IsAccessDenied`
+(internal) recognizes a 403 from `NuGetAuthenticationException.StatusCode` and takes the server's explanation from
+`ServerReason`; the exception's message is never parsed (the library reports every 401 or 403 as this exception type with
+its status, including a raw HTTP 403 whose reason it recorded for the source, so no other shape needs handling). The
+reason, which the library has already reduced to one line, is reduced again to one line of at most 300 characters through
+`SecretRedactor` because it comes from the server, and `CreateAccessDenied` logs a warning
 with the reason and builds "Signed in, but 'host' refused access: reason. ..." with a hint to ask the feed's
-administrator for read permission (Reader / ReadPackages on Azure DevOps). **Dependency on the library:** the
-referenced `DemaConsulting.NuGet.Caching` 2.0.0-beta.2 reports every dispatcher-level failure as a 401, so against it
-this path is never taken and a 403 behaves as before; once the referenced version carries the 403 status code and
-reason (`NuGetAuthenticationException.StatusCode` / `ServerReason`, with the message above), `IsAccessDenied` should
-read those properties instead of the message.
+administrator for read permission (Reader / ReadPackages on Azure DevOps). The `AccessDenied` handling of attempt 2 is
+still needed, for a 403 that follows a 401 the user's sign-in answered (for example the service index accepts the
+credential and the package resource then refuses it).
 A credential the user typed is committed to the session store only after attempt 2
 succeeded - and handed to the user's credential store at that moment when the user ticked "Remember on this
 computer"; a credential the server rejected (from the stores in attempt 1, or typed in attempt 2) is forgotten and,

@@ -421,7 +421,8 @@ sections:
           - NuGetSourceProvider_RunAsync_ForbiddenWithoutReason_ReportsAccessDeniedWithTheStatus
           - NuGetSourceProvider_RunAsync_Unauthorized_StillPromptsOnce
           - NuGetSourceProvider_RunAsync_UnauthorizedThenForbiddenAfterSignIn_ReportsAccessDeniedAfterOnePrompt
-          - NuGetSourceProvider_IsAccessDenied_MessageShapes_ParsesStatusAndReason
+          - NuGetSourceProvider_IsAccessDenied_StatusAndReason_DetectsForbiddenAndSanitizesReason
+          - NuGetSourceProvider_ListVersions_ServerExplainsForbidden_ShowsReasonWithoutPromptingOrForgetting
 
       - id: AgentControl-NuGetSourceProvider-RejectedCredentialForgotten
         title: >-

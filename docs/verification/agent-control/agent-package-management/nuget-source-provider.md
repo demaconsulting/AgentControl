@@ -260,8 +260,9 @@ asserted as a guarantee.) This scenario is tested by
 `AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin`.
 
 **NuGetSourceProvider_ServerRefusesAccess_AccessDeniedWithoutPrompting**: When the NuGet library reports that the
-server answered HTTP 403 (its message says `HTTP 403 (Forbidden) -` and, when the server explained itself,
-`Server said: "reason"`), the operation ends as `AccessDenied` at the silent attempt: the prompt is never asked, a
+server answered HTTP 403 (the `NuGetAuthenticationException` has `StatusCode` 403 and, when the server explained
+itself, a `ServerReason`; the message is not read), the operation ends as `AccessDenied` at the silent attempt: the
+prompt is never asked (the library does not even consult the credential callback for a 403), a
 saved or session sign-in that was used is kept, the message reads "Signed in, but 'host' refused access: reason"
 (secret-redacted, one line, at most 300 characters) with a hint to ask the feed's administrator for read permission,
 and a warning with the reason is logged; without a reason the message gives the status. A 401 is unchanged: the user
@@ -272,12 +273,13 @@ the unit level, with a scripted library call (`RunAsync`), by
 `NuGetSourceProvider_RunAsync_ForbiddenWithoutReason_ReportsAccessDeniedWithTheStatus`,
 `NuGetSourceProvider_RunAsync_Unauthorized_StillPromptsOnce`,
 `NuGetSourceProvider_RunAsync_UnauthorizedThenForbiddenAfterSignIn_ReportsAccessDeniedAfterOnePrompt` and
-`NuGetSourceProvider_IsAccessDenied_MessageShapes_ParsesStatusAndReason`; and end to end against the in-process
-mock server answering 403 with an `X-TFS-ServiceError` header by
-`NuGetSourceProvider_ListVersions_ServerExplainsForbidden_ShowsReasonWithoutPromptingOrForgetting`, which needs a
-`DemaConsulting.NuGet.Caching` that reports a 403's status and reason and is skipped for an older one (as of
-2.0.0-beta.2; the two earlier 403 scenarios, `...ServerAnswersForbiddenAndNoPrompt...` and
-`...ServerAnswersForbiddenToTheCredential...`, accept either behavior according to the library). Covering
+`NuGetSourceProvider_IsAccessDenied_StatusAndReason_DetectsForbiddenAndSanitizesReason` (which also checks that a
+message that merely talks about a 403 is not one); and end to end against the in-process
+mock server answering 403 (with an `X-TFS-ServiceError` header, and with no prompt or with a prompt that is never
+asked) by
+`NuGetSourceProvider_ListVersions_ServerExplainsForbidden_ShowsReasonWithoutPromptingOrForgetting`,
+`NuGetSourceProvider_ListVersions_ServerAnswersForbiddenAndNoPrompt_ThrowsAccessDeniedWithoutAsking` and
+`NuGetSourceProvider_ListVersions_ServerAnswersForbiddenToTheCredential_ThrowsAccessDeniedWithoutPrompting`. Covering
 `AgentControl-NuGetSourceProvider-AccessDenied`.
 
 **NuGetSourceProvider_ServerFailures_DistinctCausesWithSecretFreeMessages**: A wrong password produces
