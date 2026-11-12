@@ -554,6 +554,48 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a launch-style check that was superseded, but is still inside a provider call
+    ///     that ignores cancellation, holds off the periodic round until it has unwound, even though
+    ///     the newer check completed and <see cref="MainWindowViewModel.PendingRefresh"/> is done.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_PeriodicRecheck_SupersededLaunchCheckStillRunning_NoRoundUntilItHasUnwound()
+    {
+        // Arrange: a launch check held at a provider call that does not notice cancellation
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"));
+        var gate = new TaskCompletionSource();
+        feed.ListVersionsGate = gate.Task;
+        feed.ListVersionsGateIgnoresCancellation = true;
+        var viewModel = CreateViewModel(clock, feed, out _);
+        var superseded = viewModel.BeginUpgradeRefresh();
+        Assert.False(superseded.IsCompleted);
+        viewModel.StartPeriodicUpgradeRecheck();
+
+        // Act: a newer launch check supersedes it and completes; then a tick comes
+        feed.ListVersionsGate = null;
+        await viewModel.BeginUpgradeRefresh();
+        Assert.True(viewModel.PendingRefresh.IsCompleted);
+        Assert.False(superseded.IsCompleted);
+        var readsBefore = feed.ListVersionsCalls;
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+
+        // Assert: no round started, so the source was not read for one
+        Assert.Equal(readsBefore, feed.ListVersionsCalls);
+
+        // Act: the superseded check unwinds; the next tick may start a round
+        gate.SetResult();
+        await superseded;
+        var readsAfterUnwind = feed.ListVersionsCalls;
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+
+        // Assert: a round started and read the source once (it completes synchronously here, so its
+        // task cannot be told apart from the initial completed one)
+        await viewModel.PendingPeriodicRecheck;
+        Assert.Equal(1, feed.ListVersionsCalls - readsAfterUnwind);
+    }
+
+    /// <summary>
     ///     Test that disposing the view model while the launch-time check waits for a source cancels that
     ///     check too (the provider's token is canceled) and that nothing reaches the card afterwards.
     /// </summary>

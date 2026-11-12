@@ -396,6 +396,70 @@ public sealed class PackageVersionCacheTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a version listing whose fetch started earlier but completes last does not replace
+    ///     the listing of a fetch that started later: the newer data stays cached.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_EarlierStartedVersionFetchCompletesLast_KeepsLaterStartedListing()
+    {
+        // Arrange: a first fetch that has read 1.0.0 and is held open, then a version is published
+        var clock = new FakeTimeProvider();
+        var gate = new TaskCompletionSource();
+        var source = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsGate = gate.Task,
+            ListVersionsReadsBeforeGate = true
+        };
+        var registry = CreateRegistry(source);
+        var cache = new PackageVersionCache(clock);
+        var earlier = cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+        source.Publish("contoso-agents", "1.1.0");
+        source.ListVersionsGate = null;
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Act: the earlier fetch completes last, then the cache is asked again
+        gate.SetResult();
+        var earlierResult = await earlier;
+        var cached = await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Assert: the earlier fetch saw the old data, but the cache kept the later one without reading again
+        Assert.Equal(["1.0.0"], earlierResult.Select(package => package.Version.ToString()));
+        Assert.Equal(["1.1.0", "1.0.0"], cached.Select(package => package.Version.ToString()));
+        Assert.Equal(2, source.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that a package-name listing whose fetch started earlier but completes last does not
+    ///     replace the listing of a fetch that started later.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_EarlierStartedPackageIdsFetchCompletesLast_KeepsLaterStartedListing()
+    {
+        // Arrange: a first fetch that has read one package name and is held open, then another is published
+        var clock = new FakeTimeProvider();
+        var gate = new TaskCompletionSource();
+        var source = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0")) { ListPackageIdsGate = gate.Task };
+        var registry = CreateRegistry(source);
+        var cache = new PackageVersionCache(clock);
+        var earlier = cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+        source.Publish("other-agents", "1.0.0");
+        source.ListPackageIdsGate = null;
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+
+        // Act: the earlier fetch completes last, then the cache is asked again
+        gate.SetResult();
+        var earlierResult = await earlier;
+        var cached = await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+
+        // Assert: the earlier fetch saw the old data, but the cache kept the later one without reading again
+        Assert.Equal(["contoso-agents"], earlierResult);
+        Assert.Equal(["contoso-agents", "other-agents"], cached);
+        Assert.Equal(2, source.ListPackageIdsCalls);
+    }
+
+    /// <summary>
     ///     Test that a cached version list and package list are served until five minutes have
     ///     passed since they were fetched, without reading the source again.
     /// </summary>

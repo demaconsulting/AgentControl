@@ -152,12 +152,18 @@ sections:
         title: >-
           The PackageVersionCache class shall serve a cached package list or version list for at
           most five minutes after it was fetched, and shall read the source again when a list is
-          requested after that, so that no automatic check uses a listing older than five minutes.
+          requested after that, so that no automatic check uses a listing older than five minutes,
+          and shall not let a fetch that completes late replace the listing of a fetch that
+          started after it.
         justification: |
           Packages are published while the application stays open all day; a cache that never
           expired would keep showing the versions that existed when the list was first read, with
-          no sign that anything is missing.
+          no sign that anything is missing. A read that ignores cancellation (a package scan that
+          has started finishes) can complete after a newer read of the same listing; letting it
+          overwrite the newer entry would serve older data until the entry expired.
         tests:
           - PackageVersionCache_EntryYoungerThanFiveMinutes_IsStillServedFromCache
           - PackageVersionCache_EntryOlderThanFiveMinutes_IsFetchedAgain
           - PackageVersionCache_EntryFetchedAgainAfterExpiry_IsServedForAnotherFiveMinutes
+          - PackageVersionCache_EarlierStartedVersionFetchCompletesLast_KeepsLaterStartedListing
+          - PackageVersionCache_EarlierStartedPackageIdsFetchCompletesLast_KeepsLaterStartedListing

@@ -530,16 +530,21 @@ sections:
         title: >-
           The MainWindowViewModel class shall not start a periodic re-check round while the
           previous round is still running - including a round that was cancelled by a newer check
-          but has not finished unwinding - shall run one timer however often the re-check is
+          but has not finished unwinding - or while any launch-time upgrade check is still running,
+          including one that a newer check superseded but that has not finished unwinding, shall
+          run one timer however often the re-check is
           started, and shall stop the timer and cancel the running round and the running
           background upgrade check when it is disposed.
         justification: |
           A slow source must not pile up rounds (two rounds would race through the shared cache and
-          the cards' state), and a closed window must not keep checking package sources in the
-          background, neither by the periodic rounds nor by the check that runs at launch.
+          the cards' state), a superseded check that is still inside a provider call that ignores
+          cancellation must not overlap a new round, and a closed window must not keep checking
+          package sources in the background, neither by the periodic rounds nor by the check that
+          runs at launch.
         tests:
           - MainWindowViewModel_PeriodicRecheck_PreviousRoundStillRunning_SkipsTheTick
           - MainWindowViewModel_PeriodicRecheck_RoundSuperseded_NoNewRoundUntilItHasUnwound
+          - MainWindowViewModel_PeriodicRecheck_SupersededLaunchCheckStillRunning_NoRoundUntilItHasUnwound
           - MainWindowViewModel_StartPeriodicUpgradeRecheck_CalledTwice_RunsOneTimer
           - MainWindowViewModel_Dispose_StopsThePeriodicRecheck
           - MainWindowViewModel_Dispose_RoundRunning_CancelsIt

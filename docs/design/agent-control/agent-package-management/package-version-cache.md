@@ -134,9 +134,11 @@ unconfigured alias; argument checks throw `ArgumentNullException`/`ArgumentExcep
 hit returns the previously observed result instead, even if the source has since become
 unreachable, until the entry is five minutes old - a deliberate trade-off to avoid re-querying a
 potentially slow or offline location on every UI refresh. Two simultaneous misses for the same key
-may both query; the later result wins. The across-sources methods catch a single source's failure (see their
-descriptions) instead
-of propagating it, unless every consulted source failed.
+may both query; the one that started later wins whichever completes last (each entry records when its fetch
+started, which is also what its expiry counts from, and a completing fetch keeps an existing entry that started
+later than itself), so a slow read that ignores cancellation never replaces newer data with older. The
+across-sources methods catch a single source's failure (see their descriptions) instead of propagating it, unless
+every consulted source failed.
 
 #### Dependencies
 

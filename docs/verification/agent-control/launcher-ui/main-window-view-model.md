@@ -344,13 +344,17 @@ open, a tick that arrives while the previous round is still running starts nothi
 pending round is the same task), the next tick after the round ended starts a new one; starting the re-check twice
 leaves one timer (one read per tick); a round that a launch-style check (a settings change) supersedes stays
 registered until it has unwound, so a tick that comes after the new check completed - while the cancelled round's
-provider call is still in flight - starts no second round, and the first tick after it finished does; disposing the
+provider call is still in flight - starts no second round, and the first tick after it finished does; a launch-style
+check that a newer one superseded while it was inside a provider call that ignores cancellation holds off the rounds
+until it has unwound, although the newer check completed and `PendingRefresh` is done, and the first tick after it
+unwound starts a round that reads the source once; disposing the
 view model (twice is harmless) stops the timer so later ticks read
 nothing and refuses a new start, disposing while a round waits for a source cancels the round without an error and
 leaves the card as it was, and disposing while the launch-time check waits for a source cancels that check too (the
 provider's token is cancelled and a late answer changes no card). This scenario is tested by
 `MainWindowViewModel_PeriodicRecheck_PreviousRoundStillRunning_SkipsTheTick`,
 `MainWindowViewModel_PeriodicRecheck_RoundSuperseded_NoNewRoundUntilItHasUnwound`,
+`MainWindowViewModel_PeriodicRecheck_SupersededLaunchCheckStillRunning_NoRoundUntilItHasUnwound`,
 `MainWindowViewModel_StartPeriodicUpgradeRecheck_CalledTwice_RunsOneTimer`,
 `MainWindowViewModel_Dispose_StopsThePeriodicRecheck`, `MainWindowViewModel_Dispose_RoundRunning_CancelsIt` and
 `MainWindowViewModel_Dispose_LaunchCheckRunning_CancelsIt`,

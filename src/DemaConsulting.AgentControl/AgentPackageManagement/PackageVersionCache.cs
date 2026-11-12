@@ -141,7 +141,8 @@ internal sealed class SourceFailureMemo
 ///     <see cref="Invalidate(string)"/> clears one source so editing or removing a source does not
 ///     discard the other sources' results; a fetch that was already in flight when its source was
 ///     invalidated does not repopulate the cache. Safe for concurrent use; two simultaneous misses
-///     for the same key may both fetch, and the later result wins.
+///     for the same key may both fetch, and the result of the fetch that started later wins
+///     whichever completes last, so a slow earlier fetch never replaces newer data with older.
 ///     </para>
 /// </remarks>
 internal sealed class PackageVersionCache
@@ -213,8 +214,13 @@ internal sealed class PackageVersionCache
         var ids = await provider.ListPackageIdsAsync(cancellationToken);
         lock (_lock)
         {
-            entry.PackageIds = ids;
-            entry.PackageIdsFetchedAt = fetchedAt;
+            // A read that started later is fresher: a slow earlier read finishing last must not
+            // replace it with older data
+            if (entry.PackageIds is null || entry.PackageIdsFetchedAt <= fetchedAt)
+            {
+                entry.PackageIds = ids;
+                entry.PackageIdsFetchedAt = fetchedAt;
+            }
         }
 
         return ids;
@@ -288,7 +294,12 @@ internal sealed class PackageVersionCache
 
         lock (_lock)
         {
-            entry.Versions[packageId] = new VersionListing(versions, fetchedAt);
+            // A read that started later is fresher: a slow earlier read finishing last must not
+            // replace it with older data
+            if (!entry.Versions.TryGetValue(packageId, out var existing) || existing.FetchedAt <= fetchedAt)
+            {
+                entry.Versions[packageId] = new VersionListing(versions, fetchedAt);
+            }
         }
 
         return versions;

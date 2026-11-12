@@ -127,9 +127,14 @@ is tested by `PackageVersionCache_IsNewerVersionAvailableAcrossSources_NewestWin
 **PackageVersionCache_EntriesExpire_AfterFiveMinutes**: With a fake clock (`FakeTimeProvider`, so no test waits), a
 package list and a version list that were fetched are served from the cache just under five minutes later, without
 reading the source; at five minutes both are read again and show a version and a package published meanwhile; an
-entry that was fetched again is served for another five minutes counted from the second fetch, not the first. This
+entry that was fetched again is served for another five minutes counted from the second fetch, not the first; and
+when two fetches of the same listing overlap, the one that started later stays cached even if the earlier one
+completes last (for both the version list and the package list), so a slow read that ignores cancellation cannot
+replace newer data with older. This
 scenario is tested by `PackageVersionCache_EntryYoungerThanFiveMinutes_IsStillServedFromCache`,
-`PackageVersionCache_EntryOlderThanFiveMinutes_IsFetchedAgain` and
-`PackageVersionCache_EntryFetchedAgainAfterExpiry_IsServedForAnotherFiveMinutes`, covering
+`PackageVersionCache_EntryOlderThanFiveMinutes_IsFetchedAgain`,
+`PackageVersionCache_EntryFetchedAgainAfterExpiry_IsServedForAnotherFiveMinutes`,
+`PackageVersionCache_EarlierStartedVersionFetchCompletesLast_KeepsLaterStartedListing` and
+`PackageVersionCache_EarlierStartedPackageIdsFetchCompletesLast_KeepsLaterStartedListing`, covering
 `AgentControl-PackageVersionCache-EntriesExpire` (and, through it, the subsystem requirement
 `AgentControl-AgentPackageManagement-ListingsExpire`).

@@ -129,6 +129,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _refreshCancellation;
 
     /// <summary>
+    ///     How many launch-time (or settings-change, or added-repo) upgrade checks are still running,
+    ///     superseded and canceled ones included until they have unwound. A periodic round does not
+    ///     start while this is above zero.
+    /// </summary>
+    private int _launchChecksInFlight;
+    /// <summary>
     ///     The configuration directory settings are persisted to/from, or <see langword="null"/>
     ///     to use <see cref="SettingsStore.GetDefaultConfigDirectory"/>.
     /// </summary>
@@ -725,12 +731,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Starts one periodic re-check round unless this view model was disposed or an earlier
-    ///     check (the previous round, or the launch-time one) is still running.
+    ///     Starts one periodic re-check round unless this view model was disposed, the previous round
+    ///     is still running, or any launch-time check (including one that was superseded but has not
+    ///     unwound) is still running.
     /// </summary>
     private void BeginPeriodicRecheck()
     {
-        if (_disposed || _recheckCancellation is not null || !PendingRefresh.IsCompleted)
+        if (_disposed || _recheckCancellation is not null || Volatile.Read(ref _launchChecksInFlight) > 0)
         {
             return;
         }
@@ -864,35 +871,50 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="cancellationToken">Cancels the checks that have not completed.</param>
     /// <returns>A task that completes when every check has finished or been cancelled; a
     ///     cancelled check is not an error.</returns>
-    private static async Task CheckUpgradesAsync(
+    /// <remarks>
+    ///     Counted in <see cref="_launchChecksInFlight"/> from the call until it has unwound, so a
+    ///     check that was superseded (and canceled) but is still inside a provider call that ignores
+    ///     cancellation keeps holding off the periodic round, even though
+    ///     <see cref="PendingRefresh"/> no longer refers to it.
+    /// </remarks>
+    private async Task CheckUpgradesAsync(
         IReadOnlyList<RepoCardViewModel> cards, CancellationToken cancellationToken)
     {
-        using var throttle = new SemaphoreSlim(MaxConcurrentUpgradeChecks);
-
-        // The failures of this check: once a source could not be read for a package, the cards that
-        // follow get that failure instead of reading it again (cards that are already reading it
-        // at the same moment still do, as they do for a listing that succeeds)
-        var failures = new SourceFailureMemo();
-        var checks = cards.Select(async card =>
-        {
-            await throttle.WaitAsync(cancellationToken);
-            try
-            {
-                await card.RefreshUpgradeStatusAsync(cancellationToken, failureMemo: failures);
-            }
-            finally
-            {
-                throttle.Release();
-            }
-        });
-
+        // Counted before the first await, so the caller observes it as soon as this returns
+        Interlocked.Increment(ref _launchChecksInFlight);
         try
         {
-            await Task.WhenAll(checks);
+            using var throttle = new SemaphoreSlim(MaxConcurrentUpgradeChecks);
+
+            // The failures of this check: once a source could not be read for a package, the cards that
+            // follow get that failure instead of reading it again (cards that are already reading it
+            // at the same moment still do, as they do for a listing that succeeds)
+            var failures = new SourceFailureMemo();
+            var checks = cards.Select(async card =>
+            {
+                await throttle.WaitAsync(cancellationToken);
+                try
+                {
+                    await card.RefreshUpgradeStatusAsync(cancellationToken, failureMemo: failures);
+                }
+                finally
+                {
+                    throttle.Release();
+                }
+            });
+
+            try
+            {
+                await Task.WhenAll(checks);
+            }
+            catch (OperationCanceledException)
+            {
+                // Superseded by a newer check (or the window closing): the cards keep their state
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // Superseded by a newer check (or the window closing): the cards keep their state
+            Interlocked.Decrement(ref _launchChecksInFlight);
         }
     }
 

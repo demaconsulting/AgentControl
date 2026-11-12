@@ -119,6 +119,19 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     public bool ListVersionsGateIgnoresCancellation { get; set; }
 
     /// <summary>
+    ///     Gets or sets a task that <see cref="ListPackageIdsAsync"/> awaits (ignoring cancellation)
+    ///     before returning, or <see langword="null"/> to return immediately.
+    /// </summary>
+    public Task? ListPackageIdsGate { get; set; }
+
+    /// <summary>
+    ///     Gets or sets whether <see cref="ListVersionsAsync"/> reads what the source serves before it
+    ///     waits for <see cref="ListVersionsGate"/>, like a scan that has already started, so
+    ///     what is published while the call is held open is not in its result.
+    /// </summary>
+    public bool ListVersionsReadsBeforeGate { get; set; }
+
+    /// <summary>
     ///     Gets the cancellation token of the most recent <see cref="ListVersionsAsync"/> call, or
     ///     <see langword="null"/> before the first call.
     /// </summary>
@@ -137,11 +150,21 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     public Dictionary<string, string> Revisions { get; } = [];
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _listPackageIdsCalls);
-        return Task.FromResult<IReadOnlyList<string>>(
-            Snapshot().Select(p => p.PackageId).Distinct().OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToList());
+
+        // The listing is read before the gate, like a scan that has already started: whatever is
+        // published while the call is held open is not in its result
+        IReadOnlyList<string> ids =
+            Snapshot().Select(p => p.PackageId).Distinct().OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToList();
+        var gate = ListPackageIdsGate;
+        if (gate is not null)
+        {
+            await gate;
+        }
+
+        return ids;
     }
 
     /// <summary>
@@ -165,6 +188,7 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
 
         // Snapshot the gate so a later change does not affect this call; waiting honors
         // cancellation, like a real source does
+        var served = ListVersionsReadsBeforeGate ? Snapshot() : null;
         var gate = ListVersionsGate;
         if (gate is not null)
         {
@@ -183,7 +207,7 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
             throw ListVersionsException;
         }
 
-        return Snapshot()
+        return (served ?? Snapshot())
             .Where(p => string.Equals(p.PackageId, packageId, StringComparison.Ordinal))
             .Select(p => new DiscoveredPackage(
                 p.PackageId, ParseVersion(p.Version), p.Version, Alias,

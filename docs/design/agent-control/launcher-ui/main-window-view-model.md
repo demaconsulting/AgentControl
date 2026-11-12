@@ -102,6 +102,12 @@ superseded or disposed but whose provider call is still in flight still counts a
 from overlapping), the function that brings a tick to the UI thread, and whether the view model was disposed.
 `RecheckUpgradesAsync`'s `finally` clears the field only when it still holds that round's own source.
 
+**_launchChecksInFlight**: `int` — how many background upgrade checks of the launch kind (launch, settings change,
+added repo) are running: incremented when `CheckUpgradesAsync` is called and decremented in its `finally`, so a check
+that a newer one superseded counts until it has unwound, although `PendingRefresh` no longer refers to it. A periodic
+tick starts no round while it is above zero or `_recheckCancellation` is set, so a superseded check still inside a
+provider call that ignores cancellation never overlaps a round.
+
 **Credentials**: `PackageCredentialContext?` — The session credential store and sign-in prompt created by
 `App`, passed to every `RepoCardViewModel` and to the connection-test provider so that a sign-in made in one
 place is remembered for all of them; `null` (tests, or no sign-in facilities) leaves server sources with only
