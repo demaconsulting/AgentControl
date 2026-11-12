@@ -32,8 +32,8 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
 /// <summary>
 ///     Tests of how <see cref="RepoCardViewModel"/> shows and treats a repo whose package a Git source
-///     supplies: the Git icon and the tag in the chip tooltip, that a user-started refresh reads the Git
-///     sources again (so a newly pushed tag is offered), a Git that is too old, "Change package..." on a
+///     supplies: the Git icon and the tag in the chip tooltip, that a user-started refresh reads every
+///     source again (so a newly pushed tag or published version is offered), a Git that is too old, "Change package..." on a
 ///     pinned repo and the confirmation when the same version now delivers different files.
 /// </summary>
 /// <remarks>
@@ -207,21 +207,39 @@ public sealed class RepoCardGitAwarenessTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a user-started refresh of a repo supplied by a source that is not a Git source still
-    ///     uses the cached listing: only mutable Git tags need to be read again.
+    ///     Test that a user-started refresh of a repo supplied by a source that is not a Git source
+    ///     (a zip folder, a NuGet source) reads that source again too, since new versions are
+    ///     published to every kind of source.
     /// </summary>
-    [Fact]
-    public async Task RepoCardViewModel_RefreshAsync_ZipSource_KeepsUsingCachedListing()
+    /// <param name="useNuGet">Whether the source that supplies the package is a NuGet source (otherwise a
+    ///     zip folder).</param>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RepoCardViewModel_RefreshAsync_NonGitSource_ListsAgain(bool useNuGet)
     {
-        // Arrange
-        var (_, card, provider) = CreatePinnedCard(source: ZipSource());
+        // Arrange: a card supplied by the source, which was listed once by a background check
+        var source = new PackageSourceDefinition
+        {
+            Alias = "Repo",
+            Type = useNuGet ? PackageSourceType.NuGet : PackageSourceType.Zip,
+            Location = "unused"
+        };
+        var (_, card, provider) = CreatePinnedCard(source: source);
         await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, provider.ListVersionsCalls);
+        provider.Publish("contoso-agents", "1.3.0");
 
         // Act
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        var upgradeAfterBackground = card.IsUpgradeAvailable;
         await card.RefreshAsync(TestContext.Current.CancellationToken);
 
-        // Assert
-        Assert.Equal(1, provider.ListVersionsCalls);
+        // Assert: the background check used the cache, and the refresh read the source and found the version
+        Assert.False(upgradeAfterBackground);
+        Assert.Equal(2, provider.ListVersionsCalls);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.3.0", card.LatestAvailableVersion);
     }
 
     /// <summary>

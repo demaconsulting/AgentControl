@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using Microsoft.Extensions.Time.Testing;
 
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 
@@ -395,6 +396,148 @@ public sealed class PackageVersionCacheTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a version listing whose fetch started earlier but completes last does not replace
+    ///     the listing of a fetch that started later: the newer data stays cached.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_EarlierStartedVersionFetchCompletesLast_KeepsLaterStartedListing()
+    {
+        // Arrange: a first fetch that has read 1.0.0 and is held open, then a version is published
+        var clock = new FakeTimeProvider();
+        var gate = new TaskCompletionSource();
+        var source = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsGate = gate.Task,
+            ListVersionsReadsBeforeGate = true
+        };
+        var registry = CreateRegistry(source);
+        var cache = new PackageVersionCache(clock);
+        var earlier = cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+        source.Publish("contoso-agents", "1.1.0");
+        source.ListVersionsGate = null;
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Act: the earlier fetch completes last, then the cache is asked again
+        gate.SetResult();
+        var earlierResult = await earlier;
+        var cached = await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Assert: the earlier fetch saw the old data, but the cache kept the later one without reading again
+        Assert.Equal(["1.0.0"], earlierResult.Select(package => package.Version.ToString()));
+        Assert.Equal(["1.1.0", "1.0.0"], cached.Select(package => package.Version.ToString()));
+        Assert.Equal(2, source.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that a package-name listing whose fetch started earlier but completes last does not
+    ///     replace the listing of a fetch that started later.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_EarlierStartedPackageIdsFetchCompletesLast_KeepsLaterStartedListing()
+    {
+        // Arrange: a first fetch that has read one package name and is held open, then another is published
+        var clock = new FakeTimeProvider();
+        var gate = new TaskCompletionSource();
+        var source = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0")) { ListPackageIdsGate = gate.Task };
+        var registry = CreateRegistry(source);
+        var cache = new PackageVersionCache(clock);
+        var earlier = cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+        source.Publish("other-agents", "1.0.0");
+        source.ListPackageIdsGate = null;
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+
+        // Act: the earlier fetch completes last, then the cache is asked again
+        gate.SetResult();
+        var earlierResult = await earlier;
+        var cached = await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+
+        // Assert: the earlier fetch saw the old data, but the cache kept the later one without reading again
+        Assert.Equal(["contoso-agents"], earlierResult);
+        Assert.Equal(["contoso-agents", "other-agents"], cached);
+        Assert.Equal(2, source.ListPackageIdsCalls);
+    }
+
+    /// <summary>
+    ///     Test that a cached version list and package list are served until five minutes have
+    ///     passed since they were fetched, without reading the source again.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_EntryYoungerThanFiveMinutes_IsStillServedFromCache()
+    {
+        // Arrange: a source that was listed once
+        var clock = new FakeTimeProvider();
+        var source = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(source);
+        var cache = new PackageVersionCache(clock);
+        await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Act: just under five minutes later, ask again
+        clock.Advance(PackageVersionCache.EntryLifetime - TimeSpan.FromSeconds(1));
+        await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Assert: nothing was read again
+        Assert.Equal(1, source.ListPackageIdsCalls);
+        Assert.Equal(1, source.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that a cached entry expires five minutes after it was fetched, so the next call reads
+    ///     the source again and sees a version published meanwhile.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_EntryOlderThanFiveMinutes_IsFetchedAgain()
+    {
+        // Arrange: a source that was listed once, then a newer version is published
+        var clock = new FakeTimeProvider();
+        var source = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(source);
+        var cache = new PackageVersionCache(clock);
+        await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+        source.Publish("contoso-agents", "1.1.0");
+        source.Publish("other-agents", "1.0.0");
+
+        // Act: five minutes later, ask again
+        clock.Advance(PackageVersionCache.EntryLifetime);
+        var ids = await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+        var versions = await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Assert: both lists were read again and show what was published
+        Assert.Equal(2, source.ListPackageIdsCalls);
+        Assert.Equal(2, source.ListVersionsCalls);
+        Assert.Equal(["contoso-agents", "other-agents"], ids);
+        Assert.Equal(["1.1.0", "1.0.0"], versions.Select(package => package.Version.ToString()));
+    }
+
+    /// <summary>
+    ///     Test that an entry that was fetched again starts a new five minutes, rather than staying
+    ///     expired or keeping its first fetch time.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_EntryFetchedAgainAfterExpiry_IsServedForAnotherFiveMinutes()
+    {
+        // Arrange: an entry that expired and was fetched again
+        var clock = new FakeTimeProvider();
+        var source = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(source);
+        var cache = new PackageVersionCache(clock);
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+        clock.Advance(PackageVersionCache.EntryLifetime);
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Act: four minutes after the second fetch (nine after the first), ask again
+        clock.Advance(TimeSpan.FromMinutes(4));
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Assert: the second fetch's entry is still served
+        Assert.Equal(2, source.ListVersionsCalls);
+    }
+
+    /// <summary>
     ///     Test that asking the cache about an alias that is not configured fails with
     ///     <see cref="UnknownSourceException"/> and never consults any other source.
     /// </summary>
@@ -532,6 +675,102 @@ public sealed class PackageVersionCacheTests : IDisposable
         // Assert
         Assert.Equal("Working", Assert.Single(offers).SourceAlias);
         Assert.Equal(["first failure", "second failure"], failures);
+    }
+
+    /// <summary>
+    ///     Test that, with a round's failure memo, a source that failed is read once however often it is
+    ///     asked, the later askers get the same failure, and a source that did not fail is unaffected.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_FailureMemo_SourceFailed_IsNotReadAgainAndRethrowsTheSameFailure()
+    {
+        // Arrange: one unreachable source and one working source, and a round's memo
+        var broken = new FakePackageSourceProvider("Broken", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("unreachable")
+        };
+        var working = new FakePackageSourceProvider("Working", ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(broken, working);
+        var cache = new PackageVersionCache();
+        var memo = new SourceFailureMemo();
+
+        // Act: three askers in the same round
+        var failures = new List<IOException>();
+        for (var asker = 0; asker < 3; asker++)
+        {
+            failures.Add(await Assert.ThrowsAsync<IOException>(
+                () => cache.GetVersionsDescendingAsync(
+                    registry, "Broken", "contoso-agents", CancellationToken.None, memo)));
+            await cache.GetVersionsDescendingAsync(registry, "Working", "contoso-agents", CancellationToken.None, memo);
+        }
+
+        // Assert: one read of each source, the same failure every time
+        Assert.Equal(1, broken.ListVersionsCalls);
+        Assert.Equal(1, working.ListVersionsCalls);
+        Assert.All(failures, failure => Assert.Equal("unreachable", failure.Message));
+    }
+
+    /// <summary>
+    ///     Test that a failure is remembered only by the memo it was given: the cache keeps no failure, so a
+    ///     call without a memo (a user action) or with the next round's memo reads the source again.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_FailureMemo_FailureIsNotPersistedBeyondTheMemo()
+    {
+        // Arrange: an unreachable source that fails once in a round
+        var broken = new FakePackageSourceProvider("Broken", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("unreachable")
+        };
+        var registry = CreateRegistry(broken);
+        var cache = new PackageVersionCache();
+        await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsDescendingAsync(
+                registry, "Broken", "contoso-agents", CancellationToken.None, new SourceFailureMemo()));
+
+        // Act: the next round, and a call with no memo, each ask again
+        await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsDescendingAsync(
+                registry, "Broken", "contoso-agents", CancellationToken.None, new SourceFailureMemo()));
+        await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsDescendingAsync(registry, "Broken", "contoso-agents", CancellationToken.None));
+
+        // Assert: each of the three reached the source; and once it recovers, the cache serves it
+        Assert.Equal(3, broken.ListVersionsCalls);
+        broken.ListVersionsException = null;
+        var versions = await cache.GetVersionsDescendingAsync(
+            registry, "Broken", "contoso-agents", CancellationToken.None, new SourceFailureMemo());
+        Assert.Single(versions);
+    }
+
+    /// <summary>
+    ///     Test that the failure memo is keyed by source and package: a failure of one package at a source
+    ///     does not stop another package from being read there.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_FailureMemo_FailureOfOnePackage_DoesNotAffectAnotherPackage()
+    {
+        // Arrange: a source whose read fails once, for the first package asked
+        var feed = new FakePackageSourceProvider("Feed", ("other-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("unreachable")
+        };
+        var registry = CreateRegistry(feed);
+        var cache = new PackageVersionCache();
+        var memo = new SourceFailureMemo();
+        await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsDescendingAsync(registry, "Feed", "contoso-agents", CancellationToken.None, memo));
+        feed.ListVersionsException = null;
+
+        // Act: the other package at the same source, and the first package again
+        var other = await cache.GetVersionsDescendingAsync(registry, "feed", "other-agents", CancellationToken.None, memo);
+        await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsDescendingAsync(registry, "FEED", "contoso-agents", CancellationToken.None, memo));
+
+        // Assert: the other package was read; the first was answered by the memo (alias compared
+        // case-insensitively)
+        Assert.Single(other);
+        Assert.Equal(2, feed.ListVersionsCalls);
     }
 
     /// <summary>

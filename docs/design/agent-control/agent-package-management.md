@@ -128,13 +128,15 @@ plus **PackageVersionCache.Invalidate**.
 - *Type*: In-process .NET instance methods (asynchronous).
 - *Role*: Provider.
 - *Contract*: Reuse a cached result per `(source alias, package ID)` across repeated calls until
-  `Invalidate` clears everything or `Invalidate(alias)` clears one source
+  it is five minutes old (when the source is read again), or `Invalidate` clears everything or
+  `Invalidate(alias)` clears one source
   (`AgentControl-PackageVersionCache-CachePackageNames`,
   `AgentControl-PackageVersionCache-CacheVersions`,
   `AgentControl-PackageVersionCache-CacheNewerVersion`,
   `AgentControl-PackageVersionCache-Invalidate`,
   `AgentControl-PackageVersionCache-KeyedBySource`,
-  `AgentControl-PackageVersionCache-InvalidateBySource`).
+  `AgentControl-PackageVersionCache-InvalidateBySource`,
+  `AgentControl-PackageVersionCache-EntriesExpire`).
 - *Constraints*: An uncached call against a missing source folder still throws
   `DirectoryNotFoundException`, matching the providers' own behavior.
 
@@ -290,8 +292,8 @@ is the repo card's (see *RepoCardViewModel Design*).
   advice to refresh the list (the listed commit is the only thing `Revision` is used for). Whether the files of a tag
   that was moved earlier are still the ones a repo was set up with is not decided here: it is the content identity
   check of the repo card, which compares the files, never the commit.
-- *Refreshing the list.* The card's Refresh re-reads the listings of the Git sources (it drops their cached entries)
-  so that a newly pushed tag - a new version - shows up at once; the other kinds of source keep using the cache.
+- *Refreshing the list.* The card's Refresh re-reads the listings of every configured source, Git sources included
+  (it drops their cached entries), so that a newly pushed tag - a new version - shows up at once.
 - *User-started versus background.* `GitSourceOptions.Interactive` is the `allowPrompt` switch of the card: only work
   the user started lets git show its credential UI; a missing sign-in in the background is
   `PackageSourceFailureKind.AuthenticationFailed`, which the card already shows as "sign-in needed".
@@ -350,9 +352,13 @@ parse so name/version splitting is unchanged.
 memoization layer: `MainWindowViewModel` constructs one shared instance so multiple
 `RepoCardViewModel`s pointed at the same source do not each re-query it independently, and
 `MainWindowViewModel.ApplySettings` invalidates only the sources that were edited or removed,
-since previously cached results for those become stale (architecture.md's "Repo-fact caching
-strategy": available package versions are cached once per app session or a short TTL, refreshed
-on app start or manual refresh, rather than rescanned per repo card).
+since previously cached results for those become stale. Entries expire five minutes after they were
+fetched (a `TimeProvider` dates them, so tests move the clock by hand), because the application is
+left open while packages are published; a user action that must show what the sources offer now
+(opening Select Package, the card's Refresh, Upgrade) invalidates the sources it reads, and the
+periodic background re-check of `MainWindowViewModel` clears the cache at the start of each round
+(architecture.md's "Repo-fact caching strategy": available package versions are cached for a short TTL
+and refreshed on manual action, rather than rescanned per repo card).
 
 **Resolution.** `PackageSourceRegistry` is built from the configured definitions (and, optionally, the
 `PackageCredentialContext` that NuGet server sources use) and resolves an

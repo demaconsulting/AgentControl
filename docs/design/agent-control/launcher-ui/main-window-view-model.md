@@ -84,8 +84,29 @@ group (from a card's menu) and for a rename (from a header), and this view model
 comes from a card or a header button (favorite, group, card color, launch stamp, collapse) could not be saved; the
 window shows it in a message box (`AgentControl-MainWindowViewModel-SaveFailureReported`).
 
-**_packageVersionCache**: `PackageVersionCache` — The shared, session-scoped package-version
-cache passed to every `RepoCardViewModel`, per architecture.md's repo-fact caching strategy.
+**_packageVersionCache**: `PackageVersionCache` — The package-version cache passed to every
+`RepoCardViewModel`, per architecture.md's repo-fact caching strategy; created with the view model's `TimeProvider`, so
+its entries expire five minutes after they were fetched.
+
+**_timeProvider**, **_upgradeRecheckInterval**: `TimeProvider` and `TimeSpan` — the clock behind the cache's expiry and
+the periodic re-check's timer, and the interval of that timer (`DefaultUpgradeRecheckInterval`, five minutes, the
+lifetime of a cache entry). Both are constructor parameters so tests move time by hand and shorten the interval.
+
+**_registryFactory**: `Func<AppSettings, PackageSourceRegistry>?` — handed to every card; `null` uses the real providers.
+Supplied by tests that need sources whose reads they count.
+
+**_recheckTimer**, **_recheckCancellation**, **_runOnUiThread**, **_disposed**: the periodic re-check's timer, the
+cancellation source of the round that is running (non-null exactly from the moment a round starts until that round has
+finished unwinding - canceling a round only requests the cancellation and leaves the field set, so a round that was
+superseded or disposed but whose provider call is still in flight still counts as running, which is what stops rounds
+from overlapping), the function that brings a tick to the UI thread, and whether the view model was disposed.
+`RecheckUpgradesAsync`'s `finally` clears the field only when it still holds that round's own source.
+
+**_launchChecksInFlight**: `int` — how many background upgrade checks of the launch kind (launch, settings change,
+added repo) are running: incremented when `CheckUpgradesAsync` is called and decremented in its `finally`, so a check
+that a newer one superseded counts until it has unwound, although `PendingRefresh` no longer refers to it. A periodic
+tick starts no round while it is above zero or `_recheckCancellation` is set, so a superseded check still inside a
+provider call that ignores cancellation never overlaps a round.
 
 **Credentials**: `PackageCredentialContext?` — The session credential store and sign-in prompt created by
 `App`, passed to every `RepoCardViewModel` and to the connection-test provider so that a sign-in made in one
@@ -125,12 +146,14 @@ candidate-first flow, described below.
 **Constructor**: Populates `RepoCards` from the loaded settings.
 
 - *Parameters*: `AppSettings settings`, `StartupOptions? startupOptions = null`,
-  `string? configDirectory = null`, `PackageCredentialContext? credentials = null`.
-- *Preconditions*: `settings` is not null.
+  `string? configDirectory = null`, `PackageCredentialContext? credentials = null`,
+  `Action<ThemePreference>? applyTheme = null`, `TimeProvider? timeProvider = null`,
+  `TimeSpan? upgradeRecheckInterval = null` and `Func<AppSettings, PackageSourceRegistry>? registryFactory = null`.
+- *Preconditions*: `settings` is not null; `upgradeRecheckInterval`, when given, is positive.
 - *Postconditions*: One `RepoCardViewModel` exists per `RecentRepo` in `settings.RecentRepos`;
   each card's cheap refresh (`RefreshCheap`) has run; `DisplayedItems` and `DisplayedRepoCards`
   reflect the initial sort/filter/grouping (`AgentControl-MainWindowViewModel-PopulateRecentRepos`).
-  No package source has been read (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`).
+  No package source has been read (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`) and no timer runs yet.
 
 Only the cheap per-card checks run eagerly at construction — the working-tree dirty check is
 deferred/lazy, per architecture.md's repo-fact caching strategy, so startup stays fast even
@@ -142,9 +165,58 @@ with many tracked repos.
   await it).
 - *Postconditions*: Each card's `RefreshUpgradeStatusAsync` runs a few cards at a time, so a slow or
   unreachable source holds up only the cards' own checks, never the window, and a check still running for earlier
-  settings is cancelled. The window calls it once it is shown; `AddRepo` checks the new card's
+  settings (including a periodic round) is cancelled. The window calls it once it is shown; `AddRepo` checks the new card's
   upgrade status the same way, and `ApplySettings` starts a new round against the new sources
   (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`).
+
+**StartPeriodicUpgradeRecheck**: Starts a timer that checks every card's upgrade availability again every
+`_upgradeRecheckInterval` (five minutes) until the view model is disposed
+(`AgentControl-MainWindowViewModel-PeriodicUpgradeRecheck`, `-PeriodicRecheckLifecycle`).
+
+- *Parameters*: `Action<Action>? runOnUiThread` — runs an action on the UI thread; the main window passes
+  `Dispatcher.UIThread.Post`. `null` runs each tick where the timer fired (tests, whose fake clock fires timers on the
+  calling thread).
+- *Preconditions*: The view model is not disposed (otherwise `ObjectDisposedException`). Calling it again is ignored,
+  so there is only ever one timer. The window calls it where it calls `BeginUpgradeRefresh`; the constructor does not
+  start it, so a view model in a unit test never runs a timer unasked.
+- *Threading*: `TimeProvider.CreateTimer` fires on a thread-pool thread. The tick only hands `BeginPeriodicRecheck` to
+  `runOnUiThread`; the round, its `await`s and therefore every card property it updates run on the UI thread, like the
+  launch-time check ("Not thread-safe; every member is expected to be called from the UI thread"). A
+  `DispatcherTimer` was not used because a `TimeProvider` timer can be driven by `FakeTimeProvider` in a test, so the
+  interval and the expiry are tested without waiting; the cache and the timer share the one clock.
+- *Round* (`BeginPeriodicRecheck` / `RecheckUpgradesAsync`): does nothing when the view model is disposed, when the
+  previous round has not finished (`_recheckCancellation` is non-null) or when the launch-time check
+  (`PendingRefresh`) has not finished, so a slow source never piles up work. Otherwise it takes the cards that have a pin,
+  are not busy and whose folder is not missing (a retired card is no longer in `RepoCards`, and a card that became
+  busy while waiting its turn is skipped when its turn comes), **clears the cache** (the previous round's entries may
+  still be inside their five minutes, and the round exists to see what the sources offer now) and checks them with
+  `RefreshUpgradeStatusAsync(token)` - `allowPrompt` false, `relistSources` false, i.e. exactly the launch-time check:
+  no sign-in dialog ever opens, and a failure - a server that needs a sign-in, an unreachable source - is shown in the
+  card's own state (`IsUpgradeStatusUnknown`, `SourceProblem`) as at launch, never as a dialog. The cards are grouped by
+  pinned package name: groups run a few at a time, the cards of one group one after another, so the first card of a
+  package reads each source and the others are answered from what it just fetched (each source is read once per package
+  per round, not once per card). That also has to hold when a source cannot be read: `PackageVersionCache` never caches
+  a failure, so the round creates a `SourceFailureMemo` and passes it through `RefreshUpgradeStatusAsync(token,
+  failureMemo: failures)` to the cache's reads. The first card whose read of a source fails records the failure in the
+  memo under `(source alias, package ID)`; every later card of the round (in the same group, and a card checked after
+  the failure in another) gets that same failure for that source without reading it, so a source is read at most once
+  per round per package and a card ends in the same state as the first one (`IsUpgradeStatusUnknown`, plus the
+  sign-in or Git-too-old `SourceProblem`); a source that failed while another answered is skipped for the later cards
+  too, which still show the upgrade the working source offers. The memo belongs to the round: it is dropped when the
+  round ends, so the next round - like every action the user starts, which passes no memo - reads the source again.
+  The launch-time check (`CheckUpgradesAsync`, which does not group cards and reads concurrently) creates a memo of its
+  own for the same reason; cards that are already reading the same source at the moment it fails still read it, as
+  they do for a listing that succeeds. The round's token is cancelled by `Dispose` and by `StartUpgradeRefresh` (a settings
+  change starts a new launch-style round that supersedes it); a cancelled round is not an error. Canceling only
+  requests the cancellation: `_recheckCancellation` stays set until `RecheckUpgradesAsync` has actually finished
+  (its `finally` clears it, and only if it still holds that round's own source), so a tick that arrives after the
+  superseding check completed, while the cancelled round's provider call is still in flight, finds the round still
+  registered and starts nothing - two rounds never overlap on the shared cache and card state.
+- *`Dispose`* (`IDisposable`; the main window calls it when it closes): disposes the timer, cancels the running round
+  and the background upgrade check tracked by `_refreshCancellation` (launch, settings change, added repo: it is
+  cancelled, disposed and cleared the way `StartUpgradeRefresh` replaces it), so neither keeps waiting for a slow
+  source or updates cards after the window closed, and refuses further starts (a repo added afterwards starts no
+  check); calling it twice is harmless.
 
 **AddRepo**: Adds a repository to the recent-repos list.
 
@@ -307,7 +379,9 @@ succeeding.
   **RepoGroupName** (`Settings` subsystem) — the group-name rules used for sorting, validation and
   repair.
 - **PackageVersionCache** (`AgentPackageManagement` subsystem) — shared across all cards;
-  invalidated per source by `ApplySettings` when a package source was edited or removed.
+  invalidated per source by `ApplySettings` when a package source was edited or removed, and entirely at the start of each
+  periodic re-check round.
+- **TimeProvider** (.NET) — the timer and the clock of the periodic re-check and of the cache's expiry.
 - **PackageCredentialContext** (`PackageCredentials` subsystem) — the session credentials and sign-in
   prompt it holds and passes on; **NuGetSourceProvider**, **GitSourceProvider**, **GitSourceOptions**
   (`AgentPackageManagement`) — created by `CreateConnectionTestProvider`.
@@ -317,7 +391,9 @@ succeeding.
 - **App** — constructs `MainWindowViewModel` in `OnFrameworkInitializationCompleted`, passing the
   process-wide `PackageCredentialContext`, and assigns it as `MainWindow.DataContext`.
 - **MainWindow** (code-behind) — calls `AddRepo`, `RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and
-  `RemoveGroup` (catching the `InvalidOperationException` of a failed save and showing a message), subscribes to
+  `RemoveGroup` (catching the `InvalidOperationException` of a failed save and showing a message), starts the
+  upgrade check and the periodic re-check (`BeginUpgradeRefresh`, `StartPeriodicUpgradeRecheck`) when the view
+  model is attached, disposes the view model when it closes, subscribes to
   `SettingsSaveFailed` to show a message for the changes that come from cards and headers, and reads `Settings` to open
   `SettingsWindow`, passing `CreateConnectionTestProvider` as its provider factory; fills each card
   menu's "Move to group" submenu when the menu opens, shows the `GroupNameWindow` prompt and the

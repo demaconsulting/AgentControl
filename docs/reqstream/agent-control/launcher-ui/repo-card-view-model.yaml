@@ -1297,21 +1297,23 @@ sections:
           - RepoCardViewModel_PackageChipTooltip_ZipSource_HasNoTag
           - RepoCardViewModel_PinnedTagName_TagPatternEdited_FollowsTheSourcesPattern
 
-      - id: AgentControl-RepoCardViewModel-RefreshRelistsGitSources
+      - id: AgentControl-RepoCardViewModel-RefreshRelistsSources
         title: >-
-          The RepoCardViewModel class shall, when the user refreshes a card, read every configured
-          Git source's tags again instead of reusing the listing cached earlier in the session, so
-          that a tag pushed since then (a new version) is offered, while a check that runs in the
-          background may use the cached listing.
+          The RepoCardViewModel class shall, when the user refreshes a card (and when the refresh
+          follows a pull), read every configured source - NuGet, zip folder and Git alike - again
+          instead of using a cached listing, so that a package published since then (a new
+          version) is offered, while a check that runs in the background may use a cached listing
+          that is less than five minutes old.
         justification: |
-          Tags can be pushed at any time, and a cached listing would hide a new version for the rest
-          of the session; the user who asks for a refresh expects the current answer, while
-          background checks must stay cheap. A newer version may be in any of the user's Git
-          sources, not only the one that supplies the repo's files.
+          Packages can be published at any time, and a cached listing would hide a new version; the
+          user who asks for a refresh expects the current answer, while background checks must stay
+          cheap. A newer version may be in any of the user's sources, not only the one that
+          supplies the repo's files.
         tests:
           - RepoCardViewModel_RefreshAsync_GitSourceNewTagPushedAfterCachedListing_ListsAgainAndOffersNewVersion
           - RepoCardViewModel_RefreshAsync_SeveralGitSources_ListsEachOfThemAgain
-          - RepoCardViewModel_RefreshAsync_ZipSource_KeepsUsingCachedListing
+          - RepoCardViewModel_RefreshAsync_NonGitSource_ListsAgain
+          - RepoCardViewModel_RefreshAsync_ZipFolderGainedVersionAfterListing_OffersUpgradeAfterRefresh
       - id: AgentControl-RepoCardViewModel-GitTooOldProblem
         title: >-
           The RepoCardViewModel class shall, when the background check finds that the installed git

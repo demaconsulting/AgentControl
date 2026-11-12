@@ -37,10 +37,13 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     looked up in a source other than the selected one.
 ///     </para>
 ///     <para>
-///     All source access is asynchronous and routed through the shared, session-scoped
+///     All source access is asynchronous and routed through the shared
 ///     <see cref="AgentPackageManagement.PackageVersionCache"/> rather than a source provider
-///     directly, so opening the dialog again in the same app session does not query a source
-///     again. <see cref="LoadAsync"/> reads every source's package list concurrently, and each
+///     directly. <see cref="LoadAsync"/> first invalidates every source, so opening the dialog (and
+///     a source's Retry) shows what the sources offer now rather than a listing cached earlier;
+///     what the dialog then fetches is reused while it stays open (switching between sources and
+///     packages does not read them again) until the cache entry expires. <see cref="LoadAsync"/>
+///     reads every source's package list concurrently, and each
 ///     source reports its own failure (<see cref="SelectPackageSourceViewModel.ErrorMessage"/>),
 ///     so one unreachable source never blocks or hides the others. Selecting a package loads its
 ///     versions in the background; a newer selection supersedes the load still running for an
@@ -55,7 +58,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
     private readonly PackageSourceRegistry _registry;
 
     /// <summary>
-    ///     The shared, session-scoped package-version cache.
+    ///     The shared package-version cache.
     /// </summary>
     private readonly PackageVersionCache _cache;
 
@@ -421,6 +424,14 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         IsLoading = Sources.Count > 0;
         try
         {
+            // Opening the dialog shows what the sources offer now, not what was cached earlier:
+            // everything the dialog reads from here on (including the versions of packages the user
+            // selects) is served from what this load fetched, until the cache entry expires
+            foreach (var source in Sources)
+            {
+                _cache.Invalidate(source.Alias);
+            }
+
             await Task.WhenAll(Sources.Select(source => LoadSourceAsync(source, cancellationToken)));
             await ApplyPreferredSelectionAsync(cancellationToken);
         }
@@ -537,6 +548,7 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
         {
             // Read the failed source again, on its own, without touching the others
             var source = _selectedSource;
+            _cache.Invalidate(source.Alias);
             source.BeginLoading();
             PendingSourceRetry = RetrySourceAsync(source);
             return;
@@ -547,7 +559,10 @@ internal sealed class SelectPackageWindowViewModel : ViewModelBase
             return;
         }
 
-        // Start a fresh version load exactly as a new selection would, superseding the failed one
+        // Start a fresh version load exactly as a new selection would, superseding the failed one,
+        // and read the source again (a failure is never cached, but a listing that has since gone
+        // stale must not be served either)
+        _cache.Invalidate(_selectedSource.Alias);
         _versionsCancellation.Cancel();
         _versionsCancellation.Dispose();
         _versionsCancellation = new CancellationTokenSource();

@@ -96,7 +96,7 @@ internal sealed partial class MainWindow : Window
         AvaloniaXamlLoader.Load(this);
         DataContextChanged += OnDataContextChanged;
         Closing += MainWindow_Closing;
-
+        Closed += (_, _) => (DataContext as MainWindowViewModel)?.Dispose();
         // Remember which card's favorite star has the keyboard focus (see RestoreStarFocus)
         AddHandler(GotFocusEvent, OnAnyGotFocus, RoutingStrategies.Bubble);
         Deactivated += (_, _) => _focusedStarCard = null;
@@ -254,6 +254,11 @@ internal sealed partial class MainWindow : Window
         // The upgrade check reads package sources, which may be slow or unreachable, so it starts
         // in the background now that the window has its data rather than delaying the window
         _ = viewModel.BeginUpgradeRefresh();
+
+        // ...and the same check repeats every five minutes while the window stays open, so a
+        // package published meanwhile shows up. The timer fires off the UI thread, so each tick is
+        // posted back to it.
+        viewModel.StartPeriodicUpgradeRecheck(action => Dispatcher.UIThread.Post(action));
     }
 
     /// <summary>

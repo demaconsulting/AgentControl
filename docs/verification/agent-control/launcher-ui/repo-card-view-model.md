@@ -80,7 +80,8 @@ invocations are not parallelized with other tests using real process launches).
   is replaced; with nobody to ask nothing changes; a repo with no tracked agent files, or one git cannot be asked
   about, is applied as always without a question.
 - A card whose package a Git source supplies shows the Git icon and the alias and names the tag in its chip tooltip
-  (never a commit), a refresh the user starts reads the Git sources again so a newly pushed tag is offered, and the
+  (never a commit), a refresh the user starts reads every source again (NuGet, zip folder and Git) so a newly published
+  version or pushed tag is offered, and the
   card says when the installed git is too old without suggesting a sign-in; a pinned repo can execute Select Package as
   Change package.
 - A NuGet folder source can be selected from, upgraded from, and applied to a repo.
@@ -766,16 +767,20 @@ and `AgentControl-RepoCardViewModel-GitSourceTooltip` (the tag). The tag is deri
 configured now, not stored in the pin. The tests use a `FakePackageSourceProvider` standing in for the Git
 source and a pin file written for the test, so no Git repository or network is involved.
 
-**RepoCardViewModel_RefreshRelistsGitSources_NewTagIsOfferedAndOtherSourcesKeepTheirCache**: Against a real local Git
+**RepoCardViewModel_RefreshRelistsSources_NewVersionIsOfferedByEveryKindOfSource**: Against a real local Git
 repository (`GitRepositoryFixture`) whose listing is cached by the card's first check, a tag for a newer version is
 pushed; a background check still answers from the cache, while the card's Refresh reads the Git source again and
-offers the new version as the upgrade; with two Git sources every one of them is read again by a Refresh; the same
-Refresh of a card whose source is a zip folder keeps using the cached listing. A Git source that is only a candidate
-(not the one that supplies the files) is read again too, because a newer version can be in any of them. This scenario is
+offers the new version as the upgrade; with two Git sources every one of them is read again by a Refresh. A card whose
+source is a zip folder or a NuGet source (an in-memory provider that is given a new version after the first listing)
+is read again by a Refresh as well, and with a real zip folder that receives a new zip after the first listing a
+background check keeps answering from the cache while the card's Refresh offers the new version. A source that is
+only a candidate (not the one that supplies the files) is read again too, because a newer version can be in any of
+them. This scenario is
 tested by `RepoCardViewModel_RefreshAsync_GitSourceNewTagPushedAfterCachedListing_ListsAgainAndOffersNewVersion`,
-`RepoCardViewModel_RefreshAsync_SeveralGitSources_ListsEachOfThemAgain` and
-`RepoCardViewModel_RefreshAsync_ZipSource_KeepsUsingCachedListing`, covering
-`AgentControl-RepoCardViewModel-RefreshRelistsGitSources`.
+`RepoCardViewModel_RefreshAsync_SeveralGitSources_ListsEachOfThemAgain`,
+`RepoCardViewModel_RefreshAsync_NonGitSource_ListsAgain` and
+`RepoCardViewModel_RefreshAsync_ZipFolderGainedVersionAfterListing_OffersUpgradeAfterRefresh`, covering
+`AgentControl-RepoCardViewModel-RefreshRelistsSources`.
 
 **RepoCardViewModel_ChangePackage_GitVersionWithOtherFiles_AsksAndAcceptsDeliberately**: When the tag of the pinned
 version now delivers other files, choosing the pinned version again (Change package...) asks for confirmation and

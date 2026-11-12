@@ -368,7 +368,8 @@ still waiting (`AgentControl-RepoCardViewModel-SupersededUpgradeCheck`), so a re
 since changed is discarded; a source configuration that is invalid is shown as a problem
 (`-InvalidSourceConfigurationIsProblem`) and cancellation leaves
 the previous state in place (`AgentControl-RepoCardViewModel-CancelOperation`). Its
-`allowPrompt` parameter defaults to `false`, which is what the background check at start-up, after a
+`allowPrompt` parameter defaults to `false`, which is what the background check at start-up, the periodic re-check every
+five minutes, after a
 repo is added and after settings change uses: it reads a server through the remembered session
 credentials and **never opens the sign-in dialog**. A server that then answers that it needs a sign-in
 (`PackageSourceFailureKind.AuthenticationFailed`) sets `SourceProblem` to the provider's secret-free message
@@ -396,13 +397,14 @@ tampered with, and the files identity does that for every kind of source, so a m
 delivers different files is caught where the files would be applied (the restore before launch and Upgrade refuse
 them, Change package asks) and one that delivers identical files is irrelevant.
 
-The session's `PackageVersionCache` answers the background check, which is cheap, from the listing it already read.
-A tag pushed after the listing - a new version - is only visible in a fresh listing, so the optional
-`relistGitSource` parameter (true for the
-**Refresh** command only) discards the cached entries of *every configured Git source* -
+The `PackageVersionCache` answers the background check, which is cheap, from a listing it read less than five
+minutes ago (older entries are read again). A package published after the listing - a new NuGet version, a zip added to
+a folder, a pushed tag - is only visible in a fresh listing, so the optional
+`relistSources` parameter (true for the
+**Refresh** command and for the refresh after a pull) discards the cached entries of *every configured source* -
 `PackageVersionCache.Invalidate(sourceAlias)`, which also stops a read already in flight from putting an
-older answer back - before the check, so that newly pushed tags show up at once; the versions of other kinds
-of source are immutable by convention and keep using the cache.
+older answer back - before the check, so that newly published versions show up at once
+(`AgentControl-RepoCardViewModel-RefreshRelistsSources`).
 A `GitRemoteException` of
 kind `GitTooOld` found by the check
 becomes a source problem with the exception's secret-free message and no sign-in hint
@@ -478,10 +480,10 @@ is an informational side action only — it never blocks `Launch`.
 throwing for a failed pull. A pull can change the pin file, the branch, which agent files are committed and the working
 tree, so after every completed pull - a refused one too, because a merge that stopped on a conflict has already changed
 the working tree and may have written conflict markers into the pin file - it runs the shared private refresh core
-(`RefreshCheap`, the upgrade check with `allowPrompt: true` and `relistGitSource: true`, then `RefreshDirtyStatus`,
+(`RefreshCheap`, the upgrade check with `allowPrompt: true` and `relistSources: true`, then `RefreshDirtyStatus`,
 the very sequence behind `RefreshAsync`). The core runs inside the pull's own busy operation and does not take
 `IsBusy` again, so there is no nested operation to be refused. The user explicitly acted, so, like Refresh, the check
-may ask for a sign-in and reads the Git sources again. The refresh token is the operation's token (the pull itself is
+may ask for a sign-in and reads every source again. The refresh token is the operation's token (the pull itself is
 never interrupted and has no Cancel button; only `Retire` or the caller's token can cancel the refresh part). A pull that
 has completed cannot be undone, so canceling the refresh part never loses its outcome: the cancellation is caught
 inside the pull operation (it does not reach the generic "The operation was canceled." handling), the pull's
@@ -679,7 +681,8 @@ teammate may use any alias and any kind of source for the same files, which are 
 purely local, from the user's own Settings, wherever the pinned package is acquired or checked:
 
 1. *Which sources offer it.* The configured sources are asked, in Settings order, through
-   `PackageVersionCache.GetVersionsAcrossSourcesAsync` (no source is excluded and none is read twice per session; a
+   `PackageVersionCache.GetVersionsAcrossSourcesAsync` (no source is excluded and none is read twice within the
+   cache's five minutes; a
    source that cannot be read is skipped and its failure recorded), and only the sources that list the pinned package
    and version are candidates (`FindOfferingSourcesAsync`, which also returns the first listing failure that was a
    refusal of access, used in 2).
@@ -728,8 +731,10 @@ source delivering the identical files, or show a "Package source problem" if the
 unchanged: the background check uses a registry that never prompts, so a candidate that needs a sign-in is simply one
 that cannot be verified; the launch restore is user-initiated and may prompt.
 
-*Refresh and Git sources.* Because a Git tag can be pushed at any time, the card's Refresh invalidates the cache of
-every configured Git source (`relistGitSource`) so that new tags - new versions - show up at once. It is not used to
+*Refresh and the sources.* Because a package can be published at any time, the card's Refresh invalidates the cache of
+every configured source (`relistSources`), Git, NuGet and zip folder alike, so that new versions show up at once; the
+background check (the launch-time one and the periodic re-check of `MainWindowViewModel`) never sets it. It is not
+used to
 detect a moved tag: a moved tag that delivers different files is caught by the identity check when the files are
 applied, and one that delivers identical files is irrelevant.
 

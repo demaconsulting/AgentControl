@@ -859,7 +859,6 @@ sections:
           - AgentControl-GitIntegration-RemoteGitMinimumVersion
           - AgentControl-LauncherUI-GitSourceSetup
           - AgentControl-LauncherUI-GitTooOld
-          - AgentControl-LauncherUI-RefreshRelistsGitSources
         tests:
           # The published application against a real local repository: tags matching the pattern are
           # listed as the versions (and the hint when a wrong-case pattern matches nothing), and a
@@ -867,6 +866,22 @@ sections:
           - windows@SettingsWindow_AddGitRepositoryViaDialog_TestsConnectionListsTagsAndPersistsIt
           - windows@SettingsWindow_AddGitRepositoryWithWrongCasePattern_ShowsNoMatchingTagsThenSucceedsWhenFixed
           - windows@SelectPackage_FromGitSource_PinsPackageAndFilesIdentityAndCardShowsGitSourceChip
+
+      - id: AgentControl-System-FreshPackageListings
+        title: >-
+          The tool shall show what the package sources offer now: a package or version published
+          while the application is open appears in Select Package and after a refresh, and in the
+          upgrade badges within five minutes, without restarting the application.
+        tags: [system]
+        justification: |
+          Users leave the application open all day while new package versions are published; a
+          list that silently stays as it was when it was first read made a user see two releases
+          when three existed.
+        children:
+          - AgentControl-AgentPackageManagement-ListingsExpire
+          - AgentControl-LauncherUI-RefreshRelistsSources
+          - AgentControl-LauncherUI-SelectPackageReadsSourcesFresh
+          - AgentControl-LauncherUI-PeriodicUpgradeRecheck
 
       - id: AgentControl-System-GitSourceSettings
         title: >-

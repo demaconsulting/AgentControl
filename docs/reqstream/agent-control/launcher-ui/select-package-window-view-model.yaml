@@ -180,3 +180,19 @@ sections:
           pinned version.
         tests:
           - SelectPackageWindowViewModel_LoadAsync_CancelledWhilePreferredVersionsLoad_CancelsThatReadToo
+
+      - id: AgentControl-SelectPackageWindowViewModel-ReadsSourcesFresh
+        title: >-
+          The SelectPackageWindowViewModel class shall, when the dialog loads, read the package
+          list of every source again instead of using a cached listing, shall read a source again
+          (and not use a cached listing) when the user retries it, and shall reuse what it fetched
+          while the dialog stays open, so that switching between sources and packages does not
+          read them again.
+        justification: |
+          The user opens Select Package to choose among what the sources offer now; a listing that
+          was cached earlier in the day would hide a package or version published since. Reusing
+          what the open dialog has fetched keeps it responsive.
+        tests:
+          - SelectPackageWindowViewModel_LoadAsync_SourceChangedSincePreviousListing_ShowsTheNewContent
+          - SelectPackageWindowViewModel_SwitchingPackagesWithinOpenDialog_DoesNotReadSourceAgain
+          - SelectPackageWindowViewModel_RetryVersions_ReadsTheSourceFresh

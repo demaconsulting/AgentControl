@@ -66,6 +66,50 @@ public sealed class MainWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that attaching a view model to the main window starts its periodic upgrade re-check
+    ///     (its ticks posted to the UI thread) and that closing the window disposes the view model, which
+    ///     stops it.
+    /// </summary>
+    [Fact]
+    public void MainWindow_ViewModelAttachedThenWindowClosed_StartsPeriodicRecheckAndDisposesViewModel() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: a view model on a fake clock with a pinned repo and an in-memory source, attached to a window
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        var feed = new Tests.AgentPackageManagement.FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"));
+        var repo = CreateTempDirectory();
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings
+        {
+            Sources = [new PackageSourceDefinition { Alias = "Feed", Type = PackageSourceType.Zip, Location = "unused" }],
+            RecentRepos = [new RecentRepo { Path = repo }]
+        };
+        var viewModel = new MainWindowViewModel(
+            settings,
+            configDirectory: CreateTempDirectory(),
+            timeProvider: clock,
+            registryFactory: _ => new PackageSourceRegistry(settings.Sources, _ => feed));
+        var window = new MainWindow { DataContext = viewModel };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(viewModel.RepoCards[0].IsUpgradeAvailable);
+
+        // Act: a version is published and the interval passes; the tick is posted to the UI thread
+        feed.Publish("contoso-agents", "1.1.0");
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert: the window started the re-check, so the card shows the new version
+        Assert.True(viewModel.RepoCards[0].IsUpgradeAvailable);
+
+        // Act: the window is closed
+        window.Close();
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert: the view model was disposed, so the re-check can no longer be started
+        Assert.Throws<ObjectDisposedException>(() => viewModel.StartPeriodicUpgradeRecheck());
+    });
+
+    /// <summary>
     ///     Test that a card added after the data context is set is shown, refreshed when attached
     ///     to the visual tree, and can be removed via a (declined) confirmation flow.
     /// </summary>

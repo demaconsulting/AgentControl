@@ -181,6 +181,7 @@ reviews:
       - "src/**/LauncherUI/MainWindowViewModel.cs"
       - "test/**/LauncherUI/MainWindowViewModelTests.cs"
       - "test/**/LauncherUI/MainWindowViewModelPersistenceTests.cs"
+      - "test/**/LauncherUI/MainWindowViewModelRecheckTests.cs"
       - "test/**/LauncherUI/RepoGroupingTests.cs"
 
   - id: AgentControl-LauncherUI-RepoGroupHeaderViewModel

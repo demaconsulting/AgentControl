@@ -3,8 +3,9 @@
 #### Verification Approach
 
 `MainWindowViewModel` is verified with unit tests defined in `MainWindowViewModelTests.cs`, `RepoGroupingTests.cs`
-(sections, collapse, filter, rename and removal of groups) and `MainWindowViewModelPersistenceTests.cs` (every change
-the user makes when the settings file cannot be written).
+(sections, collapse, filter, rename and removal of groups), `MainWindowViewModelPersistenceTests.cs` (every change
+the user makes when the settings file cannot be written) and `MainWindowViewModelRecheckTests.cs` (the periodic upgrade
+re-check, on a fake clock).
 Each test constructs a real `MainWindowViewModel` against a unique temporary configuration
 directory (via `SettingsStore`) and unique temporary repo directories, so tests are hermetic
 and can run in parallel with each other, subject to the `RealProcess` xUnit collection (which
@@ -28,6 +29,10 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - Applying settings drops cached package results only for sources that were edited or removed.
 - Constructing the view model reads no package source; upgrade availability is checked in the
   background, and an unreachable source does not stop the other sources from offering their upgrades.
+- While the application runs the cards' upgrade availability is checked again every five minutes (never asking for a
+  sign-in, skipping cards that are busy, missing or without a pin, reading each source once per round - also a
+  source that cannot be read, which is read again by the next round - never overlapping rounds) until the view
+  model is disposed.
 - The connection-test provider shares the application's session credentials with the cards, and for a Git source is a
   Git provider that is interactive and runs the configured git after its version check.
 - With no repo in a group the list is flat and has no header; with groups it is sectioned
@@ -304,3 +309,53 @@ reported for the removed card. What a retired card does with work that is still 
 `RepoCardViewModel` unit, which owns `Retire`. This scenario is tested by
 `MainWindowViewModel_RemoveRepo_RetiresTheCard`, covering
 `AgentControl-MainWindowViewModel-RemoveRepoRetiresCard`.
+
+**MainWindowViewModel_PeriodicRecheck_BadgesFollowNewVersions**: The tests in `MainWindowViewModelRecheckTests.cs`
+run the view model on a `FakeTimeProvider` (so no test waits) over an in-memory source (`FakePackageSourceProvider`)
+whose reads are counted and which can be given a version after construction. A card whose launch-time check found
+nothing newer shows the upgrade after a version is published and the interval (five minutes by default, any positive
+interval on request) has passed, and not just before it; the round repeats every interval; a round reads a source once
+for five cards that pin the same package; a repo with no pin, a repo whose folder is missing and a card that is busy
+refreshing itself are not checked (no source is read for them); a source that now needs a sign-in is reported on the
+card (`SourceNeedsSignIn`, status unknown) with no dialog - the check is the one that never asks; a source that cannot
+be reached (or that needs a sign-in) is read once per round for five cards that pin the same package - a failed read
+is not cached, but the round remembers it - and every card shows the failed-check state, while the next round reads the
+source again (once), also when it is still down; with two sources of which one is down, the failing source is read once
+per round (not once per card) and every card still shows the upgrade the other offers; the launch-time check shares a
+failure the same way; and with a
+UI-thread runner supplied the tick is queued and the round runs only when the runner runs it. This scenario is
+tested by `MainWindowViewModel_Constructor_RecheckInterval_DefaultsToFiveMinutesAndMustBePositive`,
+`MainWindowViewModel_PeriodicRecheck_VersionPublishedAfterLaunchCheck_ShowsUpgradeAfterInterval`,
+`MainWindowViewModel_PeriodicRecheck_CustomInterval_RepeatsEveryInterval`,
+`MainWindowViewModel_PeriodicRecheck_SeveralCardsSamePackage_ReadsTheSourceOnce`,
+`MainWindowViewModel_PeriodicRecheck_SourceUnreachable_ReadsOncePerRoundAndEveryCardShowsFailure`,
+`MainWindowViewModel_PeriodicRecheck_SourceStaysUnreachable_ReadsOnceInEachRound`,
+`MainWindowViewModel_PeriodicRecheck_SourceNeedsSignIn_ReadsOncePerRoundAndEveryCardReportsIt`,
+`MainWindowViewModel_PeriodicRecheck_OneSourceFails_FailingSourceReadOncePerRound`,
+`MainWindowViewModel_LaunchCheck_SourceUnreachable_CardsShareTheFailure`,
+`MainWindowViewModel_PeriodicRecheck_CardsWithNoPinOrMissingFolder_AreSkipped`,
+`MainWindowViewModel_PeriodicRecheck_CardIsBusy_IsSkipped`,
+`MainWindowViewModel_PeriodicRecheck_SourceNeedsSignIn_IsReportedOnTheCard` and
+`MainWindowViewModel_PeriodicRecheck_UiThreadRunnerSupplied_TickRunsThroughIt`, covering
+`AgentControl-MainWindowViewModel-PeriodicUpgradeRecheck`.
+
+**MainWindowViewModel_PeriodicRecheck_Lifecycle_NoOverlapOneTimerStopsOnDispose**: With a source whose read is held
+open, a tick that arrives while the previous round is still running starts nothing (the source is read once and the
+pending round is the same task), the next tick after the round ended starts a new one; starting the re-check twice
+leaves one timer (one read per tick); a round that a launch-style check (a settings change) supersedes stays
+registered until it has unwound, so a tick that comes after the new check completed - while the cancelled round's
+provider call is still in flight - starts no second round, and the first tick after it finished does; a launch-style
+check that a newer one superseded while it was inside a provider call that ignores cancellation holds off the rounds
+until it has unwound, although the newer check completed and `PendingRefresh` is done, and the first tick after it
+unwound starts a round that reads the source once; disposing the
+view model (twice is harmless) stops the timer so later ticks read
+nothing and refuses a new start, disposing while a round waits for a source cancels the round without an error and
+leaves the card as it was, and disposing while the launch-time check waits for a source cancels that check too (the
+provider's token is cancelled and a late answer changes no card). This scenario is tested by
+`MainWindowViewModel_PeriodicRecheck_PreviousRoundStillRunning_SkipsTheTick`,
+`MainWindowViewModel_PeriodicRecheck_RoundSuperseded_NoNewRoundUntilItHasUnwound`,
+`MainWindowViewModel_PeriodicRecheck_SupersededLaunchCheckStillRunning_NoRoundUntilItHasUnwound`,
+`MainWindowViewModel_StartPeriodicUpgradeRecheck_CalledTwice_RunsOneTimer`,
+`MainWindowViewModel_Dispose_StopsThePeriodicRecheck`, `MainWindowViewModel_Dispose_RoundRunning_CancelsIt` and
+`MainWindowViewModel_Dispose_LaunchCheckRunning_CancelsIt`,
+covering `AgentControl-MainWindowViewModel-PeriodicRecheckLifecycle`.

@@ -121,8 +121,9 @@ executable.
 - A Git repository can be added from the Add menu; its editor explains the address, tag pattern, folder and sign-in,
   validates as the user types, lists the matching tags (or the tags that did not match, with a hint) after Test
   connection and saves only an acceptable source; a Git source is shown with the Git icon, "Online source" when remote;
-  a card its package comes from names the tag, a refresh the user starts reads the Git sources again (a newly pushed tag
-  is offered), and the card offers Change package..., which opens on the supplying source's choice and asks before
+  a card its package comes from names the tag, a refresh the user starts reads every source again (a newly published
+  version or pushed tag is offered), and the card offers Change package..., which opens on the supplying source's
+  choice and asks before
   applying changed content.
 - The Settings source list shows a remote source as a neutral "Online source" (cloud icon, no warning styling, a
   tooltip saying when it is contacted), a "Signed only" badge only on NuGet sources that require signed packages
@@ -1023,14 +1024,37 @@ window-level evidence of both `AgentControl-LauncherUI-GitSourcePresentation` an
 `AgentControl-LauncherUI-GitSourceCardTooltip`; the source is a local folder, so nothing is fetched).
 The drawn icon is shown only as ink in the end-to-end test (`SettingsWindow_AddMenu_OffersAllFourSourceTypes...`).
 
-**LauncherUI_RefreshRelistsGitSources_NewTagIsOfferedAndBackgroundChecksUseTheCache**: A card refresh the user starts
-reads every configured Git source again, so a tag pushed after a listing was cached is offered as the upgrade (against
-a real local repository), both of two Git sources are listed again, while the background check keeps using the cached
-listing and a source that is not a Git source is never read again. This scenario is tested by
-`RepoCardViewModel_RefreshAsync_GitSourceNewTagPushedAfterCachedListing_ListsAgainAndOffersNewVersion` (covering
-`AgentControl-LauncherUI-RefreshRelistsGitSources`, child `AgentControl-RepoCardViewModel-RefreshRelistsGitSources`),
+**LauncherUI_RefreshRelistsSources_NewVersionIsOfferedAndBackgroundChecksUseTheCache**: A card refresh the user starts
+reads every configured source again - Git, NuGet and zip folder - so a version published after a listing was cached is
+offered as the upgrade (a tag pushed to a real local repository, a zip added to a real folder, a version published to
+an in-memory source), both of two Git sources are listed again, while the background check keeps using the cached
+listing. This scenario is tested by
+`RepoCardViewModel_RefreshAsync_GitSourceNewTagPushedAfterCachedListing_ListsAgainAndOffersNewVersion` and
+`RepoCardViewModel_RefreshAsync_ZipFolderGainedVersionAfterListing_OffersUpgradeAfterRefresh` (covering
+`AgentControl-LauncherUI-RefreshRelistsSources`, child `AgentControl-RepoCardViewModel-RefreshRelistsSources`),
 `RepoCardViewModel_RefreshAsync_SeveralGitSources_ListsEachOfThemAgain` and
-`RepoCardViewModel_RefreshAsync_ZipSource_KeepsUsingCachedListing`.
+`RepoCardViewModel_RefreshAsync_NonGitSource_ListsAgain`.
+
+**LauncherUI_SelectPackageReadsSourcesFresh_OpeningTheDialogShowsWhatTheSourcesOfferNow**: Opening the Select Package
+dialog reads the sources again, so a package or version published since an earlier listing is among the choices. This
+scenario is tested by `SelectPackageWindowViewModel_LoadAsync_SourceChangedSincePreviousListing_ShowsTheNewContent`,
+covering `AgentControl-LauncherUI-SelectPackageReadsSourcesFresh`, child
+`AgentControl-SelectPackageWindowViewModel-ReadsSourcesFresh`.
+
+**LauncherUI_PeriodicUpgradeRecheck_BadgesFollowNewVersionsWhileTheWindowIsOpen**: While the main window is open the
+cards' upgrade availability is checked again every five minutes, and the check stops when the window closes. The
+view-model tests run on a fake clock: a version published after the launch-time check is shown as an upgrade once the
+interval has passed (and not before), and no round runs after the view model is disposed. The wiring in the window
+(the timer is started when the view model is attached, its ticks are posted to the UI thread, and the view model is
+disposed when the window closes) is covered by a headless main window test that attaches a view model on a fake clock,
+shows that a published version appears on the card after the interval, closes the window and shows the view model is
+disposed. This scenario is tested by
+`MainWindowViewModel_PeriodicRecheck_VersionPublishedAfterLaunchCheck_ShowsUpgradeAfterInterval`,
+`MainWindowViewModel_Dispose_StopsThePeriodicRecheck` and
+`MainWindow_ViewModelAttachedThenWindowClosed_StartsPeriodicRecheckAndDisposesViewModel`, covering
+`AgentControl-LauncherUI-PeriodicUpgradeRecheck`,
+children `AgentControl-MainWindowViewModel-PeriodicUpgradeRecheck` and
+`AgentControl-MainWindowViewModel-PeriodicRecheckLifecycle`.
 
 **LauncherUI_ChangePackage_PinnedRepoChoosesAgainOnTheCurrentChoice**: For a repo that has a pin the select-package
 command can execute and raises the request ("Change package..."); the main window opens the Select Package dialog on the

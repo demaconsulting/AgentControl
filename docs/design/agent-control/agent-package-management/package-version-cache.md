@@ -4,23 +4,44 @@
 
 #### Purpose
 
-`PackageVersionCache` is a session-scoped cache of what each configured package source offers,
-keyed by `(source alias, package ID)`. Per architecture.md's repo-fact caching strategy, the set
-of available package versions at a source is not repo-scoped (every repo pinned to the same
-package at the same source shares the same answer) and may involve slow network I/O, so it is
-fetched once per app session rather than per repo card. It is constructed once by
+`PackageVersionCache` is a cache of what each configured package source offers, keyed by
+`(source alias, package ID)`, whose entries expire five minutes after they were fetched. Per
+architecture.md's repo-fact caching strategy, the set of available package versions at a source is
+not repo-scoped (every repo pinned to the same package at the same source shares the same answer)
+and may involve slow network I/O, so it is fetched once and shared rather than fetched per repo
+card. The application is left open all day while packages are published, so a listing that never
+expired would hide every release made after it was read. An entry is therefore served for at most
+five minutes (`PackageVersionCache.EntryLifetime`), so no automatic check (upgrade badges, finding
+the source that offers the pinned package before a launch) uses a listing older than that; a user
+action that must show what a source offers now (opening Select Package, Refresh, Upgrade) calls
+`Invalidate(sourceAlias)` for the sources it reads first, and the periodic background re-check of
+`MainWindowViewModel` clears the cache at the start of each round. It is constructed once by
 `MainWindowViewModel` and shared across every `RepoCardViewModel` and every
-`SelectPackageWindowViewModel` for the app session's lifetime. Keying by alias (never by
-location, and never by package ID alone) guarantees a result fetched from one source is never
-returned for another.
+`SelectPackageWindowViewModel`. Keying by alias (never by location, and never by package ID alone)
+guarantees a result fetched from one source is never returned for another.
 
 #### Data Model
 
 **\_sources**: `Dictionary<string, SourceEntry>` (case-insensitive alias) — one private
-`SourceEntry` per source holding that source's cached package IDs (`null` = not yet queried) and
-a `Dictionary<string, IReadOnlyList<DiscoveredPackage>>` of descending version lists by package
-ID. A present key with an empty list means "queried, none found", which is distinct from "not
-yet queried"; a failed query is never cached.
+`SourceEntry` per source holding that source's cached package IDs (`null` = not yet queried) with
+the time they were fetched, and a `Dictionary<string, VersionListing>` of descending version lists by
+package ID, each with the time it was fetched. A present key with an empty list means "queried, none
+found", which is distinct from "not yet queried"; a failed query is never cached (a background check
+round may remember a failure for the length of the round only; see `SourceFailureMemo` below).
+
+**SourceFailureMemo** (class, same file): `Dictionary<(string Alias, string PackageId), Exception>`
+(alias case-insensitive, package ID exact, like the cache keys) behind its own lock — the failures of
+source reads within one background check round. A caller (`MainWindowViewModel`'s periodic round and
+launch-time check) creates one per round and drops it when the round ends; the cache never holds one,
+so nothing recorded in it can outlive the round, and a caller that passes none (a user action) is
+unaffected.
+
+**\_timeProvider**: `TimeProvider` — the clock that dates fetches and judges expiry; the system
+clock unless a test supplies another through the constructor, so tests move time without waiting.
+
+**EntryLifetime**: `TimeSpan` (five minutes) — an entry fetched at time *t* is served while
+`now - t` is less than this; at exactly this age it counts as expired.
+(`AgentControl-PackageVersionCache-EntriesExpire`)
 
 **\_lock**: `object` — guards the dictionaries and entries so the cache is safe for concurrent
 use.
@@ -37,14 +58,21 @@ cache (`AgentControl-PackageVersionCache-CachePackageNames`).
 - *Returns*: `Task<IReadOnlyList<string>>`.
 - *Postconditions*: The alias is resolved through the registry first, so an alias that is not
   configured fails with `UnknownSourceException` instead of returning cached data
-  (`AgentControl-PackageVersionCache-KeyedBySource`).
+  (`AgentControl-PackageVersionCache-KeyedBySource`). A cached list younger than
+  `EntryLifetime` is returned without reading the source; an older one is treated as not yet
+  queried, so the source is read and the entry replaced, dated at the moment the read started.
 
 **GetVersionsDescendingAsync**: Gets a package's versions at a source, highest first,
 consulting/populating the cache (`AgentControl-PackageVersionCache-CacheVersions`).
 
 - *Parameters*: `PackageSourceRegistry registry`, `string sourceAlias`, `string packageId`,
-  `CancellationToken`.
+  `CancellationToken`, and an optional `SourceFailureMemo? failureMemo`.
 - *Returns*: `Task<IReadOnlyList<DiscoveredPackage>>`.
+- *Postconditions*: Expiry works as for `GetPackageIdsAsync`, per package. With a memo, a cache miss first checks
+  whether this round already recorded a failure for `(sourceAlias, packageId)` and, if so, rethrows it (original stack
+  preserved) without reading the source; a read that fails with an I/O, permission or `InvalidOperationException`
+  error is recorded in the memo (and rethrown). Cancellation is never recorded. Without a memo nothing is
+  remembered: every miss reads the source.
 
 **IsNewerVersionAvailableAsync**: Determines whether a newer version exists than a pinned one,
 using the cached descending list; the highest entry is the latest
@@ -70,11 +98,13 @@ using the cached descending list; the highest entry is the latest
 
 - *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string? excludeAlias`, `CancellationToken`,
   and an
-  optional `Action<Exception>? onSourceFailure`.
+  optional `Action<Exception>? onSourceFailure` and an optional `SourceFailureMemo? failureMemo` (passed to every
+  `GetVersionsDescendingAsync` call, so a source that failed earlier in the round is skipped - and reported to
+  `onSourceFailure` - without being read again).
 - *Returns*: `Task<IReadOnlyList<DiscoveredPackage>>` - the offers source by source in the order of
   `registry.Definitions` (the order the user configured), each source's versions highest first.
 - *Algorithm*: For each definition other than `excludeAlias` (which is never contacted), calls
-  `GetVersionsDescendingAsync`, so every source is read through - and once per session cached in - its own entry.
+  `GetVersionsDescendingAsync`, so every source is read through - and cached for at most five minutes in - its own entry.
   The repo card passes no `excludeAlias`: a pin names no source, so every configured source is asked.
 - *Postconditions*: A source that fails with an I/O, permission or `InvalidOperationException` error (which includes
   `PackageSourceAccessException`) is skipped, remembering the first failure and passing each one to
@@ -89,7 +119,8 @@ using the cached descending list; the highest entry is the latest
 **IsNewerVersionAvailableAcrossSourcesAsync**: The upgrade question across all configured sources, which is how a
 repo's upgrade is resolved because its pin names no source (`AgentControl-PackageVersionCache-NewestAcrossSources`).
 
-- *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string pinnedVersion`, `CancellationToken`.
+- *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string pinnedVersion`, `CancellationToken`, and an
+  optional `SourceFailureMemo? failureMemo` (forwarded to `GetVersionsAcrossSourcesAsync`).
 - *Returns*: `Task<UpgradeCheck>` built by the same private `BuildUpgradeCheck` as the single-source method: the latest
   is the first offer that no later offer exceeds - a later offer replaces the choice only when strictly newer, so a
   tie keeps the earlier source, i.e. Settings order.
@@ -101,25 +132,31 @@ unchanged (`DirectoryNotFoundException` for a missing folder, `InvalidOperationE
 other source failures, `OperationCanceledException`), and `UnknownSourceException` for an
 unconfigured alias; argument checks throw `ArgumentNullException`/`ArgumentException`. A cache
 hit returns the previously observed result instead, even if the source has since become
-unreachable — a deliberate staleness trade-off to avoid re-querying a potentially slow or
-offline location on every UI refresh. Two simultaneous misses for the same key may both query;
-the later result wins. The across-sources methods catch a single source's failure (see their descriptions) instead
-of propagating it, unless every consulted source failed.
+unreachable, until the entry is five minutes old - a deliberate trade-off to avoid re-querying a
+potentially slow or offline location on every UI refresh. Two simultaneous misses for the same key
+may both query; the one that started later wins whichever completes last (each entry records when its fetch
+started, which is also what its expiry counts from, and a completing fetch keeps an existing entry that started
+later than itself), so a slow read that ignores cancellation never replaces newer data with older. The
+across-sources methods catch a single source's failure (see their descriptions) instead of propagating it, unless
+every consulted source failed.
 
 #### Dependencies
 
 - **PackageSourceRegistry** — resolves an alias to its provider on a cache miss.
 - **IPackageSourceProvider** (via the registry) — the source being cached.
 - **PackageVersion** — used to order versions and compare against a pin.
+- **TimeProvider** (.NET) — the clock for expiry.
 
 #### Callers
 
-- **MainWindowViewModel** — constructs the single shared instance for the app session and
+- **MainWindowViewModel** — constructs the single shared instance (with its own `TimeProvider`),
   calls `Invalidate(sourceAlias)` for each source that is edited or removed when settings are
-  applied.
+  applied, `Invalidate()` at the start of each periodic upgrade re-check round, and creates the
+  per-round `SourceFailureMemo` of a periodic round and of the launch-time check.
 - **RepoCardViewModel** — calls `GetVersionsAcrossSourcesAsync` (which configured sources offer the pinned package and
   version) and `IsNewerVersionAvailableAcrossSourcesAsync` (the upgrade check and Upgrade) over all configured
-  sources, and `Invalidate(sourceAlias)` for every configured Git source when the card is refreshed, so that newly
-  pushed tags show up at once.
-- **SelectPackageWindowViewModel** — calls `GetPackageIdsAsync`/`GetVersionsDescendingAsync` to
-  populate its picker lists.
+  sources, and `Invalidate(sourceAlias)` for every configured source when the card is refreshed (or upgraded), so that
+  newly published versions show up at once.
+- **SelectPackageWindowViewModel** — calls `Invalidate(sourceAlias)` for every source when the dialog loads (and for a
+  source being retried), then `GetPackageIdsAsync`/`GetVersionsDescendingAsync` to populate its picker lists, which
+  the open dialog then reuses.

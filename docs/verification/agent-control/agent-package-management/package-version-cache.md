@@ -8,7 +8,7 @@ Most tests use a real temporary directory populated with real zip files behind a
 call and showing that a repeated call still returns the cached result. The multi-source tests
 use an in-memory fake provider (`FakePackageSourceProvider`) that counts its calls, so the tests
 can assert exactly which source was queried how often, and can hold a query open to create an
-in-flight call.
+in-flight call. The expiry tests move a `FakeTimeProvider` by hand.
 
 #### Test Environment
 
@@ -25,7 +25,8 @@ N/A - standard test environment.
   read (telling a caller that asks), reports a failure when every source failed (the first refusal of access when
   there was one, otherwise the first failure), and attributes the newest
   version - a tie to the first source configured.
-- Cached results are reused on repeated calls without redundant re-scanning.
+- Cached results are reused on repeated calls without redundant re-scanning, until they are five minutes old; an older
+  entry is read from its source again.
 - Invalidation forces the next call to re-scan and reflects updated source-folder contents.
 - An uncached call against a missing source folder throws `DirectoryNotFoundException`.
 
@@ -106,9 +107,34 @@ scenario is tested by
 `PackageVersionCache_GetVersionsAcrossSources_SourceFailureCallback_ReportsEachSkippedSource`, covering
 `AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure`.
 
+**PackageVersionCache_RoundFailureMemo_FailureRememberedForTheRoundOnly**: With the failure memo of a round, a source
+whose read failed is read once however often it is asked (the later askers get the same failure, while another source
+is read normally); the memo is keyed by source alias (case-insensitively) and package, so a failure for one package
+does not stop another package from being read at that source; and nothing outlives the memo - a read with the next
+round's memo, or with no memo, reaches the source again, and once the source recovers the cache serves its listing.
+This scenario is tested by `PackageVersionCache_FailureMemo_SourceFailed_IsNotReadAgainAndRethrowsTheSameFailure`,
+`PackageVersionCache_FailureMemo_FailureIsNotPersistedBeyondTheMemo` and
+`PackageVersionCache_FailureMemo_FailureOfOnePackage_DoesNotAffectAnotherPackage`, covering
+`AgentControl-PackageVersionCache-RoundFailureMemo`.
+
 **PackageVersionCache_NewestAcrossSources_NewestWinsAndTieKeepsConfigurationOrder**: The upgrade check across sources
 reports the newest version offered by any source, attributes a version that several sources offer to the first of them
 in configuration order, and reports no upgrade and no latest version when no source offers the package. This scenario
 is tested by `PackageVersionCache_IsNewerVersionAvailableAcrossSources_NewestWinsAndTieKeepsConfigurationOrder` and
 `PackageVersionCache_IsNewerVersionAvailableAcrossSources_NobodyOffersPackage_ReportsNoUpgrade`, covering
 `AgentControl-PackageVersionCache-NewestAcrossSources`.
+
+**PackageVersionCache_EntriesExpire_AfterFiveMinutes**: With a fake clock (`FakeTimeProvider`, so no test waits), a
+package list and a version list that were fetched are served from the cache just under five minutes later, without
+reading the source; at five minutes both are read again and show a version and a package published meanwhile; an
+entry that was fetched again is served for another five minutes counted from the second fetch, not the first; and
+when two fetches of the same listing overlap, the one that started later stays cached even if the earlier one
+completes last (for both the version list and the package list), so a slow read that ignores cancellation cannot
+replace newer data with older. This
+scenario is tested by `PackageVersionCache_EntryYoungerThanFiveMinutes_IsStillServedFromCache`,
+`PackageVersionCache_EntryOlderThanFiveMinutes_IsFetchedAgain`,
+`PackageVersionCache_EntryFetchedAgainAfterExpiry_IsServedForAnotherFiveMinutes`,
+`PackageVersionCache_EarlierStartedVersionFetchCompletesLast_KeepsLaterStartedListing` and
+`PackageVersionCache_EarlierStartedPackageIdsFetchCompletesLast_KeepsLaterStartedListing`, covering
+`AgentControl-PackageVersionCache-EntriesExpire` (and, through it, the subsystem requirement
+`AgentControl-AgentPackageManagement-ListingsExpire`).

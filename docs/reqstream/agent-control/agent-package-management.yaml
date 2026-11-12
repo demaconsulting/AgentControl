@@ -42,6 +42,18 @@ sections:
         tests:
           - PackageSource_EnumeratePackageNames_MixedDirectory_ReturnsDistinctSortedNames
 
+      - id: AgentControl-AgentPackageManagement-ListingsExpire
+        title: >-
+          The AgentPackageManagement subsystem shall keep what a package source offers for at most
+          five minutes, so that a package published while the application is open is found by the
+          next check after that.
+        justification: |
+          A listing that is never read again hides every package published after it was made.
+        children:
+          - AgentControl-PackageVersionCache-EntriesExpire
+        tests:
+          - PackageVersionCache_EntryOlderThanFiveMinutes_IsFetchedAgain
+
       - id: AgentControl-AgentPackageManagement-UpgradeDetection
         title: >-
           The AgentPackageManagement subsystem shall determine whether a newer package version
@@ -499,6 +511,7 @@ sections:
         children:
           - AgentControl-PackageVersionCache-ListAcrossSources
           - AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure
+          - AgentControl-PackageVersionCache-RoundFailureMemo
           - AgentControl-PackageVersionCache-NewestAcrossSources
         tests:
           - AgentPackageManagementSubsystem_AcrossSources_ListsOffersInConfigurationOrderAndNewestWins

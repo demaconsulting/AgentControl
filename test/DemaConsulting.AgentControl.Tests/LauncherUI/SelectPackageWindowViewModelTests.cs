@@ -203,9 +203,89 @@ public sealed class SelectPackageWindowViewModelTests
     }
 
     /// <summary>
+    ///     Test that opening the dialog again reads a source whose list changed since the previous
+    ///     listing (new package, new version) instead of serving the cached one.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_LoadAsync_SourceChangedSincePreviousListing_ShowsTheNewContent()
+    {
+        // Arrange: a dialog was opened over a shared cache and selected a package
+        var provider = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(provider);
+        var cache = new PackageVersionCache();
+        var first = new SelectPackageWindowViewModel(registry, cache);
+        await first.LoadAsync(CancellationToken.None);
+        first.SelectedPackageName = "contoso-agents";
+        await first.PendingVersionsLoad;
+        Assert.Equal(["1.0.0"], first.AvailableVersions);
+
+        // Act: a version and a package are published, then the dialog is opened again
+        provider.Publish("contoso-agents", "1.1.0");
+        provider.Publish("other-agents", "1.0.0");
+        var second = new SelectPackageWindowViewModel(registry, cache);
+        await second.LoadAsync(CancellationToken.None);
+        second.SelectedPackageName = "contoso-agents";
+        await second.PendingVersionsLoad;
+
+        // Assert: the new package and version are listed
+        Assert.Equal(["contoso-agents", "other-agents"], second.PackageNames);
+        Assert.Equal(["1.1.0", "1.0.0"], second.AvailableVersions);
+    }
+
+    /// <summary>
+    ///     Test that what the dialog fetched is reused while it stays open: switching between
+    ///     packages and back does not read the source again.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_SwitchingPackagesWithinOpenDialog_DoesNotReadSourceAgain()
+    {
+        // Arrange: an open dialog over a source with two packages
+        var provider = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"), ("other-agents", "2.0.0"));
+        var viewModel = CreateViewModel(provider);
+        await viewModel.LoadAsync(CancellationToken.None);
+
+        // Act: select one package, another, and the first again
+        foreach (var name in new[] { "contoso-agents", "other-agents", "contoso-agents" })
+        {
+            viewModel.SelectedPackageName = name;
+            await viewModel.PendingVersionsLoad;
+        }
+
+        // Assert: the package list was read once, and each package's versions once
+        Assert.Equal(1, provider.ListPackageIdsCalls);
+        Assert.Equal(2, provider.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that Retry of a package's version list reads the source's current content rather
+    ///     than a listing cached earlier.
+    /// </summary>
+    [Fact]
+    public async Task SelectPackageWindowViewModel_RetryVersions_ReadsTheSourceFresh()
+    {
+        // Arrange: a package with no versions yet (cached as "none found", with an error and Retry)
+        var provider = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var viewModel = CreateViewModel(provider);
+        await viewModel.LoadAsync(CancellationToken.None);
+        viewModel.SelectedPackageName = "ghost-agents";
+        await viewModel.PendingVersionsLoad;
+        Assert.True(viewModel.CanRetry);
+        Assert.Empty(viewModel.AvailableVersions);
+        provider.Publish("ghost-agents", "1.1.0");
+
+        // Act
+        viewModel.RetryCommand.Execute(null);
+        await viewModel.PendingVersionsLoad;
+
+        // Assert
+        Assert.Equal(["1.1.0"], viewModel.AvailableVersions);
+    }
+
+    /// <summary>
     ///     Test that selecting a package populates AvailableVersions descending, defaulting the
     ///     selected version to the latest, without blocking the caller.
     /// </summary>
+
     [Fact]
     public async Task SelectPackageWindowViewModel_SelectPackageName_PopulatesVersionsDescendingAndDefaultsToLatest()
     {
