@@ -342,10 +342,16 @@ tested by `MainWindowViewModel_Constructor_RecheckInterval_DefaultsToFiveMinutes
 **MainWindowViewModel_PeriodicRecheck_Lifecycle_NoOverlapOneTimerStopsOnDispose**: With a source whose read is held
 open, a tick that arrives while the previous round is still running starts nothing (the source is read once and the
 pending round is the same task), the next tick after the round ended starts a new one; starting the re-check twice
-leaves one timer (one read per tick); disposing the view model (twice is harmless) stops the timer so later ticks read
-nothing and refuses a new start, and disposing while a round waits for a source cancels the round without an error and
-leaves the card as it was. This scenario is tested by
+leaves one timer (one read per tick); a round that a launch-style check (a settings change) supersedes stays
+registered until it has unwound, so a tick that comes after the new check completed - while the cancelled round's
+provider call is still in flight - starts no second round, and the first tick after it finished does; disposing the
+view model (twice is harmless) stops the timer so later ticks read
+nothing and refuses a new start, disposing while a round waits for a source cancels the round without an error and
+leaves the card as it was, and disposing while the launch-time check waits for a source cancels that check too (the
+provider's token is cancelled and a late answer changes no card). This scenario is tested by
 `MainWindowViewModel_PeriodicRecheck_PreviousRoundStillRunning_SkipsTheTick`,
+`MainWindowViewModel_PeriodicRecheck_RoundSuperseded_NoNewRoundUntilItHasUnwound`,
 `MainWindowViewModel_StartPeriodicUpgradeRecheck_CalledTwice_RunsOneTimer`,
-`MainWindowViewModel_Dispose_StopsThePeriodicRecheck` and `MainWindowViewModel_Dispose_RoundRunning_CancelsIt`,
+`MainWindowViewModel_Dispose_StopsThePeriodicRecheck`, `MainWindowViewModel_Dispose_RoundRunning_CancelsIt` and
+`MainWindowViewModel_Dispose_LaunchCheckRunning_CancelsIt`,
 covering `AgentControl-MainWindowViewModel-PeriodicRecheckLifecycle`.

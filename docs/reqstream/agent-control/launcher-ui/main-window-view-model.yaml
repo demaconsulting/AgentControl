@@ -529,13 +529,18 @@ sections:
       - id: AgentControl-MainWindowViewModel-PeriodicRecheckLifecycle
         title: >-
           The MainWindowViewModel class shall not start a periodic re-check round while the
-          previous round is still running, shall run one timer however often the re-check is
-          started, and shall stop the timer and cancel the running round when it is disposed.
+          previous round is still running - including a round that was cancelled by a newer check
+          but has not finished unwinding - shall run one timer however often the re-check is
+          started, and shall stop the timer and cancel the running round and the running
+          background upgrade check when it is disposed.
         justification: |
-          A slow source must not pile up rounds, and a closed window must not keep checking
-          package sources in the background.
+          A slow source must not pile up rounds (two rounds would race through the shared cache and
+          the cards' state), and a closed window must not keep checking package sources in the
+          background, neither by the periodic rounds nor by the check that runs at launch.
         tests:
           - MainWindowViewModel_PeriodicRecheck_PreviousRoundStillRunning_SkipsTheTick
+          - MainWindowViewModel_PeriodicRecheck_RoundSuperseded_NoNewRoundUntilItHasUnwound
           - MainWindowViewModel_StartPeriodicUpgradeRecheck_CalledTwice_RunsOneTimer
           - MainWindowViewModel_Dispose_StopsThePeriodicRecheck
           - MainWindowViewModel_Dispose_RoundRunning_CancelsIt
+          - MainWindowViewModel_Dispose_LaunchCheckRunning_CancelsIt

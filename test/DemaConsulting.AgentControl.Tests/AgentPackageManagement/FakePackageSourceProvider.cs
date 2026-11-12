@@ -112,6 +112,19 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     public Task? ListVersionsGate { get; set; }
 
     /// <summary>
+    ///     Gets or sets whether a call waits for <see cref="ListVersionsGate"/> without honoring its
+    ///     cancellation token, like a provider call that is already in flight and only notices a
+    ///     cancellation request later (so a test can hold a canceled check open).
+    /// </summary>
+    public bool ListVersionsGateIgnoresCancellation { get; set; }
+
+    /// <summary>
+    ///     Gets the cancellation token of the most recent <see cref="ListVersionsAsync"/> call, or
+    ///     <see langword="null"/> before the first call.
+    /// </summary>
+    public CancellationToken? LastListVersionsToken { get; private set; }
+
+    /// <summary>
     ///     Gets or sets an exception that <see cref="ListVersionsAsync"/> throws (after the gate),
     ///     or <see langword="null"/> to succeed.
     /// </summary>
@@ -148,13 +161,21 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
         string packageId, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _listVersionsCalls);
+        LastListVersionsToken = cancellationToken;
 
         // Snapshot the gate so a later change does not affect this call; waiting honors
         // cancellation, like a real source does
         var gate = ListVersionsGate;
         if (gate is not null)
         {
-            await gate.WaitAsync(cancellationToken);
+            if (ListVersionsGateIgnoresCancellation)
+            {
+                await gate;
+            }
+            else
+            {
+                await gate.WaitAsync(cancellationToken);
+            }
         }
 
         if (ListVersionsException is not null)

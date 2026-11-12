@@ -509,6 +509,83 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a round superseded by a launch-style check stays registered until it has finished
+    ///     unwinding, so a tick that comes after the new check completed (while the canceled round's
+    ///     provider call is still in flight) starts no second round on top of it.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_PeriodicRecheck_RoundSuperseded_NoNewRoundUntilItHasUnwound()
+    {
+        // Arrange: a round held at a provider call that does not notice cancellation
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"));
+        var viewModel = CreateViewModel(clock, feed, out _);
+        viewModel.StartPeriodicUpgradeRecheck();
+        var gate = new TaskCompletionSource();
+        feed.ListVersionsGate = gate.Task;
+        feed.ListVersionsGateIgnoresCancellation = true;
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+        var oldRound = viewModel.PendingPeriodicRecheck;
+        Assert.False(oldRound.IsCompleted);
+        Assert.Equal(1, feed.ListVersionsCalls);
+
+        // Act: a launch-style check (settings changed) supersedes the round and completes, while the
+        // canceled round's provider call is still in flight; then a tick comes
+        feed.ListVersionsGate = null;
+        await viewModel.BeginUpgradeRefresh();
+        Assert.True(viewModel.PendingRefresh.IsCompleted);
+        Assert.False(oldRound.IsCompleted);
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+
+        // Assert: no second round started, and the source was not read for one
+        Assert.Same(oldRound, viewModel.PendingPeriodicRecheck);
+        Assert.Equal(2, feed.ListVersionsCalls);
+
+        // Act: the canceled round finishes unwinding; the next tick may start a round
+        gate.SetResult();
+        await oldRound;
+        var readsAfterUnwind = feed.ListVersionsCalls;
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+
+        // Assert: the new round read the source once
+        Assert.NotSame(oldRound, viewModel.PendingPeriodicRecheck);
+        await viewModel.PendingPeriodicRecheck;
+        Assert.Equal(1, feed.ListVersionsCalls - readsAfterUnwind);
+    }
+
+    /// <summary>
+    ///     Test that disposing the view model while the launch-time check waits for a source cancels that
+    ///     check too (the provider's token is canceled) and that nothing reaches the card afterwards.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_Dispose_LaunchCheckRunning_CancelsIt()
+    {
+        // Arrange: a launch-time check held at the source read, with a newer version waiting
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
+        var gate = new TaskCompletionSource();
+        feed.ListVersionsGate = gate.Task;
+        var viewModel = CreateViewModel(clock, feed, out var card);
+        var launch = viewModel.BeginUpgradeRefresh();
+        Assert.False(launch.IsCompleted);
+        Assert.NotNull(feed.LastListVersionsToken);
+        Assert.False(feed.LastListVersionsToken.Value.IsCancellationRequested);
+
+        // Act: the window closes
+        viewModel.Dispose();
+
+        // Assert: the provider was told to stop, and the check ended without the gate being released
+        Assert.True(feed.LastListVersionsToken.Value.IsCancellationRequested);
+        await launch.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // The source answers late: the card was not updated
+        gate.SetResult();
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.Null(card.LatestAvailableVersion);
+        Assert.False(card.IsCheckingUpgrade);
+    }
+
+    /// <summary>
     ///     Test that starting the periodic re-check twice does not start a second timer.
     /// </summary>
     [Fact]

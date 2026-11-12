@@ -96,8 +96,11 @@ lifetime of a cache entry). Both are constructor parameters so tests move time b
 Supplied by tests that need sources whose reads they count.
 
 **_recheckTimer**, **_recheckCancellation**, **_runOnUiThread**, **_disposed**: the periodic re-check's timer, the
-cancellation source of the round that is running (non-null exactly while a round runs, which is also what stops
-rounds from overlapping), the function that brings a tick to the UI thread, and whether the view model was disposed.
+cancellation source of the round that is running (non-null exactly from the moment a round starts until that round has
+finished unwinding - canceling a round only requests the cancellation and leaves the field set, so a round that was
+superseded or disposed but whose provider call is still in flight still counts as running, which is what stops rounds
+from overlapping), the function that brings a tick to the UI thread, and whether the view model was disposed.
+`RecheckUpgradesAsync`'s `finally` clears the field only when it still holds that round's own source.
 
 **Credentials**: `PackageCredentialContext?` — The session credential store and sign-in prompt created by
 `App`, passed to every `RepoCardViewModel` and to the connection-test provider so that a sign-in made in one
@@ -198,9 +201,16 @@ with many tracked repos.
   The launch-time check (`CheckUpgradesAsync`, which does not group cards and reads concurrently) creates a memo of its
   own for the same reason; cards that are already reading the same source at the moment it fails still read it, as
   they do for a listing that succeeds. The round's token is cancelled by `Dispose` and by `StartUpgradeRefresh` (a settings
-  change starts a new launch-style round that supersedes it); a cancelled round is not an error.
+  change starts a new launch-style round that supersedes it); a cancelled round is not an error. Canceling only
+  requests the cancellation: `_recheckCancellation` stays set until `RecheckUpgradesAsync` has actually finished
+  (its `finally` clears it, and only if it still holds that round's own source), so a tick that arrives after the
+  superseding check completed, while the cancelled round's provider call is still in flight, finds the round still
+  registered and starts nothing - two rounds never overlap on the shared cache and card state.
 - *`Dispose`* (`IDisposable`; the main window calls it when it closes): disposes the timer, cancels the running round
-  and refuses further starts; calling it twice is harmless.
+  and the background upgrade check tracked by `_refreshCancellation` (launch, settings change, added repo: it is
+  cancelled, disposed and cleared the way `StartUpgradeRefresh` replaces it), so neither keeps waiting for a slow
+  source or updates cards after the window closed, and refuses further starts (a repo added afterwards starts no
+  check); calling it twice is harmless.
 
 **AddRepo**: Adds a repository to the recent-repos list.
 

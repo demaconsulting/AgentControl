@@ -619,6 +619,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="card">The card to check.</param>
     private void BeginSingleCardUpgradeRefresh(RepoCardViewModel card)
     {
+        // A disposed view model (the window closed) starts no check
+        if (_disposed)
+        {
+            return;
+        }
+
         var token = _refreshCancellation?.Token ?? CancellationToken.None;
         var previous = PendingRefresh;
         PendingRefresh = Task.WhenAll(previous, CheckUpgradesAsync([card], token));
@@ -735,13 +741,16 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Cancels the periodic re-check round that is running, if any.
+    ///     Requests cancellation of the periodic re-check round that is running, if any. The round
+    ///     stays registered in <see cref="_recheckCancellation"/> until it has finished unwinding, so
+    ///     no new round starts while it is still running.
     /// </summary>
     private void CancelPeriodicRecheck()
     {
-        var running = _recheckCancellation;
-        _recheckCancellation = null;
-        running?.Cancel();
+        // Only request the cancellation: the field keeps referring to the round until that round has
+        // actually unwound (its finally clears it), so a tick that comes while the canceled round's
+        // provider call is still in flight does not start a second round on top of it
+        _recheckCancellation?.Cancel();
     }
 
     /// <summary>
@@ -822,7 +831,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     ///     Stops the periodic upgrade re-check (see <see cref="StartPeriodicUpgradeRecheck"/>) and
-    ///     cancels the round that is running; called when the main window closes.
+    ///     cancels the round that is running and the background upgrade check (launch, settings
+    ///     change, added repo) that is running; called when the main window closes.
     /// </summary>
     public void Dispose()
     {
@@ -835,6 +845,16 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _recheckTimer?.Dispose();
         _recheckTimer = null;
         CancelPeriodicRecheck();
+
+        // The launch-time check must not keep waiting for a slow source (or publish to cards) after
+        // the window closed
+        var refresh = _refreshCancellation;
+        _refreshCancellation = null;
+        if (refresh is not null)
+        {
+            refresh.Cancel();
+            refresh.Dispose();
+        }
     }
 
     /// <summary>
