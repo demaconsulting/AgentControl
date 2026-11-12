@@ -186,7 +186,18 @@ with many tracked repos.
   card's own state (`IsUpgradeStatusUnknown`, `SourceProblem`) as at launch, never as a dialog. The cards are grouped by
   pinned package name: groups run a few at a time, the cards of one group one after another, so the first card of a
   package reads each source and the others are answered from what it just fetched (each source is read once per package
-  per round, not once per card). The round's token is cancelled by `Dispose` and by `StartUpgradeRefresh` (a settings
+  per round, not once per card). That also has to hold when a source cannot be read: `PackageVersionCache` never caches
+  a failure, so the round creates a `SourceFailureMemo` and passes it through `RefreshUpgradeStatusAsync(token,
+  failureMemo: failures)` to the cache's reads. The first card whose read of a source fails records the failure in the
+  memo under `(source alias, package ID)`; every later card of the round (in the same group, and a card checked after
+  the failure in another) gets that same failure for that source without reading it, so a source is read at most once
+  per round per package and a card ends in the same state as the first one (`IsUpgradeStatusUnknown`, plus the
+  sign-in or Git-too-old `SourceProblem`); a source that failed while another answered is skipped for the later cards
+  too, which still show the upgrade the working source offers. The memo belongs to the round: it is dropped when the
+  round ends, so the next round - like every action the user starts, which passes no memo - reads the source again.
+  The launch-time check (`CheckUpgradesAsync`, which does not group cards and reads concurrently) creates a memo of its
+  own for the same reason; cards that are already reading the same source at the moment it fails still read it, as
+  they do for a listing that succeeds. The round's token is cancelled by `Dispose` and by `StartUpgradeRefresh` (a settings
   change starts a new launch-style round that supersedes it); a cancelled round is not an error.
 - *`Dispose`* (`IDisposable`; the main window calls it when it closes): disposes the timer, cancels the running round
   and refuses further starts; calling it twice is harmless.

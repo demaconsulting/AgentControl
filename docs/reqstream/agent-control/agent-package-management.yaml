@@ -511,6 +511,7 @@ sections:
         children:
           - AgentControl-PackageVersionCache-ListAcrossSources
           - AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure
+          - AgentControl-PackageVersionCache-RoundFailureMemo
           - AgentControl-PackageVersionCache-NewestAcrossSources
         tests:
           - AgentPackageManagementSubsystem_AcrossSources_ListsOffersInConfigurationOrderAndNewestWins

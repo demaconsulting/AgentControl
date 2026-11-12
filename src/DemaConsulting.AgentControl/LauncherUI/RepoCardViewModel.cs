@@ -3020,6 +3020,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="packageName">The pinned package name.</param>
     /// <param name="version">The pinned version text.</param>
     /// <param name="cancellationToken">Cancels the listing.</param>
+    /// <param name="failureMemo">The failures of the background check round the listing belongs to,
+    ///     or <see langword="null"/> outside a round; see
+    ///     <see cref="PackageVersionCache.GetVersionsDescendingAsync"/>.</param>
     /// <returns>The offers of the package at exactly that version in Settings order (a source
     ///     with several spellings of the version lists each), the failure to report for a source
     ///     that could not be read (and was skipped) - a refusal of access (HTTP 403) when there was one,
@@ -3029,7 +3032,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see cref="PackageVersionCache.GetVersionsAcrossSourcesAsync"/>.</exception>
     private async Task<(List<DiscoveredPackage> Offering, Exception? FirstFailure, PackageSourceAccessException? FirstAccessDenied)>
         FindOfferingSourcesAsync(
-            PackageSourceRegistry registry, string packageName, string? version, CancellationToken cancellationToken)
+            PackageSourceRegistry registry,
+            string packageName,
+            string? version,
+            CancellationToken cancellationToken,
+            SourceFailureMemo? failureMemo = null)
     {
         Exception? firstFailure = null;
         PackageSourceAccessException? firstAccessDenied = null;
@@ -3042,7 +3049,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 {
                     firstAccessDenied ??= denied;
                 }
-            });
+            },
+            failureMemo);
         return ([.. offers.Where(candidate => IsVersion(candidate, version))], firstAccessDenied ?? firstFailure, firstAccessDenied);
     }
 
@@ -3717,11 +3725,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     package published since the last listing - a new NuGet version, a zip added to a folder,
     ///     a pushed tag - is offered at once); <see langword="false"/> (the default) for the
     ///     background check, which may reuse cached listings no older than five minutes.</param>
+    /// <param name="failureMemo">The failures of the background check round this check belongs to,
+    ///     or <see langword="null"/> (the default; a check the user asked for, or one on its own). A
+    ///     source that already failed in the round is not read again - this card ends in the same
+    ///     state the card that hit the failure did - and a failure here is recorded for the cards
+    ///     that follow. Nothing in it outlives the round.</param>
     /// <returns>A task that completes when the card's upgrade state is current.</returns>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is cancelled; the card keeps its previous upgrade state.</exception>
     public async Task RefreshUpgradeStatusAsync(
-        CancellationToken cancellationToken = default, bool allowPrompt = false, bool relistSources = false)
+        CancellationToken cancellationToken = default,
+        bool allowPrompt = false,
+        bool relistSources = false,
+        SourceFailureMemo? failureMemo = null)
     {
         // A card that was removed from the list checks nothing any more
         if (_isRetired)
@@ -3772,7 +3788,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // The pin names no source: the user's configured sources, in Settings order, are asked
             // what they offer of the pinned package and version
             var (offering, firstFailure, listingAccessDenied) = await FindOfferingSourcesAsync(
-                registry, pinnedPackageName, pinnedVersion, cancellationToken);
+                registry, pinnedPackageName, pinnedVersion, cancellationToken, failureMemo);
 
             // Nothing offers it and a source could not be read: nothing is known (a sign-in that is
             // needed, a share that is down), which is not "no source offers it"
@@ -3821,7 +3837,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // keeps Settings order). With a problem it is still offered when newer: upgrading is the
             // natural way out of it.
             var check = await _packageVersionCache.IsNewerVersionAvailableAcrossSourcesAsync(
-                registry, pinnedPackageName, pinnedVersion, cancellationToken);
+                registry, pinnedPackageName, pinnedVersion, cancellationToken, failureMemo);
 
             if (generation == _upgradeCheckGeneration)
             {

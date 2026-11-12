@@ -614,6 +614,102 @@ public sealed class PackageVersionCacheTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that, with a round's failure memo, a source that failed is read once however often it is
+    ///     asked, the later askers get the same failure, and a source that did not fail is unaffected.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_FailureMemo_SourceFailed_IsNotReadAgainAndRethrowsTheSameFailure()
+    {
+        // Arrange: one unreachable source and one working source, and a round's memo
+        var broken = new FakePackageSourceProvider("Broken", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("unreachable")
+        };
+        var working = new FakePackageSourceProvider("Working", ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(broken, working);
+        var cache = new PackageVersionCache();
+        var memo = new SourceFailureMemo();
+
+        // Act: three askers in the same round
+        var failures = new List<IOException>();
+        for (var asker = 0; asker < 3; asker++)
+        {
+            failures.Add(await Assert.ThrowsAsync<IOException>(
+                () => cache.GetVersionsDescendingAsync(
+                    registry, "Broken", "contoso-agents", CancellationToken.None, memo)));
+            await cache.GetVersionsDescendingAsync(registry, "Working", "contoso-agents", CancellationToken.None, memo);
+        }
+
+        // Assert: one read of each source, the same failure every time
+        Assert.Equal(1, broken.ListVersionsCalls);
+        Assert.Equal(1, working.ListVersionsCalls);
+        Assert.All(failures, failure => Assert.Equal("unreachable", failure.Message));
+    }
+
+    /// <summary>
+    ///     Test that a failure is remembered only by the memo it was given: the cache keeps no failure, so a
+    ///     call without a memo (a user action) or with the next round's memo reads the source again.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_FailureMemo_FailureIsNotPersistedBeyondTheMemo()
+    {
+        // Arrange: an unreachable source that fails once in a round
+        var broken = new FakePackageSourceProvider("Broken", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("unreachable")
+        };
+        var registry = CreateRegistry(broken);
+        var cache = new PackageVersionCache();
+        await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsDescendingAsync(
+                registry, "Broken", "contoso-agents", CancellationToken.None, new SourceFailureMemo()));
+
+        // Act: the next round, and a call with no memo, each ask again
+        await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsDescendingAsync(
+                registry, "Broken", "contoso-agents", CancellationToken.None, new SourceFailureMemo()));
+        await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsDescendingAsync(registry, "Broken", "contoso-agents", CancellationToken.None));
+
+        // Assert: each of the three reached the source; and once it recovers, the cache serves it
+        Assert.Equal(3, broken.ListVersionsCalls);
+        broken.ListVersionsException = null;
+        var versions = await cache.GetVersionsDescendingAsync(
+            registry, "Broken", "contoso-agents", CancellationToken.None, new SourceFailureMemo());
+        Assert.Single(versions);
+    }
+
+    /// <summary>
+    ///     Test that the failure memo is keyed by source and package: a failure of one package at a source
+    ///     does not stop another package from being read there.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_FailureMemo_FailureOfOnePackage_DoesNotAffectAnotherPackage()
+    {
+        // Arrange: a source whose read fails once, for the first package asked
+        var feed = new FakePackageSourceProvider("Feed", ("other-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("unreachable")
+        };
+        var registry = CreateRegistry(feed);
+        var cache = new PackageVersionCache();
+        var memo = new SourceFailureMemo();
+        await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsDescendingAsync(registry, "Feed", "contoso-agents", CancellationToken.None, memo));
+        feed.ListVersionsException = null;
+
+        // Act: the other package at the same source, and the first package again
+        var other = await cache.GetVersionsDescendingAsync(registry, "feed", "other-agents", CancellationToken.None, memo);
+        await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsDescendingAsync(registry, "FEED", "contoso-agents", CancellationToken.None, memo));
+
+        // Assert: the other package was read; the first was answered by the memo (alias compared
+        // case-insensitively)
+        Assert.Single(other);
+        Assert.Equal(2, feed.ListVersionsCalls);
+    }
+
+    /// <summary>
     ///     Test that the cross-source upgrade check reports the newest version across the sources, that a
     ///     version offered by several sources is attributed to the first of them in configuration order.
     /// </summary>

@@ -34,6 +34,86 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? Latest);
 
 /// <summary>
+///     The failures of package-source reads within one background check round, keyed by
+///     <c>(source alias, package ID)</c>, so a source that cannot be read is read once per round
+///     instead of once per card.
+/// </summary>
+/// <remarks>
+///     <para>
+///     <see cref="PackageVersionCache"/> never caches a failure, so without this a round over many
+///     cards that pin the same package would retry an unreachable (or sign-in-requiring) source for
+///     every card. A caller creates one instance per round, passes it to the cache's read methods
+///     and drops it when the round ends: nothing recorded here outlives the round, so the next round
+///     (and every action the user starts, which passes none) reads the source again. The recorded
+///     exception is rethrown to every later reader, so each card ends in the same state as the first
+///     one. Safe for concurrent use.
+///     </para>
+/// </remarks>
+internal sealed class SourceFailureMemo
+{
+    /// <summary>
+    ///     Guards <see cref="_failures"/>.
+    /// </summary>
+    private readonly object _lock = new();
+
+    /// <summary>
+    ///     The first failure recorded per source alias (case-insensitive) and package ID.
+    /// </summary>
+    private readonly Dictionary<(string Alias, string PackageId), Exception> _failures = new(KeyComparer.Instance);
+
+    /// <summary>
+    ///     Gets the failure recorded for a source's read of a package.
+    /// </summary>
+    /// <param name="sourceAlias">The source alias.</param>
+    /// <param name="packageId">The package name or ID.</param>
+    /// <param name="failure">Receives the recorded failure when there is one.</param>
+    /// <returns><see langword="true"/> when that read already failed in this round.</returns>
+    public bool TryGetFailure(string sourceAlias, string packageId, out Exception? failure)
+    {
+        lock (_lock)
+        {
+            return _failures.TryGetValue((sourceAlias, packageId), out failure);
+        }
+    }
+
+    /// <summary>
+    ///     Records the failure of a source's read of a package; the first failure recorded for a key
+    ///     is kept.
+    /// </summary>
+    /// <param name="sourceAlias">The source alias.</param>
+    /// <param name="packageId">The package name or ID.</param>
+    /// <param name="failure">The failure.</param>
+    public void Record(string sourceAlias, string packageId, Exception failure)
+    {
+        lock (_lock)
+        {
+            _failures.TryAdd((sourceAlias, packageId), failure);
+        }
+    }
+
+    /// <summary>
+    ///     Compares keys the way <see cref="PackageVersionCache"/> keys its entries: the alias
+    ///     case-insensitively, the package ID exactly.
+    /// </summary>
+    private sealed class KeyComparer : IEqualityComparer<(string Alias, string PackageId)>
+    {
+        /// <summary>
+        ///     The shared instance.
+        /// </summary>
+        public static readonly KeyComparer Instance = new();
+
+        /// <inheritdoc />
+        public bool Equals((string Alias, string PackageId) x, (string Alias, string PackageId) y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(x.Alias, y.Alias)
+            && StringComparer.Ordinal.Equals(x.PackageId, y.PackageId);
+
+        /// <inheritdoc />
+        public int GetHashCode((string Alias, string PackageId) obj) =>
+            HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Alias), StringComparer.Ordinal.GetHashCode(obj.PackageId));
+    }
+}
+
+/// <summary>
 ///     Cache of what each configured package source offers, keyed by <c>(source alias, package ID)</c>,
 ///     whose entries expire after <see cref="EntryLifetime"/>.
 /// </summary>
@@ -54,7 +134,9 @@ internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? La
 ///     </para>
 ///     <para>
 ///     A cached empty result (no versions found) is a valid, distinct entry from "not yet queried",
-///     and a failed fetch is never cached. An expired entry is treated as not yet queried.
+///     and a failed fetch is never cached (a background check round may pass a
+///     <see cref="SourceFailureMemo"/> so that a failure is remembered for that round only). An
+///     expired entry is treated as not yet queried.
 ///     <see cref="Invalidate()"/> clears everything, while
 ///     <see cref="Invalidate(string)"/> clears one source so editing or removing a source does not
 ///     discard the other sources' results; a fetch that was already in flight when its source was
@@ -147,6 +229,11 @@ internal sealed class PackageVersionCache
     /// <param name="sourceAlias">The source alias.</param>
     /// <param name="packageId">The package name or ID.</param>
     /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
+    /// <param name="failureMemo">The failures of the current background check round, or
+    ///     <see langword="null"/> (a user action, or any call outside a round). When given, a cache
+    ///     miss whose read already failed in the round rethrows that failure without reading the
+    ///     source again, and a new failure is recorded in it; the cache itself still never keeps a
+    ///     failure.</param>
     /// <returns>The discovered packages ordered from highest to lowest version.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry"/> is
     ///     <see langword="null"/>.</exception>
@@ -156,7 +243,11 @@ internal sealed class PackageVersionCache
     /// <exception cref="DirectoryNotFoundException">Thrown on a cache miss when a folder source
     ///     does not exist or is unreachable.</exception>
     public async Task<IReadOnlyList<DiscoveredPackage>> GetVersionsDescendingAsync(
-        PackageSourceRegistry registry, string sourceAlias, string packageId, CancellationToken cancellationToken)
+        PackageSourceRegistry registry,
+        string sourceAlias,
+        string packageId,
+        CancellationToken cancellationToken,
+        SourceFailureMemo? failureMemo = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceAlias);
@@ -172,11 +263,29 @@ internal sealed class PackageVersionCache
             }
         }
 
+        // This round already found the source unreadable: every card gets the same failure
+        // without asking the source again
+        if (failureMemo is not null && failureMemo.TryGetFailure(sourceAlias, packageId, out var memoized))
+        {
+            ExceptionDispatchInfo.Capture(memoized!).Throw();
+        }
+
         // The entry is dated when the read starts: the listing is no fresher than that moment
         var fetchedAt = _timeProvider.GetUtcNow();
-        var versions = (await provider.ListVersionsAsync(packageId, cancellationToken))
-            .OrderByDescending(package => package.Version)
-            .ToList();
+        List<DiscoveredPackage> versions;
+        try
+        {
+            versions = (await provider.ListVersionsAsync(packageId, cancellationToken))
+                .OrderByDescending(package => package.Version)
+                .ToList();
+        }
+        catch (Exception ex) when (failureMemo is not null
+            && ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            failureMemo.Record(sourceAlias, packageId, ex);
+            throw;
+        }
+
         lock (_lock)
         {
             entry.Versions[packageId] = new VersionListing(versions, fetchedAt);
@@ -229,6 +338,10 @@ internal sealed class PackageVersionCache
     /// <param name="onSourceFailure">Called with the failure of each source that could not be read
     ///     (and was skipped), or <see langword="null"/>. Lets a caller tell "no source offers the
     ///     package" from "a source that might have could not be read".</param>
+    /// <param name="failureMemo">The failures of the current background check round, or
+    ///     <see langword="null"/> outside a round; see
+    ///     <see cref="GetVersionsDescendingAsync"/>. A source that failed in the round is skipped
+    ///     (and reported to <paramref name="onSourceFailure"/>) without being read again.</param>
     /// <returns>The discovered packages source by source in configuration order (the order of
     ///     Settings), each source's versions from highest to lowest; empty when no source offers
     ///     the package. A source that cannot be read is skipped, so one unreachable source never
@@ -258,7 +371,8 @@ internal sealed class PackageVersionCache
         string packageId,
         string? excludeAlias,
         CancellationToken cancellationToken,
-        Action<Exception>? onSourceFailure = null)
+        Action<Exception>? onSourceFailure = null,
+        SourceFailureMemo? failureMemo = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
@@ -275,7 +389,8 @@ internal sealed class PackageVersionCache
             consulted++;
             try
             {
-                offers.AddRange(await GetVersionsDescendingAsync(registry, alias, packageId, cancellationToken));
+                offers.AddRange(await GetVersionsDescendingAsync(
+                    registry, alias, packageId, cancellationToken, failureMemo));
                 succeeded++;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
@@ -309,6 +424,9 @@ internal sealed class PackageVersionCache
     /// <param name="packageId">The package name or ID.</param>
     /// <param name="pinnedVersion">The repo's current pinned version text.</param>
     /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
+    /// <param name="failureMemo">The failures of the current background check round, or
+    ///     <see langword="null"/> outside a round; see
+    ///     <see cref="GetVersionsAcrossSourcesAsync"/>.</param>
     /// <returns>The upgrade check result; see <see cref="UpgradeCheck"/>. The newest version
     ///     across the sources wins, and a version offered by several sources is attributed to the
     ///     first of them in configuration order.</returns>
@@ -319,11 +437,16 @@ internal sealed class PackageVersionCache
     /// <exception cref="IOException">Thrown when every source that was consulted failed; see
     ///     <see cref="GetVersionsAcrossSourcesAsync"/>.</exception>
     public async Task<UpgradeCheck> IsNewerVersionAvailableAcrossSourcesAsync(
-        PackageSourceRegistry registry, string packageId, string pinnedVersion, CancellationToken cancellationToken)
+        PackageSourceRegistry registry,
+        string packageId,
+        string pinnedVersion,
+        CancellationToken cancellationToken,
+        SourceFailureMemo? failureMemo = null)
     {
         ArgumentNullException.ThrowIfNull(pinnedVersion);
 
-        var offers = await GetVersionsAcrossSourcesAsync(registry, packageId, excludeAlias: null, cancellationToken);
+        var offers = await GetVersionsAcrossSourcesAsync(
+            registry, packageId, excludeAlias: null, cancellationToken, failureMemo: failureMemo);
         return BuildUpgradeCheck(offers, pinnedVersion);
     }
 

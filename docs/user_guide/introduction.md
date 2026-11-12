@@ -907,7 +907,8 @@ folder of zips or as a Git tag). What a source offers is therefore never trusted
   against your sources again every five minutes - the same check as at start, which never opens a sign-in dialog and
   skips a card whose folder is missing or that is busy - so a new version appears as an upgrade chip within about five
   minutes. A source that cannot be read, or that needs a sign-in, is reported on the card as at start; use **Refresh**
-  to sign in. Each source is read once per round, however many repos use its packages. The checking stops when you
+  to sign in. Each source is read once per round, however many repos use its packages (a source that is down is not
+  asked again for each repo, only again in the next round). The checking stops when you
   close the window.
 
 ## Selecting an Initial Package

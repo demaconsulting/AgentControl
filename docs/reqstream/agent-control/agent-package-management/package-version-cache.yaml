@@ -117,6 +117,23 @@ sections:
           - PackageVersionCache_GetVersionsAcrossSources_EverySourceFailsOneRefusesAccess_ThrowsTheRefusal
           - PackageVersionCache_GetVersionsAcrossSources_SourceFailureCallback_ReportsEachSkippedSource
 
+      - id: AgentControl-PackageVersionCache-RoundFailureMemo
+        title: >-
+          The PackageVersionCache class shall, when a caller passes the failure memo of a background
+          check round, read a source that failed for a package at most once in that round and give
+          every later read of it the same failure, key the memo by source alias and package, and
+          keep no failure beyond the memo, so that a read without a memo or with a later round's
+          memo reads the source again.
+        justification: |
+          A failed read is deliberately never cached, so a background round over many cards that
+          pin the same package would otherwise retry an unreachable (or sign-in-requiring) source
+          once per card; remembering the failure for the round alone stops that without hiding a
+          source that has recovered from the next round or from a user action.
+        tests:
+          - PackageVersionCache_FailureMemo_SourceFailed_IsNotReadAgainAndRethrowsTheSameFailure
+          - PackageVersionCache_FailureMemo_FailureIsNotPersistedBeyondTheMemo
+          - PackageVersionCache_FailureMemo_FailureOfOnePackage_DoesNotAffectAnotherPackage
+
       - id: AgentControl-PackageVersionCache-NewestAcrossSources
         title: >-
           The PackageVersionCache class shall determine, across all configured sources, the newest

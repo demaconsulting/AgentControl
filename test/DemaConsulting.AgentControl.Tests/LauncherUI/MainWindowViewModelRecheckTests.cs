@@ -179,6 +179,173 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a round reads an unreachable source once however many cards pin the package (a failed
+    ///     read is not cached, but the round remembers it), that every card shows the failure the way the
+    ///     launch-time check shows it, and that the next round reads the source again.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_PeriodicRecheck_SourceUnreachable_ReadsOncePerRoundAndEveryCardShowsFailure()
+    {
+        // Arrange: five repos pinned to the same package at a source that cannot be reached
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("Feed is unreachable.")
+        };
+        var viewModel = CreateViewModel(clock, feed, repoCount: 5);
+        viewModel.StartPeriodicUpgradeRecheck();
+
+        // Act: one round
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+        await viewModel.PendingPeriodicRecheck;
+
+        // Assert: the source was read once, and every card shows the failed-check state
+        Assert.Equal(1, feed.ListVersionsCalls);
+        Assert.All(viewModel.RepoCards, card =>
+        {
+            Assert.True(card.IsUpgradeStatusUnknown);
+            Assert.False(card.IsUpgradeAvailable);
+            Assert.False(card.IsCheckingUpgrade);
+        });
+
+        // Act: the next round, with the source back
+        feed.ListVersionsException = null;
+        feed.Publish("contoso-agents", "1.1.0");
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+        await viewModel.PendingPeriodicRecheck;
+
+        // Assert: the failure was not persisted - the source was read again (once) and the cards recovered
+        Assert.Equal(2, feed.ListVersionsCalls);
+        Assert.All(viewModel.RepoCards, card =>
+        {
+            Assert.False(card.IsUpgradeStatusUnknown);
+            Assert.True(card.IsUpgradeAvailable);
+        });
+    }
+
+    /// <summary>
+    ///     Test that a source that is still unreachable in the next round is read again (once), so the
+    ///     round's memory of a failure never lasts longer than the round.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_PeriodicRecheck_SourceStaysUnreachable_ReadsOnceInEachRound()
+    {
+        // Arrange
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("Feed is unreachable.")
+        };
+        var viewModel = CreateViewModel(clock, feed, repoCount: 4);
+        viewModel.StartPeriodicUpgradeRecheck();
+
+        // Act: three rounds
+        for (var round = 1; round <= 3; round++)
+        {
+            clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+            await viewModel.PendingPeriodicRecheck;
+
+            // Assert: one read per round
+            Assert.Equal(round, feed.ListVersionsCalls);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a source that needs a sign-in is read once per round and every card reports the
+    ///     sign-in on itself, like the first card does.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_PeriodicRecheck_SourceNeedsSignIn_ReadsOncePerRoundAndEveryCardReportsIt()
+    {
+        // Arrange: five cards, a source that asks for a sign-in
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new PackageSourceAccessException(
+                PackageSourceFailureKind.AuthenticationFailed, "Source 'Feed' needs a sign-in.")
+        };
+        var viewModel = CreateViewModel(clock, feed, repoCount: 5);
+        viewModel.StartPeriodicUpgradeRecheck();
+
+        // Act
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+        await viewModel.PendingPeriodicRecheck;
+
+        // Assert
+        Assert.Equal(1, feed.ListVersionsCalls);
+        Assert.All(viewModel.RepoCards, card =>
+        {
+            Assert.True(card.SourceNeedsSignIn);
+            Assert.True(card.IsUpgradeStatusUnknown);
+            Assert.Contains("needs a sign-in", card.SourceProblem, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    ///     Test that when one of two sources fails and the other answers, the failing source is read once
+    ///     per round (not once per card, nor twice per card), every card shows the upgrade the working
+    ///     source offers, and the failing source is read again in the next round.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_PeriodicRecheck_OneSourceFails_FailingSourceReadOncePerRound()
+    {
+        // Arrange: five cards; the first source is down, the second offers a newer version
+        var clock = new FakeTimeProvider();
+        var down = new FakePackageSourceProvider("Down", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("Down is unreachable.")
+        };
+        var up = new FakePackageSourceProvider("Up", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
+        var viewModel = CreateViewModel(clock, [down, up], repoCount: 5);
+        viewModel.StartPeriodicUpgradeRecheck();
+
+        // Act: one round
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+        await viewModel.PendingPeriodicRecheck;
+
+        // Assert: each source was read once, and every card shows the upgrade from the source that answered
+        Assert.Equal(1, down.ListVersionsCalls);
+        Assert.Equal(1, up.ListVersionsCalls);
+        Assert.All(viewModel.RepoCards, card =>
+        {
+            Assert.True(card.IsUpgradeAvailable);
+            Assert.Equal("1.1.0", card.LatestAvailableVersion);
+            Assert.False(card.IsUpgradeStatusUnknown);
+        });
+
+        // Act: the next round
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+        await viewModel.PendingPeriodicRecheck;
+
+        // Assert: both sources were read again, once each
+        Assert.Equal(2, down.ListVersionsCalls);
+        Assert.Equal(2, up.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that the launch-time check shares what it learned of an unreachable source with the cards
+    ///     that follow, instead of reading it once per card, and that every card shows the failure.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_LaunchCheck_SourceUnreachable_CardsShareTheFailure()
+    {
+        // Arrange: five repos pinned to the same package at a source that cannot be reached
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("Feed is unreachable.")
+        };
+        var viewModel = CreateViewModel(clock, feed, repoCount: 5);
+
+        // Act
+        await viewModel.BeginUpgradeRefresh();
+
+        // Assert
+        Assert.Equal(1, feed.ListVersionsCalls);
+        Assert.All(viewModel.RepoCards, card => Assert.True(card.IsUpgradeStatusUnknown));
+    }
+
+    /// <summary>
     ///     Test that a round skips a card with no pin and a card whose folder is missing, and reads no
     ///     source when there is nothing to check.
     /// </summary>
@@ -388,7 +555,20 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
     /// <param name="interval">The re-check interval, or <see langword="null"/> for the default.</param>
     /// <returns>The view model.</returns>
     private MainWindowViewModel CreateViewModel(
-        FakeTimeProvider clock, FakePackageSourceProvider feed, int repoCount, TimeSpan? interval = null)
+        FakeTimeProvider clock, FakePackageSourceProvider feed, int repoCount, TimeSpan? interval = null) =>
+        CreateViewModel(clock, [feed], repoCount, interval);
+
+    /// <summary>
+    ///     Creates a view model over repos pinned to <c>contoso-agents 1.0.0</c> whose sources are the given
+    ///     in-memory feeds, in Settings order.
+    /// </summary>
+    /// <param name="clock">The fake clock.</param>
+    /// <param name="feeds">The feeds that serve the sources, one source per feed (named by its alias).</param>
+    /// <param name="repoCount">How many repos are pinned.</param>
+    /// <param name="interval">The re-check interval, or <see langword="null"/> for the default.</param>
+    /// <returns>The view model.</returns>
+    private MainWindowViewModel CreateViewModel(
+        FakeTimeProvider clock, FakePackageSourceProvider[] feeds, int repoCount, TimeSpan? interval = null)
     {
         var repos = new string[repoCount];
         for (var index = 0; index < repoCount; index++)
@@ -398,12 +578,20 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         }
 
         var settings = CreateSettings(repos);
+        settings.Sources =
+        [
+            .. feeds.Select(feed => new PackageSourceDefinition
+            {
+                Alias = feed.Alias, Type = PackageSourceType.Zip, Location = "unused"
+            })
+        ];
         return new MainWindowViewModel(
             settings,
             configDirectory: CreateTempDirectory(),
             timeProvider: clock,
             upgradeRecheckInterval: interval,
-            registryFactory: _ => new PackageSourceRegistry(settings.Sources, _ => feed));
+            registryFactory: _ => new PackageSourceRegistry(
+                settings.Sources, definition => feeds.Single(feed => feed.Alias == definition.Alias)));
     }
 
     /// <summary>

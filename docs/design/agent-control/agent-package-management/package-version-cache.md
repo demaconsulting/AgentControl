@@ -26,7 +26,15 @@ guarantees a result fetched from one source is never returned for another.
 `SourceEntry` per source holding that source's cached package IDs (`null` = not yet queried) with
 the time they were fetched, and a `Dictionary<string, VersionListing>` of descending version lists by
 package ID, each with the time it was fetched. A present key with an empty list means "queried, none
-found", which is distinct from "not yet queried"; a failed query is never cached.
+found", which is distinct from "not yet queried"; a failed query is never cached (a background check
+round may remember a failure for the length of the round only; see `SourceFailureMemo` below).
+
+**SourceFailureMemo** (class, same file): `Dictionary<(string Alias, string PackageId), Exception>`
+(alias case-insensitive, package ID exact, like the cache keys) behind its own lock — the failures of
+source reads within one background check round. A caller (`MainWindowViewModel`'s periodic round and
+launch-time check) creates one per round and drops it when the round ends; the cache never holds one,
+so nothing recorded in it can outlive the round, and a caller that passes none (a user action) is
+unaffected.
 
 **\_timeProvider**: `TimeProvider` — the clock that dates fetches and judges expiry; the system
 clock unless a test supplies another through the constructor, so tests move time without waiting.
@@ -58,9 +66,13 @@ cache (`AgentControl-PackageVersionCache-CachePackageNames`).
 consulting/populating the cache (`AgentControl-PackageVersionCache-CacheVersions`).
 
 - *Parameters*: `PackageSourceRegistry registry`, `string sourceAlias`, `string packageId`,
-  `CancellationToken`.
+  `CancellationToken`, and an optional `SourceFailureMemo? failureMemo`.
 - *Returns*: `Task<IReadOnlyList<DiscoveredPackage>>`.
-- *Postconditions*: Expiry works as for `GetPackageIdsAsync`, per package.
+- *Postconditions*: Expiry works as for `GetPackageIdsAsync`, per package. With a memo, a cache miss first checks
+  whether this round already recorded a failure for `(sourceAlias, packageId)` and, if so, rethrows it (original stack
+  preserved) without reading the source; a read that fails with an I/O, permission or `InvalidOperationException`
+  error is recorded in the memo (and rethrown). Cancellation is never recorded. Without a memo nothing is
+  remembered: every miss reads the source.
 
 **IsNewerVersionAvailableAsync**: Determines whether a newer version exists than a pinned one,
 using the cached descending list; the highest entry is the latest
@@ -86,7 +98,9 @@ using the cached descending list; the highest entry is the latest
 
 - *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string? excludeAlias`, `CancellationToken`,
   and an
-  optional `Action<Exception>? onSourceFailure`.
+  optional `Action<Exception>? onSourceFailure` and an optional `SourceFailureMemo? failureMemo` (passed to every
+  `GetVersionsDescendingAsync` call, so a source that failed earlier in the round is skipped - and reported to
+  `onSourceFailure` - without being read again).
 - *Returns*: `Task<IReadOnlyList<DiscoveredPackage>>` - the offers source by source in the order of
   `registry.Definitions` (the order the user configured), each source's versions highest first.
 - *Algorithm*: For each definition other than `excludeAlias` (which is never contacted), calls
@@ -105,7 +119,8 @@ using the cached descending list; the highest entry is the latest
 **IsNewerVersionAvailableAcrossSourcesAsync**: The upgrade question across all configured sources, which is how a
 repo's upgrade is resolved because its pin names no source (`AgentControl-PackageVersionCache-NewestAcrossSources`).
 
-- *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string pinnedVersion`, `CancellationToken`.
+- *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string pinnedVersion`, `CancellationToken`, and an
+  optional `SourceFailureMemo? failureMemo` (forwarded to `GetVersionsAcrossSourcesAsync`).
 - *Returns*: `Task<UpgradeCheck>` built by the same private `BuildUpgradeCheck` as the single-source method: the latest
   is the first offer that no later offer exceeds - a later offer replaces the choice only when strictly newer, so a
   tie keeps the earlier source, i.e. Settings order.
@@ -134,7 +149,8 @@ of propagating it, unless every consulted source failed.
 
 - **MainWindowViewModel** — constructs the single shared instance (with its own `TimeProvider`),
   calls `Invalidate(sourceAlias)` for each source that is edited or removed when settings are
-  applied, and `Invalidate()` at the start of each periodic upgrade re-check round.
+  applied, `Invalidate()` at the start of each periodic upgrade re-check round, and creates the
+  per-round `SourceFailureMemo` of a periodic round and of the launch-time check.
 - **RepoCardViewModel** — calls `GetVersionsAcrossSourcesAsync` (which configured sources offer the pinned package and
   version) and `IsNewerVersionAvailableAcrossSourcesAsync` (the upgrade check and Upgrade) over all configured
   sources, and `Invalidate(sourceAlias)` for every configured source when the card is refreshed (or upgraded), so that

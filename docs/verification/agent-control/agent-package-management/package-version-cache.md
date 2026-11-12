@@ -107,6 +107,16 @@ scenario is tested by
 `PackageVersionCache_GetVersionsAcrossSources_SourceFailureCallback_ReportsEachSkippedSource`, covering
 `AgentControl-PackageVersionCache-ListAcrossSourcesTolerateFailure`.
 
+**PackageVersionCache_RoundFailureMemo_FailureRememberedForTheRoundOnly**: With the failure memo of a round, a source
+whose read failed is read once however often it is asked (the later askers get the same failure, while another source
+is read normally); the memo is keyed by source alias (case-insensitively) and package, so a failure for one package
+does not stop another package from being read at that source; and nothing outlives the memo - a read with the next
+round's memo, or with no memo, reaches the source again, and once the source recovers the cache serves its listing.
+This scenario is tested by `PackageVersionCache_FailureMemo_SourceFailed_IsNotReadAgainAndRethrowsTheSameFailure`,
+`PackageVersionCache_FailureMemo_FailureIsNotPersistedBeyondTheMemo` and
+`PackageVersionCache_FailureMemo_FailureOfOnePackage_DoesNotAffectAnotherPackage`, covering
+`AgentControl-PackageVersionCache-RoundFailureMemo`.
+
 **PackageVersionCache_NewestAcrossSources_NewestWinsAndTieKeepsConfigurationOrder**: The upgrade check across sources
 reports the newest version offered by any source, attributes a version that several sources offer to the first of them
 in configuration order, and reports no upgrade and no latest version when no source offers the package. This scenario

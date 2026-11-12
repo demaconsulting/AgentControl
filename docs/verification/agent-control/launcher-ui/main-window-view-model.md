@@ -30,8 +30,9 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - Constructing the view model reads no package source; upgrade availability is checked in the
   background, and an unreachable source does not stop the other sources from offering their upgrades.
 - While the application runs the cards' upgrade availability is checked again every five minutes (never asking for a
-  sign-in, skipping cards that are busy, missing or without a pin, reading each source once per round, never overlapping
-  rounds) until the view model is disposed.
+  sign-in, skipping cards that are busy, missing or without a pin, reading each source once per round - also a
+  source that cannot be read, which is read again by the next round - never overlapping rounds) until the view
+  model is disposed.
 - The connection-test provider shares the application's session credentials with the cards, and for a Git source is a
   Git provider that is interactive and runs the configured git after its version check.
 - With no repo in a group the list is flat and has no header; with groups it is sectioned
@@ -316,12 +317,22 @@ nothing newer shows the upgrade after a version is published and the interval (f
 interval on request) has passed, and not just before it; the round repeats every interval; a round reads a source once
 for five cards that pin the same package; a repo with no pin, a repo whose folder is missing and a card that is busy
 refreshing itself are not checked (no source is read for them); a source that now needs a sign-in is reported on the
-card (`SourceNeedsSignIn`, status unknown) with no dialog - the check is the one that never asks; and with a
+card (`SourceNeedsSignIn`, status unknown) with no dialog - the check is the one that never asks; a source that cannot
+be reached (or that needs a sign-in) is read once per round for five cards that pin the same package - a failed read
+is not cached, but the round remembers it - and every card shows the failed-check state, while the next round reads the
+source again (once), also when it is still down; with two sources of which one is down, the failing source is read once
+per round (not once per card) and every card still shows the upgrade the other offers; the launch-time check shares a
+failure the same way; and with a
 UI-thread runner supplied the tick is queued and the round runs only when the runner runs it. This scenario is
 tested by `MainWindowViewModel_Constructor_RecheckInterval_DefaultsToFiveMinutesAndMustBePositive`,
 `MainWindowViewModel_PeriodicRecheck_VersionPublishedAfterLaunchCheck_ShowsUpgradeAfterInterval`,
 `MainWindowViewModel_PeriodicRecheck_CustomInterval_RepeatsEveryInterval`,
 `MainWindowViewModel_PeriodicRecheck_SeveralCardsSamePackage_ReadsTheSourceOnce`,
+`MainWindowViewModel_PeriodicRecheck_SourceUnreachable_ReadsOncePerRoundAndEveryCardShowsFailure`,
+`MainWindowViewModel_PeriodicRecheck_SourceStaysUnreachable_ReadsOnceInEachRound`,
+`MainWindowViewModel_PeriodicRecheck_SourceNeedsSignIn_ReadsOncePerRoundAndEveryCardReportsIt`,
+`MainWindowViewModel_PeriodicRecheck_OneSourceFails_FailingSourceReadOncePerRound`,
+`MainWindowViewModel_LaunchCheck_SourceUnreachable_CardsShareTheFailure`,
 `MainWindowViewModel_PeriodicRecheck_CardsWithNoPinOrMissingFolder_AreSkipped`,
 `MainWindowViewModel_PeriodicRecheck_CardIsBusy_IsSkipped`,
 `MainWindowViewModel_PeriodicRecheck_SourceNeedsSignIn_IsReportedOnTheCard` and

@@ -502,18 +502,25 @@ sections:
           The MainWindowViewModel class shall, every five minutes while it is alive once the
           re-check was started, check again the upgrade availability of each card that has a pin,
           is not busy and whose folder is not missing, without ever asking the user to sign in,
-          reading each package source once per round however many cards share a package, and
+          reading each package source once per round however many cards share a package (also when
+          the source cannot be read, without remembering that failure beyond the round), and
           report a failure through the card's state as the check at launch does.
         justification: |
           The application is left open all day while packages are published; without a periodic
           check the upgrade badges would only show what existed when the window opened. The check
-          must never interrupt the user with a dialog, and a slow source must not be read once per
-          card.
+          must never interrupt the user with a dialog, and a slow or unreachable source must not be
+          read once per card (a user who is off the VPN with many cards would otherwise send a
+          request per card to a feed that cannot answer, every round).
         tests:
           - MainWindowViewModel_Constructor_RecheckInterval_DefaultsToFiveMinutesAndMustBePositive
           - MainWindowViewModel_PeriodicRecheck_VersionPublishedAfterLaunchCheck_ShowsUpgradeAfterInterval
           - MainWindowViewModel_PeriodicRecheck_CustomInterval_RepeatsEveryInterval
           - MainWindowViewModel_PeriodicRecheck_SeveralCardsSamePackage_ReadsTheSourceOnce
+          - MainWindowViewModel_PeriodicRecheck_SourceUnreachable_ReadsOncePerRoundAndEveryCardShowsFailure
+          - MainWindowViewModel_PeriodicRecheck_SourceStaysUnreachable_ReadsOnceInEachRound
+          - MainWindowViewModel_PeriodicRecheck_SourceNeedsSignIn_ReadsOncePerRoundAndEveryCardReportsIt
+          - MainWindowViewModel_PeriodicRecheck_OneSourceFails_FailingSourceReadOncePerRound
+          - MainWindowViewModel_LaunchCheck_SourceUnreachable_CardsShareTheFailure
           - MainWindowViewModel_PeriodicRecheck_CardsWithNoPinOrMissingFolder_AreSkipped
           - MainWindowViewModel_PeriodicRecheck_CardIsBusy_IsSkipped
           - MainWindowViewModel_PeriodicRecheck_SourceNeedsSignIn_IsReportedOnTheCard

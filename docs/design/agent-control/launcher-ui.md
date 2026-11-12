@@ -365,7 +365,8 @@ window, and never hides what the other sources offer (`AgentControl-LauncherUI-R
 `AgentControl-LauncherUI-StaleResultsDiscarded`). The application is left open all day while packages are published,
 so `MainWindowViewModel` repeats the same check for every card every five minutes while the window is open (a timer on
 a `TimeProvider` whose ticks are posted to the UI thread; it skips busy, missing and unpinned cards, never overlaps
-rounds, reads each source once per round and stops when the window closes and the view model is disposed;
+rounds, reads each source once per round - an unreachable source too, whose failure is remembered for the round only -
+and stops when the window closes and the view model is disposed;
 `AgentControl-LauncherUI-PeriodicUpgradeRecheck`), and opening the Select Package dialog reads the sources afresh
 rather than serving a listing cached earlier (`AgentControl-LauncherUI-SelectPackageReadsSourcesFresh`). That
 background check never opens the

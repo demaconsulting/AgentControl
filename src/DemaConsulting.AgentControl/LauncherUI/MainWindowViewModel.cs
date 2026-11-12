@@ -671,7 +671,11 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     A round re-reads every source once: it clears the package-version cache first, so it is
     ///     not answered by a listing from the previous round that has not expired yet, and then the
     ///     cards that pin the same package are checked one after the other, so only the first of
-    ///     them reads the sources and the rest are answered from what it just fetched. A card that
+    ///     them reads the sources and the rest are answered from what it just fetched. That holds
+    ///     for a source that cannot be read too: the failure (unreachable, sign-in needed) is not
+    ///     cached, but the round remembers it per source and package (a
+    ///     <see cref="SourceFailureMemo"/>), so the later cards show the same failure without
+    ///     reading the source again, and the next round reads it afresh. A card that
     ///     is busy, missing, or has no pin is skipped. A tick that finds the previous round still
     ///     running (or the launch-time check still running) does nothing, so a slow source never
     ///     piles up rounds.
@@ -763,7 +767,10 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             // Cards that pin the same package are checked one after the other, so only the first
             // reads the sources and the others are answered from what it just fetched; groups run
-            // a few at a time
+            // a few at a time. A source that cannot be read is not cached (a later round, and the
+            // user's own actions, try it again), so the round remembers its failures: the cards after
+            // the first get the same failure without reading that source again.
+            var failures = new SourceFailureMemo();
             using var throttle = new SemaphoreSlim(MaxConcurrentUpgradeChecks);
             var groups = cards
                 .GroupBy(card => card.PinnedPackageName, StringComparer.OrdinalIgnoreCase)
@@ -777,7 +784,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                             token.ThrowIfCancellationRequested();
                             if (CanRecheckUpgrade(card))
                             {
-                                await card.RefreshUpgradeStatusAsync(token);
+                                await card.RefreshUpgradeStatusAsync(token, failureMemo: failures);
                             }
                         }
                     }
@@ -841,12 +848,17 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IReadOnlyList<RepoCardViewModel> cards, CancellationToken cancellationToken)
     {
         using var throttle = new SemaphoreSlim(MaxConcurrentUpgradeChecks);
+
+        // The failures of this check: once a source could not be read for a package, the cards that
+        // follow get that failure instead of reading it again (cards that are already reading it
+        // at the same moment still do, as they do for a listing that succeeds)
+        var failures = new SourceFailureMemo();
         var checks = cards.Select(async card =>
         {
             await throttle.WaitAsync(cancellationToken);
             try
             {
-                await card.RefreshUpgradeStatusAsync(cancellationToken);
+                await card.RefreshUpgradeStatusAsync(cancellationToken, failureMemo: failures);
             }
             finally
             {
