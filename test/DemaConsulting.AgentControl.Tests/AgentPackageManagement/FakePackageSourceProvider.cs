@@ -39,7 +39,7 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     /// <summary>
     ///     The packages this fake serves, as (package ID, version text) pairs.
     /// </summary>
-    private readonly IReadOnlyList<(string PackageId, string Version)> _packages;
+    private readonly List<(string PackageId, string Version)> _packages;
 
     /// <summary>
     ///     Number of times <see cref="ListPackageIdsAsync"/> was called.
@@ -64,7 +64,21 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     public FakePackageSourceProvider(string alias, params (string PackageId, string Version)[] packages)
     {
         Alias = alias;
-        _packages = packages;
+        _packages = [.. packages];
+    }
+
+    /// <summary>
+    ///     Adds a package version to what this fake serves from now on, like a release being
+    ///     published while the application runs.
+    /// </summary>
+    /// <param name="packageId">The package ID.</param>
+    /// <param name="version">The version text.</param>
+    public void Publish(string packageId, string version)
+    {
+        lock (_packages)
+        {
+            _packages.Add((packageId, version));
+        }
     }
 
     /// <inheritdoc />
@@ -114,7 +128,19 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     {
         Interlocked.Increment(ref _listPackageIdsCalls);
         return Task.FromResult<IReadOnlyList<string>>(
-            _packages.Select(p => p.PackageId).Distinct().OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToList());
+            Snapshot().Select(p => p.PackageId).Distinct().OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToList());
+    }
+
+    /// <summary>
+    ///     Takes a copy of the packages served now.
+    /// </summary>
+    /// <returns>The packages.</returns>
+    private List<(string PackageId, string Version)> Snapshot()
+    {
+        lock (_packages)
+        {
+            return [.. _packages];
+        }
     }
 
     /// <inheritdoc />
@@ -136,7 +162,7 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
             throw ListVersionsException;
         }
 
-        return _packages
+        return Snapshot()
             .Where(p => string.Equals(p.PackageId, packageId, StringComparison.Ordinal))
             .Select(p => new DiscoveredPackage(
                 p.PackageId, ParseVersion(p.Version), p.Version, Alias,

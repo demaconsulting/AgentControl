@@ -130,3 +130,17 @@ sections:
         tests:
           - PackageVersionCache_IsNewerVersionAvailableAcrossSources_NewestWinsAndTieKeepsConfigurationOrder
           - PackageVersionCache_IsNewerVersionAvailableAcrossSources_NobodyOffersPackage_ReportsNoUpgrade
+
+      - id: AgentControl-PackageVersionCache-EntriesExpire
+        title: >-
+          The PackageVersionCache class shall serve a cached package list or version list for at
+          most five minutes after it was fetched, and shall read the source again when a list is
+          requested after that, so that no automatic check uses a listing older than five minutes.
+        justification: |
+          Packages are published while the application stays open all day; a cache that never
+          expired would keep showing the versions that existed when the list was first read, with
+          no sign that anything is missing.
+        tests:
+          - PackageVersionCache_EntryYoungerThanFiveMinutes_IsStillServedFromCache
+          - PackageVersionCache_EntryOlderThanFiveMinutes_IsFetchedAgain
+          - PackageVersionCache_EntryFetchedAgainAfterExpiry_IsServedForAnotherFiveMinutes

@@ -69,12 +69,58 @@ internal enum AddRepoResult
 ///     it can be tested directly. Not thread-safe; every member is expected to be called from
 ///     the UI thread.
 /// </remarks>
-internal sealed class MainWindowViewModel : ViewModelBase
+internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     /// <summary>
     ///     The most upgrade checks that read package sources at the same time.
     /// </summary>
     private const int MaxConcurrentUpgradeChecks = 4;
+
+    /// <summary>
+    ///     How often the periodic background upgrade re-check runs by default: the lifetime of a
+    ///     cached listing, so no card's upgrade badge is older than the listing it was derived from
+    ///     is allowed to be.
+    /// </summary>
+    internal static readonly TimeSpan DefaultUpgradeRecheckInterval = PackageVersionCache.EntryLifetime;
+
+    /// <summary>
+    ///     Builds the registry of configured sources for every card, or <see langword="null"/> for
+    ///     the real providers; see the constructor.
+    /// </summary>
+    private readonly Func<AppSettings, PackageSourceRegistry>? _registryFactory;
+
+    /// <summary>
+    ///     The clock that drives the periodic upgrade re-check (and dates the package-version
+    ///     cache's entries).
+    /// </summary>
+    private readonly TimeProvider _timeProvider;
+
+    /// <summary>
+    ///     How often the periodic upgrade re-check runs.
+    /// </summary>
+    private readonly TimeSpan _upgradeRecheckInterval;
+
+    /// <summary>
+    ///     The timer that triggers the periodic upgrade re-check, or <see langword="null"/> when it
+    ///     is not running (not started yet, or this view model was disposed).
+    /// </summary>
+    private ITimer? _recheckTimer;
+
+    /// <summary>
+    ///     Cancels the periodic re-check round that is running, or <see langword="null"/> when none is.
+    /// </summary>
+    private CancellationTokenSource? _recheckCancellation;
+
+    /// <summary>
+    ///     Runs an action on the UI thread; the periodic timer fires on a thread-pool thread, and
+    ///     every property this view model's cards expose is updated on the UI thread.
+    /// </summary>
+    private Action<Action>? _runOnUiThread;
+
+    /// <summary>
+    ///     Whether this view model was disposed, after which no re-check starts.
+    /// </summary>
+    private bool _disposed;
 
     /// <summary>
     ///     Cancels the background upgrade check started by the most recent
@@ -105,10 +151,10 @@ internal sealed class MainWindowViewModel : ViewModelBase
     private AppSettings _settings;
 
     /// <summary>
-    ///     The shared, session-scoped package-version cache passed to every
-    ///     <see cref="RepoCardViewModel"/>, per architecture.md's repo-fact caching strategy.
+    ///     The package-version cache passed to every <see cref="RepoCardViewModel"/>, per
+    ///     architecture.md's repo-fact caching strategy; its entries expire after five minutes.
     /// </summary>
-    private readonly PackageVersionCache _packageVersionCache = new();
+    private readonly PackageVersionCache _packageVersionCache;
 
     /// <summary>
     ///     The current filter text typed into the recent-repos search box, or
@@ -137,21 +183,41 @@ internal sealed class MainWindowViewModel : ViewModelBase
     ///     by <see cref="ApplySettings"/> after the settings were saved. <see langword="null"/>
     ///     applies nothing (the view model then has no dependency on the UI framework, so tests
     ///     can observe the call with a fake).</param>
+    /// <param name="timeProvider">The clock behind the package-version cache's expiry and the
+    ///     periodic upgrade re-check, or <see langword="null"/> for the system clock. Supplied so
+    ///     tests can move time without waiting.</param>
+    /// <param name="upgradeRecheckInterval">How often the periodic upgrade re-check runs once
+    ///     <see cref="StartPeriodicUpgradeRecheck"/> was called, or <see langword="null"/> for
+    ///     <see cref="DefaultUpgradeRecheckInterval"/> (five minutes).</param>
+    /// <param name="registryFactory">Builds the registry of configured sources for every card from
+    ///     the settings; <see langword="null"/> uses the real providers. Supplied so tests can
+    ///     substitute in-memory sources whose reads they count.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when
+    ///     <paramref name="upgradeRecheckInterval"/> is zero or negative.</exception>
     public MainWindowViewModel(
         AppSettings settings,
         StartupOptions? startupOptions = null,
         string? configDirectory = null,
         PackageCredentialContext? credentials = null,
-        Action<ThemePreference>? applyTheme = null)
+        Action<ThemePreference>? applyTheme = null,
+        TimeProvider? timeProvider = null,
+        TimeSpan? upgradeRecheckInterval = null,
+        Func<AppSettings, PackageSourceRegistry>? registryFactory = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(
+            upgradeRecheckInterval ?? DefaultUpgradeRecheckInterval, TimeSpan.Zero);
 
         _settings = settings;
+        _registryFactory = registryFactory;
         _startupOptions = startupOptions;
         _configDirectory = configDirectory;
         _applyTheme = applyTheme;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _upgradeRecheckInterval = upgradeRecheckInterval ?? DefaultUpgradeRecheckInterval;
+        _packageVersionCache = new PackageVersionCache(_timeProvider);
         Credentials = credentials;
 
         RepoCards = [];
@@ -574,8 +640,194 @@ internal sealed class MainWindowViewModel : ViewModelBase
             previous.Dispose();
         }
 
+        // A periodic re-check still running was started for the previous settings: this check
+        // supersedes it
+        CancelPeriodicRecheck();
+
         PendingRefresh = CheckUpgradesAsync(cards, cancellation.Token);
         return PendingRefresh;
+    }
+
+    /// <summary>
+    ///     Gets the task of the most recently started periodic upgrade re-check round, so a caller
+    ///     (a test) can await it; completed when none has been started.
+    /// </summary>
+    internal Task PendingPeriodicRecheck { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    ///     Starts re-checking every card's upgrade availability each
+    ///     <see cref="DefaultUpgradeRecheckInterval"/> (or the interval given to the constructor) for
+    ///     as long as the application runs, until <see cref="Dispose"/>.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     Users leave the application open all day, and packages are published meanwhile, so the
+    ///     upgrade badges would otherwise show only what existed when the window opened. Each round
+    ///     is the same check as the one at launch (<see cref="RepoCardViewModel.RefreshUpgradeStatusAsync"/>
+    ///     without a sign-in prompt): a server that needs a sign-in is reported on the card, never by
+    ///     a dialog, and any other failure is shown the way the launch-time check shows it.
+    ///     </para>
+    ///     <para>
+    ///     A round re-reads every source once: it clears the package-version cache first, so it is
+    ///     not answered by a listing from the previous round that has not expired yet, and then the
+    ///     cards that pin the same package are checked one after the other, so only the first of
+    ///     them reads the sources and the rest are answered from what it just fetched. A card that
+    ///     is busy, missing, or has no pin is skipped. A tick that finds the previous round still
+    ///     running (or the launch-time check still running) does nothing, so a slow source never
+    ///     piles up rounds.
+    ///     </para>
+    ///     <para>
+    ///     The timer fires on a thread-pool thread; <paramref name="runOnUiThread"/> brings each tick
+    ///     back to the UI thread, where the round runs and where its awaits resume, so every card
+    ///     property is updated there, like the launch-time check.
+    ///     </para>
+    /// </remarks>
+    /// <param name="runOnUiThread">Runs an action on the UI thread (the main window passes the
+    ///     dispatcher's <c>Post</c>), or <see langword="null"/> to run each tick on the timer's own
+    ///     thread (for tests with a fake clock, which fire the timer on the caller's thread).</param>
+    /// <exception cref="ObjectDisposedException">Thrown when this view model was disposed.</exception>
+    public void StartPeriodicUpgradeRecheck(Action<Action>? runOnUiThread = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_recheckTimer is not null)
+        {
+            return;
+        }
+
+        _runOnUiThread = runOnUiThread;
+        _recheckTimer = _timeProvider.CreateTimer(
+            _ => OnRecheckTimer(), null, _upgradeRecheckInterval, _upgradeRecheckInterval);
+    }
+
+    /// <summary>
+    ///     Handles the periodic timer firing (on any thread): moves to the UI thread and starts a round.
+    /// </summary>
+    private void OnRecheckTimer()
+    {
+        if (_runOnUiThread is { } runOnUiThread)
+        {
+            runOnUiThread(BeginPeriodicRecheck);
+        }
+        else
+        {
+            BeginPeriodicRecheck();
+        }
+    }
+
+    /// <summary>
+    ///     Starts one periodic re-check round unless this view model was disposed or an earlier
+    ///     check (the previous round, or the launch-time one) is still running.
+    /// </summary>
+    private void BeginPeriodicRecheck()
+    {
+        if (_disposed || _recheckCancellation is not null || !PendingRefresh.IsCompleted)
+        {
+            return;
+        }
+
+        var cancellation = new CancellationTokenSource();
+        _recheckCancellation = cancellation;
+        PendingPeriodicRecheck = RecheckUpgradesAsync(cancellation);
+    }
+
+    /// <summary>
+    ///     Cancels the periodic re-check round that is running, if any.
+    /// </summary>
+    private void CancelPeriodicRecheck()
+    {
+        var running = _recheckCancellation;
+        _recheckCancellation = null;
+        running?.Cancel();
+    }
+
+    /// <summary>
+    ///     Runs one periodic re-check round; see <see cref="StartPeriodicUpgradeRecheck"/>.
+    /// </summary>
+    /// <param name="cancellation">The round's cancellation source, which this round disposes.</param>
+    /// <returns>A task that completes when every card has been re-checked or the round was
+    ///     cancelled; cancellation is not an error.</returns>
+    private async Task RecheckUpgradesAsync(CancellationTokenSource cancellation)
+    {
+        var token = cancellation.Token;
+        try
+        {
+            var cards = RepoCards.Where(CanRecheckUpgrade).ToList();
+            if (cards.Count == 0)
+            {
+                return;
+            }
+
+            // What the previous round (or any earlier action) cached may still be inside its five
+            // minutes: this round exists to see what the sources offer now
+            _packageVersionCache.Invalidate();
+
+            // Cards that pin the same package are checked one after the other, so only the first
+            // reads the sources and the others are answered from what it just fetched; groups run
+            // a few at a time
+            using var throttle = new SemaphoreSlim(MaxConcurrentUpgradeChecks);
+            var groups = cards
+                .GroupBy(card => card.PinnedPackageName, StringComparer.OrdinalIgnoreCase)
+                .Select(async group =>
+                {
+                    await throttle.WaitAsync(token);
+                    try
+                    {
+                        foreach (var card in group)
+                        {
+                            token.ThrowIfCancellationRequested();
+                            if (CanRecheckUpgrade(card))
+                            {
+                                await card.RefreshUpgradeStatusAsync(token);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        throttle.Release();
+                    }
+                })
+                .ToList();
+            await Task.WhenAll(groups);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer check, or the window is closing: the cards keep their state
+        }
+        finally
+        {
+            if (ReferenceEquals(_recheckCancellation, cancellation))
+            {
+                _recheckCancellation = null;
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    /// <summary>
+    ///     Determines whether a periodic round checks a card: one that is busy with an action of its
+    ///     own, whose folder is missing, or that pins no package has nothing to re-check.
+    /// </summary>
+    /// <param name="card">The card.</param>
+    /// <returns><see langword="true"/> when the card's upgrade availability is re-checked.</returns>
+    private static bool CanRecheckUpgrade(RepoCardViewModel card) =>
+        !card.IsBusy && !card.IsMissing && card.PinnedPackageName is not null;
+
+    /// <summary>
+    ///     Stops the periodic upgrade re-check (see <see cref="StartPeriodicUpgradeRecheck"/>) and
+    ///     cancels the round that is running; called when the main window closes.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _recheckTimer?.Dispose();
+        _recheckTimer = null;
+        CancelPeriodicRecheck();
     }
 
     /// <summary>
@@ -1103,7 +1355,8 @@ internal sealed class MainWindowViewModel : ViewModelBase
             _packageVersionCache,
             _startupOptions,
             credentials: Credentials,
-            commitChange: CommitRepoChange);
+            commitChange: CommitRepoChange,
+            registryFactory: _registryFactory);
 
     /// <summary>
     ///     Creates the provider that the settings window's "Test connection" lists versions

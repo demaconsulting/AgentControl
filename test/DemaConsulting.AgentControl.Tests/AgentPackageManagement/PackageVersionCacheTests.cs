@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using Microsoft.Extensions.Time.Testing;
 
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 
@@ -391,6 +392,84 @@ public sealed class PackageVersionCacheTests : IDisposable
         await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
 
         // Assert: the in-flight result was discarded, so the second query had to fetch again
+        Assert.Equal(2, source.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that a cached version list and package list are served until five minutes have
+    ///     passed since they were fetched, without reading the source again.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_EntryYoungerThanFiveMinutes_IsStillServedFromCache()
+    {
+        // Arrange: a source that was listed once
+        var clock = new FakeTimeProvider();
+        var source = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(source);
+        var cache = new PackageVersionCache(clock);
+        await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Act: just under five minutes later, ask again
+        clock.Advance(PackageVersionCache.EntryLifetime - TimeSpan.FromSeconds(1));
+        await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Assert: nothing was read again
+        Assert.Equal(1, source.ListPackageIdsCalls);
+        Assert.Equal(1, source.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that a cached entry expires five minutes after it was fetched, so the next call reads
+    ///     the source again and sees a version published meanwhile.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_EntryOlderThanFiveMinutes_IsFetchedAgain()
+    {
+        // Arrange: a source that was listed once, then a newer version is published
+        var clock = new FakeTimeProvider();
+        var source = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(source);
+        var cache = new PackageVersionCache(clock);
+        await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+        source.Publish("contoso-agents", "1.1.0");
+        source.Publish("other-agents", "1.0.0");
+
+        // Act: five minutes later, ask again
+        clock.Advance(PackageVersionCache.EntryLifetime);
+        var ids = await cache.GetPackageIdsAsync(registry, "A", CancellationToken.None);
+        var versions = await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Assert: both lists were read again and show what was published
+        Assert.Equal(2, source.ListPackageIdsCalls);
+        Assert.Equal(2, source.ListVersionsCalls);
+        Assert.Equal(["contoso-agents", "other-agents"], ids);
+        Assert.Equal(["1.1.0", "1.0.0"], versions.Select(package => package.Version.ToString()));
+    }
+
+    /// <summary>
+    ///     Test that an entry that was fetched again starts a new five minutes, rather than staying
+    ///     expired or keeping its first fetch time.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_EntryFetchedAgainAfterExpiry_IsServedForAnotherFiveMinutes()
+    {
+        // Arrange: an entry that expired and was fetched again
+        var clock = new FakeTimeProvider();
+        var source = new FakePackageSourceProvider("A", ("contoso-agents", "1.0.0"));
+        var registry = CreateRegistry(source);
+        var cache = new PackageVersionCache(clock);
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+        clock.Advance(PackageVersionCache.EntryLifetime);
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Act: four minutes after the second fetch (nine after the first), ask again
+        clock.Advance(TimeSpan.FromMinutes(4));
+        await cache.GetVersionsDescendingAsync(registry, "A", "contoso-agents", CancellationToken.None);
+
+        // Assert: the second fetch's entry is still served
         Assert.Equal(2, source.ListVersionsCalls);
     }
 

@@ -34,15 +34,19 @@ namespace DemaConsulting.AgentControl.AgentPackageManagement;
 internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? Latest);
 
 /// <summary>
-///     Session-scoped cache of what each configured package source offers, keyed by
-///     <c>(source alias, package ID)</c>.
+///     Cache of what each configured package source offers, keyed by <c>(source alias, package ID)</c>,
+///     whose entries expire after <see cref="EntryLifetime"/>.
 /// </summary>
 /// <remarks>
 ///     <para>
 ///     Per architecture.md's repo-fact caching strategy, the set of available package versions at
 ///     a source is not repo-scoped at all (every repo pinned to the same package at the same source
-///     shares the same answer) and may involve slow network I/O, so it is fetched once per app
-///     session rather than per repo-card. Entries are keyed by alias, never by location, so two
+///     shares the same answer) and may involve slow network I/O, so it is fetched once and shared
+///     rather than fetched per repo-card. Packages are published while the app keeps running, so an
+///     entry is served for at most <see cref="EntryLifetime"/> (five minutes) after it was fetched,
+///     and a user action that must show what a source offers now (opening Select Package, Refresh,
+///     Upgrade) invalidates the sources it reads first. Entries are keyed by alias, never by
+///     location, so two
 ///     sources that offer the same package ID are cached - and invalidated - independently, and a
 ///     result fetched from one source is never returned for another. Providers are reached through
 ///     a <see cref="PackageSourceRegistry"/>, so an unconfigured alias fails with
@@ -50,7 +54,8 @@ internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? La
 ///     </para>
 ///     <para>
 ///     A cached empty result (no versions found) is a valid, distinct entry from "not yet queried",
-///     and a failed fetch is never cached. <see cref="Invalidate()"/> clears everything, while
+///     and a failed fetch is never cached. An expired entry is treated as not yet queried.
+///     <see cref="Invalidate()"/> clears everything, while
 ///     <see cref="Invalidate(string)"/> clears one source so editing or removing a source does not
 ///     discard the other sources' results; a fetch that was already in flight when its source was
 ///     invalidated does not repopulate the cache. Safe for concurrent use; two simultaneous misses
@@ -60,6 +65,16 @@ internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? La
 internal sealed class PackageVersionCache
 {
     /// <summary>
+    ///     How long a cached listing is served before it is read from its source again.
+    /// </summary>
+    internal static readonly TimeSpan EntryLifetime = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    ///     The clock that dates fetches and judges whether an entry has expired.
+    /// </summary>
+    private readonly TimeProvider _timeProvider;
+
+    /// <summary>
     ///     Guards <see cref="_sources"/> and the per-source entries.
     /// </summary>
     private readonly object _lock = new();
@@ -68,6 +83,16 @@ internal sealed class PackageVersionCache
     ///     The cached data per source alias (case-insensitive).
     /// </summary>
     private readonly Dictionary<string, SourceEntry> _sources = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    ///     Initializes a new, empty <see cref="PackageVersionCache"/>.
+    /// </summary>
+    /// <param name="timeProvider">The clock that dates fetches (so tests need not wait out
+    ///     <see cref="EntryLifetime"/>), or <see langword="null"/> for the system clock.</param>
+    public PackageVersionCache(TimeProvider? timeProvider = null)
+    {
+        _timeProvider = timeProvider ?? TimeProvider.System;
+    }
 
     /// <summary>
     ///     Gets the package names or IDs a source offers, consulting (and populating) the cache.
@@ -95,16 +120,19 @@ internal sealed class PackageVersionCache
         var entry = GetOrCreateEntry(sourceAlias);
         lock (_lock)
         {
-            if (entry.PackageIds is not null)
+            if (entry.PackageIds is not null && !IsExpired(entry.PackageIdsFetchedAt))
             {
                 return entry.PackageIds;
             }
         }
 
+        // The entry is dated when the read starts: the listing is no fresher than that moment
+        var fetchedAt = _timeProvider.GetUtcNow();
         var ids = await provider.ListPackageIdsAsync(cancellationToken);
         lock (_lock)
         {
             entry.PackageIds = ids;
+            entry.PackageIdsFetchedAt = fetchedAt;
         }
 
         return ids;
@@ -138,18 +166,20 @@ internal sealed class PackageVersionCache
         var entry = GetOrCreateEntry(sourceAlias);
         lock (_lock)
         {
-            if (entry.Versions.TryGetValue(packageId, out var cached))
+            if (entry.Versions.TryGetValue(packageId, out var cached) && !IsExpired(cached.FetchedAt))
             {
-                return cached;
+                return cached.Packages;
             }
         }
 
+        // The entry is dated when the read starts: the listing is no fresher than that moment
+        var fetchedAt = _timeProvider.GetUtcNow();
         var versions = (await provider.ListVersionsAsync(packageId, cancellationToken))
             .OrderByDescending(package => package.Version)
             .ToList();
         lock (_lock)
         {
-            entry.Versions[packageId] = versions;
+            entry.Versions[packageId] = new VersionListing(versions, fetchedAt);
         }
 
         return versions;
@@ -205,8 +235,8 @@ internal sealed class PackageVersionCache
     ///     hides what the others offer.</returns>
     /// <remarks>
     ///     Asks every configured source what it offers (aliases are user-specific configuration, so
-    ///     a pin names none): through the per-source cache, so no source is read twice in a
-    ///     session. Whether the content a
+    ///     a pin names none): through the per-source cache, so no source is read twice within
+    ///     <see cref="EntryLifetime"/> unless it was invalidated. Whether the content a
     ///     source offers is the content the pin recorded is for the caller to verify - a listing
     ///     says nothing about it.
     /// </remarks>
@@ -360,6 +390,14 @@ internal sealed class PackageVersionCache
     }
 
     /// <summary>
+    ///     Determines whether a listing fetched at the given time is too old to serve.
+    /// </summary>
+    /// <param name="fetchedAt">When the listing was fetched.</param>
+    /// <returns><see langword="true"/> when at least <see cref="EntryLifetime"/> has passed.</returns>
+    private bool IsExpired(DateTimeOffset fetchedAt) =>
+        _timeProvider.GetUtcNow() - fetchedAt >= EntryLifetime;
+
+    /// <summary>
     ///     Gets the cache entry of a source, creating it if needed.
     /// </summary>
     /// <param name="sourceAlias">The source alias.</param>
@@ -391,9 +429,21 @@ internal sealed class PackageVersionCache
         public IReadOnlyList<string>? PackageIds { get; set; }
 
         /// <summary>
+        ///     Gets or sets when <see cref="PackageIds"/> were fetched.
+        /// </summary>
+        public DateTimeOffset PackageIdsFetchedAt { get; set; }
+
+        /// <summary>
         ///     Gets the cached descending version lists by package ID. A present key with an empty
         ///     list means "queried, none found".
         /// </summary>
-        public Dictionary<string, IReadOnlyList<DiscoveredPackage>> Versions { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, VersionListing> Versions { get; } = new(StringComparer.Ordinal);
     }
+
+    /// <summary>
+    ///     A package's descending version list and when it was fetched.
+    /// </summary>
+    /// <param name="Packages">The discovered packages, highest version first.</param>
+    /// <param name="FetchedAt">When the list was fetched.</param>
+    private sealed record VersionListing(IReadOnlyList<DiscoveredPackage> Packages, DateTimeOffset FetchedAt);
 }

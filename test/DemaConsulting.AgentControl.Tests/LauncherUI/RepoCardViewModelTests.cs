@@ -2013,6 +2013,36 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a zip folder that gained a version after the card's last listing shows the upgrade
+    ///     after the user refreshes the card, while an automatic check still answers from the cache.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshAsync_ZipFolderGainedVersionAfterListing_OffersUpgradeAfterRefresh()
+    {
+        // Arrange: a repo pinned to 1.0.0 and a zip folder with only 1.0.0, listed once
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [ZipSource("Folder", sourceDir)] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.False(card.IsUpgradeAvailable);
+
+        // Act: a new version is dropped into the folder; an automatic check, then the user's Refresh
+        CreatePackageZip(sourceDir, "contoso-agents", "1.1.0");
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        var upgradeAfterAutomaticCheck = card.IsUpgradeAvailable;
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(upgradeAfterAutomaticCheck);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", card.LatestAvailableVersion);
+    }
+
+    /// <summary>
     ///     Test that a version 1 pin file (no source) is hinted to the Default source, which supplies the
     ///     package when it offers the pinned version.
     /// </summary>

@@ -293,7 +293,8 @@ package and its version (keeping the newest version when the pinned one is no lo
 when the source failed, does not offer the package or is not configured), so choosing the version the repo already
 uses again is one click; it never overrides a choice the user made while the source was loading
 (`AgentControl-LauncherUI-ChangePackage`). Selecting a source loads that
-source's package names from `PackageVersionCache` in the background, with a progress indicator
+source's package names from `PackageVersionCache` in the background (the dialog first invalidates every source, so it
+shows what the sources offer now, and reuses what it fetched while it stays open), with a progress indicator
 and cancellation; a source that cannot be read shows its error inline, with a **Retry** button that reads
 only that source (or, when only a package's versions failed, only those) again, and never blocks the other
 sources (`AgentControl-LauncherUI-ResponsiveOperations`, `AgentControl-LauncherUI-SourceFailureIsolation`,
@@ -361,7 +362,13 @@ while one runs. Upgrade availability is determined by a separate background chec
 and after settings are applied, so that one slow or unreachable source holds up only the cards' own checks, never the
 window, and never hides what the other sources offer (`AgentControl-LauncherUI-ResponsiveOperations`,
 `AgentControl-LauncherUI-SourceFailureIsolation`,
-`AgentControl-LauncherUI-StaleResultsDiscarded`). That background check never opens the
+`AgentControl-LauncherUI-StaleResultsDiscarded`). The application is left open all day while packages are published,
+so `MainWindowViewModel` repeats the same check for every card every five minutes while the window is open (a timer on
+a `TimeProvider` whose ticks are posted to the UI thread; it skips busy, missing and unpinned cards, never overlaps
+rounds, reads each source once per round and stops when the window closes and the view model is disposed;
+`AgentControl-LauncherUI-PeriodicUpgradeRecheck`), and opening the Select Package dialog reads the sources afresh
+rather than serving a listing cached earlier (`AgentControl-LauncherUI-SelectPackageReadsSourcesFresh`). That
+background check never opens the
 sign-in dialog (`RefreshUpgradeStatusAsync` defaults to `allowPrompt: false`): for a server it uses the
 credentials already typed this session or saved with the user's Git credential helper (read without any dialog)
 and otherwise sets the card's source problem to say a sign-in is
@@ -697,9 +704,10 @@ and a tie keeping Settings order (`AgentControl-LauncherUI-PinnedSourceSupplierS
 version delivers other files has another files identity, whichever source delivers it: the restore before launch
 and Upgrade refuse it (nothing is applied), and Change package asks for confirmation before the changed files replace
 the repo's (a moved tag that delivers identical files is irrelevant, and nothing is shown for it). There is no
-separate warning chip. The card's Refresh command, which the user starts, reads every configured Git source again
-instead of reusing the session's cached listing, so that a newly pushed tag - a new version - shows up at once, while
-the background check may use the cache. The way to accept changed files is the card menu's "Change package...", which
+separate warning chip. The card's Refresh command, which the user starts, reads every configured source (NuGet, zip
+folder and Git) again instead of reusing a cached listing, so that a newly published version or pushed tag shows up at
+once, while the background check may use a listing less than five minutes old (`AgentControl-LauncherUI-RefreshRelistsSources`).
+The way to accept changed files is the card menu's "Change package...", which
 opens the Select Package dialog on the source that supplies the repo's files (when known), its package and version;
 choosing the pinned version again asks for confirmation before the changed content replaces the files
 (`AgentControl-LauncherUI-ChangePackage`, `AgentControl-LauncherUI-ContentChangeConfirmation`). The Select Package

@@ -2,7 +2,7 @@ package AgentControl {
     private import SoftwareItemMetadata::*;
 
     part def PackageVersionCache {
-        doc /* Memoizes per-source, per-package version listings keyed by source alias and package id; invalidated per source. */
+        doc /* Caches per-source, per-package version listings keyed by source alias and package id; entries expire after five minutes and can be invalidated per source. */
 
         metadata info : SoftwareInfo {
             sourceFiles = ("src/DemaConsulting.AgentControl/AgentPackageManagement/PackageVersionCache.cs");

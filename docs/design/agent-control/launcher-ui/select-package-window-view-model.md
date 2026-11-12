@@ -71,7 +71,8 @@ all selected.
   first when none or an unknown alias is given) is selected; nothing has been read yet, so
   constructing the view model never blocks.
 
-**LoadAsync**: Reads the package list of every source concurrently without blocking the caller.
+**LoadAsync**: Invalidates every source in the cache, then reads the package list of every source concurrently without
+blocking the caller.
 
 - *Parameters*: A cancellation token, cancelled when the dialog closes.
 - *Postconditions*: Each row shows its package list, an empty-source notice, or - when that
@@ -108,8 +109,10 @@ at the selected source.
 
 **Retry** (private, bound to `RetryCommand`): Reads again only what failed
 (`AgentControl-SelectPackageWindowViewModel-Retry`). When the selected source failed, that source alone
-returns to its loading state and its package list is read again; the other sources and every successful
-result are left alone. When only the selected package's versions failed, the version read starts afresh
+(invalidated in the cache first, so the read is fresh) returns to its loading state and its package list is read
+again; the other sources and every successful
+result are left alone. When only the selected package's versions failed, the selected source is invalidated and
+the version read starts afresh
 exactly as a new selection would, superseding the failed one. With nothing failed it does nothing. A server
 that was briefly unreachable is simply tried again, and one that needs a sign-in asks again - the user
 started this read, so the sign-in dialog may open.
@@ -124,9 +127,13 @@ started this read, so the sign-in dialog may open.
 - *Postconditions*: `Confirmed` is raised with a `PackageReference` of (source alias, package
   name, version) (`AgentControl-SelectPackageWindowViewModel-Confirm`).
 
-All source access routes through the shared, session-scoped `PackageVersionCache` rather than a
-provider directly, so opening this dialog a second time in the same app session does not query
-a source again. Reading a NuGet server source can take several seconds and may open the sign-in
+All source access routes through the shared `PackageVersionCache` rather than a provider directly. Opening the
+dialog shows what the sources offer *now*: `LoadAsync` first calls `PackageVersionCache.Invalidate(alias)` for every
+source, so a package or version published since an earlier listing (or cached by a background check) is read afresh
+(`AgentControl-SelectPackageWindowViewModel-ReadsSourcesFresh`). What the dialog then fetches is reused while it stays
+open - selecting another package, switching sources and switching back are answered by the cache - until its entry is
+five minutes old. Retry reads fresh as well: it invalidates the retried source first, whether the package list or only
+the versions failed. Reading a NuGet server source can take several seconds and may open the sign-in
 dialog (a credential typed for the server is remembered for the session, so the dialog does not appear
 again for the versions of a package or a later dialog); a 401 on a package resource after a credential was
 supplied makes the NuGet client retry with its own back-off, which is why each source shows progress and the

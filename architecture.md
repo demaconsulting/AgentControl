@@ -347,8 +347,10 @@ AgentControl
     launch, to keep startup fast.
   - *Available package versions* in the package source are not repo-scoped
     at all (shared across every repo pinned to the same package name) and
-    may involve slow network/UNC I/O — cached once per app session (or a
-    short TTL), refreshed on app start or via manual refresh, rather than
+    may involve slow network/UNC I/O — cached for at most five minutes
+    (the app stays open for days and packages are published meanwhile),
+    re-read on every user action that shows them (Select Package, Refresh,
+    Upgrade) and by a background re-check every five minutes, rather than
     rescanned per repo-card.
   - *Repo-exists-on-disk* and the pin-file contents are cheap enough
     (`Directory.Exists`, one small JSON read) that they are always read

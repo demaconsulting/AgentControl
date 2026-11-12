@@ -27,6 +27,8 @@ N/A - standard test environment.
 - Confirmation is permitted only when a source, a package name and a version are selected.
 - The confirmed package reference matches exactly what the user selected, including the source.
 - A failed read of a source or of a package's versions can be retried on its own.
+- Opening the dialog (and retrying) reads the sources afresh instead of serving a listing cached earlier, while the open
+  dialog reuses what it fetched.
 - Given the source, package and version a repo gets its files from (the card's supplying source, which may be none),
   the dialog selects them once the source has been read
   (the newest version stays selected when the pinned one is no longer listed), selects nothing when the source failed,
@@ -103,6 +105,18 @@ in progress. This scenario is tested by
 `SelectPackageWindowViewModel_Retry_SourceFailedThenAnswers_LoadsOnlyThatSource` and
 `SelectPackageWindowViewModel_Retry_NothingFailed_DoesNothing`, covering
 `AgentControl-SelectPackageWindowViewModel-Retry`.
+
+**SelectPackageWindowViewModel_ReadsSourcesFresh_OpeningTheDialogReadsWhatTheSourcesOfferNow**: A dialog is opened over
+a shared cache and a package selected; a version of it and another package are then published, and a second dialog
+opened over the same cache lists the new package and the new version (it did not serve the cached listing). Within
+one open dialog, selecting a package, another and the first again reads the package list once and each package's
+versions once (the dialog reuses what it fetched). A package whose "no versions found" answer was cached shows the
+version published afterwards once the user presses Retry. The sources are `FakePackageSourceProvider`s, which can
+publish a version after construction and count their reads. This scenario is tested by
+`SelectPackageWindowViewModel_LoadAsync_SourceChangedSincePreviousListing_ShowsTheNewContent`,
+`SelectPackageWindowViewModel_SwitchingPackagesWithinOpenDialog_DoesNotReadSourceAgain` and
+`SelectPackageWindowViewModel_RetryVersions_ReadsTheSourceFresh`, covering
+`AgentControl-SelectPackageWindowViewModel-ReadsSourcesFresh`.
 
 **SelectPackageWindowViewModel_PreselectCurrentPackage_OpensOnThePinnedChoice**: Given the source (the card's
 supplying source), package and

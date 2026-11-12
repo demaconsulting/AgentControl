@@ -1710,9 +1710,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     this card.
     /// </summary>
     /// <remarks>
-    ///     Does not bypass the shared <see cref="PackageVersionCache"/> - per architecture.md's
-    ///     caching-strategy decision, the package-version scan is refreshed on app start or via
-    ///     the Settings window (whenever a package source changes), not per-repo-card.
+    ///     Re-reads every configured package source (rather than serving the cache), so the card
+    ///     shows what the sources offer now; the cache still serves automatic checks for at most five
+    ///     minutes, see <see cref="PackageVersionCache"/>.
     /// </remarks>
     public AsyncRelayCommand RefreshCommand { get; }
 
@@ -1922,9 +1922,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     the single full-refresh entry point behind <see cref="RefreshCommand"/>, rather than
     ///     the split eager/lazy sequencing <see cref="MainWindowViewModel"/> uses at app launch.
     ///     It holds <see cref="IsBusy"/> while it runs so no other card action starts meanwhile.
-    ///     Because the user asked for it, the Git sources are read again rather than answered from the
-    ///     session's cached listing, so a tag that was pushed since the last listing (a new version)
-    ///     is offered at once.
+    ///     Because the user asked for it, every configured source (NuGet, zip folder and Git) is read
+    ///     again rather than answered from the cache, so a package published since the last listing
+    ///     (a new version) is offered at once.
     /// </remarks>
     /// <param name="cancellationToken">Cancels the package-source part of the refresh.</param>
     /// <returns>A task that completes when every property is current; a failing source is
@@ -1946,7 +1946,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         // The user asked for this refresh (or for the action that triggered it), so a server that
         // needs a sign-in may ask for it
-        await RefreshUpgradeStatusAsync(token, allowPrompt: true, relistGitSource: true);
+        await RefreshUpgradeStatusAsync(token, allowPrompt: true, relistSources: true);
         RefreshDirtyStatus();
     }
 
@@ -3712,17 +3712,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     after settings change, which must never interrupt the user with a dialog: it uses a
     ///     remembered credential if there is one and otherwise reports that a sign-in is needed.
     ///     <see langword="true"/> when the user asked for the check.</param>
-    /// <param name="relistGitSource">Whether the Git sources are read again instead of answered
-    ///     from the session's cached listing. <see langword="true"/> when the user asked for the
-    ///     check (so a tag pushed since the last listing - a new version - is offered at once);
-    ///     <see langword="false"/> (the default) for the background check, which may reuse the
-    ///     cache. Has no effect for other kinds of source, whose versions are immutable by
-    ///     convention.</param>
+    /// <param name="relistSources">Whether every configured source is read again instead of
+    ///     answered from the cache. <see langword="true"/> when the user asked for the check (so a
+    ///     package published since the last listing - a new NuGet version, a zip added to a folder,
+    ///     a pushed tag - is offered at once); <see langword="false"/> (the default) for the
+    ///     background check, which may reuse cached listings no older than five minutes.</param>
     /// <returns>A task that completes when the card's upgrade state is current.</returns>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is cancelled; the card keeps its previous upgrade state.</exception>
     public async Task RefreshUpgradeStatusAsync(
-        CancellationToken cancellationToken = default, bool allowPrompt = false, bool relistGitSource = false)
+        CancellationToken cancellationToken = default, bool allowPrompt = false, bool relistSources = false)
     {
         // A card that was removed from the list checks nothing any more
         if (_isRetired)
@@ -3757,15 +3756,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             var registry = CreateSourceRegistry(allowPrompt);
 
-            // A newly pushed tag is only visible in a fresh listing: when the user asked, drop what
-            // the session learned about the Git sources so the check below reads them again. The
+            // A package published since the last listing is only visible in a fresh listing: when
+            // the user asked, drop what the cache learned about every configured source so the
+            // check below reads them again (NuGet servers, zip folders and Git tags alike). The
             // cache discards the entries of just those sources, and a read that was already running
             // for one cannot put its older answer back.
-            if (relistGitSource)
+            if (relistSources)
             {
-                foreach (var git in registry.Definitions.Where(definition => definition.Type == PackageSourceType.Git))
+                foreach (var definition in registry.Definitions)
                 {
-                    _packageVersionCache.Invalidate(git.Alias);
+                    _packageVersionCache.Invalidate(definition.Alias);
                 }
             }
 

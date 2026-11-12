@@ -104,7 +104,8 @@ Each repo card shows:
   visible (hover over either for the full text)
 - The "..." menu is grouped. **Repository**: **Git Pull** (see *Pulling Changes*) and **Refresh** (re-checks
   the repo's git state, upgrade status and committed-agent-files chip without waiting for the next app
-  launch, and re-reads your Git repository sources so that a newly pushed tag - a new version - shows up at
+  launch, and re-reads all your package sources - NuGet, zip folders and Git repositories - so that a newly
+  published version or pushed tag shows up at
   once; for a repo whose folder is missing it reads **Check again** and checks whether the folder is
   available again). **Agent files**: **Select Package...** (a repo with no package yet), **Change package...** (a
   repo that already has one) and **Upgrade to x.y.z** (when a newer version exists); the group is hidden when none
@@ -469,8 +470,9 @@ window all mean "do not sign in". What happens next:
 Only one sign-in dialog is shown at a time; if two sources need one at once, the second waits for the
 first.
 
-**Background checks never open the dialog.** When AgentControl starts, after you change Settings, and
-when you add a repo, it checks each repo's package against your configured sources for upgrades in the background.
+**Background checks never open the dialog.** When AgentControl starts, after you change Settings, when
+you add a repo, and then every five minutes while AgentControl stays open (see *How Up to Date the Lists Are*), it
+checks each repo's package against your configured sources for upgrades in the background.
 For a server
 that needs a sign-in, that check uses a credential you already typed this session (or saved, see below)
 and otherwise does
@@ -889,6 +891,24 @@ pins named are no longer stored.
 
 A repo's card shows **Select Package...** in its "..." menu while the repo has no pin, and **Change package...**
 once it has one; **Upgrade to x.y.z** is added when a newer version is available.
+
+## How Up to Date the Lists Are
+
+AgentControl is meant to stay open all day, and new package versions are published meanwhile (to a NuGet server, a
+folder of zips or as a Git tag). What a source offers is therefore never trusted for long:
+
+- **Every action you start reads the sources again.** Opening **Select Package...** or **Change package...**
+  (and **Retry** in it), the card's **Refresh** (and the refresh after a **Git Pull**) and **Upgrade** all ask the
+  sources what they offer *now*, so a version published a minute ago is in the list. Within the one open Select
+  Package dialog, switching between sources and packages does not read them again.
+- **Automatic checks use a list that is at most five minutes old.** The upgrade badges, and finding the source that
+  supplies a repo's package before a launch, never rely on a list older than five minutes.
+- **Upgrade badges follow without you doing anything.** While AgentControl is open it checks every card's package
+  against your sources again every five minutes - the same check as at start, which never opens a sign-in dialog and
+  skips a card whose folder is missing or that is busy - so a new version appears as an upgrade chip within about five
+  minutes. A source that cannot be read, or that needs a sign-in, is reported on the card as at start; use **Refresh**
+  to sign in. Each source is read once per round, however many repos use its packages. The checking stops when you
+  close the window.
 
 ## Selecting an Initial Package
 

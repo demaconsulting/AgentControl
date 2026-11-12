@@ -8,7 +8,7 @@ Most tests use a real temporary directory populated with real zip files behind a
 call and showing that a repeated call still returns the cached result. The multi-source tests
 use an in-memory fake provider (`FakePackageSourceProvider`) that counts its calls, so the tests
 can assert exactly which source was queried how often, and can hold a query open to create an
-in-flight call.
+in-flight call. The expiry tests move a `FakeTimeProvider` by hand.
 
 #### Test Environment
 
@@ -25,7 +25,8 @@ N/A - standard test environment.
   read (telling a caller that asks), reports a failure when every source failed (the first refusal of access when
   there was one, otherwise the first failure), and attributes the newest
   version - a tie to the first source configured.
-- Cached results are reused on repeated calls without redundant re-scanning.
+- Cached results are reused on repeated calls without redundant re-scanning, until they are five minutes old; an older
+  entry is read from its source again.
 - Invalidation forces the next call to re-scan and reflects updated source-folder contents.
 - An uncached call against a missing source folder throws `DirectoryNotFoundException`.
 
@@ -112,3 +113,13 @@ in configuration order, and reports no upgrade and no latest version when no sou
 is tested by `PackageVersionCache_IsNewerVersionAvailableAcrossSources_NewestWinsAndTieKeepsConfigurationOrder` and
 `PackageVersionCache_IsNewerVersionAvailableAcrossSources_NobodyOffersPackage_ReportsNoUpgrade`, covering
 `AgentControl-PackageVersionCache-NewestAcrossSources`.
+
+**PackageVersionCache_EntriesExpire_AfterFiveMinutes**: With a fake clock (`FakeTimeProvider`, so no test waits), a
+package list and a version list that were fetched are served from the cache just under five minutes later, without
+reading the source; at five minutes both are read again and show a version and a package published meanwhile; an
+entry that was fetched again is served for another five minutes counted from the second fetch, not the first. This
+scenario is tested by `PackageVersionCache_EntryYoungerThanFiveMinutes_IsStillServedFromCache`,
+`PackageVersionCache_EntryOlderThanFiveMinutes_IsFetchedAgain` and
+`PackageVersionCache_EntryFetchedAgainAfterExpiry_IsServedForAnotherFiveMinutes`, covering
+`AgentControl-PackageVersionCache-EntriesExpire` (and, through it, the subsystem requirement
+`AgentControl-AgentPackageManagement-ListingsExpire`).

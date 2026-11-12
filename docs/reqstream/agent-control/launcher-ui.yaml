@@ -1809,16 +1809,45 @@ sections:
           - RepoCardViewModel_PackageChipTooltip_GitSource_NamesTagOnly
           - MainWindow_GitSourceCard_ChipShowsGitIconAliasAndTag
 
-      - id: AgentControl-LauncherUI-RefreshRelistsGitSources
+      - id: AgentControl-LauncherUI-RefreshRelistsSources
         title: >-
-          The LauncherUI subsystem shall read the user's Git sources again when the user starts a
-          refresh, so that a tag pushed during the session (a new version) is not missed.
+          The LauncherUI subsystem shall read all the user's package sources again when the user
+          starts a refresh, so that a package published during the session (a new version, a new
+          tag) is not missed.
         justification: |
-          A cached listing would hide a newly pushed version.
+          A cached listing would hide a newly published version.
         children:
-          - AgentControl-RepoCardViewModel-RefreshRelistsGitSources
+          - AgentControl-RepoCardViewModel-RefreshRelistsSources
         tests:
           - RepoCardViewModel_RefreshAsync_GitSourceNewTagPushedAfterCachedListing_ListsAgainAndOffersNewVersion
+          - RepoCardViewModel_RefreshAsync_ZipFolderGainedVersionAfterListing_OffersUpgradeAfterRefresh
+
+      - id: AgentControl-LauncherUI-SelectPackageReadsSourcesFresh
+        title: >-
+          The LauncherUI subsystem shall show in the Select Package dialog what the package sources
+          offer when the dialog is opened, not a listing cached earlier.
+        justification: |
+          The user chooses among what is available now; a package published since the last listing
+          must be among the choices.
+        children:
+          - AgentControl-SelectPackageWindowViewModel-ReadsSourcesFresh
+        tests:
+          - SelectPackageWindowViewModel_LoadAsync_SourceChangedSincePreviousListing_ShowsTheNewContent
+
+      - id: AgentControl-LauncherUI-PeriodicUpgradeRecheck
+        title: >-
+          The LauncherUI subsystem shall check the upgrade availability of the cards again every
+          five minutes while the main window is open, and shall stop checking when it closes.
+        justification: |
+          The application is left open all day while new package versions are published; the upgrade
+          badges must follow without the user pressing Refresh.
+        children:
+          - AgentControl-MainWindowViewModel-PeriodicUpgradeRecheck
+          - AgentControl-MainWindowViewModel-PeriodicRecheckLifecycle
+        tests:
+          - MainWindowViewModel_PeriodicRecheck_VersionPublishedAfterLaunchCheck_ShowsUpgradeAfterInterval
+          - MainWindowViewModel_Dispose_StopsThePeriodicRecheck
+          - MainWindow_ViewModelAttachedThenWindowClosed_StartsPeriodicRecheckAndDisposesViewModel
 
       - id: AgentControl-LauncherUI-ChangePackage
         title: >-

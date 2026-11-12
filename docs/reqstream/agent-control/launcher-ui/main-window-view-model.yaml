@@ -496,3 +496,39 @@ sections:
           notes or a prompt for a repo that is no longer in the list.
         tests:
           - MainWindowViewModel_RemoveRepo_RetiresTheCard
+
+      - id: AgentControl-MainWindowViewModel-PeriodicUpgradeRecheck
+        title: >-
+          The MainWindowViewModel class shall, every five minutes while it is alive once the
+          re-check was started, check again the upgrade availability of each card that has a pin,
+          is not busy and whose folder is not missing, without ever asking the user to sign in,
+          reading each package source once per round however many cards share a package, and
+          report a failure through the card's state as the check at launch does.
+        justification: |
+          The application is left open all day while packages are published; without a periodic
+          check the upgrade badges would only show what existed when the window opened. The check
+          must never interrupt the user with a dialog, and a slow source must not be read once per
+          card.
+        tests:
+          - MainWindowViewModel_Constructor_RecheckInterval_DefaultsToFiveMinutesAndMustBePositive
+          - MainWindowViewModel_PeriodicRecheck_VersionPublishedAfterLaunchCheck_ShowsUpgradeAfterInterval
+          - MainWindowViewModel_PeriodicRecheck_CustomInterval_RepeatsEveryInterval
+          - MainWindowViewModel_PeriodicRecheck_SeveralCardsSamePackage_ReadsTheSourceOnce
+          - MainWindowViewModel_PeriodicRecheck_CardsWithNoPinOrMissingFolder_AreSkipped
+          - MainWindowViewModel_PeriodicRecheck_CardIsBusy_IsSkipped
+          - MainWindowViewModel_PeriodicRecheck_SourceNeedsSignIn_IsReportedOnTheCard
+          - MainWindowViewModel_PeriodicRecheck_UiThreadRunnerSupplied_TickRunsThroughIt
+
+      - id: AgentControl-MainWindowViewModel-PeriodicRecheckLifecycle
+        title: >-
+          The MainWindowViewModel class shall not start a periodic re-check round while the
+          previous round is still running, shall run one timer however often the re-check is
+          started, and shall stop the timer and cancel the running round when it is disposed.
+        justification: |
+          A slow source must not pile up rounds, and a closed window must not keep checking
+          package sources in the background.
+        tests:
+          - MainWindowViewModel_PeriodicRecheck_PreviousRoundStillRunning_SkipsTheTick
+          - MainWindowViewModel_StartPeriodicUpgradeRecheck_CalledTwice_RunsOneTimer
+          - MainWindowViewModel_Dispose_StopsThePeriodicRecheck
+          - MainWindowViewModel_Dispose_RoundRunning_CancelsIt
