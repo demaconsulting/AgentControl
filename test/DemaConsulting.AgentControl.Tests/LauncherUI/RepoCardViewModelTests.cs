@@ -424,6 +424,11 @@ public sealed class RepoCardViewModelTests : IDisposable
         using var fixture = GitRepositoryFixture.CreateOrSkip();
         var clonePath = ClonePinnedRepo(fixture, "1.0.0");
         fixture.Git(clonePath, "config", "pull.rebase", "false");
+
+        // The card's own git runs without the fixture's identity variables, and a merge needs an
+        // identity (CI runners have none configured)
+        fixture.Git(clonePath, "config", "user.name", "Test");
+        fixture.Git(clonePath, "config", "user.email", "test@example.invalid");
         await File.WriteAllTextAsync(
             Path.Combine(clonePath, ".agentcontrol.json"), PinFileText("3.0.0"), TestContext.Current.CancellationToken);
         fixture.Git(clonePath, "commit", "-q", "-a", "-m", "Pin 3.0.0 locally");
@@ -442,7 +447,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         // is no longer readable (conflict markers) and the working tree is dirty
         Assert.StartsWith("Pull failed:", card.StatusMessage, StringComparison.Ordinal);
         Assert.True(card.LastActionFailed);
-        Assert.Null(card.PinnedPackageVersion);
+        Assert.True(card.PinnedPackageVersion is null, $"The pull did not leave a conflict: {card.StatusMessage}");
         Assert.False(card.CanPull);
         Assert.True(card.IsWorkingTreeDirty);
         Assert.False(card.IsBusy);
