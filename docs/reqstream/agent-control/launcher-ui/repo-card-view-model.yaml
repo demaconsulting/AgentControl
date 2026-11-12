@@ -160,14 +160,24 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-Pull
         title: >-
-          The RepoCardViewModel class shall pull the repo's latest commits and report
-          success or failure via a status message.
+          The RepoCardViewModel class shall pull the repo's latest commits, report success or
+          failure via a status message, and afterwards refresh the card in full - the pin, branch,
+          committed agent files, upgrade availability and working-tree status - exactly as the
+          Refresh action does, without replacing the pull's status message.
         justification: |
           The developer needs immediate feedback on whether the pull succeeded, and if not,
-          why, without needing to inspect a terminal.
+          why, without needing to inspect a terminal. A pull can change the pin file, the
+          branch and the committed agent files, so a card that kept showing what it knew before
+          the pull would be stale until the developer thought to refresh it.
         tests:
           - RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage
           - RepoCardViewModel_PullCommand_FailedPull_SetsFailureStatusMessage
+          - RepoCardViewModel_PullCommand_PullChangesPinFile_RefreshesCardAndKeepsSuccessMessage
+          - RepoCardViewModel_PullCommand_PullBringsUnreadablePinFile_KeepsPullOutcomeAndReportsPin
+          - RepoCardViewModel_PullCommand_FailedPullThatChangedTheRepo_RefreshesCardAndReportsFailure
+          - RepoCardViewModel_PullCommand_PullChangesPin_RefreshesUpgradeAvailability
+          - RepoCardViewModel_PullCommand_CancelledDuringUpgradeCheck_KeepsPullOutcomeAndChecksWorkingTree
+          - RepoCardViewModel_PullCommand_CardRetiredDuringUpgradeCheck_KeepsPullOutcomeAndChecksNothingMore
 
       - id: AgentControl-RepoCardViewModel-Launch
         title: >-

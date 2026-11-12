@@ -1930,14 +1930,25 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <returns>A task that completes when every property is current; a failing source is
     ///     reported through the card's state, not thrown.</returns>
     public Task RefreshAsync(CancellationToken cancellationToken = default) =>
-        RunOperationAsync("Refreshing...", cancelable: true, async token =>
-        {
-            RefreshCheap();
+        RunOperationAsync("Refreshing...", cancelable: true, RefreshCoreAsync, cancellationToken);
 
-            // The user asked for this refresh, so a server that needs a sign-in may ask for it
-            await RefreshUpgradeStatusAsync(token, allowPrompt: true, relistGitSource: true);
-            RefreshDirtyStatus();
-        }, cancellationToken);
+    /// <summary>
+    ///     Performs the full refresh for <see cref="RefreshAsync"/> and for the refresh that follows a
+    ///     pull (<see cref="PullCoreAsync"/>): the cheap checks, the upgrade check and the working-tree
+    ///     check. It does not take <see cref="IsBusy"/> itself, so it can run inside the operation
+    ///     that is already holding it.
+    /// </summary>
+    /// <param name="token">Cancels the package-source part of the refresh.</param>
+    /// <returns>A task that completes when every property is current.</returns>
+    private async Task RefreshCoreAsync(CancellationToken token)
+    {
+        RefreshCheap();
+
+        // The user asked for this refresh (or for the action that triggered it), so a server that
+        // needs a sign-in may ask for it
+        await RefreshUpgradeStatusAsync(token, allowPrompt: true, relistGitSource: true);
+        RefreshDirtyStatus();
+    }
 
     /// <summary>
     ///     Runs every cheap per-repo check that does not need a package source: the missing-repo
@@ -2316,20 +2327,34 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Runs <c>git pull</c> in this repo on a worker thread, then refreshes the working-tree
-    ///     status.
+    ///     Runs <c>git pull</c> in this repo on a worker thread, then refreshes the whole card the way
+    ///     <see cref="RefreshAsync"/> does.
     /// </summary>
     /// <param name="cancellationToken">Signaled when the command itself is cancelled; a pull that
     ///     has already started is not interrupted.</param>
-    /// <returns>A task that completes when the pull and the status refresh have finished.</returns>
+    /// <returns>A task that completes when the pull and the refresh have finished.</returns>
     private Task PullAsync(CancellationToken cancellationToken) =>
-        RunOperationAsync("Pulling...", cancelable: false, async _ => await PullCoreAsync(), cancellationToken);
+        RunOperationAsync("Pulling...", cancelable: false, PullCoreAsync, cancellationToken);
 
     /// <summary>
     ///     Performs the pull for <see cref="PullAsync"/>.
     /// </summary>
-    /// <returns>A task that completes when the pull and the status refresh have finished.</returns>
-    private async Task PullCoreAsync()
+    /// <remarks>
+    ///     A pull can change anything the card shows: the pin file (a new pinned package or version),
+    ///     which agent files are committed, the branch and the working tree. So after every completed
+    ///     pull - a refused one too, since a merge that stopped on a conflict has already changed the
+    ///     working tree and can have written conflict markers into the pin file - the card is refreshed
+    ///     in full, inside the pull's own busy operation. The pull's outcome stays the card's status:
+    ///     the refresh does not replace it, and only a failure to read the pin file is added to it.
+    ///     A pull that has completed cannot be undone, so its outcome also survives the refresh being
+    ///     cancelled (the card retired, or the caller's token signaled): the cancellation is absorbed
+    ///     here instead of reaching <see cref="RunOperationAsync"/>, which would replace the outcome
+    ///     with "The operation was canceled."
+    /// </remarks>
+    /// <param name="token">Cancels the package-source part of the refresh that follows the pull (the
+    ///     pull itself is never interrupted).</param>
+    /// <returns>A task that completes when the pull and the refresh have finished.</returns>
+    private async Task PullCoreAsync(CancellationToken token)
     {
         if (_logger.IsEnabled(LogLevel.Information))
         {
@@ -2341,9 +2366,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
             var settings = _getSettings();
             var git = new GitClient(ResolveGitExecutablePath(settings));
             var result = await Task.Run(() => git.Pull(RepoPath), CancellationToken.None);
-            StatusMessage = result.Succeeded
+            var pullMessage = result.Succeeded
                 ? "Pull succeeded."
                 : $"Pull failed: {result.StandardError.Trim()}";
+            StatusMessage = pullMessage;
             LastActionFailed = !result.Succeeded;
 
             if (result.Succeeded)
@@ -2359,7 +2385,38 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     "Pull failed for repo '{RepoName}': {StandardError}", RepoName, result.StandardError.Trim());
             }
 
-            RefreshGitStatus();
+            // What the pull changed (the pin, the branch, the committed agent files, the working tree)
+            // is picked up by the same full refresh the Refresh action runs
+            try
+            {
+                await RefreshCoreAsync(token);
+            }
+            catch (OperationCanceledException)
+            {
+                // The pull has already happened and cannot be undone, so canceling the package-source
+                // part of the refresh (the card was retired, or the caller gave up) must not turn its
+                // outcome into "The operation was canceled." The cheap checks have already run; the
+                // working-tree check is cheap too and is what the pull most directly affects, so it is
+                // still made - except for a retired card, which checks nothing any more. The upgrade
+                // state is left as it was, as when a Refresh is cancelled.
+                if (!_isRetired)
+                {
+                    RefreshDirtyStatus();
+                }
+            }
+
+            // The refresh must not replace the pull's outcome. The only status text it can set is a
+            // failure to read the pin file the pull just changed; that is kept after the outcome
+            if (StatusMessage != pullMessage && !string.IsNullOrEmpty(StatusMessage))
+            {
+                StatusMessage = $"{pullMessage} {StatusMessage}";
+            }
+            else
+            {
+                StatusMessage = pullMessage;
+            }
+
+            LastActionFailed = !result.Succeeded;
         }
         catch (InvalidOperationException ex)
         {
