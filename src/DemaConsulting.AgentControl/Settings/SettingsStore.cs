@@ -66,7 +66,9 @@ internal static class SettingsStore
     ///     The persisted settings, or a fresh default <see cref="AppSettings"/> instance if no
     ///     settings file exists yet (first run) — this is expected, not an error. A legacy
     ///     <c>PackageSourcePath</c> in the file is migrated into <c>Sources</c> as the
-    ///     <c>Default</c> zip source when no sources are configured. Explicit JSON <c>null</c>
+    ///     <c>Default</c> zip source when no sources are configured. A file without the repo-order
+    ///     marker has its repos arranged once as favorites first, then the most recently launched,
+    ///     and is marked as holding the user's order. Explicit JSON <c>null</c>
     ///     values for the source list, the recent-repos list or a source's package IDs are
     ///     normalized to empty collections.
     /// </returns>
@@ -95,6 +97,10 @@ internal static class SettingsStore
 
             // Carry a legacy single package-folder setting forward as the "Default" source
             settings.MigrateLegacySource();
+
+            // A file written before the repo order was stored holds the repos in the order they
+            // were added; arrange them once the way older versions displayed them
+            settings.EnsureRepoOrder();
             return settings;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)

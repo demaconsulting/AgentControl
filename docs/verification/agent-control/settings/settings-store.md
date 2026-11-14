@@ -3,7 +3,9 @@
 #### Verification Approach
 
 `SettingsStore` is verified with unit tests defined in `SettingsStoreTests.cs` and, for the user's own organizing
-choices (a repo's group and card color, the collapsed sections), `SettingsStoreOrganizingTests.cs`. Every test
+choices (a repo's group and card color, the collapsed sections), `SettingsStoreOrganizingTests.cs`, and for the user's
+own repo order (the stored sequence, the one-time arrangement of a file without it, a damaged marker),
+`SettingsStoreRepoOrderTests.cs`. Every test
 uses a real temporary configuration directory on disk, so load/save round-tripping, the
 no-file-yet default case, and directory-creation-on-save are exercised against genuine
 filesystem state.
@@ -21,6 +23,9 @@ N/A - standard test environment.
   credential is refused with nothing written.
 - A repo's group, card color and the collapsed sections round-trip, and a repo without a group or color writes
   nothing for them.
+- The repos round-trip in the sequence the user gave them with the repo-order marker; a file without the marker is
+  arranged once as favorites first and then by most recent launch, a file with it keeps its sequence, and a marker that
+  is not a boolean reads as not arranged yet without failing the load.
 - A settings file from before these values existed loads as no group, the automatic color and nothing collapsed;
   damaged or wrongly typed values read as "none" without failing the load, and the values after them are still read.
 - Stored group names are repaired on load by the repo group name rules (the rules themselves are verified by the
@@ -156,6 +161,27 @@ built-in names as no group, and the overlong name cut to 40 characters. The rule
 and no color; after the loaded settings are saved the file does not contain `Chartreuse` and holds exactly one color
 entry. This scenario is tested by `SettingsStore_Load_UnknownCardColorName_ReadsAsAutomaticAndIsNotSavedBack`,
 covering `AgentControl-SettingsStore-UnknownCardColorIsAutomatic`.
+
+**SettingsStore_RepoOrder_RoundTripsInTheStoredSequence**: Tested by `SettingsStoreRepoOrderTests.cs` (temporary
+configuration directories, no UI). Three repos whose sequence differs from favorites-first and from the launch order
+are saved with the repo-order marker and loaded in that sequence, with the marker set and written to the file. This
+scenario is tested by `SettingsStore_SaveThenLoad_RepoOrder_RoundTripsInTheStoredSequence`, covering
+`AgentControl-SettingsStore-RepoOrder`.
+
+**SettingsStore_RepoOrder_FileWithoutMarkerIsSeededOnce**: A file without the marker, listing repos in the order they
+were added, loads arranged as the favorite first, then the repos by most recent launch with the never-launched ones last
+(keeping their sequence), and marked as holding the user's order; a file with the marker keeps its sequence exactly,
+whatever the favorites and launch times say. This scenario is tested by
+`SettingsStore_Load_FileWithoutOrderMarker_SeedsFavoritesFirstThenMostRecentlyLaunched` and
+`SettingsStore_Load_FileWithOrderMarker_KeepsTheStoredSequence`, covering
+`AgentControl-SettingsStore-RepoOrderLegacySeed`. A first run (no file) returns an empty, unmarked list, which the view
+model arranges (`SettingsStore_Load_NoFile_ReturnsEmptyUnseededSettings`).
+
+**SettingsStore_RepoOrder_InvalidMarkerReadsAsNotSeeded**: A marker that is null, a string, a number, an object, an
+array or `false` loads as not arranged yet, so the file is arranged once like a file without the marker, and the setting
+that follows the marker is still read, proving the reader stays positioned. This scenario is tested by
+`SettingsStore_Load_InvalidOrderMarker_ReadsAsNotSeededAndSeeds`, covering
+`AgentControl-SettingsStore-RepoOrderMarkerRepaired`.
 
 **SettingsStore_GitSource_RoundTripsByNameWithoutSecretLikeProperties**: A Git source with an ssh-style address, a tag
 pattern, a sub-folder and one package ID is saved and loaded unchanged and written with its type by name, with no

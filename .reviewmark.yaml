@@ -163,6 +163,7 @@ reviews:
       - "test/**/LauncherUI/HeadlessTestApp.cs"
       - "test/**/LauncherUI/MainWindowTests.cs"
       - "test/**/LauncherUI/RepoGroupWindowTests.cs"
+      - "test/**/LauncherUI/RepoReorderWindowTests.cs"
       - "test/**/LauncherUI/UsabilityWindowTests.cs"
       - "test/**/LauncherUI/ThirdPartyDependenciesTests.cs"
 
@@ -182,6 +183,7 @@ reviews:
       - "test/**/LauncherUI/MainWindowViewModelPersistenceTests.cs"
       - "test/**/LauncherUI/MainWindowViewModelRecheckTests.cs"
       - "test/**/LauncherUI/RepoGroupingTests.cs"
+      - "test/**/LauncherUI/RepoOrderingTests.cs"
 
   - id: AgentControl-LauncherUI-RepoGroupHeaderViewModel
     title: Review of Agent Control RepoGroupHeaderViewModel unit implementation
@@ -856,6 +858,7 @@ reviews:
       - "src/**/Settings/SettingsStore.cs"
       - "test/**/Settings/SettingsStoreTests.cs"
       - "test/**/Settings/SettingsStoreOrganizingTests.cs"
+      - "test/**/Settings/SettingsStoreRepoOrderTests.cs"
 
   - id: AgentControl-Settings-RepoGroupName
     title: Review of Agent Control RepoGroupName unit implementation

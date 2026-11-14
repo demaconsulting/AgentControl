@@ -34,7 +34,7 @@ single package-folder path to a `Default` zip source when no sources are configu
 path.
 
 - *Parameters*: `string? configDirectory = null` (defaults to `GetDefaultConfigDirectory`).
-- *Returns*: `AppSettings`.
+- *Returns*: `AppSettings`, with the repo list in the user's order.
 - *Postconditions*: Returns a fresh default `AppSettings` instance if no settings file exists
   yet — first run is expected, not an error (`AgentControl-SettingsStore-Load`). An explicit JSON
   `null` for the source list, the recent-repos list or a source's package IDs (which bypasses the
@@ -59,6 +59,16 @@ path.
   that is not one of the known colors (`RecentRepo.CardColorNames`) is read as `null`, the automatic color, so a later
   `Save` does not write it back, while a known name in any letter case or with surrounding white space is kept in its
   canonical spelling (`RecentRepo.NormalizeCardColor`) (`AgentControl-SettingsStore-UnknownCardColorIsAutomatic`).
+  Last, once the legacy source is migrated, `AppSettings.EnsureRepoOrder` seeds the repo order: the order of
+  `RecentRepos` is the user's display order and `AppSettings.HasUserRepoOrder` (written as a boolean named
+  `HasUserRepoOrder`) says that it already is. A file without the marker - written before the order existed - has its
+  repo list arranged exactly once, favorites first and then most recently launched (a repo never launched last), and
+  loads with the marker set; a file with the marker keeps its repo sequence as it is, whatever the launch times.
+  `Save` writes the list in its sequence and the marker, and `Load` reads both back, so the sequence
+  round-trips (`AgentControl-SettingsStore-RepoOrder`, `-RepoOrderLegacySeed`). A marker that is null or not a
+  boolean reads as not set, without failing the load, so the one-time arrangement runs
+  (`AgentControl-SettingsStore-RepoOrderMarkerRepaired`). A first run, which has no file, returns a default
+  `AppSettings` with an empty list and no marker; the main window's view model seeds it.
 
 **Save**: Saves `AppSettings` to a configuration directory, creating the directory if needed.
 

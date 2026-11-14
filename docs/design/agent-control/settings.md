@@ -15,10 +15,11 @@ repaired, how look-alike names are given one spelling) are logic of their own, w
 observable behavior of persisting application-wide preferences (package sources, git/agent
 tool overrides, recent repos, shell preference, keep-shell-open choice, color theme) and the user's own organizing
 choices (repo groups,
-card colors, collapsed sections) (`AgentControl-Settings-Persistence`,
+card colors, collapsed sections, the order of the repo list) (`AgentControl-Settings-Persistence`,
 `AgentControl-Settings-PackageSources`, `AgentControl-Settings-GitSourcePersistence`,
 `AgentControl-Settings-Appearance`, `AgentControl-Settings-KeepShellOpen`,
-`AgentControl-Settings-RepoOrganization`). The subsystem contains two units: `SettingsStore` and `RepoGroupName`.
+`AgentControl-Settings-RepoOrganization`, `AgentControl-Settings-RepoOrder`). The subsystem contains two units:
+`SettingsStore` and `RepoGroupName`.
 
 ### Interfaces
 
@@ -29,7 +30,10 @@ card colors, collapsed sections) (`AgentControl-Settings-Persistence`,
 - *Contract*: Returns default `AppSettings` when no settings file exists yet, so a first-ever
   run still produces a usable configuration (`AgentControl-SettingsStore-Load`). A settings file
   that only has the legacy single package-folder path loads with it as a zip source named
-  `Default` (`AgentControl-SettingsStore-LegacySourceMigration`).
+  `Default` (`AgentControl-SettingsStore-LegacySourceMigration`). A settings file that has no stored repo order yet
+  (written before the order was the user's) loads with its repo list arranged once - favorites first, then most
+  recently launched - and marked as the user's order (`AgentControl-Settings-RepoOrder`,
+  `AgentControl-SettingsStore-RepoOrderLegacySeed`); a file that already has the marker keeps its repo sequence as it is.
 - *Constraints*: None beyond standard JSON deserialization failure modes.
 
 **SettingsStore.Save**: Saves settings to the configuration directory.
@@ -72,8 +76,9 @@ display; the repo's own
 `.agentcontrol.json` via `RepoConfig` remains authoritative), `PinnedSource` (not a copy of anything in the pin: the
 alias of the configured package source that last supplied this repo's agent files on this machine, a per-user cache
 that the pin file never carries and that is cleared when the source is no longer configured; the property keeps its
-historical name so existing settings files stay readable), favorite status, last-launch
-timestamp used by `LauncherUI`'s sort order, and the user's own organizing choices: an optional `GroupName` (at most
+historical name so existing settings files stay readable), favorite status, the last-launch
+timestamp (it records when the repo was last launched; it no longer orders the main window's list, but it is what the
+one-time seed of the repo order uses), and the user's own organizing choices: an optional `GroupName` (at most
 one group per repo) and an optional `CardColor` (a palette color's name; absent means the automatic color). These
 and `AppSettings.CollapsedGroups` (the names of the collapsed list sections, including the built-in *Favorites* and
 *Ungrouped*) are per-user view state that exists only in the settings file and is never written to a repository. A
@@ -95,7 +100,29 @@ one list of valid card colors that the `LauncherUI` palette is built from - so n
 application from starting, and an unknown color is neither kept nor written back
 (`AgentControl-SettingsStore-RepoOrganization`, `AgentControl-SettingsStore-UnknownCardColorIsAutomatic`,
 `AgentControl-Settings-RepoOrganization`).
-`GroupName` and `CardColor` are omitted from the file when `null`. `AgentToolKind` enumerates the well-known agent
+`GroupName` and `CardColor` are omitted from the file when `null`.
+
+**Repo order.** The order of `AppSettings.RecentRepos` *is* the user's display order: a repo is added at the end, and
+the main window's Move menu items and drag and drop reorder the list itself (the `LauncherUI` design describes
+how; the main window shows each section's repos in that relative order). Because there is no second list, a repo
+that is removed is removed from the order too, and no repo can be missing from it, so nothing has to be reconciled on
+load. What the list cannot say by itself is whether its sequence is already the user's: a file written before the
+order existed holds the list in the order older versions stored it (newest added first), which is not what the user
+saw (favorites first, then the
+most recently launched). `AppSettings.HasUserRepoOrder` is the marker (a boolean, `false` for a file without it) and
+`AppSettings.EnsureRepoOrder` the one-time seed: when the marker is not set it stably sorts the list by favorite
+descending and then by last-launch time descending (a repo never launched last), which gives the same relative order in
+every section as before, and sets the marker; when it is set it does nothing, so a user's order is never re-sorted.
+`SettingsStore.Load` calls it after `NormalizeNulls` and the legacy-source migration, and the main window's view
+model calls it too, so settings built in memory (a first run, which has no file and so an empty list and no marker)
+are seeded the same way; the seed is written by the next save of any kind, and the arrangement is deterministic until
+then. Reading the marker is tolerant like the others: `AppSettings` declares a private JSON converter that reads
+`true` and `false` and reads anything else - null, a string, a number, an object or an array (which it skips whole) -
+as `false`, which only causes the one-time seed to run again, and never fails the load
+(`AgentControl-Settings-RepoOrder`, `AgentControl-SettingsStore-RepoOrder`, `-RepoOrderLegacySeed`,
+`-RepoOrderMarkerRepaired`). The order is stored only in the user's settings file, never in a repository.
+
+`AgentToolKind` enumerates the well-known agent
 tools (`CopilotCli`, `Cursor`, `ClaudeCode`) plus `Custom`, per architecture.md's
 "Configurable agent tool and shell" decision — the tool is never hardcoded to Copilot CLI.
 `ThemePreference` (`System`, `Light`, `Dark`) is the user's color-theme choice, stored in `AppSettings.Theme` and

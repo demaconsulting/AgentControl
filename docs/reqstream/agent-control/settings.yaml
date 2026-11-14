@@ -137,3 +137,21 @@ sections:
         tests:
           - Settings_RepoOrganization_GroupColorAndCollapsedSectionsSurviveSessionsInSettingsFileOnly
           - Settings_RepoOrganization_DamagedValuesFallBackAndNextSaveWritesCleanFile
+
+      - id: AgentControl-Settings-RepoOrder
+        title: >-
+          The Settings subsystem shall persist the order of the repos only in the user's own settings
+          file, shall arrange a file that holds no stored order once as favorites first and then the
+          most recently launched, and shall read a damaged order marker as "not arranged yet"
+          instead of failing the load.
+        justification: |
+          The order is a personal choice that must survive restarts but must not be shared through a
+          repository; a user who upgrades must keep the order that was shown before it was stored,
+          and a settings file that is damaged or written by another version must never keep the
+          application from starting.
+        children:
+          - AgentControl-SettingsStore-RepoOrder
+          - AgentControl-SettingsStore-RepoOrderLegacySeed
+          - AgentControl-SettingsStore-RepoOrderMarkerRepaired
+        tests:
+          - SettingsSubsystem_RepoOrder_SurvivesSessionsAndSeedsALegacyFileOnce

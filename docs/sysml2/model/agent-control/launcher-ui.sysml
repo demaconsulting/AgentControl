@@ -4,7 +4,8 @@ package AgentControl {
     part def LauncherUISubsystem {
         doc
         /*
-         * Presentation layer: the recent-repos main window, per-repo cards, the
+         * Presentation layer: the main window with its user-ordered repo list (Move
+         * items and drag and drop included), per-repo cards, the
          * package-selection window (opened as Select Package or, for a pinned repo, Change package),
          * the settings window, the package-source editor window (including its signed-package
          * options, its Git repository mode with tag pattern and tag preview, and "Forget saved

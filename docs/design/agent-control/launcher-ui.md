@@ -58,12 +58,15 @@ collapsed sections.)
 - *Type*: In-process .NET observable collection (data-bound to `MainWindow`'s `ListBox`, which picks the
   header or the card template by row type).
 - *Role*: Provider.
-- *Contract*: Reflects `AddRepo`/`RemoveRepo` mutations, `FilterText` changes, grouping changes and sort
-  order. With no repo in a group it is flat: favorites first, then most-recently-launched descending
-  with never-launched last. Once a repo is in a group it is sectioned - Favorites (a favorite only
+- *Contract*: Reflects `AddRepo`/`RemoveRepo` mutations, `FilterText` changes, grouping changes and repo
+  order. The order is the user's own, never the launch time: with no repo in a group it is flat - favorites
+  first, then the other repos in the order the user keeps them in (a new repo at the end, Move and drag reorder it).
+  Once a repo is in a group it is sectioned - Favorites (a favorite only
   there), the user's groups alphabetically, Ungrouped - with collapsible sections that a filter shows in
-  full (`AgentControl-LauncherUI-RecentReposDisplay`, `AgentControl-LauncherUI-SearchFilter`,
-  `AgentControl-LauncherUI-SortOrder`, `AgentControl-LauncherUI-RepoGroups`).
+  full, each section showing its repos in that same relative order
+  (`AgentControl-LauncherUI-RecentReposDisplay`, `AgentControl-LauncherUI-SearchFilter`,
+  `AgentControl-LauncherUI-SortOrder`, `AgentControl-LauncherUI-StableRepoOrder`,
+  `AgentControl-LauncherUI-RepoGroups`).
 - *Constraints*: Recomputed synchronously on the UI thread whenever a dependency changes, updating the
   collection in place so unchanged rows keep their controls.
 
@@ -174,7 +177,7 @@ loaded `AppSettings`. It exposes `AddRepo`/`RemoveRepo` (each saved through `Set
 *Transactional persistence* below), a `FilterText` property driving `DisplayedRepoCards`/`DisplayedItems`, and
 `ApplySettings`
 (invoked when `SettingsWindowViewModel` reports `Saved`), which persists the new settings
-while preserving the existing recent-repos list and invalidates the shared
+while preserving the existing recent-repos list (and its order) and invalidates the shared
 `PackageVersionCache` for each package source that was edited or removed.
 
 Each `RepoCardViewModel` is independently responsible for one repo's status and actions: it reads
@@ -208,7 +211,8 @@ the user confirms (`AgentControl-LauncherUI-RemoveRepo`).
 **How the units collaborate.** `MainWindowViewModel` is the owner and the hub. It creates one `RepoCardViewModel` per
 `RecentRepo` (giving each the shared package-version cache, the credentials and a *commit* callback that is how the
 card's own changes are saved, see below), subscribes to the card events that change the list (`FavoriteChanged`,
-`GroupChanged`, `LaunchRecorded`) and rebuilds `DisplayedItems` when they fire; the window's code-behind subscribes to
+`GroupChanged`) and rebuilds `DisplayedItems` when they fire (it deliberately does not subscribe to `LaunchRecorded`: a
+launch never moves a card); the window's code-behind subscribes to
 the events that need a dialog.
 
 - *`RepoCardViewModel` and `RepoImageLocator`*: the card is the only caller. `RefreshCheap` starts the picture
@@ -532,7 +536,8 @@ again whenever `MainWindowViewModel.ApplySettings` has saved new settings (throu
 `Action<ThemePreference>`, so the view model stays free of the UI framework), so every open window changes
 at once without a restart (`AgentControl-LauncherUI-Appearance`). Every color the application's own XAML uses
 lives in `AppStyles.axaml` as a resource in a `Light` and a `Dark` theme dictionary (surfaces, borders,
-shadows, the status accent colors, chip fills and text, button states, the avatar palette, validation,
+shadows, the status accent colors, chip fills and text, button states, the avatar palette, the drag-and-drop
+indicator `RepoDropIndicator` and header highlight `RepoDropTargetBackground`, validation,
 caution and success text, the page background) consumed with `DynamicResource`; no template or setter holds a
 hard-coded color. Text colors were chosen for at least 4.5:1 contrast against the fill and surface they are
 drawn on, status accents and icons for 3:1, and `ThemeResourceTests` checks both dictionaries define the same
@@ -544,7 +549,8 @@ hover lift with 140 ms transitions, selection and keyboard-focus ring), the stat
 tile, the chips (one height, padding and font, tinted fill with a matching foreground, a flat button wrapper
 for clickable chips), the action buttons (primary accent with hover, pressed and disabled states, and a
 tinted secondary), the ghost icon buttons without a border (favorite star, "more actions"), the group headers of the
-card menu, and the empty state. Per-control color setters are avoided on purpose.
+card menu, the drag-and-drop feedback (see *Reordering repos*) and the empty state. Per-control color setters are
+avoided on purpose.
 
 **Repo card layout.** Each card has a colored status accent bar on its left edge (`RepoCardViewModel.Status`:
 green up to date, amber upgrade available, red a problem, grey no agent package; the bar has an accessible
@@ -557,8 +563,8 @@ the repo name's initials on a color chosen by a deterministic hash of the repo p
 The **...** menu is grouped: *Repository* (**Git Pull**, with its enablement rules and its explanatory tooltip
 shown even while it is disabled, and **Refresh**), *Agent files* (**Select Package...** when no package is pinned,
 **Change package...** when one is, and **Upgrade to x.y.z** when a newer version exists; the group is hidden when
-none applies) and *Organize* (**Move to group** and
-**Card color...**) and **Remove from list**. The upgrade
+none applies) and *Organize* (**Move to group**, then **Move to top**, **Move up**, **Move down**, **Move to bottom**
+and **Card color...**) and **Remove from list**. The upgrade
 chip is a button that runs the same `UpgradeCommand` as the menu's Upgrade item
 (`AgentControl-RepoCardViewModel-UpgradeFromChip`).
 
@@ -595,6 +601,73 @@ the status accent bar and chips are unaffected. A repo that shows its own pictur
 so a logo drawn for a white page stays legible, and the chosen color is drawn as a ring around the picture. The
 letters on every palette color use whichever of white and near-black reads better on that fill in each theme,
 at least 4.5:1 (`ThemeResourceTests` checks every entry in both themes).
+
+**Reordering repos (user-controlled order).** The order of the repo cards belongs to the user and nothing else
+changes it: the list is kept in `AppSettings.RecentRepos` order (see the `Settings` design), a new repo goes to the
+end, and launching, refreshing, pulling, upgrading or marking a favorite never moves a card
+(`AgentControl-LauncherUI-SortOrder`, `AgentControl-LauncherUI-StableRepoOrder`; system level
+`AgentControl-System-RepoOrder`). Favorites stay first, and each section - or, with no groups, each of the two
+implicit tiers (favorites, the rest) - shows its repos in the same relative order. The user changes the order in two
+ways (`AgentControl-System-RepoReorder`), and both end in the same two view-model operations, so the business rules
+live in `MainWindowViewModel` and the window only translates input and shows feedback:
+
+- *Move menu items.* The *Organize* group of a card's "..." menu has **Move to top**, **Move up**, **Move down** and
+  **Move to bottom** (AutomationIds `MoveToTopMenuItem`, `MoveUpMenuItem`, `MoveDownMenuItem`,
+  `MoveToBottomMenuItem`), which are keyboard-reachable and so give a way to reorder that needs no drag. They move the
+  card within its own section (`MainWindowViewModel.MoveCard`). As with the *Move to group* submenu, what they may do
+  depends on state that is only known when the menu opens, so `MainWindow`'s `CardMenu_Opening` handler (through
+  `UpdateMoveMenuItems`) asks `MainWindowViewModel.GetMoveDisabledReason` for each item, disabling it and giving it
+  that reason as its tooltip (shown even while disabled) - at the start or end of the section, and while the filter
+  has text (`AgentControl-LauncherUI-RepoOrderMenu`).
+- *Drag and drop.* **Drag source**: the window observes the pointer on the `RepoListBox` on the way down (also for
+  events a row already handled). A press with the left button on a card is remembered as a possible drag, unless it is
+  on a `Button`, `TextBox`, `MenuItem` or `ScrollBar` in the card (the star, the chips, the menu keep their own
+  behavior), on a section header, or while reordering is off; the drag starts once the pointer has moved 6 device-independent
+  pixels in either direction with the button held, which keeps a plain or slightly unsteady click a click. The dragged
+  data is one item of the application data format `DemaConsulting.AgentControl.RepoCard` carrying the card's repo path,
+  and the dragged card's row gets the `dragging` style class (dimmed) until the drag ends however it ends. The operating
+  system's drag is started through the `DragStarter` seam, whose default is `DragDrop.DoDragDropAsync`; as with the
+  folder picker seam (`RepoFolderPicker`), a headless test supplies its own starter that records the data and then
+  raises the drop events on the list. **Drop target**: the list is a drop target (`DragDrop.AllowDrop`) with
+  drag-enter, drag-over, drag-leave and drop handlers. The pointer is hit-tested to the row it is over: over a card, the
+  upper half of the row (`IsUpperHalf`) means "before that card" and the lower half "after it", giving a
+  `RepoDropTarget.ForCard` with the card's section (`GetSectionOf`); over a section header, `RepoDropTarget.ForHeader`
+  (no anchor: the end of that section). Drag-over asks `MainWindowViewModel.CanDrop` and answers `Move` or `None` as
+  the drag effect; drop calls `MainWindowViewModel.DropCard`. A drag that does not carry this data format, or a repo
+  that is not listed, is ignored.
+- *What a drop does* (`AgentControl-LauncherUI-RepoDragReorder`, `-RepoDragBetweenSections`,
+  `-RepoDropOnHeader`): within a
+  section it moves the card to the drop position. Into another section it first changes the card's section - the group
+  for a group or Ungrouped section, the favorite flag for Favorites, exactly as the menu and the star would, so the
+  card's chip and the header counts stay consistent - and then puts it at the drop position, so one drop can mean two
+  saves (a failure of the second is reported and leaves the card in its new section at its old relative place). On a
+  header the card goes to the end of the section. A collapsed group stays collapsed (the header's count changes, which
+  is the visible result; the user's collapsed state is not touched). In the flat list (no repo is in a group) a drag
+  only reorders within a tier: a drop on the other tier is refused, since without headers nothing would explain the
+  favorite change.
+- *Feedback* (`AgentControl-LauncherUI-RepoDropFeedback`): the card template carries two thin, non-hit-testable
+  `Border`s (`DropIndicatorAbove`, `DropIndicatorBelow`) that take no layout space; while the pointer is over an
+  accepted place the window puts the style class `dropAbove`, `dropBelow` or `dropHeader` on that row's `ListBoxItem`
+  (and removes it again when the place changes, the drag leaves the list, the drop happens or the drag ends), and
+  `AppStyles.axaml` makes the matching indicator line visible (`dropAbove`, `dropBelow`) or tints the header
+  (`dropHeader`, `RepoDropTargetBackground`). The line uses `RepoDropIndicator`; both resources are defined for the
+  light and the dark theme and are checked for contrast by `ThemeResourceTests`. A refused place (the drag effect
+  `None`) shows no line, and neither does the dragged card's own row. When the pointer is within 24 pixels of the top
+  or bottom
+  of the list's scroll viewer the list scrolls a little per drag event (best effort), so a long list can be reordered
+  without dropping first.
+- *No reordering while filtering* (`AgentControl-LauncherUI-ReorderOffWhileFiltering`): while the filter box has text
+  only some repos are shown, so their positions cannot be changed. `MainWindowViewModel.IsReorderEnabled` is then `false`:
+  no drag starts, the four Move items are disabled with the tooltip `ReorderDisabledWhileFilteringMessage`, and
+  `MoveCard`, `CanDrop` and `DropCard` refuse as well. Filtering never changes the stored order.
+- *Collection moves.* A reorder moves cards inside `MainWindowViewModel.RepoCards` (`Move` notifications). The window's
+  `OnRepoCardsChanged` ignores a `Move`, because the cards stay attached and the per-card state the window keeps
+  (pending prompts, shown dialogs) must survive the reorder.
+
+The order is stored in the user's own settings only, never in a repository or its `.agentcontrol.json`, survives a
+restart, and for a settings file written before this existed is seeded once from what the user used to see (favorites
+first, then most recently launched), so nothing jumps on upgrade (`AgentControl-LauncherUI-RepoOrderRemembered`;
+system level `AgentControl-System-RepoOrderRemembered`, subsystem `AgentControl-Settings-RepoOrder`).
 
 **Settings window package-source actions.** One **Add** button opens a menu with the source types that can be
 added (zip-package folder, NuGet-package folder, NuGet-package server, Git repository), each with its type's icon

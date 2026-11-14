@@ -29,6 +29,10 @@ keyboard behavior of the dialogs, the About version row, the order of the AGENTS
 notes and the keep-or-update and launch-anyway questions about a repo's agent files,
 `RepoGroupWindowTests.cs` for the group headers, the card menu's
 "Move to group" submenu, the group-name prompt and the card color palette pop-up,
+`RepoReorderWindowTests.cs` for the user's own repo order (cards that stay put, the card menu's Move items, drag
+and drop through the window's drag-source seam and the platform's drop events, the insertion line and header tint,
+reordering turned off by the filter, the order after a restart; the real operating-system drag is covered only by the
+FlaUI tests), `RepoOrderingTests.cs` for the view model's rules behind them,
 `SettingsWindowServerSourceTests.cs` for the Settings
 window, the source editor window and its connection test, `SourceEditorSignatureWindowTests.cs` for the signature
 section and "Forget saved sign-in" of the source editor, `SourceEditorGitWindowTests.cs` for the Git editor's
@@ -175,13 +179,65 @@ full path; in both cases only the matching card remains displayed. This scenario
 `MainWindowViewModel_FilterText_MatchesRepoPath_FiltersDisplayedRepoCards`, covering
 `AgentControl-LauncherUI-SearchFilter`.
 
-**LauncherUI_SortOrder_FavoritesFirstThenMostRecentlyLaunched**: Displayed cards are checked
-for favorites sorting above non-favorites regardless of launch recency, and for
-most-recently-launched-first ordering within the same favorite tier with never-launched repos
-last. This scenario is tested by
-`MainWindowViewModel_DisplayedRepoCards_SortsFavoritesAboveNonFavorites` and
-`MainWindowViewModel_DisplayedRepoCards_SortsByLastLaunchedUtcDescendingWithNullsLast`,
-covering `AgentControl-LauncherUI-SortOrder`.
+**LauncherUI_SortOrder_FavoritesFirstThenStoredOrder**: Displayed cards are checked for favorites being listed
+first and the others in the user's stored order, whatever the launch times are: in the window (rows top to bottom,
+`MainWindow_ExistingRepos_ShownInStoredOrder_FavoritesFirst`) and in the view model
+(`MainWindowViewModel_DisplayedRepoCards_FavoritesFirstThenStoredOrder`); a stored order is kept as it is, and settings
+without a stored order are arranged once as favorites first and then by recency. This scenario is tested by
+`MainWindow_ExistingRepos_ShownInStoredOrder_FavoritesFirst`,
+`MainWindowViewModel_DisplayedRepoCards_FavoritesFirstThenStoredOrder`, covering
+`AgentControl-LauncherUI-SortOrder` (with `MainWindowViewModel_Constructor_StoredOrder_IsKeptWhateverTheLaunchTimes` and
+`MainWindowViewModel_Constructor_NoStoredOrder_SeedsFavoritesFirstThenMostRecentlyLaunched` for the unit requirements
+below it).
+
+**LauncherUI_StableRepoOrder_LaunchNeverMovesTheCardAndNewReposGoToTheBottom**: In a shown main window (tested by
+`RepoReorderWindowTests.cs`, with a fake process starter so nothing is started) launching the last repo leaves every
+row where it was, and a repo added with the top-bar add and one added into a group appear at the bottom of their
+sections. This scenario is tested by `MainWindow_Launch_DoesNotMoveTheCard` and
+`MainWindow_RepoAdded_AppearsAtTheBottomOfItsSection`, covering `AgentControl-LauncherUI-StableRepoOrder`.
+
+**LauncherUI_RepoOrderMenu_MoveItemsReorderAndDisableAtTheBoundaries**: The card menu's Organize group holds, after
+"Move to group" and before "Card color...", the items Move to top, Move up, Move down and Move to bottom, each with an
+AutomationId, an icon and a tooltip; the first repo's Top and Up items are disabled with the reason as their tooltip,
+the last repo's Down and Bottom items likewise; choosing an enabled item (the menu item's click) reorders the rows. This
+scenario is tested by `MainWindow_CardMenu_MoveItems_ReorderAndDisableAtTheBoundaries` and
+`MainWindow_CardMenu_MoveItemsInOrganizeGroupWithIdsAndTooltips`, covering `AgentControl-LauncherUI-RepoOrderMenu`.
+
+**LauncherUI_RepoDrag_ReordersWithinAndBetweenSectionsAndOnHeaders**: The headless platform has no drag source, so a
+drag is started with a real pointer press and move on a card (which calls the window's `DragStarter` seam, here a fake
+that records the dragged data and leaves the drag open) and finished with the platform's drag-enter, drag-over and
+drop events raised on the window at points computed from the rows' bounds (upper half, lower half, header). Dropping
+on the lower or upper half of another card of the same section reorders the rows
+(`MainWindow_DragCard_WithinSection_ReordersAtDropPosition`) and in a list without groups a drop in the other tier is
+refused with no drop effect, nothing becoming a favorite
+(`MainWindow_DragCard_FlatList_OnlyReordersWithinItsTier`), covering `AgentControl-LauncherUI-RepoDragReorder`. Six
+cases drop a card in another section - group to group, group to Ungrouped, Ungrouped to a group, into Favorites keeping
+the group, out of Favorites into a group and out of Favorites into Ungrouped - and check the card's group, favorite
+state, place and the stored values (`MainWindow_DragCard_IntoOtherSection_ChangesGroupOrFavoriteAtDropPosition`),
+covering `AgentControl-LauncherUI-RepoDragBetweenSections`. A drop on a header, and on a collapsed group's header (the
+group stays collapsed and its header says two repos), puts the card at the bottom of the group
+(`MainWindow_DropOnGroupHeader_MovesCardToTheGroupBottom` and
+`MainWindow_DropOnCollapsedGroupHeader_MovesCardAndKeepsTheGroupCollapsed`), covering
+`AgentControl-LauncherUI-RepoDropOnHeader`.
+
+**LauncherUI_RepoDropFeedback_LineAndTintShownAndClearedAndLegibleInBothThemes**: During a drag the dragged row has the
+`dragging` class; the upper half of a card shows the line above it, the lower half the line below it (the previous
+line is cleared), the dragged card itself shows nothing, a header over which the pointer is gets the `dropHeader` class,
+leaving the list clears it, and after the drop no row has any of the classes and no indicator is visible
+(`MainWindow_DragOver_ShowsInsertionIndicatorAboveOrBelowAndClearsItAfterwards`). The insertion line reaches 3:1
+contrast against the card and the page in both themes and the group header's text keeps 4.5:1 on the drop tint
+(`ThemeResources_DropIndicator_IsLegibleInLightAndDark`; `RepoDropIndicator` is also in the graphics checked by
+`AppStyles_TextAndGraphicColors_MeetContrastInBothThemes`), covering `AgentControl-LauncherUI-RepoDropFeedback`.
+
+**LauncherUI_ReorderOffWhileFiltering_NoDragAndMoveItemsDisabledWithTooltip**: With text in the filter a press and move
+on a card starts no drag (the `DragStarter` seam is never called and the row is not dimmed) and all four Move items are
+disabled with the filter explanation as their tooltip; with the filter cleared the drag starts and the items apply
+again. This scenario is tested by `MainWindow_FilterActive_DragStartsNothingAndMoveItemsAreDisabledWithTooltip`,
+covering `AgentControl-LauncherUI-ReorderOffWhileFiltering`.
+
+**LauncherUI_RepoOrderRemembered_OrderSurvivesAWindowRestart**: After a drag and a menu move, the saved settings are
+loaded into a new view model and a new window, which shows the rows in the same order. This scenario is tested by
+`MainWindow_ReorderedList_OrderSurvivesAWindowRestart`, covering `AgentControl-LauncherUI-RepoOrderRemembered`.
 
 **LauncherUI_Launch_OnlyTheUsersCancelOfAFailedRestoreStopsIt**: The Launch command is executed for
 a card whose agent files are already synced, recording the launch timestamp; the pre-launch check is exercised

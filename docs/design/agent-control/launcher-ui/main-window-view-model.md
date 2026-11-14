@@ -5,9 +5,9 @@
 #### Purpose
 
 `MainWindowViewModel` backs the main recent-repos window. Its responsibility is to own the
-collection of `RepoCardViewModel` instances, apply search filtering, sort ordering and the
-user's own grouping (collapsible sections), and mediate add/remove of tracked repos and settings
-changes. Window-management concerns (opening
+collection of `RepoCardViewModel` instances, apply search filtering, the user's own repo order (favorites first)
+and the user's own grouping (collapsible sections), let the user change that order (Move menu items and drag and
+drop), and mediate add/remove of tracked repos and settings changes. Window-management concerns (opening
 `SettingsWindow`/`ReleaseNotesViewer`, showing folder-browse dialogs and the group-name prompt) are
 intentionally left to `MainWindow`'s code-behind, since they require live Avalonia
 `Window`/`IStorageProvider` instances that cannot be constructed in a headless unit test.
@@ -19,22 +19,24 @@ design).
 
 #### Data Model
 
-**RepoCards**: `ObservableCollection<RepoCardViewModel>` — The recent-repos list in storage order (the order of
-`AppSettings.RecentRepos`; a repo added by `AddRepo` is inserted at the front), backing this view model's underlying
-state (settings persistence, additions/removals). It is **not** re-ordered when a repo is launched or marked as a
-favorite: only `DisplayedItems` and `DisplayedRepoCards` are ordered (favorites, then most recently launched).
+**RepoCards**: `ObservableCollection<RepoCardViewModel>` — The recent-repos list in the user's own order (the order of
+`AppSettings.RecentRepos`; a repo added by `AddRepo` is appended at the end), backing this view model's underlying
+state (settings persistence, additions/removals). Only `MoveCard`, `DropCard` (and the add paths, at the end) change
+this order: it is **not** re-ordered when a repo is launched, refreshed, synced or marked as a favorite
+(`AgentControl-MainWindowViewModel-StableOrder`). `DisplayedItems` and `DisplayedRepoCards` are derived from it
+(favorites first, then this order).
 
 **DisplayedItems**: `ObservableCollection<object>` — What the main window's list binds to: the
 visible repo cards interleaved with the `RepoGroupHeaderViewModel` of each section. While no repo
-is in a group the list is flat (no headers; favorites first, then most recently launched,
-`AgentControl-MainWindowViewModel-FlatListWithoutGroups`). Once
+is in a group the list is flat (no headers; favorites first, then the user's order from `RepoCards`,
+`AgentControl-MainWindowViewModel-FlatListWithoutGroups`, `-SortOrder`). Once
 at least one repo is in a group (`HasGroups`) it is sectioned: **Favorites** first (the favorite
 repos; a favorite is listed *only* there - not again under its group, so every repo appears once - while it keeps
 its group, and its card shows a chip with it, `-FavoriteListedOnce`), then **one section per group**, alphabetically
 (ordinal, ignoring letter case), then **Ungrouped** last (`AgentControl-MainWindowViewModel-GroupSections`). Each
 section starts with a header that carries the section's name and count, and a section with no matching repo has no
-header (`-GroupSectionHeaders`). Within a section repos are ordered by most recent launch, nulls last, stable
-otherwise (`-GroupSectionRepoOrder`).
+header (`-GroupSectionHeaders`). Within a section repos appear in their relative order in `RepoCards`, the user's own
+order (`-GroupSectionRepoOrder`).
 The cards of a collapsed section are left out; its header stays with its count. While a filter is
 active every section is shown expanded and counts only the matches; sections without a match have no header, the
 headers' toggles are disabled and the remembered collapsed names are left alone
@@ -49,7 +51,21 @@ over flat. **GroupNames**: `IReadOnlyList<string>` (derived) — the distinct gr
 alphabetically.
 
 **FilterText**: `string?` — The current filter text typed into the recent-repos search box;
-setting it recomputes `DisplayedItems` and `DisplayedRepoCards`.
+setting it recomputes `DisplayedItems` and `DisplayedRepoCards` and raises `IsReorderEnabled`.
+
+**IsReorderEnabled**: `bool` (derived) — `true` when `FilterText` is null, empty or whitespace. While the filter has
+text only some repos are shown, so their positions cannot be changed: the window starts no drag and disables the
+Move menu items, and `MoveCard`, `CanDrop` and `DropCard` refuse as well
+(`AgentControl-MainWindowViewModel-ReorderOffWhileFiltering`). **ReorderDisabledWhileFilteringMessage**: `string`
+(public constant) — the explanation ("Clear the filter to change the order: ...") shown as the tooltip of a disabled
+Move item, so the wording is the same everywhere.
+
+**RepoMove**: `enum` (`Top`, `Up`, `Down`, `Bottom`) — the four moves of the card menu.
+**RepoDropTarget**: `record` (`Kind`, `Name`, `Anchor`, `InsertBefore`) — a place a dragged card may land: a section
+(its kind and display name) and either an anchor card of that section with "before/after it", or no anchor, which
+means the end of the section (a drop on its header). `RepoDropTarget.ForHeader(header)` and
+`RepoDropTarget.ForCard(anchor, insertBefore, kind, name)` build it; the window works out the anchor's section with
+`GetSectionOf`.
 
 **HasNoDisplayedRepos**: `bool` (derived) — `true` when `DisplayedItems` is empty (no repo matches,
 or there is none; a list whose sections are all collapsed still has its headers), so the
@@ -147,7 +163,11 @@ header's collapse toggle is forwarded through `RunReportingSaveFailure`, which r
 instead of letting the exception escape into the UI framework (`-SaveFailureReported`). `ApplySettings` keeps its own
 candidate-first flow, described below.
 
-**Constructor**: Populates `RepoCards` from the loaded settings.
+**Constructor**: Populates `RepoCards` from the loaded settings, in the stored order. Before building the cards it
+calls `AppSettings.EnsureRepoOrder`, so settings built directly (a first run, a test) are seeded exactly like a loaded
+file, once: a list that has no user order yet is arranged favorites first, then most recently launched, and the
+arrangement is written by the next save of any kind (`AgentControl-MainWindowViewModel-LegacyOrderSeeded`); a list
+that already has a user order is kept whatever the launch times are (`-OrderKept`).
 
 - *Parameters*: `AppSettings settings`, `StartupOptions? startupOptions = null`,
   `string? configDirectory = null`, `PackageCredentialContext? credentials = null`,
@@ -228,7 +248,8 @@ with many tracked repos.
 - *Parameters*: `string repoPath`.
 - *Returns*: `bool` — `true` if added.
 - *Preconditions*: None beyond a non-null/non-whitespace path.
-- *Postconditions*: On success, a new card is inserted at the front of `RepoCards`, settings are persisted, and
+- *Postconditions*: On success, a new card is appended at the end of `RepoCards` (and its entry at the end of
+  `AppSettings.RecentRepos`), so it is at the bottom of its section (`-NewRepoAtEnd`), settings are persisted, and
   `DisplayedRepoCards` is recomputed (`AgentControl-MainWindowViewModel-AddRepo`). The new card is prepared first and
   its entry added through `CommitSettingsChange`; if the save fails the prepared card is retired, the exception
   reaches the caller and the list, the cards and the file are exactly as they were.
@@ -248,8 +269,11 @@ been synced.
 - *Postconditions*: shares the add with `AddRepo` (the private `AddRepoCore`), with the group - spelled as an existing
   group of the same name ignoring case - set on the new entry before the single save, so the repo is never listed
   ungrouped in between; a repo already listed is moved with `RepoCardViewModel.MoveToGroup` instead of being added
-  twice; and a collapsed target group is expanded so the repo is visible
-  (`AgentControl-MainWindowViewModel-AddRepoToGroup`). The group is stored in the user's settings only.
+  twice, and then placed at the bottom of the group like a newly added one (a failure to save that place is reported
+  through `SettingsSaveFailed`; the repo stays in the group, where it was, and the result stays `MovedExisting`);
+  and a collapsed target group is expanded so the repo is visible
+  (`AgentControl-MainWindowViewModel-AddRepoToGroup`, `-NewRepoAtEnd`). The group is stored in the user's settings
+  only.
 
 **RemoveRepo**: Removes a repo card unconditionally.
 
@@ -273,7 +297,8 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
 - *Returns*: `void`.
 - *Preconditions*: `updated` is not null.
 - *Postconditions*: The live settings instance is replaced (preserving the existing recent-
-  repos list and the collapsed-section names, since `SettingsWindowViewModel` never owns them) only after
+  repos list in its order together with its `HasUserRepoOrder` marker, and the collapsed-section names, since
+  `SettingsWindowViewModel` never owns them - `AgentControl-MainWindowViewModel-OrderKeptOnApplySettings`) only after
   the candidate has been
   persisted successfully — if the write fails, the previous instance stays live, so a later save
   (favorite, launch) can never persist a rejected candidate and the exception reaches the caller to
@@ -313,9 +338,10 @@ unusable).
 **UpdateDisplayedRepoCards** (private): Recomputes `DisplayedItems` and `DisplayedRepoCards` from
 `RepoCards` — a case-insensitive substring match against `FilterText` on repo name or path
 (`AgentControl-MainWindowViewModel-SearchFilter`), then either the flat order (favorite status
-descending, then `LastLaunchedUtc` descending with nulls last, stable otherwise -
+descending, then the order of `RepoCards` - a stable sort that never looks at `LastLaunchedUtc`:
 `AgentControl-MainWindowViewModel-SortOrder`) or, when `HasGroups`, the sections described under
-*DisplayedItems* (`AgentControl-MainWindowViewModel-GroupSections`). A section is collapsed only if
+*DisplayedItems* (`AgentControl-MainWindowViewModel-GroupSections`), each filled in `RepoCards` order. A section is
+collapsed only if
 no filter is active and its name is in `AppSettings.CollapsedGroups`
 (`AgentControl-MainWindowViewModel-GroupCollapse`, `-GroupFilter`). Both collections are brought to
 the new state **in place** (remove what is gone, move and insert the rest) rather than cleared, so
@@ -344,11 +370,77 @@ repository, `-GroupSettingsOnly`) and, once saved, refresh the cards' group prop
 events, which change nothing by themselves (`-GroupHeaderRequests`); `MainWindow` shows the name prompt or a
 confirmation and calls these methods.
 
-**AttachCardEvents** (private): Subscribes to each card's `FavoriteChanged`, `GroupChanged` and `LaunchRecorded`
-events so the displayed list is refreshed. The change itself was already saved by then: the card raises these events
-only after its `commitChange` callback (`CommitRepoChange`) reported success, so a failed save raises no event and
-refreshes nothing. A color change needs no re-ordering and so has no subscription here. A header's collapse toggle is
-run through `RunReportingSaveFailure` where the header is created.
+**GetSectionOf** (internal, static): The section a card is listed in: **Favorites** for a favorite, otherwise its group,
+otherwise **Ungrouped** - the rule `DisplayedItems` builds its sections with. With no repo in a group the list has no
+headers, and the same rule still yields two implicit tiers (Favorites, then everything else as Ungrouped) that the
+flat, favorites-first list is made of. A private `IsInSection(card, kind, name)` compares a card's section with a
+given one (names ignoring letter case) and `GetSectionMembers(card)` returns the cards of its section in `RepoCards`
+order.
+
+**GetMoveDisabledReason** / **CanMoveCard**: Say whether a card can be moved a given `RepoMove` now, and if not why.
+
+- *Returns*: `GetMoveDisabledReason` returns `null` when the move is allowed, otherwise the text the menu shows as the
+  tooltip of the disabled item: `ReorderDisabledWhileFilteringMessage` while the filter has text, "no longer in the
+  list" for a card that is not in `RepoCards`, and "already the first/last one in its section" for `Top`/`Up` on the
+  first and `Down`/`Bottom` on the last member of the section. `CanMoveCard` is `true` exactly when there is no reason
+  (`AgentControl-MainWindowViewModel-MoveAvailability`, `-ReorderOffWhileFiltering`).
+
+**MoveCard**: Moves a card to the top, one up, one down or to the bottom of **its section** and saves the new order.
+
+- *Postconditions*: The target is computed among the card's section members in `RepoCards` order (the first member,
+  the previous one, the next one, the last one) and the card is placed before or after it by `PlaceCard` (below).
+  Cards of other sections, which may be interleaved with the section's cards in the stored list, keep their relative
+  order. When the move is not allowed, nothing changes and nothing is saved (`-MoveCard`).
+- *Returns*: `true` when the card moved; `false` when the move was refused or the order could not be saved - that
+  failure is reported through `SettingsSaveFailed` and nothing changed.
+
+**CanDrop**: Pure check of whether a dragged card may be dropped at a `RepoDropTarget`.
+
+- *Postconditions*: Refused (`false`) while the filter has text, for a card that is not in `RepoCards`, for a target
+  whose anchor is no longer in `RepoCards` or no longer in the target section (a stale target), for a header of a group
+  that no longer exists, and - when no repo is in a group - for a place in the other tier: the flat list has no
+  headers that could explain the favorite change a drop there would imply, so in the flat list a drag only reorders
+  **within** its tier (`AgentControl-MainWindowViewModel-DropReorder`). Dropping a card next to itself is allowed and
+  changes nothing.
+
+**DropCard**: Drops a dragged card at a place (`AgentControl-MainWindowViewModel-DropReorder`, `-DropChangesSection`,
+`-DropOnHeader`).
+
+- *Preconditions*: `CanDrop` is `true`; otherwise `false` is returned and nothing changes.
+- *Postconditions*: When the card is not yet in the target section its section is changed first, through the paths
+  the menu and the star use: dropping into **Favorites** sets `IsFavorite` (the card keeps its group); dropping into a
+  **group** clears `IsFavorite` if set and calls `MoveToGroup(name)`; dropping into **Ungrouped** clears `IsFavorite`
+  if set and calls `MoveToGroup(null)`. If the card is then not in the requested section (a failed save, already
+  reported by the card through `SettingsSaveFailed`) nothing further is attempted and `false` is returned. Then
+  `PlaceCard` puts the card next to the anchor (before for the upper half of the row, after for the lower half) or,
+  for a header drop (no anchor), at the **end of the section**. A **collapsed** target section stays collapsed - its
+  header count shows the change; expanding it would silently change the collapsed state the user chose
+  (`AgentControl-MainWindowViewModel-DropOnHeader`).
+- *Two saves*: a drop that changes the section saves twice - the section change, then the new position. If only the
+  second fails, the card is in its new section at its old relative position and the failure is reported through
+  `SettingsSaveFailed`; the result is `false`.
+
+**PlaceCard** (private): Puts a card next to an anchor card, or at the end of its (current) section, in the stored
+order.
+
+- *Postconditions*: The new order is decided once from the live state: `RepoCards` without the card, with the card
+  inserted before/after the anchor or - with no anchor - after the last other member of its section (at the end of the
+  list when it has none). When that equals the current order nothing is saved. Otherwise
+  `CommitSettingsChange` writes the order (`ApplyRepoOrder` reorders `AppSettings.RecentRepos` in place, by path
+  ignoring letter case, an unlisted entry keeping its relative place after the listed ones; it also sets
+  `HasUserRepoOrder`), and only after a successful save `RepoCards` is brought to the new order (`ObservableCollection`
+  `Move` operations, so the cards stay attached to the window) and `UpdateDisplayedRepoCards` runs. A failed save is
+  reported through `SettingsSaveFailed` (`ReportSaveFailure`), `false` is returned and nothing changed. A saved order
+  is what the next start reads (`AgentControl-MainWindowViewModel-OrderPersisted`), and `RemoveRepo` leaves the rest
+  of the order as it was.
+
+**AttachCardEvents** (private): Subscribes to each card's `FavoriteChanged` and `GroupChanged` events so the displayed
+list is refreshed. It deliberately does **not** subscribe to `LaunchRecorded` (the card still raises it): nothing
+displayed depends on a launch any more, so a launch cannot move a card - structurally, not just through the sort
+(`AgentControl-MainWindowViewModel-StableOrder`). The change itself was already saved by then: the card raises these
+events only after its `commitChange` callback (`CommitRepoChange`) reported success, so a failed save raises no event
+and refreshes nothing. A color change needs no re-ordering and so has no subscription here. A header's collapse toggle
+is run through `RunReportingSaveFailure` where the header is created.
 
 #### Error Handling
 
@@ -359,7 +451,9 @@ credential or when the settings file cannot be written, leaving the current sett
 operations the window calls (`AddRepo`, `RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup`, `RemoveGroup`)
 throw `InvalidOperationException` when the settings file cannot be written, having changed nothing (the window
 catches it and tells the user); a change that comes from a card or a header button is not thrown but reported through
-`SettingsSaveFailed` (the callback returns `false`, the card keeps its value); `ToggleGroupCollapsed` throws
+`SettingsSaveFailed` (the callback returns `false`, the card keeps its value); `MoveCard`, `DropCard` and the order
+placement of `AddRepoToGroup` do not throw for a failed save either: they report it through `SettingsSaveFailed`,
+return `false` (or keep `MovedExisting`) and change nothing; `ToggleGroupCollapsed` throws
 `ArgumentException` for a blank name, while `RenameGroup` and `RemoveGroup` report an unknown group or unusable name
 by returning `false`. Group names read from
 settings are repaired (`RepoGroupName.Sanitize`) on the fly, a null collapsed list reads as empty, so
@@ -396,7 +490,9 @@ succeeding.
 - **App** — constructs `MainWindowViewModel` in `OnFrameworkInitializationCompleted`, passing the
   process-wide `PackageCredentialContext`, and assigns it as `MainWindow.DataContext`.
 - **MainWindow** (code-behind) — calls `AddRepo`, `RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and
-  `RemoveGroup` (catching the `InvalidOperationException` of a failed save and showing a message), starts the
+  `RemoveGroup` (catching the `InvalidOperationException` of a failed save and showing a message), asks
+  `IsReorderEnabled`, `CanMoveCard`/`GetMoveDisabledReason` and `CanDrop` and calls `MoveCard` and `DropCard` for the
+  Move menu items and for drag and drop (the failures are reported through `SettingsSaveFailed`), starts the
   upgrade check and the periodic re-check (`BeginUpgradeRefresh`, `StartPeriodicUpgradeRecheck`) when the view
   model is attached, disposes the view model when it closes, subscribes to
   `SettingsSaveFailed` to show a message for the changes that come from cards and headers, and reads `Settings` to open

@@ -73,7 +73,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that AddRepo inserts a new card at the front of the list and persists the
+    ///     Test that AddRepo appends a new card at the end of the list and persists the
     ///     updated settings to disk.
     /// </summary>
     [Fact]
@@ -87,7 +87,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         // Act: add the new repo
         var added = viewModel.AddRepo(newRepo);
 
-        // Assert: the card was added at the front, and settings were persisted
+        // Assert: the card was added, and settings were persisted
         Assert.True(added);
         var card = Assert.Single(viewModel.RepoCards);
         Assert.Equal(newRepo, card.RepoPath);
@@ -298,58 +298,32 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that DisplayedRepoCards sorts favorites above non-favorites regardless of
-    ///     LastLaunchedUtc.
+    ///     Test that DisplayedRepoCards lists favorites above non-favorites and otherwise keeps the
+    ///     stored order, whatever the launch times are.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_DisplayedRepoCards_SortsFavoritesAboveNonFavorites()
+    public void MainWindowViewModel_DisplayedRepoCards_FavoritesFirstThenStoredOrder()
     {
-        // Arrange: a non-favorite repo launched more recently than a favorite repo
+        // Arrange: a stored user order whose launch times point the other way round
+        var firstNonFavorite = CreateTempDirectory();
         var favoriteRepo = CreateTempDirectory();
-        var recentNonFavoriteRepo = CreateTempDirectory();
+        var secondNonFavorite = CreateTempDirectory();
         var settings = new AppSettings
         {
+            HasUserRepoOrder = true,
             RecentRepos =
             [
+                new RecentRepo { Path = firstNonFavorite, LastLaunchedUtc = DateTimeOffset.UtcNow.AddDays(-5) },
                 new RecentRepo { Path = favoriteRepo, IsFavorite = true, LastLaunchedUtc = DateTimeOffset.UtcNow.AddDays(-10) },
-                new RecentRepo { Path = recentNonFavoriteRepo, IsFavorite = false, LastLaunchedUtc = DateTimeOffset.UtcNow }
+                new RecentRepo { Path = secondNonFavorite, LastLaunchedUtc = DateTimeOffset.UtcNow }
             ]
         };
         var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
 
-        // Act / Assert: the favorite (older launch) sorts above the more-recently-launched
-        // non-favorite
-        Assert.Equal(favoriteRepo, viewModel.DisplayedRepoCards[0].RepoPath);
-        Assert.Equal(recentNonFavoriteRepo, viewModel.DisplayedRepoCards[1].RepoPath);
-    }
-
-    /// <summary>
-    ///     Test that DisplayedRepoCards sorts by LastLaunchedUtc descending within the same
-    ///     favorite tier, with never-launched (null) repos sorted last.
-    /// </summary>
-    [Fact]
-    public void MainWindowViewModel_DisplayedRepoCards_SortsByLastLaunchedUtcDescendingWithNullsLast()
-    {
-        // Arrange: three non-favorite repos - one launched recently, one launched earlier, one
-        // never launched
-        var recentlyLaunched = CreateTempDirectory();
-        var earlierLaunched = CreateTempDirectory();
-        var neverLaunched = CreateTempDirectory();
-        var settings = new AppSettings
-        {
-            RecentRepos =
-            [
-                new RecentRepo { Path = neverLaunched },
-                new RecentRepo { Path = earlierLaunched, LastLaunchedUtc = DateTimeOffset.UtcNow.AddDays(-1) },
-                new RecentRepo { Path = recentlyLaunched, LastLaunchedUtc = DateTimeOffset.UtcNow }
-            ]
-        };
-        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
-
-        // Act / Assert
-        Assert.Equal(recentlyLaunched, viewModel.DisplayedRepoCards[0].RepoPath);
-        Assert.Equal(earlierLaunched, viewModel.DisplayedRepoCards[1].RepoPath);
-        Assert.Equal(neverLaunched, viewModel.DisplayedRepoCards[2].RepoPath);
+        // Act / Assert: the favorite first, then the others in the stored order (not by launch time)
+        Assert.Equal(
+            [favoriteRepo, firstNonFavorite, secondNonFavorite],
+            viewModel.DisplayedRepoCards.Select(card => card.RepoPath));
     }
 
     /// <summary>

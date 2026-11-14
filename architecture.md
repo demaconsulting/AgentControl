@@ -50,12 +50,14 @@ day as a quick-launch utility for AI-assisted development sessions.
   selection, shell preference)
 - Personal organization and appearance, stored only in the user's own settings
   (never in a repo): favorites, repo groups shown as collapsible sections,
+  the user's own order of the repo cards (reordered from the card menu or by
+  drag and drop, and never changed by launching),
   card colors, an optional repo picture (`icon.png`/`logo.png`) on the card,
   and a light/dark/system color theme; every change is saved before it is
   applied
 - Repo-card status badges: upgrade-available, committed-agent-files warning,
   missing-repo, dirty-working-tree; per-repo current branch name; recent-repos
-  search/filter and most-recently-launched sort order (with pinning/favorites);
+  search/filter and a stable, user-controlled order (favorites first);
   per-repo manual refresh; confirmation prompt before removing a repo from the
   recent-repos list
 - Diagnostic file logging (Serilog-based) for troubleshooting process-launch
@@ -127,7 +129,8 @@ day as a quick-launch utility for AI-assisted development sessions.
 AgentControl
 ├── LauncherUI (Avalonia) - recent repos list, launch button, settings page,
 │   │                       upgrade notification badges/tooltips
-│   ├── MainWindowViewModel - owns the recent-repos list; creates a
+│   ├── MainWindowViewModel - owns the recent-repos list in the user's own
+│   │                         order (Move/drag reorder it); creates a
 │   │                         RepoCardViewModel per repo and a
 │   │                         RepoGroupHeaderViewModel per list section;
 │   │                         saves every change (candidate copy -> save ->
@@ -190,9 +193,11 @@ AgentControl
     │          folder-browse dialog), git executable path override, agent
     │          tool selection (Copilot CLI / Cursor / Claude Code / Custom
     │          command), shell/terminal preference, color theme, and the
-    │          user's own repo groups, card colors and collapsed sections
+    │          user's own repo groups, card colors, collapsed sections and
+    │          repo order (seeded once for an older file)
     ├── SettingsStore - loads (repairing unusable values, such as an unknown
-    │                   card color) and saves the settings file
+    │                   card color, and seeding the repo order once) and saves
+    │                   the settings file
     └── RepoGroupName - the rules for group names, used by SettingsStore,
                         RepoCardViewModel, MainWindowViewModel and
                         GroupNameViewModel
@@ -335,9 +340,17 @@ AgentControl
     since the path may reappear).
   - 🔒 **Dirty working tree** — suppresses/disables the Pull action.
 
-  The recent-repos list supports a search/filter box and sorts by
-  most-recently-launched by default, with the ability to pin/favorite
-  specific repos above that ordering. Each card has a manual refresh action
+  The recent-repos list supports a search/filter box. Its order belongs to
+  the user: favorites come first, and otherwise the repos stay in the order
+  the user keeps them in. A newly added repo goes to the bottom of its
+  section, and launching, refreshing or any other action never moves a card.
+  The user reorders from a card's "..." menu (Move to top/up/down/bottom) or
+  by dragging a card within a section, into another section (which sets its
+  group or favorite flag) or onto a section header; reordering is off while
+  the filter has text, and the order is kept only in the user's own settings
+  (a settings file from before this order existed is seeded once from the old
+  favorites-then-most-recently-launched arrangement, so nothing jumps on
+  upgrade). Each card has a manual refresh action
   (re-checks git state and the committed-agent-files badge without waiting
   for the next full app launch) and a confirmation prompt before "Remove
   from list" (a destructive action against AgentControl's own state, not the

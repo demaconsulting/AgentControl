@@ -121,6 +121,7 @@
             <ListBox Name="RepoListBox"
                       AutomationProperties.AutomationId="RepoListBox"
                       Classes="repoList"
+                      DragDrop.AllowDrop="True"
                       Margin="-8,0,-8,0"
                       IsVisible="{Binding !HasNoDisplayedRepos}"
                       ItemsSource="{Binding DisplayedItems}">
@@ -214,6 +215,7 @@
                 <DataTemplate DataType="vm:RepoCardViewModel" x:DataType="vm:RepoCardViewModel">
                     <Border Classes="RepoCard"
                              AttachedToVisualTree="RepoCard_AttachedToVisualTree">
+                        <Panel>
                         <!-- Accent bar (overall status) | card body -->
                         <Grid ColumnDefinitions="Auto,*">
                             <!-- Status accent: green = up to date, amber = upgrade available, red =
@@ -302,7 +304,7 @@
                                     <Button.Flyout>
                                         <!-- Grouped menu: Repository (Git Pull, Refresh), Agent files (Select
                                              Package or Upgrade, whichever applies), Organize (Move to group,
-                                             Card color), then Remove. The group
+                                             Move to top/up/down/bottom, Card color), then Remove. The group
                                              headers are disabled items (not interactive, skipped by the
                                              keyboard) styled as small captions. -->
                                         <MenuFlyout Opening="CardMenu_Opening">
@@ -375,6 +377,49 @@
                                                        ToolTip.Tip="Put this repo in one of your groups, or start a new group (stored only in your AgentControl settings, never in the repository)">
                                                 <MenuItem.Icon>
                                                     <materialIcons:MaterialIcon Kind="FolderMultipleOutline" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <!-- Move within the section: enabled/disabled (and their tooltip) are set
+                                                 when the menu opens (see CardMenu_Opening); disabled while the
+                                                 filter has text and at the boundaries of the section -->
+                                            <MenuItem Name="MoveToTopMenuItem"
+                                                       AutomationProperties.AutomationId="MoveToTopMenuItem"
+                                                       Header="Move to top"
+                                                       ToolTip.Tip="Put this repo first in its section"
+                                                       ToolTip.ShowOnDisabled="True"
+                                                       Click="MoveToTopMenuItem_Click">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="ArrowCollapseUp" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <MenuItem Name="MoveUpMenuItem"
+                                                       AutomationProperties.AutomationId="MoveUpMenuItem"
+                                                       Header="Move up"
+                                                       ToolTip.Tip="Move this repo one place up in its section"
+                                                       ToolTip.ShowOnDisabled="True"
+                                                       Click="MoveUpMenuItem_Click">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="ArrowUp" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <MenuItem Name="MoveDownMenuItem"
+                                                       AutomationProperties.AutomationId="MoveDownMenuItem"
+                                                       Header="Move down"
+                                                       ToolTip.Tip="Move this repo one place down in its section"
+                                                       ToolTip.ShowOnDisabled="True"
+                                                       Click="MoveDownMenuItem_Click">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="ArrowDown" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <MenuItem Name="MoveToBottomMenuItem"
+                                                       AutomationProperties.AutomationId="MoveToBottomMenuItem"
+                                                       Header="Move to bottom"
+                                                       ToolTip.Tip="Put this repo last in its section"
+                                                       ToolTip.ShowOnDisabled="True"
+                                                       Click="MoveToBottomMenuItem_Click">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="ArrowCollapseDown" />
                                                 </MenuItem.Icon>
                                             </MenuItem>
                                             <MenuItem Name="CardColorMenuItem"
@@ -785,6 +830,12 @@
                             </Grid>
                             </Grid>
                         </Grid>
+                        <!-- Drag and drop insertion line: shown above or below the card (in the gap
+                             between cards) while a dragged card hovers over its upper or lower half.
+                             Never hit-testable and takes no layout space. -->
+                        <Border Name="DropIndicatorAbove" Classes="DropIndicator above" />
+                        <Border Name="DropIndicatorBelow" Classes="DropIndicator below" />
+                        </Panel>
                     </Border>
                 </DataTemplate>
             </ListBox.DataTemplates>

@@ -171,6 +171,9 @@ port, and the real `git upload-pack`).
   sections while no repo is in a group; a collapsed section is still collapsed after a restart; the filter finds a
   repo inside a collapsed group; groups and card colors are stored only in the user's settings (the repository stays
   untouched), and a chosen card color leaves the card's status unchanged.
+- Launching a repo leaves its card where it is; the card menu's Move items and a real mouse drag reorder the cards and
+  a drag onto a group's header moves a card into the group; the order is stored only in the user's settings and is
+  still there after a restart.
 - The AGENTS.md question of an upgrade is shown before its release notes.
 - A source that requires signed packages is refused an unsigned package end to end and the repo is left unchanged;
   a valid signature, the publisher pin and the platform fail-closed behavior are proven at the subsystem and unit
@@ -195,12 +198,38 @@ is gated on user confirmation. This scenario is tested by
 `windows@RemoveMenuItem_ClickThenConfirm_RemovesCard_DecliningLeavesItInPlace`, covering
 `AgentControl-System-AddRemoveRepo`.
 
-**AgentControl_SearchAndSort_FilterTextBox_HidesAndRestoresCards**: Non-matching text is typed
+**AgentControl_SearchFilter_FilterTextBox_HidesAndRestoresCards**: Non-matching text is typed
 into the filter text box, hiding a repo card, and then the filter is cleared, restoring it;
-confirms the recent-repos list is searchable and returns to its sorted (favorites-first,
-most-recently-launched) order once the filter is removed. This scenario is tested by
+confirms the repo list is searchable and returns to its full list once the filter is removed. This
+scenario is tested by
 `windows@FilterTextBox_TypingNonMatchingText_HidesRepoCard_ClearingRestoresIt`, covering
-`AgentControl-System-SearchAndSort`.
+`AgentControl-System-SearchFilter`.
+
+**AgentControl_RepoOrder_LaunchingARepo_KeepsTheCardWhereItIs**: The published application is started over three
+repos in the user's stored order, with launch times that the earlier "most recently launched first" order would have used;
+Launch is clicked on the last card and the stubbed agent tool records its invocation. The cards are in the same order
+afterwards, in the window and in the settings file. This scenario is tested by
+`windows@RepoList_LaunchingARepo_KeepsTheCardWhereItIs`, covering `AgentControl-System-RepoOrder`. That a repo added
+goes to the bottom of its section and that favorites stay first are verified at the `LauncherUI` subsystem and unit
+levels.
+
+**AgentControl_RepoReorder_MenuAndDrag_ReorderAndMoveIntoGroups**: In the published application the "Move down" item of
+the first card's menu swaps it with the second card (its "Move up" item is disabled) and the order is written to the
+settings file only (the repository stays empty); a real mouse drag of the first card (pressed on its status bar, moved
+in steps) onto the lower half of the last card puts it last; and a real mouse drag of a card onto a group's header
+puts it in
+that group. This scenario is tested by `windows@CardMenu_MoveDown_ReordersCardAndStoresOrderInSettings`,
+`windows@RepoList_DragCardBelowAnother_ReordersAndKeepsOrderAfterRestart` and
+`windows@RepoList_DragCardOntoGroupHeader_MovesItIntoTheGroup`, covering `AgentControl-System-RepoReorder`. The drop
+cases, the insertion line, the contrast of its colors and the filter turning reordering off are verified at the
+`LauncherUI` subsystem and unit levels, where the drop events are raised on a headless window.
+
+**AgentControl_RepoOrderRemembered_RestartKeepsTheOrder**: After a real mouse drag has reordered the cards, the
+application is closed and started again over the same settings; the cards are in the dragged order, and the settings
+file holds the repos in that order. This scenario is tested by
+`windows@RepoList_DragCardBelowAnother_ReordersAndKeepsOrderAfterRestart`, covering
+`AgentControl-System-RepoOrderRemembered`; that settings without a stored order are arranged once the way earlier
+versions displayed them is verified at the `Settings` subsystem and unit levels.
 
 **AgentControl_Launch_LaunchButton_InvokesConfiguredAgentToolInWorkingDirectory**: The Launch
 button is clicked on a repo card whose agent files are already synced; the configured

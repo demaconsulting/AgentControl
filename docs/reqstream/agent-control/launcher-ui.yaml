@@ -766,8 +766,7 @@ sections:
           The LauncherUI subsystem shall filter displayed repo cards by a case-insensitive
           match against the repo's name or path.
         justification: |
-          Lets a developer quickly narrow a long recent-repos list down to the repo they are
-          looking for.
+          Lets a developer quickly narrow a long repo list down to the repo they are looking for.
         children:
           - AgentControl-MainWindowViewModel-SearchFilter
         tests:
@@ -776,17 +775,133 @@ sections:
 
       - id: AgentControl-LauncherUI-SortOrder
         title: >-
-          The LauncherUI subsystem shall order displayed repo cards with favorites first,
-          then by most-recently-launched.
+          The LauncherUI subsystem shall list favorites first and otherwise in the user's own
+          order, never in an order that depends on when a repo was launched.
         justification: |
-          Surfaces the repos a developer is most likely to want next without requiring manual
-          reordering.
+          Developers keep their repos where they put them; an order driven by launch time moves a
+          repo every time it is used, so the repo just launched would no longer be where the
+          developer looks for it. Favorites remain the first section (or the top of the flat list).
         children:
           - AgentControl-MainWindowViewModel-SortOrder
+          - AgentControl-MainWindowViewModel-OrderKept
+          - AgentControl-MainWindowViewModel-LegacyOrderSeeded
           - AgentControl-RepoCardViewModel-Favorite
         tests:
-          - MainWindowViewModel_DisplayedRepoCards_SortsFavoritesAboveNonFavorites
-          - MainWindowViewModel_DisplayedRepoCards_SortsByLastLaunchedUtcDescendingWithNullsLast
+          - MainWindow_ExistingRepos_ShownInStoredOrder_FavoritesFirst
+          - MainWindowViewModel_DisplayedRepoCards_FavoritesFirstThenStoredOrder
+
+      - id: AgentControl-LauncherUI-StableRepoOrder
+        title: >-
+          The LauncherUI subsystem shall not move a repo card when its repo is launched or
+          refreshed, and shall put a repo that is added at the bottom of its section.
+        justification: |
+          Only the user's own actions may change the order, so a card is where the user left it,
+          and a new repo appears in a predictable place (the end of the section it was added to)
+          instead of pushing everything else down.
+        children:
+          - AgentControl-MainWindowViewModel-StableOrder
+          - AgentControl-MainWindowViewModel-NewRepoAtEnd
+        tests:
+          - MainWindow_Launch_DoesNotMoveTheCard
+          - MainWindow_RepoAdded_AppearsAtTheBottomOfItsSection
+
+      - id: AgentControl-LauncherUI-RepoOrderMenu
+        title: >-
+          The LauncherUI subsystem shall offer, in the Organize group of each card's menu, moving the
+          repo to the top, up, down or to the bottom of its section, with the items that do not apply
+          disabled.
+        justification: |
+          A menu is the way to reorder that works from the keyboard and for a long list where
+          dragging over a distance is awkward; disabling the moves that lead nowhere (and saying why)
+          shows where the repo is in its section.
+        children:
+          - AgentControl-MainWindowViewModel-MoveCard
+          - AgentControl-MainWindowViewModel-MoveAvailability
+        tests:
+          - MainWindow_CardMenu_MoveItems_ReorderAndDisableAtTheBoundaries
+          - MainWindow_CardMenu_MoveItemsInOrganizeGroupWithIdsAndTooltips
+
+      - id: AgentControl-LauncherUI-RepoDragReorder
+        title: >-
+          The LauncherUI subsystem shall let the user drag a repo card within its section and put it
+          before or after another card, and shall in the flat list only reorder within the favorites
+          or the other repos.
+        justification: |
+          Dragging is the direct way to put a repo where it belongs. Without section headers in the
+          flat list a drop could not explain a change of the favorite state, so there it only
+          reorders.
+        children:
+          - AgentControl-MainWindowViewModel-DropReorder
+        tests:
+          - MainWindow_DragCard_WithinSection_ReordersAtDropPosition
+          - MainWindow_DragCard_FlatList_OnlyReordersWithinItsTier
+
+      - id: AgentControl-LauncherUI-RepoDragBetweenSections
+        title: >-
+          The LauncherUI subsystem shall let the user drag a repo card into another section, which
+          sets the repo's group (or removes it, for Ungrouped) or its favorite state exactly as the
+          menu and the star do, and puts the card at the drop position.
+        justification: |
+          A repo that belongs in another group, or among the favorites, is moved there in one
+          gesture, with the same result as the menu's Move to group and the favorite star so the
+          two ways never disagree.
+        children:
+          - AgentControl-MainWindowViewModel-DropChangesSection
+        tests:
+          - MainWindow_DragCard_IntoOtherSection_ChangesGroupOrFavoriteAtDropPosition
+
+      - id: AgentControl-LauncherUI-RepoDropOnHeader
+        title: >-
+          The LauncherUI subsystem shall put a repo card dropped on a section header, also a collapsed
+          one, at the bottom of that section, leaving a collapsed section collapsed.
+        justification: |
+          A header is a large target that is always there, even for a section whose cards are hidden;
+          expanding it would change the collapsed state the user chose.
+        children:
+          - AgentControl-MainWindowViewModel-DropOnHeader
+        tests:
+          - MainWindow_DropOnGroupHeader_MovesCardToTheGroupBottom
+          - MainWindow_DropOnCollapsedGroupHeader_MovesCardAndKeepsTheGroupCollapsed
+
+      - id: AgentControl-LauncherUI-RepoDropFeedback
+        title: >-
+          The LauncherUI subsystem shall show where a dragged repo card will land - a line above or
+          below the card under the pointer, or a tint on the header - and nothing where a drop is
+          refused, in colors that are legible in the light and the dark theme.
+        justification: |
+          A drop that lands somewhere the user did not expect is worse than no drag; the feedback is
+          what makes the place predictable, and it has to be visible against both themes' surfaces.
+        tests:
+          - MainWindow_DragOver_ShowsInsertionIndicatorAboveOrBelowAndClearsItAfterwards
+          - ThemeResources_DropIndicator_IsLegibleInLightAndDark
+
+      - id: AgentControl-LauncherUI-ReorderOffWhileFiltering
+        title: >-
+          The LauncherUI subsystem shall not start a drag and shall disable the Move items, with a
+          tooltip that says why, while the filter has text, and shall never change the order by
+          filtering.
+        justification: |
+          A filtered list shows only some of the repos, so a place in it is not a place in the whole
+          list; refusing the change is safer than guessing, and the explanation tells the user how to
+          get the ability back.
+        children:
+          - AgentControl-MainWindowViewModel-ReorderOffWhileFiltering
+        tests:
+          - MainWindow_FilterActive_DragStartsNothingAndMoveItemsAreDisabledWithTooltip
+
+      - id: AgentControl-LauncherUI-RepoOrderRemembered
+        title: >-
+          The LauncherUI subsystem shall save the user's repo order in the settings when it changes
+          and show the saved order when the window is created again, and shall keep it when settings
+          are applied from the Settings window or a repo is removed.
+        justification: |
+          An order that is not saved is lost at the next start, and one that the Settings window or a
+          removal disturbed would not be the order the user made.
+        children:
+          - AgentControl-MainWindowViewModel-OrderPersisted
+          - AgentControl-MainWindowViewModel-OrderKeptOnApplySettings
+        tests:
+          - MainWindow_ReorderedList_OrderSurvivesAWindowRestart
 
       - id: AgentControl-LauncherUI-Launch
         title: >-

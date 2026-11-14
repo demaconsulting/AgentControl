@@ -37,7 +37,10 @@ and the actions become available again (`AgentControl-RepoCardViewModel-MissingR
 
 **IsFavorite**, **LastLaunchedUtc**, **PinnedPackageName**, **PinnedPackageVersion**,
 **SupplyingSource**: mirror the corresponding fields on the shared `RecentRepo`/pin file
-(`AgentControl-RepoCardViewModel-Favorite`, `AgentControl-RepoCardViewModel-DisplayInfo`).
+(`AgentControl-RepoCardViewModel-Favorite`, `AgentControl-RepoCardViewModel-DisplayInfo`). `IsFavorite` decides the
+section the card is listed in (Favorites, the first one); `LastLaunchedUtc` only records when the repo was last
+launched - it no longer orders the list, which is in the user's own order, but it still feeds the one-time seed of that
+order for an older settings file (`AppSettings.EnsureRepoOrder`).
 `IsFavorite` is the *only* owner of the favorite state: the card's star is a `ToggleButton` whose `IsChecked`
 binds to it two-way and the card has no favorite command. (An earlier design also bound a command that toggled
 the property, so one click flipped the state twice - the toggle itself, then the command - and a repo could
@@ -433,7 +436,8 @@ becomes a source problem with the exception's secret-free message and no sign-in
 - *Parameters*: None (bound to `LaunchCommand`).
 - *Returns*: `void`.
 - *Postconditions*: On success, `StatusMessage` is set and the launch time is recorded through the owner
-  (`RecordLaunched`: the stamp is saved first, then `LastLaunchedUtc` is set and `LaunchRecorded` raised; when the
+  (`RecordLaunched`: the stamp is saved first, then `LastLaunchedUtc` is set and `LaunchRecorded` raised - the stamp
+  only records the launch, the main view-model does not listen and the card never moves; when the
   save fails the stamp is not recorded and the process was launched all the same,
   `AgentControl-RepoCardViewModel-Launch`, `-ChangeSavedBeforeApplied`); on failure, `ErrorOccurred` is raised.
 
@@ -937,8 +941,10 @@ background task, and a retired card raises nothing.
 
 - **MainWindowViewModel** — constructs one `RepoCardViewModel` per `RecentRepo`, passing its `commitChange` callback
   (which saves each of the card's changes before applying it), subscribes to
-  `FavoriteChanged`/`GroupChanged`/`LaunchRecorded` to re-sort/re-section the displayed list (settings are already
-  saved by then; `CardColorChanged` needs no re-ordering), and retires a card when its repo is removed.
+  `FavoriteChanged`/`GroupChanged` to re-section the displayed list (it deliberately does not subscribe to
+  `LaunchRecorded`: a launch never reorders the list; settings are already
+  saved by then; `CardColorChanged` needs no re-ordering), and retires a card when its repo is removed. It also
+  drives a drop in another section through `IsFavorite` and `MoveToGroup`, the same paths as the star and the menu.
 - **MainWindow** (code-behind) — subscribes to `RemoveRequested`
   (`AgentControl-RepoCardViewModel-RemoveRequest`), `SelectPackageRequested`, `NewGroupRequested`,
   `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`,

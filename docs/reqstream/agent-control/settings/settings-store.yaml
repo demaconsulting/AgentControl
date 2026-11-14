@@ -227,6 +227,40 @@ sections:
         tests:
           - SettingsStore_Load_UnknownCardColorName_ReadsAsAutomaticAndIsNotSavedBack
 
+      - id: AgentControl-SettingsStore-RepoOrder
+        title: >-
+          The SettingsStore class shall save and load the repos in the sequence the user gave them,
+          together with the marker that says the sequence is the user's own order.
+        justification: |
+          The user's order is the sequence of the repo list itself, so it survives a restart only if
+          the store keeps the sequence, and the marker is what stops it from being arranged again.
+        tests:
+          - SettingsStore_SaveThenLoad_RepoOrder_RoundTripsInTheStoredSequence
+
+      - id: AgentControl-SettingsStore-RepoOrderLegacySeed
+        title: >-
+          The SettingsStore class shall, when loading a file without the repo-order marker, arrange the
+          repos once as favorites first, then the most recently launched with never launched repos
+          last (repos with equal keys keeping their sequence), and mark the result as the user's
+          order; a file with the marker keeps its sequence.
+        justification: |
+          A file written before the order was stored lists the repos in the order they were added, not
+          in the order the user saw; arranging it once keeps the list where it was without ever
+          re-sorting an order the user made.
+        tests:
+          - SettingsStore_Load_FileWithoutOrderMarker_SeedsFavoritesFirstThenMostRecentlyLaunched
+          - SettingsStore_Load_FileWithOrderMarker_KeepsTheStoredSequence
+
+      - id: AgentControl-SettingsStore-RepoOrderMarkerRepaired
+        title: >-
+          The SettingsStore class shall read a repo-order marker that is not a boolean as "not
+          arranged yet", without failing the load or disturbing the values around it.
+        justification: |
+          A damaged or hand-edited marker must not keep the application from starting; the list is
+          then simply arranged as for a file without the marker.
+        tests:
+          - SettingsStore_Load_InvalidOrderMarker_ReadsAsNotSeededAndSeeds
+
       - id: AgentControl-SettingsStore-GitSourceRoundTrip
         title: >-
           The SettingsStore class shall save and load a Git source with its repository address, tag

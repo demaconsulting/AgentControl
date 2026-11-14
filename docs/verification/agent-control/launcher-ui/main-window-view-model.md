@@ -3,7 +3,8 @@
 #### Verification Approach
 
 `MainWindowViewModel` is verified with unit tests defined in `MainWindowViewModelTests.cs`, `RepoGroupingTests.cs`
-(sections, collapse, filter, rename and removal of groups), `MainWindowViewModelPersistenceTests.cs` (every change
+(sections, collapse, filter, rename and removal of groups), `RepoOrderingTests.cs` (the user's own order: stability, new
+repos, the legacy seed, Move, drag and drop, filtering, persistence), `MainWindowViewModelPersistenceTests.cs` (every change
 the user makes when the settings file cannot be written) and `MainWindowViewModelRecheckTests.cs` (the periodic upgrade
 re-check, on a fake clock).
 Each test constructs a real `MainWindowViewModel` against a unique temporary configuration
@@ -23,8 +24,14 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - All unit tests pass with zero failures.
 - Repo cards are created for every recent repo recorded in settings on construction.
 - Add/remove operations correctly mutate both in-memory collections and persisted settings.
-- Search filtering and sort ordering produce the documented result for every tested input.
-- Applying updated settings preserves the recent-repos list and invalidates the shared
+- Search filtering and the user's own ordering (favorites first, then the stored order, never launch time) produce the
+  documented result for every tested input.
+- A launch, a refresh and applying settings never reorder the cards; a new repo goes to the end; settings without a
+  stored order are arranged once as favorites first and then by recency, and a stored order is kept as it is.
+- Move and drop reorder within a section (and between sections, setting group or favorite as the menu and the star do),
+  refuse what does not apply, change nothing when saving fails, are off while the filter has text, and the order is saved
+  and survives applying settings and removing a repo.
+- Applying updated settings preserves the repo list and its order and invalidates the shared
   package-version cache.
 - Applying settings drops cached package results only for sources that were edited or removed.
 - Constructing the view model reads no package source; upgrade availability is checked in the
@@ -102,13 +109,87 @@ is tested by
 `MainWindowViewModel_HasDisplayedRepos_HasNoDisplayedReposFalse`, covering
 `AgentControl-MainWindowViewModel-EmptyState`.
 
-**MainWindowViewModel_SortOrder_FavoritesFirstThenRecencyWithNullsLast**: A favorite repo
-launched longer ago sorts above a more-recently-launched non-favorite; among non-favorites, a
-recently-launched repo sorts above an earlier-launched one, which sorts above a never-launched
-repo. This scenario is tested by
-`MainWindowViewModel_DisplayedRepoCards_SortsFavoritesAboveNonFavorites` and
-`MainWindowViewModel_DisplayedRepoCards_SortsByLastLaunchedUtcDescendingWithNullsLast`,
-covering `AgentControl-MainWindowViewModel-SortOrder`.
+**MainWindowViewModel_SortOrder_FavoritesFirstThenStoredOrder**: Settings that hold a stored user order (the marker is
+set) whose launch times point the other way round than the order are shown with the favorite first and the others in
+the stored order, not by launch time; launching a repo and then putting repos in groups leaves the flat list and the
+sections in the stored order. This scenario is tested by
+`MainWindowViewModel_DisplayedRepoCards_FavoritesFirstThenStoredOrder` and
+`MainWindowViewModel_DisplayedRepoCards_LaunchTimesDoNotAffectStoredOrder`, covering
+`AgentControl-MainWindowViewModel-SortOrder`. A stored order is kept exactly, whatever the launch times say
+(`MainWindowViewModel_Constructor_StoredOrder_IsKeptWhateverTheLaunchTimes`, covering
+`AgentControl-MainWindowViewModel-OrderKept`). Settings without a stored order - an older file, or a first run built in
+memory - are arranged once as favorites first, then the most recently launched with never-launched repos last
+(`MainWindowViewModel_Constructor_NoStoredOrder_SeedsFavoritesFirstThenMostRecentlyLaunched`), and the next save of any
+kind writes that order and the marker, so it is not arranged again
+(`MainWindowViewModel_Constructor_SeededOrder_IsWrittenByTheNextSave`), covering
+`AgentControl-MainWindowViewModel-LegacyOrderSeeded`.
+
+**MainWindowViewModel_StableOrder_LaunchRefreshAndApplySettingsNeverMoveCards**: Tested by `RepoOrderingTests.cs` (same
+`RealProcess` collection and temporary-directory approach; a fake process starter and shell detector, so a launch
+starts nothing; a failing save is made by turning `settings.json` into a directory). Launching a repo records the launch
+but leaves the cards, the displayed list and the saved order as they were
+(`MainWindowViewModel_Launch_DoesNotReorderCards`); refreshing the cards, applying settings and the background upgrade
+check leave them as they were too (`MainWindowViewModel_RefreshAndApplySettings_DoNotReorderCards`), covering
+`AgentControl-MainWindowViewModel-StableOrder`. A repo added with the top-bar add is last in the list and in the file
+(and in the flat list below the other repos of its tier); a repo added to a group is at the bottom of that group; a
+repo that is already listed and is added to a group goes to the bottom of the group wherever it was in the list
+(`MainWindowViewModel_AddRepo_NewRepoGoesToTheEndOfTheList`,
+`MainWindowViewModel_AddRepoToGroup_NewRepoGoesToTheBottomOfTheGroup` and
+`MainWindowViewModel_AddRepoToGroup_RepoAlreadyListed_MovesToTheBottomOfTheGroup`), covering
+`AgentControl-MainWindowViewModel-NewRepoAtEnd`.
+
+**MainWindowViewModel_MoveCard_TopUpDownBottomWithinTheSection**: `MoveCard` puts a card first, one up, one down or last
+in its section and saves the order (`MainWindowViewModel_MoveCard_TopUpDownBottom_ReordersWithinTheSection`); a move
+that leads nowhere is refused without saving (`MainWindowViewModel_MoveCard_AtBoundary_IsRefusedAndChangesNothing`);
+when the cards of two sections alternate in the stored list a move changes only the moved card's place and leaves the
+other section's order alone (`MainWindowViewModel_MoveCard_SectionsInterleavedInTheList_KeepsOtherSectionsOrder`); and
+when the order cannot be saved nothing changes, the user is told once, and the same move works once saving works
+(`MainWindowViewModel_MoveCard_SaveFails_ChangesNothingAndReports`), covering `AgentControl-MainWindowViewModel-MoveCard`.
+`CanMoveCard` reports each of the four moves for the first, a middle and the last card
+(`MainWindowViewModel_CanMoveCard_FirstMiddleAndLast_ReportsEachItem`), and `GetMoveDisabledReason` names the reason -
+first, last, or the filter - and is `null` when the move is allowed
+(`MainWindowViewModel_GetMoveDisabledReason_NamesTheReason`), covering
+`AgentControl-MainWindowViewModel-MoveAvailability`.
+
+**MainWindowViewModel_DropCard_PlacesTheCardAtTheDropPosition**: `DropCard` puts a card before or after a card of its
+section and saves (`MainWindowViewModel_DropCard_BeforeAndAfterAnAnchor_ReordersWithinTheSection`); dropping a card on
+itself, or where it already is, is accepted and saves nothing (`MainWindowViewModel_DropCard_OnItself_ChangesNothing`);
+in a list without groups a drop in the other tier is refused, changing no favorite state, while a drop in its own tier
+works (`MainWindowViewModel_DropCard_FlatListOtherTier_IsRefused`); and a target whose card was removed, or is not in
+the target section, is refused (`MainWindowViewModel_DropCard_StaleAnchor_IsRefused`), covering
+`AgentControl-MainWindowViewModel-DropReorder`. Dropping in another section sets the group between two cards of another
+group, removes it in Ungrouped, marks a favorite and keeps the group in Favorites, and clears the favorite state on
+leaving Favorites, into a group or into Ungrouped, each at the drop position and saved
+(`MainWindowViewModel_DropCard_IntoAnotherGroup_SetsTheGroupAtTheDropPosition`,
+`MainWindowViewModel_DropCard_IntoUngrouped_RemovesTheGroup`,
+`MainWindowViewModel_DropCard_IntoFavorites_MarksFavoriteAndKeepsTheGroup`,
+`MainWindowViewModel_DropCard_OutOfFavoritesIntoGroup_ClearsFavoriteAndSetsTheGroup` and
+`MainWindowViewModel_DropCard_OutOfFavoritesIntoUngrouped_ClearsFavoriteAndGroup`); when the section change cannot be
+saved nothing changes and the user is told once (`MainWindowViewModel_DropCard_SectionChangeSaveFails_ChangesNothingAndReports`),
+covering `AgentControl-MainWindowViewModel-DropChangesSection`. A drop on a group's header puts the card at the bottom
+of the group; on a collapsed group's header it does the same, leaves the group collapsed (the same header object, still
+collapsed) and updates its count; on the Favorites and Ungrouped headers it favorites, or un-favorites and takes the
+card out of its group, at the bottom of that section (`MainWindowViewModel_DropCard_OnGroupHeader_GoesToTheBottomOfTheGroup`,
+`MainWindowViewModel_DropCard_OnCollapsedGroupHeader_KeepsItCollapsedAndUpdatesTheCount` and
+`MainWindowViewModel_DropCard_OnFavoritesAndUngroupedHeaders_MoveTheCardThere`), covering
+`AgentControl-MainWindowViewModel-DropOnHeader`.
+
+**MainWindowViewModel_ReorderOffWhileFiltering_FilterTextDisablesEveryWayToReorder**: While `FilterText` has text
+`IsReorderEnabled` is `false`, and `MoveCard`, `CanMoveCard`, `CanDrop` and `DropCard` refuse, changing nothing and
+saving nothing; blank text is no filter (`MainWindowViewModel_FilterText_DisablesReorderingAndRefusesMoveAndDrop`).
+Typing and clearing a filter leaves the stored order alone and the filtered list shows its matches in that order
+(`MainWindowViewModel_FilterText_DoesNotChangeTheStoredOrder`), and changing the filter raises the property-change
+notification for `IsReorderEnabled` (`MainWindowViewModel_IsReorderEnabled_RaisesPropertyChangedWithTheFilter`),
+covering `AgentControl-MainWindowViewModel-ReorderOffWhileFiltering`.
+
+**MainWindowViewModel_RepoOrder_IsPersistedAndKept**: A move is in the settings file, with the marker, and a view model
+built from the loaded settings shows the same order (`MainWindowViewModel_MoveCard_OrderIsPersistedAndReloaded`); removing
+a repo leaves the others in the order the user gave them, in the list and in the file
+(`MainWindowViewModel_RemoveRepo_LeavesTheRestOfTheOrderAndPersistsIt`), covering
+`AgentControl-MainWindowViewModel-OrderPersisted`. Applying settings from a fresh `AppSettings` (as the Settings
+window's Save builds it) keeps the order, the marker and the saved file's order
+(`MainWindowViewModel_ApplySettings_KeepsTheRepoOrder`), covering
+`AgentControl-MainWindowViewModel-OrderKeptOnApplySettings`.
 
 **MainWindowViewModel_ApplySettings_PreservesReposAndInvalidatesPackageCache**: `ApplySettings`
 is called with an updated `AppSettings`; the existing recent-repos list survives, the new
@@ -209,8 +290,8 @@ section (`AgentControl-MainWindowViewModel-GroupSections`, tested by
 `MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection`). Each section has a header with its count
 and a section without a repo has none (`AgentControl-MainWindowViewModel-GroupSectionHeaders`, tested by
 `MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered` and
-`MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader`); repos within a section are in order of most recent
-launch, never-launched last (`AgentControl-MainWindowViewModel-GroupSectionRepoOrder`, tested by
+`MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader`); repos within a section are in the user's own order, not
+by launch time (`AgentControl-MainWindowViewModel-GroupSectionRepoOrder`, tested by
 `MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered`). A favorite is listed only under Favorites, and
 back in its group when it is no longer a favorite (`AgentControl-MainWindowViewModel-FavoriteListedOnce`, tested by
 `MainWindowViewModel_Favorite_IsListedOnlyUnderFavoritesAndKeepsItsGroup`). Settings built in memory with a null

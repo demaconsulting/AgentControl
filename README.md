@@ -11,7 +11,7 @@
 AgentControl is a Windows desktop launcher that lets a company distribute proprietary
 AI-agent configuration (Copilot/agentic-CLI instruction files, standards, templates, and
 skills) alongside public source repositories, without ever committing that proprietary
-content to source control. A developer picks a repo from a recent-repos list, AgentControl
+content to source control. A developer picks a repo from a repo list, AgentControl
 makes sure the repo's `.github/agents`, `.github/standards`, `.github/templates`, and
 `.github/skills` folders match the version pinned in that repo's `.agentcontrol.json` file,
 then launches the developer's preferred agentic CLI tool (for example, GitHub Copilot CLI)
@@ -33,16 +33,26 @@ The cards, the card menu, Settings and the package-source editor are shown in th
 - **Compact app bar and themes**: one slim bar at the top of the main window holds the logo, a filter box and the
   **Add repository**, **Settings** and **About** buttons; the whole application follows the **System default**,
   **Light** or **Dark** theme, with legible text in both
-- **Recent-repos list**: add repos via a folder-browse button; each repo is shown as a card
+- **Repo list**: add repos via a folder-browse button; each repo is shown as a card
   with a colored **status bar** (green up to date, amber upgrade available, red a problem, grey no
   agent package - always backed by words and tooltips), a favorite star, its display name, a tile with its
   initials (or the repo's own root `icon.png`/`logo.png`), its path, and labeled chips for the pinned agent
   package (name, version and source, with a small check mark when it is the newest), an available upgrade, and
   the current git branch; **Launch** sits on the card and everything else (Git Pull, Refresh - **Check again**
-  for a repo whose folder is missing - Select Package/Change package/Upgrade, Move to group, Card color, Remove) in
+  for a repo whose folder is missing - Select Package/Change package/Upgrade, Move to group, the Move items, Card
+  color, Remove) in
   its grouped
   "..." menu; a long path is shortened to fit - the folder part first, then the middle of a very long folder
   name - so the start and the end of the repo's folder name stay visible
+- **Your own, stable repo order**: the list stays in the order you choose - Launch, Refresh and every other action
+  leave the cards where they are; a new repo goes to the bottom of its section; favorites are still listed first
+  (the Favorites section, or the top of the list while there are no groups). Reorder with **Move to top**, **Move
+  up**, **Move down** and **Move to bottom** in a card's "..." menu (keyboard-reachable; items that do not apply
+  are disabled, with a tooltip saying why) or by dragging a card by anywhere that is not one of its buttons: a line
+  shows where it will land, and dropping into another section or on a section header moves the repo there, exactly
+  like **Move to group** and the favorite star. Reordering is off while the filter box has text (filtering never
+  changes the order). The order is stored only in your own AgentControl settings, never in the repository or its
+  `.agentcontrol.json`; existing users keep the order they last saw
 - **Repo groups and card colors (just for you)**: put repos into groups of your own (**Move to group** in a
   card's "..." menu, then an existing group or **New group...**) and the list becomes collapsible sections -
   **Favorites** first, your groups alphabetically, **Ungrouped** last - with the number of repos in each; the
@@ -216,7 +226,7 @@ the .NET 10 runtime, so the target machine needs no pre-installed runtime.
 
 Click the folder-plus icon button in the app bar at the top of the main window and browse to a repository's root
 folder.
-The repo is added to the recent-repos list as a card showing its display name, path, and chips
+The repo is added to the repo list as a card showing its display name, path, and chips
 for the pinned package (name, version and source), an available upgrade, and the current git
 branch.
 
@@ -316,6 +326,19 @@ Both are personal ways to organize the list and are stored **only in your own Ag
 - **Card color.** **Organize > Card color...** opens a palette of ten colors that work in the light and dark
   themes, plus **Automatic** (the color AgentControl derives from the repo's path). The color goes on the card's
   tile (as a ring around a repo's own picture); the status bar on the card's left edge keeps its meaning.
+- **Order.** The list is in your own, stable order: nothing moves because of **Launch**, **Refresh** or any other
+  action, and a new repo goes to the bottom of its section (a repo you add to a group again moves to the bottom of
+  that group). Favorites are listed first. In a card's "..." menu, **Organize > Move to top**, **Move up**, **Move
+  down** and **Move to bottom** move the card within its section (the first repo cannot go up, the last cannot go
+  down; a disabled item's tooltip says why). You can also drag a card by any part that is not a button, such as its
+  status bar: a line shows where it lands (upper half of the card under the pointer = before, lower half = after).
+  Dropping into another section moves the repo there like **Move to group** and the favorite star do - into a
+  group sets that group, into **Ungrouped** removes it, into **Favorites** makes it a favorite (it keeps its
+  group), out of **Favorites** removes the favorite mark - and dropping on a section header (even a collapsed one,
+  which stays collapsed) puts the card at the bottom of that section. With no groups, dragging only reorders within
+  the favorites or within the other repos. While the filter box has text, reordering is off (dragging does nothing
+  and the Move items are disabled), because only some repos are shown. The order is kept in your own settings file;
+  removing a repo removes it from the order, and existing users keep the order they last saw.
 
 ### Settings
 

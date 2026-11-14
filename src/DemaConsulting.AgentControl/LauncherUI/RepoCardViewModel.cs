@@ -383,7 +383,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     Saved through the owning <see cref="MainWindowViewModel"/> (see the constructor's
     ///     <c>commitChange</c>) <em>before</em> the shared <see cref="RecentRepo"/> is changed, and
-    ///     only then does the card raise <see cref="FavoriteChanged"/> so the owner can re-sort
+    ///     only then does the card raise <see cref="FavoriteChanged"/> so the owner can regroup
     ///     <see cref="MainWindowViewModel.DisplayedRepoCards"/>. When the save fails the value is not
     ///     changed (the owner tells the user) and the star is told to show the real state again.
     ///     This property is the <b>only</b> owner of the toggle state: the card's star is a
@@ -1785,7 +1785,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Raised after <see cref="IsFavorite"/> changed (and was saved), so the owning
-    ///     <see cref="MainWindowViewModel"/> can re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     <see cref="MainWindowViewModel"/> can regroup <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
     /// </summary>
     public event EventHandler? FavoriteChanged;
 
@@ -1807,8 +1807,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public event EventHandler? CardColorChanged;
 
     /// <summary>
-    ///     Raised after a launch was recorded (and saved), so the owning
-    ///     <see cref="MainWindowViewModel"/> can re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     Raised after a launch was recorded (and saved). The owning
+    ///     <see cref="MainWindowViewModel"/> does not listen to it: a launch never moves a card,
+    ///     because the list shows the user's own order.
     /// </summary>
     public event EventHandler? LaunchRecorded;
 
@@ -2076,8 +2077,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <summary>
     ///     Records that this repo was just successfully launched, stamping
     ///     <see cref="LastLaunchedUtc"/> with the current UTC time (saved before it is applied, see
-    ///     <see cref="IsFavorite"/>) and raising <see cref="LaunchRecorded"/> so the owning
-    ///     <see cref="MainWindowViewModel"/> can re-sort <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
+    ///     <see cref="IsFavorite"/>) and raising <see cref="LaunchRecorded"/>. The stamp only
+    ///     records the launch; it does not move the card in the list.
     ///     The launch itself has already happened; when the stamp cannot be saved it is simply not
     ///     recorded (the owner tells the user).
     /// </summary>

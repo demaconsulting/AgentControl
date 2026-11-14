@@ -223,6 +223,19 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   the window (which shows the prompt or a confirmation and then calls `RenameGroup`/`RemoveGroup`). Which sections
   are collapsed is kept in the user's settings; while the filter has text every section is shown expanded so a
   match is never hidden, without changing the remembered state.
+- *Repo order* (`AgentControl-System-RepoOrder`, `AgentControl-System-RepoReorder`,
+  `AgentControl-System-RepoOrderRemembered`): the order of the cards is the user's own and is the order of
+  `AppSettings.RecentRepos` itself, so a removed repo leaves the order with no extra bookkeeping. Favorites stay
+  first; within a section the repos show in that order; a new repo is appended (the bottom of its section); and
+  launching, refreshing or any other change never moves a card - `MainWindowViewModel` does not even listen to the
+  card's `LaunchRecorded`. The user reorders from a card's menu (Move to top, up, down, bottom) or by dragging a
+  card within a section, into another section (which sets the group or favorite flag as the menu and the star
+  would) or onto a header (the end of that section); `MainWindowViewModel.MoveCard`, `CanDrop` and `DropCard` hold
+  the rules and `MainWindow` only turns pointer input into a drop place and draws the insertion line or header
+  tint. Reordering is off while the filter has text. The order is saved with the other user choices (and, like
+  them, through the transactional change above), kept across restarts, and seeded once for a settings file written
+  before the order existed (favorites first, then most recently launched, by `AppSettings.EnsureRepoOrder`), so
+  nothing jumps on upgrade.
 - *Card colors* (`AgentControl-System-CardColor`): the palette pop-up offers one swatch per entry of
   `CardColorPalette` (built from the single list of valid names, `RecentRepo.CardColorNames`) plus Automatic;
   `RepoCardViewModel.SetCardColor` records the name, or clears it for Automatic, and the tile - and only the tile -
@@ -257,7 +270,8 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   and applies the shared `DialogBehavior` from its code-behind: Tab and Shift+Tab stay inside the dialog, the first
   sensible control takes the focus when it opens, and Escape cancels a dialog that can be cancelled.
 
-**Where the user's choices live, and what a failed save does.** Favorites, last-launch times, groups, card colors,
+**Where the user's choices live, and what a failed save does.** Favorites, last-launch times, the order of the repos,
+groups, card colors,
 which sections are collapsed and the theme are the user's own: they are stored only in the per-user settings file
 (`Settings`), never in a repo and not in its `.agentcontrol.json`, which holds nothing but the package pin. A change
 the user makes in the main window is made as one transaction by `MainWindowViewModel`: it is tried on a candidate copy of
@@ -282,11 +296,13 @@ longer raise an error box, release notes or a prompt, and the window releases it
   keyboard).
 - *Contract*: The main window shows the recent-repos list with per-repo cards exposing
   Launch as a button and, in the card's "..." menu, Git Pull, Refresh (labeled "Check again" for a repo whose
-  folder is missing), Select Package/Change package/Upgrade, Move to group, Card color and Remove, plus the favorite
-  star and
+  folder is missing), Select Package/Change package/Upgrade, Move to group, Move to top/up/down/bottom, Card color and
+  Remove, plus the favorite star and
   the upgrade chip; the list is flat, or sectioned (Favorites, the user's groups, Ungrouped) once a repo is in a
-  group; the toolbar-level app bar holds the filter, Add, Settings and About
-  (`AgentControl-System-RecentRepos`, `AgentControl-System-AddRemoveRepo`, `AgentControl-System-SearchAndSort`,
+  group, in the user's own order (a card can also be dragged to reorder it); the toolbar-level app bar holds the
+  filter, Add, Settings and About
+  (`AgentControl-System-RecentRepos`, `AgentControl-System-AddRemoveRepo`, `AgentControl-System-SearchFilter`,
+  `AgentControl-System-RepoOrder`, `AgentControl-System-RepoReorder`, `AgentControl-System-RepoOrderRemembered`,
   `AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
   `AgentControl-System-MissingRepoRecheck`, `AgentControl-System-UpgradeFromChip`,
   `AgentControl-System-About`). Settings offers the color theme (`AgentControl-System-Appearance`). Every dialog is
@@ -435,16 +451,18 @@ override for hermetic testing).
 - *Role*: Provider/Consumer (`Settings` reads and writes it).
 - *Contract*: Records the package sources, git/agent-tool overrides, agent-tool selection, shell
   preference, whether the shell stays open after the agent tool exits (on when absent), the color theme, and the
-  recent-repos list with, per repo, its favorite flag, last-launch time and the
+  recent-repos list, kept in the user's own display order (with a marker that the order is already the user's), with,
+  per repo, its favorite flag, last-launch time and the
   user's own organizing choices (its group and its card color), plus the names of the collapsed list sections
   (`AgentControl-System-Settings`, `AgentControl-System-KeepShellOpen`, `AgentControl-System-MultipleSources`,
   `AgentControl-System-Appearance`,
-  `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`);
+  `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`, `AgentControl-System-RepoOrderRemembered`);
   a legacy single package-folder path is carried forward
   as the source named `Default`. Contains no password, token or other secret. Returns default
   settings when no file exists yet (first-ever run); a value that is unusable is repaired as the file is read and
   never keeps the application from starting: an unknown theme reads as the system default, an unusable
-  keep-shell-open value as on, an unknown card color as
+  keep-shell-open value as on, an unusable repo-order marker as "not yet the user's order" (so the legacy arrangement
+  is seeded once), an unknown card color as
   automatic, an unusable group name as no group. The choices in it exist only here, never in a repo, and a change
   is written before it is applied (see *Architecture*).
 - *Constraints*: Location can be overridden by a startup argument to isolate FlaUI end-to-end

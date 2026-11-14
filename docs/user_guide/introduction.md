@@ -5,7 +5,7 @@
 Agent Control is a Windows desktop launcher application that lets a company distribute
 proprietary AI-agent configuration (Copilot/agentic-CLI instruction files, standards,
 templates, and skills) alongside public source repositories, without ever committing that
-proprietary content to source control. A developer opens a repo from a recent-repos list,
+proprietary content to source control. A developer opens a repo from a repo list,
 has AgentControl ensure the repo's `.github/agents`, `.github/standards`,
 `.github/templates`, and `.github/skills` folders match the version pinned in that repo's
 `.agentcontrol.json` file, optionally pulls the latest commits, and then launches their
@@ -24,7 +24,8 @@ This user guide covers:
 
 - Installing AgentControl
 - The main window: the app bar, the repo cards, and the light and dark themes
-- Adding a repository to the recent-repos list
+- Adding a repository to the repo list
+- Keeping the repo list in your own order: groups, the Move items and drag and drop
 - Reading a repo card's chips: pinned package, upgrade, branch, and status warnings
 - Configuring package sources (zip-package folders, NuGet-package folders, NuGet-package
   servers and Git repositories), including testing a connection and signing in
@@ -69,9 +70,9 @@ holds:
 - three icon buttons: **Add repository** (a folder with a plus), **Settings** (a gear) and **About** (an
   information mark), each with a tooltip.
 
-Below the app bar is the list of **repo cards**, described in the next section, newest-launched first within each
-section (see *Organizing Repos with Groups*). With no repos, or when the filter matches none, a short message
-says so instead.
+Below the app bar is the list of **repo cards**, described in the next section, in your own order within each
+section (see *Organizing Repos with Groups* and *Ordering Your Repos*). With no repos, or when the filter matches
+none, a short message says so instead.
 
 AgentControl follows your operating system's light or dark setting by default, and every window works in both
 themes; to always use one of them, choose a **Theme** in Settings (see *Settings*).
@@ -82,7 +83,7 @@ themes; to always use one of them, choose a **Theme** in Settings (see *Settings
 
 Click the **Add repository** button (the folder-plus icon) in the main window's app bar. A folder-browse dialog
 opens; select the root folder of the git repository you want to manage. The repo is added to the
-recent-repos list as a card.
+repo list as a card, at the bottom of its section.
 
 Each repo card shows:
 
@@ -91,9 +92,9 @@ Each repo card shows:
   missing, the package source has a problem or needs a sign-in, or the last action you started on the card
   failed); **grey** — no agent package is pinned (or the upgrade check is still running). Color is never the
   only signal: hover the bar for the status and its reason, and the chips below say the same in words.
-- On the first line, the **favorite star** (click it, or press Space on it, to pin the repo above the default
-  most-recently-launched sort order, and click it again to unpin it; it is a gold filled star when favorited and an
-  outline otherwise) and
+- On the first line, the **favorite star** (click it, or press Space on it, to list the repo under
+  **Favorites** - the first section, or the top of the list while there are no groups - and click it again to
+  remove it from there; it is a gold filled star when favorited and an outline otherwise) and
   the repo's name (its folder name) right beside it
 - On the same line at the right, the **Launch** button, labeled with your agent tool (see *Launching*), and a
   "..." menu
@@ -109,8 +110,9 @@ Each repo card shows:
   once; for a repo whose folder is missing it reads **Check again** and checks whether the folder is
   available again). **Agent files**: **Select Package...** (a repo with no package yet), **Change package...** (a
   repo that already has one) and **Upgrade to x.y.z** (when a newer version exists); the group is hidden when none
-  of them applies - see below. **Organize**: **Move to group** and **Card color...** (see
-  *Organizing Repos with Groups* and *Choosing a Card Color*). Then **Remove from list**.
+  of them applies - see below. **Organize**: **Move to group**, **Move to top**, **Move up**, **Move down**,
+  **Move to bottom** and **Card color...** (see *Organizing Repos with Groups*, *Ordering Your Repos* and
+  *Choosing a Card Color*). Then **Remove from list**.
 
 ![A card with the repo's own picture and an up-to-date package, a section header, and a card with an upgrade chip
 and an uncommitted-changes warning](images/repo-card-anatomy.png)
@@ -119,7 +121,7 @@ and an uncommitted-changes warning](images/repo-card-anatomy.png)
 group and Card color under Organize, and Remove from list](images/card-menu.png)
 
 Removing a repo from the list prompts for confirmation first, since it is a destructive
-action against AgentControl's own recent-repos state (it does not touch the repository
+action against AgentControl's own repo list state (it does not touch the repository
 itself).
 
 ## Giving a Repo a Card Icon
@@ -152,7 +154,8 @@ name and how many repos it holds:
   group, so every repo appears once; its card shows its group as a small chip, and it returns to its group when you
   remove the star.
 - Then come **your groups**, alphabetically (letter case ignored), and finally **Ungrouped**, the repos in no group.
-  A section with no repo has no header. Within a section the most recently launched repo comes first.
+  A section with no repo has no header. Within a section the repos are in your own order, and a repo you add
+  goes to the bottom of its section (see *Ordering Your Repos*).
 
 Click a header (its chevron, name or count) to **collapse** or **expand** the section; AgentControl remembers which
 sections you collapsed. A group's header also has a "..." menu. Its first item, **Add repository...**, opens the same
@@ -169,6 +172,44 @@ The **filter box** always searches all repos: while it has text, every section i
 without a match disappears, so a repo is never hidden inside a collapsed group; clear the filter and your collapsed
 sections are back as you left them (the headers' toggles are disabled while filtering). While no repo is in a group
 there are no headers at all, and favorites simply come first.
+
+## Ordering Your Repos
+
+The repo list stays in the order **you** choose, and it is stable: **Launch**, **Refresh** and every other action
+leave the cards where they are, so a repo is always where you last put it.
+
+- **New repos go to the bottom.** A repo you add is placed at the bottom of its section, also when you use
+  **Add repository...** on a group header. A repo that is already listed and that you add to a group again moves to
+  the bottom of that group. **Favorites** are still listed first: in the **Favorites** section, or at the top of the
+  list while no groups exist.
+- **Upgrading from an earlier version** keeps the order you last saw: AgentControl arranges the list once, favorites
+  first and then the most recently launched repos, and from then on the order only changes when you change
+  it.
+- **The Move items.** In a card's "..." menu, under **Organize**, choose **Move to top**, **Move up**, **Move
+  down** or **Move to bottom** to move the card within its own section (a step at a time, or to either end). An
+  item that does not apply is disabled, and its tooltip says why: the first repo of a section cannot move up or to the
+  top, and the last cannot move down or to the bottom. These items work from the keyboard, so they are the way to
+  reorder without a mouse.
+- **Drag and drop.** Press on a card anywhere that is not one of its buttons (for example its colored status bar on
+  the left edge, or an empty part of the card) and drag it. A line shows where the card will land: above the card
+  under the pointer when the pointer is in its upper half, below it when the pointer is in its lower half. Drop to
+  put the card there. Dropping inside the same section reorders it.
+- **Dropping into another section** moves the repo there at the drop position, exactly like **Move to group** and
+  the favorite star: into a group puts the repo in that group; into **Ungrouped** takes it out of its group; into
+  **Favorites** marks it a favorite (it keeps its group); out of **Favorites** removes the favorite mark and puts it
+  in the section you dropped it on (a group, or no group). Dropping on a section **header** puts the card at the
+  bottom of that section. A **collapsed** section stays collapsed when you drop on its header, and its count
+  updates. Where a drop is accepted, no line is shown next to the card itself.
+- **In the flat list** (no groups) there are no sections to drop into, so dragging only reorders within the
+  favorites at the top, or within the other repos.
+- **While the filter has text, ordering is off.** Only some repos are shown, so their positions cannot be changed:
+  dragging does nothing and the Move items are disabled, with the tooltip "Clear the filter to change the order:
+  while the filter has text only some repos are shown, so their positions cannot be changed." Filtering itself
+  never changes the order.
+
+Like groups and card colors, the order is stored only in your own AgentControl settings file
+(`%APPDATA%\AgentControl\settings.json`), never in the repository or its `.agentcontrol.json`. Removing a repo
+from the list also removes it from the order.
 
 ## Choosing a Card Color
 

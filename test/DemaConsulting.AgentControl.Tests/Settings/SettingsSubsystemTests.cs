@@ -222,6 +222,64 @@ public class SettingsSubsystemTests
     }
 
     /// <summary>
+    ///     Test that the user's own repo order is kept for the next session in the settings file only,
+    ///     that a file written before the order was stored is arranged once as favorites first and then
+    ///     the most recently launched (and that arrangement is what later sessions see, even when
+    ///     launch times change), and that a damaged marker never fails the load.
+    /// </summary>
+    [Fact]
+    public void SettingsSubsystem_RepoOrder_SurvivesSessionsAndSeedsALegacyFileOnce()
+    {
+        // Arrange: a file as an older version wrote it - repos in the order they were added
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"RecentRepos\": [" +
+                " { \"Path\": \"never\" }," +
+                " { \"Path\": \"old\", \"LastLaunchedUtc\": \"2026-01-01T00:00:00+00:00\" }," +
+                " { \"Path\": \"fav\", \"IsFavorite\": true, \"LastLaunchedUtc\": \"2025-01-01T00:00:00+00:00\" }," +
+                " { \"Path\": \"new\", \"LastLaunchedUtc\": \"2026-06-01T00:00:00+00:00\" }" +
+                "] }");
+
+            // Act: the first session seeds the order, the user then moves one repo and saves
+            var firstSession = SettingsStore.Load(configDir);
+            var seeded = firstSession.RecentRepos.Select(repo => repo.Path).ToList();
+            (firstSession.RecentRepos[3], firstSession.RecentRepos[0]) = (firstSession.RecentRepos[0], firstSession.RecentRepos[3]);
+            SettingsStore.Save(firstSession, configDir);
+
+            // A newer launch time does not move anything in a later session
+            var secondSession = SettingsStore.Load(configDir);
+            secondSession.RecentRepos.Single(repo => repo.Path == "never").LastLaunchedUtc = DateTimeOffset.UtcNow;
+            SettingsStore.Save(secondSession, configDir);
+            var thirdSession = SettingsStore.Load(configDir);
+
+            // Act: a damaged marker reads as "not seeded", so the file is arranged again, without failing
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"HasUserRepoOrder\": \"yes\", \"RecentRepos\": [ { \"Path\": \"x\" }," +
+                " { \"Path\": \"y\", \"IsFavorite\": true } ] }");
+            var damaged = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.Multiple(
+                () => Assert.Equal(["fav", "new", "old", "never"], seeded),
+                () => Assert.True(firstSession.HasUserRepoOrder),
+                () => Assert.Equal(["never", "new", "old", "fav"], thirdSession.RecentRepos.Select(repo => repo.Path)),
+                () => Assert.True(thirdSession.HasUserRepoOrder),
+                () => Assert.Equal(["y", "x"], damaged.RecentRepos.Select(repo => repo.Path)),
+                () => Assert.True(damaged.HasUserRepoOrder),
+                () => Assert.Equal(
+                    ["settings.json"], Directory.GetFileSystemEntries(configDir).Select(Path.GetFileName)));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that a Git source the user configured is kept for the next session with the other
     ///     sources and settings - its address, tag pattern, sub-folder and single package name, the
     ///     type written by name and nothing secret-like in the file - and that an address which

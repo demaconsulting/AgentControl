@@ -186,9 +186,9 @@ sections:
           the user cancels the wait for the pre-launch sync, and shall raise an
           error when no agent tool command is configured.
         justification: |
-          Launch is the primary action of AgentControl; the launch timestamp feeds the
-          most-recently-launched sort order, and a missing configuration must be surfaced
-          rather than silently doing nothing.
+          Launch is the primary action of AgentControl; the launch timestamp records when the repo
+          was last launched (it no longer moves the card), and a missing configuration must be
+          surfaced rather than silently doing nothing.
         tests:
           - RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded
           - RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred
@@ -565,8 +565,8 @@ sections:
           mark again, recording the status on the repo's settings entry and raising its change
           notification exactly once per change.
         justification: |
-          Marking a repo as a favorite is how a developer promotes it to the top of the
-          sorted recent-repos list; a single click must change the status exactly once, so a repo
+          Marking a repo as a favorite is how a developer lists it under Favorites, the first
+          section of the repo list; a single click must change the status exactly once, so a repo
           can both be favorited and unfavorited.
         tests:
           - RepoCardViewModel_IsFavorite_Set_UpdatesRecentRepoAndRaisesFavoriteChangedOncePerChange

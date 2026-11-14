@@ -145,20 +145,73 @@ sections:
           - windows@GroupHeaderToggleButton_Click_CollapsesSectionAndRemembersItAfterRestart
           - windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly
 
-      - id: AgentControl-System-SearchAndSort
+      - id: AgentControl-System-SearchFilter
         title: >-
-          The tool shall let the user search/filter the recent-repos list, and shall order
-          it with favorited repos first, then by most-recently-launched.
+          The tool shall let the user search/filter the repo list.
         tags: [system]
         justification: |
-          As the recent-repos list grows, developers need to quickly locate a specific repo
-          (search) and see their most relevant repos without scrolling (favorites/recency
-          ordering), per architecture.md's recent-repos information-design decisions.
+          As the repo list grows, developers need to quickly locate a specific repo, per
+          architecture.md's repo-list information-design decisions.
         children:
           - AgentControl-LauncherUI-SearchFilter
-          - AgentControl-LauncherUI-SortOrder
         tests:
           - windows@FilterTextBox_TypingNonMatchingText_HidesRepoCard_ClearingRestoresIt
+
+      - id: AgentControl-System-RepoOrder
+        title: >-
+          The tool shall list the repos in an order only the user changes - launching, refreshing
+          or any other action shall never move a repo, a repo that is added shall go to the bottom
+          of its section, and favorites shall be listed first.
+        tags: [system]
+        justification: |
+          A list that rearranges itself under the pointer (the repo just launched jumping to the
+          top) makes a repo hard to find again by its place; developers memorize where their repos
+          are, so the only changes to the order must be the ones they make.
+        children:
+          - AgentControl-LauncherUI-SortOrder
+          - AgentControl-LauncherUI-StableRepoOrder
+        tests:
+          - windows@RepoList_LaunchingARepo_KeepsTheCardWhereItIs
+
+      - id: AgentControl-System-RepoReorder
+        title: >-
+          The tool shall let the user change the order of the repos by moving a repo to the top, up,
+          down or to the bottom of its section from its menu, and by dragging a repo within its
+          section, into another section or onto a section header, showing where the repo will land
+          - and shall not allow this while the filter has text.
+        tags: [system]
+        justification: |
+          The user's own order is only useful when it is easy to make: the menu is the way that
+          also works from the keyboard, dragging is the direct one, and a filtered list shows only
+          some of the repos, so the places in it do not mean places in the whole list.
+        children:
+          - AgentControl-LauncherUI-RepoOrderMenu
+          - AgentControl-LauncherUI-RepoDragReorder
+          - AgentControl-LauncherUI-RepoDragBetweenSections
+          - AgentControl-LauncherUI-RepoDropOnHeader
+          - AgentControl-LauncherUI-RepoDropFeedback
+          - AgentControl-LauncherUI-ReorderOffWhileFiltering
+        tests:
+          - windows@CardMenu_MoveDown_ReordersCardAndStoresOrderInSettings
+          - windows@RepoList_DragCardBelowAnother_ReordersAndKeepsOrderAfterRestart
+          - windows@RepoList_DragCardOntoGroupHeader_MovesItIntoTheGroup
+
+      - id: AgentControl-System-RepoOrderRemembered
+        title: >-
+          The tool shall keep the user's repo order in the user's own settings only (never in a
+          repository or its agent configuration), so it is still there when the tool is started
+          again, and an existing user shall keep the order that was shown before the order was
+          stored.
+        tags: [system]
+        justification: |
+          An order that is lost at every start is not the user's order, a personal order must not
+          reach the repositories the repos belong to, and a user who upgrades must not find the
+          list rearranged.
+        children:
+          - AgentControl-LauncherUI-RepoOrderRemembered
+          - AgentControl-Settings-RepoOrder
+        tests:
+          - windows@RepoList_DragCardBelowAnother_ReordersAndKeepsOrderAfterRestart
 
       - id: AgentControl-System-UpgradeFromChip
         title: >-

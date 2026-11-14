@@ -92,7 +92,9 @@ internal sealed class RecentRepo
     ///     before this field existed).
     /// </summary>
     /// <remarks>
-    ///     Drives the recent-repos list's default most-recently-launched sort order. See
+    ///     Records when the repo was last launched; it does not move the card. It also feeds the
+    ///     one-time seed of the user's own repo order (<see cref="AppSettings.EnsureRepoOrder"/>)
+    ///     for a settings file written before the order was stored. See
     ///     <see cref="IsFavorite"/> remarks for why this lives on <see cref="RecentRepo"/> rather
     ///     than a separate cache file.
     /// </remarks>
