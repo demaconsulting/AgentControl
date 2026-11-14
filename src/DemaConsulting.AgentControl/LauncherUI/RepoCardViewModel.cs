@@ -22,6 +22,7 @@ using System.Globalization;
 using System.Runtime.ExceptionServices;
 using Avalonia.Media.Imaging;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.AgentToolLauncher;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.PackageCredentials;
@@ -176,6 +177,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private readonly Func<RecentRepo, Action<RecentRepo>, bool>? _commitChange;
 
     /// <summary>
+    ///     Starts the agent-tool process when the card launches the tool; see the constructor.
+    /// </summary>
+    private readonly IAgentToolProcessStarter _processStarter;
+
+    /// <summary>
+    ///     Detects the shell the agent tool runs in; see the constructor.
+    /// </summary>
+    private readonly ShellDetector _shellDetector;
+
+    /// <summary>
     ///     Whether <see cref="Retire"/> was called: the card was removed from the list, so nothing it
     ///     still has running may report back or publish a result.
     /// </summary>
@@ -263,6 +274,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     returning whether that succeeded (the owning <see cref="MainWindowViewModel"/> saves a
     ///     candidate first and changes the live entry only then); <see langword="null"/> applies the
     ///     change to the entry directly and saves nothing.</param>
+    /// <param name="processStarter">Starts the agent-tool process; <see langword="null"/> uses the
+    ///     real <see cref="AgentToolProcessStarter"/>. Supplied so tests can capture the launch
+    ///     without starting a shell.</param>
+    /// <param name="shellDetector">Detects the shell the agent tool runs in; <see langword="null"/>
+    ///     uses a real <see cref="ShellDetector"/>. Supplied so tests get a deterministic shell.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="recentRepo"/>,
     ///     <paramref name="getSettings"/>, or <paramref name="packageVersionCache"/> is
     ///     <see langword="null"/>.</exception>
@@ -274,7 +290,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
         Func<AppSettings, PackageSourceRegistry>? registryFactory = null,
         PackageCredentialContext? credentials = null,
         Func<RepoImageFile, Bitmap?>? decodeImage = null,
-        Func<RecentRepo, Action<RecentRepo>, bool>? commitChange = null)
+        Func<RecentRepo, Action<RecentRepo>, bool>? commitChange = null,
+        IAgentToolProcessStarter? processStarter = null,
+        ShellDetector? shellDetector = null)
     {
         ArgumentNullException.ThrowIfNull(recentRepo);
         ArgumentNullException.ThrowIfNull(getSettings);
@@ -288,6 +306,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         _credentials = credentials;
         _decodeImage = decodeImage ?? (file => RepoImageLocator.Decode(file));
         _commitChange = commitChange;
+        _processStarter = processStarter ?? new AgentToolProcessStarter();
+        _shellDetector = shellDetector ?? new ShellDetector();
 
         LaunchCommand = new AsyncRelayCommand(LaunchAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
         PullCommand = new AsyncRelayCommand(PullAsync, ReportUnexpectedFailure, () => CanPull && !IsMissing && !IsBusy);
@@ -2140,9 +2160,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     RepoName, RepoPath, command);
             }
 
-            var shell = new AgentControl.AgentToolLauncher.ShellDetector().Detect(settings.ShellPreference);
-            var startInfo = AgentLauncher.BuildProcessStartInfo(shell, command, RepoPath);
-            AgentLauncher.Launch(startInfo);
+            var shell = _shellDetector.Detect(settings.ShellPreference);
+            var startInfo = AgentLauncher.BuildProcessStartInfo(shell, command, RepoPath, settings.KeepShellOpen);
+            _processStarter.Start(startInfo);
             StatusMessage = "Launched.";
             RecordLaunched();
         }

@@ -59,6 +59,7 @@ input-files:
   - docs/design/agent-control/agent-tool-launcher.md
   - docs/design/agent-control/agent-tool-launcher/shell-detector.md
   - docs/design/agent-control/agent-tool-launcher/agent-tool-launcher.md
+  - docs/design/agent-control/agent-tool-launcher/agent-tool-process-starter.md
   - docs/design/agent-control/git-integration.md
   - docs/design/agent-control/git-integration/git-client.md
   - docs/design/agent-control/git-integration/committed-agent-files-cache.md

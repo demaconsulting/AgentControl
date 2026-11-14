@@ -118,6 +118,11 @@ internal static class TestSettingsWriter
             ["AgentTool"] = 3, // AgentToolKind.Custom
             ["CustomAgentCommand"] = $"\"{argLoggerStubExePath}\" {AgentToolMarkerArgument}",
             ["ShellPreference"] = shellPreference,
+            // The launched shell ends together with the arg-logger stub, so no console window
+            // outlives a test. Keeping the shell open (the application's default) is covered by
+            // the BuildProcessStartInfo unit tests; a test may still set or remove the key
+            // through customize.
+            ["KeepShellOpen"] = false,
             ["RecentRepos"] = new[]
             {
                 new

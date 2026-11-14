@@ -10,11 +10,12 @@
 #   with its own requirements file (settings/repo-group-name.yaml)
 # - Subsystem requirements describe the observable behavior of persisting application-wide
 #   preferences (package sources, git/agent tool overrides, recent repos, shell preference,
-#   color theme) and the user's own organizing choices (repo groups, card colors, collapsed
-#   sections)
-# - The theme and organization requirements are evidenced by the Settings subsystem tests
-#   (SettingsSubsystemTests.cs), which use the subsystem the way the application does: saved by
-#   one session, loaded by the next; the unit requirements below them carry the unit tests
+#   keep-shell-open choice, color theme) and the user's own organizing choices (repo groups,
+#   card colors, collapsed sections)
+# - The theme, keep-shell-open and organization requirements are evidenced by the Settings
+#   subsystem tests (SettingsSubsystemTests.cs), which use the subsystem the way the
+#   application does: saved by one session, loaded by the next; the unit requirements below
+#   them carry the unit tests
 
 sections:
   - title: Settings Subsystem Requirements
@@ -84,6 +85,22 @@ sections:
           - AgentControl-SettingsStore-ThemeInvalidReadsAsSystem
         tests:
           - Settings_Appearance_ChosenThemeSurvivesSessionsAndDamagedValueReadsAsSystemDefault
+
+      - id: AgentControl-Settings-KeepShellOpen
+        title: >-
+          The Settings subsystem shall persist the user's choice of keeping the shell open after
+          the agent tool exits, and shall read a missing, null or invalid value as on instead of
+          failing the load.
+        justification: |
+          The choice is a per-user preference that must survive restarts; a settings file from an
+          older version has no value and must keep the shell open as before, and a damaged value
+          must never keep the application from starting.
+        children:
+          - AgentControl-SettingsStore-KeepShellOpen
+          - AgentControl-SettingsStore-KeepShellOpenDefaultsToOn
+          - AgentControl-SettingsStore-KeepShellOpenInvalidReadsAsOn
+        tests:
+          - Settings_KeepShellOpen_ChosenValueSurvivesSessionsAndMissingOrDamagedValueReadsAsOn
 
       - id: AgentControl-Settings-RepoOrganization
         title: >-

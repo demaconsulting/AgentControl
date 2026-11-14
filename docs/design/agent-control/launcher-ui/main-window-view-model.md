@@ -95,6 +95,10 @@ lifetime of a cache entry). Both are constructor parameters so tests move time b
 **_registryFactory**: `Func<AppSettings, PackageSourceRegistry>?` — handed to every card; `null` uses the real providers.
 Supplied by tests that need sources whose reads they count.
 
+**_processStarter**, **_shellDetector**: `IAgentToolProcessStarter?`, `ShellDetector?` — handed to every card;
+`null` uses the real starter and a real detector (the application's choice). Supplied by tests so a launch is
+captured without a shell being started.
+
 **_recheckTimer**, **_recheckCancellation**, **_runOnUiThread**, **_disposed**: the periodic re-check's timer, the
 cancellation source of the round that is running (non-null exactly from the moment a round starts until that round has
 finished unwinding - canceling a round only requests the cancellation and leaves the field set, so a round that was
@@ -148,7 +152,8 @@ candidate-first flow, described below.
 - *Parameters*: `AppSettings settings`, `StartupOptions? startupOptions = null`,
   `string? configDirectory = null`, `PackageCredentialContext? credentials = null`,
   `Action<ThemePreference>? applyTheme = null`, `TimeProvider? timeProvider = null`,
-  `TimeSpan? upgradeRecheckInterval = null` and `Func<AppSettings, PackageSourceRegistry>? registryFactory = null`.
+  `TimeSpan? upgradeRecheckInterval = null`, `Func<AppSettings, PackageSourceRegistry>? registryFactory = null`,
+  `IAgentToolProcessStarter? processStarter = null` and `ShellDetector? shellDetector = null`.
 - *Preconditions*: `settings` is not null; `upgradeRecheckInterval`, when given, is positive.
 - *Postconditions*: One `RepoCardViewModel` exists per `RecentRepo` in `settings.RecentRepos`;
   each card's cheap refresh (`RefreshCheap`) has run; `DisplayedItems` and `DisplayedRepoCards`

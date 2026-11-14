@@ -65,6 +65,15 @@ existed), are loaded and read as the system default, still with the setting that
 `AgentControl-SettingsStore-ThemeDefaultsToSystem`, `AgentControl-SettingsStore-ThemeInvalidReadsAsSystem`). Which
 theme the application then shows is a LauncherUI concern, verified there and end to end.
 
+**Settings_KeepShellOpen_ChosenValueSurvivesSessionsAndMissingOrDamagedValueReadsAsOn**: Both keep-shell-open choices
+(off, then on) are saved by one session together with another setting and are the choice made, with the other
+setting kept, when the next session loads; then settings files whose value is a string, a number, null, an object or
+an array, or missing altogether (a file from before the choice existed), are loaded and read as on, still with the
+setting that follows. This scenario is tested by
+`Settings_KeepShellOpen_ChosenValueSurvivesSessionsAndMissingOrDamagedValueReadsAsOn`, covering
+`AgentControl-Settings-KeepShellOpen` (children: `AgentControl-SettingsStore-KeepShellOpen`,
+`AgentControl-SettingsStore-KeepShellOpenDefaultsToOn`, `AgentControl-SettingsStore-KeepShellOpenInvalidReadsAsOn`).
+
 **Settings_RepoOrganization_GroupsColorsAndCollapsedSectionsSurviveSessionsInSettingsFileOnly**: A first session saves
 three repos (one grouped, colored and favorite, one grouped, one plain) and two collapsed sections; a later session
 loads them, changes a group, a card color, the collapsed sections and another setting and saves; a third session

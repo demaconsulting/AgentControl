@@ -1,0 +1,24 @@
+---
+# Software Unit Requirements for the AgentToolProcessStarter Class
+#
+# AgentToolProcessStarter starts the operating-system process that hosts a launched agent tool,
+# from the process-start information the AgentToolLauncher class built. It is the production
+# implementation of the IAgentToolProcessStarter interface, a supporting type of the
+# AgentToolLauncher subsystem.
+
+sections:
+  - title: AgentToolProcessStarter Unit Requirements
+    requirements:
+      - id: AgentControl-AgentToolProcessStarter-StartProcess
+        title: >-
+          The AgentToolProcessStarter class shall start the process described by the start
+          information without taking ownership of it, shall report a process that cannot be
+          started as an InvalidOperationException, and shall reject null start information.
+        justification: |
+          Launching the agent tool is a fire-and-forget action: AgentControl does not wait for or
+          control the shell afterwards, so it must not hold on to the process, and a shell that
+          cannot be started must be reported as an error the user can read rather than lost.
+        tests:
+          - AgentToolProcessStarter_Start_NullStartInfo_ThrowsArgumentNullException
+          - AgentToolProcessStarter_Start_MissingExecutable_ThrowsInvalidOperationException
+          - AgentToolProcessStarter_Start_ExistingExecutable_StartsProcess

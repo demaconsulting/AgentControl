@@ -565,6 +565,21 @@ explicit themes, not the system default). This scenario is tested by
 picker under it, above the Tools heading and the git setting, tested by
 `windows@SettingsWindow_AppearanceIsItsOwnSectionAboveTools`, also covering `AgentControl-System-Appearance`.
 
+**AgentControl_KeepShellOpen_SettingIsOfferedSavedAndGovernsTheLaunchedShell**: In the real application, a settings
+file without the `KeepShellOpen` value (as an older version wrote it) shows Settings' "Keep the shell open after the
+agent tool exits" checkbox checked (the default is on); clearing it and saving writes `"KeepShellOpen": false` to the
+file, and checking it again and saving writes `true`. A launch with the choice cleared runs the arg-logger stub as the
+agent tool in a shell that ends together with it: the stub records its invocation and then no process launched by the
+test context is left running. These scenarios are tested by
+`windows@SettingsWindow_KeepShellOpenCheckBox_DefaultsOnClearedAndSavedIsPersisted` and
+`windows@LaunchButton_Click_KeepShellOpenOff_ShellEndsWhenAgentToolExits`, covering
+`AgentControl-System-KeepShellOpen`. The opposite case, a shell that stays open, is not run end to end because a test
+cannot leave an interactive shell window running on the machine it runs on; the arguments that keep the shell open
+are verified by the `AgentToolLauncher` unit and subsystem tests, and a launch through the card with the setting on
+by the `RepoCardViewModel` tests, none of which start a process. Every other end-to-end test writes the setting as
+cleared (`TestSettingsWriter`), so the shell it launches ends by itself and no console window outlives a test; the
+end-to-end cleanup of a launched shell is only a short safety net for a shell that is still running after a failure.
+
 **AgentControl_RepoGroups_MoveToNewExistingAndOutOfGroup**: In the real application a repo is moved to a new group
 through the card's "..." menu (Move to group, then New group...), a name is typed into the prompt and confirmed,
 and a header named after the group, counting one repo and expanded, appears with the repo under it. In a second

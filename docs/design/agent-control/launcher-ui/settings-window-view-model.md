@@ -61,6 +61,11 @@ the owner with the other settings on save (`AgentControl-SettingsWindowViewModel
 window shows it in a picker with friendly names, which are produced by the `LauncherUI` supporting type
 `ThemePreferenceDisplayNameConverter`, not by this view model.
 
+**KeepShellOpen**: `bool` — Whether the shell window that hosts the launched agent tool stays open after the
+tool exits. Seeded from the saved setting (on when none was saved), bound to the "Keep the shell open after the
+agent tool exits" checkbox, and passed to the owner with the other settings on save, so saving never resets it
+(`AgentControl-SettingsWindowViewModel-KeepShellOpen`, `AgentControl-LauncherUI-KeepShellOpenOption`).
+
 **AvailableShellPreferences**: `static IReadOnlyList<string>` — The OS-conditional
 shell/terminal preset choices offered by the picker: `pwsh`, `powershell`, `cmd` on Windows, or
 `bash`, `zsh`, `sh` on other platforms, per architecture.md's "Configurable agent tool and

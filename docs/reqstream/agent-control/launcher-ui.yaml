@@ -194,6 +194,33 @@ sections:
           - ThemePreferenceDisplayNameConverter_Convert_KnownTheme_ReturnsFriendlyName
           - ThemePreferenceDisplayNameConverter_Convert_NotATheme_ReturnsEmpty
 
+      - id: AgentControl-LauncherUI-KeepShellOpenOption
+        title: >-
+          The LauncherUI subsystem shall offer, in the Tools section of the Settings window next
+          to the shell/terminal preference, a "Keep the shell open after the agent tool exits"
+          choice with an explanatory tooltip, starting from the saved value (on when none was
+          saved) and saved with the other settings.
+        justification: |
+          Whether the shell window outlives the agent tool is a personal choice that belongs with
+          the other tool settings; the tooltip says what it does, and starting from the saved
+          value shows the user what is in effect.
+        children:
+          - AgentControl-SettingsWindowViewModel-KeepShellOpen
+        tests:
+          - SettingsWindow_Layout_KeepShellOpenCheckBoxFollowsShellPreferenceWithTooltip
+
+      - id: AgentControl-LauncherUI-KeepShellOpenApplied
+        title: >-
+          The LauncherUI subsystem shall launch the agent tool with the shell kept open or not
+          according to the setting in force at the moment of the launch, without a restart.
+        justification: |
+          A user who changes the choice expects the very next launch to behave accordingly, and
+          would not know whether the change had been understood if a restart were needed.
+        children:
+          - AgentControl-RepoCardViewModel-KeepShellOpen
+        tests:
+          - MainWindowViewModel_ApplySettings_KeepShellOpenChanged_NextLaunchUsesIt
+
       - id: AgentControl-LauncherUI-ThemeApplied
         title: >-
           The LauncherUI subsystem shall apply the saved theme choice to the running application,

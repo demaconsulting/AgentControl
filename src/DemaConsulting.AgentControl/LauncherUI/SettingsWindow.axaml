@@ -280,6 +280,12 @@
                    Text="{Binding ShellPreference}"
                    HorizontalAlignment="Stretch" />
 
+        <CheckBox Name="KeepShellOpenCheckBox"
+                  AutomationProperties.AutomationId="KeepShellOpenCheckBox"
+                  Content="Keep the shell open after the agent tool exits"
+                  IsChecked="{Binding KeepShellOpen}"
+                  ToolTip.Tip="Keeps the terminal window open when the agent tool exits, so error messages stay visible and you stay at a prompt in the repo. Clear it to close the window together with the tool. Applies to PowerShell and the Command shell, from the next launch." />
+
     </StackPanel>
     </ScrollViewer>
 

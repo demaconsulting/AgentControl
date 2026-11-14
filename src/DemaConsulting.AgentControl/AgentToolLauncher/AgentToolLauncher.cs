@@ -58,12 +58,20 @@ internal static class AgentToolLauncher
     ///     tool's invocation string.</param>
     /// <param name="workingDirectory">The directory the shell process starts in (the target
     ///     repo's root).</param>
+    /// <param name="keepShellOpen">
+    ///     <see langword="true"/> (the default) to keep the shell open after the command exits;
+    ///     <see langword="false"/> to end the shell together with the command. Affects PowerShell
+    ///     and cmd only; POSIX shells run the command via <c>-c</c> and exit either way.
+    /// </param>
     /// <returns>
-    ///     A <see cref="ProcessStartInfo"/> ready to pass to <see cref="Launch"/>. The shell is
-    ///     started with <c>-NoExit</c> (PowerShell) or <c>/K</c> (cmd) so the window remains open
-    ///     for the user to interact with the launched tool; POSIX shells run the command via
-    ///     <c>-c</c>. For PowerShell, a command beginning with a quoted executable path is prefixed
-    ///     with the call operator (<c>&amp;</c>) so that it is executed rather than echoed.
+    ///     A <see cref="ProcessStartInfo"/> ready to pass to <see cref="Launch"/>. When
+    ///     <paramref name="keepShellOpen"/> is <see langword="true"/> the shell is started with
+    ///     <c>-NoExit</c> (PowerShell) or <c>/K</c> (cmd) so the window remains open for the user
+    ///     to interact with the launched tool; when <see langword="false"/> PowerShell omits
+    ///     <c>-NoExit</c> and cmd uses <c>/C</c>, so the shell ends with the command. POSIX shells
+    ///     run the command via <c>-c</c>. For PowerShell, a command beginning with a quoted
+    ///     executable path is prefixed with the call operator (<c>&amp;</c>) so that it is
+    ///     executed rather than echoed.
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="shell"/> is
     ///     <see langword="null"/>.</exception>
@@ -71,7 +79,8 @@ internal static class AgentToolLauncher
     ///     <paramref name="workingDirectory"/> is null, empty, or whitespace.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="shell"/> has an
     ///     unrecognized <see cref="ShellKind"/> value.</exception>
-    public static ProcessStartInfo BuildProcessStartInfo(DetectedShell shell, string command, string workingDirectory)
+    public static ProcessStartInfo BuildProcessStartInfo(
+        DetectedShell shell, string command, string workingDirectory, bool keepShellOpen = true)
     {
         ArgumentNullException.ThrowIfNull(shell);
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
@@ -88,17 +97,23 @@ internal static class AgentToolLauncher
         {
             case ShellKind.PowerShellCore:
             case ShellKind.WindowsPowerShell:
-                // -NoExit keeps the window open after the command completes so the user can
-                // interact with the launched agent tool; -NoLogo suppresses the PowerShell banner.
+                // -NoExit (only when keepShellOpen) keeps the window open after the command
+                // completes so the user can see errors and stay at a prompt; without it the shell
+                // ends with the command. -NoLogo suppresses the PowerShell banner.
                 startInfo.ArgumentList.Add("-NoLogo");
-                startInfo.ArgumentList.Add("-NoExit");
+                if (keepShellOpen)
+                {
+                    startInfo.ArgumentList.Add("-NoExit");
+                }
+
                 startInfo.ArgumentList.Add("-Command");
                 startInfo.ArgumentList.Add(ApplyPowerShellCallOperator(command));
                 break;
 
             case ShellKind.Cmd:
-                // /K keeps the cmd window open after the command completes, mirroring -NoExit.
-                startInfo.ArgumentList.Add("/K");
+                // /K keeps the cmd window open after the command completes (mirroring -NoExit);
+                // /C runs the command and ends the shell.
+                startInfo.ArgumentList.Add(keepShellOpen ? "/K" : "/C");
                 startInfo.ArgumentList.Add(command);
                 break;
 
@@ -129,7 +144,7 @@ internal static class AgentToolLauncher
     /// <remarks>
     ///     In PowerShell a leading quoted string is an expression whose value is echoed, not a
     ///     command, so <c>"C:\Program Files\Tool\tool.exe" --flag</c> would only be printed (and
-    ///     the trailing arguments would be a parse error). cmd (<c>/K</c>) and POSIX shells
+    ///     the trailing arguments would be a parse error). cmd (<c>/K</c>, <c>/C</c>) and POSIX shells
     ///     (<c>-c</c>) execute such a command directly and therefore never go through this method.
     /// </remarks>
     private static string ApplyPowerShellCallOperator(string command)

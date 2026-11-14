@@ -570,6 +570,45 @@ public sealed class UsabilityWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that Tools offers the keep-shell-open checkbox directly after the shell preference,
+    ///     with its label and an explanatory tooltip, bound to the view model (checked by default).
+    /// </summary>
+    [Fact]
+    public void SettingsWindow_Layout_KeepShellOpenCheckBoxFollowsShellPreferenceWithTooltip() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true));
+        var window = new SettingsWindow(viewModel);
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            var tools = window.FindControl<TextBlock>("ToolsHeadingText")!;
+            var shell = window.FindControl<ComboBox>("ShellPreferenceComboBox")!;
+            var keepOpen = window.FindControl<CheckBox>("KeepShellOpenCheckBox")!;
+
+            // Assert: in the Tools section, after the shell preference, with a label and a tooltip
+            double Top(Control control) => control.TranslatePoint(default, window)!.Value.Y;
+            Assert.True(Top(tools) < Top(shell));
+            Assert.True(Top(shell) < Top(keepOpen), "the checkbox follows the shell preference");
+            Assert.Equal("Keep the shell open after the agent tool exits", keepOpen.Content);
+            Assert.False(string.IsNullOrWhiteSpace(ToolTip.GetTip(keepOpen)?.ToString()));
+
+            // Assert: checked by default, and bound to the view model both ways
+            Assert.True(keepOpen.IsChecked);
+            keepOpen.IsChecked = false;
+            Assert.False(viewModel.KeepShellOpen);
+            viewModel.KeepShellOpen = true;
+            Assert.True(keepOpen.IsChecked);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that Settings is resizable with a minimum size, keeps its default opening width, and that
     ///     widening it widens the text boxes and the source list with it, while a short window scrolls the
     ///     settings and keeps the Save button in view.

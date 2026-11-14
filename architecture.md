@@ -274,7 +274,11 @@ AgentControl
   expose a picker (Copilot CLI / Cursor / Claude Code / Custom command) plus a
   shell/terminal preference, because the correct terminal materially affects
   how well some CLI tools behave on Windows (e.g., Copilot CLI works best in a
-  modern PowerShell).
+  modern PowerShell). A "keep the shell open after the agent tool exits"
+  choice (on by default) decides whether that window stays open for the
+  developer or closes together with the tool; it only changes how the shell is
+  invoked, and the launch itself goes through a replaceable process starter so
+  tests never open a real shell.
 
 - **Testability via config-dir override and stub executables.** A command-line
   option lets FlaUI-driven integration tests point AgentControl at an isolated

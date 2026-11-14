@@ -64,6 +64,12 @@ stamped (`RecordLaunched` raises no `LaunchRecorded`). Without a callback (a car
 in tests) the change is applied to the entry directly. The assignments must be plain assignments of fixed values,
 because the owner runs them twice (candidate, then live entry).
 
+**Launch seam**: the constructor also takes two optional parameters, `processStarter`
+(`IAgentToolProcessStarter`) and `shellDetector` (`ShellDetector`), which default to the real
+`AgentToolProcessStarter` and a real `ShellDetector`; `MainWindowViewModel` hands its own (also optional, `null`
+meaning the real ones) to every card it creates. They exist so tests can capture a launch without starting a shell
+(`AgentControl-RepoCardViewModel-KeepShellOpen`).
+
 **SourceProblem** / **HasSourceProblem**: `string?`/`bool` — the card's error state for a pin whose
 package cannot be obtained: no configured source offers the pinned package and version (or none is configured), or
 sources offer it but none delivers the files the pin recorded, or a source configuration that is
@@ -432,7 +438,12 @@ becomes a source problem with the exception's secret-free message and no sign-in
   `AgentControl-RepoCardViewModel-Launch`, `-ChangeSavedBeforeApplied`); on failure, `ErrorOccurred` is raised.
 
 Calls `EnsureAgentFilesSyncedBeforeLaunchAsync` first, inside the card's cancelable busy operation ("Preparing agent
-files..."), then resolves the shell/agent command and spawns the process unless the outcome is `LaunchCanceled`. The
+files..."), then resolves the shell/agent command and starts the process (through the injected
+`IAgentToolProcessStarter`) unless the outcome is `LaunchCanceled`. The shell is detected by the injected
+`ShellDetector`; the keep-shell-open setting is read from the live settings at that moment and passed to
+`BuildProcessStartInfo`, so a change applies from the next launch (`AgentControl-RepoCardViewModel-KeepShellOpen`).
+The starter and the detector are optional constructor parameters that default to the real ones, which is what the
+application uses; tests pass a recording starter and a deterministic detector so no process is ever started. The
 agent-package state never gates the launch - a missing pin, committed agent files, a user who keeps files that differ,
 a user who cannot be asked, and the user canceling the wait for the check ("Agent file sync was canceled; launching
 anyway.") all launch. There is exactly one exception, decided by the user: agent files that were needed could not be
@@ -821,7 +832,8 @@ presents as "sign-in needed" (`AgentControl-RepoCardViewModel-GitSourceOptions`,
 #### Error Handling
 
 `Launch` catches `InvalidOperationException`/`ArgumentException` from
-`AgentToolLauncher.BuildProcessStartInfo`/`Launch` and raises `ErrorOccurred`.
+`AgentToolLauncher.BuildProcessStartInfo` and from the process starter (which reports a process that cannot be
+started as `InvalidOperationException`) and raises `ErrorOccurred`, without recording a launch.
 `EnsureAgentFilesSyncedBeforeLaunchAsync` does not catch the I/O of the hash itself except
 `InvalidOperationException` (a link, an unreadable file or a case collision), which it treats as "the files cannot be
 vouched for" and answers with the Keep/Update question; cancellation propagates as `OperationCanceledException` to
@@ -908,8 +920,9 @@ background task, and a retired card raises nothing.
 - **AgentFilesChoiceRequest**, **AgentFilesSyncOutcome** (`LauncherUI`, own file `AgentFilesChoiceRequest.cs`) —
   carries the keep-or-update and launch-anyway-or-cancel questions to the view layer and the answer back, and names
   what the pre-launch check concluded.
-- **ShellDetector**, **AgentToolLauncher** (`AgentToolLauncher` subsystem) — shell detection
-  and process launch.
+- **ShellDetector**, **AgentToolLauncher**, **IAgentToolProcessStarter**/**AgentToolProcessStarter**
+  (`AgentToolLauncher` subsystem) — shell detection and process launch; the detector and the starter are
+  constructor parameters (the real ones by default).
 - **AppLogging**, **ILogger** (`Logging` subsystem) — `_logger` logs the real business
   operations this view model performs (launch, pull, upgrade/apply-package, AGENTS.md
   accept/decline), mirroring the convention already established by `GitClient` and

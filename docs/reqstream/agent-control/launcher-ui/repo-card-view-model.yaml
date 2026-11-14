@@ -194,6 +194,21 @@ sections:
           - RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred
           - RepoCardViewModel_LaunchCommand_PreLaunchSyncCancelledByUser_StillLaunches
 
+      - id: AgentControl-RepoCardViewModel-KeepShellOpen
+        title: >-
+          The RepoCardViewModel class shall launch the agent tool through the shell chosen by the
+          shell preference, asking for the shell to stay open exactly when the keep-shell-open
+          setting in force at the moment of the launch is on, and shall report a process that
+          cannot be started as an error without recording a launch.
+        justification: |
+          The setting must govern the very next launch, so it is read when the launch happens
+          rather than when the card is created; a launch that did not happen must not be
+          recorded as one, and the reason must reach the user.
+        tests:
+          - RepoCardViewModel_LaunchCommand_KeepShellOpenSetting_PassesMatchingArgumentsToStarter
+          - RepoCardViewModel_LaunchCommand_SettingChangedBetweenLaunches_UsesCurrentValue
+          - RepoCardViewModel_LaunchCommand_ProcessStartFails_ReportsErrorAndDoesNotRecordLaunch
+
       - id: AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch
         title: >-
           The RepoCardViewModel class shall skip the pre-launch check of the repo's agent files

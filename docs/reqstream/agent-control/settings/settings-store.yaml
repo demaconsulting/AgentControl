@@ -126,6 +126,35 @@ sections:
         tests:
           - SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem
 
+      - id: AgentControl-SettingsStore-KeepShellOpen
+        title: >-
+          The SettingsStore class shall save the user's keep-shell-open choice as a boolean and
+          read it back.
+        justification: |
+          The choice is a per-user preference that must survive a restart, and a plain boolean
+          keeps the file readable.
+        tests:
+          - SettingsStore_SaveThenLoad_KeepShellOpen_RoundTrips
+
+      - id: AgentControl-SettingsStore-KeepShellOpenDefaultsToOn
+        title: >-
+          The SettingsStore class shall read a settings file that has no keep-shell-open value
+          as on.
+        justification: |
+          Existing settings files have no such value, and those users have always had the shell
+          kept open.
+        tests:
+          - SettingsStore_Load_NoKeepShellOpenValue_DefaultsToOn
+
+      - id: AgentControl-SettingsStore-KeepShellOpenInvalidReadsAsOn
+        title: >-
+          The SettingsStore class shall read a null or non-boolean keep-shell-open value as on
+          instead of failing the load.
+        justification: |
+          A mistyped or damaged value in the file must never keep the application from starting.
+        tests:
+          - SettingsStore_Load_InvalidKeepShellOpenValue_ReadsAsOn
+
       - id: AgentControl-SettingsStore-RepoOrganization
         title: >-
           The SettingsStore class shall save a repo's group, a repo's chosen card color and the

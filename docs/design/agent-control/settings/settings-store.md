@@ -42,7 +42,10 @@ path.
   before migration runs, so it can never crash migration, startup or a source provider. A missing
   `Theme` value loads as `ThemePreference.System` (`AgentControl-SettingsStore-ThemeDefaultsToSystem`), and an
   unknown or invalid one does too instead of failing the load (`AgentControl-SettingsStore-ThemeInvalidReadsAsSystem`);
-  `Save` writes the theme by name and `Load` reads it back (`AgentControl-SettingsStore-Theme`). A repo's `GroupName`
+  `Save` writes the theme by name and `Load` reads it back (`AgentControl-SettingsStore-Theme`). A missing
+  `KeepShellOpen` value loads as `true` (`AgentControl-SettingsStore-KeepShellOpenDefaultsToOn`), and a null or
+  non-boolean one does too instead of failing the load (`AgentControl-SettingsStore-KeepShellOpenInvalidReadsAsOn`);
+  `Save` writes it as a boolean and `Load` reads it back (`AgentControl-SettingsStore-KeepShellOpen`). A repo's `GroupName`
   and `CardColor` and the `CollapsedGroups` list are written to the settings file only and read back
   (`AgentControl-SettingsStore-RepoOrganization`); `Save` omits a group or color that is `null`
   (`AgentControl-SettingsStore-RepoOrganizationOmitsUnset`). They are read tolerantly: a file without them loads as no

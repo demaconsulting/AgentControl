@@ -20,6 +20,7 @@
 
 using System.Collections.ObjectModel;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.AgentToolLauncher;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.Settings;
@@ -88,6 +89,18 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     the real providers; see the constructor.
     /// </summary>
     private readonly Func<AppSettings, PackageSourceRegistry>? _registryFactory;
+
+    /// <summary>
+    ///     Starts the agent-tool process for every card, or <see langword="null"/> for the real
+    ///     one; see the constructor.
+    /// </summary>
+    private readonly IAgentToolProcessStarter? _processStarter;
+
+    /// <summary>
+    ///     Detects the shell for every card's launch, or <see langword="null"/> for a real
+    ///     detector; see the constructor.
+    /// </summary>
+    private readonly ShellDetector? _shellDetector;
 
     /// <summary>
     ///     The clock that drives the periodic upgrade re-check (and dates the package-version
@@ -198,6 +211,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="registryFactory">Builds the registry of configured sources for every card from
     ///     the settings; <see langword="null"/> uses the real providers. Supplied so tests can
     ///     substitute in-memory sources whose reads they count.</param>
+    /// <param name="processStarter">Starts the agent-tool process for every card;
+    ///     <see langword="null"/> uses the real one. Supplied so tests can capture launches without
+    ///     starting a shell.</param>
+    /// <param name="shellDetector">Detects the shell for every card's launch;
+    ///     <see langword="null"/> uses a real <see cref="ShellDetector"/>. Supplied so tests get a
+    ///     deterministic shell.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when
@@ -210,7 +229,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Action<ThemePreference>? applyTheme = null,
         TimeProvider? timeProvider = null,
         TimeSpan? upgradeRecheckInterval = null,
-        Func<AppSettings, PackageSourceRegistry>? registryFactory = null)
+        Func<AppSettings, PackageSourceRegistry>? registryFactory = null,
+        IAgentToolProcessStarter? processStarter = null,
+        ShellDetector? shellDetector = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(
@@ -218,6 +239,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _settings = settings;
         _registryFactory = registryFactory;
+        _processStarter = processStarter;
+        _shellDetector = shellDetector;
         _startupOptions = startupOptions;
         _configDirectory = configDirectory;
         _applyTheme = applyTheme;
@@ -1410,7 +1433,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _startupOptions,
             credentials: Credentials,
             commitChange: CommitRepoChange,
-            registryFactory: _registryFactory);
+            registryFactory: _registryFactory,
+            processStarter: _processStarter,
+            shellDetector: _shellDetector);
 
     /// <summary>
     ///     Creates the provider that the settings window's "Test connection" lists versions

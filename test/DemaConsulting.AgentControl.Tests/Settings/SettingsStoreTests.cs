@@ -726,6 +726,98 @@ public class SettingsStoreTests
     }
 
     /// <summary>
+    ///     Test that a settings file written before the keep-shell-open choice existed (no value)
+    ///     loads as "keep the shell open", and so does a brand-new settings instance.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_NoKeepShellOpenValue_DefaultsToOn()
+    {
+        // Arrange: an old settings file without a KeepShellOpen value
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(configDir, "settings.json"), """{ "GitExecutablePath": "git" }""");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.True(loaded.KeepShellOpen);
+            Assert.True(new AppSettings().KeepShellOpen);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that both keep-shell-open choices round-trip through save and load, and are
+    ///     written as a JSON boolean.
+    /// </summary>
+    /// <param name="keepShellOpen">The choice to save.</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SettingsStore_SaveThenLoad_KeepShellOpen_RoundTrips(bool keepShellOpen)
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            // Act
+            SettingsStore.Save(new AppSettings { KeepShellOpen = keepShellOpen }, configDir);
+            var loaded = SettingsStore.Load(configDir);
+            var json = File.ReadAllText(Path.Combine(configDir, "settings.json"));
+
+            // Assert: the value is kept, and the file holds a boolean
+            Assert.Equal(keepShellOpen, loaded.KeepShellOpen);
+            Assert.Contains(
+                $"\"KeepShellOpen\": {(keepShellOpen ? "true" : "false")}", json, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a keep-shell-open value that is not a boolean - null, a string, a number, an
+    ///     array or an object - reads as "keep the shell open" instead of failing the load, and
+    ///     that the value after it is still read.
+    /// </summary>
+    /// <param name="valueJson">The JSON text of the KeepShellOpen value.</param>
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"no\"")]
+    [InlineData("0")]
+    [InlineData("[]")]
+    [InlineData("{ \"a\": 1 }")]
+    public void SettingsStore_Load_InvalidKeepShellOpenValue_ReadsAsOn(string valueJson)
+    {
+        // Arrange: a settings file whose KeepShellOpen value may be anything, followed by another
+        // value that must still be read (proves the reader stays positioned correctly)
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"KeepShellOpen\": " + valueJson + ", \"GitExecutablePath\": \"git-after\" }");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.True(loaded.KeepShellOpen);
+            Assert.Equal("git-after", loaded.GitExecutablePath);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Creates a unique temporary directory for test isolation.
     /// </summary>
     /// <returns>The created directory's path.</returns>

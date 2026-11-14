@@ -5,7 +5,8 @@ package AgentControl {
         doc
         /*
          * Loads/saves application-wide settings (package source path, git/agent-tool
-         * overrides, recent repos, shell preference, and the user's own repo groups, card
+         * overrides, recent repos, shell preference, whether the shell stays open after the
+         * agent tool exits, and the user's own repo groups, card
          * colors and collapsed sections). The data types AppSettings, RecentRepo, AgentToolKind
          * and ThemePreference are documented as supporting types of this subsystem rather than
          * as units of their own.

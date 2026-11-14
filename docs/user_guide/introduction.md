@@ -1155,6 +1155,12 @@ Tools section](images/settings-dark.png)
   "auto-detect" entry) to let AgentControl auto-detect the best available shell (it prefers the
   highest available PowerShell/`pwsh`, falls back to Windows PowerShell 5, then to `cmd`, on
   Windows; the platform default shell is used on macOS/Linux).
+- **Keep the shell open after the agent tool exits** — a checkbox next to the shell preference, on by default (as in
+  earlier versions). When it is on, the terminal window stays open after the agent tool exits, so error messages stay
+  visible and you stay at a prompt in the repo. Clear it to have the window close together with the tool. It applies to
+  Windows PowerShell, PowerShell (`pwsh`) and the Command shell (`cmd`), from the next launch; you do not need to
+  restart AgentControl. On macOS/Linux behavior is unchanged: AgentControl does not open a terminal window there, so
+  the choice has no effect.
 
 # About
 

@@ -56,6 +56,7 @@ flowchart TD
     subgraph AgentToolLauncher
         ShellDetector
         AgentToolLauncher_Unit[AgentToolLauncher]
+        AgentToolProcessStarter
     end
     subgraph GitIntegration
         GitClient
@@ -131,9 +132,11 @@ flowchart TD
     RepoCardViewModel -->|reads and writes the pin, with the applied package's identity| RepoPinStore
     RepoCardViewModel --> GitClient
     RepoCardViewModel --> AgentToolLauncher_Unit
+    RepoCardViewModel --> AgentToolProcessStarter
     RepoCardViewModel --> SelectPackageWindowViewModel
     RepoSync --> ReleaseNotesViewerViewModel
     AgentToolLauncher_Unit --> ShellDetector
+    AgentToolProcessStarter --> AgentToolLauncher_Unit
 ```
 
 `Program` is the entry point: it parses startup arguments (`Startup`), initializes diagnostic
@@ -239,6 +242,15 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   Avalonia's theme variant for every open window at once; the system default follows the operating system. The
   persisted choice is applied before the first window is shown. Every color of the application's own XAML is a
   resource defined for both themes, so no window can have a color in one theme only.
+- *Keep the shell open* (`AgentControl-System-KeepShellOpen`): Settings offers a "Keep the shell open after the agent
+  tool exits" choice next to the shell preference, on by default and saved with the other settings; a settings file
+  without it reads as on. `RepoCardViewModel` reads the setting in force when the user launches (so a change applies
+  from the next launch, without a restart) and passes it to `AgentToolLauncher.BuildProcessStartInfo`, which only
+  changes how the shell is invoked: PowerShell gets `-NoExit` and the Command shell `/K` when it is on; PowerShell
+  omits `-NoExit` and the Command shell uses `/C` when it is off, so the shell ends together with the tool. On
+  macOS and Linux no terminal window is opened (an existing limitation, unchanged), so the choice has no effect there.
+  The card hands the resulting start information to an injected process starter (the real one by default), which is
+  what lets tests verify a launch without opening a shell.
 - *Modal dialogs and keyboard* (`AgentControl-System-DialogKeyboard`, `AgentControl-System-About`): every dialog
   (Settings, the source editors, the sign-in prompt, the package picker, confirmations, message boxes, the
   group-name prompt and About) is shown with its owner window, so the operating system disables the window behind it,
@@ -422,14 +434,17 @@ override for hermetic testing).
 - *Type*: File.
 - *Role*: Provider/Consumer (`Settings` reads and writes it).
 - *Contract*: Records the package sources, git/agent-tool overrides, agent-tool selection, shell
-  preference, the color theme, and the recent-repos list with, per repo, its favorite flag, last-launch time and the
+  preference, whether the shell stays open after the agent tool exits (on when absent), the color theme, and the
+  recent-repos list with, per repo, its favorite flag, last-launch time and the
   user's own organizing choices (its group and its card color), plus the names of the collapsed list sections
-  (`AgentControl-System-Settings`, `AgentControl-System-MultipleSources`, `AgentControl-System-Appearance`,
+  (`AgentControl-System-Settings`, `AgentControl-System-KeepShellOpen`, `AgentControl-System-MultipleSources`,
+  `AgentControl-System-Appearance`,
   `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`);
   a legacy single package-folder path is carried forward
   as the source named `Default`. Contains no password, token or other secret. Returns default
   settings when no file exists yet (first-ever run); a value that is unusable is repaired as the file is read and
-  never keeps the application from starting: an unknown theme reads as the system default, an unknown card color as
+  never keeps the application from starting: an unknown theme reads as the system default, an unusable
+  keep-shell-open value as on, an unknown card color as
   automatic, an unusable group name as no group. The choices in it exist only here, never in a repo, and a change
   is written before it is applied (see *Architecture*).
 - *Constraints*: Location can be overridden by a startup argument to isolate FlaUI end-to-end
@@ -554,7 +569,7 @@ an unwanted or repeated file write.
    `PackageContentIdentity.ComputeInstalledFilesIdentity` compared with the pin's identity - no package access when
    the files match; a silent install, a keep-or-update question or a launch-anyway-or-cancel question otherwise,
    re-extracting via `PackageContentExtractor` only when files must be installed or updated) followed by
-   `AgentToolLauncher.BuildProcessStartInfo`
+   `AgentToolLauncher.BuildProcessStartInfo` (with the keep-shell-open setting) and an injected process starter
    (`AgentControl-System-Launch`, `AgentControl-System-VerifyAgentFiles`); Select Package to the chosen source's provider
    (`IPackageSourceProvider.ListVersionsAsync`/`AcquireAsync`) - for a NuGet server the provider signs
    in as needed, asking through `AvaloniaCredentialPrompt` and the `CredentialPromptViewModel` dialog

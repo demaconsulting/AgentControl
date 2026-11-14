@@ -1135,6 +1135,25 @@ sections:
           # view-model's own unit test (a disclosed pre-existing granularity limitation).
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
 
+      - id: AgentControl-System-KeepShellOpen
+        title: >-
+          The tool shall let the user choose in Settings whether the shell window that hosts the
+          launched agent tool stays open after the tool exits (the default, as before) or closes
+          together with the tool, and shall launch the tool accordingly from the next launch on.
+        tags: [system]
+        justification: |
+          Errors printed by a failed agent tool, and a prompt in the repo, are worth keeping for
+          some users while others want a window that closes by itself; the default must preserve
+          what existing users have.
+        children:
+          - AgentControl-LauncherUI-KeepShellOpenOption
+          - AgentControl-LauncherUI-KeepShellOpenApplied
+          - AgentControl-AgentToolLauncherSubsystem-KeepShellOpen
+          - AgentControl-Settings-KeepShellOpen
+        tests:
+          - windows@SettingsWindow_KeepShellOpenCheckBox_DefaultsOnClearedAndSavedIsPersisted
+          - windows@LaunchButton_Click_KeepShellOpenOff_ShellEndsWhenAgentToolExits
+
       - id: AgentControl-System-ConnectionTest
         title: >-
           The tool shall let the user test a package server's connection before saving it, and

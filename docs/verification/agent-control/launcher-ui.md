@@ -660,6 +660,19 @@ read as words and an unknown value reads as empty. This scenario is tested by
 `ThemePreferenceDisplayNameConverter` is a supporting type of this subsystem, so its tests are cited here and not
 by a unit requirement.
 
+**LauncherUI_KeepShellOpen_OptionIsOfferedNextToTheShellPreference**: The Settings window shows a "Keep the shell
+open after the agent tool exits" checkbox in the Tools section directly after the shell preference, with a non-empty
+tooltip, checked by default and bound both ways to the view model. This scenario is tested by
+`SettingsWindow_Layout_KeepShellOpenCheckBoxFollowsShellPreferenceWithTooltip` (headless), covering
+`AgentControl-LauncherUI-KeepShellOpenOption` (child: `AgentControl-SettingsWindowViewModel-KeepShellOpen`; the view
+model's test is in its unit verification design).
+
+**LauncherUI_KeepShellOpen_ChangeAppliesToTheNextLaunch**: With a recording process starter and a deterministic shell
+detector handed to the main window view model, a launch asks for PowerShell with `-NoExit`; after settings that clear
+the choice are applied (as Save does), the next launch of the same card asks for PowerShell without `-NoExit`; no
+process is started. This scenario is tested by `MainWindowViewModel_ApplySettings_KeepShellOpenChanged_NextLaunchUsesIt`,
+covering `AgentControl-LauncherUI-KeepShellOpenApplied` (child: `AgentControl-RepoCardViewModel-KeepShellOpen`).
+
 **LauncherUI_ThemeApplied_ChoiceTakesEffectOnTheRunningApplication**: Each theme choice maps to the matching Avalonia
 variant (system default to `ThemeVariant.Default`, which follows the operating system) and applying a choice changes
 the running application's requested and actual theme, so every window follows it; settings that were refused are

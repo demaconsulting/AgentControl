@@ -673,8 +673,10 @@ tooltip, accessible name and check mark. The icon-only toolbar buttons and the c
 accessible names matching their tooltips.
 
 **Settings sections and the source editor.** Settings lists Package sources, then an Appearance section (the
-Theme picker, a labeled row) and a Tools section (git executable, agent tool, shell)
-(`AgentControl-LauncherUI-Appearance`). The source editor's location box wraps a long folder or feed address
+Theme picker, a labeled row) and a Tools section (git executable, agent tool, shell, and the "Keep the shell open
+after the agent tool exits" checkbox directly after the shell preference, with a tooltip saying what it does)
+(`AgentControl-LauncherUI-Appearance`, `AgentControl-LauncherUI-KeepShellOpenOption`). The source editor's location
+box wraps a long folder or feed address
 over several lines (up to a maximum height, then it scrolls), has a tooltip with the whole value
 (`SourceEditorViewModel.LocationTooltip`, absent while the box is empty), and the editor is 640 px wide.
 

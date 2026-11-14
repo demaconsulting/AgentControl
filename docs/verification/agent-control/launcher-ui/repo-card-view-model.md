@@ -40,7 +40,11 @@ is constructed; only the view-model class itself is under test. The
 #### Test Environment
 
 N/A - standard test environment; `RealProcess` collection applies (git-stub subprocess
-invocations are not parallelized with other tests using real process launches).
+invocations are not parallelized with other tests using real process launches). No test
+starts an agent-tool process: every card the launch tests build is given a recording
+`FakeAgentToolProcessStarter` and a deterministic `ShellDetector` (shared helpers of the test
+classes do this by construction), so launching never opens a shell on the machine the tests run
+on, and the tests that reach no launch assert that the starter was not called.
 
 #### Acceptance Criteria
 
@@ -242,7 +246,19 @@ scenario is tested by
 `RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded`,
 `RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred`, and
 `RepoCardViewModel_LaunchCommand_PreLaunchSyncCancelledByUser_StillLaunches`, covering
-`AgentControl-RepoCardViewModel-Launch`.
+`AgentControl-RepoCardViewModel-Launch`. The launches are captured by the fake starter (exactly one request, with the
+repo as working directory); the no-command test asserts the starter was not called.
+
+**RepoCardViewModel_Launch_KeepShellOpenSettingGovernsTheShellArguments**: The keep-shell-open setting in force at the
+moment of the launch decides the arguments the process starter receives: with PowerShell the `-NoExit` form when on
+and the form without `-NoExit` when off, with the Command shell `/K` when on and `/C` when off; a change of the
+setting between two launches of the same card is used by the second launch; and a process that cannot be started
+(the fake starter throws `InvalidOperationException`) raises `ErrorOccurred` with the reason, starting "Failed to
+launch the agent tool", and records no launch. This scenario is tested by
+`RepoCardViewModel_LaunchCommand_KeepShellOpenSetting_PassesMatchingArgumentsToStarter`,
+`RepoCardViewModel_LaunchCommand_SettingChangedBetweenLaunches_UsesCurrentValue` and
+`RepoCardViewModel_LaunchCommand_ProcessStartFails_ReportsErrorAndDoesNotRecordLaunch`, covering
+`AgentControl-RepoCardViewModel-KeepShellOpen`.
 
 **RepoCardViewModel_EnsureSyncedBeforeLaunch_SkipsWhenCommittedOrUnpinnedAndNeverBlocksLaunch**: The pre-launch
 check stays out of the way: it returns an informational status message (no `ErrorOccurred`) when no pin exists,

@@ -76,6 +76,49 @@ public class SettingsSubsystemTests
     }
 
     /// <summary>
+    ///     Test that the user's keep-shell-open choice (either value) is still chosen in a later
+    ///     session, and that a missing or damaged value reads as "keep the shell open" without
+    ///     failing the load or disturbing other settings.
+    /// </summary>
+    [Fact]
+    public void Settings_KeepShellOpen_ChosenValueSurvivesSessionsAndMissingOrDamagedValueReadsAsOn()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            // Act / Assert: both choices are kept for the next session
+            foreach (var keepShellOpen in new[] { false, true })
+            {
+                SettingsStore.Save(
+                    new AppSettings { KeepShellOpen = keepShellOpen, GitExecutablePath = "git-kept" }, configDir);
+                var nextSession = SettingsStore.Load(configDir);
+                Assert.Equal(keepShellOpen, nextSession.KeepShellOpen);
+                Assert.Equal("git-kept", nextSession.GitExecutablePath);
+            }
+
+            // Act / Assert: values no session may fail on read as "keep the shell open"
+            foreach (var valueJson in new[] { "\"nope\"", "0", "null", "{ \"a\": 1 }", "[ false ]" })
+            {
+                File.WriteAllText(
+                    Path.Combine(configDir, "settings.json"),
+                    "{ \"KeepShellOpen\": " + valueJson + ", \"GitExecutablePath\": \"git-after\" }");
+                var damaged = SettingsStore.Load(configDir);
+                Assert.True(damaged.KeepShellOpen);
+                Assert.Equal("git-after", damaged.GitExecutablePath);
+            }
+
+            // Act / Assert: a file written before the choice existed keeps the shell open too
+            File.WriteAllText(Path.Combine(configDir, "settings.json"), "{ \"GitExecutablePath\": \"git-old\" }");
+            Assert.True(SettingsStore.Load(configDir).KeepShellOpen);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that a repo's group and card color and the collapsed sections are kept for the next
     ///     session in the user's own settings file only, change with later saves, and are not lost
     ///     when other settings are saved.

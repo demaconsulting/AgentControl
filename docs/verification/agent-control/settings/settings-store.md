@@ -105,6 +105,19 @@ value still read, proving the reader stays positioned - while a name in another 
 accepted as the theme they name. This scenario is tested by `SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem`,
 covering `AgentControl-SettingsStore-ThemeInvalidReadsAsSystem`.
 
+**SettingsStore_KeepShellOpen_RoundTrips**: Both keep-shell-open choices survive a save and a load, and the file holds
+a JSON boolean. This scenario is tested by `SettingsStore_SaveThenLoad_KeepShellOpen_RoundTrips`, covering
+`AgentControl-SettingsStore-KeepShellOpen`.
+
+**SettingsStore_KeepShellOpen_NoValueDefaultsToOn**: A settings file without a `KeepShellOpen` value loads as on (as
+does a new `AppSettings`). This scenario is tested by `SettingsStore_Load_NoKeepShellOpenValue_DefaultsToOn`, covering
+`AgentControl-SettingsStore-KeepShellOpenDefaultsToOn`.
+
+**SettingsStore_KeepShellOpen_InvalidValueReadsAsOn**: A null, a string, a number, an array and an object all load as
+on - with the setting that follows the value still read, proving the reader stays positioned. This scenario is tested
+by `SettingsStore_Load_InvalidKeepShellOpenValue_ReadsAsOn`, covering
+`AgentControl-SettingsStore-KeepShellOpenInvalidReadsAsOn`.
+
 **SettingsStore_RepoOrganization_RoundTrips**: Tested by `SettingsStoreOrganizingTests.cs` (temporary configuration
 directories, no UI). A repo's group, a repo's card color and the collapsed section names survive a save and a load.
 This scenario is tested by `SettingsStore_SaveThenLoad_GroupColorAndCollapsedGroups_RoundTrip`, covering

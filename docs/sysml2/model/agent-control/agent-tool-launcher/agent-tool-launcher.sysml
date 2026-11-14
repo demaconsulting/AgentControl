@@ -2,7 +2,7 @@ package AgentControl {
     private import SoftwareItemMetadata::*;
 
     part def AgentToolLauncher {
-        doc /* Builds process-start information to run the agent tool inside a detected shell. */
+        doc /* Builds process-start information to run the agent tool inside a detected shell, with the shell kept open after the tool exits or ended together with it. */
 
         metadata info : SoftwareInfo {
             sourceFiles = ("src/DemaConsulting.AgentControl/AgentToolLauncher/AgentToolLauncher.cs");

@@ -26,6 +26,7 @@ using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
 using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
+using DemaConsulting.AgentControl.Tests.AgentToolLauncher;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
@@ -40,8 +41,8 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 ///     Uses real repo folders and real zip, NuGet and Git packages, and records every request for a package
 ///     source registry (<see cref="_registryRequests"/>) so a test can prove that no package source was
 ///     touched. The user's answers are scripted by answering each raised
-///     <see cref="AgentFilesChoiceRequest"/> from a queue; no window is opened. The "launch" tests run a real
-///     do-nothing process as the agent tool.
+///     <see cref="AgentFilesChoiceRequest"/> from a queue; no window is opened. The "launch" tests inject a fake
+///     process starter and a deterministic shell detector, so no process is ever started.
 /// </remarks>
 public sealed class RepoCardLaunchVerificationTests : IDisposable
 {
@@ -60,6 +61,11 @@ public sealed class RepoCardLaunchVerificationTests : IDisposable
     ///     source) since the counter was last reset.
     /// </summary>
     private int _registryRequests;
+
+    /// <summary>
+    ///     Records every process the cards of this test ask to start; no process is ever started.
+    /// </summary>
+    private readonly FakeAgentToolProcessStarter _starter = new();
 
     /// <summary>
     ///     Test that a pinned repo without any managed folder gets the pinned package silently: no question,
@@ -671,6 +677,7 @@ public sealed class RepoCardLaunchVerificationTests : IDisposable
         // Assert
         Assert.Single(requests);
         Assert.True(launched);
+        Assert.Single(_starter.Started);
         Assert.Equal("my experiment", await File.ReadAllTextAsync(edited, TestContext.Current.CancellationToken));
     }
 
@@ -695,6 +702,7 @@ public sealed class RepoCardLaunchVerificationTests : IDisposable
         // Assert
         Assert.Single(requests);
         Assert.True(launched);
+        Assert.Single(_starter.Started);
         AssertInstalledFilesAre(repo, "v1");
     }
 
@@ -720,6 +728,7 @@ public sealed class RepoCardLaunchVerificationTests : IDisposable
         Assert.Single(requests);
         Assert.False(launched);
         Assert.Null(card.LastLaunchedUtc);
+        Assert.Empty(_starter.Started);
         Assert.Contains("Launch canceled", card.StatusMessage, StringComparison.Ordinal);
         Assert.False(card.IsBusy);
     }
@@ -746,6 +755,7 @@ public sealed class RepoCardLaunchVerificationTests : IDisposable
         Assert.Single(requests);
         Assert.True(launched);
         Assert.NotNull(card.LastLaunchedUtc);
+        Assert.Single(_starter.Started);
     }
 
     /// <summary>
@@ -916,7 +926,10 @@ public sealed class RepoCardLaunchVerificationTests : IDisposable
                 return registryFactory is null
                     ? PackageSourceRegistry.Create(current.GetEffectiveSources())
                     : registryFactory(current);
-            });
+            },
+            // Launch-safe by construction: a card built here never starts a real process
+            processStarter: _starter,
+            shellDetector: FakeAgentToolProcessStarter.CreateShellDetector());
         card.RefreshCheap();
         return card;
     }
@@ -931,7 +944,8 @@ public sealed class RepoCardLaunchVerificationTests : IDisposable
         throw new InvalidOperationException("A package source must not be reached.");
 
     /// <summary>
-    ///     Builds settings that launch a real do-nothing process as the agent tool.
+    ///     Builds settings that launch a fake agent tool command (the process is never started: the
+    ///     cards of these tests use <see cref="_starter"/>).
     /// </summary>
     /// <param name="sources">The configured package sources.</param>
     /// <returns>The settings.</returns>
@@ -939,7 +953,7 @@ public sealed class RepoCardLaunchVerificationTests : IDisposable
         new()
         {
             AgentTool = AgentToolKind.Custom,
-            CustomAgentCommand = OperatingSystem.IsWindows() ? "cmd /c exit 0" : "true",
+            CustomAgentCommand = "my-agent",
             Sources = [.. sources]
         };
 

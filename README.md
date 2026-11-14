@@ -343,6 +343,9 @@ The Settings window lets you configure:
   OS-appropriate dropdown (`pwsh`/`powershell`/`cmd` on Windows, `bash`/`zsh`/`sh` elsewhere)
   or typed in directly for a custom shell; leave unset to let AgentControl auto-detect the
   best available shell
+- **Keep the shell open after the agent tool exits** — on by default; turn it off to have the terminal window close
+  together with the tool (PowerShell and the Command shell on Windows). With it on, the window stays open so error
+  messages stay visible and you stay at a prompt in the repo. Applied from the next launch.
 
 ### About
 

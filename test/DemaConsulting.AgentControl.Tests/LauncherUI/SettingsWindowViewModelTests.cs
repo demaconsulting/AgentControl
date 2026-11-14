@@ -480,6 +480,36 @@ public class SettingsWindowViewModelTests
     }
 
     /// <summary>
+    ///     Test that the keep-shell-open choice starts on (or from the saved setting) and is saved
+    ///     with the other settings.
+    /// </summary>
+    [Fact]
+    public void SettingsWindowViewModel_KeepShellOpen_DefaultsToOnAndIsSavedWithSettings()
+    {
+        // Arrange: no saved choice
+        AppSettings? savedSettings = null;
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), settings => savedSettings = settings);
+        Assert.True(viewModel.KeepShellOpen);
+
+        // Act: clear the choice and save
+        viewModel.KeepShellOpen = false;
+        viewModel.SaveCommand.Execute(null);
+
+        // Assert: the saved settings carry it, and a window seeded with it starts the same way
+        Assert.NotNull(savedSettings);
+        Assert.False(savedSettings.KeepShellOpen);
+        Assert.False(new SettingsWindowViewModel(new AppSettings { KeepShellOpen = false }, _ => { }).KeepShellOpen);
+
+        // Act: saving without touching the choice keeps it on
+        AppSettings? untouched = null;
+        new SettingsWindowViewModel(new AppSettings(), settings => untouched = settings).SaveCommand.Execute(null);
+
+        // Assert
+        Assert.NotNull(untouched);
+        Assert.True(untouched.KeepShellOpen);
+    }
+
+    /// <summary>
     ///     Test that a settings callback that rejects the save keeps the window open with the
     ///     reason shown, and does not report the settings as saved.
     /// </summary>

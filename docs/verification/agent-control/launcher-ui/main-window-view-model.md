@@ -189,6 +189,15 @@ exception reaches the caller, the applier is not called and the live settings ke
 `MainWindowViewModel_ApplySettings_ThemeChanged_PersistsAndAppliesTheme` and
 `MainWindowViewModel_ApplySettings_SaveFails_DoesNotApplyTheme`.
 
+**MainWindowViewModel_ApplySettings_KeepShellOpenChanged_NextLaunchUsesIt**: Built with a recording process starter and
+a deterministic shell detector, the view model hands both to the cards it creates: a launch asks for PowerShell with
+`-NoExit`, and after `ApplySettings` with the keep-shell-open choice cleared the next launch of the same card asks for
+PowerShell without `-NoExit`, with no process started. This scenario is tested by
+`MainWindowViewModel_ApplySettings_KeepShellOpenChanged_NextLaunchUsesIt`, evidencing
+`AgentControl-LauncherUI-KeepShellOpenApplied` at the subsystem level (see the `LauncherUI` verification design). The
+persistence tests' launch case (`MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports`) uses the same
+fake starter.
+
 **MainWindowViewModel_GroupSections_FlatListWithoutGroupsSectionedListWithThem**: Tested by
 `RepoGroupingTests.cs` (same `RealProcess` collection and temporary-directory approach, with repos
 created under a unique parent so the card name is the folder name). Settings with no group give a flat

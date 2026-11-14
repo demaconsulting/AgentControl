@@ -2,7 +2,7 @@ package AgentControl {
     private import SoftwareItemMetadata::*;
 
     part def SettingsWindowViewModel {
-        doc /* Settings dialog view-model: package sources list (zip folder, NuGet folder, NuGet server and Git repository, with the Add menu commands and the refusal of unusable Git settings), git override, agent tool, shell preference. */
+        doc /* Settings dialog view-model: package sources list (zip folder, NuGet folder, NuGet server and Git repository, with the Add menu commands and the refusal of unusable Git settings), git override, agent tool, shell preference, keep-shell-open choice. */
 
         metadata info : SoftwareInfo {
             sourceFiles = ("src/DemaConsulting.AgentControl/LauncherUI/SettingsWindowViewModel.cs");

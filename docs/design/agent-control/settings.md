@@ -13,10 +13,11 @@ repaired, how look-alike names are given one spelling) are logic of their own, w
 (`docs/design/agent-control/settings/repo-group-name.md`), verification, `RepoGroupNameTests.cs` and review set; the
 `LauncherUI` group prompt and cards use it as well as `SettingsStore`. The subsystem provides the
 observable behavior of persisting application-wide preferences (package sources, git/agent
-tool overrides, recent repos, shell preference, color theme) and the user's own organizing choices (repo groups,
+tool overrides, recent repos, shell preference, keep-shell-open choice, color theme) and the user's own organizing
+choices (repo groups,
 card colors, collapsed sections) (`AgentControl-Settings-Persistence`,
 `AgentControl-Settings-PackageSources`, `AgentControl-Settings-GitSourcePersistence`,
-`AgentControl-Settings-Appearance`,
+`AgentControl-Settings-Appearance`, `AgentControl-Settings-KeepShellOpen`,
 `AgentControl-Settings-RepoOrganization`). The subsystem contains two units: `SettingsStore` and `RepoGroupName`.
 
 ### Interfaces
@@ -54,7 +55,8 @@ card colors, collapsed sections) (`AgentControl-Settings-Persistence`,
 ### Design
 
 `AppSettings` is a plain, mutable data-transfer object (the configured package sources, git
-executable override, `AgentToolKind` selection, custom agent command, shell preference, and the
+executable override, `AgentToolKind` selection, custom agent command, shell preference, the
+keep-shell-open choice, and the
 `RecentRepo` list) serialized as JSON by `SettingsStore` under `%APPDATA%\AgentControl\` or a
 config-directory override. The package sources are a list of `PackageSourceDefinition` (see the
 `AgentPackageManagement` subsystem); the model has no member that can hold a password, token or
@@ -104,6 +106,14 @@ out-of-range number, null, a boolean, an object or an array (which it skips whol
 built-in enum handling would throw on an unknown name and `SettingsStore.Load` would report the whole file as
 corrupt; the appearance can therefore never keep the application from starting
 (`AgentControl-SettingsStore-Theme`, `AgentControl-Settings-Appearance`).
+
+`AppSettings.KeepShellOpen` is whether the shell window that hosts a launched agent tool stays open after the tool
+exits; it is `true` by default, and a settings file without the value (written by an older version) means `true`, so
+existing users keep what they had. It is written as a JSON boolean. Reading is tolerant in the same way as the
+theme: `AppSettings` declares a private JSON converter that reads `true` and `false` and reads anything else - null,
+a string, a number, an object or an array (which it skips whole) - as `true`, because the built-in boolean handling
+would throw on those and `SettingsStore.Load` would report the whole file as corrupt
+(`AgentControl-Settings-KeepShellOpen`, `AgentControl-SettingsStore-KeepShellOpen`).
 
 `SettingsStore` is a static class with no persistent state of its own; it is called once at
 startup (`App.OnFrameworkInitializationCompleted`) to load settings, and again whenever

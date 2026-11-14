@@ -26,6 +26,7 @@ using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Settings;
 using DemaConsulting.AgentControl.Startup;
 using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
+using DemaConsulting.AgentControl.Tests.AgentToolLauncher;
 using DemaConsulting.AgentControl.Tests.GitIntegration;
 using Material.Icons;
 
@@ -562,6 +563,100 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that the keep-shell-open setting reaches the process starter as the matching shell
+    ///     arguments for each shell: the no-exit form when on, the form that ends with the tool when off.
+    /// </summary>
+    /// <param name="shellPreference">The shell preference (PowerShell or the Command shell).</param>
+    /// <param name="keepShellOpen">The keep-shell-open setting.</param>
+    /// <param name="expectedArguments">The arguments the started shell must receive.</param>
+    [Theory]
+    [InlineData("pwsh", true, new[] { "-NoLogo", "-NoExit", "-Command", "my-agent --flag" })]
+    [InlineData("pwsh", false, new[] { "-NoLogo", "-Command", "my-agent --flag" })]
+    [InlineData("cmd", true, new[] { "/K", "my-agent --flag" })]
+    [InlineData("cmd", false, new[] { "/C", "my-agent --flag" })]
+    public async Task RepoCardViewModel_LaunchCommand_KeepShellOpenSetting_PassesMatchingArgumentsToStarter(
+        string shellPreference, bool keepShellOpen, string[] expectedArguments)
+    {
+        // Arrange: a card with a recording starter and a deterministic shell
+        var repoRoot = CreateTempDirectory();
+        var settings = new AppSettings
+        {
+            AgentTool = AgentToolKind.Custom,
+            CustomAgentCommand = "my-agent --flag",
+            ShellPreference = shellPreference,
+            KeepShellOpen = keepShellOpen
+        };
+        var starter = new FakeAgentToolProcessStarter();
+        var card = CreateCard(repoRoot, null, null, settings, starter);
+
+        // Act
+        await card.LaunchCommand.ExecuteAsync();
+
+        // Assert: one launch, in the repo, with the arguments that match the setting
+        var started = Assert.Single(starter.Started);
+        Assert.Equal(repoRoot, started.WorkingDirectory);
+        Assert.Equal(expectedArguments, started.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that a change of the keep-shell-open setting between two launches is used by the
+    ///     second launch, because the setting is read when the launch happens.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_LaunchCommand_SettingChangedBetweenLaunches_UsesCurrentValue()
+    {
+        // Arrange: a card reading a settings object that is changed between launches
+        var settings = new AppSettings
+        {
+            AgentTool = AgentToolKind.Custom,
+            CustomAgentCommand = "my-agent",
+            ShellPreference = "pwsh",
+            KeepShellOpen = true
+        };
+        var starter = new FakeAgentToolProcessStarter();
+        var card = CreateCard(CreateTempDirectory(), null, null, settings, starter);
+
+        // Act: launch, change the setting, launch again
+        await card.LaunchCommand.ExecuteAsync();
+        settings.KeepShellOpen = false;
+        await card.LaunchCommand.ExecuteAsync();
+
+        // Assert: the first launch kept the shell open, the second did not
+        Assert.Equal(2, starter.Started.Count);
+        Assert.Equal(["-NoLogo", "-NoExit", "-Command", "my-agent"], starter.Started[0].ArgumentList);
+        Assert.Equal(["-NoLogo", "-Command", "my-agent"], starter.Started[1].ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that a process that cannot be started is reported as an error and does not record a launch.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_LaunchCommand_ProcessStartFails_ReportsErrorAndDoesNotRecordLaunch()
+    {
+        // Arrange: a starter that fails
+        var settings = new AppSettings { AgentTool = AgentToolKind.Custom, CustomAgentCommand = "my-agent" };
+        var starter = new FakeAgentToolProcessStarter
+        {
+            ThrowOnStart = new InvalidOperationException("No such shell.")
+        };
+        var card = CreateCard(CreateTempDirectory(), null, null, settings, starter);
+        string? capturedError = null;
+        var recorded = false;
+        card.ErrorOccurred += (_, message) => capturedError = message;
+        card.LaunchRecorded += (_, _) => recorded = true;
+
+        // Act
+        await card.LaunchCommand.ExecuteAsync();
+
+        // Assert
+        Assert.NotNull(capturedError);
+        Assert.StartsWith("Failed to launch the agent tool", capturedError, StringComparison.Ordinal);
+        Assert.Contains("No such shell.", capturedError, StringComparison.Ordinal);
+        Assert.False(recorded);
+        Assert.Null(card.LastLaunchedUtc);
+    }
+
+    /// <summary>
     ///     Test that Launch raises ErrorOccurred when no agent tool command can be resolved
     ///     (Custom selected with no command configured).
     /// </summary>
@@ -573,7 +668,8 @@ public sealed class RepoCardViewModelTests : IDisposable
         var repoRoot = CreateTempDirectory();
         CreateManagedFolders(repoRoot);
         var settings = new AppSettings { AgentTool = AgentToolKind.Custom, CustomAgentCommand = null };
-        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings);
+        var starter = new FakeAgentToolProcessStarter();
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings, starter);
         string? capturedError = null;
         card.ErrorOccurred += (_, message) => capturedError = message;
 
@@ -583,6 +679,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Assert: an error was raised rather than attempting to launch an empty command
         Assert.NotNull(capturedError);
         Assert.Contains("agentic CLI tool", capturedError, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(starter.Started);
     }
 
     /// <summary>
@@ -963,16 +1060,17 @@ public sealed class RepoCardViewModelTests : IDisposable
     [Fact]
     public async Task RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded()
     {
-        // Arrange: a resolvable custom agent-tool command using a real executable (cmd/sh), and a
-        // pinned/synced repo so the ensure-synced-before-launch check passes.
+        // Arrange: a custom agent-tool command, a recording starter (no process is ever started),
+        // and a pinned/synced repo so the ensure-synced-before-launch check passes.
         var repoRoot = CreateTempDirectory();
         CreateManagedFolders(repoRoot);
         var settings = new AppSettings
         {
             AgentTool = AgentToolKind.Custom,
-            CustomAgentCommand = OperatingSystem.IsWindows() ? "cmd /c exit 0" : "true"
+            CustomAgentCommand = "my-agent --flag"
         };
-        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings);
+        var starter = new FakeAgentToolProcessStarter();
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings, starter);
         var raised = false;
         card.LaunchRecorded += (_, _) => raised = true;
         Assert.Null(card.LastLaunchedUtc);
@@ -980,9 +1078,10 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Act
         await card.LaunchCommand.ExecuteAsync();
 
-        // Assert
+        // Assert: the launch reached the starter, in the repo, and was recorded
         Assert.True(raised);
         Assert.NotNull(card.LastLaunchedUtc);
+        Assert.Equal(repoRoot, Assert.Single(starter.Started).WorkingDirectory);
     }
 
     /// <summary>
@@ -1773,19 +1872,20 @@ public sealed class RepoCardViewModelTests : IDisposable
     [InlineData(true, true)]
     public async Task RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches(bool withPin, bool withUnreachableSource)
     {
-        // Arrange: a resolvable custom agent-tool command using a real executable (cmd/sh), and a
-        // repo whose ensure-synced-before-launch check will either find no pin at all, or a pin
+        // Arrange: a custom agent-tool command and a recording starter (no process is ever started),
+        // and a repo whose ensure-synced-before-launch check will either find no pin at all, or a pin
         // whose package is not resolvable at the configured source
         var repoRoot = CreateTempDirectory();
         var settings = new AppSettings
         {
             AgentTool = AgentToolKind.Custom,
-            CustomAgentCommand = OperatingSystem.IsWindows() ? "cmd /c exit 0" : "true",
+            CustomAgentCommand = "my-agent --flag",
             PackageSourcePath = withUnreachableSource ? CreateTempDirectory() : null
         };
+        var starter = new FakeAgentToolProcessStarter();
         var card = withPin
-            ? CreateCard(repoRoot, "contoso-agents", "1.0.0", settings)
-            : CreateCard(repoRoot, null, null, settings);
+            ? CreateCard(repoRoot, "contoso-agents", "1.0.0", settings, starter)
+            : CreateCard(repoRoot, null, null, settings, starter);
         var raised = false;
         card.LaunchRecorded += (_, _) => raised = true;
         Assert.Null(card.LastLaunchedUtc);
@@ -1793,10 +1893,11 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Act
         await card.LaunchCommand.ExecuteAsync();
 
-        // Assert: the process was still spawned and the launch recorded, despite the sync attempt
+        // Assert: the process was still requested and the launch recorded, despite the sync attempt
         // finding nothing to do (no pin) or failing outright (pinned package missing from source)
         Assert.True(raised);
         Assert.NotNull(card.LastLaunchedUtc);
+        Assert.Single(starter.Started);
     }
 
     /// <summary>
@@ -2594,7 +2695,8 @@ public sealed class RepoCardViewModelTests : IDisposable
     {
         // Arrange: a card with no agent tool command configured, so launching reports an error
         var repoRoot = CreateTempDirectory();
-        var card = CreateCard(repoRoot, null, null, new AppSettings { AgentTool = AgentToolKind.Custom });
+        var starter = new FakeAgentToolProcessStarter();
+        var card = CreateCard(repoRoot, null, null, new AppSettings { AgentTool = AgentToolKind.Custom }, starter);
         card.RefreshCheap();
         Assert.Equal(RepoCardStatus.NoPackage, card.Status);
 
@@ -2603,6 +2705,7 @@ public sealed class RepoCardViewModelTests : IDisposable
 
         // Assert
         Assert.Equal(RepoCardStatus.Problem, card.Status);
+        Assert.Empty(starter.Started);
     }
 
     /// <summary>
@@ -2935,9 +3038,10 @@ public sealed class RepoCardViewModelTests : IDisposable
         {
             Sources = [ZipSource("Default", "unused")],
             AgentTool = AgentToolKind.Custom,
-            CustomAgentCommand = OperatingSystem.IsWindows() ? "cmd /c exit 0" : "true"
+            CustomAgentCommand = "my-agent --flag"
         };
-        var card = CreateCardWithProvider(CreateTempDirectory(), "contoso-agents", "1.0.0", provider, settings);
+        var starter = new FakeAgentToolProcessStarter();
+        var card = CreateCardWithProvider(CreateTempDirectory(), "contoso-agents", "1.0.0", provider, settings, starter);
         var recorded = false;
         card.LaunchRecorded += (_, _) => recorded = true;
 
@@ -2949,10 +3053,11 @@ public sealed class RepoCardViewModelTests : IDisposable
         card.CancelOperationCommand.Execute(null);
         await launching;
 
-        // Assert: the tool was launched regardless
+        // Assert: the tool was launched regardless (the process was requested exactly once)
         Assert.True(recorded);
         Assert.Equal("Launched.", card.StatusMessage);
         Assert.False(card.IsBusy);
+        Assert.Single(starter.Started);
     }
 
     /// <summary>
@@ -3278,7 +3383,7 @@ public sealed class RepoCardViewModelTests : IDisposable
     /// </summary>
     private RepoCardViewModel CreateCardWithProvider(
         string repoRoot, string? pinnedPackageName, string? pinnedVersion, IPackageSourceProvider provider,
-        AppSettings? settings = null)
+        AppSettings? settings = null, FakeAgentToolProcessStarter? starter = null)
     {
         settings ??= new AppSettings { Sources = [ZipSource("Default", "unused")] };
         if (pinnedPackageName is not null)
@@ -3296,7 +3401,12 @@ public sealed class RepoCardViewModelTests : IDisposable
             PinnedPackageVersion = pinnedVersion,
             PinnedSource = pinnedPackageName is null ? null : "Default"
         };
-        return new RepoCardViewModel(recentRepo, () => settings, new PackageVersionCache(), null, _ => registry);
+
+        // Launch-safe by construction: a card built here never starts a real process
+        return new RepoCardViewModel(
+            recentRepo, () => settings, new PackageVersionCache(), null, _ => registry,
+            processStarter: starter ?? new FakeAgentToolProcessStarter(),
+            shellDetector: FakeAgentToolProcessStarter.CreateShellDetector());
     }
 
     /// <summary>
@@ -3347,7 +3457,9 @@ public sealed class RepoCardViewModelTests : IDisposable
     {
         var startupOptions = StartupOptions.Parse(["--config-dir", CreateTempDirectory()]);
         return new RepoCardViewModel(
-            new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache(), startupOptions);
+            new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache(), startupOptions,
+            processStarter: new FakeAgentToolProcessStarter(),
+            shellDetector: FakeAgentToolProcessStarter.CreateShellDetector());
     }
 
     /// <summary>
@@ -3371,7 +3483,8 @@ public sealed class RepoCardViewModelTests : IDisposable
     ///     app sessions.
     /// </summary>
     private static RepoCardViewModel CreateCard(
-        string repoPath, string? pinnedPackageName, string? pinnedPackageVersion, AppSettings settings)
+        string repoPath, string? pinnedPackageName, string? pinnedPackageVersion, AppSettings settings,
+        FakeAgentToolProcessStarter? starter = null)
     {
         if (pinnedPackageName is not null)
         {
@@ -3385,7 +3498,11 @@ public sealed class RepoCardViewModelTests : IDisposable
             PinnedPackageVersion = pinnedPackageVersion
         };
 
-        return new RepoCardViewModel(recentRepo, () => settings, new PackageVersionCache());
+        // Launch-safe by construction: a card built here never starts a real process
+        return new RepoCardViewModel(
+            recentRepo, () => settings, new PackageVersionCache(),
+            processStarter: starter ?? new FakeAgentToolProcessStarter(),
+            shellDetector: FakeAgentToolProcessStarter.CreateShellDetector());
     }
 
     /// <summary>

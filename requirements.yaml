@@ -49,6 +49,7 @@ includes:
   - docs/reqstream/agent-control/agent-tool-launcher.yaml
   - docs/reqstream/agent-control/agent-tool-launcher/shell-detector.yaml
   - docs/reqstream/agent-control/agent-tool-launcher/agent-tool-launcher.yaml
+  - docs/reqstream/agent-control/agent-tool-launcher/agent-tool-process-starter.yaml
   - docs/reqstream/agent-control/git-integration.yaml
   - docs/reqstream/agent-control/git-integration/git-client.yaml
   - docs/reqstream/agent-control/git-integration/git-credential-client.yaml

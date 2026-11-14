@@ -24,6 +24,7 @@ using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.Settings;
 using DemaConsulting.AgentControl.Startup;
+using DemaConsulting.AgentControl.Tests.AgentToolLauncher;
 using DemaConsulting.AgentControl.Tests.GitIntegration;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
@@ -162,6 +163,47 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Null(reloaded.PackageSourcePath);
         var recentRepo = Assert.Single(reloaded.RecentRepos);
         Assert.Equal(repoPath, recentRepo.Path);
+    }
+
+    /// <summary>
+    ///     Test that a change of the keep-shell-open setting applied through ApplySettings is used by
+    ///     the next launch of an existing card, and that the view model hands its process starter and
+    ///     shell detector to its cards (so no process is started).
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_ApplySettings_KeepShellOpenChanged_NextLaunchUsesIt()
+    {
+        // Arrange: a view model with a recording starter, a deterministic shell and one repo
+        var repoPath = CreateTempDirectory();
+        var settings = new AppSettings
+        {
+            AgentTool = AgentToolKind.Custom,
+            CustomAgentCommand = "my-agent",
+            ShellPreference = "pwsh",
+            KeepShellOpen = true,
+            RecentRepos = [new RecentRepo { Path = repoPath }]
+        };
+        var starter = new FakeAgentToolProcessStarter();
+        var viewModel = new MainWindowViewModel(
+            settings, configDirectory: CreateTempDirectory(),
+            processStarter: starter, shellDetector: FakeAgentToolProcessStarter.CreateShellDetector());
+        var card = Assert.Single(viewModel.RepoCards);
+
+        // Act: launch, apply settings that clear the choice (as the Settings window's Save does), launch again
+        await card.LaunchCommand.ExecuteAsync();
+        viewModel.ApplySettings(new AppSettings
+        {
+            AgentTool = AgentToolKind.Custom,
+            CustomAgentCommand = "my-agent",
+            ShellPreference = "pwsh",
+            KeepShellOpen = false
+        });
+        await card.LaunchCommand.ExecuteAsync();
+
+        // Assert: the first launch kept the shell open, the next one did not
+        Assert.Equal(2, starter.Started.Count);
+        Assert.Equal(["-NoLogo", "-NoExit", "-Command", "my-agent"], starter.Started[0].ArgumentList);
+        Assert.Equal(["-NoLogo", "-Command", "my-agent"], starter.Started[1].ArgumentList);
     }
 
     /// <summary>
