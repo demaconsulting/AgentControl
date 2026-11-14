@@ -79,22 +79,9 @@
   </PropertyGroup>
 
   <Target Name="PublishAgentControlForHarvest" BeforeTargets="GetHarvestDirectoryContent">
-    <!-- Because the ProjectReference above guarantees DemaConsulting.AgentControl.csproj's own
-         normal Build target has already fully completed by the time this runs, that project's
-         compiler-generated "obj\Release\net10.0\*.AssemblyInfo.cs" / "*.AssemblyAttributes.cs"
-         fragments already exist on disk and are no longer needed (they are already compiled
-         into that project's own output DLL). MSBuild's default "**/*.cs" wildcard used by the
-         isolated publish below has no way to exclude that OLD default obj folder once a
-         different BaseIntermediateOutputPath is in effect, so those two known, safely-
-         regenerable generated files are removed first to prevent them being picked up a second
-         time (which otherwise causes CS0579 duplicate-attribute errors during the isolated
-         publish). -->
-    <ItemGroup>
-      <_StaleAgentControlGeneratedCompile Include="$(AgentControlProjectDir)obj\$(Configuration)\**\*.AssemblyInfo.cs" />
-      <_StaleAgentControlGeneratedCompile Include="$(AgentControlProjectDir)obj\$(Configuration)\**\.NETCoreApp,Version=v*.AssemblyAttributes.cs" />
-    </ItemGroup>
-    <Delete Files="@(_StaleAgentControlGeneratedCompile)" Condition="Exists('%(_StaleAgentControlGeneratedCompile.Identity)')" />
-
+    <!-- DemaConsulting.AgentControl.csproj excludes its conventional obj/ and bin/ folders from
+         its default globs (DefaultItemExcludes), so the isolated publish below never compiles
+         generated files left there by the normal build or by an earlier Debug build. -->
     <RemoveDir Directories="$(AgentControlPublishDir)" Condition="Exists('$(AgentControlPublishDir)')" />
 
     <!-- A genuinely separate "dotnet publish" process (not an in-process MSBuild task) writing

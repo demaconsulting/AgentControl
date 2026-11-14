@@ -256,8 +256,8 @@ the events that need a dialog.
   still limits its own height to the screen when it opens (`AgentControl-LauncherUI-ResizableSourceDialogs`).
 - *Window titles*: the windows show the product name with a space - "Agent Control" (main window and the message and
   confirmation boxes), "Agent Control Settings" and "About Agent Control". This is display text only: the product,
-  executable, assembly, namespaces, settings folder and AutomationIds keep the name `AgentControl`. The Puppet and the
-  UI tests that look a window up by title use the same strings.
+  executable, assembly, namespaces, settings folder and AutomationIds keep the name `AgentControl`. The UI tests that
+  look a window up by title use the same strings.
 - *Supporting types*: `CardColorPalette` is a static table built from `RecentRepo.CardColorNames` (the single list of
   valid names, owned by `Settings`); the card uses it to accept a color name and to find the tile's palette index, and
   the main window's palette pop-up draws one swatch per entry. `PathEllipsisText` is a control in the card's template

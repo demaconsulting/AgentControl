@@ -1,6 +1,7 @@
 ---
 resource-path:
   - docs/design
+  - docs/design/generated
   - docs/design/agent-control
   - docs/design/agent-control/launcher-ui
   - docs/design/agent-control/agent-package-management
@@ -13,7 +14,9 @@ resource-path:
   - docs/design/agent-control/startup
   - docs/design/agent-control/utilities
   - docs/design/ots
+  - docs/images
   - docs/template
+embed-resources: true
 
 input-files:
   - docs/design/title.txt

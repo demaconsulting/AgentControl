@@ -394,5 +394,5 @@ menu offers `UpgradeMenuItem` (version 1.1.0) instead of `SelectPackageMenuItem`
   main window by its AutomationId (`MainWindowRoot`) or its title, not by what Windows calls the process's main window.
 - The Puppet is not part of AgentControl: it is built and unit-tested (argument, chord, placement, hover planning,
   instance-record validation, launch arguments, build lookup, list-item matching and fixture creation) in
-  `test/DemaConsulting.AgentControl.Puppet.Tests`, but no UI runs in those tests. The unit tests and the build run in CI;
+  `tools/DemaConsulting.AgentControl.Puppet.Tests`, but no UI runs in those tests. The unit tests and the build run in CI;
   the Puppet itself only runs on Windows.
