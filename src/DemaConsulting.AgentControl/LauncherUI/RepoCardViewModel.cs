@@ -1837,6 +1837,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         AgentsMdTemplateOfferRequested = null;
         ContentChangeConfirmationRequested = null;
         CommittedFilesConversionRequested = null;
+        AgentFilesChoiceRequested = null;
 
         // The picture is disposed here, once the view has been told it is gone
         RepoImage = null;
@@ -1887,6 +1888,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     subscriber nobody can be asked, so the operation stops and changes nothing.
     /// </summary>
     public event EventHandler<CommittedFilesConversionRequest>? CommittedFilesConversionRequested;
+
+    /// <summary>
+    ///     Raised by <see cref="LaunchCommand"/> when the agent files on disk differ from the pinned
+    ///     package (keep them or update them from the package?) and when a needed restore of the
+    ///     agent files failed (launch anyway or cancel?). The view layer shows the request's message
+    ///     in a modal <see cref="ConfirmationWindow"/> with the request's two button labels and
+    ///     answers through <see cref="AgentFilesChoiceRequest.Respond"/>; the launch waits for the
+    ///     answer while it holds the card busy. Does not itself show any dialog - that is a
+    ///     view-layer concern, like <see cref="CommittedFilesConversionRequested"/>. Without a
+    ///     subscriber nobody can be asked, so the files are kept and a failure is reported
+    ///     passively, and the launch proceeds.
+    /// </summary>
+    public event EventHandler<AgentFilesChoiceRequest>? AgentFilesChoiceRequested;
 
     /// <summary>
     ///     What to do when a package version that the repo is already pinned to is delivered with
@@ -2064,32 +2078,40 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     architecture.md's <c>AgentToolLauncher</c> subsystem.
     /// </summary>
     /// <remarks>
-    ///     Per architecture.md's "Initial package selection and ensure-synced-before-launch"
-    ///     decision (as amended - launch must never be blocked by agent-package sync state),
-    ///     this first awaits <see cref="EnsureAgentFilesSyncedBeforeLaunchAsync"/> purely for its
-    ///     best-effort sync side effect (it may extract missing managed folders, or surface an
-    ///     informational status message/warning), then always proceeds to resolve the shell/agent
-    ///     command and spawn the process regardless of that call's outcome - including when the
-    ///     user cancels the wait for the sync. A user may want to
-    ///     launch their agentic CLI tool to help with agent-package migration, or simply because
-    ///     an agentic tool is useful even with zero agent files present - either way, sync state
-    ///     must never stand in the way of launching.
+    ///     This first awaits <see cref="EnsureAgentFilesSyncedBeforeLaunchAsync"/>, which verifies
+    ///     the agent files on disk against the pinned package (installing them silently when none
+    ///     exist, and asking the user to keep or update them when they differ), then resolves the
+    ///     shell/agent command and spawns the process. Per architecture.md's "Verify installed agent
+    ///     files before launch" decision (which amends "launch must never be blocked by
+    ///     agent-package sync state"), sync state stands in the way of a launch in exactly one case:
+    ///     the agent files were needed, could not be restored, and the user chose to cancel the
+    ///     launch. Everything else launches - including when the wait is canceled, when the user
+    ///     keeps files that differ, when there is no pin or the files are committed, and when nobody
+    ///     can be asked - because an agentic tool is useful for migrating agent packages, or with
+    ///     zero agent files at all.
     /// </remarks>
     /// <param name="cancellationToken">Signaled when the command itself is cancelled.</param>
-    /// <returns>A task that completes once the agent tool has been started or the failure has
-    ///     been reported.</returns>
+    /// <returns>A task that completes once the agent tool has been started, the launch was canceled
+    ///     by the user, or the failure has been reported.</returns>
     private Task LaunchAsync(CancellationToken cancellationToken) =>
         RunOperationAsync("Preparing agent files...", cancelable: true, async token =>
         {
-            // The pre-launch sync is best effort: whether it succeeds, fails or is cancelled by
-            // the user, the agent tool is still started below
+            // Canceling the wait for the sync never stops the launch; only an explicit "Cancel"
+            // answered to a failed restore does
+            var outcome = AgentFilesSyncOutcome.Skipped;
             try
             {
-                await EnsureAgentFilesSyncedBeforeLaunchAsync(token);
+                outcome = await EnsureAgentFilesSyncedBeforeLaunchAsync(token);
             }
             catch (OperationCanceledException)
             {
                 StatusMessage = "Agent file sync was canceled; launching anyway.";
+            }
+
+            if (outcome == AgentFilesSyncOutcome.LaunchCanceled)
+            {
+                StatusMessage = "Launch canceled; the agent files were not restored.";
+                return;
             }
 
             LaunchAgentTool();
@@ -2136,98 +2158,340 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Best-effort attempt to sync this repo's four managed agent folders with the currently
-    ///     pinned package version, as an informational side action that runs before
-    ///     <see cref="LaunchAsync"/> spawns the agent tool. Per architecture.md's
-    ///     "ensure-synced-before-launch" decision (as amended), this <b>never</b> blocks the
-    ///     launch - it only ever attempts to help keep the managed folders in sync, surfacing a
-    ///     non-blocking status message or warning when it cannot.
+    ///     Verifies, before <see cref="LaunchAsync"/> spawns the agent tool, that the agent files
+    ///     physically in this repo are the ones the pinned package delivers, and repairs or asks
+    ///     when they are not.
     /// </summary>
-    /// <param name="cancellationToken">Cancels reading the source; once the copy into the repo
-    ///     has started it is not interrupted, so a repo is never left half extracted.</param>
-    /// <returns>
-    ///     <see langword="true"/> if no sync action was needed or attempted (the repo has
-    ///     committed agent files, has no pin, or the managed folders were already present), or a
-    ///     missing set was silently re-extracted successfully; <see langword="false"/> if a sync
-    ///     attempt was made and failed for an ordinary reason (source unreachable, pinned version
-    ///     missing, an I/O failure), in which case <see cref="ErrorOccurred"/> has already been
-    ///     raised as a non-blocking warning explaining why and <see cref="LaunchAsync"/> proceeds to
-    ///     spawn the agent tool regardless of this return value.
-    /// </returns>
+    /// <param name="cancellationToken">Cancels hashing the installed files, reading the sources and
+    ///     waiting for an answer; once the copy into the repo has started it is not interrupted, so
+    ///     a repo is never left half extracted.</param>
+    /// <returns>The outcome; <see cref="AgentFilesSyncOutcome.LaunchCanceled"/> is the only one
+    ///     that stops the launch (see <see cref="AgentFilesSyncOutcome"/> for the others).</returns>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
-    ///     is cancelled while the source is being read; the launch still proceeds.</exception>
+    ///     is cancelled while the files are being hashed, the source is being read or a question is
+    ///     open; the launch then proceeds (see <see cref="LaunchAsync"/>).</exception>
     /// <remarks>
     ///     <para>
-    ///     If this repo has committed agent files (<see cref="HasCommittedAgentFiles"/> is
-    ///     <see langword="true"/>), the four managed folders are never touched - no delete, no
-    ///     extract - even if a pin exists and the folders are missing or stale. Blindly deleting
-    ///     or overwriting files the user has deliberately committed to their repo would be far
-    ///     worse than leaving them alone; this instead raises a non-blocking <see cref="StatusMessage"/>
-    ///     noting that sync was skipped, and returns <see langword="true"/>.
+    ///     Why not "the folders exist": the previous check only looked for the four managed folders,
+    ///     so a repo whose folders were present but about half of whose files were missing (an
+    ///     interrupted extraction has no rollback) looked synced and was launched forever without a
+    ///     restore. The decision now rests on the files themselves. The checks run in this order and
+    ///     the first that applies wins:
     ///     </para>
+    ///     <list type="number">
+    ///         <item>Committed agent files (<see cref="HasCommittedAgentFiles"/>): never touched; sync
+    ///         is skipped (<see cref="AgentFilesSyncOutcome.Skipped"/>).</item>
+    ///         <item>No pin: nothing to sync (<see cref="AgentFilesSyncOutcome.Skipped"/>); an agentic
+    ///         tool is useful with zero managed files.</item>
+    ///         <item>No agent file on disk (<see cref="PackageContentExtractor.HasInstalledFiles"/> is
+    ///         <see langword="false"/>): the pinned package is installed silently - nothing can be
+    ///         lost (<see cref="AgentFilesSyncOutcome.Restored"/>).</item>
+    ///         <item>The pin records no files identity (an older pin): there is nothing to compare
+    ///         the files with and obtaining the package on every launch would cost a source listing or
+    ///         download, so the weaker folder-presence rule applies - all four folders exist: launch
+    ///         (<see cref="AgentFilesSyncOutcome.Skipped"/>); a folder is missing: silent restore.</item>
+    ///         <item>Otherwise the files are hashed with
+    ///         <see cref="PackageContentIdentity.ComputeInstalledFilesIdentity"/> - the algorithm that
+    ///         produced the pin's identity - on a worker thread. Equal: launch, with no prompt and
+    ///         <b>no access to any package source</b> (<see cref="AgentFilesSyncOutcome.InSync"/>).
+    ///         Different (a file missing, changed or added) or not readable (a link, an I/O error): the
+    ///         user is asked on every launch to keep the current files (the default) or to update them
+    ///         from the package, which deletes the four folders and extracts the pinned package.</item>
+    ///     </list>
     ///     <para>
-    ///     Otherwise, if no pin exists at all (<see cref="PinnedPackageName"/> is
-    ///     <see langword="null"/>), this is treated as an acceptable, unremarkable state - not an
-    ///     error - since an agentic CLI tool remains useful even with zero managed agent files
-    ///     present. A non-blocking <see cref="StatusMessage"/> notes that launch is proceeding
-    ///     without managed agent files, and this returns <see langword="true"/>.
-    ///     </para>
-    ///     <para>
-    ///     If a pin exists and <see cref="PackageZipExtractor.AllManagedFoldersExist"/> is
-    ///     already <see langword="true"/>, this returns <see langword="true"/> immediately with no
-    ///     re-extraction - the common "already synced" case must not pay any extra I/O cost on
-    ///     every launch.
-    ///     </para>
-    ///     <para>
-    ///     If a pin exists but one or more managed folders are missing (e.g. a freshly cloned
-    ///     repo whose <c>.gitignore</c>'d agent folders were never unpacked on this machine), this
-    ///     resolves the <em>currently pinned</em> package and version (never the
-    ///     latest - upgrading remains a deliberate, separate user action) among the user's own
-    ///     configured sources, in Settings order: the first source whose files have exactly the
-    ///     pin's recorded files identity supplies it; a pin without one takes the source it was
-    ///     last supplied from (else the first that offers it) - and re-extracts it
-    ///     directly via <see cref="PackageContentExtractor.Extract"/>, deliberately without going
-    ///     through <see cref="ApplyPackageAndShowReleaseNotesAsync"/> - architecture.md's
-    ///     ensure-synced-before-launch bullet never mentions showing release notes, unlike its
-    ///     Select-Package bullet, so a silent background repair must not pop a release-notes
-    ///     window on every launch. If this re-extraction attempt fails, <see cref="ErrorOccurred"/>
-    ///     is raised as a non-blocking warning and this returns <see langword="false"/> - but the
-    ///     launch still proceeds regardless.
+    ///     The package is only obtained when files must be restored or updated, resolved as the
+    ///     <em>currently pinned</em> package and version (never the latest - upgrading remains a
+    ///     deliberate, separate user action) through the existing caches, with no release-notes
+    ///     window; see <see cref="RestorePinnedFilesAsync"/>. A restore that fails raises a question
+    ///     (<see cref="AgentFilesChoiceRequested"/>): launch anyway, or cancel (the default). With no
+    ///     subscriber nobody can be asked, so a mismatch keeps the files and a failure is reported
+    ///     passively through <see cref="ErrorOccurred"/> and the launch proceeds. The pin is never
+    ///     written here.
     ///     </para>
     ///     <para>
     ///     Marked <see langword="internal"/> (not <see langword="private"/>) rather than tested
     ///     only through <see cref="LaunchAsync"/> itself, mirroring <c>AgentToolLauncher.BuildProcessStartInfo</c>'s
     ///     own precedent for keeping process-spawning code separated from its unit-testable
     ///     decision logic.
-    /// </para>
+    ///     </para>
     /// </remarks>
-    internal async Task<bool> EnsureAgentFilesSyncedBeforeLaunchAsync(CancellationToken cancellationToken = default)
+    internal async Task<AgentFilesSyncOutcome> EnsureAgentFilesSyncedBeforeLaunchAsync(
+        CancellationToken cancellationToken = default)
     {
+        // Check 1: committed files are the user's own work and are never touched
         if (HasCommittedAgentFiles)
         {
             StatusMessage = "This repo has committed agent files; skipping agent-package sync.";
-            return true;
+            return AgentFilesSyncOutcome.Skipped;
         }
 
+        // Check 2: without a pin there is no package to compare with
         var pinnedPackageName = PinnedPackageName;
         if (pinnedPackageName is null)
         {
             StatusMessage = "No agent package is pinned for this repo; launching without managed agent files.";
-            return true;
+            return AgentFilesSyncOutcome.Skipped;
         }
 
+        // Check 3: no agent file at all - install the pinned package silently. The scan reads the
+        // disk, so it runs on a worker to keep the UI responsive.
+        var hasInstalledFiles = await Task.Run(() => PackageContentExtractor.HasInstalledFiles(RepoPath), cancellationToken);
+        if (!hasInstalledFiles)
+        {
+            return await RestoreOrAskAsync(
+                pinnedPackageName, outcomeOnSuccess: AgentFilesSyncOutcome.Restored, updateInstalledFiles: false, cancellationToken);
+        }
+
+        // Check 4: a pin without a files identity cannot be verified against the disk
+        var recordedIdentity = LoadPinForComparison()?.ContentIdentity;
+        if (!PackageContentIdentity.IsFilesIdentity(recordedIdentity))
+        {
+            return await EnsureUnverifiablePinFoldersAsync(pinnedPackageName, cancellationToken);
+        }
+
+        // Check 5: hash what is installed with the pin's own algorithm; this reads only the repo,
+        // so an in-sync repo launches without touching any package source
+        string? installedIdentity = null;
+        string? unreadableReason = null;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            installedIdentity = await Task.Run(
+                () => PackageContentIdentity.ComputeInstalledFilesIdentity(RepoPath, cancellationToken), cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A link, an unreadable file or a case collision: the files cannot be vouched for, which
+            // is a reason to ask rather than to launch silently or to overwrite
+            unreadableReason = ex.Message;
+        }
+
+        stopwatch.Stop();
+        if (installedIdentity is not null &&
+            PackageContentIdentity.Compare(recordedIdentity, installedIdentity) == ContentIdentityComparison.Same)
+        {
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    "Agent files of repo '{RepoName}' match the pin ({Identity}); verified in {ElapsedMs} ms",
+                    RepoName, PackageContentIdentity.Describe(installedIdentity), stopwatch.ElapsedMilliseconds);
+            }
+
+            return AgentFilesSyncOutcome.InSync;
+        }
+
+        // Check 6: the files differ from the pin (or cannot be read) - ask, defaulting to Keep
+        if (_logger.IsEnabled(LogLevel.Warning))
+        {
+            _logger.LogWarning(
+                "Agent files of repo '{RepoName}' do not match the pin: pinned {Pinned}, installed {Installed}{Reason}",
+                RepoName,
+                PackageContentIdentity.Describe(recordedIdentity),
+                PackageContentIdentity.Describe(installedIdentity),
+                unreadableReason is null ? string.Empty : $" ({unreadableReason})");
+        }
+
+        return await AskKeepOrUpdateAsync(pinnedPackageName, unreadableReason, cancellationToken);
+    }
+
+    /// <summary>
+    ///     Applies the weaker launch-time rule to a pin that records no files identity: all four
+    ///     managed folders present means launch (nothing can be compared, and fetching the package
+    ///     on every launch would be costly); a missing folder means a silent restore.
+    /// </summary>
+    /// <param name="pinnedPackageName">The pinned package name.</param>
+    /// <param name="cancellationToken">Cancels the restore's source access.</param>
+    /// <returns>The outcome; see <see cref="EnsureAgentFilesSyncedBeforeLaunchAsync"/>.</returns>
+    private async Task<AgentFilesSyncOutcome> EnsureUnverifiablePinFoldersAsync(
+        string pinnedPackageName, CancellationToken cancellationToken)
+    {
+        // Folder presence is a metadata-only check, so it needs no worker thread
         if (PackageZipExtractor.AllManagedFoldersExist(RepoPath))
         {
-            return true;
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation(
+                    "The pin of repo '{RepoName}' records no content identity; its agent files cannot be verified, and all managed folders are present",
+                    RepoName);
+            }
+
+            StatusMessage = "The agent files cannot be verified against this repo's older pin; launching with them.";
+            return AgentFilesSyncOutcome.Skipped;
         }
 
+        return await RestoreOrAskAsync(
+            pinnedPackageName, outcomeOnSuccess: AgentFilesSyncOutcome.Restored, updateInstalledFiles: false, cancellationToken);
+    }
+
+    /// <summary>
+    ///     Asks whether to keep the installed agent files that differ from the pin or to replace them
+    ///     with the pinned package's files, and acts on the answer.
+    /// </summary>
+    /// <param name="pinnedPackageName">The pinned package name.</param>
+    /// <param name="unreadableReason">Why the installed files could not be read, or
+    ///     <see langword="null"/> when they were read and simply differ.</param>
+    /// <param name="cancellationToken">Cancels waiting for the answer and the restore's source
+    ///     access.</param>
+    /// <returns><see cref="AgentFilesSyncOutcome.KeptCurrentFiles"/> when the user keeps the files
+    ///     (the default, Escape and the no-subscriber case); otherwise the result of the update (see
+    ///     <see cref="RestoreOrAskAsync"/>).</returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is cancelled while the question is open.</exception>
+    private async Task<AgentFilesSyncOutcome> AskKeepOrUpdateAsync(
+        string pinnedPackageName, string? unreadableReason, CancellationToken cancellationToken)
+    {
+        var unreadableNote = unreadableReason is null
+            ? string.Empty
+            : $" Some of them could not be read ({unreadableReason}).";
+        var answer = await AskAgentFilesChoiceAsync(
+            $"The agent files in '{RepoName}' do not match the package this repo is pinned to " +
+            $"({pinnedPackageName} {PinnedPackageVersion}). Some files may be missing, changed or added - for " +
+            $"example you may be trying out new agent files.{unreadableNote}\n\n" +
+            "Update from package replaces the agent folders (.github/agents, .github/standards, .github/templates, " +
+            ".github/skills) with the pinned package's files and discards any changes there. " +
+            "Keep current files launches with the files exactly as they are.",
+            confirmText: "Update from package",
+            declineText: "Keep current files",
+            cancellationToken);
+
+        // Keep is the default; with nobody to ask, the files are also left alone
+        if (answer != true)
+        {
+            StatusMessage = "Agent files differ from the pinned package; keeping your current files.";
+            return AgentFilesSyncOutcome.KeptCurrentFiles;
+        }
+
+        return await RestoreOrAskAsync(
+            pinnedPackageName, outcomeOnSuccess: AgentFilesSyncOutcome.Updated, updateInstalledFiles: true, cancellationToken);
+    }
+
+    /// <summary>
+    ///     Restores (or updates) the agent files from the pinned package and, when that fails, lets
+    ///     the user decide whether to launch anyway.
+    /// </summary>
+    /// <param name="pinnedPackageName">The pinned package name.</param>
+    /// <param name="outcomeOnSuccess">The outcome to report when the files were installed.</param>
+    /// <param name="updateInstalledFiles"><see langword="true"/> when the files being replaced are
+    ///     the user's current files (an explicit update), which only changes the wording of the
+    ///     failure question.</param>
+    /// <param name="cancellationToken">Cancels reading the source and waiting for an answer.</param>
+    /// <returns><paramref name="outcomeOnSuccess"/> on success. On failure with a subscriber:
+    ///     <see cref="AgentFilesSyncOutcome.FailedLaunchAnyway"/> when the user chooses to launch
+    ///     anyway, otherwise (the default, Escape) <see cref="AgentFilesSyncOutcome.LaunchCanceled"/>.
+    ///     On failure without a subscriber the failure is reported passively through
+    ///     <see cref="ErrorOccurred"/> and <see cref="AgentFilesSyncOutcome.FailedLaunchAnyway"/> is
+    ///     returned, so a host that cannot ask is never blocked.</returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is cancelled while the source is being read or a question is open.</exception>
+    private async Task<AgentFilesSyncOutcome> RestoreOrAskAsync(
+        string pinnedPackageName,
+        AgentFilesSyncOutcome outcomeOnSuccess,
+        bool updateInstalledFiles,
+        CancellationToken cancellationToken)
+    {
+        var result = await RestorePinnedFilesAsync(pinnedPackageName, cancellationToken);
+        if (result.Succeeded)
+        {
+            if (outcomeOnSuccess == AgentFilesSyncOutcome.Updated)
+            {
+                StatusMessage = $"Agent files updated from {pinnedPackageName} {PinnedPackageVersion}.";
+            }
+
+            return outcomeOnSuccess;
+        }
+
+        // A failed restore: the user decides whether the tool starts without (all of) its files
+        var startsWith = updateInstalledFiles ? "with your current files" : "without (all of) them";
+        var answer = await AskAgentFilesChoiceAsync(
+            $"{result.Reason}\n\nThe agent files could not be restored, so the agent tool would start {startsWith}. " +
+            "Launch anyway?",
+            confirmText: "Launch anyway",
+            declineText: "Cancel",
+            cancellationToken);
+        if (answer is null)
+        {
+            // Nobody can be asked: report it the old, passive way and never block the launch
+            ErrorOccurred?.Invoke(this, $"{result.Reason} {result.PassiveLaunchNote}");
+            return AgentFilesSyncOutcome.FailedLaunchAnyway;
+        }
+
+        return answer.Value ? AgentFilesSyncOutcome.FailedLaunchAnyway : AgentFilesSyncOutcome.LaunchCanceled;
+    }
+
+    /// <summary>
+    ///     Raises <see cref="AgentFilesChoiceRequested"/> and waits for the user's answer without
+    ///     blocking a thread.
+    /// </summary>
+    /// <param name="message">The complete question.</param>
+    /// <param name="confirmText">The label of the non-default button.</param>
+    /// <param name="declineText">The label of the safe, default button.</param>
+    /// <param name="cancellationToken">Cancels waiting for the answer.</param>
+    /// <returns><see langword="true"/> when the user chose <paramref name="confirmText"/>;
+    ///     <see langword="false"/> when the user chose <paramref name="declineText"/>;
+    ///     <see langword="null"/> when nobody is subscribed to ask.</returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is cancelled while the question is open.</exception>
+    private async Task<bool?> AskAgentFilesChoiceAsync(
+        string message, string confirmText, string declineText, CancellationToken cancellationToken)
+    {
+        var handler = AgentFilesChoiceRequested;
+        if (handler is null)
+        {
+            return null;
+        }
+
+        StatusMessage = "Waiting for your decision about the agent files.";
+        var request = new AgentFilesChoiceRequest(message, confirmText, declineText);
+        handler(this, request);
+        return await request.Answer.WaitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    ///     What <see cref="RestorePinnedFilesAsync"/> achieved.
+    /// </summary>
+    /// <param name="Succeeded">Whether the pinned package's files were installed.</param>
+    /// <param name="Reason">When it failed, the plain-language cause (without the trailing
+    ///     "launching" sentence); otherwise <see langword="null"/>.</param>
+    /// <param name="PassiveLaunchNote">When it failed, the sentence a host that cannot ask the user
+    ///     appends to <paramref name="Reason"/> before reporting it passively.</param>
+    private sealed record RestoreResult(bool Succeeded, string? Reason = null, string? PassiveLaunchNote = null);
+
+    /// <summary>
+    ///     Installs the pinned package's agent files into the repo: resolves the <em>currently
+    ///     pinned</em> package among the user's configured sources, deletes the four managed folders
+    ///     and extracts the package, as the "restore" of a repo whose files are missing and as the
+    ///     "update" of one whose files differ.
+    /// </summary>
+    /// <param name="pinnedPackageName">The pinned package name.</param>
+    /// <param name="cancellationToken">Cancels reading the source; the copy into the repo, once
+    ///     started, is not interrupted.</param>
+    /// <returns>A successful result, or a failed one carrying the reason; never throws for an
+    ///     ordinary failure (source unreachable, pinned version missing, a republished package, an
+    ///     I/O failure).</returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is cancelled while the source is being read.</exception>
+    /// <remarks>
+    ///     <para>
+    ///     The package is resolved among the configured sources in Settings order: the first source
+    ///     whose files have exactly the pin's recorded files identity supplies it; a pin without one
+    ///     takes the source it was last supplied from (else the first that offers it). A package
+    ///     version that was republished with other files is refused and nothing is extracted. The
+    ///     files are extracted directly via <see cref="PackageContentExtractor.Extract"/>,
+    ///     deliberately without going through <see cref="ApplyPackageAndShowReleaseNotesAsync"/>: a
+    ///     repair at launch must not pop a release-notes window on every launch, and it never writes
+    ///     the pin (recording an identity here would dirty the working tree). Existing caches are
+    ///     reused; nothing is forced to download again.
+    ///     </para>
+    /// </remarks>
+    private async Task<RestoreResult> RestorePinnedFilesAsync(string pinnedPackageName, CancellationToken cancellationToken)
+    {
         try
         {
             var registry = CreateSourceRegistry();
             if (registry.Definitions.Count == 0)
             {
-                ErrorOccurred?.Invoke(this, "No package source is configured for this repo. Launching without syncing agent files.");
-                return false;
+                return new RestoreResult(
+                    false, "No package source is configured for this repo.", "Launching without syncing agent files.");
             }
 
             // The pin names no source (sources are per-user configuration), so the configured
@@ -2249,8 +2513,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 var reason = firstFailure is not null
                     ? $"A package source could not be read: {SecretRedactor.SafeMessage(firstFailure)}"
                     : DescribeNoSourceOffers(pinnedPackageName, pinnedVersion);
-                ErrorOccurred?.Invoke(this, reason + " Launching without syncing agent files.");
-                return false;
+                return new RestoreResult(false, reason, "Launching without syncing agent files.");
             }
 
             DiscoveredPackage pinnedPackage;
@@ -2269,11 +2532,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
                             PackageContentIdentity.Describe(recordedPin.ContentIdentity));
                     }
 
-                    ErrorOccurred?.Invoke(
-                        this,
-                        $"The agent files were not synced. {DescribeNoMatchingFiles(pinnedPackageName, pinnedVersion)} " +
+                    return new RestoreResult(
+                        false,
+                        $"The agent files were not synced. {DescribeNoMatchingFiles(pinnedPackageName, pinnedVersion)}",
                         $"Launching without them. {ContentChangeAdvice}");
-                    return false;
                 }
 
                 pinnedPackage = verified.Package;
@@ -2288,7 +2550,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             if (_logger.IsEnabled(LogLevel.Information))
             {
                 _logger.LogInformation(
-                    "Re-syncing missing managed agent folders for repo '{RepoName}' from package '{PackageName} {Version}' of source '{Source}'",
+                    "Restoring managed agent files for repo '{RepoName}' from package '{PackageName} {Version}' of source '{Source}'",
                     RepoName, pinnedPackage.PackageName, pinnedPackage.Version, pinnedPackage.SourceAlias);
             }
 
@@ -2301,7 +2563,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
             SupplyingSource = pinnedPackage.SourceAlias;
             MaybeOfferAgentsMdTemplate(reader, fromLaunchResync: true);
-            return true;
+            return new RestoreResult(true);
         }
         catch (InvalidOperationException ex)
         {
@@ -2310,8 +2572,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 _logger.LogError(ex, "Failed to sync agent files for repo '{RepoName}' before launch", RepoName);
             }
 
-            ErrorOccurred?.Invoke(this, $"Failed to sync agent files: {SecretRedactor.SafeMessage(ex)} Launching anyway.");
-            return false;
+            return new RestoreResult(false, $"Failed to sync agent files: {SecretRedactor.SafeMessage(ex)}", "Launching anyway.");
         }
         catch (DirectoryNotFoundException ex)
         {
@@ -2321,8 +2582,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     ex, "Package source is unreachable while syncing repo '{RepoName}' before launch", RepoName);
             }
 
-            ErrorOccurred?.Invoke(this, $"Package source is unreachable: {SecretRedactor.SafeMessage(ex)} Launching anyway.");
-            return false;
+            return new RestoreResult(false, $"Package source is unreachable: {SecretRedactor.SafeMessage(ex)}", "Launching anyway.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Every configured source failing (listing rethrows the first failure) or the copy into
+            // the repo failing can surface as a plain I/O or access error; it is an ordinary
+            // restore failure, not an unhandled one
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "An I/O failure stopped the agent files of repo '{RepoName}' being restored", RepoName);
+            }
+
+            return new RestoreResult(false, $"Failed to sync agent files: {SecretRedactor.SafeMessage(ex)}", "Launching anyway.");
         }
     }
 

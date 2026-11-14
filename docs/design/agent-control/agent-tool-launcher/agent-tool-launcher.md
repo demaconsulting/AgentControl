@@ -73,6 +73,7 @@ intermittent-launch-failure diagnostics as `GitClient.RunGit`).
 
 #### Callers
 
-- **RepoCardViewModel.Launch** — calls `EnsureAgentFilesSyncedBeforeLaunch` first purely for
-  its best-effort agent-package sync side effect (never gating on its outcome), then always
-  calls `ShellDetector.Detect` followed by `BuildProcessStartInfo`/`Launch`.
+- **RepoCardViewModel.Launch** — calls `EnsureAgentFilesSyncedBeforeLaunchAsync` first to verify the repo's agent
+  files against the pinned package, then calls `ShellDetector.Detect` followed by
+  `BuildProcessStartInfo`/`Launch`, unless the user cancelled the launch after agent files that were needed could not
+  be installed; no other outcome of that check gates the launch, and the spawn itself is unchanged.

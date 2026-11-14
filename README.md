@@ -58,7 +58,8 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   with that identity supplies them, whatever it is called and whatever kind of source it is. There
   is no floating "latest" mode, so upgrades are always a deliberate, visible action. A published version whose
   files later change (a republished zip or NuGet package, a Git tag moved to other files) is never applied
-  silently: the restore at launch and Upgrade refuse it, and you accept it on purpose with **Change package...** in
+  silently: an install or update at launch and Upgrade refuse it, and you accept it on purpose with
+  **Change package...** in
   the card's "..." menu
 - **Status chips**: each repo card shows an amber upgrade chip ("Upgrade to" and the version an upgrade
   would move to; click it to upgrade), an uncommitted-changes warning, a committed-agent-files
@@ -72,12 +73,15 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   AgentControl proactively ensures the repo's `.gitignore` covers the four managed
   folders immediately after every "Select Package..."/Upgrade, making an accidental commit
   much less likely in the first place
-- **Ensure-synced-before-launch**: clicking Launch attempts a best-effort sync of the four
-  managed agent folders before starting the agent tool; if they are missing (for example, a
-  fresh clone) it silently re-extracts the currently pinned version first — it never
-  auto-upgrades to a newer version on your behalf. This sync attempt is purely informational
-  and never blocks the launch: repos with committed agent files skip it entirely, repos with
-  no pin launch anyway, and a failed re-extraction only surfaces a warning
+- **Check before launch**: clicking Launch first checks that the four managed agent folders hold the files of the
+  package the repo is pinned to. A repo with no agent files (for example a fresh clone) silently gets the currently
+  pinned version installed — never a newer one. Otherwise the files in the folders are compared, byte for byte, with the
+  fingerprint the pin recorded, on your own machine and without downloading anything: when they match, the tool
+  starts at once. When they differ (a file is missing, changed or added) AgentControl asks whether to **Update from
+  package** or **Keep current files** (the default), and asks again on every launch while they differ. If files that
+  were needed cannot be installed, you choose **Launch anyway** or **Cancel** (the default). Repos with committed agent
+  files skip the check entirely, repos with no pin launch anyway, and a repo whose pin was made by an older version
+  (no recorded fingerprint) keeps the simple check that its four folders exist until you choose its package again
 - **Git integration**: pull the latest commits for a repo with **Git Pull** in its card's "..." menu (enabled
   only when the working tree is clean), with a configurable git executable override. A Git repository package
   source needs Git 2.29 or newer
@@ -165,7 +169,7 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   moved). AgentControl
   records a fingerprint of the agent files of each package it applies and does not replace a repo's agent files with a
   package of the
-  same version whose content changed (an Upgrade or the restore at launch stops with a message; choosing that
+  same version whose content changed (an Upgrade or an install or update at launch stops with a message; choosing that
   version again with **Change package...** asks for confirmation). The fingerprint detects a changed package; it
   does not prove who published it. For a NuGet package it describes the copy cached on this computer, so a server-side
   republish of a version this computer already has cached is not noticed until that cached copy is cleared. See the
@@ -247,8 +251,8 @@ same validate → delete → extract → pin sequence, offers the package's `AGE
 An agent package may optionally include a root-level `AGENTS.md` entry — a starting template,
 not a finished file (the same convention as the existing root-level `release-notes.md` entry:
 it lives outside the four managed folders, so it's never touched by the blind-delete-and-replace
-sync). Whenever a package is extracted (Select Package, Upgrade, or the best-effort
-sync-before-launch) and the repo has no root-level `AGENTS.md` of its own, and the package
+sync). Whenever a package is extracted (Select Package, Upgrade, or an install at launch) and the repo has no
+root-level `AGENTS.md` of its own, and the package
 being applied has a template to offer, AgentControl shows a modal Yes/No dialog asking whether
 to place the template at the repo root, clearly noting that you are responsible for
 customizing it afterward. A pre-existing `AGENTS.md` is never touched or overwritten, and if
@@ -259,13 +263,27 @@ every subsequent sync.
 
 Click **Launch** (labeled with your agent tool, for example **Launch Copilot**) to start your
 configured agentic CLI tool in the repo's working directory.
-Launch is never blocked by agent-package sync state — before launching, AgentControl makes a
-best-effort attempt to sync the four managed agent folders for a pinned repo (silently
-re-extracting the *currently pinned* version, never a newer one, if any are missing), but this
-is purely an informational side action. A repo with committed agent files skips the sync
-entirely (the managed folders are never touched), and a repo with no pin at all still launches
-— an agentic CLI tool remains useful even with zero managed agent files present, and can help
-with migrating away from committed agent files.
+Before launching, AgentControl checks a pinned repo's agent files against the package the repo is pinned to; it never
+upgrades to a newer version on your behalf. What happens depends on what it finds:
+
+- **No agent files** in the four managed folders (absent or empty): the pinned version is installed silently.
+- **The files match** the fingerprint recorded in the pin: the tool starts at once. The comparison is made locally,
+  byte for byte (line endings included), and nothing is downloaded or read from a package source.
+- **The files differ** (a file is missing, changed or added, or a folder cannot be read): AgentControl asks whether to
+  **Update from package** (replace the four folders with the pinned package's files, discarding changes there) or
+  **Keep current files** (the default; also what Escape does), which launches with the files as they are. The question
+  is asked again on every launch while the files differ.
+- **Needed files cannot be installed** (no source offers the pinned version, a source cannot be read, or the package
+  was republished with other files): AgentControl says why and asks **Launch anyway** or **Cancel** (the default).
+  Cancel starts nothing.
+- A repo with **committed agent files** skips the check entirely (the managed folders are never touched), and a repo
+  with **no pin** at all still launches — an agentic CLI tool remains useful even with zero managed agent files
+  present, and can help with migrating away from committed agent files.
+- A repo whose pin was made by an older version of AgentControl has **no recorded fingerprint**, so its files cannot
+  be compared: it launches when all four managed folders exist and is repaired silently when one is missing. Choose
+  its package again once with **Change package...** to record a fingerprint and switch on the full check.
+
+Launch is only stopped by your own **Cancel** after a failed install; every other outcome launches.
 
 ### Pulling changes
 

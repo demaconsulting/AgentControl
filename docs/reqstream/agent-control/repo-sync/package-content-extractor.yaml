@@ -207,12 +207,56 @@ sections:
           exist only when all four exist as ordinary folders, so that a linked managed folder is
           not treated as an existing one.
         justification: |
-          A caller that skips syncing because the folders exist must fall through to the
-          extraction, which refuses the link with a clear error, rather than trust a link.
+          A caller that skips syncing because the folders exist (a repo whose pin records no
+          identity of its files, which cannot be compared) must fall through to the extraction,
+          which refuses the link with a clear error, rather than trust a link.
         tests:
           - windows@PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsJunction_ReturnsFalse
           - ubuntu@PackageContentExtractor_AllManagedFoldersExist_ManagedFolderIsSymlink_ReturnsFalse
           - PackageContentExtractor_AllManagedFoldersExist_AllFoldersOrdinary_ReturnsTrue
+
+      - id: AgentControl-PackageContentExtractor-HasInstalledFiles
+        title: >-
+          The PackageContentExtractor class shall report that a repo has installed agent files when
+          at least one file exists below one of its four managed agent folders, shall report that
+          it has none when the folders are absent, empty or hold only empty folders (or the repo
+          folder does not exist), shall count a hidden file, shall ignore files outside the managed
+          folders, and shall report a managed folder that is a link, which it cannot inspect
+          safely, as holding files.
+        justification: |
+          A repo with no agent files is the one case in which the pinned package can be installed
+          without asking, so "nothing is installed" must be exact: a single file, however it is
+          named, is something a developer may not want replaced, and a link must never be mistaken
+          for emptiness and silently deleted.
+        tests:
+          - PackageContentExtractor_HasInstalledFiles_NoManagedFolders_ReturnsFalse
+          - PackageContentExtractor_HasInstalledFiles_EmptyManagedFolders_ReturnsFalse
+          - PackageContentExtractor_HasInstalledFiles_OnlyEmptySubfolders_ReturnsFalse
+          - PackageContentExtractor_HasInstalledFiles_OneFileInOneFolder_ReturnsTrue
+          - PackageContentExtractor_HasInstalledFiles_HiddenFileOnly_ReturnsTrue
+          - PackageContentExtractor_HasInstalledFiles_FilesOutsideManagedFolders_ReturnsFalse
+          - PackageContentExtractor_HasInstalledFiles_MissingRepoRoot_ReturnsFalse
+          - windows@PackageContentExtractor_HasInstalledFiles_ManagedFolderIsJunction_ReturnsTrue
+          - ubuntu@PackageContentExtractor_HasInstalledFiles_ManagedFolderIsSymlink_ReturnsTrue
+          - PackageContentExtractor_HasInstalledFiles_NullRepoRoot_ThrowsArgumentNullException
+
+      - id: AgentControl-PackageContentExtractor-ReadManagedFoldersOfRepo
+        title: >-
+          The folder package reader shall be able to read a repo's four managed agent folders as
+          a package, listing and reading only the files below them, never the repo's root files or
+          any other content of the repo, shall accept a repo whose root is reached through a link,
+          and shall refuse a repo folder that does not exist.
+        justification: |
+          The agent files in a repo can only be compared with a package's if they are read the way
+          a package's are; the repo's own AGENTS.md and other files must not take part, and a repo
+          root reached through a link (such as a redirected profile) is legitimate.
+        tests:
+          - DirectoryPackageContentReader_OpenManagedFolders_ListsOnlyManagedFolderFiles
+          - DirectoryPackageContentReader_OpenManagedFolders_ReadingRootFile_ThrowsInvalidOperationException
+          - DirectoryPackageContentReader_OpenManagedFolders_MissingRepoRoot_ThrowsInvalidOperationException
+          - DirectoryPackageContentReader_OpenManagedFolders_NullRepoRoot_ThrowsArgumentNullException
+          - windows@DirectoryPackageContentReader_OpenManagedFolders_RepoRootUnderJunction_IsAccepted
+          - ubuntu@DirectoryPackageContentReader_OpenManagedFolders_RepoRootUnderSymlink_IsAccepted
 
       - id: AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink
         title: >-

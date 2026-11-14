@@ -21,6 +21,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.RepoSync;
 
 namespace DemaConsulting.AgentControl.Tests.RepoSync;
@@ -150,6 +151,61 @@ public sealed class RepoSyncSubsystemTests : IDisposable
             () => Assert.Equal(expected, folderReader.ContentIdentity),
             () => Assert.Equal(expected, layoutReader.ContentIdentity),
             () => Assert.NotEqual(expected, changedReader.ContentIdentity));
+    }
+
+    /// <summary>
+    ///     Test that the files a repo holds after an extraction hash to the identity of the package
+    ///     they came from, whatever the package kind (a zip, an unpacked package folder, a layout-root
+    ///     folder), and that editing, deleting or adding one file is detected: the pin's recorded
+    ///     identity and the identity of what is installed are computed by the one algorithm.
+    /// </summary>
+    [Fact]
+    public void RepoSync_InstalledFiles_ExtractionFromZipFolderAndLayoutPackages_HasThePackagesIdentity()
+    {
+        // Arrange: the same two agent files delivered as a zip, an unpacked folder and a layout root
+        var expected = FilesIdentity((".github/agents/copilot.md", "agents"), (".github/standards/style.md", "standards"));
+        var zipPath = Path.Combine(CreateTempDirectory(), "pkg-1.0.0.zip");
+        WriteZipEntries(
+            zipPath, CompressionLevel.Optimal, DateTimeOffset.UtcNow,
+            (".github/agents/copilot.md", "agents"), (".github/standards/style.md", "standards"),
+            ("release-notes.md", "notes"), ("AGENTS.md", "template"));
+        var unpacked = CreateTempDirectory();
+        WriteFile(Path.Combine(unpacked, "content"), ".github/agents/copilot.md", "agents");
+        WriteFile(Path.Combine(unpacked, "content"), ".github/standards/style.md", "standards");
+        var layout = CreateTempDirectory();
+        WriteFile(layout, ".github/agents/copilot.md", "agents");
+        WriteFile(layout, ".github/standards/style.md", "standards");
+        WriteFile(layout, "README.md", "not part of the package");
+        using var zipReader = ZipPackageContentReader.Open(zipPath);
+        using var folderReader = DirectoryPackageContentReader.Open(unpacked);
+        using var layoutReader = DirectoryPackageContentReader.OpenLayoutRoot(layout);
+        var repos = new IPackageContentReader[] { zipReader, folderReader, layoutReader }.Select(reader =>
+        {
+            var repo = CreateTempDirectory();
+            PackageContentExtractor.Extract(reader, repo);
+            return repo;
+        }).ToList();
+
+        // Act
+        var installed = repos
+            .Select(repo => PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken))
+            .ToList();
+        var agents = Path.Combine(repos[0], ".github", "agents", "copilot.md");
+        File.WriteAllText(agents, "edited");
+        var edited = PackageContentIdentity.ComputeInstalledFilesIdentity(repos[0], TestContext.Current.CancellationToken);
+        File.Delete(agents);
+        var deleted = PackageContentIdentity.ComputeInstalledFilesIdentity(repos[0], TestContext.Current.CancellationToken);
+        File.WriteAllText(agents, "agents");
+        WriteFile(repos[0], ".github/skills/extra.md", "extra");
+        var added = PackageContentIdentity.ComputeInstalledFilesIdentity(repos[0], TestContext.Current.CancellationToken);
+
+        // Assert: every kind of package round-trips, and every kind of difference is detected
+        Assert.Multiple(
+            () => Assert.All(installed, identity => Assert.Equal(expected, identity)),
+            () => Assert.Equal(expected, zipReader.ContentIdentity),
+            () => Assert.NotEqual(expected, edited),
+            () => Assert.NotEqual(expected, deleted),
+            () => Assert.NotEqual(expected, added));
     }
 
     /// <summary>

@@ -56,8 +56,9 @@ PowerShell/`pwsh`, falling back to Windows PowerShell 5, falling back to `cmd`; 
 default shell on macOS/Linux) and launch the configured agentic CLI tool in the repo's
 working directory (`AgentControl-AgentToolLauncherSubsystem-Launch`).
 
-`RepoCardViewModel`'s `LaunchCommand` is the sole caller: it first ensures the repo's agent
-files are synced (via the `RepoSync` subsystem), then calls `ShellDetector.Detect` followed
+`RepoCardViewModel`'s `LaunchCommand` is the sole caller: it first verifies the repo's agent
+files against the pinned package (via the `RepoSync` and `AgentPackageManagement` subsystems), then calls
+`ShellDetector.Detect` followed
 by `AgentToolLauncher.BuildProcessStartInfo`, and starts the resulting `ProcessStartInfo` via
 the .NET BCL `Process` class. The subsystem has no dependency on other tool subsystems beyond
 `Settings` (the configured agent-tool command and shell preference are read by the caller,

@@ -101,6 +101,25 @@ sections:
           - ReleaseNotesViewer_LinkFocusedEnterKey_InvokesOpener
           - ReleaseNotesViewer_OpenLinkAsync_OpensOnlyHttpAndReportsFailures
 
+      - id: AgentControl-RepoSync-InstalledFiles
+        title: >-
+          The RepoSync subsystem shall be able to tell whether any agent file is installed in a
+          repo's four managed agent folders, and to present exactly those installed files, and only
+          those, in the same form as a package's files, so that the files in a repo can be compared
+          with a package's and an untouched extraction of a zip, an unpacked package folder or a
+          layout folder is indistinguishable from the package.
+        justification: |
+          Deciding whether the agent files in a repo are the pinned package's needs the repo's
+          files to be read the way a package's are, without reading anything else in the repo
+          (the repo's own AGENTS.md, other .github content, the git folder) and without being
+          led out of the repo by a link; and a repo with no agent files must be recognizable
+          without hashing anything.
+        children:
+          - AgentControl-PackageContentExtractor-HasInstalledFiles
+          - AgentControl-PackageContentExtractor-ReadManagedFoldersOfRepo
+        tests:
+          - RepoSync_InstalledFiles_ExtractionFromZipFolderAndLayoutPackages_HasThePackagesIdentity
+
       - id: AgentControl-RepoSync-GitIgnorePrevention
         title: >-
           The RepoSync subsystem shall ensure a repo's .gitignore covers the four managed

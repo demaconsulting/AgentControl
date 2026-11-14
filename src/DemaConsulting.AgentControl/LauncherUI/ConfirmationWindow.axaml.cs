@@ -76,6 +76,37 @@ internal sealed partial class ConfirmationWindow : Window
     }
 
     /// <summary>
+    ///     Initializes a new <see cref="ConfirmationWindow"/> displaying the given message with
+    ///     custom button labels, for questions whose answers are not literally "Yes" and "No"
+    ///     (for example "Update from package" / "Keep current files").
+    /// </summary>
+    /// <param name="message">The confirmation message text to display.</param>
+    /// <param name="confirmText">The label of the confirming button (the one that closes the
+    ///     window with <see langword="true"/>).</param>
+    /// <param name="declineText">The label of the declining button (closes with
+    ///     <see langword="false"/>); it is the safe choice that keeps the focus and is what Escape
+    ///     answers, exactly like "No" does.</param>
+    /// <exception cref="ArgumentNullException">Thrown when any argument is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when a button is missing from the loaded
+    ///     XAML.</exception>
+    public ConfirmationWindow(string message, string confirmText, string declineText) : this(message)
+    {
+        ArgumentNullException.ThrowIfNull(confirmText);
+        ArgumentNullException.ThrowIfNull(declineText);
+
+        // Only the labels change; AutomationIds, focus and Escape behavior stay those of Yes/No
+        var yesButton = this.FindControl<Button>("ConfirmationYesButton")
+                        ?? throw new InvalidOperationException(
+                            "ConfirmationYesButton control not found in ConfirmationWindow.axaml.");
+        var noButton = this.FindControl<Button>("ConfirmationNoButton")
+                       ?? throw new InvalidOperationException(
+                           "ConfirmationNoButton control not found in ConfirmationWindow.axaml.");
+        yesButton.Content = confirmText;
+        noButton.Content = declineText;
+    }
+
+    /// <summary>
     ///     Closes the window reporting the user's confirmation.
     /// </summary>
     /// <param name="sender">The clicked "Yes" button.</param>

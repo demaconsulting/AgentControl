@@ -65,8 +65,10 @@ a repo root.
 - *Postconditions*: Does not inspect folder contents — a managed folder that exists but is
   empty (or only partially populated) still counts as "existing"
   (`AgentControl-PackageZipExtractor-AllManagedFoldersExist`). Consulted by
-  `RepoCardViewModel.EnsureAgentFilesSyncedBeforeLaunch` to decide whether a silent
-  re-extraction is needed before launch.
+  `RepoCardViewModel.EnsureAgentFilesSyncedBeforeLaunchAsync` only for a pin that records no identity of its files
+  (an older pin), where the files cannot be compared and a missing folder triggers a silent re-extraction; a pin with
+  an identity is verified from the files themselves instead (`PackageContentExtractor.HasInstalledFiles` and
+  `PackageContentIdentity.ComputeInstalledFilesIdentity`).
 
 **ReadReleaseNotes**: Reads the content of the package zip's root-level `release-notes.md`
 entry without extracting it to disk.
@@ -105,7 +107,7 @@ read.
 #### Callers
 
 - **RepoCardViewModel** — calls `Extract` (via `ApplyPackageAndShowReleaseNotes`) after a
-  Select-Package or Upgrade action, calls `AllManagedFoldersExist` and, on a miss, `Extract`
-  directly during `EnsureAgentFilesSyncedBeforeLaunch`, calls `ReadReleaseNotes` to obtain
+  Select-Package or Upgrade action, calls `AllManagedFoldersExist` (for a pin without an identity) and, on a miss,
+  `Extract` directly during `EnsureAgentFilesSyncedBeforeLaunchAsync`, calls `ReadReleaseNotes` to obtain
   the text shown via `ReleaseNotesViewerViewModel`, and calls `ReadAgentsMdTemplate` (after any
   successful `Extract`) to decide whether to raise its `AgentsMdTemplateOfferRequested` event.

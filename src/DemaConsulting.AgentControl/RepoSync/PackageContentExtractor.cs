@@ -342,7 +342,12 @@ internal static class PackageContentExtractor
     ///     empty still counts as "existing" here. A linked folder is deliberately not "valid", so
     ///     a caller that skips syncing when the folders exist falls through to
     ///     <see cref="Extract"/>, which refuses the link with a clear error. The repo root itself
-    ///     is not inspected (it may legitimately live under a linked path).
+    ///     is not inspected (it may legitimately live under a linked path). Folder existence is
+    ///     no longer the launch-time "in sync" test (a repo with the folders present but half of
+    ///     its files missing looked synced); it is kept only as the weaker check for a pin that
+    ///     records no content identity, where there is nothing to compare the files with - see
+    ///     <see cref="HasInstalledFiles"/> and
+    ///     <see cref="AgentPackageManagement.PackageContentIdentity.ComputeInstalledFilesIdentity"/> for the real check.
     /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> is
     ///     <see langword="null"/>.</exception>
@@ -355,6 +360,49 @@ internal static class PackageContentExtractor
             var folderPath = PathHelpers.SafePathCombine(repoRoot, folder);
             return Directory.Exists(folderPath) && FindUnsafeComponent(repoRoot, folderPath) is null;
         });
+    }
+
+    /// <summary>
+    ///     Determines whether at least one agent file is physically installed in a repo's four
+    ///     managed folders.
+    /// </summary>
+    /// <param name="repoRoot">Absolute path to the repository root to check.</param>
+    /// <returns><see langword="true"/> if any file exists below a managed folder, or if a managed
+    ///     folder cannot be inspected safely (for example it is a link); <see langword="false"/>
+    ///     when no managed folder holds a file (the folders are absent, empty or contain only empty
+    ///     sub-folders) or the repo folder itself does not exist.</returns>
+    /// <remarks>
+    ///     This is the launch-time "nothing is installed" test: only then may the pinned package
+    ///     be installed silently, because there is nothing a developer could lose. Content that
+    ///     cannot be inspected (a link, an unreadable folder) is reported as installed so it is
+    ///     never mistaken for an empty repo and silently overwritten - the caller's verification
+    ///     then treats it as "cannot be verified" and asks. A repo folder that does not exist
+    ///     reports <see langword="false"/> rather than throwing, because the launcher disables a
+    ///     missing repo's card before this is reached. Read-only; stateless and thread-safe.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> is
+    ///     <see langword="null"/>.</exception>
+    public static bool HasInstalledFiles(string repoRoot)
+    {
+        ArgumentNullException.ThrowIfNull(repoRoot);
+
+        // A missing repo has no files; the reader would otherwise refuse it
+        if (!Directory.Exists(repoRoot))
+        {
+            return false;
+        }
+
+        using var reader = DirectoryPackageContentReader.OpenManagedFolders(repoRoot);
+        try
+        {
+            return reader.ListFiles().Count > 0;
+        }
+        catch (InvalidOperationException)
+        {
+            // A link or unreadable folder: something is there that we cannot vouch for, so it
+            // must not be treated as "nothing installed"
+            return true;
+        }
     }
 
     /// <summary>

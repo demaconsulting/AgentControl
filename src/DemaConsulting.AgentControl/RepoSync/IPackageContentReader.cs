@@ -56,7 +56,7 @@ internal interface IPackageContentReader : IDisposable
     ///     Lets a repo's pin record which files a package version delivered, so a later sync of the
     ///     same version can detect that the package was republished - whichever kind of source
     ///     delivers it, because the identity is computed from the files (through
-    ///     <see cref="DemaConsulting.AgentControl.AgentPackageManagement.PackageContentIdentity.ComputeFilesIdentity"/>)
+    ///     <see cref="DemaConsulting.AgentControl.AgentPackageManagement.PackageContentIdentity.ComputeFilesIdentity(IPackageContentReader)"/>)
     ///     and not from the zip, <c>.nupkg</c> or repository they came in. It describes the very
     ///     content this reader reads, never a separate look at the source. A default implementation
     ///     returns <see langword="null"/> so readers that predate identities keep working;

@@ -20,7 +20,7 @@ the zip-file facade over it.
 
 **ManagedFolders**: `static readonly string[]` — the four folder paths (relative to a repo root)
 that are blind-deleted and replaced on every sync/upgrade; the single source of truth consulted by
-both `Extract` and `AllManagedFoldersExist`.
+`Extract`, `AllManagedFoldersExist` and `HasInstalledFiles` (through the managed-folders reader).
 
 **IPackageContentReader**: a read-only view of package content — `Description` (a path for
 messages), `ContentIdentity` (the identity of the agent files the reader delivers, or `null` when it cannot name
@@ -110,7 +110,38 @@ repo if present, and copies the same four folders from the package into the repo
 ordinary folders, without inspecting contents. A managed folder that is a link, or sits below a
 linked `.github`, is not valid, so a caller that skips syncing when the folders exist falls
 through to `Extract`, which refuses the link with a clear error
-(`AgentControl-PackageContentExtractor-ManagedFoldersExist`).
+(`AgentControl-PackageContentExtractor-ManagedFoldersExist`). It is no longer the launch-time "in sync" test: it is
+kept as the weaker check for a pin that records no identity of its files, where there is nothing to compare the files
+with (see `HasInstalledFiles` and `PackageContentIdentity.ComputeInstalledFilesIdentity` for the real check).
+
+**HasInstalledFiles**: Reports whether at least one agent file is physically installed in a repo's four managed
+folders - the launch-time "nothing is installed" test, which is the one case in which the pinned package may be
+installed without asking.
+
+- *Parameters*: `string repoRoot`.
+- *Returns*: `bool` — `true` when any file exists below a managed folder (a hidden file counts; files outside the four
+  folders and empty folders do not); also `true` when a managed folder cannot be inspected safely (a link, an
+  unreadable folder: the listing throws `InvalidOperationException`, which is caught), so such content is never
+  mistaken for an empty repo and silently replaced - the caller's verification then treats it as "cannot be
+  verified" and asks; `false` when the folders are absent, empty or hold only empty folders, or when the repo folder
+  does not exist (the launcher disables a missing repo's card before this is reached, so a missing repo reports
+  `false` rather than throwing).
+- *Algorithm*: Opens `DirectoryPackageContentReader.OpenManagedFolders(repoRoot)` and tests whether `ListFiles()` is
+  non-empty (`AgentControl-PackageContentExtractor-HasInstalledFiles`).
+- *Errors*: `ArgumentNullException` for a null repo root. Read-only and thread-safe.
+
+**DirectoryPackageContentReader.OpenManagedFolders**: Opens a repo's four managed folders as a package so the files
+that are installed can be listed, read and hashed exactly as a package's are. It is the third reader scope, next to
+the `content`-folder and layout-root scopes of the same class: it lists and reads only the files below
+`PackageContentExtractor.LayoutFolders` (never the two root files, `.git` or other `.github` content - a path outside
+the four folders, such as the repo's own `AGENTS.md`, is refused when read), refuses a link at or below a managed
+folder when listing or reading exactly as the layout scope does, and does *not* inspect or refuse a link at the repo
+root itself, because `Extract` and `AllManagedFoldersExist` accept a repo root reached through a junction or symbolic
+link (`AgentControl-PackageContentExtractor-ReadManagedFoldersOfRepo`,
+`AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink`). A repo folder that does not exist is
+`InvalidOperationException`; a null root is `ArgumentNullException`. It holds no file handles, and its own
+`ContentIdentity` is not used for the installed files - `PackageContentIdentity.ComputeInstalledFilesIdentity` hashes
+it directly.
 
 **GetManagedPackagePath**: Applies the extraction's own membership rule to one package path: says whether `Extract`
 would write the file into a managed folder and under which canonical path.
@@ -218,6 +249,8 @@ This residual risk is repeated in the `RepoSync` subsystem design and is recorde
 
 - **PackageZipExtractor** — zip-file facade delegating to it.
 - **RepoCardViewModel** — extracts a package acquired from a source provider, reads its release
-  notes and `AGENTS.md` template.
+  notes and `AGENTS.md` template, and asks `HasInstalledFiles` before a launch.
+- **PackageContentIdentity** (`AgentPackageManagement` subsystem) — `ComputeInstalledFilesIdentity` opens
+  `DirectoryPackageContentReader.OpenManagedFolders` over a repo.
 - **ZipFolderSourceProvider**, **NuGetSourceProvider** (`AgentPackageManagement` subsystem) —
   return the readers it consumes.

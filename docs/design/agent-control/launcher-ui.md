@@ -88,19 +88,22 @@ new section is collapsed) has no star to focus.)
   `AgentControl-LauncherUI-Pull`; `SelectPackageCommand` for any repo that is present and not busy - "Select
   Package..." without a pin, "Change package..." with one, `AgentControl-LauncherUI-ChangePackage`); `Execute`
   delegates to the relevant subsystem
-  (`GitIntegration`, `RepoSync`, `AgentToolLauncher`, `RepoConfig`) — Launch only once agent
-  files are confirmed synced (`AgentControl-LauncherUI-Launch`), Upgrade only when a newer
+  (`GitIntegration`, `RepoSync`, `AgentToolLauncher`, `RepoConfig`) — Launch only after the agent files were
+  verified against the pin (`AgentControl-LauncherUI-VerifyAgentFilesBeforeLaunch`) and not when the user cancelled it
+  after a failed restore (`AgentControl-LauncherUI-RestoreFailureChoice`, `AgentControl-LauncherUI-Launch`), Upgrade
+  only when a newer
   version exists at a configured source (`AgentControl-LauncherUI-Upgrade`) — and raises a view-model
   event (`LaunchRecorded`, `SelectPackageRequested`, `ReleaseNotesReady`,
   `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `CommittedFilesConversionRequested`,
-  `ErrorOccurred`, `RemoveRequested`) reporting the outcome.
+  `AgentFilesChoiceRequested`, `ErrorOccurred`, `RemoveRequested`) reporting the outcome.
   An asynchronous command ignores a second request while it runs and can be cancelled through
   `CancelOperationCommand` (`AgentControl-LauncherUI-OneOperationPerRepo`,
   `AgentControl-LauncherUI-CancelOperation`, `AgentControl-LauncherUI-OperationProgress`). The card also
   exposes the chip properties (package, upgrade, branch, status) the view binds to
   (`AgentControl-LauncherUI-RepoCardChips`, `AgentControl-LauncherUI-StatusBadges`).
 - *Constraints*: Never mutates state before a required confirmation (see `RemoveRequest`
-  below); never launches without a successful ensure-synced check.
+  below); never replaces agent files that differ from the pin without the user choosing to update them, and never
+  starts the agent tool after the user cancelled a launch whose needed agent files could not be installed.
 
 **SelectPackageWindowViewModel.ConfirmCommand**: Confirms a source, package and version
 selection.
@@ -402,7 +405,9 @@ cancelled or timed out) closes the dialog as a cancel. The typed password is han
 logged.
 
 `RepoCardViewModel` reuses the existing modal `ConfirmationWindow` (the same Yes/No dialog
-shown for Remove confirmation) to offer a package's optional root-level `AGENTS.md` template
+shown for Remove confirmation; a second constructor takes the labels of the two buttons for questions whose answers
+are not literally Yes and No, keeping the AutomationIds, the focus on the declining button and Escape as a decline)
+to offer a package's optional root-level `AGENTS.md` template
 when the repo has none of its own: `MainWindow` subscribes to
 `AgentsMdTemplateOfferRequested`, shows `ConfirmationWindow` with explanatory text, and calls
 back into `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` depending on the user's answer
@@ -422,10 +427,31 @@ of the version the repo is pinned to would replace its agent files with changed 
 `RepoCardViewModel` changes nothing and raises `ContentChangeConfirmationRequested` with the selection and a
 plain-language question; `MainWindow` shows it in the same modal `ConfirmationWindow` (the safe answer, No, is the
 default) and, only if the user answers Yes, applies the selection again with `acceptContentChange: true`, which
-replaces the files and records the new identity. An Upgrade or the restore of missing agent files before launch
-never asks: it refuses and reports through `ErrorOccurred`, and the message names the card menu's **Change
+replaces the files and records the new identity. An Upgrade or the restore or update of agent files before launch
+never asks: it refuses and reports (the Launch case through the "Launch anyway / Cancel" question below), and the
+message names the card menu's **Change
 package...** as the way to accept the change - it no longer suggests deleting the repo's pin file
 (`AgentControl-LauncherUI-ContentChangeRefusal`, `AgentControl-LauncherUI-ChangePackage`).
+
+**Verifying the agent files before launch.** Launch no longer takes the existence of the four managed folders as proof
+that the pinned files are there (a repo with the folders present but half of the files missing was launched that way
+indefinitely). `RepoCardViewModel` decides from the files themselves, in this order (the full table is in the
+*RepoCardViewModel* design): committed agent files or no pin skip the check; a repo whose managed folders hold no file
+at all gets the pinned package installed silently; for a pin that records a files identity the files in the folders
+are hashed with the very algorithm that produced that identity and compared, with no package source read, so an
+in-sync launch asks nothing and downloads nothing; a pin recorded without an identity keeps the older folder check
+(all four folders present: launch; one missing: silent install). When the files differ - a file missing, changed or
+added, or not readable because of a link - the card raises `AgentFilesChoiceRequested` with an
+`AgentFilesChoiceRequest`, and `MainWindow` shows it in the same modal `ConfirmationWindow`, with the request's own
+button labels: **Update from package** replaces the four folders with the pinned package's files, **Keep current
+files** (the default, and what Escape answers) launches with the files as they are. The question is asked on every
+launch while the difference persists and nothing is persisted. When agent files that were needed cannot be installed
+(no source, an unreachable or refusing source, a republished package, a failed copy) the card raises the same event
+with the reason and the labels **Launch anyway** and **Cancel** (the default and Escape): only Launch anyway starts the
+agent tool; Cancel starts nothing and records no launch. This is the one case in which agent-package state stands in
+the way of a launch, and the user decides it (`AgentControl-LauncherUI-VerifyAgentFilesBeforeLaunch`,
+`AgentControl-LauncherUI-RestoreFailureChoice`; the decision is recorded in architecture.md). `MainWindow` always
+answers the request - a dialog that fails to show answers with the safe default - so the card's launch never hangs.
 
 **Converting committed agent files.** A repo can have its managed agent folders (`.github/agents`,
 `.github/standards`, `.github/templates`, `.github/skills`) tracked by git. `.gitignore` has no effect on tracked files,
@@ -585,7 +611,7 @@ lives in the view models above. `MainWindow`'s code-behind is the one exception:
 dialog-orchestration, view-layer plumbing that requires a live Avalonia `Window` — subscribing
 to each `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`,
 `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`,
-`CommittedFilesConversionRequested`, `ErrorOccurred`) and deciding which
+`CommittedFilesConversionRequested`, `AgentFilesChoiceRequested`, `ErrorOccurred`) and deciding which
 dialog/window to show and how to route the user's response back into the view model (e.g.
 calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the `ConfirmationWindow` shown
 for the AGENTS.md template offer). `AboutWindow` (opened via a

@@ -6,7 +6,8 @@ The `RepoSync` subsystem is verified through its constituent units' test suites
 (`PackageContentExtractorTests.cs`, `PackageZipExtractorTests.cs`,
 `ReleaseNotesViewerViewModelTests.cs`, and `GitIgnoreEnsurerTests.cs`), each documented in its own
 unit-level verification design, and - for the content identity a reader reports and the layout-root form a Git package
-is delivered in - by `RepoSyncSubsystemTests.cs`, whose tests use the readers and the extractor together against real
+is delivered in, and for the identity of the files installed in a repo - by `RepoSyncSubsystemTests.cs`, whose tests
+use the readers and the extractor together against real
 temporary folders and a real zip, the way the application drives them. `ReleaseNotesViewerViewModelTests.cs` also
 directly exercises
 `ReleaseNotesViewer`'s internal `BuildBlockTextBlock` rendering helper (via `InternalsVisibleTo`),
@@ -52,6 +53,10 @@ account may not create them).
 - A folder whose root is the package layout is read and applied as a package: only the four managed folders and the two
   root files are seen and written, never the folder's metadata or other content; a link in the layout is refused before
   the repo is touched and a link outside it is ignored.
+- The agent files installed in a repo's four managed folders are presented as a package (nothing else in the repo is
+  read, a repo root reached through a link is accepted), and an untouched extraction of a zip, an unpacked package
+  folder or a layout folder is indistinguishable from the package by its identity; a repo with no file below the
+  managed folders is reported as having no installed files.
 
 ### Test Scenarios
 
@@ -151,6 +156,20 @@ skip where links cannot be created), covering `AgentControl-RepoSync-RefuseLinke
 `AgentControl-PackageContentExtractor-RefuseNonFolderRepoComponent` and
 `AgentControl-PackageContentExtractor-RefuseLinkedDestinationFile`, whose unit tests are
 described in the `PackageContentExtractor` unit verification design).
+
+**RepoSync_InstalledFiles_ExtractionFromZipFolderAndLayoutPackages_HasThePackagesIdentity**: Arrange: the same agent
+files as a zip, an unpacked package folder (with its own metadata) and a layout-root folder, each with release notes
+and an `AGENTS.md` template that are not part of the agent files. Act: extract each into its own temporary repo with
+`PackageContentExtractor.Extract`, give the repos a root `AGENTS.md` of their own, then ask
+`PackageContentExtractor.HasInstalledFiles` and compute `PackageContentIdentity.ComputeInstalledFilesIdentity`. Assert:
+every repo reports installed files and the installed identity equals the identity the package's reader reports, so an
+untouched extraction of any kind of package is indistinguishable from the package, and the repo's own files do not
+change it. This scenario is tested by
+`RepoSync_InstalledFiles_ExtractionFromZipFolderAndLayoutPackages_HasThePackagesIdentity` in
+`RepoSyncSubsystemTests.cs`, covering `AgentControl-RepoSync-InstalledFiles` (children:
+`AgentControl-PackageContentExtractor-HasInstalledFiles` and
+`AgentControl-PackageContentExtractor-ReadManagedFoldersOfRepo`, whose unit tests are described in the
+`PackageContentExtractor` unit verification design).
 
 **RepoSync_ContentIdentity_SameFilesFromEveryKindOfReaderReportTheSameIdentity**: With the readers against real folders
 and real zips, the same agent files read from a compressed zip, a stored zip with another entry order, other timestamps

@@ -47,6 +47,10 @@ skipped). Junction tests run on Windows only (they skip elsewhere) and need no p
   link or junction is refused with nothing deleted or written (the link target is unchanged and
   other managed folders survive), a linked managed folder is not reported as existing, and a repo
   root reached through a link still extracts.
+- A repo has installed agent files exactly when a file exists below one of its four managed folders (hidden files
+  count; empty folders and files elsewhere do not); a managed folder that cannot be inspected safely (a link) is
+  reported as holding files, never as empty; and a repo's managed folders can be opened as a package that lists only
+  those folders' files and accepts a repo root reached through a link.
 
 #### Test Scenarios
 
@@ -229,3 +233,36 @@ This scenario is tested by
 `AgentControl-PackageContentExtractor-RefuseLinkInPlaceOfManagedFolder`; and
 `DirectoryPackageContentReader_OpenLayoutRoot_SymlinkAsRootFile_IsRefused`, covering
 `AgentControl-PackageContentExtractor-RefuseLinkAsRootFile`.
+
+**PackageContentExtractor_HasInstalledFiles_OnlyAFileBelowAManagedFolderCounts**: Arrange: temporary repos with no
+managed folders, with the four folders empty, with only empty sub-folders, with one file in one folder, with only a
+hidden file, with files only outside the managed folders (the repo root, other `.github` content), with a junction
+(Windows) or a symbolic link (Linux) as a managed folder, and a repo folder that does not exist. Act: call
+`HasInstalledFiles`. Assert: `false` for no folders, empty folders, empty sub-folders, files outside the managed
+folders and a missing repo folder; `true` for one file, a hidden file and a linked managed folder (which is never
+mistaken for emptiness); and a null repo root throws `ArgumentNullException`. This scenario is tested by
+`PackageContentExtractor_HasInstalledFiles_NoManagedFolders_ReturnsFalse`,
+`PackageContentExtractor_HasInstalledFiles_EmptyManagedFolders_ReturnsFalse`,
+`PackageContentExtractor_HasInstalledFiles_OnlyEmptySubfolders_ReturnsFalse`,
+`PackageContentExtractor_HasInstalledFiles_OneFileInOneFolder_ReturnsTrue`,
+`PackageContentExtractor_HasInstalledFiles_HiddenFileOnly_ReturnsTrue`,
+`PackageContentExtractor_HasInstalledFiles_FilesOutsideManagedFolders_ReturnsFalse`,
+`PackageContentExtractor_HasInstalledFiles_MissingRepoRoot_ReturnsFalse`,
+`PackageContentExtractor_HasInstalledFiles_ManagedFolderIsJunction_ReturnsTrue` (`windows@`),
+`PackageContentExtractor_HasInstalledFiles_ManagedFolderIsSymlink_ReturnsTrue` (`ubuntu@`) and
+`PackageContentExtractor_HasInstalledFiles_NullRepoRoot_ThrowsArgumentNullException`, covering
+`AgentControl-PackageContentExtractor-HasInstalledFiles`.
+
+**PackageContentExtractor_ReadManagedFoldersOfRepo_ListsOnlyTheManagedFolders**: Arrange: a repo with files in the
+four managed folders, a root `AGENTS.md` and `release-notes.md`, a `.git` folder and other `.github` content. Act: open
+`DirectoryPackageContentReader.OpenManagedFolders` and list and read. Assert: only the managed-folder files are listed;
+reading a root file throws `InvalidOperationException`; a missing repo folder throws `InvalidOperationException` and a
+null root `ArgumentNullException`; and a repo root reached through a junction (Windows) or symbolic link (Linux) is
+accepted. This scenario is tested by
+`DirectoryPackageContentReader_OpenManagedFolders_ListsOnlyManagedFolderFiles`,
+`DirectoryPackageContentReader_OpenManagedFolders_ReadingRootFile_ThrowsInvalidOperationException`,
+`DirectoryPackageContentReader_OpenManagedFolders_MissingRepoRoot_ThrowsInvalidOperationException`,
+`DirectoryPackageContentReader_OpenManagedFolders_NullRepoRoot_ThrowsArgumentNullException`,
+`DirectoryPackageContentReader_OpenManagedFolders_RepoRootUnderJunction_IsAccepted` (`windows@`) and
+`DirectoryPackageContentReader_OpenManagedFolders_RepoRootUnderSymlink_IsAccepted` (`ubuntu@`), covering
+`AgentControl-PackageContentExtractor-ReadManagedFoldersOfRepo`.

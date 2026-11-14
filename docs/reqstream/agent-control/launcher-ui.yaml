@@ -763,14 +763,17 @@ sections:
 
       - id: AgentControl-LauncherUI-Launch
         title: >-
-          The LauncherUI subsystem shall launch the configured agent tool for a repo,
-          attempting a best-effort agent-package sync beforehand without ever letting the
-          sync outcome block the launch.
+          The LauncherUI subsystem shall launch the configured agent tool for a repo after
+          checking the repo's agent files against its pinned package, without letting the outcome
+          of that check block the launch - except when agent files that were needed could not be
+          installed and the user chooses to cancel the launch.
         justification: |
           Launching the configured agentic CLI tool is AgentControl's primary purpose, and
-          must never be blocked by agent-package sync state - a user may want the tool's help
-          migrating away from committed agent files, or may find it useful even with zero
-          managed agent files present. Sync remains a best-effort, informational side action.
+          agent-package sync state must not stand in its way - a user may want the tool's help
+          migrating away from committed agent files, may be trying out other agent files, or may
+          find the tool useful even with zero managed agent files present. The one exception is
+          the user's own choice: when files that were needed could not be installed, the user may
+          decide that starting without them is not worth it.
         children:
           - AgentControl-RepoCardViewModel-Launch
           - AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch
@@ -778,6 +781,60 @@ sections:
           - RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting
           - RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches
+          - RepoCardViewModel_LaunchCommand_MismatchKeep_Launches
+          - RepoCardViewModel_LaunchCommand_RestoreFailsAndUserCancels_DoesNotLaunchOrRecordLaunch
+
+      - id: AgentControl-LauncherUI-VerifyAgentFilesBeforeLaunch
+        title: >-
+          The LauncherUI subsystem shall, when a repo pinned to an agent package is launched, install
+          the package silently when the repo has no agent files; compare the agent files in the repo
+          with the package the pin names, without reading any package source, when the pin records
+          the files of the package; launch without asking when they are the same; and ask the user,
+          on every launch, whether to keep the files or update them from the package when they
+          differ, keeping the files as they are unless the user chooses to update.
+        justification: |
+          A repo whose agent folders exist but are only partly filled looked synced and was launched
+          that way indefinitely, so what is on disk has to be checked against what the pin names.
+          Doing that check locally keeps every ordinary launch fast and offline, while asking
+          before replacing anything protects files the developer may be deliberately experimenting
+          with, and a repo with no agent files has nothing to lose and is repaired without a
+          question.
+        children:
+          - AgentControl-RepoCardViewModel-RestoreWhenNoAgentFiles
+          - AgentControl-RepoCardViewModel-VerifyFilesAgainstPinIdentity
+          - AgentControl-RepoCardViewModel-AskKeepOrUpdateOnMismatch
+          - AgentControl-RepoCardViewModel-NoPackageAccessWhenInSync
+          - AgentControl-RepoCardViewModel-PinWithoutIdentityKeepsFolderCheck
+          - AgentControl-RepoCardViewModel-VerifyOffUiThread
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoManagedFolders_RestoresSilentlyWithoutPrompt
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FilesMatchPin_ReturnsInSyncWithoutPromptOrPackageAccess
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HalfOfTheFilesMissing_AsksAndUpdateRestoresAllFiles
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchPersists_AsksOnEveryLaunch
+          - RepoCardViewModel_LaunchCommand_MismatchKeep_Launches
+          - RepoCardViewModel_LaunchCommand_MismatchUpdate_RestoresThenLaunches
+          - MainWindow_AgentFilesChoiceRequested_ShowsLabeledConfirmationAndAnswersRequest
+
+      - id: AgentControl-LauncherUI-RestoreFailureChoice
+        title: >-
+          The LauncherUI subsystem shall, when agent files that a launch needs cannot be installed
+          from the pinned package, tell the user why in a question that offers to launch anyway or
+          to cancel the launch, with Cancel as the default answer and the answer that Escape
+          gives, and shall start the agent tool only when the user chooses to launch anyway.
+        justification: |
+          Starting an agentic tool without the agent files it was meant to follow is a decision
+          with consequences the developer should make knowingly; a message that scrolls past
+          while the tool already starts leaves no choice. Making the safe answer the default keeps
+          an accidental key press from launching without the files.
+        children:
+          - AgentControl-RepoCardViewModel-OfferLaunchAnywayOnRestoreFailure
+        tests:
+          - RepoCardViewModel_LaunchCommand_RestoreFailsAndUserCancels_DoesNotLaunchOrRecordLaunch
+          - RepoCardViewModel_LaunchCommand_RestoreFailsAndUserChoosesLaunchAnyway_Launches
+          - ConfirmationWindow_CustomLabels_ShowTextAndKeepNoButtonAsDefault
+          - ConfirmationWindow_CustomLabelsConfirmClicked_ReturnsTrue
+          - ConfirmationWindow_CustomLabelsNullArgument_Throws
+          - MainWindow_AgentFilesChoiceRequested_ShowsLabeledConfirmationAndAnswersRequest
 
       - id: AgentControl-LauncherUI-Pull
         title: >-
@@ -1575,12 +1632,12 @@ sections:
         title: >-
           The LauncherUI subsystem shall not replace a repo's agent files with a package of the
           pinned version whose content differs from the recorded identity when upgrading or when
-          restoring missing agent files before launch, shall tell the user in plain language,
+          restoring or updating agent files before launch, shall tell the user in plain language,
           shall change nothing and shall never write the pin during a launch.
         justification: |
           A changed copy of the pinned version must never be applied without the user knowing; the
-          launch-time restore must also never rewrite the pin, because that would change a file
-          under version control every time the agent tool is started.
+          launch-time restore or update must also never rewrite the pin, because that would change
+          a file under version control every time the agent tool is started.
         children:
           - AgentControl-RepoCardViewModel-RefuseChangedContent
           - AgentControl-RepoCardViewModel-RefuseChangedContentMessage

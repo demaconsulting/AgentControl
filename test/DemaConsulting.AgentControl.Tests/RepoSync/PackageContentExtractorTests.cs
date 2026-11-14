@@ -1233,6 +1233,259 @@ public sealed class PackageContentExtractorTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a repo without any managed folder has no installed agent files.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_HasInstalledFiles_NoManagedFolders_ReturnsFalse()
+    {
+        // Arrange: a repo with only its own files
+        var repo = CreateLayoutRoot(("README.md", "readme"), (".github/workflows/build.yml", "name: build"));
+
+        // Act / Assert
+        Assert.False(PackageContentExtractor.HasInstalledFiles(repo));
+    }
+
+    /// <summary>
+    ///     Test that managed folders that exist but hold no file count as having no installed files,
+    ///     so a launch installs the package silently rather than asking about nothing.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_HasInstalledFiles_EmptyManagedFolders_ReturnsFalse()
+    {
+        // Arrange: all four managed folders, empty
+        var repo = CreateTempDirectory();
+        CreateManagedFolders(repo);
+
+        // Act / Assert
+        Assert.False(PackageContentExtractor.HasInstalledFiles(repo));
+    }
+
+    /// <summary>
+    ///     Test that managed folders holding only empty sub-folders count as having no installed files.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_HasInstalledFiles_OnlyEmptySubfolders_ReturnsFalse()
+    {
+        // Arrange: nested empty folders below the managed folders
+        var repo = CreateTempDirectory();
+        CreateManagedFolders(repo);
+        Directory.CreateDirectory(Path.Combine(repo, ".github", "skills", "a", "b"));
+        Directory.CreateDirectory(Path.Combine(repo, ".github", "agents", "empty"));
+
+        // Act / Assert
+        Assert.False(PackageContentExtractor.HasInstalledFiles(repo));
+    }
+
+    /// <summary>
+    ///     Test that a single file in a single managed folder is enough to count as installed.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_HasInstalledFiles_OneFileInOneFolder_ReturnsTrue()
+    {
+        // Arrange: only one folder exists, with one nested file
+        var repo = CreateLayoutRoot((".github/skills/lint/SKILL.md", "skill"));
+
+        // Act / Assert
+        Assert.True(PackageContentExtractor.HasInstalledFiles(repo));
+    }
+
+    /// <summary>
+    ///     Test that a hidden file is an installed file too: it takes part in the identity, so it
+    ///     must not be mistaken for an empty repo and overwritten silently.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_HasInstalledFiles_HiddenFileOnly_ReturnsTrue()
+    {
+        // Arrange: a dot-file as the only content
+        var repo = CreateLayoutRoot((".github/agents/.hidden", "x"));
+
+        // Act / Assert
+        Assert.True(PackageContentExtractor.HasInstalledFiles(repo));
+    }
+
+    /// <summary>
+    ///     Test that files elsewhere in the repo, including other <c>.github</c> content and the
+    ///     repo's own root <c>AGENTS.md</c>, are not installed agent files.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_HasInstalledFiles_FilesOutsideManagedFolders_ReturnsFalse()
+    {
+        // Arrange: files that are not in the four managed folders
+        var repo = CreateLayoutRoot(
+            ("AGENTS.md", "mine"),
+            ("release-notes.md", "notes"),
+            (".github/CODEOWNERS", "* @me"),
+            (".github/workflows/build.yml", "name: build"),
+            (".git/config", "[core]"));
+
+        // Act / Assert
+        Assert.False(PackageContentExtractor.HasInstalledFiles(repo));
+    }
+
+    /// <summary>
+    ///     Test that a repo folder that does not exist has no installed files rather than throwing.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_HasInstalledFiles_MissingRepoRoot_ReturnsFalse()
+    {
+        // Arrange: a path that does not exist
+        var missing = Path.Combine(CreateTempDirectory(), "missing");
+
+        // Act / Assert
+        Assert.False(PackageContentExtractor.HasInstalledFiles(missing));
+    }
+
+    /// <summary>
+    ///     Test that a managed folder that is a directory junction counts as installed content that
+    ///     cannot be vouched for, never as an empty repo (Windows).
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_HasInstalledFiles_ManagedFolderIsJunction_ReturnsTrue()
+    {
+        // Arrange: .github/standards is a junction to an empty folder outside the repo
+        var outside = CreateTempDirectory();
+        var repo = CreateTempDirectory();
+        CreateJunctionOrSkip(Path.Combine(repo, ".github", "standards"), outside);
+
+        // Act / Assert
+        Assert.True(PackageContentExtractor.HasInstalledFiles(repo));
+    }
+
+    /// <summary>
+    ///     Test that a managed folder that is a symbolic link counts as installed content that cannot
+    ///     be vouched for, wherever the operating system lets a test create one.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_HasInstalledFiles_ManagedFolderIsSymlink_ReturnsTrue()
+    {
+        // Arrange: .github/standards is a symbolic link to an empty folder outside the repo
+        var outside = CreateTempDirectory();
+        var repo = CreateTempDirectory();
+        TryCreateDirectorySymlinkOrSkip(Path.Combine(repo, ".github", "standards"), outside);
+
+        // Act / Assert
+        Assert.True(PackageContentExtractor.HasInstalledFiles(repo));
+    }
+
+    /// <summary>
+    ///     Test that a null repo root is rejected.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_HasInstalledFiles_NullRepoRoot_ThrowsArgumentNullException()
+    {
+        // Arrange: no repo
+
+        // Act / Assert
+        Assert.Throws<ArgumentNullException>(() => PackageContentExtractor.HasInstalledFiles(null!));
+    }
+
+    /// <summary>
+    ///     Test that a managed-folders reader lists only the files of the four managed folders: not
+    ///     the repo's own root files, not <c>.git</c> and not other <c>.github</c> content.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenManagedFolders_ListsOnlyManagedFolderFiles()
+    {
+        // Arrange: managed files next to files that belong to the repo
+        var repo = CreateLayoutRoot(
+            (".github/agents/copilot.md", "agents"),
+            (".github/skills/lint/SKILL.md", "skill"),
+            (".github/workflows/build.yml", "name: build"),
+            (".github/CODEOWNERS", "* @me"),
+            ("AGENTS.md", "mine"),
+            ("release-notes.md", "notes"),
+            (".git/config", "[core]"),
+            ("src/Program.cs", "class P {}"));
+        using var reader = DirectoryPackageContentReader.OpenManagedFolders(repo);
+
+        // Act
+        var files = reader.ListFiles().Order(StringComparer.Ordinal).ToList();
+
+        // Assert
+        Assert.Equal([".github/agents/copilot.md", ".github/skills/lint/SKILL.md"], files);
+    }
+
+    /// <summary>
+    ///     Test that a managed-folders reader refuses to read the repo's root files and anything
+    ///     else outside the managed folders, even by name.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenManagedFolders_ReadingRootFile_ThrowsInvalidOperationException()
+    {
+        // Arrange: a repo with its own AGENTS.md, which is not an agent file
+        var repo = CreateLayoutRoot((".github/agents/copilot.md", "agents"), ("AGENTS.md", "mine"));
+        using var reader = DirectoryPackageContentReader.OpenManagedFolders(repo);
+
+        // Act / Assert: a managed file reads, anything else is refused
+        Assert.Equal("agents", reader.ReadText(".github/agents/copilot.md"));
+        Assert.Throws<InvalidOperationException>(() => reader.ReadText("AGENTS.md"));
+        Assert.Throws<InvalidOperationException>(() => reader.OpenRead(".github/workflows/build.yml"));
+    }
+
+    /// <summary>
+    ///     Test that a repo folder that does not exist is refused.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenManagedFolders_MissingRepoRoot_ThrowsInvalidOperationException()
+    {
+        // Arrange: a path that does not exist
+        var missing = Path.Combine(CreateTempDirectory(), "missing");
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(() => DirectoryPackageContentReader.OpenManagedFolders(missing));
+    }
+
+    /// <summary>
+    ///     Test that a null repo root is rejected.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenManagedFolders_NullRepoRoot_ThrowsArgumentNullException()
+    {
+        // Arrange: no repo
+
+        // Act / Assert
+        Assert.Throws<ArgumentNullException>(() => DirectoryPackageContentReader.OpenManagedFolders(null!));
+    }
+
+    /// <summary>
+    ///     Test that a repo reached through a directory junction is accepted, as extraction accepts it
+    ///     (Windows).
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenManagedFolders_RepoRootUnderJunction_IsAccepted()
+    {
+        // Arrange: a repo reached through a junction
+        var repo = CreateLayoutRoot((".github/agents/copilot.md", "agents"));
+        var linked = Path.Combine(CreateTempDirectory(), "linked-repo");
+        CreateJunctionOrSkip(linked, repo);
+
+        // Act
+        using var reader = DirectoryPackageContentReader.OpenManagedFolders(linked);
+
+        // Assert
+        Assert.Equal([".github/agents/copilot.md"], reader.ListFiles());
+    }
+
+    /// <summary>
+    ///     Test that a repo reached through a symbolic link is accepted, as extraction accepts it,
+    ///     wherever the operating system lets a test create one.
+    /// </summary>
+    [Fact]
+    public void DirectoryPackageContentReader_OpenManagedFolders_RepoRootUnderSymlink_IsAccepted()
+    {
+        // Arrange: a repo reached through a symbolic link
+        var repo = CreateLayoutRoot((".github/agents/copilot.md", "agents"));
+        var linked = Path.Combine(CreateTempDirectory(), "linked-repo");
+        TryCreateDirectorySymlinkOrSkip(linked, repo);
+
+        // Act
+        using var reader = DirectoryPackageContentReader.OpenManagedFolders(linked);
+
+        // Assert
+        Assert.Equal([".github/agents/copilot.md"], reader.ListFiles());
+    }
+
+    /// <summary>
     ///     Test that a null reader or repo root is rejected.
     /// </summary>
     [Fact]
@@ -1242,6 +1495,18 @@ public sealed class PackageContentExtractorTests : IDisposable
         Assert.Throws<ArgumentNullException>(() => PackageContentExtractor.Extract(null!, CreateTempDirectory()));
         Assert.Throws<ArgumentNullException>(
             () => PackageContentExtractor.Extract(new StubPackageContentReader([]), null!));
+    }
+
+    /// <summary>
+    ///     Creates the four (empty) managed agent folders under a repo.
+    /// </summary>
+    /// <param name="repo">The repo folder.</param>
+    private static void CreateManagedFolders(string repo)
+    {
+        foreach (var folder in new[] { "agents", "standards", "templates", "skills" })
+        {
+            Directory.CreateDirectory(Path.Combine(repo, ".github", folder));
+        }
     }
 
     /// <summary>

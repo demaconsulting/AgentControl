@@ -40,7 +40,9 @@ Nothing else takes part - no timestamps, permissions, directory entries, entry o
 format - so the identity is the same for the same files whatever delivered them
 (`AgentControl-PackageContentIdentity-FilesIdentityIndependentOfPackaging`), and it changes if one byte, a path, or
 the membership changes, or if bytes move from one file to another because the length and path are part of the
-stream (`AgentControl-PackageContentIdentity-FilesIdentityDetectsChange`).
+stream (`AgentControl-PackageContentIdentity-FilesIdentityDetectsChange`). The bytes are the raw bytes: no line-ending
+or other text normalization is applied, which is also why the files installed in a repo hash to the identity of the
+package they were extracted from.
 
 **ContentIdentityComparison**: `enum` - `NotComparable` (a side is missing or is not a files identity), `Same`,
 `Changed`.
@@ -73,6 +75,31 @@ the readers' `ContentIdentity` property uses: a reader opened only for its relea
 every file, and a reader over an unacceptable package still opens - `Extract` then reports the specific problem,
 and "no identity" means "nothing to compare", never "changed".
 
+**ComputeInstalledFilesIdentity**: Computes the identity of the agent files that are physically installed in a repo's
+four managed folders, with exactly the algorithm that produced the identity a pin recorded for the package
+(`AgentControl-AgentPackageManagement-InstalledFilesIdentity`).
+
+- *Parameters*: `string repoRoot`, `CancellationToken cancellationToken = default` (checked before each file is
+  hashed).
+- *Returns*: `string` - the identity of the installed files; when no managed folder holds a file, the identity of the
+  empty stream (a caller that must tell "nothing installed" apart asks `PackageContentExtractor.HasInstalledFiles`
+  first).
+- *Algorithm*: Opens `DirectoryPackageContentReader.OpenManagedFolders(repoRoot)` and hashes it with the same private
+  function `ComputeFilesIdentity` uses; only the reader differs. There is no second algorithm. An untouched
+  extraction therefore hashes to the recorded identity by construction: the extraction copies each file's raw bytes
+  (no line-ending or text normalization) to the path `Extract` selected with the very rule the identity uses
+  (`GetManagedPackagePath`), and the repo's own root files, the release notes and anything outside the four folders
+  are excluded on both sides. A missing, changed, renamed or extra file changes the result
+  (`AgentControl-PackageContentIdentity-InstalledIdentityDetectsDifferences`); timestamps, permissions and empty
+  folders do not (`AgentControl-PackageContentIdentity-InstalledFilesIdentity`). A repo root reached through a link is
+  accepted, as `Extract` accepts it.
+- *Errors*: `ArgumentNullException` for a null repo root; `InvalidOperationException` when the repo folder does not
+  exist, when an installed file or folder is a link, cannot be read or collides with another in letter case - the
+  files then cannot be verified, and the caller treats that as a difference, never as a match;
+  `OperationCanceledException` when the token is canceled
+  (`AgentControl-PackageContentIdentity-InstalledIdentityFailsSafely`). Read-only and thread-safe; it reads every
+  installed file twice at most (once to measure and once to hash), so a caller on a UI thread runs it on a worker.
+
 **IsFilesIdentity**: Tells whether a text is a well-formed files identity: the prefix (ignoring letter case)
 followed by exactly 64 hexadecimal digits, ignoring surrounding white space. An identity an older version
 recorded (a container hash, `sha256:`, or a Git commit, `git-commit:`) is not
@@ -100,13 +127,16 @@ recorded (a container hash, `sha256:`, or a Git commit, `git-commit:`) is not
 
 `ComputeFilesIdentity` throws the `InvalidOperationException` described above for a package that cannot be
 identified; I/O failures while reading a file (`IOException`, `InvalidDataException` of a corrupt zip,
-`UnauthorizedAccessException`) are wrapped in it, naming the package. `TryComputeFilesIdentity`, `IsFilesIdentity`,
+`UnauthorizedAccessException`) are wrapped in it, naming the package. `ComputeInstalledFilesIdentity` reports an
+unreadable repo the same way (naming the repo folder) and lets a canceled token surface as
+`OperationCanceledException`. `TryComputeFilesIdentity`, `IsFilesIdentity`,
 `Compare` and `Describe` never throw (for valid arguments).
 
 #### Dependencies
 
 - **IPackageContentReader** and **PackageContentExtractor** (`RepoSync` subsystem) - the reader supplies the files;
-  `GetManagedPackagePath` is the membership rule.
+  `GetManagedPackagePath` is the membership rule; `DirectoryPackageContentReader.OpenManagedFolders` supplies the
+  files installed in a repo.
 - **.NET BCL** - `System.Security.Cryptography.IncrementalHash`.
 
 #### Callers
@@ -114,4 +144,5 @@ identified; I/O failures while reading a file (`IOException`, `InvalidDataExcept
 - **ZipPackageContentReader** and **DirectoryPackageContentReader** (`RepoSync` subsystem) - `TryComputeFilesIdentity`
   over their own files, which makes every source's identity come out the same way.
 - **RepoCardViewModel** (`LauncherUI` subsystem) - `Compare`, `Describe` and `IsFilesIdentity` when applying,
-  upgrading to or restoring a package, and when verifying which configured source delivers the files a pin recorded.
+  upgrading to or restoring a package, and when verifying which configured source delivers the files a pin recorded;
+  `ComputeInstalledFilesIdentity` before a launch, to compare the files in the repo with the pin's identity.

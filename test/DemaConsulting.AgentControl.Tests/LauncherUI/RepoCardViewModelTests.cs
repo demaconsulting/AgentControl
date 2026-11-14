@@ -1567,7 +1567,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         var result = card.EnsureAgentFilesSyncedBeforeLaunch();
 
         // Assert: the re-extraction occurred and the offer was raised
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.Equal("# AGENTS\n\nCustomize me.", capturedTemplate);
     }
 
@@ -1580,21 +1580,26 @@ public sealed class RepoCardViewModelTests : IDisposable
     [Fact]
     public void RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FoldersAlreadyPresent_NeverReadsZipOrRaisesOffer()
     {
-        // Arrange: a pinned repo with all four managed folders already present, and no
+        // Arrange: a pinned repo with all four managed folders already present (the agents folder
+        // holds a file, so something is installed), a pin that records no content identity, and no
         // configured package source at all (so a zip read, if attempted, would fail/throw -
         // proving this path never even tries to resolve or read the pinned package's zip)
         var repoRoot = CreateTempDirectory();
         CreateManagedFolders(repoRoot);
+        File.WriteAllText(Path.Combine(repoRoot, ".github", "agents", "installed.md"), "installed");
         var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", new AppSettings());
         var offerRaised = false;
         card.AgentsMdTemplateOfferRequested += (_, _) => offerRaised = true;
+        string? capturedError = null;
+        card.ErrorOccurred += (_, message) => capturedError = message;
 
         // Act
         var result = card.EnsureAgentFilesSyncedBeforeLaunch();
 
-        // Assert: no offer raised
-        Assert.True(result);
+        // Assert: no offer raised, nothing reported (no package access was attempted)
+        Assert.True(result.IsSynced());
         Assert.False(offerRaised);
+        Assert.Null(capturedError);
     }
 
     /// <summary>
@@ -1637,7 +1642,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         var result = card.EnsureAgentFilesSyncedBeforeLaunch();
 
         // Assert: no error raised, launch may proceed, status message is informational
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.Null(capturedError);
         Assert.NotNull(card.StatusMessage);
         Assert.Contains("no agent package is pinned", card.StatusMessage, StringComparison.OrdinalIgnoreCase);
@@ -1672,7 +1677,7 @@ public sealed class RepoCardViewModelTests : IDisposable
 
         // Assert: no extraction occurred (folders remain absent), no error raised, launch may
         // proceed, status message is informational
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.Null(capturedError);
         Assert.False(PackageZipExtractor.AllManagedFoldersExist(repoRoot));
         Assert.NotNull(card.StatusMessage);
@@ -1698,7 +1703,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         var result = card.EnsureAgentFilesSyncedBeforeLaunch();
 
         // Assert: no re-extraction occurred (the sentinel file survives)
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.True(File.Exists(sentinelPath));
     }
 
@@ -1723,7 +1728,7 @@ public sealed class RepoCardViewModelTests : IDisposable
 
         // Assert: the folders now exist, populated from the pinned 1.0.0 package - never the
         // newer 2.0.0 package
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.True(PackageZipExtractor.AllManagedFoldersExist(repoRoot));
         Assert.Equal("v1-marker", File.ReadAllText(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
     }
@@ -1752,7 +1757,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         var result = card.EnsureAgentFilesSyncedBeforeLaunch();
 
         // Assert
-        Assert.False(result);
+        Assert.False(result.IsSynced());
         Assert.NotNull(capturedError);
         Assert.False(PackageZipExtractor.AllManagedFoldersExist(repoRoot));
     }
@@ -1978,7 +1983,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         var synced = card.EnsureAgentFilesSyncedBeforeLaunch();
 
         // Assert
-        Assert.False(synced);
+        Assert.False(synced.IsSynced());
         Assert.Contains("now contains different files", error, StringComparison.Ordinal);
         Assert.False(PackageZipExtractor.AllManagedFoldersExist(repoRoot));
     }

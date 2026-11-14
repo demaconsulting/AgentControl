@@ -1077,6 +1077,68 @@ public sealed class UsabilityWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that a launch whose agent files differ from the pin shows a modal question whose buttons carry
+    ///     the request's labels ("Update from package" / "Keep current files"), that the card stays busy until
+    ///     it is answered, that Keep leaves the files alone, that Update restores the package's files, and that
+    ///     each request is always answered.
+    /// </summary>
+    [Fact]
+    public void MainWindow_AgentFilesChoiceRequested_ShowsLabeledConfirmationAndAnswersRequest() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a repo applied from a package, then with one agent file edited
+        var sourceDir = CreateTempDirectory();
+        CreateZip(sourceDir, "contoso-agents", "1.0.0", releaseNotes: "# Original");
+        var repo = CreateRepoDirectory("agent-files-differ");
+        var (window, viewModel) = CreateWindow([new RecentRepo { Path = repo }], new AppSettings { PackageSourcePath = sourceDir });
+
+        try
+        {
+            var card = viewModel.RepoCards.Single();
+            await card.ApplySelectedPackageAsync(new PackageReference("Default", "contoso-agents", "1.0.0"));
+            Dispatcher.UIThread.RunJobs();
+            CloseChildWindows(window);
+            var edited = Path.Combine(repo, ".github", "agents", "readme.md");
+            await File.WriteAllTextAsync(edited, "my experiment", TestContext.Current.CancellationToken);
+
+            // Act 1: verify with Keep as the answer
+            var checking = card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+            await PumpUntilAsync(() => window.OwnedWindows.OfType<ConfirmationWindow>().Any());
+            var question = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+
+            // Assert 1: the labels are the request's, the card is still waiting, and nothing has changed yet
+            Assert.Equal("Update from package", question.FindControl<Button>("ConfirmationYesButton")?.Content);
+            Assert.Equal("Keep current files", question.FindControl<Button>("ConfirmationNoButton")?.Content);
+            Assert.False(checking.IsCompleted);
+            Assert.Equal("my experiment", await File.ReadAllTextAsync(edited, TestContext.Current.CancellationToken));
+
+            // Act 2: Keep
+            DialogWindowTests.Click(question, "ConfirmationNoButton");
+            await PumpUntilAsync(() => checking.IsCompleted);
+
+            // Assert 2: the request was answered with the safe side and the file is untouched
+            Assert.Equal(AgentFilesSyncOutcome.KeptCurrentFiles, await checking);
+            Assert.Equal("my experiment", await File.ReadAllTextAsync(edited, TestContext.Current.CancellationToken));
+            Assert.Empty(window.OwnedWindows);
+
+            // Act 3: verify again and Update
+            checking = card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+            await PumpUntilAsync(() => window.OwnedWindows.OfType<ConfirmationWindow>().Any());
+            DialogWindowTests.Click(window.OwnedWindows.OfType<ConfirmationWindow>().Single(), "ConfirmationYesButton");
+            await PumpUntilAsync(() => checking.IsCompleted);
+
+            // Assert 3: the package's file is back
+            Assert.Equal(AgentFilesSyncOutcome.Updated, await checking);
+            Assert.Equal("content", await File.ReadAllTextAsync(edited, TestContext.Current.CancellationToken));
+            Assert.Empty(window.OwnedWindows);
+        }
+        finally
+        {
+            CloseChildWindows(window);
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Lets the dispatcher and background work run until a condition holds, giving up after about
     ///     five seconds so a test that would hang fails instead.
     /// </summary>

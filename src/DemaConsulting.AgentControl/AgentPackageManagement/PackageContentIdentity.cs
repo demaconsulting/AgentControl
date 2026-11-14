@@ -133,7 +133,26 @@ internal static class PackageContentIdentity
     ///     two files with the same canonical path (the identity would depend on which one wins) or
     ///     with paths that differ only in letter case (they would be one file on a case-insensitive
     ///     file system), or a file changes length while it is being read.</exception>
-    public static string ComputeFilesIdentity(IPackageContentReader reader)
+    public static string ComputeFilesIdentity(IPackageContentReader reader) =>
+        HashFiles(reader, CancellationToken.None);
+
+    /// <summary>
+    ///     Computes the <c>files-sha256:</c> identity of the agent files a reader delivers,
+    ///     abandoning the work when a token is canceled; the one implementation behind
+    ///     <see cref="ComputeFilesIdentity(IPackageContentReader)"/> and
+    ///     <see cref="ComputeInstalledFilesIdentity"/>.
+    /// </summary>
+    /// <param name="reader">The package content to identify. Read only; not disposed.</param>
+    /// <param name="cancellationToken">Checked before each file is hashed, so a large tree can be
+    ///     abandoned promptly.</param>
+    /// <returns>The identity; see <see cref="ComputeFilesIdentity(IPackageContentReader)"/>.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="reader"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown under the same conditions as
+    ///     <see cref="ComputeFilesIdentity(IPackageContentReader)"/>.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is canceled while the files are being hashed.</exception>
+    private static string HashFiles(IPackageContentReader reader, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(reader);
 
@@ -163,6 +182,7 @@ internal static class PackageContentIdentity
         {
             foreach (var (canonicalPath, listedPath) in files)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var length = MeasureLength(reader, listedPath, buffer);
                 hash.AppendData(Encoding.UTF8.GetBytes(canonicalPath));
                 hash.AppendData("\0"u8);
@@ -181,11 +201,56 @@ internal static class PackageContentIdentity
     }
 
     /// <summary>
+    ///     Computes the <c>files-sha256:</c> identity of the agent files that are physically
+    ///     installed in a repo's four managed folders, with exactly the algorithm that produced the
+    ///     identity a pin recorded for the package.
+    /// </summary>
+    /// <param name="repoRoot">The repo's root folder.</param>
+    /// <param name="cancellationToken">Checked before each file is hashed; defaults to never
+    ///     canceled.</param>
+    /// <returns>The identity of the installed files. When no managed folder holds a file, the
+    ///     identity of the empty stream (callers that need to tell "nothing installed" apart use
+    ///     <see cref="PackageContentExtractor.HasInstalledFiles"/> first).</returns>
+    /// <remarks>
+    ///     <para>
+    ///     No second algorithm exists: the four managed folders are presented through
+    ///     <see cref="DirectoryPackageContentReader.OpenManagedFolders"/> and hashed by
+    ///     <see cref="HashFiles"/>. An untouched extraction therefore hashes to the
+    ///     recorded identity by construction: the extraction copies each file's raw bytes (no line
+    ///     ending or text normalization) to the path <see cref="PackageContentExtractor.Extract"/>
+    ///     selected with the same <see cref="PackageContentExtractor.GetManagedPackagePath"/> rule
+    ///     the identity uses, and the repo's own root files and anything outside the four folders
+    ///     are excluded on both sides. A missing, changed, renamed or extra file changes the result;
+    ///     timestamps, permissions and empty folders do not.
+    ///     </para>
+    ///     <para>
+    ///     Read-only and thread-safe; reads every installed file once to measure and once to hash,
+    ///     so callers on a UI thread run it on a worker.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the repo folder does not exist, an
+    ///     installed file or folder is a link, cannot be read, or two files differ only in letter
+    ///     case; the installed files then cannot be verified.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is canceled while the files are being hashed.</exception>
+    public static string ComputeInstalledFilesIdentity(string repoRoot, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(repoRoot);
+
+        // The very same function hashes a package's files and the installed ones; only the reader
+        // differs, which is what makes the two identities comparable
+        using var reader = DirectoryPackageContentReader.OpenManagedFolders(repoRoot);
+        return HashFiles(reader, cancellationToken);
+    }
+
+    /// <summary>
     ///     Computes the <c>files-sha256:</c> identity of a reader's files, or reports that none can
     ///     be named.
     /// </summary>
     /// <param name="reader">The package content to identify.</param>
-    /// <returns>The identity (see <see cref="ComputeFilesIdentity"/>), or <see langword="null"/>
+    /// <returns>The identity (see <see cref="ComputeFilesIdentity(IPackageContentReader)"/>), or <see langword="null"/>
     ///     when the content cannot be identified (it cannot be read, or holds a path that extraction
     ///     rejects). That is "nothing to compare", never "changed": extracting such a package fails
     ///     with the specific reason, which is how the user learns about it.</returns>

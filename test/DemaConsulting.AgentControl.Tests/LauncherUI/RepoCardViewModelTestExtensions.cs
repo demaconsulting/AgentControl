@@ -65,12 +65,22 @@ internal static class RepoCardViewModelTestExtensions
     }
 
     /// <summary>
-    ///     Runs the best-effort pre-launch sync of a card and waits for its outcome.
+    ///     Runs the pre-launch verification of a card and waits for its outcome.
     /// </summary>
-    /// <param name="card">The card to sync.</param>
-    /// <returns>The sync's result, as returned by the card.</returns>
-    public static bool EnsureAgentFilesSyncedBeforeLaunch(this RepoCardViewModel card) =>
+    /// <param name="card">The card to verify.</param>
+    /// <returns>The outcome, as returned by the card.</returns>
+    public static AgentFilesSyncOutcome EnsureAgentFilesSyncedBeforeLaunch(this RepoCardViewModel card) =>
         RunToCompletion(() => card.EnsureAgentFilesSyncedBeforeLaunchAsync());
+
+    /// <summary>
+    ///     Determines whether a pre-launch verification ended with the agent files in a usable,
+    ///     synced state (as opposed to a failed restore).
+    /// </summary>
+    /// <param name="outcome">The outcome to test.</param>
+    /// <returns><see langword="false"/> for a failed restore (launch anyway or canceled);
+    ///     <see langword="true"/> for every other outcome.</returns>
+    public static bool IsSynced(this AgentFilesSyncOutcome outcome) =>
+        outcome is not (AgentFilesSyncOutcome.FailedLaunchAnyway or AgentFilesSyncOutcome.LaunchCanceled);
 
     /// <summary>
     ///     Runs an asynchronous operation on a pool thread and waits for it.

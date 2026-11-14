@@ -150,17 +150,23 @@ each repo's pin, `GitIntegration` for status/pull/branch queries and for hardene
 repositories, and `AgentToolLauncher` for
 detecting a shell and launching the configured agentic CLI tool in it. `Utilities` provides shared,
 independently testable helpers (currently safe path combination) consumed across subsystems. After a
-genuine sync (Select Package, Upgrade, or Launch's best-effort re-extraction), `RepoCardViewModel`
+genuine sync (Select Package, Upgrade, or the restore or update of agent files at Launch), `RepoCardViewModel`
 may also offer to place a package's optional root-level `AGENTS.md` template at the repo's root via
 a modal confirmation, never overwriting a pre-existing `AGENTS.md` and remembering a decline so the
 user is not re-prompted for that repo again (`AgentControl-System-AgentsMdTemplate`). Select Package and
 Upgrade record in the pin the content identity of the package they applied - a SHA-256 over the agent files the
 package delivers (`files-sha256:`), the same whether they came from a zip, a NuGet package or a Git tag, so it alone
-proves the files were not tampered with: an Upgrade, or the restore of missing agent files at launch, that finds the
+proves the files were not tampered with: an Upgrade, or the restore or update of agent files at launch, that finds the
 pinned version delivering different files than recorded (a republished package, or a Git tag that was moved to other
 files) applies nothing and says so, while choosing that version again with Change package... asks the user to confirm
 first, and a pin with no identity adopts one silently the next time a package is selected or upgraded to - the
-launch-time restore never writes the pin (`AgentControl-System-PackageContentIntegrity`). A pin names no package
+launch-time restore never writes the pin (`AgentControl-System-PackageContentIntegrity`). The same identity is what
+Launch checks the files on disk against: `PackageContentIdentity` hashes the agent files installed in the repo's four
+managed folders with the algorithm that produced the pin's identity, so a repo whose files are the package's launches
+without asking and without reading any package source, a repo with no agent files gets the pinned package installed
+silently, and files that differ (a missing, changed or extra file) are put to the user as "Update from package" or
+"Keep current files"; when agent files that were needed cannot be installed, the user chooses "Launch anyway" or
+"Cancel" (`AgentControl-System-VerifyAgentFiles`). A pin names no package
 source at all, because sources and their aliases are each user's own configuration and a committed file is shared:
 every user's configured sources are asked which offer the pinned package and version, and the first whose files have
 the recorded identity supplies them, whatever its alias or kind. The card remembers that supplier in the user's own
@@ -368,8 +374,8 @@ unique alias.
   time it is saved), and a pin from a newer schema is neither interpreted nor overwritten - the user is told to update
   AgentControl (`AgentControl-System-SourcePinIntegrity`, `AgentControl-System-PinFile`,
   `AgentControl-System-PackageContentIntegrity`, `AgentControl-System-IdentityAdoptedOnUpgrade`).
-- *Constraints*: No "latest"/unpinned mode is supported (mandatory version pinning). The restore of
-  missing agent files at launch never writes the file.
+- *Constraints*: No "latest"/unpinned mode is supported (mandatory version pinning). The restore or update of
+  agent files at launch never writes the file.
 
 **Configured Git Executable**: The git executable used for status/pull/branch queries and, hardened, for the Git
 package source.
@@ -394,8 +400,9 @@ Copilot CLI), launched inside a detected shell.
 - *Type*: External process.
 - *Role*: Consumer (`AgentToolLauncher` starts it).
 - *Contract*: Launched in the repo's working directory inside a shell appropriate to the
-  current platform (see `docs/design/agent-control/agent-tool-launcher.md`), only after the
-  repo's agent files are confirmed synced to the pinned version.
+  current platform (see `docs/design/agent-control/agent-tool-launcher.md`), after the
+  repo's agent files were verified against the pinned package; the only thing that stops a launch is the user's own
+  Cancel when agent files that were needed could not be installed.
 - *Constraints*: Configurable per Settings (well-known tool picker or custom command).
 
 **Diagnostic Log File**: A rolling log file under `<config-dir>\logs\`.
@@ -459,8 +466,9 @@ override for hermetic testing).
 
 N/A - not a safety-classified software item. The main accepted risk is the blind-delete
 sync trade-off documented in `docs/design/agent-control/repo-sync.md` and architecture.md's
-Open Concerns #3 (local customizations inside the four managed folders are silently removed
-on the next sync/upgrade); this is a disclosed, accepted trade-off, not a defect. Package sources are
+Open Concerns #3 (local customizations inside the four managed folders are removed on the next upgrade, and at
+launch only after the user chose "Update from package" for files that differ from the pin); this is a disclosed,
+accepted trade-off, not a defect. Package sources are
 untrusted input: a pin names no source, so the user's own configured sources are asked, and one is used only when the
 files it delivers have the identical content identity (`AgentControl-System-SourcePinIntegrity`,
 `AgentControl-System-PortablePin`), NuGet content is read from a private per-source cache
@@ -542,9 +550,12 @@ an unwanted or repeated file write.
    so, keeping only the "Check again" refresh available (`AgentControl-System-MissingRepoRecheck`).
 4. User actions on a card dispatch to the relevant subsystem: Pull to `GitClient.Pull`
    (gated on a clean working tree, `AgentControl-System-Pull`); Launch to
-   `RepoCardViewModel`'s ensure-synced check (re-extracting via `PackageZipExtractor` only if
-   a managed folder is missing) followed by `AgentToolLauncher.BuildProcessStartInfo`
-   (`AgentControl-System-Launch`); Select Package to the chosen source's provider
+   `RepoCardViewModel`'s pre-launch check (`PackageContentExtractor.HasInstalledFiles`, then
+   `PackageContentIdentity.ComputeInstalledFilesIdentity` compared with the pin's identity - no package access when
+   the files match; a silent install, a keep-or-update question or a launch-anyway-or-cancel question otherwise,
+   re-extracting via `PackageContentExtractor` only when files must be installed or updated) followed by
+   `AgentToolLauncher.BuildProcessStartInfo`
+   (`AgentControl-System-Launch`, `AgentControl-System-VerifyAgentFiles`); Select Package to the chosen source's provider
    (`IPackageSourceProvider.ListVersionsAsync`/`AcquireAsync`) - for a NuGet server the provider signs
    in as needed, asking through `AvaloniaCredentialPrompt` and the `CredentialPromptViewModel` dialog
    when the user started the action and keeping what was typed in `SessionCredentialStore` once the
@@ -559,7 +570,7 @@ an unwanted or repeated file write.
    test a server's connection before it is saved),
    applied back through `MainWindowViewModel.ApplySettings`
    (`AgentControl-System-Settings`); and, after a Select Package, Upgrade, or Launch-time
-   re-extraction genuinely occurs, `RepoCardViewModel` decides whether to offer the package's
+   restore or update genuinely occurs, `RepoCardViewModel` decides whether to offer the package's
    optional root-level `AGENTS.md` template (`PackageContentExtractor.ReadAgentsMdTemplate`),
    writes it via `AcceptAgentsMdTemplate`, or persists a decline via `RepoPinStore.Save`
    (`AgentControl-System-AgentsMdTemplate`).
@@ -581,7 +592,8 @@ an unwanted or repeated file write.
    per-repository, per-commit cache and exposes the result through the layout reader
    (`AgentControl-System-GitSourceLayoutOnly`, `AgentControl-System-GitSourceRefusesLinks`,
    `AgentControl-System-GitSourceRefusesCollisions`). (d) `RepoCardViewModel` compares the reader's identity with the
-   pin (an Upgrade or the restore at launch stops on a difference, Change package asks first), passes the reader to
+   pin (an Upgrade or the restore or update at launch stops on a difference, Change package asks first), passes the
+   reader to
    `PackageContentExtractor.Extract`, and only after the extraction succeeded `RepoPinStore.Save` records the
    package, version and the files identity - no source and no commit
    (`AgentControl-System-PinFile`, `AgentControl-System-PackageContentIntegrity`). The *failure flow* never applies

@@ -346,19 +346,56 @@ sections:
 
       - id: AgentControl-System-Launch
         title: >-
-          The tool shall ensure a repo's agent files are synced before launching the
-          configured agentic CLI tool in that repo's working directory.
+          The tool shall launch the configured agentic CLI tool in a repo's working directory
+          after checking that the repo's agent files are those of the package the repo is pinned
+          to, without overwriting files the user chose to keep, and shall stop a launch only when
+          the user cancels it because agent files that were needed could not be installed.
         tags: [system]
         justification: |
           Launching the agent tool with missing or stale agent files (e.g. a fresh clone
           whose gitignored agent folders were never unpacked) would silently defeat the
-          tool's core purpose; Launch must first guarantee the pinned agent files are
-          actually present on disk.
+          tool's core purpose, so Launch first checks the pinned agent files. Launching the tool
+          is also the primary action of the application and an agentic tool is useful even
+          when it has no managed agent files (for example to migrate away from committed agent
+          files), so the check never overwrites files the user wants and never stands in the way
+          of a launch the user still wants.
         children:
           - AgentControl-LauncherUI-Launch
           - AgentControl-AgentToolLauncherSubsystem-Launch
+          - AgentControl-System-VerifyAgentFiles
         tests:
           - windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory
+
+      - id: AgentControl-System-VerifyAgentFiles
+        title: >-
+          The tool shall, before launching the agent tool in a repo that is pinned to an agent
+          package, compare the agent files in the repo's four managed agent folders with the
+          package the pin names; install the package without asking when the repo has no agent
+          files; launch without asking and without downloading anything when the files are the
+          package's; ask the user on every launch whether to update the files from the package or
+          to keep them when they differ; and let the user launch anyway or cancel the launch
+          when agent files that are needed cannot be installed.
+        tags: [system]
+        justification: |
+          A repo whose agent folders exist but are only partly filled (an interrupted sync, a
+          deleted file) looked synced and was launched with an incomplete agent package for as
+          long as the folders existed, so the folders' presence is not evidence that the pinned
+          files are there. Comparing the files themselves with the identity the pin recorded finds
+          every missing, changed or extra file. Asking before replacing protects a developer who is
+          deliberately trying out other agent files, while a repo with no agent files has nothing to
+          lose and is repaired silently. A launch that has to start without files it needed is the
+          user's decision, not the tool's, so a failed install is put to the user instead of being
+          reported in passing.
+        children:
+          - AgentControl-LauncherUI-VerifyAgentFilesBeforeLaunch
+          - AgentControl-LauncherUI-RestoreFailureChoice
+          - AgentControl-RepoSync-InstalledFiles
+          - AgentControl-AgentPackageManagement-InstalledFilesIdentity
+        tests:
+          - windows@LaunchButton_Click_AgentFilesDiffer_KeepChosen_LaunchesWithFilesUntouched
+          - windows@LaunchButton_Click_AgentFilesDiffer_UpdateChosen_ReplacesFilesAndLaunches
+          - windows@LaunchButton_Click_AgentFilesMatchPin_LaunchesWithoutPrompt
+          - windows@LaunchButton_Click_RestoreFails_CancelChosen_DoesNotLaunch
 
       - id: AgentControl-System-Pull
         title: The tool shall let the user pull the latest commits for a repo whose working tree is clean.
@@ -786,18 +823,18 @@ sections:
 
       - id: AgentControl-System-ChangedContentRefusedAtLaunch
         title: >-
-          The tool shall not replace a repo's agent files, when it restores missing agent files
+          The tool shall not replace a repo's agent files, when it restores or updates them
           at launch, with a package of the same version whose content differs from the recorded
           identity (a republished package, or a Git tag moved to a commit with other files,
-          whatever kind of source it comes from), shall tell the user in plain language and shall
-          change nothing.
+          whatever kind of source it comes from), shall tell the user in plain language, shall
+          change nothing and shall leave the decision to launch anyway or to cancel to the user.
         tags: [system, security]
         justification: |
           A package republished under the version a repo is pinned to would silently change the
-          instructions an agent follows; restoring agent files at launch must never be the way
-          that change gets in. The refusal of an Upgrade of a republished version is a rule of the
-          repo card (see its requirements); the application offers an Upgrade only for a newer
-          version than the one pinned, so that refusal has no end-to-end scenario.
+          instructions an agent follows; restoring or updating agent files at launch must never be
+          the way that change gets in. The refusal of an Upgrade of a republished version is a rule
+          of the repo card (see its requirements); the application offers an Upgrade only for a
+          newer version than the one pinned, so that refusal has no end-to-end scenario.
         children:
           - AgentControl-LauncherUI-ContentChangeRefusal
         tests:

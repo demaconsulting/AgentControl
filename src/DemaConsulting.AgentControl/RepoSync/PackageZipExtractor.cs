@@ -28,8 +28,9 @@ namespace DemaConsulting.AgentControl.RepoSync;
 ///     <see cref="PackageContentExtractor"/>.
 /// </summary>
 /// <remarks>
-///     Kept as the stable zip-file API (and the single entry point for checking whether the
-///     managed folders exist) so existing callers and their requirements remain valid; every rule
+///     Kept as the stable zip-file API (and the entry point for the folder-presence check, which
+///     launch now applies only to a pin that records no content identity) so existing callers and
+///     their requirements remain valid; every rule
 ///     - managed-folder list, path containment, delete-then-copy semantics, no rollback - lives in
 ///     <see cref="PackageContentExtractor"/> and is shared with the unpacked-folder packages used
 ///     by NuGet sources. Rewriting the <c>.agentcontrol.json</c> pin is the caller's

@@ -205,9 +205,26 @@ most-recently-launched) order once the filter is removed. This scenario is teste
 **AgentControl_Launch_LaunchButton_InvokesConfiguredAgentToolInWorkingDirectory**: The Launch
 button is clicked on a repo card whose agent files are already synced; the configured
 (stubbed) agent-tool executable is invoked with the repo's working directory as its argument,
-proving launch only proceeds once agent files are confirmed synced. This scenario is tested by
+proving launch proceeds once the agent files were verified. This scenario is tested by
 `windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory`, covering
-`AgentControl-System-Launch`.
+`AgentControl-System-Launch`. The other ways a launch can go are the next scenario.
+
+**AgentControl_VerifyAgentFiles_KeepOrUpdateAndLaunchAnywayOrCancel**: In the published application a repo is
+pinned (with the identity of the package, which is applied through the real Select Package flow so that the pin is what
+the application writes) to a package from a zip folder, and the stubbed agent tool records its invocation. Four runs:
+(1) the files match the pin - Launch invokes the agent tool at once with no dialog
+(`windows@LaunchButton_Click_AgentFilesMatchPin_LaunchesWithoutPrompt`); (2) some files were changed or deleted -
+Launch shows the question with the buttons "Update from package" and "Keep current files"; choosing "Keep current
+files" leaves every file as it was and invokes the agent tool
+(`windows@LaunchButton_Click_AgentFilesDiffer_KeepChosen_LaunchesWithFilesUntouched`); (3) the same difference, but
+"Update from package" is chosen - the files then equal the package's and the agent tool is invoked
+(`windows@LaunchButton_Click_AgentFilesDiffer_UpdateChosen_ReplacesFilesAndLaunches`); (4) the repo has no agent files
+and the package source is unreachable - Launch shows the reason with the buttons "Launch anyway" and "Cancel";
+choosing "Cancel" invokes nothing (`windows@LaunchButton_Click_RestoreFails_CancelChosen_DoesNotLaunch`). This scenario
+is tested by those four tests, covering `AgentControl-System-VerifyAgentFiles`. That nothing is downloaded when the
+files match, that the file comparison is byte for byte, and the defaults and Escape of the dialogs are verified one
+level down (see the `LauncherUI` verification design), because the end-to-end tests cannot observe a package access
+that did not happen.
 
 **AgentControl_Pull_PullMenuItem_InvokesConfiguredGitExecutableWithPullArgument**: Git Pull is
 chosen in the "..." menu of a repo card with a clean working tree; the configured (stubbed) git
@@ -501,10 +518,10 @@ a version the application has not held yet.
 **AgentControl_ChangedContentRefusedAtLaunch_RepublishedPackageIsExplainedAndNothingIsSynced**: In the published
 application a repo is pinned to 1.0.0 with the identity of the original package, its managed folders are missing, and
 the 1.0.0 package has since been republished with other content - in a zip folder in the first run, in a NuGet-package
-folder in the second. Clicking Launch shows a message that the agent files were not synced because the package now
-contains different files than the copy the repo was set up with, no managed folder is created, the pin file is byte
-for byte unchanged, and the launch goes on: the configured agent tool is still invoked in the repo's working directory
-(how that fits the system Launch requirement is a pre-existing follow-up, not changed by this scenario). The refusal
+folder in the second. Clicking Launch shows a question that explains that the agent files were not synced because the
+package now contains different files than the copy the repo was set up with and offers "Launch anyway" and "Cancel";
+the test chooses "Launch anyway". No managed folder is created, the pin file is byte for byte unchanged, and the
+launch goes on: the configured agent tool is still invoked in the repo's working directory. The refusal
 of an Upgrade of a republished version is a rule of the repo card, specified by the
 child requirements and verified at the subsystem and unit levels; the application offers an Upgrade only for a newer
 version than the one pinned, so there is no end-to-end path to it and it is not claimed as system-level evidence. This

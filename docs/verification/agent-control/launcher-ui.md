@@ -3,7 +3,9 @@
 ### Verification Approach
 
 The `LauncherUI` subsystem is verified by the combined unit tests of its ten units
-(`MainWindowViewModelTests.cs` and `RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`, `RepoCardServerSourceTests.cs`
+(`MainWindowViewModelTests.cs` and `RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`,
+`RepoCardLaunchVerificationTests.cs` (the checks of a repo's agent files before launch),
+`RepoCardServerSourceTests.cs`
 and `RepoCardImageTests.cs`,
 `SelectPackageWindowViewModelTests.cs` and `SelectPackageRetryTests.cs`,
 `SettingsWindowViewModelTests.cs`, `SettingsWindowGitSourceTests.cs`, `SourceEditorViewModelTests.cs`,
@@ -20,10 +22,12 @@ command, which together
 exercise the full recent-repos/card/select-package/settings/sign-in interaction surface without ever
 constructing an Avalonia `Window` (apart from the picture decoder and `DialogBehavior`, which need Avalonia's headless
 session). The windows themselves are exercised by headless Avalonia tests
-(`DialogWindowTests.cs`, `MainWindowTests.cs`, `UsabilityWindowTests.cs` for the favorite star with real pointer
+(`DialogWindowTests.cs` - including the confirmation window's custom button labels -, `MainWindowTests.cs`,
+`UsabilityWindowTests.cs` for the favorite star with real pointer
 and key input, the "Check again" menu item, the up-to-date check mark, the narrow card, the Settings sections, the
-keyboard behavior of the dialogs, the About version row and the order of the AGENTS.md question and the release
-notes, `RepoGroupWindowTests.cs` for the group headers, the card menu's
+keyboard behavior of the dialogs, the About version row, the order of the AGENTS.md question and the release
+notes and the keep-or-update and launch-anyway questions about a repo's agent files,
+`RepoGroupWindowTests.cs` for the group headers, the card menu's
 "Move to group" submenu, the group-name prompt and the card color palette pop-up,
 `SettingsWindowServerSourceTests.cs` for the Settings
 window, the source editor window and its connection test, `SourceEditorSignatureWindowTests.cs` for the signature
@@ -179,16 +183,49 @@ last. This scenario is tested by
 `MainWindowViewModel_DisplayedRepoCards_SortsByLastLaunchedUtcDescendingWithNullsLast`,
 covering `AgentControl-LauncherUI-SortOrder`.
 
-**LauncherUI_Launch_NeverBlockedByAgentPackageSyncState**: The Launch command is executed for
-a card whose agent files are already synced, recording the launch timestamp; the ensure-synced
-check is exercised confirming it returns true without re-extracting when folders are already
-present; and a separate scenario confirms the agent-tool process still launches (raising
-`LaunchRecorded`) when the best-effort sync attempt has no pin to work with, or is attempted
-and fails outright. This scenario is tested by
+**LauncherUI_Launch_OnlyTheUsersCancelOfAFailedRestoreStopsIt**: The Launch command is executed for
+a card whose agent files are already synced, recording the launch timestamp; the pre-launch check is exercised
+confirming it returns without re-extracting when a pin without an identity finds all four folders present; and
+separate scenarios confirm the agent-tool process still launches (raising `LaunchRecorded`) when the check has no pin
+to work with or fails with nobody to ask, when the user keeps agent files that differ from the pin, and - the one
+exception - does not launch and records nothing when agent files that were needed could not be installed and the user
+cancels. This scenario is tested by
 `RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting`,
-and `RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches`, covering
+`RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches`,
+`RepoCardViewModel_LaunchCommand_MismatchKeep_Launches` and
+`RepoCardViewModel_LaunchCommand_RestoreFailsAndUserCancels_DoesNotLaunchOrRecordLaunch`, covering
 `AgentControl-LauncherUI-Launch`.
+
+**LauncherUI_VerifyAgentFilesBeforeLaunch_InstallsSilentlyComparesLocallyAndAsksOnDifference**: Through the real
+card with real package fixtures: a repo with no agent files is given the pinned package without a question; a repo
+whose files are the package's launches without a question and without any package-source access; and a repo that
+lost half of its files while all four folders remain (the reported defect) raises the keep-or-update question, is
+left untouched by Keep, and is restored in full by Update, after which the launch command starts the tool. The same
+difference is asked about again on the next launch. In the headless main window the card's
+`AgentFilesChoiceRequested` event opens the confirmation with the request's own labels and answers the request for
+every way of closing it. This scenario is tested by
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoManagedFolders_RestoresSilentlyWithoutPrompt`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FilesMatchPin_ReturnsInSyncWithoutPromptOrPackageAccess`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HalfOfTheFilesMissing_AsksAndUpdateRestoresAllFiles`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchPersists_AsksOnEveryLaunch`,
+`RepoCardViewModel_LaunchCommand_MismatchKeep_Launches`,
+`RepoCardViewModel_LaunchCommand_MismatchUpdate_RestoresThenLaunches` and
+`MainWindow_AgentFilesChoiceRequested_ShowsLabeledConfirmationAndAnswersRequest`, covering
+`AgentControl-LauncherUI-VerifyAgentFilesBeforeLaunch`.
+
+**LauncherUI_RestoreFailureChoice_OffersLaunchAnywayOrCancelWithCancelAsDefault**: When agent files that a launch needs
+cannot be installed, the card raises a question with the reason and the labels "Launch anyway" and "Cancel"; Cancel
+starts no process and records no launch, "Launch anyway" starts the tool. The confirmation window shows custom button
+labels while keeping the declining button focused and Escape as a decline, returns true when the confirming button is
+clicked, and rejects null arguments; the main window shows the question with those labels and answers it. This scenario
+is tested by `RepoCardViewModel_LaunchCommand_RestoreFailsAndUserCancels_DoesNotLaunchOrRecordLaunch`,
+`RepoCardViewModel_LaunchCommand_RestoreFailsAndUserChoosesLaunchAnyway_Launches`,
+`ConfirmationWindow_CustomLabels_ShowTextAndKeepNoButtonAsDefault`,
+`ConfirmationWindow_CustomLabelsConfirmClicked_ReturnsTrue`,
+`ConfirmationWindow_CustomLabelsNullArgument_Throws` and
+`MainWindow_AgentFilesChoiceRequested_ShowsLabeledConfirmationAndAnswersRequest`, covering
+`AgentControl-LauncherUI-RestoreFailureChoice`.
 
 **LauncherUI_Pull_EnabledOnlyForCleanWorkingTree**: A card with a clean working tree reports
 pull as enabled, a card with a dirty working tree reports it disabled, and executing
@@ -216,7 +253,7 @@ and `RepoCardViewModel_UpgradeCommand_NoPackageSourceConfigured_RaisesErrorOccur
 `AgentControl-LauncherUI-Upgrade`.
 
 **LauncherUI_AgentsMdTemplateOffer_OfferedOnceAndNeverOverwritesExistingFile**: After a
-genuine sync (package selection, upgrade, or ensure-synced-before-launch re-extraction), the
+genuine sync (package selection, upgrade, or the restore or update of agent files before launch), the
 offer is raised with the package's template content when the repo lacks an `AGENTS.md`;
 accepting writes the template verbatim to the repo root; declining persists the decision in
 the pin file without writing a file, and a subsequent sync for the same repo does not
@@ -897,8 +934,9 @@ and `AgentControl-LauncherUI-UpgradeAcrossSources` (children: `-UpgradeAcrossSou
 `-ProblemKeepsUpgradeOffered`; each child prefixed `AgentControl-RepoCardViewModel`).
 
 **LauncherUI_ContentChangeProtection_RepublishedVersionIsNeverAppliedUnnoticed**: A package version republished with
-other files is not applied silently: an Upgrade and the restore of missing agent files before launch refuse it and
-say so, and a Select Package of the pinned version raises the confirmation request. In the main window the request
+other files is not applied silently: an Upgrade and the restore or update of agent files before launch refuse it and
+say so (before launch the user then chooses to launch anyway or cancel), and a Select Package of the pinned version
+raises the confirmation request. In the main window the request
 becomes a modal confirmation whose answer No changes nothing (the repo and the pin keep what they had) and whose
 answer Yes applies the changed package and records its new identity; a pin without an identity adopts one silently.
 This scenario is verified by the `RepoCardViewModel` unit tests (see their unit verification design), with

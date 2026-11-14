@@ -293,6 +293,18 @@ session credentials and the user's saved sign-in (read without any dialog) but c
   configured agent tool, or plain "Launch" when the name is unknown or longer than ten characters
   (`AgentControl-RepoCardViewModel-LaunchLabel`).
 
+**AgentFilesChoiceRequested**: `EventHandler<AgentFilesChoiceRequest>?` — raised when the pre-launch check has a
+two-choice question for the user (keep or update files that differ from the pin; launch anyway or cancel after a failed
+restore). `AgentFilesChoiceRequest` (own file, `AgentFilesChoiceRequest.cs`, modeled on
+`CommittedFilesConversionRequest`) carries the finished `Message`, the `ConfirmText` of the non-default action, the
+`DeclineText` of the safe default, and `Answer`, a `Task<bool>` completed by `Respond(bool)`: `true` confirms the
+non-default action, `false` is the safe side, also for Escape, closing the window and a question that could not be
+shown. The first answer wins, and the task runs its continuations asynchronously so answering from the dialog never
+runs the card's operation inside the dialog's close handling. The card awaits `Answer` (without blocking a thread)
+while it stays busy, so no second action starts while the question is open; canceling the card's operation cancels the
+wait. The same file declares the internal `AgentFilesSyncOutcome` enumeration that
+`EnsureAgentFilesSyncedBeforeLaunchAsync` returns. With no subscriber, nobody can be asked (see *Key Methods*).
+
 **_logger**: `ILogger<RepoCardViewModel>` (private, via `AppLogging.Factory.CreateLogger<RepoCardViewModel>()`)
 — Used to log the real work this view model performs (launch, pull, upgrade/apply-package,
 AGENTS.md accept/decline), mirroring the logging convention already established by `GitClient`
@@ -336,7 +348,7 @@ dropped, clears "checking", cancels the running operation (`CancelOperation`; th
 never reported as an error), sets every event of the card (`ErrorOccurred`, `ReleaseNotesReady`,
 `AgentsMdTemplateOfferRequested`, `FavoriteChanged`, `GroupChanged`, `CardColorChanged`, `LaunchRecorded`,
 `NewGroupRequested`, `RemoveRequested`, `SelectPackageRequested`, `ContentChangeConfirmationRequested`,
-`CommittedFilesConversionRequested`) to `null`
+`CommittedFilesConversionRequested`, `AgentFilesChoiceRequested`) to `null`
 so that nothing it still does can show an
 error box, release notes or a prompt, and clears the picture, which disposes it
 (`AgentControl-RepoCardViewModel-RetiredCardReportsNothing`, `-RetireCancelsRunningWork`). A retired card ignores
@@ -419,58 +431,117 @@ becomes a source problem with the exception's secret-free message and no sign-in
   save fails the stamp is not recorded and the process was launched all the same,
   `AgentControl-RepoCardViewModel-Launch`, `-ChangeSavedBeforeApplied`); on failure, `ErrorOccurred` is raised.
 
-Calls `EnsureAgentFilesSyncedBeforeLaunchAsync` purely for its best-effort sync side effect, then
-always proceeds to resolve the shell/agent command and spawn the process regardless of that
-call's outcome — the agent-package sync state (missing pin, missing managed folders, failed
-re-extraction) never gates the launch, and neither does the user canceling the wait for the sync.
+Calls `EnsureAgentFilesSyncedBeforeLaunchAsync` first, inside the card's cancelable busy operation ("Preparing agent
+files..."), then resolves the shell/agent command and spawns the process unless the outcome is `LaunchCanceled`. The
+agent-package state never gates the launch - a missing pin, committed agent files, a user who keeps files that differ,
+a user who cannot be asked, and the user canceling the wait for the check ("Agent file sync was canceled; launching
+anyway.") all launch. There is exactly one exception, decided by the user: agent files that were needed could not be
+installed and the user answered Cancel to "Launch anyway?". Then nothing is launched, no launch is recorded and
+`StatusMessage` says "Launch canceled; the agent files were not restored."
+(`AgentControl-RepoCardViewModel-OfferLaunchAnywayOnRestoreFailure`). This amends the earlier rule that launching is
+never blocked by agent-package sync state; see the *Verify installed agent files before launch* decision in
+architecture.md.
 
-**EnsureAgentFilesSyncedBeforeLaunchAsync** (internal): Best-effort attempt to sync the repo's four
-managed agent folders with the pinned package version before `Launch` spawns the process. This
-is an informational side action only — it never blocks `Launch`.
+**EnsureAgentFilesSyncedBeforeLaunchAsync** (internal): Verifies, before `Launch` spawns the process, that the agent
+files physically in the repo's four managed agent folders are the ones the pinned package delivers, and repairs
+them or asks when they are not.
 
-- *Parameters*: None.
-- *Returns*: `bool` — informational only; `true` if no sync action was needed/attempted or a
-  sync succeeded, `false` if a sync attempt was made and failed. Either way `Launch` proceeds.
-- *Postconditions*: If `HasCommittedAgentFiles` is `true`, the managed folders are never
-  touched (no delete, no extract) even if a pin exists and folders are missing; a non-blocking
-  `StatusMessage` notes that sync was skipped. Otherwise, if `PinnedPackageName` is `null`, this
-  is treated as an acceptable state (not an error) and a non-blocking `StatusMessage` notes that
-  launch is proceeding without managed agent files. If `PackageZipExtractor.AllManagedFoldersExist`
-  is already `true`, returns `true` immediately with no extra I/O — and critically, never
-  calls `MaybeOfferAgentsMdTemplate` in that case, since the offer must only ever fire when a
-  sync genuinely happens. Otherwise asks the configured sources which offer the *currently pinned* package and version
-  (never the latest; `GetVersionsAcrossSourcesAsync` over all sources, the card's last supplier tried first, otherwise
-  Settings order) and re-extracts it directly via
-  `PackageContentExtractor.Extract` over the reader the chosen provider returns,
-  without displaying release notes but still calling `MaybeOfferAgentsMdTemplate`; if this
-  re-extraction attempt fails for any reason, `ErrorOccurred` is raised as a non-blocking
-  warning (`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`). The source is chosen by the identity the pin
-  recorded (see *Portable pins*): with a files identity, the candidates are acquired in that order and the first whose
+- *Parameters*: `CancellationToken` — cancels hashing the installed files, reading the sources and waiting for an
+  answer; once the copy into the repo has started it is not interrupted, so a repo is never left half extracted.
+- *Returns*: `Task<AgentFilesSyncOutcome>` — `Skipped` (committed files, no pin, or an older pin whose folders all
+  exist), `InSync`, `Restored`, `Updated`, `KeptCurrentFiles`, `FailedLaunchAnyway` or `LaunchCanceled`; only
+  `LaunchCanceled` stops `Launch`.
+- *Preconditions*: none beyond a constructed card; the folder existence of the repo is checked by the commands'
+  `CanExecute`.
+- *Postconditions*: the checks run in this order and the first that applies wins
+  (`AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`):
+
+  1. `HasCommittedAgentFiles`: the managed folders are never touched (no delete, no extract) and `StatusMessage` notes
+     the skip. Outcome `Skipped`.
+  2. No pin (`PinnedPackageName` is `null`): an acceptable state, not an error; `StatusMessage` notes that launch
+     proceeds without managed agent files. Outcome `Skipped`.
+  3. `PackageContentExtractor.HasInstalledFiles` is `false` (the folders are absent, empty or hold only empty
+     folders): silent restore of the pinned package (below), because nothing can be lost. Outcome `Restored`, or a
+     failure (below).
+  4. The pin records no files identity (an older pin, or a legacy `sha256:` identity): there is nothing to compare.
+     When all four folders exist (`PackageZipExtractor.AllManagedFoldersExist`) the launch proceeds with no package
+     access and `StatusMessage` says the files cannot be verified (`Skipped`); when a folder is missing the package is
+     restored silently (`Restored`, or a failure).
+  5. The pin records a files identity: `PackageContentIdentity.ComputeInstalledFilesIdentity` hashes the managed
+     folders on a worker thread and the result is compared with the pin's identity. Equal: launch with no prompt and
+     **no access to any package source** (no source registry is even built). Outcome `InSync`.
+  6. The identities differ (a file missing, changed or extra) or the installed files cannot be read (a link, an I/O
+     failure, a case collision): the Keep/Update question below, asked on every launch. Outcome `KeptCurrentFiles`,
+     `Updated`, or a failure.
+
+  Check 3 comes before check 4 so that an empty or absent set of folders is repaired for every pin; check 4 exists
+  because without an identity the files can only be compared with a package, and obtaining the package costs a
+  source listing or a download on every launch (`AgentControl-RepoCardViewModel-PinWithoutIdentityKeepsFolderCheck`).
+  Choosing the package again with Select Package, Change package or Upgrade records an identity and turns the full
+  check on; a launch never writes the pin. Folder existence is no longer the "in sync" test, because a repo whose
+  folders existed but held only part of the files (an interrupted extraction has no rollback) looked synced and was
+  launched forever without a repair (`AgentControl-RepoCardViewModel-VerifyFilesAgainstPinIdentity`). The hash
+  covers exactly the files `PackageContentExtractor.Extract` writes, as raw bytes, with the same path rules as the
+  pin's identity, so an untouched extraction of a zip, NuGet or Git package equals the recorded identity by
+  construction and the repo's own `AGENTS.md`, other `.github` content and empty folders take no part.
+  `HasInstalledFiles` and the hash run inside `Task.Run`, so the window stays responsive, and the hash observes the
+  operation's cancellation (`AgentControl-RepoCardViewModel-VerifyOffUiThread`,
+  `AgentControl-RepoCardViewModel-NoPackageAccessWhenInSync`).
+- *Keep/Update question* (`AskKeepOrUpdateAsync`): raises `AgentFilesChoiceRequested` with an
+  `AgentFilesChoiceRequest` whose message names the repo, the pinned package and version, says that files may be
+  missing, changed or added (for example because the user is trying out new agent files), says why when the
+  files could not be read, and explains both choices; the confirm button reads "Update from package" and the decline
+  button "Keep current files", which is the default and what Escape and closing the window answer. The question is
+  asked again on every launch while the difference persists - nothing is remembered, because remembering would let the
+  original defect hide again. *Keep*: `StatusMessage` "Agent files differ from the pinned package; keeping your
+  current files." and `KeptCurrentFiles`. With no subscriber (a host that cannot ask) the files are kept the same way
+  and no package is touched. *Update*: the restore below, then `StatusMessage` "Agent files updated from {package}
+  {version}." and `Updated`
+  (`AgentControl-RepoCardViewModel-AskKeepOrUpdateOnMismatch`).
+- *Restore* (`RestorePinnedFilesAsync`): asks the configured sources which offer the *currently pinned* package and
+  version (never the latest; `GetVersionsAcrossSourcesAsync` over all sources, the card's last supplier tried first,
+  otherwise Settings order), deletes and re-extracts it directly via `PackageContentExtractor.Extract` over the reader
+  the chosen provider returns, without displaying release notes but still calling `MaybeOfferAgentsMdTemplate`.
+  Existing caches are reused; nothing is forced to download again, and a package is obtained only on this path. It
+  returns a `RestoreResult` (succeeded, or a plain-language reason plus the passive sentence below). The source is
+  chosen by the identity the pin recorded (see *Portable pins*): with a files identity, the candidates are acquired in
+  that order and the first whose
   files' identity equals the pin's wins - a package name and version is never enough. When no configured source offers
-  the version (or none is configured) nothing is extracted and the warning says "No configured source offers {package}
-  {version}. ..." followed by "Launching without syncing agent files."
+  the version (or none is configured) nothing is extracted and the reason says "No configured source offers {package}
+  {version}. ..."
   (`AgentControl-RepoCardViewModel-UnresolvedPinExplained`). When some offer it but none delivers the recorded files,
   the version the repo is pinned to now delivers different files: nothing is extracted, a warning is logged and
-  `ErrorOccurred` says in plain language that no configured source delivers the package with the files this repo was
+  the reason says in plain language that no configured source delivers the package with the files this repo was
   set up with, that it now contains different files than the copy this repo was set up with although the version
   number is the same, that the package may have been republished, and the advice to ask the maintainer for a new
   version or - if the files are trusted - to accept them with the card menu's "Change package..."; the pin is
-  untouched, launch continues without the files, and the method returns `false`
-  (`AgentControl-RepoCardViewModel-RefuseChangedContent`). A pin that
-  recorded no identity of its files (an older pin; nothing to verify) is synced without any
+  untouched (`AgentControl-RepoCardViewModel-RefuseChangedContent`). That refusal is one of the failure reasons. A pin
+  that recorded no identity of its files (an older pin; nothing to verify) is restored without any
   warning and is never refused: it uses the source the card was last supplied from if that source offers the version,
   otherwise the source the older file named (`RepoPin.LegacySource`, a hint read from the file; "Default" for a pin
   written before sources existed) if it offers it, otherwise the first source that offers it. The
   restore **never writes the pin**, whatever the outcome - it records no source in the pin at all - because
-  recording an identity here would change a file under
-  version control every time the tool is launched, so such a pin adopts an identity only at the next Select Package,
-  Change package
-  or Upgrade (`AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin`,
-  `AgentControl-RepoCardViewModel-AdoptMissingIdentity`). After a successful restore the card remembers the source it
+  recording an identity here would change a file under version control every time the tool is launched, so such a pin
+  adopts an identity only at the next Select Package, Change package or Upgrade
+  (`AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin`, `AgentControl-RepoCardViewModel-AdoptMissingIdentity`).
+  After a successful restore the card remembers the source it
   used as its supplier, in the user's own settings. The restore includes the AGENTS.md template offer it may
   raise: the card remembers that the open offer came from the restore, and a decline of such an offer is not
   persisted (the offer can only return when a later restore happens), whereas declining the offer raised by an
   explicit apply is recorded in the pin as before.
+- *Restore failure* (`RestoreOrAskAsync`): a restore that fails - no source is configured, none offers the version, a
+  source cannot be read, none delivers the recorded files, or the copy fails (`InvalidOperationException`,
+  `DirectoryNotFoundException`, `IOException` and `UnauthorizedAccessException` are all caught; the last two used to
+  escape and surface as "The operation failed") - raises `AgentFilesChoiceRequested` with the plain-language
+  reason followed by a sentence saying that the agent tool would start without (all of) the files, or with the
+  user's current files after a chosen update, and "Launch anyway?". The confirm button reads "Launch anyway"
+  (`FailedLaunchAnyway`) and the decline button "Cancel", the default and the answer of Escape (`LaunchCanceled`).
+  With no subscriber nobody can be asked, so the failure is reported passively through `ErrorOccurred` - the reason
+  followed by the old sentence ("Launching without syncing agent files.", "Launching without them." plus the advice,
+  or "Launching anyway.") - and `FailedLaunchAnyway` is returned, so a host that cannot ask is never blocked
+  (`AgentControl-RepoCardViewModel-OfferLaunchAnywayOnRestoreFailure`).
+- *Logging*: information for in-sync, kept, updated and restored (repo name and the short `Describe` form of the
+  identities, never a full hash and never a secret), warning for a mismatch and for a restore failure.
 - Marked `internal` rather than `private` so it can be unit-tested directly, separated from
   `Launch`'s process-spawning side effect, mirroring `AgentToolLauncher.BuildProcessStartInfo`'s
   own precedent.
@@ -602,8 +673,8 @@ shows committed agent files and never converts anything.
 
 **MaybeOfferAgentsMdTemplate** (private): Decides whether to offer the package's optional
 root-level `AGENTS.md` template, called immediately after every successful extraction in both
-`ApplyPackageAndShowReleaseNotesAsync` and `EnsureAgentFilesSyncedBeforeLaunchAsync`'s re-extraction
-branch — never as an independent, standing per-launch poll.
+`ApplyPackageAndShowReleaseNotesAsync` and `RestorePinnedFilesAsync` (the restore or update before launch) —
+never as an independent, standing per-launch poll.
 
 - *Parameters*: `IPackageContentReader reader` — the package just successfully extracted.
 - *Returns*: `void`.
@@ -751,10 +822,15 @@ presents as "sign-in needed" (`AgentControl-RepoCardViewModel-GitSourceOptions`,
 
 `Launch` catches `InvalidOperationException`/`ArgumentException` from
 `AgentToolLauncher.BuildProcessStartInfo`/`Launch` and raises `ErrorOccurred`.
-`EnsureAgentFilesSyncedBeforeLaunchAsync` catches `InvalidOperationException` (extraction failure, an invalid source
-configuration or a failure of a source) and `DirectoryNotFoundException`
-(unreachable source), raising `ErrorOccurred` as a non-blocking warning for each rather than
-propagating or blocking the launch. `Pull` catches `InvalidOperationException` from `GitClient.Pull`
+`EnsureAgentFilesSyncedBeforeLaunchAsync` does not catch the I/O of the hash itself except
+`InvalidOperationException` (a link, an unreadable file or a case collision), which it treats as "the files cannot be
+vouched for" and answers with the Keep/Update question; cancellation propagates as `OperationCanceledException` to
+`Launch`, which launches anyway. `RestorePinnedFilesAsync` catches `InvalidOperationException` (extraction failure, an
+invalid source configuration or a failure of a source), `DirectoryNotFoundException` (unreachable source),
+`IOException` and `UnauthorizedAccessException` (every configured source failing, or the copy into the repo failing)
+and returns a failed `RestoreResult` instead of throwing; `RestoreOrAskAsync` turns that into the "Launch anyway /
+Cancel" question, or - with no subscriber - into a passive `ErrorOccurred` and a launch. `Pull` catches
+`InvalidOperationException` from `GitClient.Pull`
 and reports it via `ErrorOccurred`. `RefreshGitStatus`/`RefreshBranchAndCommittedFiles` catch
 `InvalidOperationException` from `GitClient` and degrade to "unknown"/`false` rather than
 propagating, since these run as part of routine, frequent UI refreshes.
@@ -803,8 +879,10 @@ background task, and a retired card raises nothing.
 - **RepoPinStore** (`RepoConfig` subsystem) — reads/writes the repo's pin, including the recorded content
   identity and the read-time `LegacySource` hint.
 - **PackageContentIdentity**, **IPackageContentReader.ContentIdentity**
-  (`AgentPackageManagement`/`RepoSync` subsystems) — the identity of the files a source delivered, and the
-  comparison with the recorded identity (also what verifies which source delivers the files a pin recorded).
+  (`AgentPackageManagement`/`RepoSync` subsystems) — the identity of the files a source delivered, the
+  comparison with the recorded identity (also what verifies which source delivers the files a pin recorded), and
+  `PackageContentIdentity.ComputeInstalledFilesIdentity`, the identity of the files installed in the repo that the
+  pre-launch check compares with the pin.
 - **PackageSourceRegistry**, **IPackageSourceProvider**, **PackageVersionCache**,
   **DiscoveredPackage**, **PackageSourceAccessException** (`AgentPackageManagement` subsystem) — package discovery
   across all configured sources, acquisition, upgrade-availability checks, the invalidation of Git sources on
@@ -814,8 +892,9 @@ background task, and a retired card raises nothing.
   handed to server sources; `WithoutPrompt` for background work.
 - **PackageContentExtractor**, **PackageZipExtractor** (`RepoSync` subsystem) — extracts a
   package into the repo, reads its release notes, and reads an optional root-level `AGENTS.md`
-  template via `ReadAgentsMdTemplate`; `PackageZipExtractor.AllManagedFoldersExist` checks whether
-  a re-extraction is needed.
+  template via `ReadAgentsMdTemplate`; `PackageContentExtractor.HasInstalledFiles` tells whether any agent file is
+  installed, and `PackageZipExtractor.AllManagedFoldersExist` is the weaker folder check for a pin that records no
+  identity.
 - **GitIgnoreEnsurer** (`RepoSync` subsystem) — proactively ensures the repo's `.gitignore`
   covers the four managed agent folders after a successful extraction.
 - **PathHelpers** (`Utilities` subsystem) — used by `MaybeOfferAgentsMdTemplate` and
@@ -826,6 +905,9 @@ background task, and a retired card raises nothing.
   those folders from git's index when a repo is converted.
 - **CommittedFilesConversionRequest** (`LauncherUI`, own file) — carries the conversion question to the view layer
   and the answer back to the waiting operation.
+- **AgentFilesChoiceRequest**, **AgentFilesSyncOutcome** (`LauncherUI`, own file `AgentFilesChoiceRequest.cs`) —
+  carries the keep-or-update and launch-anyway-or-cancel questions to the view layer and the answer back, and names
+  what the pre-launch check concluded.
 - **ShellDetector**, **AgentToolLauncher** (`AgentToolLauncher` subsystem) — shell detection
   and process launch.
 - **AppLogging**, **ILogger** (`Logging` subsystem) — `_logger` logs the real business
@@ -847,7 +929,8 @@ background task, and a retired card raises nothing.
 - **MainWindow** (code-behind) — subscribes to `RemoveRequested`
   (`AgentControl-RepoCardViewModel-RemoveRequest`), `SelectPackageRequested`, `NewGroupRequested`,
   `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`,
-  `CommittedFilesConversionRequested` (answered through a modal `ConfirmationWindow`), and `ErrorOccurred` to drive
+  `CommittedFilesConversionRequested` (answered through a modal `ConfirmationWindow`), `AgentFilesChoiceRequested`
+  (answered through a modal `ConfirmationWindow` with the request's own button labels), and `ErrorOccurred` to drive
   dialogs/windows (detaching these handlers when a card leaves the list), calling
   `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the
   `ConfirmationWindow` shown for the AGENTS.md template offer, `MoveToGroup` from the card menu's

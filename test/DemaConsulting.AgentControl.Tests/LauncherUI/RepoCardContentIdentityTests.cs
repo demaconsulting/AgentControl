@@ -115,7 +115,7 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         var result = card.EnsureAgentFilesSyncedBeforeLaunch();
 
         // Assert: not synced, explained, nothing written anywhere in the repo
-        Assert.False(result);
+        Assert.False(result.IsSynced());
         var message = Assert.Single(errors);
         Assert.Contains("not synced", message, StringComparison.Ordinal);
         Assert.Contains("now contains different files", message, StringComparison.Ordinal);
@@ -331,7 +331,7 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         var result = card.EnsureAgentFilesSyncedBeforeLaunch();
 
         // Assert: synced, no warning, and the pin file is exactly as it was
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.Empty(errors);
         Assert.Equal("v1", ReadMarker(repo));
         Assert.Equal(pinBefore, File.ReadAllText(PinPath(repo)));
@@ -356,7 +356,7 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         var result = card.EnsureAgentFilesSyncedBeforeLaunch();
 
         // Assert
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.Empty(errors);
         Assert.Equal("v1", ReadMarker(repo));
         Assert.Equal(pinBefore, File.ReadAllText(PinPath(repo)));
@@ -387,7 +387,7 @@ public sealed class RepoCardContentIdentityTests : IDisposable
         var result = card.EnsureAgentFilesSyncedBeforeLaunch();
 
         // Assert: the offer was made and declined, and the pin file is byte-for-byte unchanged
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.Equal(1, offers);
         Assert.Equal(pinBefore, File.ReadAllBytes(PinPath(repo)));
         Assert.False(RepoPinStore.Load(repo)?.AgentsMdTemplateDeclined);

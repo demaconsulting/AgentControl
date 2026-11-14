@@ -299,7 +299,8 @@ internal sealed partial class MainWindow : Window
     ///     <see cref="RepoCardViewModel.RemoveRequested"/>,
     ///     <see cref="RepoCardViewModel.AgentsMdTemplateOfferRequested"/>, and
     ///     <see cref="RepoCardViewModel.ContentChangeConfirmationRequested"/>, and
-    ///     <see cref="RepoCardViewModel.CommittedFilesConversionRequested"/> events so failures show
+    ///     <see cref="RepoCardViewModel.CommittedFilesConversionRequested"/>, and
+    ///     <see cref="RepoCardViewModel.AgentFilesChoiceRequested"/> events so failures show
     ///     a message box, successful upgrades open a non-modal <see cref="ReleaseNotesViewer"/>
     ///     tracked by this window (see <see cref="ShowTrackedChildWindow"/>, so it closes when
     ///     this window does, rather than outliving it), a remove request shows a confirmation
@@ -307,7 +308,8 @@ internal sealed partial class MainWindow : Window
     ///     modal <see cref="ConfirmationWindow"/> before writing the template or recording a
     ///     decline, a republished package version asks for confirmation before it replaces
     ///     the copy the repo was set up with, and a repo whose agent folders are tracked by git asks
-    ///     for confirmation before they are taken out of git.
+    ///     for confirmation before they are taken out of git, and a launch whose agent files differ
+    ///     from the pin (or could not be restored) asks what to do before the agent tool starts.
     /// </summary>
     /// <param name="card">The card to subscribe to.</param>
     private void AttachCardHandlers(RepoCardViewModel card)
@@ -343,6 +345,9 @@ internal sealed partial class MainWindow : Window
         async void OnCommittedFilesConversionRequested(object? sender, CommittedFilesConversionRequest request) =>
             await ConfirmCommittedFilesConversionAsync(request);
 
+        async void OnAgentFilesChoiceRequested(object? sender, AgentFilesChoiceRequest request) =>
+            await ConfirmAgentFilesChoiceAsync(request);
+
         // Runs after the view model has regrouped the list (its handler was attached when the card was created)
         card.FavoriteChanged += OnFavoriteChanged;
         card.ErrorOccurred += OnErrorOccurred;
@@ -353,6 +358,7 @@ internal sealed partial class MainWindow : Window
         card.AgentsMdTemplateOfferRequested += OnTemplateOfferRequested;
         card.ContentChangeConfirmationRequested += OnContentChangeConfirmationRequested;
         card.CommittedFilesConversionRequested += OnCommittedFilesConversionRequested;
+        card.AgentFilesChoiceRequested += OnAgentFilesChoiceRequested;
 
         _cardHandlerRemovers[card] = () =>
         {
@@ -365,6 +371,7 @@ internal sealed partial class MainWindow : Window
             card.AgentsMdTemplateOfferRequested -= OnTemplateOfferRequested;
             card.ContentChangeConfirmationRequested -= OnContentChangeConfirmationRequested;
             card.CommittedFilesConversionRequested -= OnCommittedFilesConversionRequested;
+            card.AgentFilesChoiceRequested -= OnAgentFilesChoiceRequested;
         };
     }
 
@@ -561,6 +568,41 @@ internal sealed partial class MainWindow : Window
             // This runs from an async void handler: an escaping exception would be unhandled on the
             // UI thread, so a failure to show the dialog is logged and counts as No
             _logger.LogError(ex, "Could not show the committed-agent-files conversion question");
+        }
+        finally
+        {
+            request.Respond(confirmed);
+        }
+    }
+
+    /// <summary>
+    ///     Shows the <see cref="ConfirmationWindow"/> asking the user about a repo's agent files
+    ///     before a launch - keep or update files that differ from the pin, or launch anyway or
+    ///     cancel after a failed restore - with the request's own button labels, and reports the
+    ///     answer to the card's waiting launch.
+    /// </summary>
+    /// <param name="request">The question, its two button labels and the way to answer it, as
+    ///     carried by <see cref="RepoCardViewModel.AgentFilesChoiceRequested"/>.</param>
+    /// <remarks>
+    ///     The dialog is modal and the card stays busy until it is answered. The default (focused)
+    ///     answer is the decline side - "Keep current files" or "Cancel" - so pressing Enter, Escape
+    ///     or closing the dialog never replaces files or launches past a failure. The request is
+    ///     always answered - an unexpected failure to show the dialog counts as the decline side -
+    ///     because the card's launch would otherwise wait for ever.
+    /// </remarks>
+    private async Task ConfirmAgentFilesChoiceAsync(AgentFilesChoiceRequest request)
+    {
+        var confirmed = false;
+        try
+        {
+            confirmed = await new ConfirmationWindow(request.Message, request.ConfirmText, request.DeclineText)
+                .ShowDialog<bool>(this);
+        }
+        catch (Exception ex)
+        {
+            // This runs from an async void handler: an escaping exception would be unhandled on the
+            // UI thread, so a failure to show the dialog is logged and counts as the safe side
+            _logger.LogError(ex, "Could not show the agent files question");
         }
         finally
         {
