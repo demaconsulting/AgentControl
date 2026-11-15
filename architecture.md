@@ -344,7 +344,7 @@ AgentControl
   the user: favorites come first, and otherwise the repos stay in the order
   the user keeps them in. A newly added repo goes to the bottom of its
   section, and launching, refreshing or any other action never moves a card.
-  The user reorders from a card's "..." menu (Move to top/up/down/bottom) or
+  The user reorders from a card's "..." menu (Reorder > Move to top/up/down/bottom) or
   by dragging a card within a section, into another section (which sets its
   group or favorite flag) or onto a section header; reordering is off while
   the filter has text, and the order is kept only in the user's own settings

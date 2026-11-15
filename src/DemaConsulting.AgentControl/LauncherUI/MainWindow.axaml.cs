@@ -799,23 +799,29 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Enables or disables the four Move items of a card's menu just before it opens, and gives a
-    ///     disabled item the reason as its tooltip.
+    ///     Enables or disables the Reorder submenu and its four Move items of a card's menu just before
+    ///     it opens, and gives a disabled item the reason as its tooltip.
     /// </summary>
     /// <remarks>
-    ///     The rules (the filter has text, or the repo is already at that end of its section) belong to
-    ///     <see cref="MainWindowViewModel.GetMoveDisabledReason"/>; this only shows them. The menu
-    ///     cannot change while it is open, so deciding once on opening is enough. The window is found
-    ///     through the flyout's placement target.
+    ///     The rules (the filter has text, or the repo is already at that end of its section, or it is
+    ///     the only repo of its section) belong to <see cref="MainWindowViewModel.GetMoveDisabledReason"/>
+    ///     and <see cref="MainWindowViewModel.GetReorderDisabledReason"/>; this only shows them. The
+    ///     menu cannot change while it is open, so deciding once on opening is enough. The window is
+    ///     found through the flyout's placement target.
     /// </remarks>
     /// <param name="flyout">The card's menu.</param>
     /// <param name="card">The card the menu belongs to.</param>
     private static void UpdateMoveMenuItems(MenuFlyout flyout, RepoCardViewModel card)
     {
-        if (TopLevel.GetTopLevel(flyout.Target)?.DataContext is not MainWindowViewModel viewModel)
+        if (TopLevel.GetTopLevel(flyout.Target)?.DataContext is not MainWindowViewModel viewModel ||
+            flyout.Items.OfType<MenuItem>().FirstOrDefault(item => item.Name == "ReorderMenuItem") is not { } reorder)
         {
             return;
         }
+
+        var reorderReason = viewModel.GetReorderDisabledReason(card);
+        reorder.IsEnabled = reorderReason is null;
+        ToolTip.SetTip(reorder, reorderReason ?? "Move this repo within its section");
 
         var moves = new (string Name, RepoMove Move, string EnabledTooltip)[]
         {
@@ -826,7 +832,7 @@ internal sealed partial class MainWindow : Window
         };
         foreach (var (name, move, enabledTooltip) in moves)
         {
-            if (flyout.Items.OfType<MenuItem>().FirstOrDefault(item => item.Name == name) is not { } item)
+            if (reorder.Items.OfType<MenuItem>().FirstOrDefault(item => item.Name == name) is not { } item)
             {
                 continue;
             }

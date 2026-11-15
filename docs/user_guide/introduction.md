@@ -25,7 +25,7 @@ This user guide covers:
 - Installing AgentControl
 - The main window: the app bar, the repo cards, and the light and dark themes
 - Adding a repository to the repo list
-- Keeping the repo list in your own order: groups, the Move items and drag and drop
+- Keeping the repo list in your own order: groups, the Reorder submenu and drag and drop
 - Reading a repo card's chips: pinned package, upgrade, branch, and status warnings
 - Configuring package sources (zip-package folders, NuGet-package folders, NuGet-package
   servers and Git repositories), including testing a connection and signing in
@@ -110,15 +110,15 @@ Each repo card shows:
   once; for a repo whose folder is missing it reads **Check again** and checks whether the folder is
   available again). **Agent files**: **Select Package...** (a repo with no package yet), **Change package...** (a
   repo that already has one) and **Upgrade to x.y.z** (when a newer version exists); the group is hidden when none
-  of them applies - see below. **Organize**: **Move to group**, **Move to top**, **Move up**, **Move down**,
-  **Move to bottom** and **Card color...** (see *Organizing Repos with Groups*, *Ordering Your Repos* and
-  *Choosing a Card Color*). Then **Remove from list**.
+  of them applies - see below. **Organize**: **Move to group**, **Reorder** (a submenu with **Move to top**,
+  **Move up**, **Move down** and **Move to bottom**) and **Card color...** (see *Organizing Repos with Groups*,
+  *Ordering Your Repos* and *Choosing a Card Color*). Then **Remove from list**.
 
 ![A card with the repo's own picture and an up-to-date package, a section header, and a card with an upgrade chip
 and an uncommitted-changes warning](images/repo-card-anatomy.png)
 
 ![The open "..." menu of a card: Git Pull and Refresh under Repository, Change package... under Agent files, Move to
-group, Move to top, Move up, Move down, Move to bottom and Card color under Organize, and Remove from
+group, Reorder and Card color under Organize, and Remove from
 list](images/card-menu.png)
 
 Removing a repo from the list prompts for confirmation first, since it is a destructive
@@ -186,10 +186,11 @@ leave the cards where they are, so a repo is always where you last put it.
 - **Upgrading from an earlier version** keeps the order you last saw: AgentControl arranges the list once, favorites
   first and then the most recently launched repos, and from then on the order only changes when you change
   it.
-- **The Move items.** In a card's "..." menu, under **Organize**, choose **Move to top**, **Move up**, **Move
-  down** or **Move to bottom** to move the card within its own section (a step at a time, or to either end). An
-  item that does not apply is disabled, and its tooltip says why: the first repo of a section cannot move up or to the
-  top, and the last cannot move down or to the bottom. These items work from the keyboard, so they are the way to
+- **The Move items.** In a card's "..." menu, under **Organize**, open **Reorder** and choose **Move to top**,
+  **Move up**, **Move down** or **Move to bottom** to move the card within its own section (a step at a time, or to
+  either end). An item that does not apply is disabled, and its tooltip says why: the first repo of a section cannot
+  move up or to the top, and the last cannot move down or to the bottom. When no item applies (the only repo of its
+  section), **Reorder** itself is disabled. These items work from the keyboard, so they are the way to
   reorder without a mouse.
 - **Drag and drop.** Press on a card anywhere that is not one of its buttons (for example its colored status bar on
   the left edge, or an empty part of the card) and drag it. A line shows where the card will land: above the card
@@ -204,7 +205,7 @@ leave the cards where they are, so a repo is always where you last put it.
 - **In the flat list** (no groups) there are no sections to drop into, so dragging only reorders within the
   favorites at the top, or within the other repos.
 - **While the filter has text, ordering is off.** Only some repos are shown, so their positions cannot be changed:
-  dragging does nothing and the Move items are disabled, with the tooltip "Clear the filter to change the order:
+  dragging does nothing and the **Reorder** submenu is disabled, with the tooltip "Clear the filter to change the order:
   while the filter has text only some repos are shown, so their positions cannot be changed." Filtering itself
   never changes the order.
 

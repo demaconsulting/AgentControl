@@ -27,14 +27,14 @@ namespace DemaConsulting.AgentControl.UiTests;
 
 /// <summary>
 ///     End-to-end tests of the user's own repo order in the real application: a card keeps its place
-///     when its repo is launched, the card menu's Move items reorder it, a real mouse drag reorders
+///     when its repo is launched, the card menu's Reorder items reorder it, a real mouse drag reorders
 ///     it (and moves it into a group when dropped on the group's header), and the order is stored only
 ///     in AgentControl's settings and is still there after a restart.
 /// </summary>
 public sealed class RepoOrderTests
 {
     /// <summary>
-    ///     Choosing "Move down" in the first card's menu swaps it with the second card, stores the order in
+    ///     Choosing Reorder > "Move down" in the first card's menu swaps it with the second card, stores the order in
     ///     the settings file and keeps it after a restart.
     /// </summary>
     [Fact]
@@ -52,8 +52,9 @@ public sealed class RepoOrderTests
         mainWindow.SetForeground();
         Assert.Equal(["repo", "second", "third"], RepoNames(mainWindow));
 
-        // Act: ... > Move down on the first card
+        // Act: ... > Organize > Reorder > Move down on the first card
         Find(mainWindow, "MoreActionsButton", index: 0).AsButton().Invoke();
+        ExpandMenuItem(Find(mainWindow, "ReorderMenuItem"));
         Assert.False(Find(mainWindow, "MoveUpMenuItem").IsEnabled);
         Find(mainWindow, "MoveDownMenuItem").AsMenuItem().Invoke();
 
@@ -270,6 +271,24 @@ public sealed class RepoOrderTests
     {
         var bounds = element.BoundingRectangle;
         return new System.Drawing.Point(bounds.Left + (bounds.Width / 2), bounds.Top + (bounds.Height / 2));
+    }
+
+    /// <summary>
+    ///     Expands a menu item that has a submenu, through its UI Automation expand pattern when it
+    ///     has one, else by invoking it.
+    /// </summary>
+    /// <param name="item">The menu item.</param>
+    private static void ExpandMenuItem(AutomationElement item)
+    {
+        var expand = item.Patterns.ExpandCollapse.PatternOrDefault;
+        if (expand is not null)
+        {
+            expand.Expand();
+        }
+        else
+        {
+            item.AsMenuItem().Invoke();
+        }
     }
 
     /// <summary>

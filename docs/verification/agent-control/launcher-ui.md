@@ -29,7 +29,7 @@ keyboard behavior of the dialogs, the About version row, the order of the AGENTS
 notes and the keep-or-update and launch-anyway questions about a repo's agent files,
 `RepoGroupWindowTests.cs` for the group headers, the card menu's
 "Move to group" submenu, the group-name prompt and the card color palette pop-up,
-`RepoReorderWindowTests.cs` for the user's own repo order (cards that stay put, the card menu's Move items, drag
+`RepoReorderWindowTests.cs` for the user's own repo order (cards that stay put, the card menu's Reorder submenu, drag
 and drop through the window's drag-source seam and the platform's drop events, the insertion line and header tint,
 reordering turned off by the filter, the order after a restart; the real operating-system drag is covered only by the
 FlaUI tests), `RepoOrderingTests.cs` for the view model's rules behind them,
@@ -196,12 +196,15 @@ row where it was, and a repo added with the top-bar add and one added into a gro
 sections. This scenario is tested by `MainWindow_Launch_DoesNotMoveTheCard` and
 `MainWindow_RepoAdded_AppearsAtTheBottomOfItsSection`, covering `AgentControl-LauncherUI-StableRepoOrder`.
 
-**LauncherUI_RepoOrderMenu_MoveItemsReorderAndDisableAtTheBoundaries**: The card menu's Organize group holds, after
-"Move to group" and before "Card color...", the items Move to top, Move up, Move down and Move to bottom, each with an
-AutomationId, an icon and a tooltip; the first repo's Top and Up items are disabled with the reason as their tooltip,
-the last repo's Down and Bottom items likewise; choosing an enabled item (the menu item's click) reorders the rows. This
-scenario is tested by `MainWindow_CardMenu_MoveItems_ReorderAndDisableAtTheBoundaries` and
-`MainWindow_CardMenu_MoveItemsInOrganizeGroupWithIdsAndTooltips`, covering `AgentControl-LauncherUI-RepoOrderMenu`.
+**LauncherUI_RepoOrderMenu_MoveItemsReorderAndDisableAtTheBoundaries**: The card menu's Organize group holds exactly
+"Move to group", "Reorder" and "Card color..."; the Reorder submenu has an AutomationId, an icon and a tooltip and holds
+the items Move to top, Move up, Move down and Move to bottom, each with an AutomationId, an icon and a tooltip; the first
+repo's Top and Up items are disabled with the reason as their tooltip, the last repo's Down and Bottom items likewise;
+choosing an enabled item (the menu item's click) reorders the rows; the Reorder submenu itself is disabled, with the
+reason as its tooltip, for the only repo of its section and enabled for a repo with a neighbor. This
+scenario is tested by `MainWindow_CardMenu_MoveItems_ReorderAndDisableAtTheBoundaries`,
+`MainWindow_CardMenu_OrganizeGroupHasReorderSubmenuWithMoveItems` and
+`MainWindow_CardMenu_Reorder_DisabledForTheOnlyRepoOfItsSection`, covering `AgentControl-LauncherUI-RepoOrderMenu`.
 
 **LauncherUI_RepoDrag_ReordersWithinAndBetweenSectionsAndOnHeaders**: The headless platform has no drag source, so a
 drag is started with a real pointer press and move on a card (which calls the window's `DragStarter` seam, here a fake
@@ -230,7 +233,8 @@ contrast against the card and the page in both themes and the group header's tex
 `AppStyles_TextAndGraphicColors_MeetContrastInBothThemes`), covering `AgentControl-LauncherUI-RepoDropFeedback`.
 
 **LauncherUI_ReorderOffWhileFiltering_NoDragAndMoveItemsDisabledWithTooltip**: With text in the filter a press and move
-on a card starts no drag (the `DragStarter` seam is never called and the row is not dimmed) and all four Move items are
+on a card starts no drag (the `DragStarter` seam is never called and the row is not dimmed) and the Reorder submenu and
+all four Move items are
 disabled with the filter explanation as their tooltip; with the filter cleared the drag starts and the items apply
 again. This scenario is tested by `MainWindow_FilterActive_DragStartsNothingAndMoveItemsAreDisabledWithTooltip`,
 covering `AgentControl-LauncherUI-ReorderOffWhileFiltering`.

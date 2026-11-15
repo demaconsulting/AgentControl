@@ -563,8 +563,8 @@ the repo name's initials on a color chosen by a deterministic hash of the repo p
 The **...** menu is grouped: *Repository* (**Git Pull**, with its enablement rules and its explanatory tooltip
 shown even while it is disabled, and **Refresh**), *Agent files* (**Select Package...** when no package is pinned,
 **Change package...** when one is, and **Upgrade to x.y.z** when a newer version exists; the group is hidden when
-none applies) and *Organize* (**Move to group**, then **Move to top**, **Move up**, **Move down**, **Move to bottom**
-and **Card color...**) and **Remove from list**. The upgrade
+none applies) and *Organize* (**Move to group**, then **Reorder**, a submenu holding **Move to top**, **Move up**,
+**Move down** and **Move to bottom**, and **Card color...**) and **Remove from list**. The upgrade
 chip is a button that runs the same `UpgradeCommand` as the menu's Upgrade item
 (`AgentControl-RepoCardViewModel-UpgradeFromChip`).
 
@@ -611,14 +611,17 @@ implicit tiers (favorites, the rest) - shows its repos in the same relative orde
 ways (`AgentControl-System-RepoReorder`), and both end in the same two view-model operations, so the business rules
 live in `MainWindowViewModel` and the window only translates input and shows feedback:
 
-- *Move menu items.* The *Organize* group of a card's "..." menu has **Move to top**, **Move up**, **Move down** and
+- *Move menu items.* The *Organize* group of a card's "..." menu has a **Reorder** submenu (AutomationId
+  `ReorderMenuItem`, a swap-vertical icon) holding **Move to top**, **Move up**, **Move down** and
   **Move to bottom** (AutomationIds `MoveToTopMenuItem`, `MoveUpMenuItem`, `MoveDownMenuItem`,
   `MoveToBottomMenuItem`), which are keyboard-reachable and so give a way to reorder that needs no drag. They move the
   card within its own section (`MainWindowViewModel.MoveCard`). As with the *Move to group* submenu, what they may do
   depends on state that is only known when the menu opens, so `MainWindow`'s `CardMenu_Opening` handler (through
   `UpdateMoveMenuItems`) asks `MainWindowViewModel.GetMoveDisabledReason` for each item, disabling it and giving it
   that reason as its tooltip (shown even while disabled) - at the start or end of the section, and while the filter
-  has text (`AgentControl-LauncherUI-RepoOrderMenu`).
+  has text - and `MainWindowViewModel.GetReorderDisabledReason` for the **Reorder** submenu itself, which is disabled,
+  with the same filter explanation as its tooltip, while the filter has text and, with its own explanation, when none
+  of the four moves applies (the only repo of its section) (`AgentControl-LauncherUI-RepoOrderMenu`).
 - *Drag and drop.* **Drag source**: the window observes the pointer on the `RepoListBox` on the way down (also for
   events a row already handled). A press with the left button on a card is remembered as a possible drag, unless it is
   on a `Button`, `TextBox`, `MenuItem` or `ScrollBar` in the card (the star, the chips, the menu keep their own
@@ -658,7 +661,8 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   without dropping first.
 - *No reordering while filtering* (`AgentControl-LauncherUI-ReorderOffWhileFiltering`): while the filter box has text
   only some repos are shown, so their positions cannot be changed. `MainWindowViewModel.IsReorderEnabled` is then `false`:
-  no drag starts, the four Move items are disabled with the tooltip `ReorderDisabledWhileFilteringMessage`, and
+  no drag starts, the **Reorder** submenu and its four Move items are disabled with the tooltip
+  `ReorderDisabledWhileFilteringMessage`, and
   `MoveCard`, `CanDrop` and `DropCard` refuse as well. Filtering never changes the stored order.
 - *Collection moves.* A reorder moves cards inside `MainWindowViewModel.RepoCards` (`Move` notifications). The window's
   `OnRepoCardsChanged` ignores a `Move`, because the cards stay attached and the per-card state the window keeps

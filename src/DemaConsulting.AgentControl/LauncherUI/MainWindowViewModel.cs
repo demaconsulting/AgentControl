@@ -1560,6 +1560,35 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    ///     Gets why a card's whole Reorder submenu is unavailable now.
+    /// </summary>
+    /// <remarks>
+    ///     The submenu is unavailable while the filter has text (with the same explanation as the
+    ///     individual Move items), when the card is not in the list, and when none of the four moves
+    ///     applies, which is the case for the only repo of its section.
+    /// </remarks>
+    /// <param name="card">The card.</param>
+    /// <returns>The reason, or <see langword="null"/> when at least one move applies.</returns>
+    public string? GetReorderDisabledReason(RepoCardViewModel card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+
+        var reasons = new[] { RepoMove.Top, RepoMove.Up, RepoMove.Down, RepoMove.Bottom }
+            .Select(move => GetMoveDisabledReason(card, move))
+            .ToList();
+        if (reasons.Contains(null))
+        {
+            return null;
+        }
+
+        // The filter and "not in the list" reasons are the same for every move; otherwise no move
+        // leads anywhere because the card is the only one of its section
+        return reasons[0] is ReorderDisabledWhileFilteringMessage or "This repo is no longer in the list."
+            ? reasons[0]
+            : "This repo is the only one in its section.";
+    }
+
+    /// <summary>
     ///     Gets whether a card can be moved the given way now.
     /// </summary>
     /// <param name="card">The card.</param>

@@ -171,7 +171,7 @@ port, and the real `git upload-pack`).
   sections while no repo is in a group; a collapsed section is still collapsed after a restart; the filter finds a
   repo inside a collapsed group; groups and card colors are stored only in the user's settings (the repository stays
   untouched), and a chosen card color leaves the card's status unchanged.
-- Launching a repo leaves its card where it is; the card menu's Move items and a real mouse drag reorder the cards and
+- Launching a repo leaves its card where it is; the card menu's Reorder items and a real mouse drag reorder the cards and
   a drag onto a group's header moves a card into the group; the order is stored only in the user's settings and is
   still there after a restart.
 - The AGENTS.md question of an upgrade is shown before its release notes.
@@ -214,7 +214,8 @@ goes to the bottom of its section and that favorites stay first are verified at 
 levels.
 
 **AgentControl_RepoReorder_MenuAndDrag_ReorderAndMoveIntoGroups**: In the published application the "Move down" item of
-the first card's menu swaps it with the second card (its "Move up" item is disabled) and the order is written to the
+the Reorder submenu in the first card's menu swaps it with the second card (its "Move up" item is disabled) and the
+order is written to the
 settings file only (the repository stays empty); a real mouse drag of the first card (pressed on its status bar, moved
 in steps) onto the lower half of the last card puts it last; and a real mouse drag of a card onto a group's header
 puts it in

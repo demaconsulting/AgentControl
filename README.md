@@ -39,7 +39,7 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   initials (or the repo's own root `icon.png`/`logo.png`), its path, and labeled chips for the pinned agent
   package (name, version and source, with a small check mark when it is the newest), an available upgrade, and
   the current git branch; **Launch** sits on the card and everything else (Git Pull, Refresh - **Check again**
-  for a repo whose folder is missing - Select Package/Change package/Upgrade, Move to group, the Move items, Card
+  for a repo whose folder is missing - Select Package/Change package/Upgrade, Move to group, Reorder, Card
   color, Remove) in
   its grouped
   "..." menu; a long path is shortened to fit - the folder part first, then the middle of a very long folder
@@ -47,8 +47,9 @@ The cards, the card menu, Settings and the package-source editor are shown in th
 - **Your own, stable repo order**: the list stays in the order you choose - Launch, Refresh and every other action
   leave the cards where they are; a new repo goes to the bottom of its section; favorites are still listed first
   (the Favorites section, or the top of the list while there are no groups). Reorder with **Move to top**, **Move
-  up**, **Move down** and **Move to bottom** in a card's "..." menu (keyboard-reachable; items that do not apply
-  are disabled, with a tooltip saying why) or by dragging a card by anywhere that is not one of its buttons: a line
+  up**, **Move down** and **Move to bottom** in the **Reorder** submenu of a card's "..." menu (keyboard-reachable;
+  items that do not apply are disabled, with a tooltip saying why) or by dragging a card by anywhere that is not
+  one of its buttons: a line
   shows where it will land, and dropping into another section or on a section header moves the repo there, exactly
   like **Move to group** and the favorite star. Reordering is off while the filter box has text (filtering never
   changes the order). The order is stored only in your own AgentControl settings, never in the repository or its
@@ -328,16 +329,17 @@ Both are personal ways to organize the list and are stored **only in your own Ag
   tile (as a ring around a repo's own picture); the status bar on the card's left edge keeps its meaning.
 - **Order.** The list is in your own, stable order: nothing moves because of **Launch**, **Refresh** or any other
   action, and a new repo goes to the bottom of its section (a repo you add to a group again moves to the bottom of
-  that group). Favorites are listed first. In a card's "..." menu, **Organize > Move to top**, **Move up**, **Move
-  down** and **Move to bottom** move the card within its section (the first repo cannot go up, the last cannot go
-  down; a disabled item's tooltip says why). You can also drag a card by any part that is not a button, such as its
+  that group). Favorites are listed first. In a card's "..." menu, **Organize > Reorder > Move to top**, **Move up**,
+  **Move down** and **Move to bottom** move the card within its section (the first repo cannot go up, the last cannot
+  go down, and **Reorder** itself is disabled for the only repo of its section; a disabled item's tooltip says why).
+  You can also drag a card by any part that is not a button, such as its
   status bar: a line shows where it lands (upper half of the card under the pointer = before, lower half = after).
   Dropping into another section moves the repo there like **Move to group** and the favorite star do - into a
   group sets that group, into **Ungrouped** removes it, into **Favorites** makes it a favorite (it keeps its
   group), out of **Favorites** removes the favorite mark - and dropping on a section header (even a collapsed one,
   which stays collapsed) puts the card at the bottom of that section. With no groups, dragging only reorders within
   the favorites or within the other repos. While the filter box has text, reordering is off (dragging does nothing
-  and the Move items are disabled), because only some repos are shown. The order is kept in your own settings file;
+  and the Reorder submenu is disabled), because only some repos are shown. The order is kept in your own settings file;
   removing a repo removes it from the order, and existing users keep the order they last saw.
 
 ### Settings

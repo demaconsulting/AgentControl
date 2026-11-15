@@ -176,8 +176,10 @@ without it.
   package: it opens Select Package on the current choice), `UpgradeMenuItem` (only while an upgrade is available),
   `MoveToGroupMenuItem` (its submenu, built when the menu opens: one `MoveToGroupItem` per group - find it by
   name, for example `menu MoveToGroupMenuItem/Work` - then `NewGroupMenuItem`, and `RemoveFromGroupMenuItem` for a
-  grouped repo), `MoveToTopMenuItem`, `MoveUpMenuItem`, `MoveDownMenuItem`, `MoveToBottomMenuItem` (reorder the
-  card within its section; disabled at the ends and while the filter has text), `CardColorMenuItem`, `RemoveMenuItem`.
+  grouped repo), `ReorderMenuItem` (a submenu, disabled while the filter has text and for the only repo of its
+  section) holding `MoveToTopMenuItem`, `MoveUpMenuItem`, `MoveDownMenuItem`, `MoveToBottomMenuItem` (reorder the
+  card within its section; disabled at the ends and while the filter has text; reach them as
+  `menu ReorderMenuItem/MoveDownMenuItem`), `CardColorMenuItem`, `RemoveMenuItem`.
 - **Card color palette** (pop-up under `MoreActionsButton`, opened by `CardColorMenuItem`): `CardColorPalette`,
   one `CardColorSwatch_<Name>` per color (`CardColorSwatch_Teal`, ...; the name is also the accessible name) and
   `CardColorAutomaticButton`.

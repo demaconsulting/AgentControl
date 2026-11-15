@@ -286,6 +286,30 @@ public sealed class RepoOrderingTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that the Reorder submenu is available when at least one move applies and otherwise names
+    ///     why: the filter has text, or the repo is the only one of its section.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_GetReorderDisabledReason_NamesTheReason()
+    {
+        // Arrange: a group of one repo and two ungrouped repos
+        var fixture = CreateFixture(Spec("w1", "Work"), Spec("u1"), Spec("u2"));
+
+        // Act / Assert: a repo with a neighbor can be reordered, also at either end of its section
+        Assert.Null(fixture.ViewModel.GetReorderDisabledReason(fixture.Card("u1")));
+        Assert.Null(fixture.ViewModel.GetReorderDisabledReason(fixture.Card("u2")));
+
+        // Act / Assert: the only repo of its section has nowhere to go
+        Assert.Contains("only", fixture.ViewModel.GetReorderDisabledReason(fixture.Card("w1")), StringComparison.Ordinal);
+
+        // Act / Assert: the filter has text
+        fixture.ViewModel.FilterText = "u";
+        Assert.Equal(
+            MainWindowViewModel.ReorderDisabledWhileFilteringMessage,
+            fixture.ViewModel.GetReorderDisabledReason(fixture.Card("u1")));
+    }
+
+    /// <summary>
     ///     Test that a move that leads nowhere (the first repo up or to the top, the last one down or to
     ///     the bottom) is refused, changes nothing and saves nothing.
     /// </summary>

@@ -160,13 +160,16 @@ sections:
       - id: AgentControl-MainWindowViewModel-MoveAvailability
         title: >-
           The MainWindowViewModel class shall tell for each move whether it is available for a card and,
-          when it is not, why: the filter has text, or the card is already first or last in its section.
+          when it is not, why: the filter has text, or the card is already first or last in its section;
+          and shall tell whether the Reorder submenu as a whole is available, which it is not when
+          the filter has text or no move applies (the only repo of its section).
         justification: |
           The menu disables the items that do not apply and shows the reason as their tooltip, so the
           rules live in one place.
         tests:
           - MainWindowViewModel_CanMoveCard_FirstMiddleAndLast_ReportsEachItem
           - MainWindowViewModel_GetMoveDisabledReason_NamesTheReason
+          - MainWindowViewModel_GetReorderDisabledReason_NamesTheReason
 
       - id: AgentControl-MainWindowViewModel-DropReorder
         title: >-

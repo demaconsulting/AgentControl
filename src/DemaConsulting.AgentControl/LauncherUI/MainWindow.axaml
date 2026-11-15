@@ -304,7 +304,7 @@
                                     <Button.Flyout>
                                         <!-- Grouped menu: Repository (Git Pull, Refresh), Agent files (Select
                                              Package or Upgrade, whichever applies), Organize (Move to group,
-                                             Move to top/up/down/bottom, Card color), then Remove. The group
+                                             Reorder > Move to top/up/down/bottom, Card color), then Remove. The group
                                              headers are disabled items (not interactive, skipped by the
                                              keyboard) styled as small captions. -->
                                         <MenuFlyout Opening="CardMenu_Opening">
@@ -379,48 +379,59 @@
                                                     <materialIcons:MaterialIcon Kind="FolderMultipleOutline" />
                                                 </MenuItem.Icon>
                                             </MenuItem>
-                                            <!-- Move within the section: enabled/disabled (and their tooltip) are set
-                                                 when the menu opens (see CardMenu_Opening); disabled while the
-                                                 filter has text and at the boundaries of the section -->
-                                            <MenuItem Name="MoveToTopMenuItem"
-                                                       AutomationProperties.AutomationId="MoveToTopMenuItem"
-                                                       Header="Move to top"
-                                                       ToolTip.Tip="Put this repo first in its section"
-                                                       ToolTip.ShowOnDisabled="True"
-                                                       Click="MoveToTopMenuItem_Click">
+                                            <!-- Reorder within the section: the submenu holds the four Move items.
+                                                 Its own enabled/disabled state and tooltip, and those of the
+                                                 four items, are set when the menu opens (see CardMenu_Opening);
+                                                 Reorder is disabled while the filter has text and when no
+                                                 move applies, an item at the boundaries of the section -->
+                                            <MenuItem Name="ReorderMenuItem"
+                                                       AutomationProperties.AutomationId="ReorderMenuItem"
+                                                       Header="Reorder"
+                                                       ToolTip.Tip="Move this repo within its section"
+                                                       ToolTip.ShowOnDisabled="True">
                                                 <MenuItem.Icon>
-                                                    <materialIcons:MaterialIcon Kind="ArrowCollapseUp" />
+                                                    <materialIcons:MaterialIcon Kind="SwapVertical" />
                                                 </MenuItem.Icon>
-                                            </MenuItem>
-                                            <MenuItem Name="MoveUpMenuItem"
-                                                       AutomationProperties.AutomationId="MoveUpMenuItem"
-                                                       Header="Move up"
-                                                       ToolTip.Tip="Move this repo one place up in its section"
-                                                       ToolTip.ShowOnDisabled="True"
-                                                       Click="MoveUpMenuItem_Click">
-                                                <MenuItem.Icon>
-                                                    <materialIcons:MaterialIcon Kind="ArrowUp" />
-                                                </MenuItem.Icon>
-                                            </MenuItem>
-                                            <MenuItem Name="MoveDownMenuItem"
-                                                       AutomationProperties.AutomationId="MoveDownMenuItem"
-                                                       Header="Move down"
-                                                       ToolTip.Tip="Move this repo one place down in its section"
-                                                       ToolTip.ShowOnDisabled="True"
-                                                       Click="MoveDownMenuItem_Click">
-                                                <MenuItem.Icon>
-                                                    <materialIcons:MaterialIcon Kind="ArrowDown" />
-                                                </MenuItem.Icon>
-                                            </MenuItem>
-                                            <MenuItem Name="MoveToBottomMenuItem"
-                                                       AutomationProperties.AutomationId="MoveToBottomMenuItem"
-                                                       Header="Move to bottom"
-                                                       ToolTip.Tip="Put this repo last in its section"
-                                                       ToolTip.ShowOnDisabled="True"
-                                                       Click="MoveToBottomMenuItem_Click">
-                                                <MenuItem.Icon>
-                                                    <materialIcons:MaterialIcon Kind="ArrowCollapseDown" />
-                                                </MenuItem.Icon>
+                                                <MenuItem Name="MoveToTopMenuItem"
+                                                           AutomationProperties.AutomationId="MoveToTopMenuItem"
+                                                           Header="Move to top"
+                                                           ToolTip.Tip="Put this repo first in its section"
+                                                           ToolTip.ShowOnDisabled="True"
+                                                           Click="MoveToTopMenuItem_Click">
+                                                    <MenuItem.Icon>
+                                                        <materialIcons:MaterialIcon Kind="ArrowCollapseUp" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem Name="MoveUpMenuItem"
+                                                           AutomationProperties.AutomationId="MoveUpMenuItem"
+                                                           Header="Move up"
+                                                           ToolTip.Tip="Move this repo one place up in its section"
+                                                           ToolTip.ShowOnDisabled="True"
+                                                           Click="MoveUpMenuItem_Click">
+                                                    <MenuItem.Icon>
+                                                        <materialIcons:MaterialIcon Kind="ArrowUp" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem Name="MoveDownMenuItem"
+                                                           AutomationProperties.AutomationId="MoveDownMenuItem"
+                                                           Header="Move down"
+                                                           ToolTip.Tip="Move this repo one place down in its section"
+                                                           ToolTip.ShowOnDisabled="True"
+                                                           Click="MoveDownMenuItem_Click">
+                                                    <MenuItem.Icon>
+                                                        <materialIcons:MaterialIcon Kind="ArrowDown" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem Name="MoveToBottomMenuItem"
+                                                           AutomationProperties.AutomationId="MoveToBottomMenuItem"
+                                                           Header="Move to bottom"
+                                                           ToolTip.Tip="Put this repo last in its section"
+                                                           ToolTip.ShowOnDisabled="True"
+                                                           Click="MoveToBottomMenuItem_Click">
+                                                    <MenuItem.Icon>
+                                                        <materialIcons:MaterialIcon Kind="ArrowCollapseDown" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
                                             </MenuItem>
                                             <MenuItem Name="CardColorMenuItem"
                                                        AutomationProperties.AutomationId="CardColorMenuItem"

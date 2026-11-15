@@ -385,6 +385,12 @@ order.
   first and `Down`/`Bottom` on the last member of the section. `CanMoveCard` is `true` exactly when there is no reason
   (`AgentControl-MainWindowViewModel-MoveAvailability`, `-ReorderOffWhileFiltering`).
 
+**GetReorderDisabledReason**: Says whether the whole **Reorder** submenu of a card is unavailable now, and if so why.
+
+- *Returns*: `null` when at least one of the four moves applies; otherwise the filter explanation or "no longer in the
+  list" reason when that is why every move is refused, and "the only one in its section" when the card is alone in its
+  section so that no move leads anywhere (`AgentControl-MainWindowViewModel-MoveAvailability`).
+
 **MoveCard**: Moves a card to the top, one up, one down or to the bottom of **its section** and saves the new order.
 
 - *Postconditions*: The target is computed among the card's section members in `RepoCards` order (the first member,
@@ -491,7 +497,8 @@ succeeding.
   process-wide `PackageCredentialContext`, and assigns it as `MainWindow.DataContext`.
 - **MainWindow** (code-behind) — calls `AddRepo`, `RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and
   `RemoveGroup` (catching the `InvalidOperationException` of a failed save and showing a message), asks
-  `IsReorderEnabled`, `CanMoveCard`/`GetMoveDisabledReason` and `CanDrop` and calls `MoveCard` and `DropCard` for the
+  `IsReorderEnabled`, `CanMoveCard`/`GetMoveDisabledReason`, `GetReorderDisabledReason` and `CanDrop` and calls
+  `MoveCard` and `DropCard` for the
   Move menu items and for drag and drop (the failures are reported through `SettingsSaveFailed`), starts the
   upgrade check and the periodic re-check (`BeginUpgradeRefresh`, `StartPeriodicUpgradeRecheck`) when the view
   model is attached, disposes the view model when it closes, subscribes to

@@ -187,11 +187,12 @@ public sealed class RepoReorderWindowTests : IDisposable
     });
 
     /// <summary>
-    ///     Test that the Move items are in the Organize group of the card menu, after "Move to group" and
-    ///     before "Card color...", each with an AutomationId, an icon and a tooltip.
+    ///     Test that the Organize group of the card menu has exactly Move to group, Reorder and "Card
+    ///     color...", and that the four Move items are in the Reorder submenu, each with an AutomationId,
+    ///     an icon and a tooltip.
     /// </summary>
     [Fact]
-    public void MainWindow_CardMenu_MoveItemsInOrganizeGroupWithIdsAndTooltips() => HeadlessTestApp.Run(() =>
+    public void MainWindow_CardMenu_OrganizeGroupHasReorderSubmenuWithMoveItems() => HeadlessTestApp.Run(() =>
     {
         // Arrange
         var (window, _, _) = CreateWindow(Spec("a"), Spec("b"), Spec("c"));
@@ -204,23 +205,62 @@ public sealed class RepoReorderWindowTests : IDisposable
             var names = items.Select(item => item.Name).ToList();
             var organize = items.FindIndex(item => item.Header?.ToString() == "Organize");
 
-            // Assert: Organize, Move to group, the four Move items, Card color
+            // Assert: Organize, Move to group, Reorder, Card color, then a separator and Remove
             string[] moves = ["MoveToTopMenuItem", "MoveUpMenuItem", "MoveDownMenuItem", "MoveToBottomMenuItem"];
             Assert.True(organize >= 0);
             Assert.Equal("MoveToGroupMenuItem", names[organize + 1]);
-            Assert.Equal(moves, names.Skip(organize + 2).Take(4));
-            Assert.Equal("CardColorMenuItem", names[organize + 6]);
-            foreach (var name in moves)
+            Assert.Equal("ReorderMenuItem", names[organize + 2]);
+            Assert.Equal("CardColorMenuItem", names[organize + 3]);
+            Assert.Equal("RemoveMenuItem", names[organize + 4]);
+            Assert.DoesNotContain(items, item => moves.Contains(item.Name));
+
+            var reorder = items[organize + 2];
+            Assert.Equal("Reorder", reorder.Header?.ToString());
+            Assert.Equal("ReorderMenuItem", AutomationProperties.GetAutomationId(reorder));
+            Assert.NotNull(reorder.Icon);
+            Assert.False(string.IsNullOrEmpty(ToolTip.GetTip(reorder)?.ToString()));
+            var children = reorder.Items.OfType<MenuItem>().ToList();
+            Assert.Equal(moves, children.Select(item => item.Name));
+            foreach (var item in children)
             {
-                var item = items.Single(candidate => candidate.Name == name);
-                Assert.Equal(name, AutomationProperties.GetAutomationId(item));
+                Assert.Equal(item.Name, AutomationProperties.GetAutomationId(item));
                 Assert.NotNull(item.Icon);
                 Assert.False(string.IsNullOrEmpty(ToolTip.GetTip(item)?.ToString()));
             }
 
             Assert.Equal(
                 ["Move to top", "Move up", "Move down", "Move to bottom"],
-                items.Where(item => moves.Contains(item.Name)).Select(item => item.Header?.ToString()));
+                children.Select(item => item.Header?.ToString()));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the Reorder submenu is disabled, with the reason as its tooltip, for the only repo of
+    ///     its section, and enabled for a repo that has a section neighbor.
+    /// </summary>
+    [Fact]
+    public void MainWindow_CardMenu_Reorder_DisabledForTheOnlyRepoOfItsSection() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: one repo in a group, two ungrouped repos
+        var (window, _, _) = CreateWindow(Spec("w1", "Work"), Spec("u1"), Spec("u2"));
+
+        try
+        {
+            // Act / Assert: the only repo of its group has nothing to move past
+            var menu = OpenCardMenu(window, "w1");
+            var reorder = FindMenuItem(menu, "ReorderMenuItem");
+            Assert.False(reorder.IsEnabled);
+            Assert.Contains("only", ToolTip.GetTip(reorder)?.ToString(), StringComparison.Ordinal);
+            menu.Hide();
+
+            // Act / Assert: a repo with a neighbor can be reordered
+            menu = OpenCardMenu(window, "u1");
+            Assert.True(FindMenuItem(menu, "ReorderMenuItem").IsEnabled);
+            menu.Hide();
         }
         finally
         {
@@ -498,6 +538,9 @@ public sealed class RepoReorderWindowTests : IDisposable
                 Assert.Null(drag.Transfer);
                 Assert.DoesNotContain("dragging", FindRow(window, "alpine").Classes);
                 var menu = OpenCardMenu(window, "alpine");
+                var reorder = FindMenuItem(menu, "ReorderMenuItem");
+                Assert.False(reorder.IsEnabled);
+                Assert.Equal(MainWindowViewModel.ReorderDisabledWhileFilteringMessage, ToolTip.GetTip(reorder)?.ToString());
                 foreach (var name in new[] { "MoveToTopMenuItem", "MoveUpMenuItem", "MoveDownMenuItem", "MoveToBottomMenuItem" })
                 {
                     var item = FindMenuItem(menu, name);
@@ -518,6 +561,7 @@ public sealed class RepoReorderWindowTests : IDisposable
                 drag.Completion.SetResult(DragDropEffects.None);
                 Dispatcher.UIThread.RunJobs();
                 menu = OpenCardMenu(window, "alpine");
+                Assert.True(FindMenuItem(menu, "ReorderMenuItem").IsEnabled);
                 Assert.True(FindMenuItem(menu, "MoveUpMenuItem").IsEnabled);
                 menu.Hide();
             }
@@ -882,13 +926,16 @@ public sealed class RepoReorderWindowTests : IDisposable
     }
 
     /// <summary>
-    ///     Finds an item of an open menu by its XAML name.
+    ///     Finds an item of an open menu by its XAML name; the four Move items are found inside the
+    ///     Reorder submenu.
     /// </summary>
     /// <param name="menu">The open menu.</param>
     /// <param name="name">The item's XAML name.</param>
     /// <returns>The item.</returns>
     private static MenuItem FindMenuItem(MenuFlyout menu, string name) =>
-        menu.Items.OfType<MenuItem>().Single(item => item.Name == name);
+        menu.Items.OfType<MenuItem>().SingleOrDefault(item => item.Name == name) ??
+        menu.Items.OfType<MenuItem>().Single(item => item.Name == "ReorderMenuItem")
+            .Items.OfType<MenuItem>().Single(item => item.Name == name);
 
     /// <summary>
     ///     Clicks a menu item the way a user's click does and lets the work it starts run.

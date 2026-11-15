@@ -148,7 +148,9 @@ when the order cannot be saved nothing changes, the user is told once, and the s
 `CanMoveCard` reports each of the four moves for the first, a middle and the last card
 (`MainWindowViewModel_CanMoveCard_FirstMiddleAndLast_ReportsEachItem`), and `GetMoveDisabledReason` names the reason -
 first, last, or the filter - and is `null` when the move is allowed
-(`MainWindowViewModel_GetMoveDisabledReason_NamesTheReason`), covering
+(`MainWindowViewModel_GetMoveDisabledReason_NamesTheReason`), and `GetReorderDisabledReason` is `null` for repos with a
+section neighbor and names the filter or "the only one in its section" otherwise
+(`MainWindowViewModel_GetReorderDisabledReason_NamesTheReason`), covering
 `AgentControl-MainWindowViewModel-MoveAvailability`.
 
 **MainWindowViewModel_DropCard_PlacesTheCardAtTheDropPosition**: `DropCard` puts a card before or after a card of its

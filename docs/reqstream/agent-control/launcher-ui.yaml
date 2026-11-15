@@ -807,19 +807,21 @@ sections:
 
       - id: AgentControl-LauncherUI-RepoOrderMenu
         title: >-
-          The LauncherUI subsystem shall offer, in the Organize group of each card's menu, moving the
-          repo to the top, up, down or to the bottom of its section, with the items that do not apply
-          disabled.
+          The LauncherUI subsystem shall offer, in a Reorder submenu of the Organize group of each card's
+          menu, moving the repo to the top, up, down or to the bottom of its section, with the items that
+          do not apply disabled, and the Reorder submenu itself disabled when none of them applies.
         justification: |
           A menu is the way to reorder that works from the keyboard and for a long list where
           dragging over a distance is awkward; disabling the moves that lead nowhere (and saying why)
-          shows where the repo is in its section.
+          shows where the repo is in its section, and keeping the four moves in one submenu keeps the
+          Organize group short.
         children:
           - AgentControl-MainWindowViewModel-MoveCard
           - AgentControl-MainWindowViewModel-MoveAvailability
         tests:
           - MainWindow_CardMenu_MoveItems_ReorderAndDisableAtTheBoundaries
-          - MainWindow_CardMenu_MoveItemsInOrganizeGroupWithIdsAndTooltips
+          - MainWindow_CardMenu_OrganizeGroupHasReorderSubmenuWithMoveItems
+          - MainWindow_CardMenu_Reorder_DisabledForTheOnlyRepoOfItsSection
 
       - id: AgentControl-LauncherUI-RepoDragReorder
         title: >-
@@ -877,7 +879,8 @@ sections:
 
       - id: AgentControl-LauncherUI-ReorderOffWhileFiltering
         title: >-
-          The LauncherUI subsystem shall not start a drag and shall disable the Move items, with a
+          The LauncherUI subsystem shall not start a drag and shall disable the Reorder submenu and its
+          Move items, with a
           tooltip that says why, while the filter has text, and shall never change the order by
           filtering.
         justification: |

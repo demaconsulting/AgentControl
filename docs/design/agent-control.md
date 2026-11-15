@@ -228,7 +228,8 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   `AppSettings.RecentRepos` itself, so a removed repo leaves the order with no extra bookkeeping. Favorites stay
   first; within a section the repos show in that order; a new repo is appended (the bottom of its section); and
   launching, refreshing or any other change never moves a card - `MainWindowViewModel` does not even listen to the
-  card's `LaunchRecorded`. The user reorders from a card's menu (Move to top, up, down, bottom) or by dragging a
+  card's `LaunchRecorded`. The user reorders from a card's menu (Reorder > Move to top, up, down, bottom) or by
+  dragging a
   card within a section, into another section (which sets the group or favorite flag as the menu and the star
   would) or onto a header (the end of that section); `MainWindowViewModel.MoveCard`, `CanDrop` and `DropCard` hold
   the rules and `MainWindow` only turns pointer input into a drop place and draws the insertion line or header
@@ -296,7 +297,8 @@ longer raise an error box, release notes or a prompt, and the window releases it
   keyboard).
 - *Contract*: The main window shows the recent-repos list with per-repo cards exposing
   Launch as a button and, in the card's "..." menu, Git Pull, Refresh (labeled "Check again" for a repo whose
-  folder is missing), Select Package/Change package/Upgrade, Move to group, Move to top/up/down/bottom, Card color and
+  folder is missing), Select Package/Change package/Upgrade, Move to group, Reorder (Move to top/up/down/bottom),
+  Card color and
   Remove, plus the favorite star and
   the upgrade chip; the list is flat, or sectioned (Favorites, the user's groups, Ungrouped) once a repo is in a
   group, in the user's own order (a card can also be dragged to reorder it); the toolbar-level app bar holds the
