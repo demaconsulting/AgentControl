@@ -342,30 +342,5 @@ public sealed class AgentsMdTemplateOfferTests
     ///     for the app/automation pair.
     /// </summary>
     /// <param name="context">The context whose current launch should be closed.</param>
-    private static void CloseCurrentLaunch(AgentControlTestContext context)
-    {
-        try
-        {
-            context.App?.Close();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
-        {
-            // Best-effort: the process may have already exited.
-        }
-
-        try
-        {
-            context.App?.Kill();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
-        {
-            // Best-effort: the process may have already exited.
-        }
-
-        // Dispose the FlaUI Application wrapper itself (not just Close/Kill the OS process),
-        // mirroring AgentControlTestContext.Dispose()'s own precedent - otherwise this wrapper
-        // leaks across the context's second Launch() call below.
-        context.App?.Dispose();
-        context.Automation?.Dispose();
-    }
+    private static void CloseCurrentLaunch(AgentControlTestContext context) => context.CloseApplication();
 }

@@ -118,8 +118,8 @@ Each repo card shows:
 and an uncommitted-changes warning](images/repo-card-anatomy.png)
 
 ![The open "..." menu of a card: Git Pull and Refresh under Repository, Change package... under Agent files, Move to
-group, Reorder and Card color under Organize, and Remove from
-list](images/card-menu.png)
+group, Reorder (its submenu open, with Move to top, Move up, Move down and Move to bottom) and Card color under
+Organize, and Remove from list](images/card-menu.png)
 
 Removing a repo from the list prompts for confirmation first, since it is a destructive
 action against AgentControl's own repo list state (it does not touch the repository
