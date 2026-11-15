@@ -50,8 +50,8 @@
   <rect x="795" y="204" width="220" height="104" rx="8" fill="#ffffff" stroke="#15803d" stroke-width="2" stroke-dasharray="7 4"/>
   <text x="905" y="228" font-size="14.5" font-weight="700" fill="#14532d" text-anchor="middle">.github/agents, standards,</text>
   <text x="905" y="247" font-size="14.5" font-weight="700" fill="#14532d" text-anchor="middle">templates, skills</text>
-  <text x="905" y="272" font-size="13" font-weight="700" fill="#14532d" text-anchor="middle">GIT-IGNORED</text>
-  <text x="905" y="292" font-size="13" fill="#14532d" text-anchor="middle">never committed</text>
+  <text x="905" y="272" font-size="13" font-weight="700" fill="#14532d" text-anchor="middle">NORMALLY GIT-IGNORED</text>
+  <text x="905" y="292" font-size="13" fill="#14532d" text-anchor="middle">added to .gitignore for you</text>
 
   <!-- Arrows between the boxes -->
   <line x1="284" y1="200" x2="401" y2="200" stroke="#1e293b" stroke-width="2.5" marker-end="url(#arrow)"/>

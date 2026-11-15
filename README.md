@@ -16,7 +16,7 @@ CLI tool in the repo.
 
 ![Concept: a company publishes versioned agent packages; AgentControl reads the pin in a developer's public repo,
 fetches that version from the developer's configured sources, verifies the files against the pinned fingerprint,
-places them in the git-ignored .github folders, and launches the agentic CLI tool][workflow]
+places them in the .github folders (normally git-ignored), and launches the agentic CLI tool][workflow]
 
 ## Screenshot
 
