@@ -20,7 +20,9 @@ badge. It also provides the package-authenticity behavior
 (`AgentControl-AgentPackageManagement-SignedPackages`, `AgentControl-AgentPackageManagement-SignaturePlatformSupport`,
 which support `AgentControl-System-PackageAuthenticity`). It also provides the content identity of a
 delivered package (`AgentControl-AgentPackageManagement-ContentIdentity` and `-ContentIdentityComparable`, which support
-`AgentControl-System-PackageContentIntegrity`) and the offers of all configured sources
+`AgentControl-System-PackageContentIntegrity`), the same identity of the agent files installed in a repo
+(`AgentControl-AgentPackageManagement-InstalledFilesIdentity`, which supports `AgentControl-System-VerifyAgentFiles`)
+and the offers of all configured sources
 (`AgentControl-AgentPackageManagement-OffersAcrossSources`, which supports
 `AgentControl-System-UpgradeAcrossSources`). It also provides the Git repository source - the tags of a repository
 that match a pattern as the versions of one package, fetched shallow into a cache keyed by repository and commit
@@ -242,6 +244,14 @@ Design* (`AgentControl-AgentPackageManagement-ContentIdentity`). The decisions:
   which is how it is caught.
 - *Not a signature.* The identity detects a republished or altered package; it does not prove who published it
   (see *Package authenticity* for that).
+- *The files installed in a repo.* The same identity is computed over the agent files physically in a repo's four
+  managed folders (`PackageContentIdentity.ComputeInstalledFilesIdentity`, reading them through
+  `DirectoryPackageContentReader.OpenManagedFolders` of the `RepoSync` subsystem), so that Launch can tell a repo whose
+  files are the pinned package's from one that is damaged or edited - with no package source involved - by comparing
+  it with the identity the pin recorded (`AgentControl-AgentPackageManagement-InstalledFilesIdentity`, which supports
+  `AgentControl-System-VerifyAgentFiles`). It is the very algorithm that identifies a package, over raw bytes, so an
+  untouched extraction of a zip, NuGet or Git package equals the package's identity, while a missing, changed, renamed
+  or extra file does not; files that cannot be read (a link, an I/O failure) yield an error, never an identity.
 
 **Offers across sources.** A repo's pin names no source - aliases are each user's own configuration, so the
 configured sources have to be asked what they offer.

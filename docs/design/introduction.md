@@ -69,6 +69,16 @@ supporting types of `LauncherUI`, not units.
 
 ![Software Structure](SoftwareStructureView.svg)
 
+The diagram below complements the structure view by showing how the parts work together at run time: the developer
+picks a repo in LauncherUI, which acquires the pinned agent package from its package source, extracts its agent folders
+into the repo, records the pin in `.agentcontrol.json`, and launches the agentic CLI tool in that repo, with
+`GitIntegration` running the user's own git executable.
+
+![AgentControl architecture: the developer launches from LauncherUI, which orchestrates AgentPackageManagement (package
+sources), RepoSync (agent folders in the developer's repo), RepoConfig (the .agentcontrol.json pin file),
+AgentToolLauncher (the agentic CLI tool), PackageCredentials and GitIntegration (the git executable), supported by
+Settings, Logging, Startup and Utilities](architecture.svg)
+
 ## Folder Layout
 
 - **src/** - source files and projects

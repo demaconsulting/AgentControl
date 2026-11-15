@@ -179,5 +179,12 @@ save callback receives settings whose theme is dark. This scenario is tested by
 `SettingsWindowViewModel_Theme_DefaultsToSystemAndIsSavedWithSettings`, covering
 `AgentControl-SettingsWindowViewModel-AppearanceSaved`.
 
+**SettingsWindowViewModel_KeepShellOpen_StartsFromSavedAndIsSavedWithSettings**: A view model built from settings
+without a saved choice starts with keep-shell-open on; clearing it and saving gives the owner's save callback settings
+whose choice is off; a view model built from settings whose choice is off starts off; and saving without touching the
+choice keeps it on (the property is copied into the saved settings, so saving never resets it). This scenario is tested
+by `SettingsWindowViewModel_KeepShellOpen_DefaultsToOnAndIsSavedWithSettings`, covering
+`AgentControl-SettingsWindowViewModel-KeepShellOpen`.
+
 The picker's friendly theme names belong to the supporting type `ThemePreferenceDisplayNameConverter` and are
 checked by `ThemePreferenceDisplayNameConverterTests` at the `LauncherUI` subsystem level.

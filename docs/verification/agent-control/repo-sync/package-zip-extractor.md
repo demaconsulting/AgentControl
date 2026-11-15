@@ -58,7 +58,8 @@ tested by `windows@PackageZipExtractor_Extract_GitHubFolderIsJunction_RefusesAnd
 covering `AgentControl-PackageZipExtractor-RefuseLinkedRepoFolders`.
 
 **PackageZipExtractor_AllManagedFoldersExist_ReflectsActualPresence**: The check returns true
-when all four managed folders are present, and false when some or none are present. This
+when all four managed folders are present, and false when some or none are present. It is used
+before launch only for a pin that records no identity of its files. This
 scenario is tested by
 `PackageZipExtractor_AllManagedFoldersExist_AllFourPresent_ReturnsTrue`,
 `PackageZipExtractor_AllManagedFoldersExist_SomeMissing_ReturnsFalse`, and

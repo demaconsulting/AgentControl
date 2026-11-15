@@ -39,12 +39,12 @@ public sealed class RepoGroupingTests : IDisposable
 
     /// <summary>
     ///     Test that with no repo in a group the list is flat and header-free, exactly as before
-    ///     groups existed: favorites first, then the most recently launched.
+    ///     groups existed: favorites first, then the user's own order.
     /// </summary>
     [Fact]
     public void MainWindowViewModel_DisplayedItems_NoGroups_FlatListWithoutHeaders()
     {
-        // Arrange
+        // Arrange: launch times that point the other way round than the stored order
         var now = DateTimeOffset.UtcNow;
         var viewModel = CreateViewModel(
             new Spec("old", LastLaunched: now.AddDays(-5)),
@@ -54,8 +54,8 @@ public sealed class RepoGroupingTests : IDisposable
         // Act
         var shown = Describe(viewModel);
 
-        // Assert: no header at all, not even Favorites
-        Assert.Equal(["fav", "new", "old"], shown);
+        // Assert: no header at all, not even Favorites; the others in the stored order
+        Assert.Equal(["fav", "old", "new"], shown);
         Assert.False(viewModel.HasGroups);
         Assert.Empty(viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>());
     }
@@ -63,7 +63,7 @@ public sealed class RepoGroupingTests : IDisposable
     /// <summary>
     ///     Test that grouped repos are shown in sections: Favorites first, the user's groups
     ///     alphabetically (ignoring case), Ungrouped last, each header with its count, and repos
-    ///     within a section by most recent launch.
+    ///     within a section in the user's own order (not by launch time).
     /// </summary>
     [Fact]
     public void MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered()
@@ -81,18 +81,18 @@ public sealed class RepoGroupingTests : IDisposable
         // Act
         var shown = Describe(viewModel);
 
-        // Assert
+        // Assert: "w-old" stays before "w-new" although it was launched earlier
         Assert.Equal(
             [
                 "[Favorites 1]", "star",
                 "[Alpha 1]", "a1",
                 "[home 1]", "h1",
-                "[Work 2]", "w-new", "w-old",
+                "[Work 2]", "w-old", "w-new",
                 "[Ungrouped 1]", "loose"
             ],
             shown);
         Assert.Equal(
-            ["star", "a1", "h1", "w-new", "w-old", "loose"],
+            ["star", "a1", "h1", "w-old", "w-new", "loose"],
             viewModel.DisplayedRepoCards.Select(card => card.RepoName));
     }
 
@@ -526,7 +526,7 @@ public sealed class RepoGroupingTests : IDisposable
     /// <summary>
     ///     Test that adding a repo to a group creates its card directly in that group (spelled as the
     ///     existing group, whatever the letter case asked for), persists the group, and puts the card
-    ///     in the group's section.
+    ///     at the bottom of the group's section.
     /// </summary>
     [Fact]
     public void MainWindowViewModel_AddRepoToGroup_NewRepo_AddsCardInTheGroupAndPersistsIt()
@@ -544,7 +544,7 @@ public sealed class RepoGroupingTests : IDisposable
         var card = Assert.Single(viewModel.RepoCards, candidate => candidate.RepoName == "fresh");
         Assert.Equal("Work", card.GroupName);
         Assert.Equal(["Work"], viewModel.GroupNames);
-        Assert.Equal(["[Work 2]", "fresh", "w1", "[Ungrouped 1]", "loose"], Describe(viewModel));
+        Assert.Equal(["[Work 2]", "w1", "fresh", "[Ungrouped 1]", "loose"], Describe(viewModel));
         var reloaded = SettingsStore.Load(configDir);
         Assert.Equal("Work", reloaded.RecentRepos.Single(repo => repo.Path == newRepo).GroupName);
     }
@@ -604,7 +604,7 @@ public sealed class RepoGroupingTests : IDisposable
 
         // Assert
         Assert.False(viewModel.IsGroupCollapsed("Work"));
-        Assert.Equal(["[Work 2]", "fresh", "w1"], Describe(viewModel));
+        Assert.Equal(["[Work 2]", "w1", "fresh"], Describe(viewModel));
     }
 
     /// <summary>
@@ -655,7 +655,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     Creates a view model over repos described by <paramref name="specs"/>, persisting to a new
     ///     configuration directory.
     /// </summary>
-    /// <param name="specs">The repos, in recent-list order.</param>
+    /// <param name="specs">The repos, in the user's stored order.</param>
     /// <returns>The view model.</returns>
     private MainWindowViewModel CreateViewModel(params Spec[] specs) => CreateViewModel(CreateTempDirectory(), specs);
 
@@ -663,12 +663,14 @@ public sealed class RepoGroupingTests : IDisposable
     ///     Creates a view model over repos described by <paramref name="specs"/>.
     /// </summary>
     /// <param name="configDir">The configuration directory settings are persisted to.</param>
-    /// <param name="specs">The repos, in recent-list order.</param>
+    /// <param name="specs">The repos, in the user's stored order.</param>
     /// <returns>The view model.</returns>
     private MainWindowViewModel CreateViewModel(string configDir, params Spec[] specs)
     {
         var settings = new AppSettings
         {
+            // The list is the user's own order, so it is not re-arranged by launch time
+            HasUserRepoOrder = true,
             RecentRepos =
             [
                 .. specs.Select(spec => new RecentRepo

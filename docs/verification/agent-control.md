@@ -171,6 +171,9 @@ port, and the real `git upload-pack`).
   sections while no repo is in a group; a collapsed section is still collapsed after a restart; the filter finds a
   repo inside a collapsed group; groups and card colors are stored only in the user's settings (the repository stays
   untouched), and a chosen card color leaves the card's status unchanged.
+- Launching a repo leaves its card where it is; the card menu's Reorder items and a real mouse drag reorder the cards and
+  a drag onto a group's header moves a card into the group; the order is stored only in the user's settings and is
+  still there after a restart.
 - The AGENTS.md question of an upgrade is shown before its release notes.
 - A source that requires signed packages is refused an unsigned package end to end and the repo is left unchanged;
   a valid signature, the publisher pin and the platform fail-closed behavior are proven at the subsystem and unit
@@ -195,19 +198,63 @@ is gated on user confirmation. This scenario is tested by
 `windows@RemoveMenuItem_ClickThenConfirm_RemovesCard_DecliningLeavesItInPlace`, covering
 `AgentControl-System-AddRemoveRepo`.
 
-**AgentControl_SearchAndSort_FilterTextBox_HidesAndRestoresCards**: Non-matching text is typed
+**AgentControl_SearchFilter_FilterTextBox_HidesAndRestoresCards**: Non-matching text is typed
 into the filter text box, hiding a repo card, and then the filter is cleared, restoring it;
-confirms the recent-repos list is searchable and returns to its sorted (favorites-first,
-most-recently-launched) order once the filter is removed. This scenario is tested by
+confirms the repo list is searchable and returns to its full list once the filter is removed. This
+scenario is tested by
 `windows@FilterTextBox_TypingNonMatchingText_HidesRepoCard_ClearingRestoresIt`, covering
-`AgentControl-System-SearchAndSort`.
+`AgentControl-System-SearchFilter`.
+
+**AgentControl_RepoOrder_LaunchingARepo_KeepsTheCardWhereItIs**: The published application is started over three
+repos in the user's stored order, with launch times that the earlier "most recently launched first" order would have used;
+Launch is clicked on the last card and the stubbed agent tool records its invocation. The cards are in the same order
+afterwards, in the window and in the settings file. This scenario is tested by
+`windows@RepoList_LaunchingARepo_KeepsTheCardWhereItIs`, covering `AgentControl-System-RepoOrder`. That a repo added
+goes to the bottom of its section and that favorites stay first are verified at the `LauncherUI` subsystem and unit
+levels.
+
+**AgentControl_RepoReorder_MenuAndDrag_ReorderAndMoveIntoGroups**: In the published application the "Move down" item of
+the Reorder submenu in the first card's menu swaps it with the second card (its "Move up" item is disabled) and the
+order is written to the
+settings file only (the repository stays empty); a real mouse drag of the first card (pressed on its status bar, moved
+in steps) onto the lower half of the last card puts it last; and a real mouse drag of a card onto a group's header
+puts it in
+that group. This scenario is tested by `windows@CardMenu_MoveDown_ReordersCardAndStoresOrderInSettings`,
+`windows@RepoList_DragCardBelowAnother_ReordersAndKeepsOrderAfterRestart` and
+`windows@RepoList_DragCardOntoGroupHeader_MovesItIntoTheGroup`, covering `AgentControl-System-RepoReorder`. The drop
+cases, the insertion line, the contrast of its colors and the filter turning reordering off are verified at the
+`LauncherUI` subsystem and unit levels, where the drop events are raised on a headless window.
+
+**AgentControl_RepoOrderRemembered_RestartKeepsTheOrder**: After a real mouse drag has reordered the cards, the
+application is closed and started again over the same settings; the cards are in the dragged order, and the settings
+file holds the repos in that order. This scenario is tested by
+`windows@RepoList_DragCardBelowAnother_ReordersAndKeepsOrderAfterRestart`, covering
+`AgentControl-System-RepoOrderRemembered`; that settings without a stored order are arranged once the way earlier
+versions displayed them is verified at the `Settings` subsystem and unit levels.
 
 **AgentControl_Launch_LaunchButton_InvokesConfiguredAgentToolInWorkingDirectory**: The Launch
 button is clicked on a repo card whose agent files are already synced; the configured
 (stubbed) agent-tool executable is invoked with the repo's working directory as its argument,
-proving launch only proceeds once agent files are confirmed synced. This scenario is tested by
+proving launch proceeds once the agent files were verified. This scenario is tested by
 `windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory`, covering
-`AgentControl-System-Launch`.
+`AgentControl-System-Launch`. The other ways a launch can go are the next scenario.
+
+**AgentControl_VerifyAgentFiles_KeepOrUpdateAndLaunchAnywayOrCancel**: In the published application a repo is
+pinned (with the identity of the package, which is applied through the real Select Package flow so that the pin is what
+the application writes) to a package from a zip folder, and the stubbed agent tool records its invocation. Four runs:
+(1) the files match the pin - Launch invokes the agent tool at once with no dialog
+(`windows@LaunchButton_Click_AgentFilesMatchPin_LaunchesWithoutPrompt`); (2) some files were changed or deleted -
+Launch shows the question with the buttons "Update from package" and "Keep current files"; choosing "Keep current
+files" leaves every file as it was and invokes the agent tool
+(`windows@LaunchButton_Click_AgentFilesDiffer_KeepChosen_LaunchesWithFilesUntouched`); (3) the same difference, but
+"Update from package" is chosen - the files then equal the package's and the agent tool is invoked
+(`windows@LaunchButton_Click_AgentFilesDiffer_UpdateChosen_ReplacesFilesAndLaunches`); (4) the repo has no agent files
+and the package source is unreachable - Launch shows the reason with the buttons "Launch anyway" and "Cancel";
+choosing "Cancel" invokes nothing (`windows@LaunchButton_Click_RestoreFails_CancelChosen_DoesNotLaunch`). This scenario
+is tested by those four tests, covering `AgentControl-System-VerifyAgentFiles`. That nothing is downloaded when the
+files match, that the file comparison is byte for byte, and the defaults and Escape of the dialogs are verified one
+level down (see the `LauncherUI` verification design), because the end-to-end tests cannot observe a package access
+that did not happen.
 
 **AgentControl_Pull_PullMenuItem_InvokesConfiguredGitExecutableWithPullArgument**: Git Pull is
 chosen in the "..." menu of a repo card with a clean working tree; the configured (stubbed) git
@@ -501,10 +548,10 @@ a version the application has not held yet.
 **AgentControl_ChangedContentRefusedAtLaunch_RepublishedPackageIsExplainedAndNothingIsSynced**: In the published
 application a repo is pinned to 1.0.0 with the identity of the original package, its managed folders are missing, and
 the 1.0.0 package has since been republished with other content - in a zip folder in the first run, in a NuGet-package
-folder in the second. Clicking Launch shows a message that the agent files were not synced because the package now
-contains different files than the copy the repo was set up with, no managed folder is created, the pin file is byte
-for byte unchanged, and the launch goes on: the configured agent tool is still invoked in the repo's working directory
-(how that fits the system Launch requirement is a pre-existing follow-up, not changed by this scenario). The refusal
+folder in the second. Clicking Launch shows a question that explains that the agent files were not synced because the
+package now contains different files than the copy the repo was set up with and offers "Launch anyway" and "Cancel";
+the test chooses "Launch anyway". No managed folder is created, the pin file is byte for byte unchanged, and the
+launch goes on: the configured agent tool is still invoked in the repo's working directory. The refusal
 of an Upgrade of a republished version is a rule of the repo card, specified by the
 child requirements and verified at the subsystem and unit levels; the application offers an Upgrade only for a newer
 version than the one pinned, so there is no end-to-end path to it and it is not claimed as system-level evidence. This
@@ -547,6 +594,21 @@ explicit themes, not the system default). This scenario is tested by
 `AgentControl-System-Appearance`. A second scenario shows that Settings has an Appearance heading with the Theme
 picker under it, above the Tools heading and the git setting, tested by
 `windows@SettingsWindow_AppearanceIsItsOwnSectionAboveTools`, also covering `AgentControl-System-Appearance`.
+
+**AgentControl_KeepShellOpen_SettingIsOfferedSavedAndGovernsTheLaunchedShell**: In the real application, a settings
+file without the `KeepShellOpen` value (as an older version wrote it) shows Settings' "Keep the shell open after the
+agent tool exits" checkbox checked (the default is on); clearing it and saving writes `"KeepShellOpen": false` to the
+file, and checking it again and saving writes `true`. A launch with the choice cleared runs the arg-logger stub as the
+agent tool in a shell that ends together with it: the stub records its invocation and then no process launched by the
+test context is left running. These scenarios are tested by
+`windows@SettingsWindow_KeepShellOpenCheckBox_DefaultsOnClearedAndSavedIsPersisted` and
+`windows@LaunchButton_Click_KeepShellOpenOff_ShellEndsWhenAgentToolExits`, covering
+`AgentControl-System-KeepShellOpen`. The opposite case, a shell that stays open, is not run end to end because a test
+cannot leave an interactive shell window running on the machine it runs on; the arguments that keep the shell open
+are verified by the `AgentToolLauncher` unit and subsystem tests, and a launch through the card with the setting on
+by the `RepoCardViewModel` tests, none of which start a process. Every other end-to-end test writes the setting as
+cleared (`TestSettingsWriter`), so the shell it launches ends by itself and no console window outlives a test; the
+end-to-end cleanup of a launched shell is only a short safety net for a shell that is still running after a failure.
 
 **AgentControl_RepoGroups_MoveToNewExistingAndOutOfGroup**: In the real application a repo is moved to a new group
 through the card's "..." menu (Move to group, then New group...), a name is typed into the prompt and confirmed,

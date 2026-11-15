@@ -37,12 +37,12 @@ namespace DemaConsulting.AgentControl.UiTests;
 /// <remarks>
 ///     Implements <see cref="IDisposable"/> so every test can use a <c>using</c> block (or a
 ///     <c>try</c>/<c>finally</c>) to guarantee the spawned AgentControl process, any shell process
-///     it in turn launches for the agent-tool command (see <c>AgentToolLauncher</c>'s
-///     <c>-NoExit</c>/<c>/K</c> "leave the window open" behavior, which this context must
-///     clean up since the shell is not a child FlaUI tracks), and every temp directory are
-///     cleaned up even if the test fails an assertion or throws. Shell cleanup is strictly
-///     scoped to this context's own launch (see <see cref="LaunchedShellCleaner"/>): unrelated
-///     shells and terminal tabs are never touched.
+///     it in turn launches for the agent-tool command (which is not a child FlaUI tracks), and
+///     every temp directory are cleaned up even if the test fails an assertion or throws. The
+///     settings this context writes turn "keep the shell open" off, so the launched shell ends
+///     together with the arg-logger stub by itself; <see cref="LaunchedShellCleaner"/> is only a
+///     short, strictly scoped safety net for a shell that is still alive at the end of the test:
+///     unrelated shells and terminal tabs are never touched.
 /// </remarks>
 internal sealed class AgentControlTestContext : IDisposable
 {
@@ -53,7 +53,7 @@ internal sealed class AgentControlTestContext : IDisposable
 
     /// <summary>
     ///     Initializes a new isolated test context: creates temp directories, writes
-    ///     <c>settings.json</c>, and prepares the scoped shell cleaner.
+    ///     <c>settings.json</c>, and prepares the scoped shell safety net.
     /// </summary>
     /// <param name="packageSourcePath">The package source directory to configure, or
     ///     <see langword="null"/> to leave it unconfigured.</param>
@@ -213,10 +213,8 @@ internal sealed class AgentControlTestContext : IDisposable
             startInfo.EnvironmentVariables[name] = value;
         }
 
-        // Record which terminal windows already exist so only windows created by this launch
-        // can ever be considered for cleanup.
+        // Create the automation instance used to find the app's windows
         Automation = new UIA3Automation();
-        _shellCleaner.CaptureBaseline(Automation);
 
         App = Application.Launch(startInfo);
         _appProcessId = App.ProcessId;
@@ -367,35 +365,37 @@ internal sealed class AgentControlTestContext : IDisposable
     ///     the temp directories, so a later <see cref="Launch"/> starts a new session against the same
     ///     config directory and repo (to prove that something was remembered across a restart).
     /// </summary>
+    /// <remarks>
+    ///     Closes any dialog still open over the main window first, then the main window, waits a few
+    ///     seconds at most for the process to exit and kills its process tree only after that; see
+    ///     <see cref="ApplicationTeardown"/>. Whatever it finds open, and why a kill was needed, is
+    ///     written to the test output. Safe to call when nothing is running (also repeatedly).
+    /// </remarks>
     public void CloseApplication()
     {
-        try
-        {
-            App?.Close();
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
-        {
-            // Best-effort: the process may have already exited.
-        }
+        var app = App;
+        var automation = Automation;
+        App = null;
+        Automation = null;
 
         try
         {
-            App?.Kill();
+            if (app is not null)
+            {
+                ApplicationTeardown.Close(app, automation, _appStartTime, ConfigDirectory, LogCleanup);
+            }
         }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+        finally
         {
-            // Best-effort: the process may have already exited.
+            app?.Dispose();
+            automation?.Dispose();
         }
-
-        App?.Dispose();
-        Automation?.Dispose();
     }
 
     /// <summary>
-    ///     Closes/kills the launched AgentControl process, disposes the automation instance,
-    ///     terminates only the shell (and stub) spawned by this context's agent-tool launch,
-    ///     closes the terminal window that launch left behind, and best-effort deletes this
-    ///     context's temp directory tree.
+    ///     Closes the launched AgentControl process (see <see cref="CloseApplication"/>), disposes the automation instance,
+    ///     ends (as a bounded safety net) any shell or stub this context's agent-tool launch left
+    ///     running, and best-effort deletes this context's temp directory tree.
     /// </summary>
     public void Dispose()
     {
@@ -408,8 +408,9 @@ internal sealed class AgentControlTestContext : IDisposable
 
         CloseApplication();
 
-        // Only after the app is gone: terminate exactly the shell (and stub) it launched and
-        // close the terminal window left behind - see LaunchedShellCleaner for the rationale.
+        // Only after the app is gone: end whatever shell (and stub) the launch left running. The
+        // shell normally ended by itself (the tests run with "keep the shell open" off), so this
+        // is a quick check - see LaunchedShellCleaner.
         if (_appProcessId is { } appProcessId)
         {
             _shellCleaner.Cleanup(appProcessId, _appStartTime);
@@ -426,14 +427,37 @@ internal sealed class AgentControlTestContext : IDisposable
     }
 
     /// <summary>
-    ///     Forwards a cleanup diagnostic to the xUnit test output (visible with diagnostic
-    ///     messages enabled), never failing the test if no test context is available.
+    ///     Waits until the shell this context's AgentControl launched for the agent tool (and the
+    ///     arg-logger stub it ran) has ended, polling for a bounded time.
+    /// </summary>
+    /// <param name="timeout">Maximum time to wait.</param>
+    /// <returns><see langword="true"/> when nothing launched by this context is still running
+    ///     (also when no launch happened); <see langword="false"/> when something is still alive
+    ///     after <paramref name="timeout"/>.</returns>
+    public bool WaitForLaunchedShellToExit(TimeSpan timeout)
+    {
+        if (_appProcessId is not { } appProcessId)
+        {
+            return true;
+        }
+
+        return Retry.WhileTrue(
+            () => _shellCleaner.AnyOwnedAlive(appProcessId, _appStartTime),
+            timeout: timeout,
+            interval: TimeSpan.FromMilliseconds(250)).Success;
+    }
+
+    /// <summary>
+    ///     Forwards a cleanup diagnostic to the test's own output (shown with the test result, for
+    ///     example by the console logger at <c>detailed</c> verbosity, and kept in the TRX) and to the
+    ///     xUnit diagnostic messages, never failing the test if no test context is available.
     /// </summary>
     /// <param name="message">The diagnostic message.</param>
     private static void LogCleanup(string message)
     {
         try
         {
+            TestContext.Current.TestOutputHelper?.WriteLine(message);
             TestContext.Current.SendDiagnosticMessage(message);
         }
         catch (Exception ex) when (ex is InvalidOperationException or NullReferenceException)

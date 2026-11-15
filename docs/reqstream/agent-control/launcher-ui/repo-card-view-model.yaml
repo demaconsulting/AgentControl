@@ -186,29 +186,46 @@ sections:
           the user cancels the wait for the pre-launch sync, and shall raise an
           error when no agent tool command is configured.
         justification: |
-          Launch is the primary action of AgentControl; the launch timestamp feeds the
-          most-recently-launched sort order, and a missing configuration must be surfaced
-          rather than silently doing nothing.
+          Launch is the primary action of AgentControl; the launch timestamp records when the repo
+          was last launched (it no longer moves the card), and a missing configuration must be
+          surfaced rather than silently doing nothing.
         tests:
           - RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded
           - RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred
           - RepoCardViewModel_LaunchCommand_PreLaunchSyncCancelledByUser_StillLaunches
 
+      - id: AgentControl-RepoCardViewModel-KeepShellOpen
+        title: >-
+          The RepoCardViewModel class shall launch the agent tool through the shell chosen by the
+          shell preference, asking for the shell to stay open exactly when the keep-shell-open
+          setting in force at the moment of the launch is on, and shall report a process that
+          cannot be started as an error without recording a launch.
+        justification: |
+          The setting must govern the very next launch, so it is read when the launch happens
+          rather than when the card is created; a launch that did not happen must not be
+          recorded as one, and the reason must reach the user.
+        tests:
+          - RepoCardViewModel_LaunchCommand_KeepShellOpenSetting_PassesMatchingArgumentsToStarter
+          - RepoCardViewModel_LaunchCommand_SettingChangedBetweenLaunches_UsesCurrentValue
+          - RepoCardViewModel_LaunchCommand_ProcessStartFails_ReportsErrorAndDoesNotRecordLaunch
+
       - id: AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch
         title: >-
-          The RepoCardViewModel class shall make a best-effort attempt to sync the repo's
-          agent files with its pinned package version before launch, re-extracting them only
-          when they are missing, but shall never prevent the launch from proceeding: it shall
-          skip the sync attempt entirely when the repo has committed agent files or has no
-          pinned package, and shall treat a failed re-extraction as a non-blocking warning
-          rather than a launch-blocking error.
+          The RepoCardViewModel class shall skip the pre-launch check of the repo's agent files
+          entirely when the repo has committed agent files or has no pinned package, shall install
+          only the pinned version of the package (never a newer one) when it installs agent
+          files before launch, and shall never prevent the launch from proceeding except when the
+          user cancels it because agent files that were needed could not be installed - a failed
+          installation is reported and left to that choice, and a user who cannot be asked is
+          never blocked.
         justification: |
-          Launching the configured agentic CLI tool must never be blocked by agent-package
-          sync state - a user may want the tool's help migrating away from committed agent
-          files, or may simply find the tool useful with no managed agent files present at
-          all. Sync remains a best-effort, informational side action that keeps the agent
-          tool's files current when it safely can, without ever standing in the way of the
-          launch itself.
+          Launching the configured agentic CLI tool is the primary action and must not be held up
+          by agent-package state - a user may want the tool's help migrating away from committed
+          agent files, or may simply find the tool useful with no managed agent files present at
+          all. Only the pinned version is installed because moving to a newer version is a
+          deliberate, separate action (Upgrade). The one exception to launching is the user's own
+          decision after a failed installation (see the requirement for offering to launch
+          anyway).
         tests:
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoPin_ReturnsTrueWithInformationalStatusMessage
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HasCommittedAgentFiles_SkipsSyncEntirelyAndReturnsTrue
@@ -216,6 +233,157 @@ sections:
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedButFoldersMissing_ReExtractsPinnedVersionOnly
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedVersionMissingFromSource_ReturnsFalse
           - RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches
+
+      - id: AgentControl-RepoCardViewModel-RestoreWhenNoAgentFiles
+        title: >-
+          The RepoCardViewModel class shall, when a pinned repo with no committed agent files is
+          launched and none of its four managed agent folders holds a file (the folders are absent,
+          empty or hold only empty folders), install the pinned version of the package without
+          asking the user.
+        justification: |
+          A repo with no agent files has nothing a developer could lose, and a fresh clone of a repo
+          whose agent folders are not committed is exactly the case the tool exists for; asking
+          would only delay a launch whose answer is never in doubt.
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoManagedFolders_RestoresSilentlyWithoutPrompt
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_EmptyManagedFolders_RestoresSilentlyWithoutPrompt
+
+      - id: AgentControl-RepoCardViewModel-VerifyFilesAgainstPinIdentity
+        title: >-
+          The RepoCardViewModel class shall, when a pinned repo whose pin records the identity of
+          the package's agent files is launched and its managed agent folders hold files, treat the
+          files as the package's only when every file the package delivers is present with exactly
+          the same bytes and no other file is present, comparing the raw bytes of the files in the
+          four managed folders only (the repo's root files, such as AGENTS.md, and empty folders
+          take no part), and shall treat files that cannot be read, such as a linked managed
+          folder, as different.
+        justification: |
+          The folders' presence says nothing about whether the pinned files are in them; an
+          interrupted sync, a deleted file or an edited file are only found by comparing the files
+          themselves with what the pin recorded. A comparison that normalized line endings or
+          ignored extra files would let changed instructions through, and files that cannot be
+          read cannot be vouched for, so they must never be treated as the package's.
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FilesMatchPin_ReturnsInSyncWithoutPromptOrPackageAccess
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromNuGetFolderSource_IsInSyncWithoutPackageAccess
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromZipSource_IsInSyncWithoutPackageAccess
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromGitSource_IsInSyncWithoutPackageAccess
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MissingFile_AsksAndKeepLeavesFilesUntouched
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HalfOfTheFilesMissing_AsksAndUpdateRestoresAllFiles
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ChangedFile_UpdateReplacesFileAndKeepsPinUnchanged
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ExtraFile_UpdateDeletesExtraFile
+          - windows@RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ManagedFolderIsJunction_TreatedAsMismatchAndAsks
+          - ubuntu@RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ManagedFolderIsSymlink_TreatedAsMismatchAndAsks
+
+      - id: AgentControl-RepoCardViewModel-AskKeepOrUpdateOnMismatch
+        title: >-
+          The RepoCardViewModel class shall, when the agent files of a launched repo differ from the
+          package its pin names, ask the user in a modal question - which names the repo, the
+          package and its version and what each choice does - whether to update the files from
+          the package or to keep the current files, with keeping them as the default answer and the
+          answer that Escape gives, shall leave the files exactly as they are when the user keeps
+          them or cannot be asked, shall replace the four managed folders with the package's files
+          only when the user chooses to update, shall ask again on every launch while the
+          difference persists, and shall never write the pin.
+        justification: |
+          Differing agent files may be damage to repair or a developer deliberately trying out
+          other instructions; only the user knows, and discarding the second without asking would
+          destroy work. Keeping the files is therefore the default, nothing is remembered so that a
+          difference can never hide again, and a launch that nobody can be asked about must never
+          overwrite anything.
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MissingFile_AsksAndKeepLeavesFilesUntouched
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HalfOfTheFilesMissing_AsksAndUpdateRestoresAllFiles
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ChangedFile_UpdateReplacesFileAndKeepsPinUnchanged
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ExtraFile_UpdateDeletesExtraFile
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchWithoutSubscriber_KeepsFilesAndNeverTouchesPackageSource
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchPersists_AsksOnEveryLaunch
+          - RepoCardViewModel_LaunchCommand_MismatchKeep_Launches
+          - RepoCardViewModel_LaunchCommand_MismatchUpdate_RestoresThenLaunches
+          - AgentFilesChoiceRequest_Respond_FirstAnswerWins
+          - AgentFilesChoiceRequest_Constructor_NullArguments_Throw
+          - AgentFilesChoiceRequest_Answer_CompletesAsynchronously
+
+      - id: AgentControl-RepoCardViewModel-NoPackageAccessWhenInSync
+        title: >-
+          The RepoCardViewModel class shall launch without asking and without reading, listing or
+          downloading from any package source when the agent files of a pinned repo are the
+          package's, and shall obtain the package only when files have to be installed or updated,
+          reusing the copies it already has.
+        justification: |
+          Most launches find the files as they should be; checking them must be fast, must work
+          offline and must not need a sign-in or a server, which is only possible when the check
+          needs nothing but the repo and the identity in the pin.
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FilesMatchPin_ReturnsInSyncWithoutPromptOrPackageAccess
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromNuGetFolderSource_IsInSyncWithoutPackageAccess
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromZipSource_IsInSyncWithoutPackageAccess
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromGitSource_IsInSyncWithoutPackageAccess
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchWithoutSubscriber_KeepsFilesAndNeverTouchesPackageSource
+
+      - id: AgentControl-RepoCardViewModel-PinWithoutIdentityKeepsFolderCheck
+        title: >-
+          The RepoCardViewModel class shall, when a pinned repo whose pin records no identity of the
+          package's agent files is launched and its managed agent folders hold files, launch
+          without asking and without reading any package source when all four managed folders
+          exist, and install the pinned version silently when one of them is missing.
+        justification: |
+          A pin recorded by an older version has no identity to compare the files with, and
+          obtaining the package to compare would cost a source listing or download on every launch,
+          so such a pin keeps the check that was made before identities were verified; choosing the
+          package once more records an identity and turns the full check on.
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutIdentity_AllFoldersWithFiles_SkipsWithoutPackageAccess
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutIdentity_SomeFolderMissing_RestoresSilently
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedButFoldersMissing_ReExtractsPinnedVersionOnly
+
+      - id: AgentControl-RepoCardViewModel-VerifyOffUiThread
+        title: >-
+          The RepoCardViewModel class shall read and compare the agent files and install them
+          without blocking the window, keeping the card busy so that no second action starts, and
+          shall stop checking when the card's operation is canceled.
+        justification: |
+          Reading every agent file and copying a package are disk work that would freeze the window
+          if done on its thread; the card's busy state and cancel are how every other long action
+          of the card stays controllable.
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_CanceledWhileVerifying_ThrowsOperationCanceledException
+          - RepoCardViewModel_LaunchCommand_PreLaunchSyncCancelledByUser_StillLaunches
+
+      - id: AgentControl-RepoCardViewModel-OfferLaunchAnywayOnRestoreFailure
+        title: >-
+          The RepoCardViewModel class shall, when the agent files that a launch needs - because the
+          repo has none, a pin without an identity lacks a folder, or the user chose to update -
+          cannot be installed (no source is configured, no source offers the pinned version, a
+          source cannot be read, no source delivers the files the pin recorded, or the files cannot
+          be written), tell the user why in a modal question that offers Launch anyway or Cancel,
+          with Cancel as the default answer and the answer that Escape gives, shall start the
+          agent tool only when the user chooses Launch anyway and shall otherwise neither start it
+          nor record a launch, and shall report the failure to a user who cannot be asked and
+          launch. When the failed install was an update the user chose, the question shall say the
+          files in the repo may be partially updated or incomplete rather than promise the earlier
+          files.
+        justification: |
+          Starting an agentic tool without the agent files it was meant to follow, or with files
+          the user wanted replaced, is a decision the developer should make knowingly; a message
+          shown while the tool is already starting leaves no choice. A failed update may already
+          have replaced part of the files, so the question must not claim they are unchanged. A
+          refused package of the same
+          version with other content is one of these failures, and nothing is extracted for it.
+          Where no one can be asked the launch still proceeds, so a host without a window is never
+          blocked.
+        tests:
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndSourceUnreachable_AsksLaunchAnywayWithReason_DeclineCancelsLaunch
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UpdateFails_QuestionWarnsFilesMayBePartiallyUpdated
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndSourceUnreachable_LaunchAnywayChosen_OutcomeFailedLaunchAnyway
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndOnlyRepublishedPackage_AsksLaunchAnywayAndNothingExtracted
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchAndUpdate_RepublishedPackageOnlySource_RefusesFilesUntouchedAndOffersLaunchAnyway
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_EveryConfiguredSourceThrowsIOException_IsReportedNotUnhandled
+          - RepoCardViewModel_LaunchCommand_RestoreFailsAndUserCancels_DoesNotLaunchOrRecordLaunch
+          - RepoCardViewModel_LaunchCommand_RestoreFailsAndUserChoosesLaunchAnyway_Launches
+          - RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches
+          - AgentFilesChoiceRequest_Respond_FirstAnswerWins
 
       - id: AgentControl-RepoCardViewModel-Upgrade
         title: >-
@@ -285,7 +453,7 @@ sections:
       - id: AgentControl-RepoCardViewModel-AgentsMdTemplateOffer
         title: >-
           The RepoCardViewModel class shall, after a successful extraction during package
-          selection, upgrade, or the ensure-synced-before-launch re-extraction, offer the
+          selection, upgrade, or the restore or update of agent files before launch, offer the
           package's optional root-level AGENTS.md template to the user only when the repo has
           no AGENTS.md file of its own, the package has a template to offer, and the user has
           not previously declined the offer for this repo.
@@ -402,8 +570,8 @@ sections:
           mark again, recording the status on the repo's settings entry and raising its change
           notification exactly once per change.
         justification: |
-          Marking a repo as a favorite is how a developer promotes it to the top of the
-          sorted recent-repos list; a single click must change the status exactly once, so a repo
+          Marking a repo as a favorite is how a developer lists it under Favorites, the first
+          section of the repo list; a single click must change the status exactly once, so a repo
           can both be favorited and unfavorited.
         tests:
           - RepoCardViewModel_IsFavorite_Set_UpdatesRecentRepoAndRaisesFavoriteChangedOncePerChange
@@ -871,11 +1039,11 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-RefuseChangedContent
         title: >-
-          The RepoCardViewModel class shall, when an upgrade or the restore of missing agent
+          The RepoCardViewModel class shall, when an upgrade or the restore or update of agent
           files before launch finds that the version the repo is pinned to now has content that
           differs from the recorded identity, apply nothing and leave the pin as it was.
         justification: |
-          Restoring or upgrading to a changed copy of a version would silently change the
+          Restoring, updating or upgrading to a changed copy of a version would silently change the
           instructions the agent follows.
         tests:
           - RepoCardViewModel_UpgradeCommand_SameVersionRepublished_RefusesWithoutChangingRepoOrPin
@@ -1063,7 +1231,7 @@ sections:
       - id: AgentControl-RepoCardViewModel-ResolveByFilesIdentity
         title: >-
           The RepoCardViewModel class shall find the source that supplies a repo's pinned package -
-          for the restore of missing agent files before launch and for the check of what supplies
+          for the restore or update of agent files before launch and for the check of what supplies
           the repo's files - among all the sources the user has configured, in Settings order,
           choosing the first source that offers the pinned package name and version and whose files
           have exactly the content identity the pin recorded, whatever its alias or kind of source.
@@ -1084,7 +1252,7 @@ sections:
       - id: AgentControl-RepoCardViewModel-PreferLastSupplier
         title: >-
           The RepoCardViewModel class shall try the source that last supplied the pinned package
-          first when it restores missing agent files before launch, and shall accept that source
+          first when it restores or updates agent files before launch, and shall accept that source
           in the background check, without reading its files again, as long as it is still
           configured and still offers the pinned version.
         justification: |
@@ -1231,7 +1399,7 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-LaunchSyncNeverWritesPin
         title: >-
-          The RepoCardViewModel class shall, when it restores missing agent files before launch,
+          The RepoCardViewModel class shall, when it restores or updates agent files before launch,
           leave the repo's pin file unchanged whether or not the pin recorded an identity, including
           when the user declines the offer of the package's AGENTS.md template that the restore
           raises.

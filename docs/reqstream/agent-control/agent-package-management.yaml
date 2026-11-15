@@ -497,6 +497,25 @@ sections:
           - AgentPackageManagementSubsystem_ZipAndNuGetSources_ReportFilesIdentityAndDetectRepublishedZip
           - AgentPackageManagementSubsystem_SameFilesFromZipNuGetAndGit_ReportTheSameIdentity
 
+      - id: AgentControl-AgentPackageManagement-InstalledFilesIdentity
+        title: >-
+          The AgentPackageManagement subsystem shall be able to give the agent files installed in a
+          repo's managed agent folders the same kind of content identity as a package's files, equal
+          to the package's when the files are an untouched extraction of it whichever kind of source
+          delivered the package, different when any file is missing, changed, renamed or added, and
+          never an identity for files it cannot read.
+        justification: |
+          What a repo's pin records can only be checked against what is on disk if both are
+          identified the same way; an identity of the installed files that is equal for an untouched
+          extraction and different for every real change is what lets a launch tell a repo in
+          order from one that is damaged or edited without reading any package source.
+        children:
+          - AgentControl-PackageContentIdentity-InstalledFilesIdentity
+          - AgentControl-PackageContentIdentity-InstalledIdentityDetectsDifferences
+          - AgentControl-PackageContentIdentity-InstalledIdentityFailsSafely
+        tests:
+          - RepoSync_InstalledFiles_ExtractionFromZipFolderAndLayoutPackages_HasThePackagesIdentity
+
       - id: AgentControl-AgentPackageManagement-OffersAcrossSources
         title: >-
           The AgentPackageManagement subsystem shall list what all the configured sources offer of

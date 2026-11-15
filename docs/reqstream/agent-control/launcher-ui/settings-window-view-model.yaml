@@ -49,6 +49,17 @@ sections:
           - SettingsWindowViewModel_Save_SourceLocationWithEmbeddedCredential_IsRefusedWithErrorMessage
           - SettingsWindowViewModel_SaveCommand_OnSaveThrowsInvalidOperation_ShowsErrorAndDoesNotRaiseSaved
 
+      - id: AgentControl-SettingsWindowViewModel-KeepShellOpen
+        title: >-
+          The SettingsWindowViewModel class shall start with the saved keep-shell-open choice (on
+          when none was saved) and pass the chosen value to its owner with the other settings on
+          save.
+        justification: |
+          A choice that was dropped when the other settings are saved would silently reset for
+          every user who opens Settings, so the value must travel with the rest.
+        tests:
+          - SettingsWindowViewModel_KeepShellOpen_DefaultsToOnAndIsSavedWithSettings
+
       - id: AgentControl-SettingsWindowViewModel-ShellPreferencePresets
         title: >-
           The SettingsWindowViewModel class shall expose an OS-appropriate, non-empty list of

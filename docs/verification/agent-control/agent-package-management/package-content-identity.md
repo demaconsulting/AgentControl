@@ -11,6 +11,11 @@ checked. The encoding is checked against a digest the test computes by building 
 against one pinned expected digest of a fixed set of files, so the test does not merely re-run the code under test.
 That the *same* files give the *same* identity when delivered as a zip, a NuGet package folder and a Git layout is
 verified by the subsystem tests of `AgentPackageManagement` (see that document), because it needs the real readers.
+The identity of the files installed in a repo (`ComputeInstalledFilesIdentity`) is verified in the same test file with
+real temporary repos: a package is extracted with `PackageContentExtractor.Extract` (from a real zip, a real unpacked
+package folder and a real layout folder), the recorded identity is that of the package's own reader, and the tree is
+then left untouched or damaged; junction tests (Windows) and symbolic-link tests (Linux, skipped where links cannot be
+created) cover the link cases.
 
 #### Test Environment
 
@@ -36,6 +41,11 @@ N/A - standard test environment.
   managed folders untouched, and the content identity reports none for such a package.
 - The short description cuts a long value (also one of an unrecognized shape, after its first colon), keeps a short
   one, and reports `none` for a missing identity.
+- The identity of the files installed in a repo equals the recorded identity of the package after an untouched
+  extraction of a zip, an unpacked package folder or a layout folder, whatever the line endings of the files, and
+  ignores empty folders, the repo's root files and anything outside the four managed folders; a missing, changed,
+  renamed or extra file gives a different identity; a linked managed folder, a missing repo, a null repo root and a
+  canceled token are refused rather than identified; and a repo root reached through a link is accepted.
 
 #### Test Scenarios
 
@@ -109,3 +119,46 @@ tested by `PackageContentIdentity_Compare_EitherIdentityMissingOrLegacy_IsNotCom
 **PackageContentIdentity_Compare_Changed**: Two different files identities give `Changed`. This scenario is
 tested by `PackageContentIdentity_Compare_DifferentValues_IsChanged`, covering
 `AgentControl-PackageContentIdentity-CompareChanged`.
+
+**PackageContentIdentity_InstalledFilesIdentity_UntouchedExtractionEqualsThePackage**: Arrange: the same files as a zip,
+an unpacked package folder and a layout-root folder, each extracted with `PackageContentExtractor.Extract` into a real
+temporary repo whose recorded identity is the package reader's. Act: compute
+`ComputeInstalledFilesIdentity(repo)`. Assert: it equals the recorded identity for all three kinds; an extra empty
+folder does not change it; a repo with no managed folders and one with empty managed folders both give the identity of
+the empty package; a repo root `AGENTS.md` and `release-notes.md` and files outside the four folders are ignored,
+while a package that ships those root files still equals; a package whose files have CRLF line endings equals its
+extraction, and converting one file to LF on disk makes the identity differ (no line-ending normalization); and a repo
+root reached through a junction (`windows@`) or a symbolic link (`ubuntu@`) is accepted. This scenario is tested by
+`PackageContentIdentity_ComputeInstalledFilesIdentity_UntouchedZipExtraction_EqualsRecordedIdentity`,
+`PackageContentIdentity_ComputeInstalledFilesIdentity_UntouchedFolderPackageExtraction_EqualsRecordedIdentity`,
+`PackageContentIdentity_ComputeInstalledFilesIdentity_UntouchedLayoutRootExtraction_EqualsRecordedIdentity`,
+`PackageContentIdentity_ComputeInstalledFilesIdentity_ExtraEmptyFolder_EqualsRecordedIdentity`,
+`PackageContentIdentity_ComputeInstalledFilesIdentity_NoManagedFolders_EqualsIdentityOfEmptyPackage`,
+`PackageContentIdentity_ComputeInstalledFilesIdentity_EmptyManagedFolders_EqualsIdentityOfEmptyPackage`,
+`PackageContentIdentity_ComputeInstalledFilesIdentity_RepoRootReleaseNotesAndAgentsMd_AreIgnored`,
+`PackageContentIdentity_ComputeInstalledFilesIdentity_CrLfContent_IsNotNormalized`,
+`windows@PackageContentIdentity_ComputeInstalledFilesIdentity_RepoRootUnderJunction_Succeeds` and
+`ubuntu@PackageContentIdentity_ComputeInstalledFilesIdentity_RepoRootUnderSymlink_Succeeds`, covering
+`AgentControl-PackageContentIdentity-InstalledFilesIdentity`.
+
+**PackageContentIdentity_InstalledFilesIdentity_DetectsDifferences**: Arrange: an untouched extraction of a package into
+a repo, with its recorded identity. Act: delete one file; change one byte of a file; add a file; rename a file; compute
+`ComputeInstalledFilesIdentity` each time. Assert: each result differs from the recorded identity. This scenario is
+tested by
+`PackageContentIdentity_ComputeInstalledFilesIdentity_MissingFile_DiffersFromRecordedIdentity`,
+`PackageContentIdentity_ComputeInstalledFilesIdentity_ChangedFileByOneByte_DiffersFromRecordedIdentity`,
+`PackageContentIdentity_ComputeInstalledFilesIdentity_ExtraFile_DiffersFromRecordedIdentity` and
+`PackageContentIdentity_ComputeInstalledFilesIdentity_RenamedFile_DiffersFromRecordedIdentity`, covering
+`AgentControl-PackageContentIdentity-InstalledIdentityDetectsDifferences`.
+
+**PackageContentIdentity_InstalledFilesIdentity_FailsSafely**: Arrange: a repo with a managed folder that is a junction
+(`windows@`) or a symbolic link (`ubuntu@`); a canceled token; a null repo root; a repo folder that does not exist.
+Act: compute `ComputeInstalledFilesIdentity`. Assert: the linked folder throws `InvalidOperationException` (no
+identity is reported for files that cannot be read), a canceled token throws `OperationCanceledException`, a null root
+throws `ArgumentNullException` and a missing repo throws `InvalidOperationException`. This scenario is tested by
+`windows@PackageContentIdentity_ComputeInstalledFilesIdentity_ManagedFolderIsJunction_ThrowsInvalidOperationException`,
+`ubuntu@PackageContentIdentity_ComputeInstalledFilesIdentity_ManagedFolderIsSymlink_ThrowsInvalidOperationException`,
+`PackageContentIdentity_ComputeInstalledFilesIdentity_CanceledToken_ThrowsOperationCanceledException`,
+`PackageContentIdentity_ComputeInstalledFilesIdentity_NullRepoRoot_ThrowsArgumentNullException` and
+`PackageContentIdentity_ComputeInstalledFilesIdentity_MissingRepoRoot_ThrowsInvalidOperationException`, covering
+`AgentControl-PackageContentIdentity-InstalledIdentityFailsSafely`.

@@ -1,21 +1,18 @@
 # Project Overview
 
-> **Downstream customization required**: Replace the `TODO` values below with
-> values specific to the target repository. These values are the canonical source
-> for project-wide template placeholders used throughout the repository.
-
-- **project-name**: TODO — repository/project name (e.g., `ReqStream`)
-- **organization**: TODO — organization name for document authorship (e.g., `DEMA Consulting`)
-- **project-tagline**: TODO — document subtitle; 4–8 words, noun phrase, no period
-  (e.g., `Requirements traceability for .NET projects`)
-- **description**: TODO — full project description, may be multiple sentences
-- **languages**: TODO — programming languages used (e.g., `C#`, `C++`)
-- **technologies**: TODO — key technologies and frameworks (e.g., `.NET`, `CMake`)
+- **project-name**: AgentControl
+- **organization**: DEMA Consulting
+- **project-tagline**: A Desktop Launcher for Distributing Proprietary Agent Packages
+- **description**: AgentControl is a Windows desktop launcher that lets a company distribute proprietary AI-agent
+  configuration (agentic-CLI instruction files, standards, templates, and skills) alongside public source repositories
+  without committing that content to source control. It syncs a repo's `.github/agents`, `.github/standards`,
+  `.github/templates`, and `.github/skills` folders to the package version pinned in the repo's `.agentcontrol.json`,
+  then launches the developer's preferred agentic CLI tool in that repo. It is a GUI app shipped as a GitHub release
+  (MSI installer), not a NuGet package.
+- **languages**: C#
+- **technologies**: .NET 10 (LTS), Avalonia, Serilog, NuGet, Git, WiX Toolset, xUnit, FlaUI
 
 # Project Structure
-
-> **Downstream customization required**: Replace `{project}` and
-> `{test-project}` with the actual source and test project folder names.
 
 ```text
 ├── docs/
@@ -31,12 +28,15 @@
 │   ├── user_guide/
 │   └── verification/
 ├── src/
-│   └── {project}/
+│   ├── DemaConsulting.AgentControl/                # The application
+│   └── DemaConsulting.AgentControl.Msi/            # WiX installer
 ├── test/
-│   ├── {test-project}/
-│   └── DemaConsulting.AgentControl.Puppet.Tests/  # Not shipped: tests of the agent tooling
-└── tools/                                         # Not shipped: agent tooling
-    └── DemaConsulting.AgentControl.Puppet/
+│   ├── DemaConsulting.AgentControl.Tests/
+│   ├── DemaConsulting.AgentControl.UiTests/
+│   └── DemaConsulting.AgentControl.ArgLoggerStub/  # Test helper executable
+└── tools/                                          # Not shipped: agent tooling (not software items)
+    ├── DemaConsulting.AgentControl.Puppet/
+    └── DemaConsulting.AgentControl.Puppet.Tests/
 ```
 
 # Language and Spelling (ALL Agents)

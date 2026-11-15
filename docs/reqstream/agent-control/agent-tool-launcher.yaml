@@ -3,10 +3,13 @@
 #
 # PURPOSE:
 # - Define requirements for the AgentControl AgentToolLauncher subsystem
-# - AgentToolLauncher spans ShellDetector.cs (chooses the terminal/shell to launch through)
-#   and AgentToolLauncher.cs (builds the process-start info to run the agent tool inside that
-#   shell); the ShellKind.cs enum is folded into this subsystem-level description as it has no
-#   dedicated test file
+# - AgentToolLauncher spans ShellDetector.cs (chooses the terminal/shell to launch through),
+#   AgentToolLauncher.cs (builds the process-start info to run the agent tool inside that
+#   shell, for a shell that stays open after the tool or ends with it) and
+#   AgentToolProcessStarter.cs (starts the process; the IAgentToolProcessStarter interface it
+#   implements is a supporting type of this subsystem, so the launch flow can be tested
+#   without starting a shell); the ShellKind.cs enum is folded into this subsystem-level
+#   description as it has no dedicated test file
 # - Subsystem requirements describe the observable behavior of launching an agentic CLI tool
 #   in a repo's working directory
 #
@@ -36,3 +39,22 @@ sections:
           - AgentControl-AgentToolLauncher-Validation
         tests:
           - windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory
+
+      - id: AgentControl-AgentToolLauncherSubsystem-KeepShellOpen
+        title: >-
+          The AgentToolLauncher subsystem shall, for PowerShell and the Command shell, run the
+          agent tool so that the shell stays open afterwards when asked to (the default) and ends
+          together with the tool otherwise, and shall start the resulting process through a
+          replaceable starter.
+        justification: |
+          Whether the window stays open for the user, or closes with the tool, is a personal
+          choice, so the arguments handed to the shell depend on it; starting the process
+          through a replaceable starter lets the launch flow be verified without opening a shell
+          on the developer's desktop.
+        children:
+          - AgentControl-AgentToolLauncher-BuildCommand
+          - AgentControl-AgentToolLauncher-ShellEndsWithTool
+          - AgentControl-AgentToolProcessStarter-StartProcess
+        tests:
+          - AgentToolLauncherSubsystem_KeepShellOpen_PowerShellAndCmd_OnKeepsOpenOffEndsWithTool
+          - AgentToolLauncherSubsystem_KeepShellOpen_PosixShell_IsUnaffected

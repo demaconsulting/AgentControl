@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.IO.Compression;
 using System.Text.Json;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Tools;
@@ -77,18 +78,24 @@ public sealed class PackageContentIntegrityTests
             Assert.NotNull(launchButton);
             launchButton.Invoke();
 
-            // Assert: the refusal is explained in plain language, nothing was extracted, and the
-            // pin is untouched
-            var messageWindow = context.WaitForWindowWithDescendant("MessageText", TimeSpan.FromSeconds(30));
+            // Assert: the refusal is explained in plain language in a question that offers to launch anyway
+            // (the default is Cancel), nothing was extracted, and the pin is untouched
+            var messageWindow = context.WaitForWindowWithDescendant("ConfirmationMessageText", TimeSpan.FromSeconds(30));
             Assert.NotNull(messageWindow);
-            var message = messageWindow.FindFirstDescendant(cf => cf.ByAutomationId("MessageText"))?.Name;
+            var message = messageWindow.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationMessageText"))?.Name;
             Assert.NotNull(message);
             Assert.Contains("not synced", message, StringComparison.Ordinal);
             Assert.Contains("now contains different files", message, StringComparison.Ordinal);
+            Assert.Equal(
+                "Launch anyway",
+                messageWindow.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationYesButton"))?.AsButton().Name);
             Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));
             Assert.Equal(pinBefore, File.ReadAllText(pinPath));
 
-            // Assert: the warning did not stop the launch - the configured agent tool (the arg-logger
+            // Act: choose to launch anyway
+            messageWindow.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationYesButton"))?.AsButton().Invoke();
+
+            // Assert: the launch goes on - the configured agent tool (the arg-logger
             // stub, recognized by its marker argument, which git invocations never carry) was invoked,
             // in the repo's working directory
             var invocation = ArgLoggerLog.WaitForInvocation(
@@ -330,6 +337,254 @@ public sealed class PackageContentIntegrityTests
     }
 
     /// <summary>
+    ///     Clicks Launch on a repo whose agent files differ from the pin and chooses Keep current files (the
+    ///     default answer): the agent tool starts in the repo and the files are exactly as the user left them.
+    /// </summary>
+    [Fact]
+    public void LaunchButton_Click_AgentFilesDiffer_KeepChosen_LaunchesWithFilesUntouched()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        var sourceDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-source-" + Guid.NewGuid());
+
+        try
+        {
+            // Arrange: a repo holding the pinned package's files, with one of them edited
+            var zipPath = FixturePackageBuilder.Create(sourceDirectory, "contoso-agents", "1.0.0");
+            using var context = CreateContext(sourceDirectory, TestFilesIdentity.OfArchive(zipPath));
+            InstallPackageFiles(zipPath, context.RepoPath);
+            var edited = Path.Combine(context.RepoPath, ".github", "agents", "test.md");
+            File.WriteAllText(edited, "# my experiment\n");
+            var mainWindow = context.Launch();
+
+            // Act: launch; the files differ, so the user is asked
+            ClickLaunch(mainWindow);
+            var question = context.WaitForWindowWithDescendant("ConfirmationMessageText", TimeSpan.FromSeconds(30));
+            Assert.NotNull(question);
+
+            // Assert: the question offers both choices, and nothing has launched or changed yet
+            Assert.Contains(
+                "do not match",
+                question.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationMessageText"))?.Name,
+                StringComparison.Ordinal);
+            Assert.Equal(
+                "Update from package",
+                question.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationYesButton"))?.AsButton().Name);
+            Assert.Equal(
+                "Keep current files",
+                question.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationNoButton"))?.AsButton().Name);
+            Assert.Equal("# my experiment\n", File.ReadAllText(edited));
+
+            // Act: keep the current files
+            question.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationNoButton"))?.AsButton().Invoke();
+
+            // Assert: the tool was launched in the repo and the edited file is still there
+            var invocation = WaitForAgentToolInvocation(context);
+            Assert.NotNull(invocation);
+            Assert.True(PathsEqual(invocation.WorkingDirectory, context.RepoPath));
+            Assert.Equal("# my experiment\n", File.ReadAllText(edited));
+        }
+        finally
+        {
+            TryDelete(sourceDirectory);
+        }
+    }
+
+    /// <summary>
+    ///     Clicks Launch on a repo whose agent files differ from the pin and chooses Update from package: the
+    ///     files are replaced by the pinned package's files and the agent tool starts.
+    /// </summary>
+    [Fact]
+    public void LaunchButton_Click_AgentFilesDiffer_UpdateChosen_ReplacesFilesAndLaunches()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        var sourceDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-source-" + Guid.NewGuid());
+
+        try
+        {
+            // Arrange: a repo holding about half of the pinned package's files (all four folders still exist)
+            var zipPath = FixturePackageBuilder.Create(sourceDirectory, "contoso-agents", "1.0.0");
+            using var context = CreateContext(sourceDirectory, TestFilesIdentity.OfArchive(zipPath));
+            InstallPackageFiles(zipPath, context.RepoPath);
+            File.Delete(Path.Combine(context.RepoPath, ".github", "standards", "test.md"));
+            File.Delete(Path.Combine(context.RepoPath, ".github", "skills", "test.md"));
+            var mainWindow = context.Launch();
+
+            // Act: launch and answer Update from package
+            ClickLaunch(mainWindow);
+            var question = context.WaitForWindowWithDescendant("ConfirmationMessageText", TimeSpan.FromSeconds(30));
+            Assert.NotNull(question);
+            question.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationYesButton"))?.AsButton().Invoke();
+
+            // Assert: the tool was launched and every file of the package is back
+            var invocation = WaitForAgentToolInvocation(context);
+            Assert.NotNull(invocation);
+            Assert.True(PathsEqual(invocation.WorkingDirectory, context.RepoPath));
+            Assert.True(File.Exists(Path.Combine(context.RepoPath, ".github", "standards", "test.md")));
+            Assert.True(File.Exists(Path.Combine(context.RepoPath, ".github", "skills", "test.md")));
+            Assert.Equal("# Test Agent\n", File.ReadAllText(Path.Combine(context.RepoPath, ".github", "agents", "test.md")));
+        }
+        finally
+        {
+            TryDelete(sourceDirectory);
+        }
+    }
+
+    /// <summary>
+    ///     Clicks Launch on a repo whose agent files are exactly the pinned package's: the agent tool starts
+    ///     at once, without any question.
+    /// </summary>
+    [Fact]
+    public void LaunchButton_Click_AgentFilesMatchPin_LaunchesWithoutPrompt()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        var sourceDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-source-" + Guid.NewGuid());
+
+        try
+        {
+            // Arrange: a repo holding exactly the pinned package's files
+            var zipPath = FixturePackageBuilder.Create(sourceDirectory, "contoso-agents", "1.0.0");
+            using var context = CreateContext(sourceDirectory, TestFilesIdentity.OfArchive(zipPath));
+            InstallPackageFiles(zipPath, context.RepoPath);
+            var mainWindow = context.Launch();
+
+            // Act
+            ClickLaunch(mainWindow);
+
+            // Assert: launched, and no question was ever shown
+            var invocation = WaitForAgentToolInvocation(context);
+            Assert.NotNull(invocation);
+            Assert.True(PathsEqual(invocation.WorkingDirectory, context.RepoPath));
+            Assert.Null(context.WaitForWindowWithDescendant("ConfirmationMessageText", TimeSpan.FromSeconds(2)));
+        }
+        finally
+        {
+            TryDelete(sourceDirectory);
+        }
+    }
+
+    /// <summary>
+    ///     Clicks Launch on a repo that has no agent files when the pinned package cannot be obtained, and
+    ///     chooses Cancel (the default answer): the agent tool is not started.
+    /// </summary>
+    [Fact]
+    public void LaunchButton_Click_RestoreFails_CancelChosen_DoesNotLaunch()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        var sourceDirectory = Path.Combine(Path.GetTempPath(), "AgentControlUiTests-source-" + Guid.NewGuid());
+
+        try
+        {
+            // Arrange: a pinned repo without agent files, and a source that does not offer the package
+            var zipPath = FixturePackageBuilder.Create(sourceDirectory, "contoso-agents", "1.0.0");
+            var identity = TestFilesIdentity.OfArchive(zipPath);
+            File.Delete(zipPath);
+            using var context = CreateContext(sourceDirectory, identity);
+            var mainWindow = context.Launch();
+
+            // Act: launch; the restore fails, so the user is asked
+            ClickLaunch(mainWindow);
+            var question = context.WaitForWindowWithDescendant("ConfirmationMessageText", TimeSpan.FromSeconds(30));
+            Assert.NotNull(question);
+            Assert.Equal(
+                "Launch anyway",
+                question.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationYesButton"))?.AsButton().Name);
+            Assert.Equal(
+                "Cancel",
+                question.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationNoButton"))?.AsButton().Name);
+            question.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationNoButton"))?.AsButton().Invoke();
+
+            // Assert: the agent tool was not started, and nothing was written to the repo
+            Assert.Null(ArgLoggerLog.WaitForInvocation(
+                context.ArgLoggerOutputFile,
+                record => record.Arguments.Contains(TestSettingsWriter.AgentToolMarkerArgument),
+                TimeSpan.FromSeconds(5)));
+            Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));
+        }
+        finally
+        {
+            TryDelete(sourceDirectory);
+        }
+    }
+
+    /// <summary>
+    ///     Creates a test context for a repo pinned to <c>contoso-agents</c> 1.0.0 with the given recorded
+    ///     identity and a zip source folder.
+    /// </summary>
+    /// <param name="sourceDirectory">The zip source folder.</param>
+    /// <param name="identity">The recorded files identity.</param>
+    /// <returns>The context, which the caller disposes.</returns>
+    private static AgentControlTestContext CreateContext(string sourceDirectory, string identity) =>
+        new(
+            packageSourcePath: sourceDirectory,
+            pinnedPackageName: "contoso-agents",
+            pinnedPackageVersion: "1.0.0",
+            pinnedSource: "Default",
+            pinnedContentIdentity: identity);
+
+    /// <summary>
+    ///     Writes the managed-folder files of a package zip into a repo exactly as extraction would (raw
+    ///     bytes), so the repo's agent files are the package's.
+    /// </summary>
+    /// <param name="zipPath">The package zip.</param>
+    /// <param name="repoPath">The repo folder.</param>
+    private static void InstallPackageFiles(string zipPath, string repoPath)
+    {
+        using var archive = ZipFile.OpenRead(zipPath);
+        foreach (var entry in archive.Entries.Where(
+                     entry => entry.Name.Length > 0 && entry.FullName.StartsWith(".github/", StringComparison.Ordinal)))
+        {
+            var target = Path.Combine(repoPath, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            entry.ExtractToFile(target, overwrite: true);
+        }
+    }
+
+    /// <summary>
+    ///     Clicks the repo card's Launch button.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    private static void ClickLaunch(Window mainWindow)
+    {
+        var launchButton = Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("LaunchButton"))?.AsButton(),
+            timeout: TimeSpan.FromSeconds(10),
+            interval: TimeSpan.FromMilliseconds(200)).Result;
+        Assert.NotNull(launchButton);
+        launchButton.Invoke();
+    }
+
+    /// <summary>
+    ///     Waits for the invocation of the configured agent tool (the arg-logger stub with its marker argument).
+    /// </summary>
+    /// <param name="context">The test context whose log to poll.</param>
+    /// <returns>The invocation, or <see langword="null"/> if none was recorded in time.</returns>
+    private static ArgLoggerInvocation? WaitForAgentToolInvocation(AgentControlTestContext context) =>
+        ArgLoggerLog.WaitForInvocation(
+            context.ArgLoggerOutputFile,
+            record => record.Arguments.Contains(TestSettingsWriter.AgentToolMarkerArgument),
+            TimeSpan.FromSeconds(30));
+
+    /// <summary>
     ///     Clicks Launch on a repo whose pinned version was republished, and checks that the refusal is explained
     ///     in plain language, that nothing was extracted and the pin is untouched, and that the launch went on.
     /// </summary>
@@ -348,17 +603,21 @@ public sealed class PackageContentIntegrityTests
         Assert.NotNull(launchButton);
         launchButton.Invoke();
 
-        // Assert: the refusal is explained, nothing was extracted, and the pin is untouched
-        var messageWindow = context.WaitForWindowWithDescendant("MessageText", TimeSpan.FromSeconds(30));
+        // Assert: the refusal is explained in a question offering to launch anyway (Cancel is the default),
+        // nothing was extracted, and the pin is untouched
+        var messageWindow = context.WaitForWindowWithDescendant("ConfirmationMessageText", TimeSpan.FromSeconds(30));
         Assert.NotNull(messageWindow);
-        var message = messageWindow.FindFirstDescendant(cf => cf.ByAutomationId("MessageText"))?.Name;
+        var message = messageWindow.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationMessageText"))?.Name;
         Assert.NotNull(message);
         Assert.Contains("not synced", message, StringComparison.Ordinal);
         Assert.Contains("now contains different files", message, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(context.RepoPath, ".github")));
         Assert.Equal(pinBefore, File.ReadAllText(pinPath));
 
-        // Assert: the warning did not stop the launch - the configured agent tool was invoked in the repo
+        // Act: choose to launch anyway
+        messageWindow.FindFirstDescendant(cf => cf.ByAutomationId("ConfirmationYesButton"))?.AsButton().Invoke();
+
+        // Assert: the launch goes on - the configured agent tool was invoked in the repo
         var invocation = ArgLoggerLog.WaitForInvocation(
             context.ArgLoggerOutputFile,
             record => record.Arguments.Contains(TestSettingsWriter.AgentToolMarkerArgument),

@@ -36,8 +36,8 @@ day as a quick-launch utility for AI-assisted development sessions.
   root-level `AGENTS.md` entry (same convention as the existing root-level
   `release-notes.md` entry — outside the four managed folders, so it is never
   blind-deleted/replaced on sync). When a sync/extract happens (initial
-  package selection, upgrade, or the ensure-synced-before-launch best-effort
-  sync) and the repo has no root-level `AGENTS.md` of its own, and the
+  package selection, upgrade, or the launch-time restore or update) and the
+  repo has no root-level `AGENTS.md` of its own, and the
   package being applied has a template to offer, the user is shown a modal
   Yes/No dialog asking whether to place the template at the repo root,
   clearly noting they are responsible for customizing it afterward. A
@@ -50,12 +50,14 @@ day as a quick-launch utility for AI-assisted development sessions.
   selection, shell preference)
 - Personal organization and appearance, stored only in the user's own settings
   (never in a repo): favorites, repo groups shown as collapsible sections,
+  the user's own order of the repo cards (reordered from the card menu or by
+  drag and drop, and never changed by launching),
   card colors, an optional repo picture (`icon.png`/`logo.png`) on the card,
   and a light/dark/system color theme; every change is saved before it is
   applied
 - Repo-card status badges: upgrade-available, committed-agent-files warning,
   missing-repo, dirty-working-tree; per-repo current branch name; recent-repos
-  search/filter and most-recently-launched sort order (with pinning/favorites);
+  search/filter and a stable, user-controlled order (favorites first);
   per-repo manual refresh; confirmation prompt before removing a repo from the
   recent-repos list
 - Diagnostic file logging (Serilog-based) for troubleshooting process-launch
@@ -66,17 +68,23 @@ day as a quick-launch utility for AI-assisted development sessions.
   within it, a version — defaulting to latest), then performs the same
   extract-and-pin sequence as an upgrade (including the AGENTS.md template
   offer described above)
-- **Ensure-synced-before-launch:** clicking Launch first attempts a best-effort
-  sync of the four known agent folders for a repo that already has a pin; if
-  any are missing (e.g. a fresh clone, or a `.gitignore`'d folder that was
-  never unpacked on this machine), it re-extracts the *currently pinned*
-  version (never silently jumps to latest). This sync attempt is purely
-  informational and never blocks the launch: a repo with committed agent
-  files skips the sync entirely (its managed folders are never touched), a
-  repo with no pin at all launches anyway with an informational message, and
-  a failed re-extraction surfaces a non-blocking warning while the launch
-  still proceeds. A re-extraction here also triggers the AGENTS.md template
-  offer described above, consistent with the other two sync call sites
+- **Verify-installed-files-before-launch** (formerly "Ensure-synced-before-launch"):
+  clicking Launch first checks, for a repo that already has a pin, that the
+  agent files physically in the four known agent folders are the pinned
+  package's. A repo with no agent files at all (e.g. a fresh clone, or a
+  `.gitignore`'d folder that was never unpacked on this machine) silently gets
+  the *currently pinned* version (never silently jumps to latest). Otherwise
+  the files are hashed locally and compared with the files identity recorded in
+  the pin, with no package access; a difference raises a Keep/Update question
+  (default Keep), and a needed restore that fails raises a Launch
+  anyway/Cancel question (default Cancel). A repo with committed agent files
+  skips the check entirely (its managed folders are never touched), a repo
+  with no pin at all launches anyway with an informational message, and a pin
+  without a recorded identity keeps the older folder-presence check. A restore
+  or update here also triggers the AGENTS.md template offer described above,
+  consistent with the other two sync call sites. See *Verify installed agent
+  files before launch* below for the decision table; this amends the earlier
+  "never blocked" rule in exactly one case
 - A simple About dialog (app version, copyright, license) reachable from the
   main window, so the running build can be identified without inspecting
   file properties
@@ -121,7 +129,8 @@ day as a quick-launch utility for AI-assisted development sessions.
 AgentControl
 ├── LauncherUI (Avalonia) - recent repos list, launch button, settings page,
 │   │                       upgrade notification badges/tooltips
-│   ├── MainWindowViewModel - owns the recent-repos list; creates a
+│   ├── MainWindowViewModel - owns the recent-repos list in the user's own
+│   │                         order (Move/drag reorder it); creates a
 │   │                         RepoCardViewModel per repo and a
 │   │                         RepoGroupHeaderViewModel per list section;
 │   │                         saves every change (candidate copy -> save ->
@@ -184,9 +193,11 @@ AgentControl
     │          folder-browse dialog), git executable path override, agent
     │          tool selection (Copilot CLI / Cursor / Claude Code / Custom
     │          command), shell/terminal preference, color theme, and the
-    │          user's own repo groups, card colors and collapsed sections
+    │          user's own repo groups, card colors, collapsed sections and
+    │          repo order (seeded once for an older file)
     ├── SettingsStore - loads (repairing unusable values, such as an unknown
-    │                   card color) and saves the settings file
+    │                   card color, and seeding the repo order once) and saves
+    │                   the settings file
     └── RepoGroupName - the rules for group names, used by SettingsStore,
                         RepoCardViewModel, MainWindowViewModel and
                         GroupNameViewModel
@@ -268,7 +279,11 @@ AgentControl
   expose a picker (Copilot CLI / Cursor / Claude Code / Custom command) plus a
   shell/terminal preference, because the correct terminal materially affects
   how well some CLI tools behave on Windows (e.g., Copilot CLI works best in a
-  modern PowerShell).
+  modern PowerShell). A "keep the shell open after the agent tool exits"
+  choice (on by default) decides whether that window stays open for the
+  developer or closes together with the tool; it only changes how the shell is
+  invoked, and the launch itself goes through a replaceable process starter so
+  tests never open a real shell.
 
 - **Testability via config-dir override and stub executables.** A command-line
   option lets FlaUI-driven integration tests point AgentControl at an isolated
@@ -325,9 +340,17 @@ AgentControl
     since the path may reappear).
   - 🔒 **Dirty working tree** — suppresses/disables the Pull action.
 
-  The recent-repos list supports a search/filter box and sorts by
-  most-recently-launched by default, with the ability to pin/favorite
-  specific repos above that ordering. Each card has a manual refresh action
+  The recent-repos list supports a search/filter box. Its order belongs to
+  the user: favorites come first, and otherwise the repos stay in the order
+  the user keeps them in. A newly added repo goes to the bottom of its
+  section, and launching, refreshing or any other action never moves a card.
+  The user reorders from a card's "..." menu (Reorder > Move to top/up/down/bottom) or
+  by dragging a card within a section, into another section (which sets its
+  group or favorite flag) or onto a section header; reordering is off while
+  the filter has text, and the order is kept only in the user's own settings
+  (a settings file from before this order existed is seeded once from the old
+  favorites-then-most-recently-launched arrangement, so nothing jumps on
+  upgrade). Each card has a manual refresh action
   (re-checks git state and the committed-agent-files badge without waiting
   for the next full app launch) and a confirmation prompt before "Remove
   from list" (a destructive action against AgentControl's own state, not the
@@ -414,20 +437,28 @@ to this document's own Purpose statement. The following closes that gap:
   long as no numeric-looking prefix segment could itself be mistaken for a
   version (an accepted edge-case limitation, consistent with this codebase's
   existing simplicity-over-precision stance).
-- **Ensure-synced-before-launch:** `Launch()` now checks, for a repo that
-  already has a pin, whether all four known agent folders exist on disk.
-  If any are missing, it re-extracts the *currently pinned* version (never
-  auto-upgrades to latest — that remains a deliberate, separate user action)
-  before proceeding to launch the agent tool. This covers the common case of
-  a freshly cloned repo whose `.gitignore`'d agent folders were never
-  unpacked on this machine. If no pin exists at all when Launch is clicked,
-  the launch proceeds anyway with an informational status message, rather
-  than silently launching the agent tool with no agent files present.
+- **Ensure-synced-before-launch** (amended by *Verify installed agent files
+  before launch* below, which replaces the folder-existence check described
+  here): `Launch()` checks, for a repo that already has a pin, the agent files
+  in the four known agent folders. Originally it only looked at whether the
+  folders existed and, if any were missing, re-extracted the *currently
+  pinned* version (never auto-upgrades to latest — that remains a deliberate,
+  separate user action) before proceeding to launch the agent tool. This
+  covers the common case of a freshly cloned repo whose `.gitignore`'d agent
+  folders were never unpacked on this machine. If no pin exists at all when
+  Launch is clicked, the launch proceeds anyway with an informational status
+  message, rather than silently launching the agent tool with no agent files
+  present.
 - **About dialog:** a simple, modal "About Agent Control" window
   (app version via the existing `Program.Version`, copyright, license text)
   reachable via a new toolbar/menu entry next to Settings.
 
 ## Launch must never be blocked by agent-package sync state
+
+*Amended: see "Verify installed agent files before launch" below, which keeps
+this rule in every case except one - a restore of agent files that were needed
+failed and the user chose to cancel the launch. The text of this section is kept
+as the record of the original decision.*
 
 A product-owner report identified that `Launch` blocking entirely when no pin
 existed (directing the user to "Select Package..." first, per the section
@@ -453,6 +484,76 @@ amends the "Ensure-synced-before-launch" bullet above:
 - If a pin exists but re-extraction is attempted and fails (source
   unreachable, pinned version missing, extraction I/O failure), this now
   surfaces as a non-blocking warning rather than a launch-blocking error.
+  (Amended: the failure is now put to the user as a "Launch anyway / Cancel"
+  question, and only a host that cannot ask still launches with the warning.)
+
+## Verify installed agent files before launch (amends "Launch must never be blocked...")
+
+A defect report showed that a repo whose four managed agent folders existed but
+held only about half of the package's files was launched that way forever: the
+folder-existence check treated "the folders are there" as "in sync", and the
+extraction has no rollback, so an interrupted or partly failed sync leaves
+exactly that state behind. The user decided the following behavior, which
+replaces the folder-existence check:
+
+The decision table; the first condition that matches wins:
+
+1. Committed agent files: never touched; the check is skipped; launch.
+2. No pin: nothing to compare with; launch.
+3. The four managed folders hold no file (absent, empty, or only empty
+   folders): install the *currently pinned* package silently.
+4. The pin records no files identity (an older pin): folder-presence check as
+   before - all four folders exist: launch; one is missing: install silently.
+5. The pin records a files identity and the files on disk hash to it: launch,
+   with no question and no package access.
+6. The files differ (a missing, changed or extra file) or cannot be read (a
+   link): ask on every launch, **Update from package** or **Keep current
+   files** (default; Esc keeps). Keep launches with the files untouched;
+   Update deletes and re-extracts the pinned package. Nothing is remembered
+   and the pin is never written.
+
+Decisions and reasons:
+
+- **Identity scope.** The on-disk hash is computed with the very algorithm that
+  produced the pin's `files-sha256:` identity, over exactly the files in the
+  four managed folders, as raw bytes: no line-ending or other normalization;
+  the repo's own root `AGENTS.md`, release notes, other `.github` content and
+  empty folders are excluded. Extraction copies raw bytes through the same
+  path rule, so an untouched extraction hashes to the recorded identity by
+  construction, for zip, NuGet and Git packages alike. Files that cannot be
+  read (a link or reparse point, an I/O error) count as a difference: they
+  cannot be vouched for, and the user is asked rather than overwritten.
+- **No package access when in sync.** The comparison needs only the repo and
+  the pin, so a launch whose files match reads no source, needs no sign-in and
+  works offline. The package is obtained only when files must be restored or
+  updated, and then through the existing caches.
+- **Older pins** (no recorded identity) have nothing to compare with, and
+  fetching the package on every launch just to compare would cost a source
+  listing or a download each time, so they keep the folder-presence behavior
+  (plus rule 3). Choosing the package again (Select Package, Change package or
+  Upgrade) records an identity and turns the full check on. A launch never
+  writes the pin.
+- **Keep is the default** because differing files may be a developer
+  deliberately trying out new agent files; the question is asked on every
+  launch while they differ (no persisted "don't ask again", so a difference
+  can never hide again, and settings are per-user while the pin is shared).
+- **Failed restore.** When files that are needed (rule 3, rule 4's missing
+  folder, or a chosen Update) cannot be restored - no source, a source that
+  cannot be read, a republished package whose content no longer matches the
+  pin (the existing refusal is kept: nothing is extracted), or an I/O failure
+  (`IOException` and `UnauthorizedAccessException` are now caught too) - the
+  user gets a modal question: **Launch anyway** or **Cancel** (default; Esc
+  cancels). Cancel aborts the launch: no process is started and no launch is
+  recorded. **This is the only exception to "Launch must never be blocked by
+  agent-package sync state"**, and it is the user's own decision. Everything
+  else still launches: committed files, no pin, a kept mismatch, a canceled
+  wait.
+- **Hosts that cannot ask** (no subscriber to the question, as in headless
+  tests): a mismatch keeps the files, and a failed restore is reported
+  passively as before and the launch proceeds, so a host without a window is
+  never blocked.
+- **Responsiveness.** Reading, hashing and restoring run off the UI thread
+  and can be canceled with the card's operation cancel.
 
 ## Open Concerns
 
@@ -463,6 +564,7 @@ amends the "Ensure-synced-before-launch" bullet above:
    platform-portable, but only a Windows MSI is planned for v1 — packaging for
    macOS/Linux is deferred until there is customer demand.
 3. 🟢 **LOW** Blind-delete trade-off: any local customizations a developer adds
-   inside the four managed folders will be silently removed on the next
-   upgrade; this is accepted risk, not a defect, but should be called out in
-   user-facing documentation.
+   inside the four managed folders are removed on the next upgrade, and at
+   launch only after the developer chose "Update from package" for files that
+   differ from the pin; this is accepted risk, not a defect, but should be
+   called out in user-facing documentation.

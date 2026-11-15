@@ -11,7 +11,7 @@
 AgentControl is a Windows desktop launcher that lets a company distribute proprietary
 AI-agent configuration (Copilot/agentic-CLI instruction files, standards, templates, and
 skills) alongside public source repositories, without ever committing that proprietary
-content to source control. A developer picks a repo from a recent-repos list, AgentControl
+content to source control. A developer picks a repo from a repo list, AgentControl
 makes sure the repo's `.github/agents`, `.github/standards`, `.github/templates`, and
 `.github/skills` folders match the version pinned in that repo's `.agentcontrol.json` file,
 then launches the developer's preferred agentic CLI tool (for example, GitHub Copilot CLI)
@@ -33,16 +33,27 @@ The cards, the card menu, Settings and the package-source editor are shown in th
 - **Compact app bar and themes**: one slim bar at the top of the main window holds the logo, a filter box and the
   **Add repository**, **Settings** and **About** buttons; the whole application follows the **System default**,
   **Light** or **Dark** theme, with legible text in both
-- **Recent-repos list**: add repos via a folder-browse button; each repo is shown as a card
+- **Repo list**: add repos via a folder-browse button; each repo is shown as a card
   with a colored **status bar** (green up to date, amber upgrade available, red a problem, grey no
   agent package - always backed by words and tooltips), a favorite star, its display name, a tile with its
   initials (or the repo's own root `icon.png`/`logo.png`), its path, and labeled chips for the pinned agent
   package (name, version and source, with a small check mark when it is the newest), an available upgrade, and
   the current git branch; **Launch** sits on the card and everything else (Git Pull, Refresh - **Check again**
-  for a repo whose folder is missing - Select Package/Change package/Upgrade, Move to group, Card color, Remove) in
+  for a repo whose folder is missing - Select Package/Change package/Upgrade, Move to group, Reorder, Card
+  color, Remove) in
   its grouped
   "..." menu; a long path is shortened to fit - the folder part first, then the middle of a very long folder
   name - so the start and the end of the repo's folder name stay visible
+- **Your own, stable repo order**: the list stays in the order you choose - Launch, Refresh and every other action
+  leave the cards where they are; a new repo goes to the bottom of its section; favorites are still listed first
+  (the Favorites section, or the top of the list while there are no groups). Reorder with **Move to top**, **Move
+  up**, **Move down** and **Move to bottom** in the **Reorder** submenu of a card's "..." menu (keyboard-reachable;
+  items that do not apply are disabled, with a tooltip saying why) or by dragging a card by anywhere that is not
+  one of its buttons: a line
+  shows where it will land, and dropping into another section or on a section header moves the repo there, exactly
+  like **Move to group** and the favorite star. Reordering is off while the filter box has text (filtering never
+  changes the order). The order is stored only in your own AgentControl settings, never in the repository or its
+  `.agentcontrol.json`; existing users keep the order they last saw
 - **Repo groups and card colors (just for you)**: put repos into groups of your own (**Move to group** in a
   card's "..." menu, then an existing group or **New group...**) and the list becomes collapsible sections -
   **Favorites** first, your groups alphabetically, **Ungrouped** last - with the number of repos in each; the
@@ -58,7 +69,8 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   with that identity supplies them, whatever it is called and whatever kind of source it is. There
   is no floating "latest" mode, so upgrades are always a deliberate, visible action. A published version whose
   files later change (a republished zip or NuGet package, a Git tag moved to other files) is never applied
-  silently: the restore at launch and Upgrade refuse it, and you accept it on purpose with **Change package...** in
+  silently: an install or update at launch and Upgrade refuse it, and you accept it on purpose with
+  **Change package...** in
   the card's "..." menu
 - **Status chips**: each repo card shows an amber upgrade chip ("Upgrade to" and the version an upgrade
   would move to; click it to upgrade), an uncommitted-changes warning, a committed-agent-files
@@ -72,12 +84,15 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   AgentControl proactively ensures the repo's `.gitignore` covers the four managed
   folders immediately after every "Select Package..."/Upgrade, making an accidental commit
   much less likely in the first place
-- **Ensure-synced-before-launch**: clicking Launch attempts a best-effort sync of the four
-  managed agent folders before starting the agent tool; if they are missing (for example, a
-  fresh clone) it silently re-extracts the currently pinned version first — it never
-  auto-upgrades to a newer version on your behalf. This sync attempt is purely informational
-  and never blocks the launch: repos with committed agent files skip it entirely, repos with
-  no pin launch anyway, and a failed re-extraction only surfaces a warning
+- **Check before launch**: clicking Launch first checks that the four managed agent folders hold the files of the
+  package the repo is pinned to. A repo with no agent files (for example a fresh clone) silently gets the currently
+  pinned version installed — never a newer one. Otherwise the files in the folders are compared, byte for byte, with the
+  fingerprint the pin recorded, on your own machine and without downloading anything: when they match, the tool
+  starts at once. When they differ (a file is missing, changed or added) AgentControl asks whether to **Update from
+  package** or **Keep current files** (the default), and asks again on every launch while they differ. If files that
+  were needed cannot be installed, you choose **Launch anyway** or **Cancel** (the default). Repos with committed agent
+  files skip the check entirely, repos with no pin launch anyway, and a repo whose pin was made by an older version
+  (no recorded fingerprint) keeps the simple check that its four folders exist until you choose its package again
 - **Git integration**: pull the latest commits for a repo with **Git Pull** in its card's "..." menu (enabled
   only when the working tree is clean), with a configurable git executable override. A Git repository package
   source needs Git 2.29 or newer
@@ -165,7 +180,7 @@ The cards, the card menu, Settings and the package-source editor are shown in th
   moved). AgentControl
   records a fingerprint of the agent files of each package it applies and does not replace a repo's agent files with a
   package of the
-  same version whose content changed (an Upgrade or the restore at launch stops with a message; choosing that
+  same version whose content changed (an Upgrade or an install or update at launch stops with a message; choosing that
   version again with **Change package...** asks for confirmation). The fingerprint detects a changed package; it
   does not prove who published it. For a NuGet package it describes the copy cached on this computer, so a server-side
   republish of a version this computer already has cached is not noticed until that cached copy is cleared. See the
@@ -212,7 +227,7 @@ the .NET 10 runtime, so the target machine needs no pre-installed runtime.
 
 Click the folder-plus icon button in the app bar at the top of the main window and browse to a repository's root
 folder.
-The repo is added to the recent-repos list as a card showing its display name, path, and chips
+The repo is added to the repo list as a card showing its display name, path, and chips
 for the pinned package (name, version and source), an available upgrade, and the current git
 branch.
 
@@ -247,8 +262,8 @@ same validate → delete → extract → pin sequence, offers the package's `AGE
 An agent package may optionally include a root-level `AGENTS.md` entry — a starting template,
 not a finished file (the same convention as the existing root-level `release-notes.md` entry:
 it lives outside the four managed folders, so it's never touched by the blind-delete-and-replace
-sync). Whenever a package is extracted (Select Package, Upgrade, or the best-effort
-sync-before-launch) and the repo has no root-level `AGENTS.md` of its own, and the package
+sync). Whenever a package is extracted (Select Package, Upgrade, or an install at launch) and the repo has no
+root-level `AGENTS.md` of its own, and the package
 being applied has a template to offer, AgentControl shows a modal Yes/No dialog asking whether
 to place the template at the repo root, clearly noting that you are responsible for
 customizing it afterward. A pre-existing `AGENTS.md` is never touched or overwritten, and if
@@ -259,13 +274,27 @@ every subsequent sync.
 
 Click **Launch** (labeled with your agent tool, for example **Launch Copilot**) to start your
 configured agentic CLI tool in the repo's working directory.
-Launch is never blocked by agent-package sync state — before launching, AgentControl makes a
-best-effort attempt to sync the four managed agent folders for a pinned repo (silently
-re-extracting the *currently pinned* version, never a newer one, if any are missing), but this
-is purely an informational side action. A repo with committed agent files skips the sync
-entirely (the managed folders are never touched), and a repo with no pin at all still launches
-— an agentic CLI tool remains useful even with zero managed agent files present, and can help
-with migrating away from committed agent files.
+Before launching, AgentControl checks a pinned repo's agent files against the package the repo is pinned to; it never
+upgrades to a newer version on your behalf. What happens depends on what it finds:
+
+- **No agent files** in the four managed folders (absent or empty): the pinned version is installed silently.
+- **The files match** the fingerprint recorded in the pin: the tool starts at once. The comparison is made locally,
+  byte for byte (line endings included), and nothing is downloaded or read from a package source.
+- **The files differ** (a file is missing, changed or added, or a folder cannot be read): AgentControl asks whether to
+  **Update from package** (replace the four folders with the pinned package's files, discarding changes there) or
+  **Keep current files** (the default; also what Escape does), which launches with the files as they are. The question
+  is asked again on every launch while the files differ.
+- **Needed files cannot be installed** (no source offers the pinned version, a source cannot be read, or the package
+  was republished with other files): AgentControl says why and asks **Launch anyway** or **Cancel** (the default).
+  Cancel starts nothing.
+- A repo with **committed agent files** skips the check entirely (the managed folders are never touched), and a repo
+  with **no pin** at all still launches — an agentic CLI tool remains useful even with zero managed agent files
+  present, and can help with migrating away from committed agent files.
+- A repo whose pin was made by an older version of AgentControl has **no recorded fingerprint**, so its files cannot
+  be compared: it launches when all four managed folders exist and is repaired silently when one is missing. Choose
+  its package again once with **Change package...** to record a fingerprint and switch on the full check.
+
+Launch is only stopped by your own **Cancel** after a failed install; every other outcome launches.
 
 ### Pulling changes
 
@@ -298,6 +327,20 @@ Both are personal ways to organize the list and are stored **only in your own Ag
 - **Card color.** **Organize > Card color...** opens a palette of ten colors that work in the light and dark
   themes, plus **Automatic** (the color AgentControl derives from the repo's path). The color goes on the card's
   tile (as a ring around a repo's own picture); the status bar on the card's left edge keeps its meaning.
+- **Order.** The list is in your own, stable order: nothing moves because of **Launch**, **Refresh** or any other
+  action, and a new repo goes to the bottom of its section (a repo you add to a group again moves to the bottom of
+  that group). Favorites are listed first. In a card's "..." menu, **Organize > Reorder > Move to top**, **Move up**,
+  **Move down** and **Move to bottom** move the card within its section (the first repo cannot go up, the last cannot
+  go down, and **Reorder** itself is disabled for the only repo of its section; a disabled item's tooltip says why).
+  You can also drag a card by any part that is not a button, such as its
+  status bar: a line shows where it lands (upper half of the card under the pointer = before, lower half = after).
+  Dropping into another section moves the repo there like **Move to group** and the favorite star do - into a
+  group sets that group, into **Ungrouped** removes it, into **Favorites** makes it a favorite (it keeps its
+  group), out of **Favorites** removes the favorite mark - and dropping on a section header (even a collapsed one,
+  which stays collapsed) puts the card at the bottom of that section. With no groups, dragging only reorders within
+  the favorites or within the other repos. While the filter box has text, reordering is off (dragging does nothing
+  and the Reorder submenu is disabled), because only some repos are shown. The order is kept in your own settings file;
+  removing a repo removes it from the order, and existing users keep the order they last saw.
 
 ### Settings
 
@@ -325,6 +368,9 @@ The Settings window lets you configure:
   OS-appropriate dropdown (`pwsh`/`powershell`/`cmd` on Windows, `bash`/`zsh`/`sh` elsewhere)
   or typed in directly for a custom shell; leave unset to let AgentControl auto-detect the
   best available shell
+- **Keep the shell open after the agent tool exits** — on by default; turn it off to have the terminal window close
+  together with the tool (PowerShell and the Command shell on Windows). With it on, the window stays open so error
+  messages stay visible and you stay at a prompt in the repo. Applied from the next launch.
 
 ### About
 

@@ -286,9 +286,179 @@ internal sealed class AppSettings
     }
 
     /// <summary>
-    ///     Gets or sets the recent-repos list, most-recently-used first.
+    ///     Gets or sets whether the shell window that hosts the launched agent tool stays open
+    ///     after the tool exits; <see langword="true"/> by default.
     /// </summary>
+    /// <remarks>
+    ///     When <see langword="true"/> the shell is started so that it keeps running after the
+    ///     tool ends (error messages stay visible and the user stays at a prompt in the repo);
+    ///     when <see langword="false"/> the shell ends together with the tool. A settings file
+    ///     without the value (written by an older version), or with one that is not a boolean,
+    ///     reads as <see langword="true"/> instead of failing the load, so the choice can never
+    ///     keep the application from starting.
+    /// </remarks>
+    [JsonConverter(typeof(KeepShellOpenJsonConverter))]
+    public bool KeepShellOpen { get; set; } = true;
+
+    /// <summary>
+    ///     Reads and writes the keep-shell-open choice as a JSON boolean and reads anything that is
+    ///     not a boolean as <see langword="true"/>.
+    /// </summary>
+    /// <remarks>
+    ///     A custom converter is needed because the built-in boolean handling throws on null, a
+    ///     string, a number, an object or an array, which <see cref="SettingsStore.Load"/> would
+    ///     report as a corrupt settings file. Stateless and thread-safe.
+    /// </remarks>
+    private sealed class KeepShellOpenJsonConverter : JsonConverter<bool>
+    {
+        /// <inheritdoc />
+        public override bool HandleNull => true;
+
+        /// <summary>
+        ///     Reads the choice from a JSON boolean.
+        /// </summary>
+        /// <param name="reader">The reader positioned on the value.</param>
+        /// <param name="typeToConvert">The target type (unused).</param>
+        /// <param name="options">The serializer options (unused).</param>
+        /// <returns>The boolean the JSON holds, or <see langword="true"/> when the value is not a
+        ///     boolean (including null, strings, numbers, objects and arrays).</returns>
+        public override bool Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.True:
+                    return true;
+
+                case JsonTokenType.False:
+                    return false;
+
+                case JsonTokenType.StartObject or JsonTokenType.StartArray:
+                    // Consume the whole nested value so the reader stays positioned correctly
+                    reader.Skip();
+                    return true;
+
+                default:
+                    return true;
+            }
+        }
+
+        /// <summary>
+        ///     Writes the choice as a JSON boolean.
+        /// </summary>
+        /// <param name="writer">The writer.</param>
+        /// <param name="value">The choice to write.</param>
+        /// <param name="options">The serializer options (unused).</param>
+        public override void Write(Utf8JsonWriter writer, bool value, JsonSerializerOptions options) =>
+            writer.WriteBooleanValue(value);
+    }
+
+    /// <summary>
+    ///     Gets or sets the repo list in the user's own display order.
+    /// </summary>
+    /// <remarks>
+    ///     A repo is added at the end of the list; the Move menu items and drag and drop reorder it.
+    ///     Nothing else (launching, refreshing, syncing) changes the order. The main window shows
+    ///     the repos of each section in this relative order. Because the order is the order of the
+    ///     list itself, a repo that is removed is removed from the order too, and no repo can be
+    ///     missing from it. <see cref="HasUserRepoOrder"/> tells whether the sequence is already
+    ///     the user's order or is still an older file's list that <see cref="EnsureRepoOrder"/>
+    ///     has to arrange first.
+    /// </remarks>
     public List<RecentRepo> RecentRepos { get; set; } = [];
+
+    /// <summary>
+    ///     Gets or sets whether <see cref="RecentRepos"/> is already the user's own display order;
+    ///     <see langword="false"/> until <see cref="EnsureRepoOrder"/> has seeded it.
+    /// </summary>
+    /// <remarks>
+    ///     A settings file written by an older version has no such marker, and its list was kept in
+    ///     the order the repos were added, which is not the order the user saw (favorites first,
+    ///     then the most recently launched). The marker is what tells the two apart, so the legacy
+    ///     arrangement is applied exactly once. A value that is not a boolean reads as
+    ///     <see langword="false"/> instead of failing the load, so the marker can never keep the
+    ///     application from starting.
+    /// </remarks>
+    [JsonConverter(typeof(FalseWhenInvalidBoolJsonConverter))]
+    public bool HasUserRepoOrder { get; set; }
+
+    /// <summary>
+    ///     Reads and writes the repo-order marker as a JSON boolean and reads anything that is not
+    ///     a boolean as <see langword="false"/>.
+    /// </summary>
+    /// <remarks>
+    ///     A custom converter is needed because the built-in boolean handling throws on null, a
+    ///     string, a number, an object or an array, which <see cref="SettingsStore.Load"/> would
+    ///     report as a corrupt settings file. Stateless and thread-safe.
+    /// </remarks>
+    private sealed class FalseWhenInvalidBoolJsonConverter : JsonConverter<bool>
+    {
+        /// <inheritdoc />
+        public override bool HandleNull => true;
+
+        /// <summary>
+        ///     Reads the marker from a JSON boolean.
+        /// </summary>
+        /// <param name="reader">The reader positioned on the value.</param>
+        /// <param name="typeToConvert">The target type (unused).</param>
+        /// <param name="options">The serializer options (unused).</param>
+        /// <returns>The boolean the JSON holds, or <see langword="false"/> when the value is not
+        ///     a boolean (including null, strings, numbers, objects and arrays).</returns>
+        public override bool Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.True:
+                    return true;
+
+                case JsonTokenType.StartObject or JsonTokenType.StartArray:
+                    // Consume the whole nested value so the reader stays positioned correctly
+                    reader.Skip();
+                    return false;
+
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        ///     Writes the marker as a JSON boolean.
+        /// </summary>
+        /// <param name="writer">The writer.</param>
+        /// <param name="value">The marker to write.</param>
+        /// <param name="options">The serializer options (unused).</param>
+        public override void Write(Utf8JsonWriter writer, bool value, JsonSerializerOptions options) =>
+            writer.WriteBooleanValue(value);
+    }
+
+    /// <summary>
+    ///     Seeds the user's repo order once, from the arrangement older versions showed: favorites
+    ///     first, then the most recently launched, repos never launched last.
+    /// </summary>
+    /// <remarks>
+    ///     Does nothing when <see cref="HasUserRepoOrder"/> is already <see langword="true"/>, so a
+    ///     user's order is never re-sorted. Otherwise the list is stably re-sorted by that rule
+    ///     (which gives the same relative order inside every section the main window shows) and the
+    ///     marker is set. Called by <see cref="SettingsStore.Load"/> and by the main window's view
+    ///     model, so settings built in memory (a first run) are seeded too. Idempotent.
+    /// </remarks>
+    internal void EnsureRepoOrder()
+    {
+        if (HasUserRepoOrder)
+        {
+            return;
+        }
+
+        // OrderBy is stable: repos with equal keys keep their list order. The list instance is
+        // kept, because the main window shares it by reference.
+        RecentRepos ??= [];
+        var seeded = RecentRepos
+            .OrderByDescending(repo => repo.IsFavorite)
+            .ThenByDescending(repo => repo.LastLaunchedUtc ?? DateTimeOffset.MinValue)
+            .ToList();
+        RecentRepos.Clear();
+        RecentRepos.AddRange(seeded);
+        HasUserRepoOrder = true;
+    }
 
     /// <summary>
     ///     Gets or sets the names of the main-window sections (the user's own groups and the

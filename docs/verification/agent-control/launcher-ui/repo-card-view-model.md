@@ -7,7 +7,9 @@ sources, `RepoCardServerSourceTests.cs`, for the signature indicator, `RepoCardS
 card color and group chip, `RepoCardColorTests.cs` (and, for moving into groups, `RepoGroupingTests.cs`), for the
 Git source (the Git icon and tooltip, the refresh that lists tags again, Change package and the git version problem)
 `RepoCardGitAwarenessTests.cs`, for the Git source's registry options `RepoCardGitSourceTests.cs`, for applying a
-package to a repo whose agent folders are tracked by git `RepoCardCommittedFilesTests.cs` and, for the
+package to a repo whose agent folders are tracked by git `RepoCardCommittedFilesTests.cs`, for the verification of a
+repo's agent files before a launch (the keep-or-update and launch-anyway-or-cancel questions, the silent install, the
+check without package access and the launch command's answer to each) `RepoCardLaunchVerificationTests.cs` and, for the
 repo picture, `RepoCardImageTests.cs`. Every
 test substitutes a stub script for the git executable (via `GitStub`, mirroring
 `GitClientTests`) and uses real temporary directories/zip fixtures for package-source and
@@ -16,7 +18,12 @@ or a real package source. The exception is `RepoCardCommittedFilesTests.cs`, whi
 (`GitRepositoryFixture`; skipped where git is not installed and failed when the environment variable `CI` is set), so
 that what git tracks before and after is observed rather than assumed, and serves its packages from an in-memory
 source that counts how often a package is acquired, so "before anything is downloaded" is checked directly; the
-question to the user is answered by a handler subscribed to the card's event. The tests that must control exactly when
+question to the user is answered by a handler subscribed to the card's event. `RepoCardLaunchVerificationTests.cs`
+works the same way: it builds real repo trees from real zip, NuGet-folder and (where git is available, via
+`GitRepositoryFixture.CreateOrSkip`) Git packages, applies the package through the card so the pin records its real
+identity, then damages the tree (deletes half the files, changes a byte, adds a file, makes a managed folder a
+junction or symbolic link) and calls the launch check with a handler that answers the `AgentFilesChoiceRequest` and a
+source-registry factory that counts, or throws on, any package access. The tests that must control exactly when
 a package source answers (stale and retired
 upgrade checks, the busy guard) give the card an in-memory source whose answer a test releases, or that signals when it
 is read and then never answers, so no timing assumption is needed. One test gives the card an owner callback that
@@ -33,14 +40,23 @@ is constructed; only the view-model class itself is under test. The
 #### Test Environment
 
 N/A - standard test environment; `RealProcess` collection applies (git-stub subprocess
-invocations are not parallelized with other tests using real process launches).
+invocations are not parallelized with other tests using real process launches). No test
+starts an agent-tool process: every card the launch tests build is given a recording
+`FakeAgentToolProcessStarter` and a deterministic `ShellDetector` (shared helpers of the test
+classes do this by construction), so launching never opens a shell on the machine the tests run
+on, and the tests that reach no launch assert that the starter was not called.
 
 #### Acceptance Criteria
 
 - All unit tests pass with zero failures.
 - Display fields, badges, and gating conditions reflect the correct underlying pin/git/source
   state for every tested input.
-- Launch is never blocked by the outcome of the best-effort ensure-synced check.
+- Launch is never blocked by the outcome of the pre-launch check of the agent files, except that the user can cancel
+  the launch when agent files that were needed could not be installed; with nobody to ask, the launch always proceeds.
+- Before a launch the files in the managed folders are compared with the pin's recorded identity and nothing is read
+  from a package source when they match; a repo with no agent files is repaired silently; files that differ (a missing,
+  changed or extra file, or an unreadable one) raise a keep-or-update question that defaults to keeping them and is
+  asked again on every launch; a pin that records no identity keeps the folder-presence check.
 - The committed-agent-files result is read from git once for an unchanged HEAD hash (proved by the stub's invocation
   log), and a second operation requested while one is really running is refused by the busy guard and accepted again
   after the first ended.
@@ -48,8 +64,8 @@ invocations are not parallelized with other tests using real process launches).
 - Remove requests never mutate state on their own.
 - The AGENTS.md template offer fires only when the repo genuinely has no AGENTS.md and the
   package genuinely has a template to offer, never re-fires after a decline is persisted, and
-  never fires when the ensure-synced-before-launch check found the managed folders already
-  present.
+  never fires when the pre-launch check found nothing to install or update (the files matched the pin, or a pin
+  without an identity found all four managed folders present).
 - A repo's pin names no package source, so every package-source operation resolves against the sources the user has
   configured: the pin records only the package, the version and the files identity (never a source) and keeps its
   other fields; the source that supplies the package is remembered on the card (in the user's own settings) and never
@@ -66,12 +82,12 @@ invocations are not parallelized with other tests using real process launches).
   pin made from a zip served by a Git source). The upgrade check considers every configured source that offers the
   package, the newest version wins and a tie keeps Settings order, a newer version stays offered next to a source
   problem, and an Upgrade or Change package records no source in the pin and remembers the source it used on the card.
-- The pin records the files identity of the package that was applied; an Upgrade, or the restore of missing agent
+- The pin records the files identity of the package that was applied; an Upgrade, or the restore or update of agent
   files before launch, that finds the pinned version delivering files that differ from the recorded identity applies
   nothing and leaves the pin unchanged (and says that Change package... accepts the change), Change package... or
   Select Package of that version asks first and applies it, recording the new
   identity, only after the user confirmed, a pin or a source without an identity is never treated as changed, and the
-  launch-time restore never writes the pin.
+  launch-time restore or update never writes the pin.
 - A package applied to a repo whose managed agent folders are tracked by git (checked with git at that moment, not
   from the badge) is preceded by a question that names the repo, the tracked folders and the package and is asked
   before any package is acquired; declining changes nothing (git, files, `.gitignore`, pin) and says so; agreeing
@@ -230,18 +246,29 @@ scenario is tested by
 `RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded`,
 `RepoCardViewModel_LaunchCommand_NoCommandConfigured_RaisesErrorOccurred`, and
 `RepoCardViewModel_LaunchCommand_PreLaunchSyncCancelledByUser_StillLaunches`, covering
-`AgentControl-RepoCardViewModel-Launch`.
+`AgentControl-RepoCardViewModel-Launch`. The launches are captured by the fake starter (exactly one request, with the
+repo as working directory); the no-command test asserts the starter was not called.
 
-**RepoCardViewModel_EnsureSyncedBeforeLaunch_NeverBlocksLaunchOnBestEffortSyncOutcome**: The
-ensure-synced check is a best-effort, non-blocking side action: it returns true with an
-informational status message (no `ErrorOccurred`) when no pin exists, skips touching the
-managed folders entirely and returns true with an informational status message when the repo
-has committed agent files (even when a pin exists and folders are missing), returns true
-without re-extracting when folders are already present, re-extracts only the pinned version
-when folders are missing, and returns false (a non-blocking warning) when the pinned version is
-no longer available at the source. A separate `Launch()`-level scenario confirms the agent-tool
-process is still spawned regardless of whether the sync attempt found no pin or failed
-outright. This scenario is tested by
+**RepoCardViewModel_Launch_KeepShellOpenSettingGovernsTheShellArguments**: The keep-shell-open setting in force at the
+moment of the launch decides the arguments the process starter receives: with PowerShell the `-NoExit` form when on
+and the form without `-NoExit` when off, with the Command shell `/K` when on and `/C` when off; a change of the
+setting between two launches of the same card is used by the second launch; and a process that cannot be started
+(the fake starter throws `InvalidOperationException`) raises `ErrorOccurred` with the reason, starting "Failed to
+launch the agent tool", and records no launch. This scenario is tested by
+`RepoCardViewModel_LaunchCommand_KeepShellOpenSetting_PassesMatchingArgumentsToStarter`,
+`RepoCardViewModel_LaunchCommand_SettingChangedBetweenLaunches_UsesCurrentValue` and
+`RepoCardViewModel_LaunchCommand_ProcessStartFails_ReportsErrorAndDoesNotRecordLaunch`, covering
+`AgentControl-RepoCardViewModel-KeepShellOpen`.
+
+**RepoCardViewModel_EnsureSyncedBeforeLaunch_SkipsWhenCommittedOrUnpinnedAndNeverBlocksLaunch**: The pre-launch
+check stays out of the way: it returns an informational status message (no `ErrorOccurred`) when no pin exists,
+skips touching the managed folders entirely when the repo has committed agent files (even when a pin exists and
+folders are missing), re-extracts only the pinned version (never a newer one) when it has to install files, and - with
+nobody subscribed to ask - reports a pinned version that is no longer available at the source passively and still
+returns an outcome that lets the launch proceed. A separate `Launch()`-level scenario confirms the agent-tool
+process is still spawned regardless of whether the check found no pin or failed outright. The older-pin
+cases (all four folders present with files: launch without re-extracting; a folder missing: silent re-extraction) are
+also covered here and in *PinWithoutIdentityKeepsFolderCheck* below. This scenario is tested by
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoPin_ReturnsTrueWithInformationalStatusMessage`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HasCommittedAgentFiles_SkipsSyncEntirelyAndReturnsTrue`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting`,
@@ -249,6 +276,111 @@ outright. This scenario is tested by
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedVersionMissingFromSource_ReturnsFalse`,
 and `RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches`, covering
 `AgentControl-RepoCardViewModel-EnsureSyncedBeforeLaunch`.
+
+**RepoCardViewModel_RestoreWhenNoAgentFiles_InstallsPinnedPackageSilently**: Arrange: a pinned repo (with a recorded
+files identity) whose managed folders are (a) all absent, or (b) present but empty. Act: run the launch check with a
+handler subscribed to the question. Assert: the pinned package's files are installed, the repo tree equals the
+package, no question was raised, no error was reported and the outcome is "restored". This scenario is tested by
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoManagedFolders_RestoresSilentlyWithoutPrompt` and
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_EmptyManagedFolders_RestoresSilentlyWithoutPrompt`, covering
+`AgentControl-RepoCardViewModel-RestoreWhenNoAgentFiles`.
+
+**RepoCardViewModel_VerifyFilesAgainstPinIdentity_MatchesOnlyTheExactPackageFiles**: Arrange: a repo to which the
+card applied a package, so that the pin records its real identity - once for a NuGet folder source, a zip source and
+a Git source. Act: run the launch check on the untouched tree, then on trees from which a file was removed (half of
+all files, in one case), in which one byte was changed, to which a file was added, and in which a managed folder is a
+junction (Windows) or a symbolic link (Ubuntu). Assert: the untouched tree is in sync from every kind of source, with
+no question; every damaged tree raises the keep-or-update question, the junction or symbolic link being treated as a
+difference rather than followed; and choosing Update restores every file and removes the extra one, so the tree equals
+the package again, with the pin file unchanged. This scenario is tested by
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FilesMatchPin_ReturnsInSyncWithoutPromptOrPackageAccess`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromNuGetFolderSource_IsInSyncWithoutPackageAccess`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromZipSource_IsInSyncWithoutPackageAccess`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromGitSource_IsInSyncWithoutPackageAccess`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MissingFile_AsksAndKeepLeavesFilesUntouched`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HalfOfTheFilesMissing_AsksAndUpdateRestoresAllFiles` (the
+regression test of the reported defect: all four folders remain but about half the files are gone),
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ChangedFile_UpdateReplacesFileAndKeepsPinUnchanged`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ExtraFile_UpdateDeletesExtraFile`,
+`windows@RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ManagedFolderIsJunction_TreatedAsMismatchAndAsks` and
+`ubuntu@RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ManagedFolderIsSymlink_TreatedAsMismatchAndAsks`, covering
+`AgentControl-RepoCardViewModel-VerifyFilesAgainstPinIdentity`.
+
+**RepoCardViewModel_AskKeepOrUpdateOnMismatch_KeepIsTheDefaultAndNothingIsRemembered**: Arrange: a repo whose files
+differ from the pin. Act: run the launch check and answer the question with Keep (the safe answer); with Update; run
+it again without changing the tree; and run it with no subscriber at all. Assert: the question names the repo, the
+package and its version; Keep leaves every file exactly as it was, reads no package source and reports "kept"; Update
+replaces the four folders with the package's files and reports "updated"; the same difference is asked about again on
+the next launch (two requests for two launches); with nobody to ask the files are kept and no package source is
+touched; and the `LaunchCommand` launches after Keep and after a successful Update. The `AgentFilesChoiceRequest`
+itself keeps the first answer only, rejects null arguments and completes its answer asynchronously. This scenario is
+tested by
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MissingFile_AsksAndKeepLeavesFilesUntouched`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HalfOfTheFilesMissing_AsksAndUpdateRestoresAllFiles`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ChangedFile_UpdateReplacesFileAndKeepsPinUnchanged`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_ExtraFile_UpdateDeletesExtraFile`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchWithoutSubscriber_KeepsFilesAndNeverTouchesPackageSource`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchPersists_AsksOnEveryLaunch`,
+`RepoCardViewModel_LaunchCommand_MismatchKeep_Launches`,
+`RepoCardViewModel_LaunchCommand_MismatchUpdate_RestoresThenLaunches`,
+`AgentFilesChoiceRequest_Respond_FirstAnswerWins`,
+`AgentFilesChoiceRequest_Constructor_NullArguments_Throw` and
+`AgentFilesChoiceRequest_Answer_CompletesAsynchronously`, covering
+`AgentControl-RepoCardViewModel-AskKeepOrUpdateOnMismatch`.
+
+**RepoCardViewModel_NoPackageAccessWhenInSync_ReadsOnlyTheRepo**: Arrange: a pinned repo whose files are the
+package's, with a source-registry factory that fails the test if it is ever called and no source configured (and, in
+the mismatch-with-no-subscriber case, a registry that must not be reached). Act: run the launch check. Assert: the
+outcome is "in sync", no question is raised, no error is reported and the registry factory was never called - nothing
+was listed, downloaded or signed in to - for each kind of source the package was applied from. This scenario is tested
+by
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FilesMatchPin_ReturnsInSyncWithoutPromptOrPackageAccess`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromNuGetFolderSource_IsInSyncWithoutPackageAccess`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromZipSource_IsInSyncWithoutPackageAccess`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_AppliedFromGitSource_IsInSyncWithoutPackageAccess` and
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchWithoutSubscriber_KeepsFilesAndNeverTouchesPackageSource`,
+covering `AgentControl-RepoCardViewModel-NoPackageAccessWhenInSync`.
+
+**RepoCardViewModel_PinWithoutIdentityKeepsFolderCheck_LaunchesOrInstallsByFolderPresence**: Arrange: a pinned repo
+whose pin records no files identity. Act: run the launch check (a) with all four managed folders present and holding
+files, and no source configured; (b) with one managed folder missing. Assert: (a) launches with no question and no
+package access; (b) installs the pinned version silently. This scenario is tested by
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutIdentity_AllFoldersWithFiles_SkipsWithoutPackageAccess`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinWithoutIdentity_SomeFolderMissing_RestoresSilently`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting` and
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedButFoldersMissing_ReExtractsPinnedVersionOnly`, covering
+`AgentControl-RepoCardViewModel-PinWithoutIdentityKeepsFolderCheck`.
+
+**RepoCardViewModel_VerifyOffUiThread_IsCancelable**: Arrange: a pinned repo whose pin records an identity. Act: cancel
+the operation's token while the launch check is verifying the files, and (separately) cancel the pre-launch wait while
+the launch command runs. Assert: the check stops with `OperationCanceledException`, and the launch
+command still launches after the wait is canceled by the user. This scenario is tested by
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_CanceledWhileVerifying_ThrowsOperationCanceledException` and
+`RepoCardViewModel_LaunchCommand_PreLaunchSyncCancelledByUser_StillLaunches`, covering
+`AgentControl-RepoCardViewModel-VerifyOffUiThread`. That the hashing and the copy run on a worker thread is a property
+of the design (`Task.Run` around each) reviewed in the code review, not observable by a unit test.
+
+**RepoCardViewModel_OfferLaunchAnywayOnRestoreFailure_CancelStopsTheLaunch**: Arrange: a pinned repo that needs its
+agent files (none installed, or the user chose Update) while the package cannot be installed - the configured source
+is unreachable, the only package offered is a republished one with other files, or every configured source throws
+`IOException`. Act: run the launch check with a handler that answers "Cancel", then one that answers "Launch anyway",
+then with no handler; also run the launch command with each answer. Assert: the question carries the reason and the
+labels "Launch anyway" and "Cancel"; Cancel gives the "launch canceled" outcome, the launch command starts nothing and
+records no launch; "Launch anyway" launches and records the launch; with no handler the failure is reported through
+`ErrorOccurred` and the launch proceeds; a republished package extracts nothing and leaves the files and the pin
+untouched; a plain I/O failure is reported rather than escaping as an unhandled error; and when an update the user chose
+fails, the question says the files may be partially updated or incomplete and that launching anyway uses them as they
+are now (it does not call them "current files"). This scenario is tested by
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndSourceUnreachable_AsksLaunchAnywayWithReason_DeclineCancelsLaunch`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UpdateFails_QuestionWarnsFilesMayBePartiallyUpdated`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndSourceUnreachable_LaunchAnywayChosen_OutcomeFailedLaunchAnyway`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndOnlyRepublishedPackage_AsksLaunchAnywayAndNothingExtracted`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchAndUpdate_RepublishedPackageOnlySource_RefusesFilesUntouchedAndOffersLaunchAnyway`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_EveryConfiguredSourceThrowsIOException_IsReportedNotUnhandled`,
+`RepoCardViewModel_LaunchCommand_RestoreFailsAndUserCancels_DoesNotLaunchOrRecordLaunch`,
+`RepoCardViewModel_LaunchCommand_RestoreFailsAndUserChoosesLaunchAnyway_Launches` and
+`RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches`, covering
+`AgentControl-RepoCardViewModel-OfferLaunchAnywayOnRestoreFailure`.
 
 **RepoCardViewModel_Upgrade_UpdatesPinOnlyWhenNewerVersionExists**: `UpgradeCommand` updates
 the pin and raises `ReleaseNotesReady` when a newer version is available, and raises
@@ -291,11 +423,11 @@ covering `AgentControl-RepoCardViewModel-ApplySelectedPackage`.
 
 **RepoCardViewModel_AgentsMdTemplateOffer_FiresOnlyWhenAbsentAndTemplateAvailableAndNotDeclined**:
 After a successful extraction during package selection, upgrade, or the
-ensure-synced-before-launch re-extraction, the offer fires with the template's content when
+pre-launch restore or update, the offer fires with the template's content when
 the repo has no `AGENTS.md` and the package has a template; it does not fire when the repo
 already has an `AGENTS.md` (which is left untouched), when the package has no template, when
-a prior decline is on record for the repo, or when the ensure-synced-before-launch check found
-all four managed folders already present (so no re-extraction, and no zip read, occurred at
+a prior decline is on record for the repo, or when the pre-launch check found nothing to install (a pin that
+records no identity and all four managed folders already present, so no re-extraction, and no package read, occurred at
 all). This scenario is tested by
 `RepoCardViewModel_ApplySelectedPackage_NoAgentsMdAndPackageHasTemplate_RaisesAgentsMdTemplateOfferRequestedWithContent`,
 `RepoCardViewModel_ApplySelectedPackage_AgentsMdAlreadyExists_DoesNotRaiseAgentsMdTemplateOfferRequested`,
@@ -674,9 +806,10 @@ Upgrade to a newer version) writes the files identity of the package's agent fil
 into the pin (never a source). Using
 real zip sources, after the 1.0.0 zip is republished with other file content: an Upgrade that finds it as the latest
 version raises an error saying the files "now contain different files" and that nothing was changed, extracts nothing
-and leaves the pin file byte for byte unchanged; the restore of missing managed folders before launch returns
-`false` with an error saying the agent files were not synced, creates no folder and leaves the pin file byte for byte
-unchanged; selecting the same version raises `ContentChangeConfirmationRequested` (carrying the selection and a
+and leaves the pin file byte for byte unchanged; the restore of missing managed folders before launch reports a failed
+restore (with nobody subscribed to the "Launch anyway or Cancel" question it is raised as an error saying the agent
+files were not synced, and the launch outcome is "launch anyway"), creates no folder and leaves the pin file byte for
+byte unchanged; selecting the same version raises `ContentChangeConfirmationRequested` (carrying the selection and a
 question naming the package), raises no error and changes nothing, and selecting it with the user's confirmation
 applies the changed content and records its new identity; selecting it with nobody subscribed to the confirmation is
 refused with the same error; selecting the same version from another source that delivers different files asks the same

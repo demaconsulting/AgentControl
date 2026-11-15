@@ -434,7 +434,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
         var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
 
         // Assert: restored, no warning, the pin untouched and the supplier remembered
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.Empty(errors);
         Assert.Equal("v1", ReadMarker(repo));
         Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
@@ -465,7 +465,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
         var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.Empty(errors);
         Assert.Equal("v1", ReadMarker(repo));
         Assert.Equal("Artifactory", card.SupplyingSource);
@@ -531,7 +531,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
         var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.False(result);
+        Assert.False(result.IsSynced());
         var message = Assert.Single(errors);
         Assert.Contains("The agent files were not synced", message, StringComparison.Ordinal);
         Assert.Contains("now contains different files", message, StringComparison.Ordinal);
@@ -564,7 +564,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
         var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.False(result);
+        Assert.False(result.IsSynced());
         var message = Assert.Single(errors);
         Assert.Contains("No configured source offers contoso-agents 1.0.0", message, StringComparison.Ordinal);
         Assert.Contains("Launching without syncing agent files", message, StringComparison.Ordinal);
@@ -596,7 +596,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
         var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
 
         // Assert: the read failure is reported, not "no source offers"
-        Assert.False(result);
+        Assert.False(result.IsSynced());
         var message = Assert.Single(errors);
         Assert.Contains("A package source could not be read", message, StringComparison.Ordinal);
         Assert.DoesNotContain("No configured source offers", message, StringComparison.Ordinal);
@@ -631,8 +631,8 @@ public sealed class RepoCardPortablePinTests : IDisposable
         var plainResult = await plainCard.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
 
         // Assert: never refused; the hint picks Mirror2, otherwise the first source that offers it
-        Assert.True(hintedResult);
-        Assert.True(plainResult);
+        Assert.True(hintedResult.IsSynced());
+        Assert.True(plainResult.IsSynced());
         Assert.Empty(errors);
         Assert.Equal("v1", ReadMarker(hinted));
         Assert.Equal("first source", ReadMarker(plain));
@@ -662,7 +662,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
         var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.Empty(errors);
         Assert.Equal("v1", ReadMarker(repo));
         Assert.Equal(pinJson, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
@@ -736,7 +736,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
         await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
 
         // Assert: restored from the Git source, which the chip names, and the pin is as it was
-        Assert.True(result);
+        Assert.True(result.IsSynced());
         Assert.Empty(errors);
         Assert.Equal("v1", ReadMarker(repo));
         Assert.Equal(pinBefore, await File.ReadAllTextAsync(PinPath(repo), TestContext.Current.CancellationToken));
@@ -1023,7 +1023,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
         var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
 
         // Assert: nothing restored, and the one warning carries the reason
-        Assert.False(result);
+        Assert.False(result.IsSynced());
         var warning = Assert.Single(errors);
         Assert.Contains(DeniedMessage, warning, StringComparison.Ordinal);
         Assert.DoesNotContain("No configured source delivers", warning, StringComparison.Ordinal);
@@ -1120,13 +1120,13 @@ public sealed class RepoCardPortablePinTests : IDisposable
         // Assert
         if (otherSourceMatches)
         {
-            Assert.True(result);
+            Assert.True(result.IsSynced());
             Assert.Empty(errors);
             Assert.Equal("v1", ReadMarker(repo));
         }
         else
         {
-            Assert.False(result);
+            Assert.False(result.IsSynced());
             var warning = Assert.Single(errors);
             Assert.Contains(DeniedMessage, warning, StringComparison.Ordinal);
             Assert.DoesNotContain("No configured source delivers", warning, StringComparison.Ordinal);
@@ -1206,7 +1206,7 @@ public sealed class RepoCardPortablePinTests : IDisposable
         var result = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
 
         // Assert
-        Assert.False(result);
+        Assert.False(result.IsSynced());
         var warning = Assert.Single(errors);
         Assert.Contains(DeniedMessage, warning, StringComparison.Ordinal);
         Assert.DoesNotContain("unreachable", warning, StringComparison.OrdinalIgnoreCase);

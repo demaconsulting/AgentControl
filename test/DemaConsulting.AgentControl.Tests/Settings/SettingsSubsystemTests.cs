@@ -76,6 +76,49 @@ public class SettingsSubsystemTests
     }
 
     /// <summary>
+    ///     Test that the user's keep-shell-open choice (either value) is still chosen in a later
+    ///     session, and that a missing or damaged value reads as "keep the shell open" without
+    ///     failing the load or disturbing other settings.
+    /// </summary>
+    [Fact]
+    public void Settings_KeepShellOpen_ChosenValueSurvivesSessionsAndMissingOrDamagedValueReadsAsOn()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            // Act / Assert: both choices are kept for the next session
+            foreach (var keepShellOpen in new[] { false, true })
+            {
+                SettingsStore.Save(
+                    new AppSettings { KeepShellOpen = keepShellOpen, GitExecutablePath = "git-kept" }, configDir);
+                var nextSession = SettingsStore.Load(configDir);
+                Assert.Equal(keepShellOpen, nextSession.KeepShellOpen);
+                Assert.Equal("git-kept", nextSession.GitExecutablePath);
+            }
+
+            // Act / Assert: values no session may fail on read as "keep the shell open"
+            foreach (var valueJson in new[] { "\"nope\"", "0", "null", "{ \"a\": 1 }", "[ false ]" })
+            {
+                File.WriteAllText(
+                    Path.Combine(configDir, "settings.json"),
+                    "{ \"KeepShellOpen\": " + valueJson + ", \"GitExecutablePath\": \"git-after\" }");
+                var damaged = SettingsStore.Load(configDir);
+                Assert.True(damaged.KeepShellOpen);
+                Assert.Equal("git-after", damaged.GitExecutablePath);
+            }
+
+            // Act / Assert: a file written before the choice existed keeps the shell open too
+            File.WriteAllText(Path.Combine(configDir, "settings.json"), "{ \"GitExecutablePath\": \"git-old\" }");
+            Assert.True(SettingsStore.Load(configDir).KeepShellOpen);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that a repo's group and card color and the collapsed sections are kept for the next
     ///     session in the user's own settings file only, change with later saves, and are not lost
     ///     when other settings are saved.
@@ -171,6 +214,64 @@ public class SettingsSubsystemTests
                 () => Assert.Equal(colors, reloaded.RecentRepos.Select(repo => repo.CardColor)),
                 () => Assert.Equal(loaded.CollapsedGroups, reloaded.CollapsedGroups),
                 () => Assert.DoesNotContain("Chartreuse", json, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the user's own repo order is kept for the next session in the settings file only,
+    ///     that a file written before the order was stored is arranged once as favorites first and then
+    ///     the most recently launched (and that arrangement is what later sessions see, even when
+    ///     launch times change), and that a damaged marker never fails the load.
+    /// </summary>
+    [Fact]
+    public void SettingsSubsystem_RepoOrder_SurvivesSessionsAndSeedsALegacyFileOnce()
+    {
+        // Arrange: a file as an older version wrote it - repos in the order they were added
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"RecentRepos\": [" +
+                " { \"Path\": \"never\" }," +
+                " { \"Path\": \"old\", \"LastLaunchedUtc\": \"2026-01-01T00:00:00+00:00\" }," +
+                " { \"Path\": \"fav\", \"IsFavorite\": true, \"LastLaunchedUtc\": \"2025-01-01T00:00:00+00:00\" }," +
+                " { \"Path\": \"new\", \"LastLaunchedUtc\": \"2026-06-01T00:00:00+00:00\" }" +
+                "] }");
+
+            // Act: the first session seeds the order, the user then moves one repo and saves
+            var firstSession = SettingsStore.Load(configDir);
+            var seeded = firstSession.RecentRepos.Select(repo => repo.Path).ToList();
+            (firstSession.RecentRepos[3], firstSession.RecentRepos[0]) = (firstSession.RecentRepos[0], firstSession.RecentRepos[3]);
+            SettingsStore.Save(firstSession, configDir);
+
+            // A newer launch time does not move anything in a later session
+            var secondSession = SettingsStore.Load(configDir);
+            secondSession.RecentRepos.Single(repo => repo.Path == "never").LastLaunchedUtc = DateTimeOffset.UtcNow;
+            SettingsStore.Save(secondSession, configDir);
+            var thirdSession = SettingsStore.Load(configDir);
+
+            // Act: a damaged marker reads as "not seeded", so the file is arranged again, without failing
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"HasUserRepoOrder\": \"yes\", \"RecentRepos\": [ { \"Path\": \"x\" }," +
+                " { \"Path\": \"y\", \"IsFavorite\": true } ] }");
+            var damaged = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.Multiple(
+                () => Assert.Equal(["fav", "new", "old", "never"], seeded),
+                () => Assert.True(firstSession.HasUserRepoOrder),
+                () => Assert.Equal(["never", "new", "old", "fav"], thirdSession.RecentRepos.Select(repo => repo.Path)),
+                () => Assert.True(thirdSession.HasUserRepoOrder),
+                () => Assert.Equal(["y", "x"], damaged.RecentRepos.Select(repo => repo.Path)),
+                () => Assert.True(damaged.HasUserRepoOrder),
+                () => Assert.Equal(
+                    ["settings.json"], Directory.GetFileSystemEntries(configDir).Select(Path.GetFileName)));
         }
         finally
         {

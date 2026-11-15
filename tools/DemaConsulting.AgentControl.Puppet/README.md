@@ -176,7 +176,10 @@ without it.
   package: it opens Select Package on the current choice), `UpgradeMenuItem` (only while an upgrade is available),
   `MoveToGroupMenuItem` (its submenu, built when the menu opens: one `MoveToGroupItem` per group - find it by
   name, for example `menu MoveToGroupMenuItem/Work` - then `NewGroupMenuItem`, and `RemoveFromGroupMenuItem` for a
-  grouped repo), `CardColorMenuItem`, `RemoveMenuItem`.
+  grouped repo), `ReorderMenuItem` (a submenu, disabled while the filter has text and for the only repo of its
+  section) holding `MoveToTopMenuItem`, `MoveUpMenuItem`, `MoveDownMenuItem`, `MoveToBottomMenuItem` (reorder the
+  card within its section; disabled at the ends and while the filter has text; reach them as
+  `menu ReorderMenuItem/MoveDownMenuItem`), `CardColorMenuItem`, `RemoveMenuItem`.
 - **Card color palette** (pop-up under `MoreActionsButton`, opened by `CardColorMenuItem`): `CardColorPalette`,
   one `CardColorSwatch_<Name>` per color (`CardColorSwatch_Teal`, ...; the name is also the accessible name) and
   `CardColorAutomaticButton`.
@@ -394,5 +397,5 @@ menu offers `UpgradeMenuItem` (version 1.1.0) instead of `SelectPackageMenuItem`
   main window by its AutomationId (`MainWindowRoot`) or its title, not by what Windows calls the process's main window.
 - The Puppet is not part of AgentControl: it is built and unit-tested (argument, chord, placement, hover planning,
   instance-record validation, launch arguments, build lookup, list-item matching and fixture creation) in
-  `test/DemaConsulting.AgentControl.Puppet.Tests`, but no UI runs in those tests. The unit tests and the build run in CI;
+  `tools/DemaConsulting.AgentControl.Puppet.Tests`, but no UI runs in those tests. The unit tests and the build run in CI;
   the Puppet itself only runs on Windows.

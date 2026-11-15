@@ -64,10 +64,9 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     private readonly string _contentRoot;
 
     /// <summary>
-    ///     Whether this reader exposes only the package layout (<see cref="PackageContentExtractor.LayoutPaths"/>)
-    ///     of a folder that holds other things too (a Git package's cache folder).
+    ///     How much of the root folder this reader exposes.
     /// </summary>
-    private readonly bool _layoutOnly;
+    private readonly ReaderScope _scope;
 
     /// <summary>
     ///     The identity once it has been computed (<see langword="null"/> is a valid result:
@@ -85,12 +84,35 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     /// </summary>
     /// <param name="packageFolder">The unpacked package folder.</param>
     /// <param name="contentRoot">The validated content root inside it.</param>
-    /// <param name="layoutOnly">Whether only the package layout of the root is exposed.</param>
-    private DirectoryPackageContentReader(string packageFolder, string contentRoot, bool layoutOnly)
+    /// <param name="scope">How much of the root is exposed.</param>
+    private DirectoryPackageContentReader(string packageFolder, string contentRoot, ReaderScope scope)
     {
         Description = packageFolder;
         _contentRoot = contentRoot;
-        _layoutOnly = layoutOnly;
+        _scope = scope;
+    }
+
+    /// <summary>
+    ///     How much of a reader's root folder is listed and readable.
+    /// </summary>
+    private enum ReaderScope
+    {
+        /// <summary>
+        ///     Everything under the content root (an unpacked package folder).
+        /// </summary>
+        Content,
+
+        /// <summary>
+        ///     Only the package layout: the four managed folders plus the two root files (a Git
+        ///     package's cache folder, which holds other things too).
+        /// </summary>
+        Layout,
+
+        /// <summary>
+        ///     Only the four managed folders (a repo whose installed agent files are being
+        ///     inspected; its root files are the repo's own and are not part of the agent files).
+        /// </summary>
+        ManagedFolders,
     }
 
     /// <inheritdoc />
@@ -157,7 +179,7 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
                 $"Package content folder '{contentRoot}' is a link, which is not allowed.");
         }
 
-        return new DirectoryPackageContentReader(packageFolder, contentRoot, layoutOnly: false);
+        return new DirectoryPackageContentReader(packageFolder, contentRoot, ReaderScope.Content);
     }
 
     /// <summary>
@@ -190,7 +212,40 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
                 $"Package folder '{layoutRoot}' is a link, which is not allowed.");
         }
 
-        return new DirectoryPackageContentReader(layoutRoot, layoutRoot, layoutOnly: true);
+        return new DirectoryPackageContentReader(layoutRoot, layoutRoot, ReaderScope.Layout);
+    }
+
+    /// <summary>
+    ///     Opens the four managed folders of a repo (<c>.github/agents</c>, <c>.github/standards</c>,
+    ///     <c>.github/templates</c>, <c>.github/skills</c>) for reading, so the agent files that are
+    ///     physically installed can be hashed with the very code that hashes a package's files.
+    /// </summary>
+    /// <param name="repoRoot">The repo's root folder.</param>
+    /// <returns>A read-only reader that lists and reads only files under the four managed folders.
+    ///     Everything else in the repo - including <c>.git</c>, the repo's own root
+    ///     <c>AGENTS.md</c> and <c>release-notes.md</c>, and any other <c>.github</c> content - is
+    ///     never listed, read or inspected.</returns>
+    /// <remarks>
+    ///     Unlike <see cref="OpenLayoutRoot"/>, a link at <paramref name="repoRoot"/> itself is
+    ///     accepted: a repo reached through a junction or symbolic link is legitimate, exactly as
+    ///     <see cref="PackageContentExtractor.Extract"/> and
+    ///     <see cref="PackageContentExtractor.AllManagedFoldersExist"/> accept it. A link at or
+    ///     below <c>.github</c> or a managed folder is refused when the files are listed or read,
+    ///     because reading through it could leave the repo. Holds no file handles.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoRoot"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the repo folder does not exist.</exception>
+    public static DirectoryPackageContentReader OpenManagedFolders(string repoRoot)
+    {
+        ArgumentNullException.ThrowIfNull(repoRoot);
+
+        if (!Directory.Exists(repoRoot))
+        {
+            throw new InvalidOperationException($"Repo folder '{repoRoot}' does not exist.");
+        }
+
+        return new DirectoryPackageContentReader(repoRoot, repoRoot, ReaderScope.ManagedFolders);
     }
 
     /// <inheritdoc />
@@ -199,7 +254,7 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
         var results = new List<string>();
         try
         {
-            if (_layoutOnly)
+            if (_scope != ReaderScope.Content)
             {
                 ListLayout(results);
             }
@@ -219,7 +274,8 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
 
     /// <summary>
     ///     Collects the files of the package layout only: the managed folders (links anywhere in
-    ///     them are refused) and the root files that exist.
+    ///     them are refused) and, unless this reader is scoped to the managed folders alone, the
+    ///     root files that exist.
     /// </summary>
     /// <param name="results">Receives the relative file paths.</param>
     /// <exception cref="InvalidOperationException">Thrown when a layout path is, or passes
@@ -236,6 +292,13 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
             }
         }
 
+        // A repo's own root files are not agent files, so a managed-folders reader skips them
+        // (and never link-checks them)
+        if (_scope == ReaderScope.ManagedFolders)
+        {
+            return;
+        }
+
         foreach (var file in PackageContentExtractor.LayoutRootFiles)
         {
             RejectLinksAlongPath(file);
@@ -247,21 +310,23 @@ internal sealed class DirectoryPackageContentReader : IPackageContentReader
     }
 
     /// <summary>
-    ///     In a layout-root reader, refuses a path that is not part of the package layout.
+    ///     In a layout-root or managed-folders reader, refuses a path that is not part of what the
+    ///     reader exposes.
     /// </summary>
     /// <param name="relativePath">The requested package-relative path.</param>
-    /// <exception cref="InvalidOperationException">Thrown when this is a layout-root reader and
-    ///     the path is neither a layout root file nor below a managed folder.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when this reader is scoped and the path
+    ///     is neither (for a layout-root reader) a layout root file nor below a managed folder.</exception>
     private void RequireLayoutPath(string relativePath)
     {
-        if (!_layoutOnly)
+        if (_scope == ReaderScope.Content)
         {
             return;
         }
 
         var normalized = relativePath.Replace('\\', PackagePathSeparator).TrimStart(PackagePathSeparator);
         var inLayout = !normalized.Split(PackagePathSeparator).Any(part => part is "." or "..") &&
-                       (PackageContentExtractor.LayoutRootFiles.Contains(normalized, StringComparer.Ordinal) ||
+                       ((_scope == ReaderScope.Layout &&
+                         PackageContentExtractor.LayoutRootFiles.Contains(normalized, StringComparer.Ordinal)) ||
                         PackageContentExtractor.LayoutFolders.Any(
                             folder => normalized.StartsWith(folder + PackagePathSeparator, StringComparison.Ordinal)));
         if (!inLayout)

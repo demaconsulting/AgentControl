@@ -61,6 +61,11 @@ the owner with the other settings on save (`AgentControl-SettingsWindowViewModel
 window shows it in a picker with friendly names, which are produced by the `LauncherUI` supporting type
 `ThemePreferenceDisplayNameConverter`, not by this view model.
 
+**KeepShellOpen**: `bool` — Whether the shell window that hosts the launched agent tool stays open after the
+tool exits. Seeded from the saved setting (on when none was saved), bound to the "Keep the shell open after the
+agent tool exits" checkbox, and passed to the owner with the other settings on save, so saving never resets it
+(`AgentControl-SettingsWindowViewModel-KeepShellOpen`, `AgentControl-LauncherUI-KeepShellOpenOption`).
+
 **AvailableShellPreferences**: `static IReadOnlyList<string>` — The OS-conditional
 shell/terminal preset choices offered by the picker: `pwsh`, `powershell`, `cmd` on Windows, or
 `bash`, `zsh`, `sh` on other platforms, per architecture.md's "Configurable agent tool and
@@ -73,7 +78,8 @@ present in this list (`AgentControl-SettingsWindowViewModel-ShellPreferencePrese
 refused.
 
 Notably absent: the recent-repos list is intentionally not exposed here — it is owned
-exclusively by `MainWindowViewModel` and is preserved by `MainWindowViewModel.ApplySettings`
+exclusively by `MainWindowViewModel` (the list is also the user's repo order, with its `HasUserRepoOrder` marker) and
+is preserved by `MainWindowViewModel.ApplySettings`
 when the `AppSettings` built by `Save` is applied. The recent-repos list is only read to count
 the repos pinned to each source.
 
@@ -127,9 +133,9 @@ properties and invokes the `onSave` callback.
   single-path field is empty; `Saved` has been raised
   (`AgentControl-SettingsWindowViewModel-Save`).
 
-The returned `AppSettings.RecentRepos` is left as a fresh empty list; callers (specifically
-`MainWindowViewModel.ApplySettings`) are responsible for preserving the authoritative
-recent-repos list, since this view model never owns or edits it.
+The returned `AppSettings.RecentRepos` is left as a fresh empty list and its `HasUserRepoOrder` marker is left at its
+default; callers (specifically `MainWindowViewModel.ApplySettings`) are responsible for preserving the authoritative
+recent-repos list - the user's repo order - and its marker, since this view model never owns or edits them.
 
 **Dispose**: Cancels the folder checks still running and releases their cancellation source;
 the window calls it when it closes (`AgentControl-SettingsWindowViewModel-SourceList`).

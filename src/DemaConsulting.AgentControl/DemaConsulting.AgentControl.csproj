@@ -11,6 +11,14 @@
          for the final path of an opened file; no unsafe code is written by hand -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
+    <!-- Always keep this project's conventional obj/ and bin/ folders out of the default
+         **/*.cs (and other) globs. The SDK only excludes the CURRENT BaseIntermediateOutputPath
+         and BaseOutputPath; the MSI project publishes this project with both redirected to
+         isolated folders, and without this exclusion any generated files left in the normal
+         obj/ (for example obj/Debug/**/*.AssemblyInfo.cs from an earlier Debug build) would be
+         compiled a second time (CS0579 duplicate attribute). -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
+
     <!-- Avalonia Configuration -->
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 

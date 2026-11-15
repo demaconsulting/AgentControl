@@ -44,11 +44,11 @@ public sealed class LaunchAndPullTests
     ///     <c>AgentToolLauncher.BuildProcessStartInfo</c>'s <c>WorkingDirectory</c>.
     /// </remarks>
     /// <remarks>
-    ///     Per architecture.md's "ensure-synced-before-launch" behavior (as amended, launch is
-    ///     never blocked by sync state), this context is seeded with a pin and the four managed
-    ///     folders are pre-created directly on disk (bypassing any package source) purely to
-    ///     exercise the "already synced" fast path - not to avoid a block, since a never-pinned
-    ///     repo now launches successfully too (see
+    ///     Per architecture.md's "Verify installed agent files before launch" behavior, this context
+    ///     is seeded with a pin that records no content identity and the four managed folders are
+    ///     pre-created directly on disk (bypassing any package source), one holding a file, purely to
+    ///     exercise the fast path that launches without touching a package source - not to avoid a
+    ///     block, since a never-pinned repo launches successfully too (see
     ///     <see cref="LaunchButton_Click_NoPin_StillInvokesConfiguredAgentTool"/>).
     /// </remarks>
     [Fact]
@@ -177,9 +177,11 @@ public sealed class LaunchAndPullTests
             TimeSpan.FromSeconds(15));
 
     /// <summary>
-    ///     Directly creates the four managed folders (empty) under a repo root, without going
-    ///     through a package zip/extraction, so <c>EnsureAgentFilesSyncedBeforeLaunch</c> treats
-    ///     the repo as already synced and proceeds straight to launching.
+    ///     Directly creates the four managed folders under a repo root, with one agent file in the
+    ///     agents folder, without going through a package zip/extraction. The repo's pin records no
+    ///     content identity, so <c>EnsureAgentFilesSyncedBeforeLaunch</c> has nothing to compare the
+    ///     files with, treats the folders-with-files as present and proceeds straight to launching
+    ///     (folders that are present but empty would count as "no agent files" and be restored).
     /// </summary>
     /// <param name="repoRoot">The repo root directory to create the managed folders under.</param>
     private static void CreateManagedFolders(string repoRoot)
@@ -188,6 +190,7 @@ public sealed class LaunchAndPullTests
         Directory.CreateDirectory(Path.Combine(repoRoot, ".github", "standards"));
         Directory.CreateDirectory(Path.Combine(repoRoot, ".github", "templates"));
         Directory.CreateDirectory(Path.Combine(repoRoot, ".github", "skills"));
+        File.WriteAllText(Path.Combine(repoRoot, ".github", "agents", "installed.md"), "# Installed Agent\n");
     }
 
     /// <summary>

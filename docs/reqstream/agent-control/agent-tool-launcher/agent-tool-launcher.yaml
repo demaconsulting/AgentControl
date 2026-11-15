@@ -3,16 +3,18 @@
 #
 # AgentToolLauncher builds the process-start information needed to run the configured agent
 # tool command inside a detected shell, shaping the shell's arguments so the resulting
-# terminal window stays open (or exits cleanly, for PowerShell) and validating its inputs.
+# terminal window either stays open after the tool exits (the default) or ends together with
+# it, and validating its inputs.
 
 sections:
   - title: AgentToolLauncher Unit Requirements
     requirements:
       - id: AgentControl-AgentToolLauncher-BuildCommand
         title: >-
-          The AgentToolLauncher class shall build process-start information appropriate to the
-          detected shell kind: no-exit arguments for PowerShell Core and Windows PowerShell,
-          keep-open arguments for the Command shell, and a `-c` argument for POSIX shells.
+          The AgentToolLauncher class shall, when asked to keep the shell open (the default),
+          build process-start information appropriate to the detected shell kind: no-exit
+          arguments for PowerShell Core and Windows PowerShell, keep-open (`/K`) arguments for
+          the Command shell, and a `-c` argument for POSIX shells.
         justification: |
           Each shell has a different way of running a command while leaving an interactive
           session open afterward for the developer, and the correct argument form must be
@@ -23,6 +25,27 @@ sections:
           - AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShell_ProducesNoExitCommandArguments
           - AgentToolLauncher_BuildProcessStartInfo_Cmd_ProducesKeepOpenArguments
           - AgentToolLauncher_BuildProcessStartInfo_Posix_ProducesDashCArgument
+          - AgentToolLauncher_BuildProcessStartInfo_PowerShellCore_KeepShellOpenTrue_HasNoExit
+          - AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShell_KeepShellOpenTrue_HasNoExit
+          - AgentToolLauncher_BuildProcessStartInfo_Cmd_KeepShellOpenTrue_UsesSlashK
+
+      - id: AgentControl-AgentToolLauncher-ShellEndsWithTool
+        title: >-
+          The AgentToolLauncher class shall, when not asked to keep the shell open, build
+          arguments that run the command and then end the shell: PowerShell without the no-exit
+          argument, the Command shell with `/C`, POSIX shells unchanged, and a quoted-path
+          command for PowerShell still adapted so it is executed.
+        justification: |
+          A user who prefers the window to close together with the tool needs the shell to end
+          when the command does; the command itself must still be run exactly as before, so the
+          adaptation that makes PowerShell execute a quoted path is kept, and POSIX shells,
+          which already end after `-c`, are left alone.
+        tests:
+          - AgentToolLauncher_BuildProcessStartInfo_PowerShellCore_KeepShellOpenFalse_OmitsNoExit
+          - AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShell_KeepShellOpenFalse_OmitsNoExit
+          - AgentToolLauncher_BuildProcessStartInfo_Cmd_KeepShellOpenFalse_UsesSlashC
+          - AgentToolLauncher_BuildProcessStartInfo_Posix_KeepShellOpenFalse_IsUnchanged
+          - AgentToolLauncher_BuildProcessStartInfo_PowerShellQuotedPath_KeepShellOpenFalse_StillPrefixesCallOperator
 
       - id: AgentControl-AgentToolLauncher-QuotedPathInvocation
         title: >-

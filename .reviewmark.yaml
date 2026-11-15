@@ -18,8 +18,7 @@ needs-review:
   - "!**/bin/**"                  # Exclude build output
   - "!node_modules/**"            # Exclude npm dependencies
   - "!**/.venv/**"                # Exclude Python virtual environment
-  - "!tools/**"                   # Exclude agent tooling (not shipped, not software items)
-  - "!test/DemaConsulting.AgentControl.Puppet.Tests/**"  # Exclude tooling test project (not shipped)
+  - "!tools/**"                   # Exclude agent tooling and its tests (not shipped, not software items)
 
 # Evidence source: review data and index.json are located in the 'reviews' branch
 # of this repository, accessed through the GitHub public HTTPS raw content access.
@@ -164,6 +163,7 @@ reviews:
       - "test/**/LauncherUI/HeadlessTestApp.cs"
       - "test/**/LauncherUI/MainWindowTests.cs"
       - "test/**/LauncherUI/RepoGroupWindowTests.cs"
+      - "test/**/LauncherUI/RepoReorderWindowTests.cs"
       - "test/**/LauncherUI/UsabilityWindowTests.cs"
       - "test/**/LauncherUI/ThirdPartyDependenciesTests.cs"
 
@@ -183,6 +183,7 @@ reviews:
       - "test/**/LauncherUI/MainWindowViewModelPersistenceTests.cs"
       - "test/**/LauncherUI/MainWindowViewModelRecheckTests.cs"
       - "test/**/LauncherUI/RepoGroupingTests.cs"
+      - "test/**/LauncherUI/RepoOrderingTests.cs"
 
   - id: AgentControl-LauncherUI-RepoGroupHeaderViewModel
     title: Review of Agent Control RepoGroupHeaderViewModel unit implementation
@@ -256,12 +257,14 @@ reviews:
       - "src/**/LauncherUI/RepoCardStatus.cs"
       - "src/**/LauncherUI/ContentChangeConfirmationRequest.cs"
       - "src/**/LauncherUI/CommittedFilesConversionRequest.cs"
+      - "src/**/LauncherUI/AgentFilesChoiceRequest.cs"
       - "src/**/LauncherUI/CardColorPalette.cs"
       - "test/**/LauncherUI/RepoCardViewModelTests.cs"
       - "test/**/LauncherUI/RepoCardContentIdentityTests.cs"
       - "test/**/LauncherUI/RepoCardGitSourceTests.cs"
       - "test/**/LauncherUI/RepoCardGitAwarenessTests.cs"
       - "test/**/LauncherUI/RepoCardPortablePinTests.cs"
+      - "test/**/LauncherUI/RepoCardLaunchVerificationTests.cs"
       - "test/**/LauncherUI/RepoCardCommittedFilesTests.cs"
       - "test/**/LauncherUI/RepoCardColorTests.cs"
       - "test/**/LauncherUI/RepoCardImageTests.cs"
@@ -705,6 +708,9 @@ reviews:
       - "docs/design/agent-control/agent-tool-launcher.md"
       - "docs/verification/agent-control/agent-tool-launcher.md"
       - "src/**/AgentToolLauncher/ShellKind.cs"
+      - "src/**/AgentToolLauncher/IAgentToolProcessStarter.cs"
+      - "test/**/AgentToolLauncher/AgentToolLauncherSubsystemTests.cs"
+      - "test/**/AgentToolLauncher/FakeAgentToolProcessStarter.cs"
 
   - id: AgentControl-AgentToolLauncherSubsystem-AgentToolLauncher
     title: Review of Agent Control AgentToolLauncher unit implementation
@@ -733,6 +739,20 @@ reviews:
       - "docs/verification/agent-control/agent-tool-launcher/shell-detector.md"
       - "src/**/AgentToolLauncher/ShellDetector.cs"
       - "test/**/AgentToolLauncher/ShellDetectorTests.cs"
+
+  - id: AgentControl-AgentToolLauncherSubsystem-AgentToolProcessStarter
+    title: Review of Agent Control AgentToolProcessStarter unit implementation
+    context:
+      - docs/design/agent-control.md
+      - docs/reqstream/agent-control.yaml
+      - docs/design/agent-control/agent-tool-launcher.md
+      - docs/reqstream/agent-control/agent-tool-launcher.yaml
+    paths:
+      - "docs/reqstream/agent-control/agent-tool-launcher/agent-tool-process-starter.yaml"
+      - "docs/design/agent-control/agent-tool-launcher/agent-tool-process-starter.md"
+      - "docs/verification/agent-control/agent-tool-launcher/agent-tool-process-starter.md"
+      - "src/**/AgentToolLauncher/AgentToolProcessStarter.cs"
+      - "test/**/AgentToolLauncher/AgentToolProcessStarterTests.cs"
 
   # AgentControl - GitIntegration
   - id: AgentControl-GitIntegration
@@ -838,6 +858,7 @@ reviews:
       - "src/**/Settings/SettingsStore.cs"
       - "test/**/Settings/SettingsStoreTests.cs"
       - "test/**/Settings/SettingsStoreOrganizingTests.cs"
+      - "test/**/Settings/SettingsStoreRepoOrderTests.cs"
 
   - id: AgentControl-Settings-RepoGroupName
     title: Review of Agent Control RepoGroupName unit implementation

@@ -44,7 +44,7 @@ using Microsoft.Extensions.Logging;
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     Main launcher window: shows the recent-repos list and exposes Add-Repo/Settings actions.
+///     Main launcher window: shows the user-ordered repo list and exposes Add-Repo/Settings actions.
 /// </summary>
 /// <remarks>
 ///     Everything this class does is view-layer plumbing that requires a live Avalonia
@@ -52,7 +52,11 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     <see cref="SettingsWindow"/> and <see cref="ReleaseNotesViewer"/>, wiring per-card events
 ///     to a message box) - all Launch/Pull/Upgrade/settings-persistence business logic lives in
 ///     <see cref="MainWindowViewModel"/> and <see cref="RepoCardViewModel"/> so it stays testable
-///     without this window ever being constructed in a unit test.
+///     without this window ever being constructed in a unit test. That includes the reordering
+///     rules: this class also owns the drag-and-drop plumbing (starting a drag from a card,
+///     translating the pointer position into a <see cref="RepoDropTarget"/>, drawing the insertion
+///     line and the header tint, auto-scrolling) and the enabling of the card menu's Move items,
+///     while <see cref="MainWindowViewModel"/> decides what is allowed and does it.
 /// </remarks>
 internal sealed partial class MainWindow : Window
 {
@@ -94,6 +98,7 @@ internal sealed partial class MainWindow : Window
     public MainWindow()
     {
         AvaloniaXamlLoader.Load(this);
+        WireRepoListDragAndDrop();
         DataContextChanged += OnDataContextChanged;
         Closing += MainWindow_Closing;
         Closed += (_, _) => (DataContext as MainWindowViewModel)?.Dispose();
@@ -268,6 +273,12 @@ internal sealed partial class MainWindow : Window
     /// <param name="e">Describes which cards were added.</param>
     private void OnRepoCardsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        // A reorder only moves cards within the list; they stay attached, and the per-card state
+        // this window keeps (pending questions, shown dialogs) must survive it
+        if (e.Action == NotifyCollectionChangedAction.Move)
+        {
+            return;
+        }
         // Cards that left the list: undo what was attached and drop what was remembered about them
         if (e.OldItems is not null)
         {
@@ -299,7 +310,8 @@ internal sealed partial class MainWindow : Window
     ///     <see cref="RepoCardViewModel.RemoveRequested"/>,
     ///     <see cref="RepoCardViewModel.AgentsMdTemplateOfferRequested"/>, and
     ///     <see cref="RepoCardViewModel.ContentChangeConfirmationRequested"/>, and
-    ///     <see cref="RepoCardViewModel.CommittedFilesConversionRequested"/> events so failures show
+    ///     <see cref="RepoCardViewModel.CommittedFilesConversionRequested"/>, and
+    ///     <see cref="RepoCardViewModel.AgentFilesChoiceRequested"/> events so failures show
     ///     a message box, successful upgrades open a non-modal <see cref="ReleaseNotesViewer"/>
     ///     tracked by this window (see <see cref="ShowTrackedChildWindow"/>, so it closes when
     ///     this window does, rather than outliving it), a remove request shows a confirmation
@@ -307,7 +319,8 @@ internal sealed partial class MainWindow : Window
     ///     modal <see cref="ConfirmationWindow"/> before writing the template or recording a
     ///     decline, a republished package version asks for confirmation before it replaces
     ///     the copy the repo was set up with, and a repo whose agent folders are tracked by git asks
-    ///     for confirmation before they are taken out of git.
+    ///     for confirmation before they are taken out of git, and a launch whose agent files differ
+    ///     from the pin (or could not be restored) asks what to do before the agent tool starts.
     /// </summary>
     /// <param name="card">The card to subscribe to.</param>
     private void AttachCardHandlers(RepoCardViewModel card)
@@ -343,6 +356,9 @@ internal sealed partial class MainWindow : Window
         async void OnCommittedFilesConversionRequested(object? sender, CommittedFilesConversionRequest request) =>
             await ConfirmCommittedFilesConversionAsync(request);
 
+        async void OnAgentFilesChoiceRequested(object? sender, AgentFilesChoiceRequest request) =>
+            await ConfirmAgentFilesChoiceAsync(request);
+
         // Runs after the view model has regrouped the list (its handler was attached when the card was created)
         card.FavoriteChanged += OnFavoriteChanged;
         card.ErrorOccurred += OnErrorOccurred;
@@ -353,6 +369,7 @@ internal sealed partial class MainWindow : Window
         card.AgentsMdTemplateOfferRequested += OnTemplateOfferRequested;
         card.ContentChangeConfirmationRequested += OnContentChangeConfirmationRequested;
         card.CommittedFilesConversionRequested += OnCommittedFilesConversionRequested;
+        card.AgentFilesChoiceRequested += OnAgentFilesChoiceRequested;
 
         _cardHandlerRemovers[card] = () =>
         {
@@ -365,6 +382,7 @@ internal sealed partial class MainWindow : Window
             card.AgentsMdTemplateOfferRequested -= OnTemplateOfferRequested;
             card.ContentChangeConfirmationRequested -= OnContentChangeConfirmationRequested;
             card.CommittedFilesConversionRequested -= OnCommittedFilesConversionRequested;
+            card.AgentFilesChoiceRequested -= OnAgentFilesChoiceRequested;
         };
     }
 
@@ -569,6 +587,41 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    ///     Shows the <see cref="ConfirmationWindow"/> asking the user about a repo's agent files
+    ///     before a launch - keep or update files that differ from the pin, or launch anyway or
+    ///     cancel after a failed restore - with the request's own button labels, and reports the
+    ///     answer to the card's waiting launch.
+    /// </summary>
+    /// <param name="request">The question, its two button labels and the way to answer it, as
+    ///     carried by <see cref="RepoCardViewModel.AgentFilesChoiceRequested"/>.</param>
+    /// <remarks>
+    ///     The dialog is modal and the card stays busy until it is answered. The default (focused)
+    ///     answer is the decline side - "Keep current files" or "Cancel" - so pressing Enter, Escape
+    ///     or closing the dialog never replaces files or launches past a failure. The request is
+    ///     always answered - an unexpected failure to show the dialog counts as the decline side -
+    ///     because the card's launch would otherwise wait for ever.
+    /// </remarks>
+    private async Task ConfirmAgentFilesChoiceAsync(AgentFilesChoiceRequest request)
+    {
+        var confirmed = false;
+        try
+        {
+            confirmed = await new ConfirmationWindow(request.Message, request.ConfirmText, request.DeclineText)
+                .ShowDialog<bool>(this);
+        }
+        catch (Exception ex)
+        {
+            // This runs from an async void handler: an escaping exception would be unhandled on the
+            // UI thread, so a failure to show the dialog is logged and counts as the safe side
+            _logger.LogError(ex, "Could not show the agent files question");
+        }
+        finally
+        {
+            request.Respond(confirmed);
+        }
+    }
+
+    /// <summary>
     ///     Shows the <see cref="ConfirmationWindow"/> offering to place the package's optional
     ///     <c>AGENTS.md</c> template at <paramref name="card"/>'s repo root, and calls back into
     ///     <see cref="RepoCardViewModel.AcceptAgentsMdTemplate"/> or
@@ -682,6 +735,8 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
+        UpdateMoveMenuItems(flyout, card);
+
         var submenu = flyout.Items.OfType<MenuItem>().FirstOrDefault(item => item.Name == "MoveToGroupMenuItem");
         if (submenu is null)
         {
@@ -740,6 +795,446 @@ internal sealed partial class MainWindow : Window
         foreach (var entry in entries)
         {
             submenu.Items.Add(entry);
+        }
+    }
+
+    /// <summary>
+    ///     Enables or disables the Reorder submenu and its four Move items of a card's menu just before
+    ///     it opens, and gives a disabled item the reason as its tooltip.
+    /// </summary>
+    /// <remarks>
+    ///     The rules (the filter has text, or the repo is already at that end of its section, or it is
+    ///     the only repo of its section) belong to <see cref="MainWindowViewModel.GetMoveDisabledReason"/>
+    ///     and <see cref="MainWindowViewModel.GetReorderDisabledReason"/>; this only shows them. The
+    ///     menu cannot change while it is open, so deciding once on opening is enough. The window is
+    ///     found through the flyout's placement target.
+    /// </remarks>
+    /// <param name="flyout">The card's menu.</param>
+    /// <param name="card">The card the menu belongs to.</param>
+    private static void UpdateMoveMenuItems(MenuFlyout flyout, RepoCardViewModel card)
+    {
+        if (TopLevel.GetTopLevel(flyout.Target)?.DataContext is not MainWindowViewModel viewModel ||
+            flyout.Items.OfType<MenuItem>().FirstOrDefault(item => item.Name == "ReorderMenuItem") is not { } reorder)
+        {
+            return;
+        }
+
+        var reorderReason = viewModel.GetReorderDisabledReason(card);
+        reorder.IsEnabled = reorderReason is null;
+        ToolTip.SetTip(reorder, reorderReason ?? "Move this repo within its section");
+
+        var moves = new (string Name, RepoMove Move, string EnabledTooltip)[]
+        {
+            ("MoveToTopMenuItem", RepoMove.Top, "Put this repo first in its section"),
+            ("MoveUpMenuItem", RepoMove.Up, "Move this repo one place up in its section"),
+            ("MoveDownMenuItem", RepoMove.Down, "Move this repo one place down in its section"),
+            ("MoveToBottomMenuItem", RepoMove.Bottom, "Put this repo last in its section")
+        };
+        foreach (var (name, move, enabledTooltip) in moves)
+        {
+            if (reorder.Items.OfType<MenuItem>().FirstOrDefault(item => item.Name == name) is not { } item)
+            {
+                continue;
+            }
+
+            var reason = viewModel.GetMoveDisabledReason(card, move);
+            item.IsEnabled = reason is null;
+            ToolTip.SetTip(item, reason ?? enabledTooltip);
+        }
+    }
+
+    /// <summary>
+    ///     Moves the card of the clicked Move menu item through the view model.
+    /// </summary>
+    /// <param name="sender">The clicked <see cref="MenuItem"/>; its data context is the card.</param>
+    /// <param name="move">The move the item stands for.</param>
+    private void MoveMenuItemClicked(object? sender, RepoMove move)
+    {
+        if (sender is MenuItem { DataContext: RepoCardViewModel card } && DataContext is MainWindowViewModel viewModel)
+        {
+            // A failed save is reported to the user by the view model
+            viewModel.MoveCard(card, move);
+        }
+    }
+
+    /// <summary>
+    ///     Handles the "Move to top" item.
+    /// </summary>
+    /// <param name="sender">The clicked <see cref="MenuItem"/>.</param>
+    /// <param name="e">Routed event arguments (unused).</param>
+    private void MoveToTopMenuItem_Click(object? sender, RoutedEventArgs e) => MoveMenuItemClicked(sender, RepoMove.Top);
+
+    /// <summary>
+    ///     Handles the "Move up" item.
+    /// </summary>
+    /// <param name="sender">The clicked <see cref="MenuItem"/>.</param>
+    /// <param name="e">Routed event arguments (unused).</param>
+    private void MoveUpMenuItem_Click(object? sender, RoutedEventArgs e) => MoveMenuItemClicked(sender, RepoMove.Up);
+
+    /// <summary>
+    ///     Handles the "Move down" item.
+    /// </summary>
+    /// <param name="sender">The clicked <see cref="MenuItem"/>.</param>
+    /// <param name="e">Routed event arguments (unused).</param>
+    private void MoveDownMenuItem_Click(object? sender, RoutedEventArgs e) => MoveMenuItemClicked(sender, RepoMove.Down);
+
+    /// <summary>
+    ///     Handles the "Move to bottom" item.
+    /// </summary>
+    /// <param name="sender">The clicked <see cref="MenuItem"/>.</param>
+    /// <param name="e">Routed event arguments (unused).</param>
+    private void MoveToBottomMenuItem_Click(object? sender, RoutedEventArgs e) =>
+        MoveMenuItemClicked(sender, RepoMove.Bottom);
+
+    /// <summary>
+    ///     The data format of a dragged repo card: one string item, the card's repo path.
+    /// </summary>
+    internal static readonly DataFormat<string> RepoCardDataFormat =
+        DataFormat.CreateStringApplicationFormat("DemaConsulting.AgentControl.RepoCard");
+
+    /// <summary>
+    ///     How far (in device-independent pixels) the pointer must move with the button held on a card
+    ///     before a drag starts, so a plain click or a slightly unsteady one never drags.
+    /// </summary>
+    private const double DragThreshold = 6;
+
+    /// <summary>
+    ///     How close to the top or bottom edge of the list (in device-independent pixels) a dragged card
+    ///     makes the list scroll, and by how much it scrolls per drag event.
+    /// </summary>
+    private const double AutoScrollEdge = 24;
+
+    /// <summary>
+    ///     Starts the operating system's drag-and-drop for a card; <see langword="null"/> uses
+    ///     <see cref="DragDrop.DoDragDropAsync"/>.
+    /// </summary>
+    /// <remarks>
+    ///     A test seam, like <see cref="RepoFolderPicker"/>: the headless platform has no drag source, so
+    ///     tests supply a starter that records the data being dragged and complete the drag by raising
+    ///     the drop events on the list themselves. The delegate receives the pointer press that
+    ///     started the drag, the data to drag and the allowed effects, and returns the effect the
+    ///     drop had.
+    /// </remarks>
+    internal Func<PointerPressedEventArgs, IDataTransfer, DragDropEffects, Task<DragDropEffects>>? DragStarter { get; set; }
+
+    /// <summary>
+    ///     The card the pointer was pressed on (and the press that did it) while it may still turn
+    ///     into a drag; <see langword="null"/> when no press is pending.
+    /// </summary>
+    private (RepoCardViewModel Card, ListBoxItem Container, PointerPressedEventArgs Press, Point Start)? _dragCandidate;
+
+    /// <summary>
+    ///     The list row that currently shows drop feedback and the class that does it, so the feedback
+    ///     can be cleared again.
+    /// </summary>
+    private (ListBoxItem Container, string Class)? _dropFeedback;
+
+    /// <summary>
+    ///     Connects the repo list's drag source and drop target handlers.
+    /// </summary>
+    /// <remarks>
+    ///     The press is observed on the way down (and also when something handled it), so a card that
+    ///     is pressed on can become a drag whatever its list row does with the press. Every business
+    ///     rule - what may be dropped where, and what a drop does - is the view model's
+    ///     (<see cref="MainWindowViewModel.CanDrop"/> and <see cref="MainWindowViewModel.DropCard"/>);
+    ///     this class only translates pointer positions into <see cref="RepoDropTarget"/>s and shows
+    ///     the feedback.
+    /// </remarks>
+    private void WireRepoListDragAndDrop()
+    {
+        var list = this.FindControl<ListBox>("RepoListBox");
+        if (list is null)
+        {
+            return;
+        }
+
+        list.AddHandler(PointerPressedEvent, RepoList_PointerPressed, RoutingStrategies.Tunnel, handledEventsToo: true);
+        list.AddHandler(PointerMovedEvent, RepoList_PointerMoved, RoutingStrategies.Tunnel, handledEventsToo: true);
+        list.AddHandler(PointerReleasedEvent, RepoList_PointerReleased, RoutingStrategies.Tunnel, handledEventsToo: true);
+        list.AddHandler(PointerCaptureLostEvent, RepoList_PointerReleased, RoutingStrategies.Tunnel, handledEventsToo: true);
+        DragDrop.AddDragEnterHandler(list, RepoList_DragOver);
+        DragDrop.AddDragOverHandler(list, RepoList_DragOver);
+        DragDrop.AddDragLeaveHandler(list, RepoList_DragLeave);
+        DragDrop.AddDropHandler(list, RepoList_Drop);
+    }
+
+    /// <summary>
+    ///     Remembers the card the left button was pressed on as a possible drag, unless reordering is
+    ///     off, the press is on one of the card's own controls, or the row is a section header.
+    /// </summary>
+    /// <param name="sender">The list.</param>
+    /// <param name="e">The press.</param>
+    private void RepoList_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _dragCandidate = null;
+        if (sender is not ListBox list ||
+            DataContext is not MainWindowViewModel { IsReorderEnabled: true } ||
+            !e.GetCurrentPoint(list).Properties.IsLeftButtonPressed ||
+            e.Source is not Visual source)
+        {
+            return;
+        }
+
+        // A press on a button, the star, a menu or a text box is that control's, not the card's
+        var ancestors = source.GetSelfAndVisualAncestors().ToList();
+        var container = ancestors.OfType<ListBoxItem>().FirstOrDefault();
+        var inCardControl = ancestors
+            .TakeWhile(visual => visual is not ListBoxItem)
+            .Any(visual => visual is Button or TextBox or MenuItem or ScrollBar);
+        if (container is { DataContext: RepoCardViewModel card } && !inCardControl)
+        {
+            _dragCandidate = (card, container, e, e.GetPosition(list));
+        }
+    }
+
+    /// <summary>
+    ///     Starts the drag once the pointer has moved far enough from where it was pressed on a card.
+    /// </summary>
+    /// <param name="sender">The list.</param>
+    /// <param name="e">The move.</param>
+    private void RepoList_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_dragCandidate is not { } candidate || sender is not ListBox list)
+        {
+            return;
+        }
+
+        if (!e.GetCurrentPoint(list).Properties.IsLeftButtonPressed ||
+            DataContext is not MainWindowViewModel { IsReorderEnabled: true })
+        {
+            _dragCandidate = null;
+            return;
+        }
+
+        var delta = e.GetPosition(list) - candidate.Start;
+        if (Math.Abs(delta.X) < DragThreshold && Math.Abs(delta.Y) < DragThreshold)
+        {
+            return;
+        }
+
+        _dragCandidate = null;
+        _ = StartDragAsync(candidate.Card, candidate.Container, candidate.Press);
+    }
+
+    /// <summary>
+    ///     Forgets a pending press when the button is released (a plain click) or the pointer capture is lost.
+    /// </summary>
+    /// <param name="sender">The list (unused).</param>
+    /// <param name="e">The event (unused).</param>
+    private void RepoList_PointerReleased(object? sender, RoutedEventArgs e) => _dragCandidate = null;
+
+    /// <summary>
+    ///     Runs a drag of a card: dims the card, hands the card's path to the drag source and, when the
+    ///     drag ends however it ends, removes the dimming and any drop feedback.
+    /// </summary>
+    /// <param name="card">The dragged card.</param>
+    /// <param name="container">The card's list row.</param>
+    /// <param name="press">The press that started the drag.</param>
+    /// <returns>A task that completes when the drag has ended.</returns>
+    private async Task StartDragAsync(RepoCardViewModel card, ListBoxItem container, PointerPressedEventArgs press)
+    {
+        var transfer = new DataTransfer();
+        transfer.Add(DataTransferItem.Create(RepoCardDataFormat, card.RepoPath));
+        container.Classes.Add("dragging");
+        try
+        {
+            var starter = DragStarter ?? DragDrop.DoDragDropAsync;
+            await starter(press, transfer, DragDropEffects.Move);
+        }
+        finally
+        {
+            container.Classes.Remove("dragging");
+            ClearDropFeedback();
+        }
+    }
+
+    /// <summary>
+    ///     Gets the card that is being dragged over the list, from the data of the drag.
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    /// <param name="viewModel">The window's view model.</param>
+    /// <param name="card">The dragged card when this returns <see langword="true"/>.</param>
+    /// <returns><see langword="true"/> when the drag carries a repo card that is in the list.</returns>
+    private bool TryGetDraggedCard(
+        DragEventArgs e,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out MainWindowViewModel? viewModel,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out RepoCardViewModel? card)
+    {
+        viewModel = DataContext as MainWindowViewModel;
+        card = null;
+        if (viewModel is null || e.DataTransfer.TryGetValue(RepoCardDataFormat) is not { } path)
+        {
+            return false;
+        }
+
+        card = viewModel.RepoCards.FirstOrDefault(
+            other => string.Equals(other.RepoPath, path, StringComparison.OrdinalIgnoreCase));
+        return card is not null;
+    }
+
+    /// <summary>
+    ///     Decides whether a card is dropped before or after the card it is over, from the pointer's
+    ///     height within that card's row.
+    /// </summary>
+    /// <param name="y">The pointer's vertical position within the row.</param>
+    /// <param name="height">The row's height.</param>
+    /// <returns><see langword="true"/> for the upper half (insert before),
+    ///     <see langword="false"/> for the lower half (insert after).</returns>
+    internal static bool IsUpperHalf(double y, double height) => y < height / 2;
+
+    /// <summary>
+    ///     Works out where a drop at the pointer's position would put a card.
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    /// <returns>The place and the row it was worked out from, or <see langword="null"/> when the pointer
+    ///     is not over a card or a section header.</returns>
+    private (RepoDropTarget Target, ListBoxItem Container)? GetDropTarget(DragEventArgs e)
+    {
+        var list = this.FindControl<ListBox>("RepoListBox");
+        if (list is null)
+        {
+            return null;
+        }
+
+        var hit = list.InputHitTest(e.GetPosition(list)) as Visual;
+        var container = hit?.GetSelfAndVisualAncestors().OfType<ListBoxItem>().FirstOrDefault();
+        switch (container?.DataContext)
+        {
+            case RepoGroupHeaderViewModel header:
+                return (RepoDropTarget.ForHeader(header), container);
+
+            case RepoCardViewModel anchor:
+                var section = MainWindowViewModel.GetSectionOf(anchor);
+                var position = e.GetPosition(container);
+                return (RepoDropTarget.ForCard(
+                    anchor, IsUpperHalf(position.Y, container.Bounds.Height), section.Kind, section.Name), container);
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    ///     Answers a drag over the list: says whether a drop here is possible, shows where the card
+    ///     would land and scrolls the list when the pointer is near its top or bottom edge.
+    /// </summary>
+    /// <param name="sender">The list.</param>
+    /// <param name="e">The drag event.</param>
+    private void RepoList_DragOver(object? sender, DragEventArgs e)
+    {
+        if (!TryGetDraggedCard(e, out var viewModel, out var card))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var found = GetDropTarget(e);
+        var allowed = found is { } target && viewModel.CanDrop(card, target.Target);
+        e.DragEffects = allowed ? DragDropEffects.Move : DragDropEffects.None;
+
+        // Nothing is shown next to the dragged card itself: dropping it there changes nothing
+        if (allowed && found is { } shown && !ReferenceEquals(shown.Target.Anchor, card))
+        {
+            ShowDropFeedback(shown.Container, shown.Target);
+        }
+        else
+        {
+            ClearDropFeedback();
+        }
+
+        AutoScrollList(e);
+    }
+
+    /// <summary>
+    ///     Removes the drop feedback when the dragged card leaves the list.
+    /// </summary>
+    /// <param name="sender">The list (unused).</param>
+    /// <param name="e">The drag event (unused).</param>
+    private void RepoList_DragLeave(object? sender, DragEventArgs e) => ClearDropFeedback();
+
+    /// <summary>
+    ///     Drops the dragged card where the pointer is, through the view model.
+    /// </summary>
+    /// <param name="sender">The list.</param>
+    /// <param name="e">The drag event.</param>
+    private void RepoList_Drop(object? sender, DragEventArgs e)
+    {
+        ClearDropFeedback();
+        if (!TryGetDraggedCard(e, out var viewModel, out var card))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (GetDropTarget(e) is { } found && viewModel.DropCard(card, found.Target))
+        {
+            e.DragEffects = DragDropEffects.Move;
+        }
+        else
+        {
+            e.DragEffects = DragDropEffects.None;
+        }
+    }
+
+    /// <summary>
+    ///     Shows where a card would land: a line above or below the card the pointer is over, or a tint on
+    ///     the header it is over.
+    /// </summary>
+    /// <param name="container">The list row the pointer is over.</param>
+    /// <param name="target">The place.</param>
+    private void ShowDropFeedback(ListBoxItem container, RepoDropTarget target)
+    {
+        var feedbackClass = "dropHeader";
+        if (target.Anchor is not null)
+        {
+            feedbackClass = target.InsertBefore ? "dropAbove" : "dropBelow";
+        }
+
+        if (_dropFeedback is { } current && ReferenceEquals(current.Container, container) && current.Class == feedbackClass)
+        {
+            return;
+        }
+
+        ClearDropFeedback();
+        container.Classes.Add(feedbackClass);
+        _dropFeedback = (container, feedbackClass);
+    }
+
+    /// <summary>
+    ///     Removes the drop feedback, if any is shown.
+    /// </summary>
+    private void ClearDropFeedback()
+    {
+        if (_dropFeedback is { } current)
+        {
+            current.Container.Classes.Remove(current.Class);
+            _dropFeedback = null;
+        }
+    }
+
+    /// <summary>
+    ///     Scrolls the list a little when the dragged card is near its top or bottom edge, so a long list
+    ///     can be reordered without dropping first (best effort: it moves when the drag reports
+    ///     the pointer).
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    private void AutoScrollList(DragEventArgs e)
+    {
+        var list = this.FindControl<ListBox>("RepoListBox");
+        var scroller = list?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        if (scroller is null)
+        {
+            return;
+        }
+
+        var y = e.GetPosition(scroller).Y;
+        if (y < AutoScrollEdge)
+        {
+            scroller.Offset = new Vector(scroller.Offset.X, Math.Max(0, scroller.Offset.Y - AutoScrollEdge));
+        }
+        else if (y > scroller.Bounds.Height - AutoScrollEdge)
+        {
+            scroller.Offset = new Vector(scroller.Offset.X, scroller.Offset.Y + AutoScrollEdge);
         }
     }
 

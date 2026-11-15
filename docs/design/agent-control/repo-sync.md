@@ -41,6 +41,16 @@ the managed folders are folders and the root files are regular files, so a file 
 belongs is refused; the reader in turn refuses a link in the layout when it lists or reads it. The list of layout
 paths has one source of truth, `PackageContentExtractor.LayoutPaths`, shared with the Git source provider.
 
+**Reading the files installed in a repo.** The same reader family also presents a repo's own four managed folders as a
+package (`DirectoryPackageContentReader.OpenManagedFolders`, a third reader scope next to the `content`-folder and
+layout-root ones: the layout rules without the two root files and without a link check of the repo root itself), and
+`PackageContentExtractor.HasInstalledFiles` asks whether any file is there. This is what lets `AgentPackageManagement`
+hash the installed files with the unchanged identity function and `LauncherUI` compare them with a pin before a launch
+(`AgentControl-RepoSync-InstalledFiles`, which supports `AgentControl-System-VerifyAgentFiles`): an untouched extraction
+of a zip, an unpacked package folder or a layout folder presents exactly the files of the package, byte for byte, so
+its identity equals the package's. Nothing in the repo outside the four folders is read, and a link at or below a
+managed folder is refused rather than followed.
+
 **How the content identity reaches the extractor and the pin.** An identity belongs to the reader, not to a call: the
 provider's `AcquireAsync` returns one `IPackageContentReader` per acquisition - a zip reader, or a folder reader the
 source's provider opened over what it unpacked or fetched. The card passes that one reader to
@@ -89,6 +99,34 @@ zip's contents (a facade over `PackageContentExtractor` for a zip file).
   customizations a developer added inside those folders are silently removed — an accepted
   risk, not a defect (see architecture.md's Open Concerns #3).
 
+**PackageContentExtractor.HasInstalledFiles**: Reports whether at least one agent file is installed in a repo's four
+managed folders.
+
+- *Type*: In-process .NET static method.
+- *Role*: Provider.
+- *Contract*: Returns `true` when any file exists below a managed folder (a hidden file counts; files outside the
+  four folders and empty folders do not) and also when a managed folder cannot be inspected safely, for example because
+  it is a link - such content must never be mistaken for "nothing installed" and replaced silently; returns `false`
+  when the folders are absent, empty or hold only empty folders, or when the repo folder itself does not exist
+  (`AgentControl-PackageContentExtractor-HasInstalledFiles`). It lists the files through
+  `DirectoryPackageContentReader.OpenManagedFolders`.
+- *Constraints*: Read-only and thread-safe; throws `ArgumentNullException` for a null repo root.
+
+**DirectoryPackageContentReader.OpenManagedFolders**: Presents a repo's four managed folders as a package, so the
+agent files that are installed can be hashed with the very code that hashes a package's files
+(`AgentControl-RepoSync-InstalledFiles`).
+
+- *Type*: In-process .NET static factory.
+- *Role*: Provider.
+- *Contract*: The reader lists and reads only the files below `.github/agents`, `.github/standards`,
+  `.github/templates` and `.github/skills` - never the repo's own root files (`AGENTS.md`, `release-notes.md`), `.git`
+  or other `.github` content - and refuses a link at or below those folders when the files are listed or read. Unlike
+  `OpenLayoutRoot`, it accepts a repo root that is itself reached through a link, as `Extract` does
+  (`AgentControl-PackageContentExtractor-ReadManagedFoldersOfRepo`,
+  `AgentControl-PackageContentExtractor-AcceptRepoRootThroughLink`).
+- *Constraints*: Throws `ArgumentNullException` for a null repo root and `InvalidOperationException` for a repo folder
+  that does not exist; holds no file handles.
+
 **PackageZipExtractor.AllManagedFoldersExist**: Reports whether all four managed folders are
 present on disk.
 
@@ -96,8 +134,9 @@ present on disk.
 - *Role*: Provider.
 - *Contract*: Returns `false` if any of the four folders is missing or is a symbolic link or
   junction (`AgentControl-PackageZipExtractor-AllManagedFoldersExist`); used by
-  `RepoCardViewModel`'s ensure-synced-before-launch check to decide whether a re-extraction is
-  needed without re-scanning file contents.
+  `RepoCardViewModel`'s pre-launch check only for a pin that records no identity of its files, where the files
+  cannot be compared and folder presence is the only check available. It is no longer the "in sync" test for a pin
+  with an identity (see `PackageContentIdentity.ComputeInstalledFilesIdentity`).
 - *Constraints*: Performs only existence checks, not content verification.
 
 **PackageZipExtractor.ReadReleaseNotes**: Reads a package's release notes without extracting.

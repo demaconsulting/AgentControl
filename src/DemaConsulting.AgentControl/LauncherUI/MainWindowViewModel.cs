@@ -20,6 +20,7 @@
 
 using System.Collections.ObjectModel;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.AgentToolLauncher;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.Settings;
@@ -57,7 +58,73 @@ internal enum AddRepoResult
 }
 
 /// <summary>
-///     View model for the main launcher window: owns the recent-repos list and the settings
+///     The four ways the "Move" items of a card's menu change a repo's place within its section.
+/// </summary>
+internal enum RepoMove
+{
+    /// <summary>
+    ///     To the first place of the repo's section.
+    /// </summary>
+    Top,
+
+    /// <summary>
+    ///     One place towards the top of the repo's section.
+    /// </summary>
+    Up,
+
+    /// <summary>
+    ///     One place towards the bottom of the repo's section.
+    /// </summary>
+    Down,
+
+    /// <summary>
+    ///     To the last place of the repo's section.
+    /// </summary>
+    Bottom
+}
+
+/// <summary>
+///     Where a dragged card is dropped: a section (a group, Favorites or Ungrouped) and a place in
+///     it, given as a card of that section to insert next to or, for a section header, "the end".
+/// </summary>
+/// <param name="Kind">The kind of the target section.</param>
+/// <param name="Name">The target section's display name (a group's name, or the built-in
+///     <see cref="RepoGroupName.FavoritesName"/>/<see cref="RepoGroupName.UngroupedName"/>).</param>
+/// <param name="Anchor">The card of the target section to insert next to, or <see langword="null"/>
+///     for the end of the section (a drop on its header).</param>
+/// <param name="InsertBefore"><see langword="true"/> to insert before <paramref name="Anchor"/>,
+///     <see langword="false"/> to insert after it; ignored when there is no anchor.</param>
+internal sealed record RepoDropTarget(RepoGroupKind Kind, string Name, RepoCardViewModel? Anchor, bool InsertBefore)
+{
+    /// <summary>
+    ///     Creates the target for a drop on a section's header: the end of that section.
+    /// </summary>
+    /// <param name="header">The header the card was dropped on.</param>
+    /// <returns>The target.</returns>
+    public static RepoDropTarget ForHeader(RepoGroupHeaderViewModel header)
+    {
+        ArgumentNullException.ThrowIfNull(header);
+        return new RepoDropTarget(header.Kind, header.Name, null, false);
+    }
+
+    /// <summary>
+    ///     Creates the target for a drop on a card: just before or after it, in its section.
+    /// </summary>
+    /// <param name="anchor">The card that was dropped on.</param>
+    /// <param name="insertBefore"><see langword="true"/> for the upper half of the card,
+    ///     <see langword="false"/> for the lower half.</param>
+    /// <param name="kind">The kind of the anchor's section.</param>
+    /// <param name="name">The anchor's section's display name.</param>
+    /// <returns>The target.</returns>
+    public static RepoDropTarget ForCard(RepoCardViewModel anchor, bool insertBefore, RepoGroupKind kind, string name)
+    {
+        ArgumentNullException.ThrowIfNull(anchor);
+        return new RepoDropTarget(kind, name, anchor, insertBefore);
+    }
+}
+
+/// <summary>
+///     View model for the main launcher window: owns the user-ordered repo list and the settings
 ///     persistence lifecycle.
 /// </summary>
 /// <remarks>
@@ -88,6 +155,18 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     the real providers; see the constructor.
     /// </summary>
     private readonly Func<AppSettings, PackageSourceRegistry>? _registryFactory;
+
+    /// <summary>
+    ///     Starts the agent-tool process for every card, or <see langword="null"/> for the real
+    ///     one; see the constructor.
+    /// </summary>
+    private readonly IAgentToolProcessStarter? _processStarter;
+
+    /// <summary>
+    ///     Detects the shell for every card's launch, or <see langword="null"/> for a real
+    ///     detector; see the constructor.
+    /// </summary>
+    private readonly ShellDetector? _shellDetector;
 
     /// <summary>
     ///     The clock that drives the periodic upgrade re-check (and dates the package-version
@@ -198,6 +277,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="registryFactory">Builds the registry of configured sources for every card from
     ///     the settings; <see langword="null"/> uses the real providers. Supplied so tests can
     ///     substitute in-memory sources whose reads they count.</param>
+    /// <param name="processStarter">Starts the agent-tool process for every card;
+    ///     <see langword="null"/> uses the real one. Supplied so tests can capture launches without
+    ///     starting a shell.</param>
+    /// <param name="shellDetector">Detects the shell for every card's launch;
+    ///     <see langword="null"/> uses a real <see cref="ShellDetector"/>. Supplied so tests get a
+    ///     deterministic shell.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when
@@ -210,14 +295,22 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Action<ThemePreference>? applyTheme = null,
         TimeProvider? timeProvider = null,
         TimeSpan? upgradeRecheckInterval = null,
-        Func<AppSettings, PackageSourceRegistry>? registryFactory = null)
+        Func<AppSettings, PackageSourceRegistry>? registryFactory = null,
+        IAgentToolProcessStarter? processStarter = null,
+        ShellDetector? shellDetector = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(
             upgradeRecheckInterval ?? DefaultUpgradeRecheckInterval, TimeSpan.Zero);
 
         _settings = settings;
+
+        // A first run, or settings built in memory, still have to get the order older versions
+        // displayed; a stored user order is left alone
+        settings.EnsureRepoOrder();
         _registryFactory = registryFactory;
+        _processStarter = processStarter;
+        _shellDetector = shellDetector;
         _startupOptions = startupOptions;
         _configDirectory = configDirectory;
         _applyTheme = applyTheme;
@@ -246,13 +339,19 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Gets the recent-repos list, most-recently-used first, backing this view model's
-    ///     underlying state (settings persistence, additions/removals).
+    ///     Gets the repo list in the user's own order, backing this view model's underlying state
+    ///     (settings persistence, additions/removals, reordering).
     /// </summary>
+    /// <remarks>
+    ///     The order is the one stored in <see cref="AppSettings.RecentRepos"/>: a new repo is added
+    ///     at the end, <see cref="MoveCard"/> and <see cref="DropCard"/> reorder it, and nothing
+    ///     else does (launching, refreshing and filtering never move a card). Each section of
+    ///     <see cref="DisplayedItems"/> shows its cards in this relative order.
+    /// </remarks>
     public ObservableCollection<RepoCardViewModel> RepoCards { get; }
 
     /// <summary>
-    ///     Gets the filtered/sorted cards that are currently shown: those of
+    ///     Gets the filtered cards that are currently shown: those of
     ///     <see cref="RepoCards"/> that match <see cref="FilterText"/> (a case-insensitive substring
     ///     match against <see cref="RepoCardViewModel.RepoName"/>/<see cref="RepoCardViewModel.RepoPath"/>),
     ///     in the order <see cref="DisplayedItems"/> shows them, without the cards hidden inside
@@ -260,7 +359,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <remarks>
     ///     See <see cref="DisplayedItems"/> for the order. When no repo is in a group the list is
-    ///     flat: favorites first, then the most recently launched, stable otherwise.
+    ///     flat: favorites first, then the user's own order.
     /// </remarks>
     public ObservableCollection<RepoCardViewModel> DisplayedRepoCards { get; }
 
@@ -274,12 +373,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     not again under its group, and its card shows a group chip), then the user's groups
     ///     alphabetically, then <c>Ungrouped</c> last; sections with no matching repo have no header.
     ///     When no repo is in a group there are no headers at all and the list looks as it always
-    ///     did, favorites first. Within a section repos are ordered by most recent launch (nulls
-    ///     last), stable otherwise. <b>Collapsing.</b> The cards of a collapsed section are left out
+    ///     did, favorites first. Within a section repos are in the user's own order (the relative
+    ///     order of <see cref="RepoCards"/>); the time of a launch plays no part. <b>Collapsing.</b>
+    ///     The cards of a collapsed section are left out
     ///     (its header stays, with the count of its matches); the state is remembered per user in
     ///     <see cref="AppSettings.CollapsedGroups"/>. <b>Filtering.</b> While a filter is active
     ///     every section is shown expanded and sections without a match disappear, so a match is
-    ///     never hidden; the remembered collapsed state is not changed by filtering.
+    ///     never hidden; the remembered collapsed state and the order are not changed by filtering.
     /// </remarks>
     public ObservableCollection<object> DisplayedItems { get; }
 
@@ -330,10 +430,29 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (SetField(ref _filterText, value))
             {
+                OnPropertyChanged(nameof(IsReorderEnabled));
                 UpdateDisplayedRepoCards();
             }
         }
     }
+
+    /// <summary>
+    ///     The explanation shown (as a tooltip on the disabled Move items) while the filter has text
+    ///     and so the order cannot be changed.
+    /// </summary>
+    public const string ReorderDisabledWhileFilteringMessage =
+        "Clear the filter to change the order: while the filter has text only some repos are shown, " +
+        "so their positions cannot be changed.";
+
+    /// <summary>
+    ///     Gets a value indicating whether the user may change the order of the repos now: only while
+    ///     the filter is empty, because a filtered list shows just some of the repos.
+    /// </summary>
+    /// <remarks>
+    ///     Governs the Move menu items and the start of a drag; <see cref="MoveCard"/> and
+    ///     <see cref="CanDrop"/> refuse too, so no path changes the order while the filter has text.
+    /// </remarks>
+    public bool IsReorderEnabled => string.IsNullOrWhiteSpace(_filterText);
 
     /// <summary>
     ///     Gets the current application settings, for building a
@@ -348,7 +467,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     internal PackageCredentialContext? Credentials { get; }
 
     /// <summary>
-    ///     Adds a repository to the recent-repos list (most-recently-used position) and persists
+    ///     Adds a repository to the end of the repo list (the bottom of its section) and persists
     ///     the updated settings.
     /// </summary>
     /// <param name="repoPath">Absolute path to the repository root to add.</param>
@@ -364,8 +483,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool AddRepo(string repoPath) => AddRepoCore(repoPath, null) == AddRepoResult.Added;
 
     /// <summary>
-    ///     Adds a repository to the recent-repos list straight into one of the user's groups, or, when
-    ///     the repository is already listed, moves its existing entry into that group.
+    ///     Adds a repository to the repo list straight into one of the user's groups (at the bottom
+    ///     of it), or, when the repository is already listed, moves its existing entry to the bottom
+    ///     of that group.
     /// </summary>
     /// <remarks>
     ///     The same add as <see cref="AddRepo"/> (same folder check, same pin loading, one save), with
@@ -442,7 +562,15 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             // A failed save is reported through SettingsSaveFailed by the card, and nothing moved
-            return existing.MoveToGroup(groupName) ? AddRepoResult.MovedExisting : AddRepoResult.MoveFailed;
+            if (!existing.MoveToGroup(groupName))
+            {
+                return AddRepoResult.MoveFailed;
+            }
+
+            // The repo joins the group at the bottom, like a repo added to it; a failure to save
+            // that place is reported, and the repo stays in the group where it was
+            PlaceCard(existing, null, false);
+            return AddRepoResult.MovedExisting;
         }
 
         var pin = TryLoadPin(repoPath);
@@ -461,7 +589,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         card.RefreshDirtyStatus();
         try
         {
-            CommitSettingsChange(settings => settings.RecentRepos.Insert(0, recentRepo));
+            CommitSettingsChange(settings => settings.RecentRepos.Add(recentRepo));
         }
         catch (InvalidOperationException)
         {
@@ -470,7 +598,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         AttachCardEvents(card);
-        RepoCards.Insert(0, card);
+        RepoCards.Add(card);
         UpdateDisplayedRepoCards();
 
         // The new card's upgrade check reads its package source, so it runs in the background
@@ -511,8 +639,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     ///     Replaces the current settings with <paramref name="updated"/> (preserving the
-    ///     recent-repos list, which is only ever mutated via <see cref="AddRepo"/>/
-    ///     <see cref="RemoveRepo"/>), persists them (adopting them only if that succeeds), invalidates the shared
+    ///     repo list and its order, which are only ever changed via <see cref="AddRepo"/>/
+    ///     <see cref="RemoveRepo"/>/<see cref="MoveCard"/>/<see cref="DropCard"/>), persists them (adopting them only if that succeeds), invalidates the shared
     ///     <see cref="PackageVersionCache"/> for each package source that was changed or removed
     ///     (cached results for an edited source would otherwise be silently reused; sources that
     ///     did not change keep theirs), and
@@ -569,6 +697,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // the exception propagates to the caller (which shows it) while the live settings stay as
         // they were, so a later save (favorite, launch, ...) can never write the rejected values
         updated.RecentRepos = _settings.RecentRepos;
+        updated.HasUserRepoOrder = _settings.HasUserRepoOrder;
         updated.CollapsedGroups = _settings.CollapsedGroups;
         SettingsStore.Save(updated, _configDirectory);
         _settings = updated;
@@ -1036,16 +1165,17 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     ///     Recomputes <see cref="DisplayedItems"/> and <see cref="DisplayedRepoCards"/> from
-    ///     <see cref="RepoCards"/>: filters by <see cref="FilterText"/>, orders by section, then by
-    ///     most recent launch (see <see cref="DisplayedItems"/> for the section rules), and brings
-    ///     both collections to that state with the fewest changes.
+    ///     <see cref="RepoCards"/>: filters by <see cref="FilterText"/>, arranges the cards by section
+    ///     and keeps the user's own order within each (see <see cref="DisplayedItems"/> for the
+    ///     section rules), and brings both collections to that state with the fewest changes.
     /// </summary>
     /// <remarks>
     ///     The collections are updated in place (removing, moving and inserting only what differs)
     ///     rather than cleared and refilled, so the rows that stay keep their controls - and so the
-    ///     keyboard focus - when, for example, a group is collapsed. The ordering uses
+    ///     keyboard focus - when, for example, a group is collapsed. The flat list's favorites-first
+    ///     ordering uses
     ///     <see cref="Enumerable.OrderByDescending{TSource,TKey}(IEnumerable{TSource},Func{TSource,TKey})"/>,
-    ///     which is documented as a stable sort.
+    ///     which is documented as a stable sort, so the user's order is kept within each tier.
     /// </remarks>
     private void UpdateDisplayedRepoCards()
     {
@@ -1065,10 +1195,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (!HasGroups)
         {
-            // No group anywhere: a flat list, favorites first, exactly as before groups existed
-            foreach (var card in filtered
-                         .OrderByDescending(card => card.IsFavorite)
-                         .ThenByDescending(card => card.LastLaunchedUtc ?? DateTimeOffset.MinValue))
+            // No group anywhere: a flat list, favorites first, then the user's own order
+            foreach (var card in filtered.OrderByDescending(card => card.IsFavorite))
             {
                 items.Add(card);
                 cards.Add(card);
@@ -1076,9 +1204,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         else
         {
-            var matches = filtered
-                .OrderByDescending(card => card.LastLaunchedUtc ?? DateTimeOffset.MinValue)
-                .ToList();
+            var matches = filtered.ToList();
 
             // A favorite is listed only under Favorites; every other repo under its group or, with
             // none, under Ungrouped
@@ -1359,11 +1485,355 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public event EventHandler<string>? GroupAddRepoRequested;
 
     /// <summary>
-    ///     Subscribes to a card's <see cref="RepoCardViewModel.FavoriteChanged"/>,
-    ///     <see cref="RepoCardViewModel.GroupChanged"/> and <c>LaunchRecorded</c> events so
+    ///     Gets the section a card is listed in: Favorites for a favorite, otherwise its group, otherwise
+    ///     Ungrouped.
+    /// </summary>
+    /// <remarks>
+    ///     The same rule that <see cref="DisplayedItems"/> uses to build the sections. When no repo is in
+    ///     a group the list has no headers, and this still yields two implicit tiers (Favorites, then
+    ///     everything else as Ungrouped) that the favorites-first flat list is made of.
+    /// </remarks>
+    /// <param name="card">The card.</param>
+    /// <returns>The section's kind and display name.</returns>
+    internal static (RepoGroupKind Kind, string Name) GetSectionOf(RepoCardViewModel card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+
+        if (card.IsFavorite)
+        {
+            return (RepoGroupKind.Favorites, RepoGroupName.FavoritesName);
+        }
+
+        return card.GroupName is { } group
+            ? (RepoGroupKind.Group, group)
+            : (RepoGroupKind.Ungrouped, RepoGroupName.UngroupedName);
+    }
+
+    /// <summary>
+    ///     Gets whether a card is listed in the given section.
+    /// </summary>
+    /// <param name="card">The card.</param>
+    /// <param name="kind">The section's kind.</param>
+    /// <param name="name">The section's display name (compared ignoring letter case).</param>
+    /// <returns><see langword="true"/> when the card is in that section.</returns>
+    private static bool IsInSection(RepoCardViewModel card, RepoGroupKind kind, string name)
+    {
+        var section = GetSectionOf(card);
+        return section.Kind == kind && RepoGroupName.Comparer.Equals(section.Name, name);
+    }
+
+    /// <summary>
+    ///     Gets why a card cannot be moved the given way now.
+    /// </summary>
+    /// <remarks>
+    ///     The wording is what the menu shows as the tooltip of the disabled item, so the filter
+    ///     explanation is the same everywhere (see <see cref="ReorderDisabledWhileFilteringMessage"/>).
+    /// </remarks>
+    /// <param name="card">The card.</param>
+    /// <param name="move">The move.</param>
+    /// <returns>The reason, or <see langword="null"/> when the move is allowed: the filter has no text,
+    ///     the card is in the list, and it is not already at the place the move leads to.</returns>
+    public string? GetMoveDisabledReason(RepoCardViewModel card, RepoMove move)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+
+        if (!IsReorderEnabled)
+        {
+            return ReorderDisabledWhileFilteringMessage;
+        }
+
+        if (!RepoCards.Contains(card))
+        {
+            return "This repo is no longer in the list.";
+        }
+
+        var members = GetSectionMembers(card);
+        var index = members.IndexOf(card);
+        var atTop = index == 0;
+        var atBottom = index == members.Count - 1;
+        return move switch
+        {
+            RepoMove.Top or RepoMove.Up when atTop => "This repo is already the first one in its section.",
+            RepoMove.Down or RepoMove.Bottom when atBottom => "This repo is already the last one in its section.",
+            _ => null
+        };
+    }
+
+    /// <summary>
+    ///     Gets why a card's whole Reorder submenu is unavailable now.
+    /// </summary>
+    /// <remarks>
+    ///     The submenu is unavailable while the filter has text (with the same explanation as the
+    ///     individual Move items), when the card is not in the list, and when none of the four moves
+    ///     applies, which is the case for the only repo of its section.
+    /// </remarks>
+    /// <param name="card">The card.</param>
+    /// <returns>The reason, or <see langword="null"/> when at least one move applies.</returns>
+    public string? GetReorderDisabledReason(RepoCardViewModel card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+
+        var reasons = new[] { RepoMove.Top, RepoMove.Up, RepoMove.Down, RepoMove.Bottom }
+            .Select(move => GetMoveDisabledReason(card, move))
+            .ToList();
+        if (reasons.Contains(null))
+        {
+            return null;
+        }
+
+        // The filter and "not in the list" reasons are the same for every move; otherwise no move
+        // leads anywhere because the card is the only one of its section
+        return reasons[0] is ReorderDisabledWhileFilteringMessage or "This repo is no longer in the list."
+            ? reasons[0]
+            : "This repo is the only one in its section.";
+    }
+
+    /// <summary>
+    ///     Gets whether a card can be moved the given way now.
+    /// </summary>
+    /// <param name="card">The card.</param>
+    /// <param name="move">The move.</param>
+    /// <returns><see langword="true"/> when <see cref="GetMoveDisabledReason"/> has no reason.</returns>
+    public bool CanMoveCard(RepoCardViewModel card, RepoMove move) => GetMoveDisabledReason(card, move) is null;
+
+    /// <summary>
+    ///     Moves a card to the top, one up, one down or to the bottom of its section, and saves the
+    ///     new order.
+    /// </summary>
+    /// <remarks>
+    ///     The section is the one the card is listed in (see <see cref="GetSectionOf"/>); other
+    ///     sections' cards, which may be interleaved with it in the stored list, keep their relative
+    ///     order. Nothing changes (and nothing is saved) when the move is not allowed.
+    /// </remarks>
+    /// <param name="card">The card to move.</param>
+    /// <param name="move">The move.</param>
+    /// <returns><see langword="true"/> when the card was moved; <see langword="false"/> when the move
+    ///     is not allowed (see <see cref="GetMoveDisabledReason"/>) or the order could not be saved
+    ///     (reported through <see cref="SettingsSaveFailed"/>); nothing changed then.</returns>
+    public bool MoveCard(RepoCardViewModel card, RepoMove move)
+    {
+        if (!CanMoveCard(card, move))
+        {
+            return false;
+        }
+
+        var members = GetSectionMembers(card);
+        var index = members.IndexOf(card);
+        return move switch
+        {
+            RepoMove.Top => PlaceCard(card, members[0], insertBefore: true),
+            RepoMove.Up => PlaceCard(card, members[index - 1], insertBefore: true),
+            RepoMove.Down => PlaceCard(card, members[index + 1], insertBefore: false),
+            _ => PlaceCard(card, members[^1], insertBefore: false)
+        };
+    }
+
+    /// <summary>
+    ///     Gets whether a dragged card may be dropped at a place.
+    /// </summary>
+    /// <remarks>
+    ///     Pure: nothing is changed. Refused while the filter has text, for a card that is not in the
+    ///     list, for an anchor that is not (or no longer) in the target section, for a header of a
+    ///     group that no longer exists, and in the flat list (no groups) for a place in the other
+    ///     tier - without headers a drop there could not explain the favorite change it would imply,
+    ///     so the flat list only reorders. Dropping a card on itself is allowed and changes nothing.
+    /// </remarks>
+    /// <param name="card">The dragged card.</param>
+    /// <param name="target">The place.</param>
+    /// <returns><see langword="true"/> when <see cref="DropCard"/> would accept the drop.</returns>
+    public bool CanDrop(RepoCardViewModel card, RepoDropTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (!IsReorderEnabled || !RepoCards.Contains(card))
+        {
+            return false;
+        }
+
+        if (target.Anchor is { } anchor &&
+            (!RepoCards.Contains(anchor) || !IsInSection(anchor, target.Kind, target.Name)))
+        {
+            // A stale target: the anchor was removed or has moved to another section
+            return false;
+        }
+
+        if (target.Anchor is null && target.Kind == RepoGroupKind.Group &&
+            !GroupNames.Contains(target.Name, RepoGroupName.Comparer))
+        {
+            return false;
+        }
+
+        // The flat list has no headers to explain a favorite or group change, so it only reorders
+        return HasGroups || IsInSection(card, target.Kind, target.Name);
+    }
+
+    /// <summary>
+    ///     Drops a dragged card at a place: moves it into the target section when it is in another one,
+    ///     then puts it at the drop position, and saves.
+    /// </summary>
+    /// <remarks>
+    ///     Changing the section goes through the same paths as the menu and the star:
+    ///     <see cref="RepoCardViewModel.MoveToGroup"/> for a group (or none, for Ungrouped) and
+    ///     <see cref="RepoCardViewModel.IsFavorite"/> for Favorites; dropping into Favorites marks the
+    ///     repo as a favorite and keeps its group, and leaving Favorites un-favorites it (and sets the
+    ///     group the target section implies). The position is then committed as a second save: when
+    ///     only that fails the repo is in its new section at its old relative place, and the failure is
+    ///     reported through <see cref="SettingsSaveFailed"/>; when the section change fails nothing
+    ///     else is attempted. A collapsed target section stays collapsed (its header count shows the
+    ///     change). A drop on a header (no anchor) puts the card at the end of that section.
+    /// </remarks>
+    /// <param name="card">The dragged card.</param>
+    /// <param name="target">The place; see <see cref="CanDrop"/> for what is refused.</param>
+    /// <returns><see langword="true"/> when the card is now at the place; <see langword="false"/> when
+    ///     the drop was refused or a save failed.</returns>
+    public bool DropCard(RepoCardViewModel card, RepoDropTarget target)
+    {
+        if (!CanDrop(card, target))
+        {
+            return false;
+        }
+
+        if (!IsInSection(card, target.Kind, target.Name))
+        {
+            switch (target.Kind)
+            {
+                case RepoGroupKind.Favorites:
+                    card.IsFavorite = true;
+                    break;
+
+                case RepoGroupKind.Group:
+                    card.IsFavorite = false;
+                    card.MoveToGroup(target.Name);
+                    break;
+
+                default:
+                    card.IsFavorite = false;
+                    card.MoveToGroup(null);
+                    break;
+            }
+
+            // A refused (failed) save leaves the card where it was: stop, it was already reported
+            if (!IsInSection(card, target.Kind, target.Name))
+            {
+                return false;
+            }
+        }
+
+        return PlaceCard(card, target.Anchor, target.InsertBefore);
+    }
+
+    /// <summary>
+    ///     Gets the cards of the section a card is listed in, in the stored order.
+    /// </summary>
+    /// <param name="card">A card of the section.</param>
+    /// <returns>The section's cards, including <paramref name="card"/> when it is in the list.</returns>
+    private List<RepoCardViewModel> GetSectionMembers(RepoCardViewModel card)
+    {
+        var section = GetSectionOf(card);
+        return [.. RepoCards.Where(other => IsInSection(other, section.Kind, section.Name))];
+    }
+
+    /// <summary>
+    ///     Puts a card next to an anchor card or at the end of its section in the stored order, saves
+    ///     that order and updates the list.
+    /// </summary>
+    /// <param name="card">The card to place.</param>
+    /// <param name="anchor">The card to place it next to, or <see langword="null"/> for the end of the
+    ///     card's current section (after the section's last other member, or the end of the list when
+    ///     it has none).</param>
+    /// <param name="insertBefore"><see langword="true"/> to place it before <paramref name="anchor"/>,
+    ///     <see langword="false"/> after it.</param>
+    /// <returns><see langword="true"/> when the card is at the place (including when it already was, in
+    ///     which case nothing is saved); <see langword="false"/> when the order could not be saved
+    ///     (reported through <see cref="SettingsSaveFailed"/>), in which case nothing changed.</returns>
+    private bool PlaceCard(RepoCardViewModel card, RepoCardViewModel? anchor, bool insertBefore)
+    {
+        // Placing a card next to itself is the identity
+        if (ReferenceEquals(anchor, card))
+        {
+            return true;
+        }
+
+        var ordered = RepoCards.Where(other => !ReferenceEquals(other, card)).ToList();
+        int index;
+        if (anchor is not null)
+        {
+            index = ordered.IndexOf(anchor) + (insertBefore ? 0 : 1);
+        }
+        else
+        {
+            var section = GetSectionOf(card);
+            index = ordered.FindLastIndex(other => IsInSection(other, section.Kind, section.Name)) + 1;
+            if (index == 0)
+            {
+                index = ordered.Count;
+            }
+        }
+
+        ordered.Insert(index, card);
+        if (ordered.SequenceEqual(RepoCards, ReferenceEqualityComparer.Instance))
+        {
+            return true;
+        }
+
+        // The new order of the paths is decided once, from the live state, so the trial change and
+        // the real one agree
+        var paths = ordered.Select(other => other.RepoPath).ToList();
+        try
+        {
+            CommitSettingsChange(settings =>
+            {
+                ApplyRepoOrder(settings.RecentRepos, paths);
+                settings.HasUserRepoOrder = true;
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            ReportSaveFailure(ex);
+            return false;
+        }
+
+        SyncCollection(RepoCards, ordered);
+        UpdateDisplayedRepoCards();
+        return true;
+    }
+
+    /// <summary>
+    ///     Reorders a repo list in place to follow a list of paths.
+    /// </summary>
+    /// <remarks>
+    ///     Paths are compared ignoring letter case. An entry whose path is not listed keeps its current
+    ///     relative order after the listed ones (so nothing is ever dropped). The same list instance is
+    ///     kept, because the settings share it by reference. Deterministic, as
+    ///     <see cref="CommitSettingsChange"/> requires.
+    /// </remarks>
+    /// <param name="repos">The list to reorder.</param>
+    /// <param name="orderedPaths">The wanted order of the repo paths.</param>
+    private static void ApplyRepoOrder(List<RecentRepo> repos, IReadOnlyList<string> orderedPaths)
+    {
+        var rank = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < orderedPaths.Count; i++)
+        {
+            rank.TryAdd(orderedPaths[i], i);
+        }
+
+        // OrderBy is stable: unlisted entries keep their relative order at the end
+        var sorted = repos
+            .OrderBy(repo => rank.TryGetValue(repo.Path, out var position) ? position : int.MaxValue)
+            .ToList();
+        repos.Clear();
+        repos.AddRange(sorted);
+    }
+
+    /// <summary>
+    ///     Subscribes to a card's <see cref="RepoCardViewModel.FavoriteChanged"/> and
+    ///     <see cref="RepoCardViewModel.GroupChanged"/> events so
     ///     <see cref="DisplayedRepoCards"/> is kept current. The change itself has already been saved
     ///     by then: the card applies it through <see cref="CommitRepoChange"/> and raises its event
-    ///     only when that succeeded. Deliberately does <em>not</em>
+    ///     only when that succeeded. Deliberately does <em>not</em> subscribe to
+    ///     <c>LaunchRecorded</c>: nothing displayed depends on a launch, so a launch can never move
+    ///     a card. Also deliberately does <em>not</em>
     ///     subscribe to <see cref="RepoCardViewModel.RemoveRequested"/> here - that event is a
     ///     view-layer wiring point only (the view shows a confirmation dialog and calls
     ///     <see cref="RemoveRepo"/> itself only if the user confirms); subscribing to it directly
@@ -1374,7 +1844,6 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         card.FavoriteChanged += (_, _) => UpdateDisplayedRepoCards();
         card.GroupChanged += (_, _) => UpdateDisplayedRepoCards();
-        card.LaunchRecorded += (_, _) => UpdateDisplayedRepoCards();
     }
 
     /// <summary>
@@ -1410,7 +1879,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _startupOptions,
             credentials: Credentials,
             commitChange: CommitRepoChange,
-            registryFactory: _registryFactory);
+            registryFactory: _registryFactory,
+            processStarter: _processStarter,
+            shellDetector: _shellDetector);
 
     /// <summary>
     ///     Creates the provider that the settings window's "Test connection" lists versions

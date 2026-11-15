@@ -179,6 +179,76 @@ public class DialogWindowTests
     });
 
     /// <summary>
+    ///     Test that the custom-label constructor shows the message and the given labels on the two buttons,
+    ///     and keeps the declining button as the focused, default one (so Enter and Escape never confirm).
+    /// </summary>
+    [Fact]
+    public void ConfirmationWindow_CustomLabels_ShowTextAndKeepNoButtonAsDefault() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var dialog = new ConfirmationWindow("Which one?", "Update from package", "Keep current files");
+
+        // Act
+        dialog.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert: text, labels, the same AutomationIds and the safe button focused
+        try
+        {
+            Assert.Equal("Which one?", dialog.FindControl<TextBlock>("ConfirmationMessageText")!.Text);
+            var yes = dialog.FindControl<Button>("ConfirmationYesButton")!;
+            var no = dialog.FindControl<Button>("ConfirmationNoButton")!;
+            Assert.Equal("Update from package", yes.Content);
+            Assert.Equal("Keep current files", no.Content);
+            Assert.Equal("ConfirmationYesButton", Avalonia.Automation.AutomationProperties.GetAutomationId(yes));
+            Assert.Equal("ConfirmationNoButton", Avalonia.Automation.AutomationProperties.GetAutomationId(no));
+            Assert.True(no.IsFocused);
+        }
+        finally
+        {
+            dialog.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the confirming button of a custom-label dialog closes it with a true result.
+    /// </summary>
+    [Fact]
+    public void ConfirmationWindow_CustomLabelsConfirmClicked_ReturnsTrue() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange
+        var owner = new Window();
+        owner.Show();
+        try
+        {
+            var dialog = new ConfirmationWindow("Which one?", "Launch anyway", "Cancel");
+            var result = dialog.ShowDialog<bool>(owner);
+
+            // Act
+            Click(dialog, "ConfirmationYesButton");
+
+            // Assert
+            Assert.True(await result);
+        }
+        finally
+        {
+            owner.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the custom-label constructor rejects a missing message or label.
+    /// </summary>
+    [Fact]
+    public void ConfirmationWindow_CustomLabelsNullArgument_Throws() => HeadlessTestApp.Run(() =>
+    {
+        // Act / Assert
+        Assert.Throws<ArgumentNullException>(() => new ConfirmationWindow(null!, "a", "b"));
+        Assert.Throws<ArgumentNullException>(() => new ConfirmationWindow("m", null!, "b"));
+        Assert.Throws<ArgumentNullException>(() => new ConfirmationWindow("m", "a", null!));
+    });
+
+    /// <summary>
     ///     Test that the About window shows its text and dependency list, and closes on Close.
     /// </summary>
     [Fact]

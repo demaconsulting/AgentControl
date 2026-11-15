@@ -6,7 +6,8 @@ The `Settings` subsystem is verified at two levels. The subsystem tests (`Settin
 the way the application does - through its public surface (`SettingsStore.Load` and `SettingsStore.Save` with the
 `AppSettings` and `RecentRepo` values) - by saving in one session and loading in a later one against a real temporary
 configuration directory, and are the evidence of the theme and organization requirements. The `SettingsStore` unit's
-test suite (`SettingsStoreTests.cs` and `SettingsStoreOrganizingTests.cs`) and the `RepoGroupName` unit's test suite
+test suite (`SettingsStoreTests.cs`, `SettingsStoreOrganizingTests.cs` and `SettingsStoreRepoOrderTests.cs`) and the
+`RepoGroupName` unit's test suite
 (`RepoGroupNameTests.cs`) carry the unit requirements and, as before, the persistence and package-source requirements
 of the subsystem. The `AppSettings`, `RecentRepo`, `AgentToolKind` and `ThemePreference` data types have no dedicated
 test file and are exercised only as values round-tripped through `SettingsStore`; `RepoGroupName` is a unit with its
@@ -34,6 +35,8 @@ temporary configuration directory.
 - A repo's group and card color and the collapsed sections survive sessions, are stored in the settings file and
   nowhere else, and read as "no group", the automatic color and "nothing collapsed" when missing, null or damaged,
   with group names repaired and unified and an unknown card color never written back.
+- The user's repo order survives sessions in the settings file only; a file written before the order was stored is
+  arranged once as favorites first and then by most recent launch, and a damaged marker reads as not arranged yet.
 
 ### Test Scenarios
 
@@ -64,6 +67,15 @@ existed), are loaded and read as the system default, still with the setting that
 `AgentControl-Settings-Appearance` (children: `AgentControl-SettingsStore-Theme`,
 `AgentControl-SettingsStore-ThemeDefaultsToSystem`, `AgentControl-SettingsStore-ThemeInvalidReadsAsSystem`). Which
 theme the application then shows is a LauncherUI concern, verified there and end to end.
+
+**Settings_KeepShellOpen_ChosenValueSurvivesSessionsAndMissingOrDamagedValueReadsAsOn**: Both keep-shell-open choices
+(off, then on) are saved by one session together with another setting and are the choice made, with the other
+setting kept, when the next session loads; then settings files whose value is a string, a number, null, an object or
+an array, or missing altogether (a file from before the choice existed), are loaded and read as on, still with the
+setting that follows. This scenario is tested by
+`Settings_KeepShellOpen_ChosenValueSurvivesSessionsAndMissingOrDamagedValueReadsAsOn`, covering
+`AgentControl-Settings-KeepShellOpen` (children: `AgentControl-SettingsStore-KeepShellOpen`,
+`AgentControl-SettingsStore-KeepShellOpenDefaultsToOn`, `AgentControl-SettingsStore-KeepShellOpenInvalidReadsAsOn`).
 
 **Settings_RepoOrganization_GroupsColorsAndCollapsedSectionsSurviveSessionsInSettingsFileOnly**: A first session saves
 three repos (one grouped, colored and favorite, one grouped, one plain) and two collapsed sections; a later session
@@ -104,3 +116,13 @@ persists what it is given and refuses a credential in the address. This scenario
 `AgentControl-SettingsStore-GitSourceRoundTrip` and `AgentControl-SettingsStore-GitSourceRefusesCredential`, whose unit
 tests are `SettingsStore_SaveThenLoad_GitSource_RoundTripsByNameWithoutSecretLikeProperties` and
 `SettingsStore_Save_GitSourceAddressWithCredential_IsRefusedWithoutChangingTheFile`).
+
+**Settings_RepoOrder_SurvivesSessionsAndSeedsALegacyFileOnce**: A settings file as an older version wrote it (the
+repos in the order they were added, no repo-order marker) is loaded by a first session, which finds it arranged as the
+favorite first and then by most recent launch; the user then swaps two repos and saves; a later session sees the swapped
+order although it changes a launch time and saves again, and the configuration directory holds the settings file and
+nothing else. A file whose marker has the wrong type is loaded and arranged once without failing. This scenario is
+tested by `SettingsSubsystem_RepoOrder_SurvivesSessionsAndSeedsALegacyFileOnce`, covering
+`AgentControl-Settings-RepoOrder` (children: `AgentControl-SettingsStore-RepoOrder`,
+`AgentControl-SettingsStore-RepoOrderLegacySeed` and `AgentControl-SettingsStore-RepoOrderMarkerRepaired`, whose unit
+tests are in `SettingsStoreRepoOrderTests.cs`).

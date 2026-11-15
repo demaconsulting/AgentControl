@@ -60,6 +60,9 @@ no network. Otherwise standard test environment, with no external services or ha
 - A package a zip, NuGet or Git source delivers reports the SHA-256 identity of its agent files, the same one for the
   same files from any kind of source however they are packed, and a zip republished under the same version with other
   files reports a different one.
+- The identity of the agent files installed in a repo is the identity the package had when it was extracted untouched
+  into the repo (from a zip, an unpacked package folder or a layout folder), and another one when any file is missing,
+  changed, renamed or added.
 - The offers of all configured sources are listed in configuration order, a source that cannot be read is skipped, and
   the newest version across them wins, a tie keeping the first source in configuration order.
 - Package discovery reflects only what is physically present in a source folder.
@@ -324,6 +327,17 @@ the identity the test computes independently from the files. This scenario is te
 `AgentPackageManagementSubsystem_SameFilesFromZipNuGetAndGit_ReportTheSameIdentity`,
 covering `AgentControl-AgentPackageManagement-ContentIdentity` and
 `AgentControl-AgentPackageManagement-ContentIdentityComparable`.
+
+**AgentPackageManagement_InstalledFilesIdentity_UntouchedExtractionHasThePackagesIdentity**: The identity of the agent
+files installed in a repo (`PackageContentIdentity.ComputeInstalledFilesIdentity`) is the same algorithm that
+identifies a package, so the files of a zip package, an unpacked package folder and a layout folder, each extracted
+into a repo, have exactly the identity the package's reader reported, while a missing, changed, renamed or extra file
+gives another one and a linked managed folder is refused. The end-to-end round trip through the real readers and the
+extractor is the `RepoSync` subsystem test, which is cited here because the subsystem has no reader of its own for a
+repo's files; the individual rules are verified by the `PackageContentIdentity` unit tests. This scenario is tested by
+`RepoSync_InstalledFiles_ExtractionFromZipFolderAndLayoutPackages_HasThePackagesIdentity`, covering
+`AgentControl-AgentPackageManagement-InstalledFilesIdentity` (children: `AgentControl-PackageContentIdentity-InstalledFilesIdentity`,
+`-InstalledIdentityDetectsDifferences` and `-InstalledIdentityFailsSafely`).
 
 **AgentPackageManagement_AcrossSources_ListsOffersInConfigurationOrderAndNewestWins**: Through the registry and the
 version cache, three zip sources offer the package, one of them being excluded from the listing, and a fourth

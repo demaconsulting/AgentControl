@@ -58,12 +58,15 @@ collapsed sections.)
 - *Type*: In-process .NET observable collection (data-bound to `MainWindow`'s `ListBox`, which picks the
   header or the card template by row type).
 - *Role*: Provider.
-- *Contract*: Reflects `AddRepo`/`RemoveRepo` mutations, `FilterText` changes, grouping changes and sort
-  order. With no repo in a group it is flat: favorites first, then most-recently-launched descending
-  with never-launched last. Once a repo is in a group it is sectioned - Favorites (a favorite only
+- *Contract*: Reflects `AddRepo`/`RemoveRepo` mutations, `FilterText` changes, grouping changes and repo
+  order. The order is the user's own, never the launch time: with no repo in a group it is flat - favorites
+  first, then the other repos in the order the user keeps them in (a new repo at the end, Move and drag reorder it).
+  Once a repo is in a group it is sectioned - Favorites (a favorite only
   there), the user's groups alphabetically, Ungrouped - with collapsible sections that a filter shows in
-  full (`AgentControl-LauncherUI-RecentReposDisplay`, `AgentControl-LauncherUI-SearchFilter`,
-  `AgentControl-LauncherUI-SortOrder`, `AgentControl-LauncherUI-RepoGroups`).
+  full, each section showing its repos in that same relative order
+  (`AgentControl-LauncherUI-RecentReposDisplay`, `AgentControl-LauncherUI-SearchFilter`,
+  `AgentControl-LauncherUI-SortOrder`, `AgentControl-LauncherUI-StableRepoOrder`,
+  `AgentControl-LauncherUI-RepoGroups`).
 - *Constraints*: Recomputed synchronously on the UI thread whenever a dependency changes, updating the
   collection in place so unchanged rows keep their controls.
 
@@ -88,19 +91,22 @@ new section is collapsed) has no star to focus.)
   `AgentControl-LauncherUI-Pull`; `SelectPackageCommand` for any repo that is present and not busy - "Select
   Package..." without a pin, "Change package..." with one, `AgentControl-LauncherUI-ChangePackage`); `Execute`
   delegates to the relevant subsystem
-  (`GitIntegration`, `RepoSync`, `AgentToolLauncher`, `RepoConfig`) — Launch only once agent
-  files are confirmed synced (`AgentControl-LauncherUI-Launch`), Upgrade only when a newer
+  (`GitIntegration`, `RepoSync`, `AgentToolLauncher`, `RepoConfig`) — Launch only after the agent files were
+  verified against the pin (`AgentControl-LauncherUI-VerifyAgentFilesBeforeLaunch`) and not when the user cancelled it
+  after a failed restore (`AgentControl-LauncherUI-RestoreFailureChoice`, `AgentControl-LauncherUI-Launch`), Upgrade
+  only when a newer
   version exists at a configured source (`AgentControl-LauncherUI-Upgrade`) — and raises a view-model
   event (`LaunchRecorded`, `SelectPackageRequested`, `ReleaseNotesReady`,
   `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `CommittedFilesConversionRequested`,
-  `ErrorOccurred`, `RemoveRequested`) reporting the outcome.
+  `AgentFilesChoiceRequested`, `ErrorOccurred`, `RemoveRequested`) reporting the outcome.
   An asynchronous command ignores a second request while it runs and can be cancelled through
   `CancelOperationCommand` (`AgentControl-LauncherUI-OneOperationPerRepo`,
   `AgentControl-LauncherUI-CancelOperation`, `AgentControl-LauncherUI-OperationProgress`). The card also
   exposes the chip properties (package, upgrade, branch, status) the view binds to
   (`AgentControl-LauncherUI-RepoCardChips`, `AgentControl-LauncherUI-StatusBadges`).
 - *Constraints*: Never mutates state before a required confirmation (see `RemoveRequest`
-  below); never launches without a successful ensure-synced check.
+  below); never replaces agent files that differ from the pin without the user choosing to update them, and never
+  starts the agent tool after the user cancelled a launch whose needed agent files could not be installed.
 
 **SelectPackageWindowViewModel.ConfirmCommand**: Confirms a source, package and version
 selection.
@@ -171,7 +177,7 @@ loaded `AppSettings`. It exposes `AddRepo`/`RemoveRepo` (each saved through `Set
 *Transactional persistence* below), a `FilterText` property driving `DisplayedRepoCards`/`DisplayedItems`, and
 `ApplySettings`
 (invoked when `SettingsWindowViewModel` reports `Saved`), which persists the new settings
-while preserving the existing recent-repos list and invalidates the shared
+while preserving the existing recent-repos list (and its order) and invalidates the shared
 `PackageVersionCache` for each package source that was edited or removed.
 
 Each `RepoCardViewModel` is independently responsible for one repo's status and actions: it reads
@@ -205,7 +211,8 @@ the user confirms (`AgentControl-LauncherUI-RemoveRepo`).
 **How the units collaborate.** `MainWindowViewModel` is the owner and the hub. It creates one `RepoCardViewModel` per
 `RecentRepo` (giving each the shared package-version cache, the credentials and a *commit* callback that is how the
 card's own changes are saved, see below), subscribes to the card events that change the list (`FavoriteChanged`,
-`GroupChanged`, `LaunchRecorded`) and rebuilds `DisplayedItems` when they fire; the window's code-behind subscribes to
+`GroupChanged`) and rebuilds `DisplayedItems` when they fire (it deliberately does not subscribe to `LaunchRecorded`: a
+launch never moves a card); the window's code-behind subscribes to
 the events that need a dialog.
 
 - *`RepoCardViewModel` and `RepoImageLocator`*: the card is the only caller. `RefreshCheap` starts the picture
@@ -256,8 +263,8 @@ the events that need a dialog.
   still limits its own height to the screen when it opens (`AgentControl-LauncherUI-ResizableSourceDialogs`).
 - *Window titles*: the windows show the product name with a space - "Agent Control" (main window and the message and
   confirmation boxes), "Agent Control Settings" and "About Agent Control". This is display text only: the product,
-  executable, assembly, namespaces, settings folder and AutomationIds keep the name `AgentControl`. The Puppet and the
-  UI tests that look a window up by title use the same strings.
+  executable, assembly, namespaces, settings folder and AutomationIds keep the name `AgentControl`. The UI tests that
+  look a window up by title use the same strings.
 - *Supporting types*: `CardColorPalette` is a static table built from `RecentRepo.CardColorNames` (the single list of
   valid names, owned by `Settings`); the card uses it to accept a color name and to find the tile's palette index, and
   the main window's palette pop-up draws one swatch per entry. `PathEllipsisText` is a control in the card's template
@@ -402,7 +409,9 @@ cancelled or timed out) closes the dialog as a cancel. The typed password is han
 logged.
 
 `RepoCardViewModel` reuses the existing modal `ConfirmationWindow` (the same Yes/No dialog
-shown for Remove confirmation) to offer a package's optional root-level `AGENTS.md` template
+shown for Remove confirmation; a second constructor takes the labels of the two buttons for questions whose answers
+are not literally Yes and No, keeping the AutomationIds, the focus on the declining button and Escape as a decline)
+to offer a package's optional root-level `AGENTS.md` template
 when the repo has none of its own: `MainWindow` subscribes to
 `AgentsMdTemplateOfferRequested`, shows `ConfirmationWindow` with explanatory text, and calls
 back into `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` depending on the user's answer
@@ -422,10 +431,31 @@ of the version the repo is pinned to would replace its agent files with changed 
 `RepoCardViewModel` changes nothing and raises `ContentChangeConfirmationRequested` with the selection and a
 plain-language question; `MainWindow` shows it in the same modal `ConfirmationWindow` (the safe answer, No, is the
 default) and, only if the user answers Yes, applies the selection again with `acceptContentChange: true`, which
-replaces the files and records the new identity. An Upgrade or the restore of missing agent files before launch
-never asks: it refuses and reports through `ErrorOccurred`, and the message names the card menu's **Change
+replaces the files and records the new identity. An Upgrade or the restore or update of agent files before launch
+never asks: it refuses and reports (the Launch case through the "Launch anyway / Cancel" question below), and the
+message names the card menu's **Change
 package...** as the way to accept the change - it no longer suggests deleting the repo's pin file
 (`AgentControl-LauncherUI-ContentChangeRefusal`, `AgentControl-LauncherUI-ChangePackage`).
+
+**Verifying the agent files before launch.** Launch no longer takes the existence of the four managed folders as proof
+that the pinned files are there (a repo with the folders present but half of the files missing was launched that way
+indefinitely). `RepoCardViewModel` decides from the files themselves, in this order (the full table is in the
+*RepoCardViewModel* design): committed agent files or no pin skip the check; a repo whose managed folders hold no file
+at all gets the pinned package installed silently; for a pin that records a files identity the files in the folders
+are hashed with the very algorithm that produced that identity and compared, with no package source read, so an
+in-sync launch asks nothing and downloads nothing; a pin recorded without an identity keeps the older folder check
+(all four folders present: launch; one missing: silent install). When the files differ - a file missing, changed or
+added, or not readable because of a link - the card raises `AgentFilesChoiceRequested` with an
+`AgentFilesChoiceRequest`, and `MainWindow` shows it in the same modal `ConfirmationWindow`, with the request's own
+button labels: **Update from package** replaces the four folders with the pinned package's files, **Keep current
+files** (the default, and what Escape answers) launches with the files as they are. The question is asked on every
+launch while the difference persists and nothing is persisted. When agent files that were needed cannot be installed
+(no source, an unreachable or refusing source, a republished package, a failed copy) the card raises the same event
+with the reason and the labels **Launch anyway** and **Cancel** (the default and Escape): only Launch anyway starts the
+agent tool; Cancel starts nothing and records no launch. This is the one case in which agent-package state stands in
+the way of a launch, and the user decides it (`AgentControl-LauncherUI-VerifyAgentFilesBeforeLaunch`,
+`AgentControl-LauncherUI-RestoreFailureChoice`; the decision is recorded in architecture.md). `MainWindow` always
+answers the request - a dialog that fails to show answers with the safe default - so the card's launch never hangs.
 
 **Converting committed agent files.** A repo can have its managed agent folders (`.github/agents`,
 `.github/standards`, `.github/templates`, `.github/skills`) tracked by git. `.gitignore` has no effect on tracked files,
@@ -506,7 +536,8 @@ again whenever `MainWindowViewModel.ApplySettings` has saved new settings (throu
 `Action<ThemePreference>`, so the view model stays free of the UI framework), so every open window changes
 at once without a restart (`AgentControl-LauncherUI-Appearance`). Every color the application's own XAML uses
 lives in `AppStyles.axaml` as a resource in a `Light` and a `Dark` theme dictionary (surfaces, borders,
-shadows, the status accent colors, chip fills and text, button states, the avatar palette, validation,
+shadows, the status accent colors, chip fills and text, button states, the avatar palette, the drag-and-drop
+indicator `RepoDropIndicator` and header highlight `RepoDropTargetBackground`, validation,
 caution and success text, the page background) consumed with `DynamicResource`; no template or setter holds a
 hard-coded color. Text colors were chosen for at least 4.5:1 contrast against the fill and surface they are
 drawn on, status accents and icons for 3:1, and `ThemeResourceTests` checks both dictionaries define the same
@@ -518,7 +549,8 @@ hover lift with 140 ms transitions, selection and keyboard-focus ring), the stat
 tile, the chips (one height, padding and font, tinted fill with a matching foreground, a flat button wrapper
 for clickable chips), the action buttons (primary accent with hover, pressed and disabled states, and a
 tinted secondary), the ghost icon buttons without a border (favorite star, "more actions"), the group headers of the
-card menu, and the empty state. Per-control color setters are avoided on purpose.
+card menu, the drag-and-drop feedback (see *Reordering repos*) and the empty state. Per-control color setters are
+avoided on purpose.
 
 **Repo card layout.** Each card has a colored status accent bar on its left edge (`RepoCardViewModel.Status`:
 green up to date, amber upgrade available, red a problem, grey no agent package; the bar has an accessible
@@ -531,8 +563,8 @@ the repo name's initials on a color chosen by a deterministic hash of the repo p
 The **...** menu is grouped: *Repository* (**Git Pull**, with its enablement rules and its explanatory tooltip
 shown even while it is disabled, and **Refresh**), *Agent files* (**Select Package...** when no package is pinned,
 **Change package...** when one is, and **Upgrade to x.y.z** when a newer version exists; the group is hidden when
-none applies) and *Organize* (**Move to group** and
-**Card color...**) and **Remove from list**. The upgrade
+none applies) and *Organize* (**Move to group**, then **Reorder**, a submenu holding **Move to top**, **Move up**,
+**Move down** and **Move to bottom**, and **Card color...**) and **Remove from list**. The upgrade
 chip is a button that runs the same `UpgradeCommand` as the menu's Upgrade item
 (`AgentControl-RepoCardViewModel-UpgradeFromChip`).
 
@@ -570,6 +602,77 @@ so a logo drawn for a white page stays legible, and the chosen color is drawn as
 letters on every palette color use whichever of white and near-black reads better on that fill in each theme,
 at least 4.5:1 (`ThemeResourceTests` checks every entry in both themes).
 
+**Reordering repos (user-controlled order).** The order of the repo cards belongs to the user and nothing else
+changes it: the list is kept in `AppSettings.RecentRepos` order (see the `Settings` design), a new repo goes to the
+end, and launching, refreshing, pulling, upgrading or marking a favorite never moves a card
+(`AgentControl-LauncherUI-SortOrder`, `AgentControl-LauncherUI-StableRepoOrder`; system level
+`AgentControl-System-RepoOrder`). Favorites stay first, and each section - or, with no groups, each of the two
+implicit tiers (favorites, the rest) - shows its repos in the same relative order. The user changes the order in two
+ways (`AgentControl-System-RepoReorder`), and both end in the same two view-model operations, so the business rules
+live in `MainWindowViewModel` and the window only translates input and shows feedback:
+
+- *Move menu items.* The *Organize* group of a card's "..." menu has a **Reorder** submenu (AutomationId
+  `ReorderMenuItem`, a swap-vertical icon) holding **Move to top**, **Move up**, **Move down** and
+  **Move to bottom** (AutomationIds `MoveToTopMenuItem`, `MoveUpMenuItem`, `MoveDownMenuItem`,
+  `MoveToBottomMenuItem`), which are keyboard-reachable and so give a way to reorder that needs no drag. They move the
+  card within its own section (`MainWindowViewModel.MoveCard`). As with the *Move to group* submenu, what they may do
+  depends on state that is only known when the menu opens, so `MainWindow`'s `CardMenu_Opening` handler (through
+  `UpdateMoveMenuItems`) asks `MainWindowViewModel.GetMoveDisabledReason` for each item, disabling it and giving it
+  that reason as its tooltip (shown even while disabled) - at the start or end of the section, and while the filter
+  has text - and `MainWindowViewModel.GetReorderDisabledReason` for the **Reorder** submenu itself, which is disabled,
+  with the same filter explanation as its tooltip, while the filter has text and, with its own explanation, when none
+  of the four moves applies (the only repo of its section) (`AgentControl-LauncherUI-RepoOrderMenu`).
+- *Drag and drop.* **Drag source**: the window observes the pointer on the `RepoListBox` on the way down (also for
+  events a row already handled). A press with the left button on a card is remembered as a possible drag, unless it is
+  on a `Button`, `TextBox`, `MenuItem` or `ScrollBar` in the card (the star, the chips, the menu keep their own
+  behavior), on a section header, or while reordering is off; the drag starts once the pointer has moved 6 device-independent
+  pixels in either direction with the button held, which keeps a plain or slightly unsteady click a click. The dragged
+  data is one item of the application data format `DemaConsulting.AgentControl.RepoCard` carrying the card's repo path,
+  and the dragged card's row gets the `dragging` style class (dimmed) until the drag ends however it ends. The operating
+  system's drag is started through the `DragStarter` seam, whose default is `DragDrop.DoDragDropAsync`; as with the
+  folder picker seam (`RepoFolderPicker`), a headless test supplies its own starter that records the data and then
+  raises the drop events on the list. **Drop target**: the list is a drop target (`DragDrop.AllowDrop`) with
+  drag-enter, drag-over, drag-leave and drop handlers. The pointer is hit-tested to the row it is over: over a card, the
+  upper half of the row (`IsUpperHalf`) means "before that card" and the lower half "after it", giving a
+  `RepoDropTarget.ForCard` with the card's section (`GetSectionOf`); over a section header, `RepoDropTarget.ForHeader`
+  (no anchor: the end of that section). Drag-over asks `MainWindowViewModel.CanDrop` and answers `Move` or `None` as
+  the drag effect; drop calls `MainWindowViewModel.DropCard`. A drag that does not carry this data format, or a repo
+  that is not listed, is ignored.
+- *What a drop does* (`AgentControl-LauncherUI-RepoDragReorder`, `-RepoDragBetweenSections`,
+  `-RepoDropOnHeader`): within a
+  section it moves the card to the drop position. Into another section it first changes the card's section - the group
+  for a group or Ungrouped section, the favorite flag for Favorites, exactly as the menu and the star would, so the
+  card's chip and the header counts stay consistent - and then puts it at the drop position, so one drop can mean two
+  saves (a failure of the second is reported and leaves the card in its new section at its old relative place). On a
+  header the card goes to the end of the section. A collapsed group stays collapsed (the header's count changes, which
+  is the visible result; the user's collapsed state is not touched). In the flat list (no repo is in a group) a drag
+  only reorders within a tier: a drop on the other tier is refused, since without headers nothing would explain the
+  favorite change.
+- *Feedback* (`AgentControl-LauncherUI-RepoDropFeedback`): the card template carries two thin, non-hit-testable
+  `Border`s (`DropIndicatorAbove`, `DropIndicatorBelow`) that take no layout space; while the pointer is over an
+  accepted place the window puts the style class `dropAbove`, `dropBelow` or `dropHeader` on that row's `ListBoxItem`
+  (and removes it again when the place changes, the drag leaves the list, the drop happens or the drag ends), and
+  `AppStyles.axaml` makes the matching indicator line visible (`dropAbove`, `dropBelow`) or tints the header
+  (`dropHeader`, `RepoDropTargetBackground`). The line uses `RepoDropIndicator`; both resources are defined for the
+  light and the dark theme and are checked for contrast by `ThemeResourceTests`. A refused place (the drag effect
+  `None`) shows no line, and neither does the dragged card's own row. When the pointer is within 24 pixels of the top
+  or bottom
+  of the list's scroll viewer the list scrolls a little per drag event (best effort), so a long list can be reordered
+  without dropping first.
+- *No reordering while filtering* (`AgentControl-LauncherUI-ReorderOffWhileFiltering`): while the filter box has text
+  only some repos are shown, so their positions cannot be changed. `MainWindowViewModel.IsReorderEnabled` is then `false`:
+  no drag starts, the **Reorder** submenu and its four Move items are disabled with the tooltip
+  `ReorderDisabledWhileFilteringMessage`, and
+  `MoveCard`, `CanDrop` and `DropCard` refuse as well. Filtering never changes the stored order.
+- *Collection moves.* A reorder moves cards inside `MainWindowViewModel.RepoCards` (`Move` notifications). The window's
+  `OnRepoCardsChanged` ignores a `Move`, because the cards stay attached and the per-card state the window keeps
+  (pending prompts, shown dialogs) must survive the reorder.
+
+The order is stored in the user's own settings only, never in a repository or its `.agentcontrol.json`, survives a
+restart, and for a settings file written before this existed is seeded once from what the user used to see (favorites
+first, then most recently launched), so nothing jumps on upgrade (`AgentControl-LauncherUI-RepoOrderRemembered`;
+system level `AgentControl-System-RepoOrderRemembered`, subsystem `AgentControl-Settings-RepoOrder`).
+
 **Settings window package-source actions.** One **Add** button opens a menu with the source types that can be
 added (zip-package folder, NuGet-package folder, NuGet-package server, Git repository), each with its type's icon
 (the one
@@ -585,7 +688,7 @@ lives in the view models above. `MainWindow`'s code-behind is the one exception:
 dialog-orchestration, view-layer plumbing that requires a live Avalonia `Window` — subscribing
 to each `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`,
 `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`,
-`CommittedFilesConversionRequested`, `ErrorOccurred`) and deciding which
+`CommittedFilesConversionRequested`, `AgentFilesChoiceRequested`, `ErrorOccurred`) and deciding which
 dialog/window to show and how to route the user's response back into the view model (e.g.
 calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the `ConfirmationWindow` shown
 for the AGENTS.md template offer). `AboutWindow` (opened via a
@@ -647,8 +750,10 @@ tooltip, accessible name and check mark. The icon-only toolbar buttons and the c
 accessible names matching their tooltips.
 
 **Settings sections and the source editor.** Settings lists Package sources, then an Appearance section (the
-Theme picker, a labeled row) and a Tools section (git executable, agent tool, shell)
-(`AgentControl-LauncherUI-Appearance`). The source editor's location box wraps a long folder or feed address
+Theme picker, a labeled row) and a Tools section (git executable, agent tool, shell, and the "Keep the shell open
+after the agent tool exits" checkbox directly after the shell preference, with a tooltip saying what it does)
+(`AgentControl-LauncherUI-Appearance`, `AgentControl-LauncherUI-KeepShellOpenOption`). The source editor's location
+box wraps a long folder or feed address
 over several lines (up to a maximum height, then it scrolls), has a tooltip with the whole value
 (`SourceEditorViewModel.LocationTooltip`, absent while the box is empty), and the editor is 640 px wide.
 

@@ -126,6 +126,35 @@ sections:
         tests:
           - SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem
 
+      - id: AgentControl-SettingsStore-KeepShellOpen
+        title: >-
+          The SettingsStore class shall save the user's keep-shell-open choice as a boolean and
+          read it back.
+        justification: |
+          The choice is a per-user preference that must survive a restart, and a plain boolean
+          keeps the file readable.
+        tests:
+          - SettingsStore_SaveThenLoad_KeepShellOpen_RoundTrips
+
+      - id: AgentControl-SettingsStore-KeepShellOpenDefaultsToOn
+        title: >-
+          The SettingsStore class shall read a settings file that has no keep-shell-open value
+          as on.
+        justification: |
+          Existing settings files have no such value, and those users have always had the shell
+          kept open.
+        tests:
+          - SettingsStore_Load_NoKeepShellOpenValue_DefaultsToOn
+
+      - id: AgentControl-SettingsStore-KeepShellOpenInvalidReadsAsOn
+        title: >-
+          The SettingsStore class shall read a null or non-boolean keep-shell-open value as on
+          instead of failing the load.
+        justification: |
+          A mistyped or damaged value in the file must never keep the application from starting.
+        tests:
+          - SettingsStore_Load_InvalidKeepShellOpenValue_ReadsAsOn
+
       - id: AgentControl-SettingsStore-RepoOrganization
         title: >-
           The SettingsStore class shall save a repo's group, a repo's chosen card color and the
@@ -197,6 +226,44 @@ sections:
           nothing can show it; the card then follows the automatic color again.
         tests:
           - SettingsStore_Load_UnknownCardColorName_ReadsAsAutomaticAndIsNotSavedBack
+
+      - id: AgentControl-SettingsStore-RepoOrder
+        title: >-
+          The SettingsStore class shall save and load the repos in the sequence the user gave them,
+          together with the marker that says the sequence is the user's own order.
+        justification: |
+          The user's order is the sequence of the repo list itself, so it survives a restart only if
+          the store keeps the sequence, and the marker is what stops it from being arranged again.
+        tests:
+          - SettingsStore_SaveThenLoad_RepoOrder_RoundTripsInTheStoredSequence
+
+      - id: AgentControl-SettingsStore-RepoOrderLegacySeed
+        title: >-
+          The SettingsStore class shall, when loading a file without the repo-order marker, arrange the
+          repos once as favorites first, then the most recently launched with never launched repos
+          last (repos with equal keys keeping their sequence), mark the result as the user's
+          order and write the arrangement and the marker back to the file so it happens only once,
+          without failing the load when that write fails; a file with the marker keeps its sequence.
+        justification: |
+          A file written before the order was stored lists the repos in the order they were added, not
+          in the order the user saw; arranging it once keeps the list where it was without ever
+          re-sorting an order the user made. Unless the result is written back, the next start would
+          seed again from launch times that have since changed and cards could move.
+        tests:
+          - SettingsStore_Load_FileWithoutOrderMarker_SeedsFavoritesFirstThenMostRecentlyLaunched
+          - SettingsStore_Load_FileWithoutOrderMarker_PersistsSeededOrderSoLaterLoadsDoNotReorder
+          - SettingsStore_Load_FileWithoutOrderMarker_SeedWriteFails_LoadStillSucceedsAndFileIsUnchanged
+          - SettingsStore_Load_FileWithOrderMarker_KeepsTheStoredSequence
+
+      - id: AgentControl-SettingsStore-RepoOrderMarkerRepaired
+        title: >-
+          The SettingsStore class shall read a repo-order marker that is not a boolean as "not
+          arranged yet", without failing the load or disturbing the values around it.
+        justification: |
+          A damaged or hand-edited marker must not keep the application from starting; the list is
+          then simply arranged as for a file without the marker.
+        tests:
+          - SettingsStore_Load_InvalidOrderMarker_ReadsAsNotSeededAndSeeds
 
       - id: AgentControl-SettingsStore-GitSourceRoundTrip
         title: >-

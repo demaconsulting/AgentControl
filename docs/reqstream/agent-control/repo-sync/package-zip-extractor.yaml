@@ -51,8 +51,9 @@ sections:
           The PackageZipExtractor class shall report whether all of a repo's managed agent-file
           folders are present, returning false if any are missing.
         justification: |
-          Used by the ensure-synced-before-launch check to decide whether a re-extraction is
-          needed without re-scanning file contents.
+          Used by the pre-launch check of a repo whose pin records no identity of its files - for
+          which the files cannot be compared and only the folders' presence can be checked - to
+          decide whether a re-extraction is needed without re-scanning file contents.
         tests:
           - PackageZipExtractor_AllManagedFoldersExist_AllFourPresent_ReturnsTrue
           - PackageZipExtractor_AllManagedFoldersExist_SomeMissing_ReturnsFalse

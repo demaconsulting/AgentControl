@@ -27,10 +27,158 @@ namespace DemaConsulting.AgentControl.Tests.AgentToolLauncher;
 /// </summary>
 /// <remarks>
 ///     These tests only exercise <c>BuildProcessStartInfo</c>, never <c>Launch</c>, so no real
-///     process is ever spawned — exactly the isolation architecture.md calls for.
+///     process is ever spawned — exactly the isolation architecture.md calls for. The existing
+///     tests use the default (keep the shell open); the <c>KeepShellOpen</c> tests pin both
+///     values of the keep-open choice.
 /// </remarks>
 public class AgentToolLauncherTests
 {
+    /// <summary>
+    ///     Test that asking explicitly to keep the shell open gives PowerShell Core the -NoExit
+    ///     arguments, the same as the default.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_PowerShellCore_KeepShellOpenTrue_HasNoExit()
+    {
+        // Arrange: a detected PowerShell Core shell
+        var shell = new DetectedShell(ShellKind.PowerShellCore, @"C:\Program Files\PowerShell\7\pwsh.exe");
+
+        // Act: build the start info asking for the shell to stay open
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "copilot", @"C:\repos\example", keepShellOpen: true);
+
+        // Assert: -NoExit is present and the result equals the default
+        Assert.Equal(["-NoLogo", "-NoExit", "-Command", "copilot"], startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that asking explicitly to keep the shell open gives Windows PowerShell the -NoExit
+    ///     arguments.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShell_KeepShellOpenTrue_HasNoExit()
+    {
+        // Arrange: a detected Windows PowerShell 5.x shell
+        var shell = new DetectedShell(ShellKind.WindowsPowerShell, @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+
+        // Act: build the start info asking for the shell to stay open
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "cursor-agent", @"C:\repos\example", keepShellOpen: true);
+
+        // Assert: -NoExit is present
+        Assert.Equal(["-NoLogo", "-NoExit", "-Command", "cursor-agent"], startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that asking explicitly to keep the shell open gives cmd.exe the /K flag.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_Cmd_KeepShellOpenTrue_UsesSlashK()
+    {
+        // Arrange: a detected cmd.exe shell
+        var shell = new DetectedShell(ShellKind.Cmd, @"C:\Windows\System32\cmd.exe");
+
+        // Act: build the start info asking for the shell to stay open
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "claude", @"C:\repos\example", keepShellOpen: true);
+
+        // Assert: /K keeps the window open
+        Assert.Equal(["/K", "claude"], startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that not keeping the shell open leaves -NoExit out for PowerShell Core, so the
+    ///     shell ends with the command.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_PowerShellCore_KeepShellOpenFalse_OmitsNoExit()
+    {
+        // Arrange: a detected PowerShell Core shell
+        var shell = new DetectedShell(ShellKind.PowerShellCore, @"C:\Program Files\PowerShell\7\pwsh.exe");
+
+        // Act: build the start info asking for the shell to end with the command
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "copilot", @"C:\repos\example", keepShellOpen: false);
+
+        // Assert: no -NoExit, everything else as before
+        Assert.Equal(@"C:\Program Files\PowerShell\7\pwsh.exe", startInfo.FileName);
+        Assert.Equal(@"C:\repos\example", startInfo.WorkingDirectory);
+        Assert.False(startInfo.UseShellExecute);
+        Assert.Equal(["-NoLogo", "-Command", "copilot"], startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that not keeping the shell open leaves -NoExit out for Windows PowerShell.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShell_KeepShellOpenFalse_OmitsNoExit()
+    {
+        // Arrange: a detected Windows PowerShell 5.x shell
+        var shell = new DetectedShell(ShellKind.WindowsPowerShell, @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+
+        // Act: build the start info asking for the shell to end with the command
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "cursor-agent", @"C:\repos\example", keepShellOpen: false);
+
+        // Assert: no -NoExit
+        Assert.Equal(["-NoLogo", "-Command", "cursor-agent"], startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that not keeping the shell open makes cmd.exe run the command with /C, so the
+    ///     shell ends with the command.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_Cmd_KeepShellOpenFalse_UsesSlashC()
+    {
+        // Arrange: a detected cmd.exe shell
+        var shell = new DetectedShell(ShellKind.Cmd, @"C:\Windows\System32\cmd.exe");
+
+        // Act: build the start info asking for the shell to end with the command
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "claude", @"C:\repos\example", keepShellOpen: false);
+
+        // Assert: /C runs the command and ends the shell
+        Assert.Equal(["/C", "claude"], startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that a POSIX shell is unaffected by the keep-open choice.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_Posix_KeepShellOpenFalse_IsUnchanged()
+    {
+        // Arrange: a detected POSIX shell
+        var shell = new DetectedShell(ShellKind.Posix, "/bin/bash");
+
+        // Act: build the start info asking for the shell to end with the command
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "copilot", "/home/user/repos/example", keepShellOpen: false);
+
+        // Assert: -c, exactly as with the default
+        Assert.Equal(["-c", "copilot"], startInfo.ArgumentList);
+    }
+
+    /// <summary>
+    ///     Test that a quoted-path command still gets the PowerShell call operator when the shell
+    ///     is not kept open.
+    /// </summary>
+    [Fact]
+    public void AgentToolLauncher_BuildProcessStartInfo_PowerShellQuotedPath_KeepShellOpenFalse_StillPrefixesCallOperator()
+    {
+        // Arrange: a detected PowerShell Core shell and a quoted path with a flag
+        var shell = new DetectedShell(ShellKind.PowerShellCore, @"C:\Program Files\PowerShell\7\pwsh.exe");
+
+        // Act: build the start info asking for the shell to end with the command
+        var startInfo = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLauncher.BuildProcessStartInfo(
+            shell, "\"C:\\Program Files\\Tool\\tool.exe\" --flag", @"C:\repos\example", keepShellOpen: false);
+
+        // Assert: no -NoExit, and the call operator is still applied so the tool is executed
+        Assert.Equal(
+            ["-NoLogo", "-Command", "& \"C:\\Program Files\\Tool\\tool.exe\" --flag"],
+            startInfo.ArgumentList);
+    }
+
     /// <summary>
     ///     Test that building start info for PowerShell Core produces the expected -NoExit
     ///     command invocation.

@@ -26,6 +26,11 @@
                     <BoxShadows x:Key="RepoCardShadowSelected">0 0 0 1 #660078D4, 0 6 16 0 #80000000</BoxShadows>
                     <BoxShadows x:Key="FocusRingShadow">0 0 0 2 #7CB7FF</BoxShadows>
 
+                    <!-- Drag and drop: the insertion line between cards and the tint behind a
+                         section header that a card is dragged over -->
+                    <SolidColorBrush x:Key="RepoDropIndicator" Color="#7CB7FF" />
+                    <SolidColorBrush x:Key="RepoDropTargetBackground" Color="#334DA3FF" />
+
                     <!-- Window-level semantic colors used by every window: surfaces, dividers, and
                          the text colors of validation (error), caution (warning) and success -->
                     <SolidColorBrush x:Key="SurfaceBorder" Color="#4A4A52" />
@@ -130,6 +135,9 @@
                     <BoxShadows x:Key="RepoCardShadowHover">0 6 16 0 #29000000</BoxShadows>
                     <BoxShadows x:Key="RepoCardShadowSelected">0 0 0 1 #660078D4, 0 6 16 0 #29000000</BoxShadows>
                     <BoxShadows x:Key="FocusRingShadow">0 0 0 2 #0A5FC4</BoxShadows>
+
+                    <SolidColorBrush x:Key="RepoDropIndicator" Color="#0A5FC4" />
+                    <SolidColorBrush x:Key="RepoDropTargetBackground" Color="#260A5FC4" />
 
                     <SolidColorBrush x:Key="SurfaceBorder" Color="#A0A0AC" />
                     <SolidColorBrush x:Key="PageBackground" Color="#F3F3F6" />
@@ -290,6 +298,38 @@
     </Style>
     <Style Selector="ListBoxItem:focus-visible Border.RepoCard">
         <Setter Property="BoxShadow" Value="{DynamicResource FocusRingShadow}" />
+    </Style>
+
+    <!-- ===== Drag and drop: the card being dragged is dimmed, a line shows where it will land
+         (above or below the card the pointer is over), and a section header the pointer is over
+         is tinted. The classes are set on the list row by MainWindow while a drag is in progress. ===== -->
+    <Style Selector="ListBoxItem.dragging Border.RepoCard">
+        <Setter Property="Opacity" Value="0.5" />
+    </Style>
+    <Style Selector="Border.DropIndicator">
+        <Setter Property="Height" Value="3" />
+        <Setter Property="CornerRadius" Value="2" />
+        <Setter Property="Background" Value="{DynamicResource RepoDropIndicator}" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+        <Setter Property="IsVisible" Value="False" />
+        <Setter Property="Margin" Value="10,0,10,0" />
+    </Style>
+    <Style Selector="Border.DropIndicator.above">
+        <Setter Property="VerticalAlignment" Value="Top" />
+        <Setter Property="Margin" Value="10,-4,10,0" />
+    </Style>
+    <Style Selector="Border.DropIndicator.below">
+        <Setter Property="VerticalAlignment" Value="Bottom" />
+        <Setter Property="Margin" Value="10,0,10,-4" />
+    </Style>
+    <Style Selector="ListBoxItem.dropAbove Border.DropIndicator.above">
+        <Setter Property="IsVisible" Value="True" />
+    </Style>
+    <Style Selector="ListBoxItem.dropBelow Border.DropIndicator.below">
+        <Setter Property="IsVisible" Value="True" />
+    </Style>
+    <Style Selector="ListBoxItem.dropHeader Grid#GroupHeader">
+        <Setter Property="Background" Value="{DynamicResource RepoDropTargetBackground}" />
     </Style>
 
     <!-- ===== Status accent bar on the card's left edge (grey unless a status class is set) ===== -->

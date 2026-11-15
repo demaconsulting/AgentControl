@@ -7,7 +7,9 @@
 # about the container they came in - so that a version republished with different files can be
 # told apart, and the same files delivered by another source are recognized as the same.
 #
-# Each requirement states one observable outcome and is linked to the test that shows it.
+# Each requirement states one observable outcome and is linked to the test that shows it. The
+# identity of the agent files installed in a repo (what Launch compares with the identity a pin
+# recorded) is the same computation over the repo's managed folders.
 
 sections:
   - title: PackageContentIdentity Unit Requirements
@@ -160,3 +162,62 @@ sections:
           reported, because it is the evidence that a version was republished.
         tests:
           - PackageContentIdentity_Compare_DifferentValues_IsChanged
+
+      - id: AgentControl-PackageContentIdentity-InstalledFilesIdentity
+        title: >-
+          The PackageContentIdentity class shall compute the identity of the agent files installed
+          in a repo's four managed agent folders such that it equals the identity of the package
+          the files were extracted from, whether that package was a zip, an unpacked package folder
+          or a layout folder, taking the raw bytes of the files as they are (line endings included),
+          ignoring the repo's root files (such as AGENTS.md), release notes, anything outside the
+          four folders and empty folders, giving a repo with no agent files the identity of
+          nothing, and accepting a repo whose root is reached through a link.
+        justification: |
+          The pin's recorded identity can only vouch for the files on disk if the same files always
+          yield the same identity: an untouched extraction must never look changed, whichever kind
+          of source supplied it, and the developer's own AGENTS.md or a different line-ending
+          setting must not either confuse or hide a difference. A repo root reached through a link,
+          such as a redirected profile, is legitimate.
+        tests:
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_UntouchedZipExtraction_EqualsRecordedIdentity
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_UntouchedFolderPackageExtraction_EqualsRecordedIdentity
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_UntouchedLayoutRootExtraction_EqualsRecordedIdentity
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_ExtraEmptyFolder_EqualsRecordedIdentity
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_NoManagedFolders_EqualsIdentityOfEmptyPackage
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_EmptyManagedFolders_EqualsIdentityOfEmptyPackage
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_RepoRootReleaseNotesAndAgentsMd_AreIgnored
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_CrLfContent_IsNotNormalized
+          - windows@PackageContentIdentity_ComputeInstalledFilesIdentity_RepoRootUnderJunction_Succeeds
+          - ubuntu@PackageContentIdentity_ComputeInstalledFilesIdentity_RepoRootUnderSymlink_Succeeds
+
+      - id: AgentControl-PackageContentIdentity-InstalledIdentityDetectsDifferences
+        title: >-
+          The PackageContentIdentity class shall give the agent files installed in a repo a
+          different identity from the package's when a file is missing, a file differs by a single
+          byte, a file was renamed or a file was added.
+        justification: |
+          Any real difference between the installed files and the package's must change the
+          identity, because that is how a partly filled, edited or extended agent folder is
+          noticed before the agent tool starts.
+        tests:
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_MissingFile_DiffersFromRecordedIdentity
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_ChangedFileByOneByte_DiffersFromRecordedIdentity
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_ExtraFile_DiffersFromRecordedIdentity
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_RenamedFile_DiffersFromRecordedIdentity
+
+      - id: AgentControl-PackageContentIdentity-InstalledIdentityFailsSafely
+        title: >-
+          The PackageContentIdentity class shall refuse to identify the agent files installed in a
+          repo when a managed folder is a link or the repo folder does not exist or no repo is
+          given, shall stop when the caller cancels, and shall never report an identity for files it
+          could not read.
+        justification: |
+          Files that cannot be read cannot be vouched for, and reading through a link could lead
+          out of the repo; an error is the only answer that is never mistaken for a match, and a
+          long read must be stoppable.
+        tests:
+          - windows@PackageContentIdentity_ComputeInstalledFilesIdentity_ManagedFolderIsJunction_ThrowsInvalidOperationException
+          - ubuntu@PackageContentIdentity_ComputeInstalledFilesIdentity_ManagedFolderIsSymlink_ThrowsInvalidOperationException
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_CanceledToken_ThrowsOperationCanceledException
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_NullRepoRoot_ThrowsArgumentNullException
+          - PackageContentIdentity_ComputeInstalledFilesIdentity_MissingRepoRoot_ThrowsInvalidOperationException

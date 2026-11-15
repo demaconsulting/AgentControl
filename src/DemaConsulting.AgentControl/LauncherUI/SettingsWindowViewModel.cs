@@ -115,6 +115,11 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     private string? _shellPreference;
 
     /// <summary>
+    ///     Backing field for <see cref="KeepShellOpen"/>.
+    /// </summary>
+    private bool _keepShellOpen;
+
+    /// <summary>
     ///     Backing field for <see cref="Theme"/>.
     /// </summary>
     private ThemePreference _theme;
@@ -162,6 +167,7 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
         _agentTool = initial.AgentTool;
         _customAgentCommand = initial.CustomAgentCommand;
         _shellPreference = initial.ShellPreference;
+        _keepShellOpen = initial.KeepShellOpen;
         _theme = initial.Theme;
         _onSave = onSave;
 
@@ -326,6 +332,16 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     {
         get => _shellPreference;
         set => SetField(ref _shellPreference, value);
+    }
+
+    /// <summary>
+    ///     Gets or sets whether the shell window that hosts the launched agent tool stays open
+    ///     after the tool exits; saved with the other settings and applied from the next launch.
+    /// </summary>
+    public bool KeepShellOpen
+    {
+        get => _keepShellOpen;
+        set => SetField(ref _keepShellOpen, value);
     }
 
     /// <summary>
@@ -508,7 +524,8 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     ///     The returned settings' <see cref="AppSettings.RecentRepos"/> and
     ///     <see cref="AppSettings.CollapsedGroups"/> are left as fresh empty
     ///     lists; callers (specifically <see cref="MainWindowViewModel.ApplySettings"/>) are
-    ///     responsible for preserving the authoritative recent-repos list and collapsed-group state, since this view model
+    ///     responsible for preserving the authoritative repo list (and its order, including
+    ///     <see cref="AppSettings.HasUserRepoOrder"/>) and collapsed-group state, since this view model
     ///     never owns or edits them. The configured sources are written to
     ///     <see cref="AppSettings.Sources"/> (never the legacy single path) in the order listed.
     ///     A source whose location embeds a credential is refused here, keeping the window open
@@ -527,6 +544,7 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
             AgentTool = AgentTool,
             CustomAgentCommand = CustomAgentCommand,
             ShellPreference = ShellPreference,
+            KeepShellOpen = KeepShellOpen,
             Theme = Theme
         };
 

@@ -1,6 +1,7 @@
 ---
 resource-path:
   - docs/design
+  - docs/design/generated
   - docs/design/agent-control
   - docs/design/agent-control/launcher-ui
   - docs/design/agent-control/agent-package-management
@@ -13,7 +14,9 @@ resource-path:
   - docs/design/agent-control/startup
   - docs/design/agent-control/utilities
   - docs/design/ots
+  - docs/images
   - docs/template
+embed-resources: true
 
 input-files:
   - docs/design/title.txt
@@ -56,6 +59,7 @@ input-files:
   - docs/design/agent-control/agent-tool-launcher.md
   - docs/design/agent-control/agent-tool-launcher/shell-detector.md
   - docs/design/agent-control/agent-tool-launcher/agent-tool-launcher.md
+  - docs/design/agent-control/agent-tool-launcher/agent-tool-process-starter.md
   - docs/design/agent-control/git-integration.md
   - docs/design/agent-control/git-integration/git-client.md
   - docs/design/agent-control/git-integration/committed-agent-files-cache.md

@@ -14,7 +14,7 @@ N/A - standard test environment.
 
 - All unit tests pass with zero failures.
 - Each supported shell kind produces the correct argument form for keeping the terminal open
-  (or exiting cleanly, for PowerShell).
+  (the default) and, separately, for ending the shell together with the command.
 - A custom command beginning with a quoted executable path is invoked (not echoed) under
   PowerShell, and is left unchanged for every other shell kind and command form.
 - A null shell, empty command, empty working directory, or unrecognized shell kind is
@@ -23,14 +23,29 @@ N/A - standard test environment.
 #### Test Scenarios
 
 **AgentToolLauncher_BuildCommand_ProducesCorrectArgumentsPerShellKind**: Building
-process-start information produces no-exit command arguments for both PowerShell Core and
-Windows PowerShell, keep-open arguments for the Command shell, and a `-c` argument for POSIX
-shells. This scenario is tested by
+process-start information, when asked to keep the shell open (the default), produces no-exit
+command arguments for both PowerShell Core and Windows PowerShell, keep-open arguments for the
+Command shell, and a `-c` argument for POSIX shells. This scenario is tested by
 `AgentToolLauncher_BuildProcessStartInfo_PowerShellCore_ProducesNoExitCommandArguments`,
 `AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShell_ProducesNoExitCommandArguments`,
-`AgentToolLauncher_BuildProcessStartInfo_Cmd_ProducesKeepOpenArguments`, and
-`AgentToolLauncher_BuildProcessStartInfo_Posix_ProducesDashCArgument`, covering
-`AgentControl-AgentToolLauncher-BuildCommand`.
+`AgentToolLauncher_BuildProcessStartInfo_Cmd_ProducesKeepOpenArguments`,
+`AgentToolLauncher_BuildProcessStartInfo_Posix_ProducesDashCArgument` (all with the default),
+and `AgentToolLauncher_BuildProcessStartInfo_PowerShellCore_KeepShellOpenTrue_HasNoExit`,
+`AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShell_KeepShellOpenTrue_HasNoExit` and
+`AgentToolLauncher_BuildProcessStartInfo_Cmd_KeepShellOpenTrue_UsesSlashK` (asking explicitly),
+covering `AgentControl-AgentToolLauncher-BuildCommand`.
+
+**AgentToolLauncher_ShellEndsWithTool_OmitsNoExitAndUsesSlashC**: Building process-start
+information, when not asked to keep the shell open, leaves `-NoExit` out for both PowerShell
+Core and Windows PowerShell (`-NoLogo -Command <command>`), uses `/C` for the Command shell,
+leaves POSIX shells unchanged (`-c`), and still adapts a quoted-path command for PowerShell
+with the call operator. This scenario is tested by
+`AgentToolLauncher_BuildProcessStartInfo_PowerShellCore_KeepShellOpenFalse_OmitsNoExit`,
+`AgentToolLauncher_BuildProcessStartInfo_WindowsPowerShell_KeepShellOpenFalse_OmitsNoExit`,
+`AgentToolLauncher_BuildProcessStartInfo_Cmd_KeepShellOpenFalse_UsesSlashC`,
+`AgentToolLauncher_BuildProcessStartInfo_Posix_KeepShellOpenFalse_IsUnchanged` and
+`AgentToolLauncher_BuildProcessStartInfo_PowerShellQuotedPath_KeepShellOpenFalse_StillPrefixesCallOperator`,
+covering `AgentControl-AgentToolLauncher-ShellEndsWithTool`.
 
 **AgentToolLauncher_QuotedPathInvocation_AddsCallOperatorOnlyForQuotedPowerShellCommands**:
 For PowerShell Core and Windows PowerShell, a command that begins (after leading whitespace)

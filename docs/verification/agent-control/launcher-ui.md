@@ -3,7 +3,9 @@
 ### Verification Approach
 
 The `LauncherUI` subsystem is verified by the combined unit tests of its ten units
-(`MainWindowViewModelTests.cs` and `RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`, `RepoCardServerSourceTests.cs`
+(`MainWindowViewModelTests.cs` and `RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`,
+`RepoCardLaunchVerificationTests.cs` (the checks of a repo's agent files before launch),
+`RepoCardServerSourceTests.cs`
 and `RepoCardImageTests.cs`,
 `SelectPackageWindowViewModelTests.cs` and `SelectPackageRetryTests.cs`,
 `SettingsWindowViewModelTests.cs`, `SettingsWindowGitSourceTests.cs`, `SourceEditorViewModelTests.cs`,
@@ -20,11 +22,17 @@ command, which together
 exercise the full recent-repos/card/select-package/settings/sign-in interaction surface without ever
 constructing an Avalonia `Window` (apart from the picture decoder and `DialogBehavior`, which need Avalonia's headless
 session). The windows themselves are exercised by headless Avalonia tests
-(`DialogWindowTests.cs`, `MainWindowTests.cs`, `UsabilityWindowTests.cs` for the favorite star with real pointer
+(`DialogWindowTests.cs` - including the confirmation window's custom button labels -, `MainWindowTests.cs`,
+`UsabilityWindowTests.cs` for the favorite star with real pointer
 and key input, the "Check again" menu item, the up-to-date check mark, the narrow card, the Settings sections, the
-keyboard behavior of the dialogs, the About version row and the order of the AGENTS.md question and the release
-notes, `RepoGroupWindowTests.cs` for the group headers, the card menu's
+keyboard behavior of the dialogs, the About version row, the order of the AGENTS.md question and the release
+notes and the keep-or-update and launch-anyway questions about a repo's agent files,
+`RepoGroupWindowTests.cs` for the group headers, the card menu's
 "Move to group" submenu, the group-name prompt and the card color palette pop-up,
+`RepoReorderWindowTests.cs` for the user's own repo order (cards that stay put, the card menu's Reorder submenu, drag
+and drop through the window's drag-source seam and the platform's drop events, the insertion line and header tint,
+reordering turned off by the filter, the order after a restart; the real operating-system drag is covered only by the
+FlaUI tests), `RepoOrderingTests.cs` for the view model's rules behind them,
 `SettingsWindowServerSourceTests.cs` for the Settings
 window, the source editor window and its connection test, `SourceEditorSignatureWindowTests.cs` for the signature
 section and "Forget saved sign-in" of the source editor, `SourceEditorGitWindowTests.cs` for the Git editor's
@@ -171,24 +179,113 @@ full path; in both cases only the matching card remains displayed. This scenario
 `MainWindowViewModel_FilterText_MatchesRepoPath_FiltersDisplayedRepoCards`, covering
 `AgentControl-LauncherUI-SearchFilter`.
 
-**LauncherUI_SortOrder_FavoritesFirstThenMostRecentlyLaunched**: Displayed cards are checked
-for favorites sorting above non-favorites regardless of launch recency, and for
-most-recently-launched-first ordering within the same favorite tier with never-launched repos
-last. This scenario is tested by
-`MainWindowViewModel_DisplayedRepoCards_SortsFavoritesAboveNonFavorites` and
-`MainWindowViewModel_DisplayedRepoCards_SortsByLastLaunchedUtcDescendingWithNullsLast`,
-covering `AgentControl-LauncherUI-SortOrder`.
+**LauncherUI_SortOrder_FavoritesFirstThenStoredOrder**: Displayed cards are checked for favorites being listed
+first and the others in the user's stored order, whatever the launch times are: in the window (rows top to bottom,
+`MainWindow_ExistingRepos_ShownInStoredOrder_FavoritesFirst`) and in the view model
+(`MainWindowViewModel_DisplayedRepoCards_FavoritesFirstThenStoredOrder`); a stored order is kept as it is, and settings
+without a stored order are arranged once as favorites first and then by recency. This scenario is tested by
+`MainWindow_ExistingRepos_ShownInStoredOrder_FavoritesFirst`,
+`MainWindowViewModel_DisplayedRepoCards_FavoritesFirstThenStoredOrder`, covering
+`AgentControl-LauncherUI-SortOrder` (with `MainWindowViewModel_Constructor_StoredOrder_IsKeptWhateverTheLaunchTimes` and
+`MainWindowViewModel_Constructor_NoStoredOrder_SeedsFavoritesFirstThenMostRecentlyLaunched` for the unit requirements
+below it).
 
-**LauncherUI_Launch_NeverBlockedByAgentPackageSyncState**: The Launch command is executed for
-a card whose agent files are already synced, recording the launch timestamp; the ensure-synced
-check is exercised confirming it returns true without re-extracting when folders are already
-present; and a separate scenario confirms the agent-tool process still launches (raising
-`LaunchRecorded`) when the best-effort sync attempt has no pin to work with, or is attempted
-and fails outright. This scenario is tested by
+**LauncherUI_StableRepoOrder_LaunchNeverMovesTheCardAndNewReposGoToTheBottom**: In a shown main window (tested by
+`RepoReorderWindowTests.cs`, with a fake process starter so nothing is started) launching the last repo leaves every
+row where it was, and a repo added with the top-bar add and one added into a group appear at the bottom of their
+sections. This scenario is tested by `MainWindow_Launch_DoesNotMoveTheCard` and
+`MainWindow_RepoAdded_AppearsAtTheBottomOfItsSection`, covering `AgentControl-LauncherUI-StableRepoOrder`.
+
+**LauncherUI_RepoOrderMenu_MoveItemsReorderAndDisableAtTheBoundaries**: The card menu's Organize group holds exactly
+"Move to group", "Reorder" and "Card color..."; the Reorder submenu has an AutomationId, an icon and a tooltip and holds
+the items Move to top, Move up, Move down and Move to bottom, each with an AutomationId, an icon and a tooltip; the first
+repo's Top and Up items are disabled with the reason as their tooltip, the last repo's Down and Bottom items likewise;
+choosing an enabled item (the menu item's click) reorders the rows; the Reorder submenu itself is disabled, with the
+reason as its tooltip, for the only repo of its section and enabled for a repo with a neighbor. This
+scenario is tested by `MainWindow_CardMenu_MoveItems_ReorderAndDisableAtTheBoundaries`,
+`MainWindow_CardMenu_OrganizeGroupHasReorderSubmenuWithMoveItems` and
+`MainWindow_CardMenu_Reorder_DisabledForTheOnlyRepoOfItsSection`, covering `AgentControl-LauncherUI-RepoOrderMenu`.
+
+**LauncherUI_RepoDrag_ReordersWithinAndBetweenSectionsAndOnHeaders**: The headless platform has no drag source, so a
+drag is started with a real pointer press and move on a card (which calls the window's `DragStarter` seam, here a fake
+that records the dragged data and leaves the drag open) and finished with the platform's drag-enter, drag-over and
+drop events raised on the window at points computed from the rows' bounds (upper half, lower half, header). Dropping
+on the lower or upper half of another card of the same section reorders the rows
+(`MainWindow_DragCard_WithinSection_ReordersAtDropPosition`) and in a list without groups a drop in the other tier is
+refused with no drop effect, nothing becoming a favorite
+(`MainWindow_DragCard_FlatList_OnlyReordersWithinItsTier`), covering `AgentControl-LauncherUI-RepoDragReorder`. Six
+cases drop a card in another section - group to group, group to Ungrouped, Ungrouped to a group, into Favorites keeping
+the group, out of Favorites into a group and out of Favorites into Ungrouped - and check the card's group, favorite
+state, place and the stored values (`MainWindow_DragCard_IntoOtherSection_ChangesGroupOrFavoriteAtDropPosition`),
+covering `AgentControl-LauncherUI-RepoDragBetweenSections`. A drop on a header, and on a collapsed group's header (the
+group stays collapsed and its header says two repos), puts the card at the bottom of the group
+(`MainWindow_DropOnGroupHeader_MovesCardToTheGroupBottom` and
+`MainWindow_DropOnCollapsedGroupHeader_MovesCardAndKeepsTheGroupCollapsed`), covering
+`AgentControl-LauncherUI-RepoDropOnHeader`.
+
+**LauncherUI_RepoDropFeedback_LineAndTintShownAndClearedAndLegibleInBothThemes**: During a drag the dragged row has the
+`dragging` class; the upper half of a card shows the line above it, the lower half the line below it (the previous
+line is cleared), the dragged card itself shows nothing, a header over which the pointer is gets the `dropHeader` class,
+leaving the list clears it, and after the drop no row has any of the classes and no indicator is visible
+(`MainWindow_DragOver_ShowsInsertionIndicatorAboveOrBelowAndClearsItAfterwards`). The insertion line reaches 3:1
+contrast against the card and the page in both themes and the group header's text keeps 4.5:1 on the drop tint
+(`ThemeResources_DropIndicator_IsLegibleInLightAndDark`; `RepoDropIndicator` is also in the graphics checked by
+`AppStyles_TextAndGraphicColors_MeetContrastInBothThemes`), covering `AgentControl-LauncherUI-RepoDropFeedback`.
+
+**LauncherUI_ReorderOffWhileFiltering_NoDragAndMoveItemsDisabledWithTooltip**: With text in the filter a press and move
+on a card starts no drag (the `DragStarter` seam is never called and the row is not dimmed) and the Reorder submenu and
+all four Move items are
+disabled with the filter explanation as their tooltip; with the filter cleared the drag starts and the items apply
+again. This scenario is tested by `MainWindow_FilterActive_DragStartsNothingAndMoveItemsAreDisabledWithTooltip`,
+covering `AgentControl-LauncherUI-ReorderOffWhileFiltering`.
+
+**LauncherUI_RepoOrderRemembered_OrderSurvivesAWindowRestart**: After a drag and a menu move, the saved settings are
+loaded into a new view model and a new window, which shows the rows in the same order. This scenario is tested by
+`MainWindow_ReorderedList_OrderSurvivesAWindowRestart`, covering `AgentControl-LauncherUI-RepoOrderRemembered`.
+
+**LauncherUI_Launch_OnlyTheUsersCancelOfAFailedRestoreStopsIt**: The Launch command is executed for
+a card whose agent files are already synced, recording the launch timestamp; the pre-launch check is exercised
+confirming it returns without re-extracting when a pin without an identity finds all four folders present; and
+separate scenarios confirm the agent-tool process still launches (raising `LaunchRecorded`) when the check has no pin
+to work with or fails with nobody to ask, when the user keeps agent files that differ from the pin, and - the one
+exception - does not launch and records nothing when agent files that were needed could not be installed and the user
+cancels. This scenario is tested by
 `RepoCardViewModel_LaunchCommand_Succeeds_RecordsLaunchTimestampAndRaisesLaunchRecorded`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_PinnedAndFoldersPresent_ReturnsTrueWithoutReExtracting`,
-and `RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches`, covering
+`RepoCardViewModel_LaunchCommand_SyncFailsOrNoPin_StillLaunches`,
+`RepoCardViewModel_LaunchCommand_MismatchKeep_Launches` and
+`RepoCardViewModel_LaunchCommand_RestoreFailsAndUserCancels_DoesNotLaunchOrRecordLaunch`, covering
 `AgentControl-LauncherUI-Launch`.
+
+**LauncherUI_VerifyAgentFilesBeforeLaunch_InstallsSilentlyComparesLocallyAndAsksOnDifference**: Through the real
+card with real package fixtures: a repo with no agent files is given the pinned package without a question; a repo
+whose files are the package's launches without a question and without any package-source access; and a repo that
+lost half of its files while all four folders remain (the reported defect) raises the keep-or-update question, is
+left untouched by Keep, and is restored in full by Update, after which the launch command starts the tool. The same
+difference is asked about again on the next launch. In the headless main window the card's
+`AgentFilesChoiceRequested` event opens the confirmation with the request's own labels and answers the request for
+every way of closing it. This scenario is tested by
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoManagedFolders_RestoresSilentlyWithoutPrompt`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_FilesMatchPin_ReturnsInSyncWithoutPromptOrPackageAccess`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HalfOfTheFilesMissing_AsksAndUpdateRestoresAllFiles`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchPersists_AsksOnEveryLaunch`,
+`RepoCardViewModel_LaunchCommand_MismatchKeep_Launches`,
+`RepoCardViewModel_LaunchCommand_MismatchUpdate_RestoresThenLaunches` and
+`MainWindow_AgentFilesChoiceRequested_ShowsLabeledConfirmationAndAnswersRequest`, covering
+`AgentControl-LauncherUI-VerifyAgentFilesBeforeLaunch`.
+
+**LauncherUI_RestoreFailureChoice_OffersLaunchAnywayOrCancelWithCancelAsDefault**: When agent files that a launch needs
+cannot be installed, the card raises a question with the reason and the labels "Launch anyway" and "Cancel"; Cancel
+starts no process and records no launch, "Launch anyway" starts the tool. The confirmation window shows custom button
+labels while keeping the declining button focused and Escape as a decline, returns true when the confirming button is
+clicked, and rejects null arguments; the main window shows the question with those labels and answers it. This scenario
+is tested by `RepoCardViewModel_LaunchCommand_RestoreFailsAndUserCancels_DoesNotLaunchOrRecordLaunch`,
+`RepoCardViewModel_LaunchCommand_RestoreFailsAndUserChoosesLaunchAnyway_Launches`,
+`ConfirmationWindow_CustomLabels_ShowTextAndKeepNoButtonAsDefault`,
+`ConfirmationWindow_CustomLabelsConfirmClicked_ReturnsTrue`,
+`ConfirmationWindow_CustomLabelsNullArgument_Throws` and
+`MainWindow_AgentFilesChoiceRequested_ShowsLabeledConfirmationAndAnswersRequest`, covering
+`AgentControl-LauncherUI-RestoreFailureChoice`.
 
 **LauncherUI_Pull_EnabledOnlyForCleanWorkingTree**: A card with a clean working tree reports
 pull as enabled, a card with a dirty working tree reports it disabled, and executing
@@ -216,7 +313,7 @@ and `RepoCardViewModel_UpgradeCommand_NoPackageSourceConfigured_RaisesErrorOccur
 `AgentControl-LauncherUI-Upgrade`.
 
 **LauncherUI_AgentsMdTemplateOffer_OfferedOnceAndNeverOverwritesExistingFile**: After a
-genuine sync (package selection, upgrade, or ensure-synced-before-launch re-extraction), the
+genuine sync (package selection, upgrade, or the restore or update of agent files before launch), the
 offer is raised with the package's template content when the repo lacks an `AGENTS.md`;
 accepting writes the template verbatim to the repo root; declining persists the decision in
 the pin file without writing a file, and a subsequent sync for the same repo does not
@@ -623,6 +720,19 @@ read as words and an unknown value reads as empty. This scenario is tested by
 `ThemePreferenceDisplayNameConverter` is a supporting type of this subsystem, so its tests are cited here and not
 by a unit requirement.
 
+**LauncherUI_KeepShellOpen_OptionIsOfferedNextToTheShellPreference**: The Settings window shows a "Keep the shell
+open after the agent tool exits" checkbox in the Tools section directly after the shell preference, with a non-empty
+tooltip, checked by default and bound both ways to the view model. This scenario is tested by
+`SettingsWindow_Layout_KeepShellOpenCheckBoxFollowsShellPreferenceWithTooltip` (headless), covering
+`AgentControl-LauncherUI-KeepShellOpenOption` (child: `AgentControl-SettingsWindowViewModel-KeepShellOpen`; the view
+model's test is in its unit verification design).
+
+**LauncherUI_KeepShellOpen_ChangeAppliesToTheNextLaunch**: With a recording process starter and a deterministic shell
+detector handed to the main window view model, a launch asks for PowerShell with `-NoExit`; after settings that clear
+the choice are applied (as Save does), the next launch of the same card asks for PowerShell without `-NoExit`; no
+process is started. This scenario is tested by `MainWindowViewModel_ApplySettings_KeepShellOpenChanged_NextLaunchUsesIt`,
+covering `AgentControl-LauncherUI-KeepShellOpenApplied` (child: `AgentControl-RepoCardViewModel-KeepShellOpen`).
+
 **LauncherUI_ThemeApplied_ChoiceTakesEffectOnTheRunningApplication**: Each theme choice maps to the matching Avalonia
 variant (system default to `ThemeVariant.Default`, which follows the operating system) and applying a choice changes
 the running application's requested and actual theme, so every window follows it; settings that were refused are
@@ -897,8 +1007,9 @@ and `AgentControl-LauncherUI-UpgradeAcrossSources` (children: `-UpgradeAcrossSou
 `-ProblemKeepsUpgradeOffered`; each child prefixed `AgentControl-RepoCardViewModel`).
 
 **LauncherUI_ContentChangeProtection_RepublishedVersionIsNeverAppliedUnnoticed**: A package version republished with
-other files is not applied silently: an Upgrade and the restore of missing agent files before launch refuse it and
-say so, and a Select Package of the pinned version raises the confirmation request. In the main window the request
+other files is not applied silently: an Upgrade and the restore or update of agent files before launch refuse it and
+say so (before launch the user then chooses to launch anyway or cancel), and a Select Package of the pinned version
+raises the confirmation request. In the main window the request
 becomes a modal confirmation whose answer No changes nothing (the repo and the pin keep what they had) and whose
 answer Yes applies the changed package and records its new identity; a pin without an identity adopts one silently.
 This scenario is verified by the `RepoCardViewModel` unit tests (see their unit verification design), with

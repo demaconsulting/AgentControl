@@ -20,6 +20,7 @@
 
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.Settings;
+using DemaConsulting.AgentControl.Tests.AgentToolLauncher;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
@@ -143,7 +144,7 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
             new AppSettings
             {
                 AgentTool = AgentToolKind.Custom,
-                CustomAgentCommand = OperatingSystem.IsWindows() ? "cmd /c exit 0" : "true"
+                CustomAgentCommand = "my-agent"
             },
             "alpha");
         var alpha = fixture.Card("alpha");
@@ -154,7 +155,8 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
         // Act
         await alpha.LaunchCommand.ExecuteAsync();
 
-        // Assert
+        // Assert: the tool was requested through the fake starter, but the stamp was not recorded
+        Assert.Single(fixture.Starter.Started);
         Assert.Null(alpha.LastLaunchedUtc);
         Assert.Null(fixture.Settings.RecentRepos.Single().LastLaunchedUtc);
         Assert.False(recorded);
@@ -382,10 +384,14 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
         [
             .. repos.Select(repo => new RecentRepo { Path = CreateDirectory(repo.Name), GroupName = repo.Group })
         ];
-        var viewModel = new MainWindowViewModel(settings, configDirectory: configDirectory);
+        var starter = new FakeAgentToolProcessStarter();
+        var viewModel = new MainWindowViewModel(
+            settings, configDirectory: configDirectory,
+            // Launch-safe by construction: a fixture never starts a real process
+            processStarter: starter, shellDetector: FakeAgentToolProcessStarter.CreateShellDetector());
         var failures = new List<string>();
         viewModel.SettingsSaveFailed += (_, message) => failures.Add(message);
-        return new Fixture(viewModel, settings, configDirectory, failures);
+        return new Fixture(viewModel, settings, configDirectory, failures, starter);
     }
 
     /// <summary>
@@ -427,8 +433,11 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     /// <param name="Settings">The live settings it was created over.</param>
     /// <param name="ConfigDirectory">The directory its settings are saved to.</param>
     /// <param name="Failures">The messages of <see cref="MainWindowViewModel.SettingsSaveFailed"/>.</param>
+    /// <param name="Starter">The process starter every card launches through; it records launches
+    ///     and starts nothing.</param>
     private sealed record Fixture(
-        MainWindowViewModel ViewModel, AppSettings Settings, string ConfigDirectory, List<string> Failures)
+        MainWindowViewModel ViewModel, AppSettings Settings, string ConfigDirectory, List<string> Failures,
+        FakeAgentToolProcessStarter Starter)
     {
         /// <summary>
         ///     Finds a repo's card by the repo's folder name.

@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using DemaConsulting.AgentControl.AgentPackageManagement;
@@ -35,8 +36,12 @@ namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 ///     under test is the encoding and the membership rule, not a particular kind of source. That the
 ///     real zip, NuGet and Git readers agree is shown at subsystem level.
 /// </remarks>
-public class PackageContentIdentityTests
+public sealed class PackageContentIdentityTests : IDisposable
 {
+    /// <summary>
+    ///     The temporary folders a test created, removed when the test class is disposed.
+    /// </summary>
+    private readonly List<string> _tempPaths = [];
     /// <summary>
     ///     The SHA-256 of the ASCII text <c>abc</c>, a published test vector.
     /// </summary>
@@ -462,6 +467,538 @@ public class PackageContentIdentityTests
 
         // Assert: the part after the first colon is cut to twelve characters
         Assert.Equal("other:0123456789ab", described);
+    }
+
+    /// <summary>
+    ///     Test that the identity of the files a zip package delivers equals the identity of the files
+    ///     an untouched extraction of it leaves in a repo, so a pin made from the zip recognizes the
+    ///     repo it produced.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_UntouchedZipExtraction_EqualsRecordedIdentity()
+    {
+        // Arrange: a zip that also holds files that are never extracted, extracted into a repo
+        var zipPath = CreateZip([.. PackageFiles(), .. NonExtractedFiles()]);
+        using var reader = ZipPackageContentReader.Open(zipPath);
+        var recorded = PackageContentIdentity.ComputeFilesIdentity(reader);
+        var repo = ExtractToNewRepo(reader);
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(recorded, installed);
+    }
+
+    /// <summary>
+    ///     Test that the identity of the files an unpacked package folder (a NuGet package) delivers
+    ///     equals the identity of the files an untouched extraction leaves in a repo.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_UntouchedFolderPackageExtraction_EqualsRecordedIdentity()
+    {
+        // Arrange: an unpacked package folder (content under "content") extracted into a repo
+        var packageFolder = CreateTempDirectory();
+        WriteTree(Path.Combine(packageFolder, "content"), [.. PackageFiles(), .. NonExtractedFiles()]);
+        File.WriteAllText(Path.Combine(packageFolder, "pkg.nuspec"), "<package />");
+        using var reader = DirectoryPackageContentReader.Open(packageFolder);
+        var recorded = PackageContentIdentity.ComputeFilesIdentity(reader);
+        var repo = ExtractToNewRepo(reader);
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(recorded, installed);
+    }
+
+    /// <summary>
+    ///     Test that the identity of the files a Git package delivers (a folder whose root is the
+    ///     package layout, next to other repository content) equals the identity of the files an
+    ///     untouched extraction leaves in a repo.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_UntouchedLayoutRootExtraction_EqualsRecordedIdentity()
+    {
+        // Arrange: a layout root that holds other repository content too, extracted into a repo
+        var layoutRoot = CreateTempDirectory();
+        WriteTree(layoutRoot, [.. PackageFiles(), .. NonExtractedFiles(), ("src/Program.cs", Bytes("class P {}"))]);
+        using var reader = DirectoryPackageContentReader.OpenLayoutRoot(layoutRoot);
+        var recorded = PackageContentIdentity.ComputeFilesIdentity(reader);
+        var repo = ExtractToNewRepo(reader);
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(recorded, installed);
+    }
+
+    /// <summary>
+    ///     Test that a file that has been deleted from an extracted repo makes the installed identity
+    ///     differ from the recorded one.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_MissingFile_DiffersFromRecordedIdentity()
+    {
+        // Arrange: an untouched extraction with one file then deleted
+        var (repo, recorded) = ExtractedRepoWithRecordedIdentity();
+        File.Delete(Path.Combine(repo, ".github", "standards", "style", "style.md"));
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.NotEqual(recorded, installed);
+    }
+
+    /// <summary>
+    ///     Test that changing one byte of one installed file makes the installed identity differ.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_ChangedFileByOneByte_DiffersFromRecordedIdentity()
+    {
+        // Arrange: an untouched extraction with one byte of one file changed
+        var (repo, recorded) = ExtractedRepoWithRecordedIdentity();
+        var file = Path.Combine(repo, ".github", "agents", "copilot.md");
+        var bytes = File.ReadAllBytes(file);
+        bytes[0] ^= 0x01;
+        File.WriteAllBytes(file, bytes);
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.NotEqual(recorded, installed);
+    }
+
+    /// <summary>
+    ///     Test that a file added to a managed folder makes the installed identity differ.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_ExtraFile_DiffersFromRecordedIdentity()
+    {
+        // Arrange: an untouched extraction plus a file the package does not deliver
+        var (repo, recorded) = ExtractedRepoWithRecordedIdentity();
+        File.WriteAllText(Path.Combine(repo, ".github", "skills", "extra.md"), "mine");
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.NotEqual(recorded, installed);
+    }
+
+    /// <summary>
+    ///     Test that renaming an installed file makes the installed identity differ.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_RenamedFile_DiffersFromRecordedIdentity()
+    {
+        // Arrange: an untouched extraction with one file renamed
+        var (repo, recorded) = ExtractedRepoWithRecordedIdentity();
+        File.Move(
+            Path.Combine(repo, ".github", "agents", "copilot.md"), Path.Combine(repo, ".github", "agents", "renamed.md"));
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.NotEqual(recorded, installed);
+    }
+
+    /// <summary>
+    ///     Test that an empty folder added to a managed folder does not change the installed identity:
+    ///     only files take part, exactly as in a package's identity.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_ExtraEmptyFolder_EqualsRecordedIdentity()
+    {
+        // Arrange: an untouched extraction plus an empty folder
+        var (repo, recorded) = ExtractedRepoWithRecordedIdentity();
+        Directory.CreateDirectory(Path.Combine(repo, ".github", "agents", "empty-folder"));
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(recorded, installed);
+    }
+
+    /// <summary>
+    ///     Test that a repo without any managed folder has the identity of the empty stream, which is
+    ///     the identity of a package that delivers no managed file.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_NoManagedFolders_EqualsIdentityOfEmptyPackage()
+    {
+        // Arrange: a repo with only its own files
+        var repo = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(repo, "README.md"), "readme");
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal("files-sha256:" + EmptySha256, installed);
+    }
+
+    /// <summary>
+    ///     Test that a repo whose four managed folders exist but hold no file has the identity of the
+    ///     empty stream.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_EmptyManagedFolders_EqualsIdentityOfEmptyPackage()
+    {
+        // Arrange: the four folders, one of them with an empty sub-folder
+        var repo = CreateTempDirectory();
+        foreach (var folder in new[] { "agents", "standards", "templates", "skills" })
+        {
+            Directory.CreateDirectory(Path.Combine(repo, ".github", folder));
+        }
+
+        Directory.CreateDirectory(Path.Combine(repo, ".github", "skills", "empty"));
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal("files-sha256:" + EmptySha256, installed);
+    }
+
+    /// <summary>
+    ///     Test that the repo's own root <c>AGENTS.md</c> and <c>release-notes.md</c>, and every file
+    ///     outside the four managed folders, are ignored, as they are in a package's identity.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_RepoRootReleaseNotesAndAgentsMd_AreIgnored()
+    {
+        // Arrange: an untouched extraction plus files that belong to the repo, not to the package
+        var (repo, recorded) = ExtractedRepoWithRecordedIdentity();
+        File.WriteAllText(Path.Combine(repo, "AGENTS.md"), "the repo's own instructions");
+        File.WriteAllText(Path.Combine(repo, "release-notes.md"), "the repo's own notes");
+        File.WriteAllText(Path.Combine(repo, "README.md"), "readme");
+        Directory.CreateDirectory(Path.Combine(repo, ".github", "workflows"));
+        File.WriteAllText(Path.Combine(repo, ".github", "workflows", "build.yml"), "name: build");
+        File.WriteAllText(Path.Combine(repo, ".github", "CODEOWNERS"), "* @me");
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(recorded, installed);
+    }
+
+    /// <summary>
+    ///     Test that line endings are compared byte for byte: a package whose files use CRLF
+    ///     round-trips to the same identity, and converting an installed file to LF changes it.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_CrLfContent_IsNotNormalized()
+    {
+        // Arrange: a package with a CRLF file, extracted untouched
+        using var reader = new InMemoryReader((".github/agents/crlf.md", Bytes("line one\r\nline two\r\n")));
+        var recorded = PackageContentIdentity.ComputeFilesIdentity(reader);
+        var repo = ExtractToNewRepo(reader);
+
+        // Act
+        var untouched = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+        File.WriteAllBytes(Path.Combine(repo, ".github", "agents", "crlf.md"), Bytes("line one\nline two\n"));
+        var converted = PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(recorded, untouched);
+        Assert.NotEqual(recorded, converted);
+    }
+
+    /// <summary>
+    ///     Test that a managed folder that is a directory junction is refused rather than read through
+    ///     (Windows).
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_ManagedFolderIsJunction_ThrowsInvalidOperationException()
+    {
+        // Arrange: .github/agents is a junction to a folder outside the repo
+        var outside = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(outside, "outside.md"), "outside");
+        var repo = CreateTempDirectory();
+        CreateJunctionOrSkip(Path.Combine(repo, ".github", "agents"), outside);
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(
+            () => PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that a managed folder that is a symbolic link is refused rather than read through,
+    ///     wherever the operating system lets a test create one.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_ManagedFolderIsSymlink_ThrowsInvalidOperationException()
+    {
+        // Arrange: .github/agents is a symbolic link to a folder outside the repo
+        var outside = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(outside, "outside.md"), "outside");
+        var repo = CreateTempDirectory();
+        CreateDirectorySymlinkOrSkip(Path.Combine(repo, ".github", "agents"), outside);
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(
+            () => PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that a repo reached through a directory junction is hashed like the repo itself
+    ///     (Windows): only links inside the repo are refused.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_RepoRootUnderJunction_Succeeds()
+    {
+        // Arrange: an untouched extraction reached through a junction
+        var (repo, recorded) = ExtractedRepoWithRecordedIdentity();
+        var linked = Path.Combine(CreateTempDirectory(), "linked-repo");
+        CreateJunctionOrSkip(linked, repo);
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(linked, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(recorded, installed);
+    }
+
+    /// <summary>
+    ///     Test that a repo reached through a symbolic link is hashed like the repo itself, wherever
+    ///     the operating system lets a test create one.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_RepoRootUnderSymlink_Succeeds()
+    {
+        // Arrange: an untouched extraction reached through a symbolic link
+        var (repo, recorded) = ExtractedRepoWithRecordedIdentity();
+        var linked = Path.Combine(CreateTempDirectory(), "linked-repo");
+        CreateDirectorySymlinkOrSkip(linked, repo);
+
+        // Act
+        var installed = PackageContentIdentity.ComputeInstalledFilesIdentity(linked, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(recorded, installed);
+    }
+
+    /// <summary>
+    ///     Test that hashing the installed files stops when its token is canceled.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_CanceledToken_ThrowsOperationCanceledException()
+    {
+        // Arrange: a repo with files and a token that is already canceled
+        var (repo, _) = ExtractedRepoWithRecordedIdentity();
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act / Assert
+        Assert.Throws<OperationCanceledException>(
+            () => PackageContentIdentity.ComputeInstalledFilesIdentity(repo, canceled.Token));
+    }
+
+    /// <summary>
+    ///     Test that a null repo root is rejected.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_NullRepoRoot_ThrowsArgumentNullException()
+    {
+        // Arrange: no repo
+
+        // Act / Assert
+        Assert.Throws<ArgumentNullException>(
+            () => PackageContentIdentity.ComputeInstalledFilesIdentity(null!, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that a repo folder that does not exist is refused: there is nothing to verify.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_ComputeInstalledFilesIdentity_MissingRepoRoot_ThrowsInvalidOperationException()
+    {
+        // Arrange: a path that does not exist
+        var missing = Path.Combine(CreateTempDirectory(), "missing");
+
+        // Act / Assert
+        Assert.Throws<InvalidOperationException>(
+            () => PackageContentIdentity.ComputeInstalledFilesIdentity(missing, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     The agent files every round-trip test uses: all four managed folders, a nested path, and
+    ///     a file with CRLF line endings.
+    /// </summary>
+    /// <returns>The files as relative <c>/</c>-separated paths and bytes.</returns>
+    private static (string Path, byte[] Content)[] PackageFiles() =>
+    [
+        (".github/agents/copilot.md", Bytes("agent instructions\r\nsecond line\r\n")),
+        (".github/standards/style/style.md", Bytes("style standard\n")),
+        (".github/templates/issue.md", Bytes("template")),
+        (".github/skills/lint/SKILL.md", Bytes("skill"))
+    ];
+
+    /// <summary>
+    ///     Files a package can ship that extraction never writes to a repo.
+    /// </summary>
+    /// <returns>The files.</returns>
+    private static (string Path, byte[] Content)[] NonExtractedFiles() =>
+    [
+        ("release-notes.md", Bytes("## 1.0.0")),
+        ("AGENTS.md", Bytes("# template")),
+        ("README.md", Bytes("package readme")),
+        (".github/workflows/build.yml", Bytes("name: build"))
+    ];
+
+    /// <summary>
+    ///     Encodes text as raw UTF-8 bytes (no byte order mark, no line-ending conversion).
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <returns>The bytes.</returns>
+    private static byte[] Bytes(string text) => Encoding.UTF8.GetBytes(text);
+
+    /// <summary>
+    ///     Extracts a package into a new, empty repo folder.
+    /// </summary>
+    /// <param name="reader">The package.</param>
+    /// <returns>The repo folder.</returns>
+    private string ExtractToNewRepo(IPackageContentReader reader)
+    {
+        var repo = CreateTempDirectory();
+        PackageContentExtractor.Extract(reader, repo);
+        return repo;
+    }
+
+    /// <summary>
+    ///     Extracts <see cref="PackageFiles"/> untouched into a new repo and computes the identity the
+    ///     package would have recorded.
+    /// </summary>
+    /// <returns>The repo folder and the package's identity.</returns>
+    private (string Repo, string Recorded) ExtractedRepoWithRecordedIdentity()
+    {
+        using var reader = new InMemoryReader(PackageFiles());
+        return (ExtractToNewRepo(reader), PackageContentIdentity.ComputeFilesIdentity(reader));
+    }
+
+    /// <summary>
+    ///     Writes files below a folder.
+    /// </summary>
+    /// <param name="root">The folder.</param>
+    /// <param name="files">Relative <c>/</c>-separated paths and bytes.</param>
+    private static void WriteTree(string root, params (string Path, byte[] Content)[] files)
+    {
+        foreach (var (path, content) in files)
+        {
+            var full = Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllBytes(full, content);
+        }
+    }
+
+    /// <summary>
+    ///     Creates a zip file holding the given files.
+    /// </summary>
+    /// <param name="files">Entry names and bytes.</param>
+    /// <returns>The zip file path.</returns>
+    private string CreateZip(params (string Path, byte[] Content)[] files)
+    {
+        var zipPath = Path.Combine(CreateTempDirectory(), "pkg-1.0.0.zip");
+        using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+        foreach (var (path, content) in files)
+        {
+            var entry = archive.CreateEntry(path);
+            using var stream = entry.Open();
+            stream.Write(content);
+        }
+
+        return zipPath;
+    }
+
+    /// <summary>
+    ///     Creates a unique temporary folder removed when the test class is disposed.
+    /// </summary>
+    /// <returns>The folder path.</returns>
+    private string CreateTempDirectory()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "agentcontrol_identity_test_" + Guid.NewGuid());
+        Directory.CreateDirectory(path);
+        _tempPaths.Add(path);
+        return path;
+    }
+
+    /// <summary>
+    ///     Creates a directory junction (needs no privilege on Windows), or skips the test on
+    ///     platforms that do not have junctions.
+    /// </summary>
+    /// <param name="linkPath">The junction to create.</param>
+    /// <param name="target">The existing directory it points at.</param>
+    private static void CreateJunctionOrSkip(string linkPath, string target)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Directory junctions exist only on Windows.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
+        var startInfo = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add("/c");
+        // cspell:disable-next-line
+        startInfo.ArgumentList.Add("mklink");
+        startInfo.ArgumentList.Add("/J");
+        startInfo.ArgumentList.Add(linkPath);
+        startInfo.ArgumentList.Add(target);
+        using var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start cmd.exe to create a junction.");
+        var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Creating the junction failed ({process.ExitCode}): {output}");
+        }
+    }
+
+    /// <summary>
+    ///     Creates a directory symbolic link, or skips the test when the platform or privileges do
+    ///     not permit creating one.
+    /// </summary>
+    /// <param name="linkPath">The link to create.</param>
+    /// <param name="target">The existing directory it points at.</param>
+    private static void CreateDirectorySymlinkOrSkip(string linkPath, string target)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
+            Directory.CreateSymbolicLink(linkPath, target);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            Assert.Skip($"Cannot create symbolic links in this environment: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        foreach (var path in _tempPaths.Where(Directory.Exists))
+        {
+            try
+            {
+                Directory.Delete(path, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Best-effort cleanup; leftover temp folders do not fail the test.
+            }
+        }
     }
 
     /// <summary>

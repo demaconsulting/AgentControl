@@ -145,20 +145,73 @@ sections:
           - windows@GroupHeaderToggleButton_Click_CollapsesSectionAndRemembersItAfterRestart
           - windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly
 
-      - id: AgentControl-System-SearchAndSort
+      - id: AgentControl-System-SearchFilter
         title: >-
-          The tool shall let the user search/filter the recent-repos list, and shall order
-          it with favorited repos first, then by most-recently-launched.
+          The tool shall let the user search/filter the repo list.
         tags: [system]
         justification: |
-          As the recent-repos list grows, developers need to quickly locate a specific repo
-          (search) and see their most relevant repos without scrolling (favorites/recency
-          ordering), per architecture.md's recent-repos information-design decisions.
+          As the repo list grows, developers need to quickly locate a specific repo, per
+          architecture.md's repo-list information-design decisions.
         children:
           - AgentControl-LauncherUI-SearchFilter
-          - AgentControl-LauncherUI-SortOrder
         tests:
           - windows@FilterTextBox_TypingNonMatchingText_HidesRepoCard_ClearingRestoresIt
+
+      - id: AgentControl-System-RepoOrder
+        title: >-
+          The tool shall list the repos in an order only the user changes - launching, refreshing
+          or any other action shall never move a repo, a repo that is added shall go to the bottom
+          of its section, and favorites shall be listed first.
+        tags: [system]
+        justification: |
+          A list that rearranges itself under the pointer (the repo just launched jumping to the
+          top) makes a repo hard to find again by its place; developers memorize where their repos
+          are, so the only changes to the order must be the ones they make.
+        children:
+          - AgentControl-LauncherUI-SortOrder
+          - AgentControl-LauncherUI-StableRepoOrder
+        tests:
+          - windows@RepoList_LaunchingARepo_KeepsTheCardWhereItIs
+
+      - id: AgentControl-System-RepoReorder
+        title: >-
+          The tool shall let the user change the order of the repos by moving a repo to the top, up,
+          down or to the bottom of its section from its menu, and by dragging a repo within its
+          section, into another section or onto a section header, showing where the repo will land
+          - and shall not allow this while the filter has text.
+        tags: [system]
+        justification: |
+          The user's own order is only useful when it is easy to make: the menu is the way that
+          also works from the keyboard, dragging is the direct one, and a filtered list shows only
+          some of the repos, so the places in it do not mean places in the whole list.
+        children:
+          - AgentControl-LauncherUI-RepoOrderMenu
+          - AgentControl-LauncherUI-RepoDragReorder
+          - AgentControl-LauncherUI-RepoDragBetweenSections
+          - AgentControl-LauncherUI-RepoDropOnHeader
+          - AgentControl-LauncherUI-RepoDropFeedback
+          - AgentControl-LauncherUI-ReorderOffWhileFiltering
+        tests:
+          - windows@CardMenu_MoveDown_ReordersCardAndStoresOrderInSettings
+          - windows@RepoList_DragCardBelowAnother_ReordersAndKeepsOrderAfterRestart
+          - windows@RepoList_DragCardOntoGroupHeader_MovesItIntoTheGroup
+
+      - id: AgentControl-System-RepoOrderRemembered
+        title: >-
+          The tool shall keep the user's repo order in the user's own settings only (never in a
+          repository or its agent configuration), so it is still there when the tool is started
+          again, and an existing user shall keep the order that was shown before the order was
+          stored.
+        tags: [system]
+        justification: |
+          An order that is lost at every start is not the user's order, a personal order must not
+          reach the repositories the repos belong to, and a user who upgrades must not find the
+          list rearranged.
+        children:
+          - AgentControl-LauncherUI-RepoOrderRemembered
+          - AgentControl-Settings-RepoOrder
+        tests:
+          - windows@RepoList_DragCardBelowAnother_ReordersAndKeepsOrderAfterRestart
 
       - id: AgentControl-System-UpgradeFromChip
         title: >-
@@ -346,19 +399,56 @@ sections:
 
       - id: AgentControl-System-Launch
         title: >-
-          The tool shall ensure a repo's agent files are synced before launching the
-          configured agentic CLI tool in that repo's working directory.
+          The tool shall launch the configured agentic CLI tool in a repo's working directory
+          after checking that the repo's agent files are those of the package the repo is pinned
+          to, without overwriting files the user chose to keep, and shall stop a launch only when
+          the user cancels it because agent files that were needed could not be installed.
         tags: [system]
         justification: |
           Launching the agent tool with missing or stale agent files (e.g. a fresh clone
           whose gitignored agent folders were never unpacked) would silently defeat the
-          tool's core purpose; Launch must first guarantee the pinned agent files are
-          actually present on disk.
+          tool's core purpose, so Launch first checks the pinned agent files. Launching the tool
+          is also the primary action of the application and an agentic tool is useful even
+          when it has no managed agent files (for example to migrate away from committed agent
+          files), so the check never overwrites files the user wants and never stands in the way
+          of a launch the user still wants.
         children:
           - AgentControl-LauncherUI-Launch
           - AgentControl-AgentToolLauncherSubsystem-Launch
+          - AgentControl-System-VerifyAgentFiles
         tests:
           - windows@LaunchButton_Click_InvokesConfiguredAgentToolInRepoWorkingDirectory
+
+      - id: AgentControl-System-VerifyAgentFiles
+        title: >-
+          The tool shall, before launching the agent tool in a repo that is pinned to an agent
+          package, compare the agent files in the repo's four managed agent folders with the
+          package the pin names; install the package without asking when the repo has no agent
+          files; launch without asking and without downloading anything when the files are the
+          package's; ask the user on every launch whether to update the files from the package or
+          to keep them when they differ; and let the user launch anyway or cancel the launch
+          when agent files that are needed cannot be installed.
+        tags: [system]
+        justification: |
+          A repo whose agent folders exist but are only partly filled (an interrupted sync, a
+          deleted file) looked synced and was launched with an incomplete agent package for as
+          long as the folders existed, so the folders' presence is not evidence that the pinned
+          files are there. Comparing the files themselves with the identity the pin recorded finds
+          every missing, changed or extra file. Asking before replacing protects a developer who is
+          deliberately trying out other agent files, while a repo with no agent files has nothing to
+          lose and is repaired silently. A launch that has to start without files it needed is the
+          user's decision, not the tool's, so a failed install is put to the user instead of being
+          reported in passing.
+        children:
+          - AgentControl-LauncherUI-VerifyAgentFilesBeforeLaunch
+          - AgentControl-LauncherUI-RestoreFailureChoice
+          - AgentControl-RepoSync-InstalledFiles
+          - AgentControl-AgentPackageManagement-InstalledFilesIdentity
+        tests:
+          - windows@LaunchButton_Click_AgentFilesDiffer_KeepChosen_LaunchesWithFilesUntouched
+          - windows@LaunchButton_Click_AgentFilesDiffer_UpdateChosen_ReplacesFilesAndLaunches
+          - windows@LaunchButton_Click_AgentFilesMatchPin_LaunchesWithoutPrompt
+          - windows@LaunchButton_Click_RestoreFails_CancelChosen_DoesNotLaunch
 
       - id: AgentControl-System-Pull
         title: The tool shall let the user pull the latest commits for a repo whose working tree is clean.
@@ -786,18 +876,18 @@ sections:
 
       - id: AgentControl-System-ChangedContentRefusedAtLaunch
         title: >-
-          The tool shall not replace a repo's agent files, when it restores missing agent files
+          The tool shall not replace a repo's agent files, when it restores or updates them
           at launch, with a package of the same version whose content differs from the recorded
           identity (a republished package, or a Git tag moved to a commit with other files,
-          whatever kind of source it comes from), shall tell the user in plain language and shall
-          change nothing.
+          whatever kind of source it comes from), shall tell the user in plain language, shall
+          change nothing and shall leave the decision to launch anyway or to cancel to the user.
         tags: [system, security]
         justification: |
           A package republished under the version a repo is pinned to would silently change the
-          instructions an agent follows; restoring agent files at launch must never be the way
-          that change gets in. The refusal of an Upgrade of a republished version is a rule of the
-          repo card (see its requirements); the application offers an Upgrade only for a newer
-          version than the one pinned, so that refusal has no end-to-end scenario.
+          instructions an agent follows; restoring or updating agent files at launch must never be
+          the way that change gets in. The refusal of an Upgrade of a republished version is a rule
+          of the repo card (see its requirements); the application offers an Upgrade only for a
+          newer version than the one pinned, so that refusal has no end-to-end scenario.
         children:
           - AgentControl-LauncherUI-ContentChangeRefusal
         tests:
@@ -1097,6 +1187,25 @@ sections:
           # Git executable, agent tool and shell preference are verified only through the
           # view-model's own unit test (a disclosed pre-existing granularity limitation).
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
+
+      - id: AgentControl-System-KeepShellOpen
+        title: >-
+          The tool shall let the user choose in Settings whether the shell window that hosts the
+          launched agent tool stays open after the tool exits (the default, as before) or closes
+          together with the tool, and shall launch the tool accordingly from the next launch on.
+        tags: [system]
+        justification: |
+          Errors printed by a failed agent tool, and a prompt in the repo, are worth keeping for
+          some users while others want a window that closes by itself; the default must preserve
+          what existing users have.
+        children:
+          - AgentControl-LauncherUI-KeepShellOpenOption
+          - AgentControl-LauncherUI-KeepShellOpenApplied
+          - AgentControl-AgentToolLauncherSubsystem-KeepShellOpen
+          - AgentControl-Settings-KeepShellOpen
+        tests:
+          - windows@SettingsWindow_KeepShellOpenCheckBox_DefaultsOnClearedAndSavedIsPersisted
+          - windows@LaunchButton_Click_KeepShellOpenOff_ShellEndsWhenAgentToolExits
 
       - id: AgentControl-System-ConnectionTest
         title: >-

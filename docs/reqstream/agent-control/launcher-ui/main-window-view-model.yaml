@@ -1,9 +1,9 @@
 ---
 # Software Unit Requirements for the MainWindowViewModel Class
 #
-# MainWindowViewModel backs the main recent-repos window: it owns the collection of
-# RepoCardViewModel instances, applies search filtering and sort ordering, and mediates
-# add/remove of tracked repos and settings changes.
+# MainWindowViewModel backs the main repo-list window: it owns the collection of
+# RepoCardViewModel instances, applies search filtering and the user's own ordering, and mediates
+# add/remove/reorder of tracked repos and settings changes.
 
 sections:
   - title: MainWindowViewModel Unit Requirements
@@ -90,14 +90,165 @@ sections:
 
       - id: AgentControl-MainWindowViewModel-SortOrder
         title: >-
-          The MainWindowViewModel class shall order displayed repo cards with favorites
-          first, then by most-recently-launched, with never-launched repos last.
+          The MainWindowViewModel class shall list displayed repo cards with favorites first and
+          otherwise in the user's own list order, never by launch time.
         justification: |
-          Surfaces the repos most relevant to the developer's current work without requiring
-          manual reordering.
+          The list shows what the user arranged; a launch must not reorder it.
         tests:
-          - MainWindowViewModel_DisplayedRepoCards_SortsFavoritesAboveNonFavorites
-          - MainWindowViewModel_DisplayedRepoCards_SortsByLastLaunchedUtcDescendingWithNullsLast
+          - MainWindowViewModel_DisplayedRepoCards_FavoritesFirstThenStoredOrder
+          - MainWindowViewModel_DisplayedRepoCards_LaunchTimesDoNotAffectStoredOrder
+
+      - id: AgentControl-MainWindowViewModel-StableOrder
+        title: >-
+          The MainWindowViewModel class shall leave the order of the repo cards unchanged when a
+          repo is launched, when cards are refreshed and when settings are applied.
+        justification: |
+          Only the user's own reordering, and adding or removing a repo, may change the order, so
+          nothing the application does on its own moves a card.
+        tests:
+          - MainWindowViewModel_Launch_DoesNotReorderCards
+          - MainWindowViewModel_RefreshAndApplySettings_DoNotReorderCards
+
+      - id: AgentControl-MainWindowViewModel-NewRepoAtEnd
+        title: >-
+          The MainWindowViewModel class shall put a repo that is added at the end of the list, so it is
+          at the bottom of its section, and shall put an already listed repo that is added to a group
+          at the bottom of that group.
+        justification: |
+          A new repo has no place in the user's order yet; the end is the one place that moves no
+          other repo, and the bottom of the section is where the user was looking.
+        tests:
+          - MainWindowViewModel_AddRepo_NewRepoGoesToTheEndOfTheList
+          - MainWindowViewModel_AddRepoToGroup_NewRepoGoesToTheBottomOfTheGroup
+          - MainWindowViewModel_AddRepoToGroup_RepoAlreadyListed_MovesToTheBottomOfTheGroup
+
+      - id: AgentControl-MainWindowViewModel-LegacyOrderSeeded
+        title: >-
+          The MainWindowViewModel class shall, when the settings hold no stored repo order, arrange the
+          repos once as favorites first, then the most recently launched with never launched repos
+          last, store that as the user's order with the next save, and not arrange them again.
+        justification: |
+          A user who upgrades, or starts for the first time, sees the list as it was and finds it
+          where it was, and from then on the launch times no longer matter.
+        tests:
+          - MainWindowViewModel_Constructor_NoStoredOrder_SeedsFavoritesFirstThenMostRecentlyLaunched
+          - MainWindowViewModel_Constructor_SeededOrder_IsWrittenByTheNextSave
+
+      - id: AgentControl-MainWindowViewModel-OrderKept
+        title: >-
+          The MainWindowViewModel class shall keep a stored repo order exactly as it is, whatever the
+          favorites and launch times say.
+        justification: |
+          The stored order is the user's own and is never re-sorted.
+        tests:
+          - MainWindowViewModel_Constructor_StoredOrder_IsKeptWhateverTheLaunchTimes
+
+      - id: AgentControl-MainWindowViewModel-MoveCard
+        title: >-
+          The MainWindowViewModel class shall move a card to the top, one up, one down or to the bottom
+          of its section, leaving the order of the other sections' cards unchanged, refuse a move that
+          leads nowhere without saving, and change nothing when the order cannot be saved.
+        justification: |
+          The Move items work within the section the user sees, although the cards of the sections are
+          interleaved in the stored list, and a failed save must not leave the display ahead of the file.
+        tests:
+          - MainWindowViewModel_MoveCard_TopUpDownBottom_ReordersWithinTheSection
+          - MainWindowViewModel_MoveCard_AtBoundary_IsRefusedAndChangesNothing
+          - MainWindowViewModel_MoveCard_SectionsInterleavedInTheList_KeepsOtherSectionsOrder
+          - MainWindowViewModel_MoveCard_SaveFails_ChangesNothingAndReports
+
+      - id: AgentControl-MainWindowViewModel-MoveAvailability
+        title: >-
+          The MainWindowViewModel class shall tell for each move whether it is available for a card and,
+          when it is not, why: the filter has text, or the card is already first or last in its section;
+          and shall tell whether the Reorder submenu as a whole is available, which it is not when
+          the filter has text or no move applies (the only repo of its section).
+        justification: |
+          The menu disables the items that do not apply and shows the reason as their tooltip, so the
+          rules live in one place.
+        tests:
+          - MainWindowViewModel_CanMoveCard_FirstMiddleAndLast_ReportsEachItem
+          - MainWindowViewModel_GetMoveDisabledReason_NamesTheReason
+          - MainWindowViewModel_GetReorderDisabledReason_NamesTheReason
+
+      - id: AgentControl-MainWindowViewModel-DropReorder
+        title: >-
+          The MainWindowViewModel class shall put a dropped card before or after a card of the same
+          section, accept a drop on the card itself without changing anything, refuse a drop whose
+          target card is no longer in that section, and in the flat list refuse a drop in the other
+          tier.
+        justification: |
+          A drop is decided from where it lands, and a target that went stale while dragging or one that
+          would silently change the favorite state of a list without headers must not be guessed at.
+        tests:
+          - MainWindowViewModel_DropCard_BeforeAndAfterAnAnchor_ReordersWithinTheSection
+          - MainWindowViewModel_DropCard_OnItself_ChangesNothing
+          - MainWindowViewModel_DropCard_FlatListOtherTier_IsRefused
+          - MainWindowViewModel_DropCard_StaleAnchor_IsRefused
+
+      - id: AgentControl-MainWindowViewModel-DropChangesSection
+        title: >-
+          The MainWindowViewModel class shall, when a card is dropped in another section, change the
+          card's group or favorite state through the card's own group and favorite operations - a group
+          sets the group, Ungrouped removes it, Favorites marks the repo a favorite and keeps its group,
+          and leaving Favorites clears the favorite state - and then put the card at the drop position,
+          changing nothing further when the section change cannot be saved.
+        justification: |
+          A drag and the menu or the star must give the same result, so the same operations are used,
+          and a failed save of the first change must not be followed by a move.
+        tests:
+          - MainWindowViewModel_DropCard_IntoAnotherGroup_SetsTheGroupAtTheDropPosition
+          - MainWindowViewModel_DropCard_IntoUngrouped_RemovesTheGroup
+          - MainWindowViewModel_DropCard_IntoFavorites_MarksFavoriteAndKeepsTheGroup
+          - MainWindowViewModel_DropCard_OutOfFavoritesIntoGroup_ClearsFavoriteAndSetsTheGroup
+          - MainWindowViewModel_DropCard_OutOfFavoritesIntoUngrouped_ClearsFavoriteAndGroup
+          - MainWindowViewModel_DropCard_SectionChangeSaveFails_ChangesNothingAndReports
+
+      - id: AgentControl-MainWindowViewModel-DropOnHeader
+        title: >-
+          The MainWindowViewModel class shall put a card dropped on a section header at the bottom of
+          that section, also when the section is collapsed, which leaves it collapsed with its count
+          updated.
+        justification: |
+          A header is a drop target for the whole section; changing the collapsed state the user chose
+          would be a side effect of the drop.
+        tests:
+          - MainWindowViewModel_DropCard_OnGroupHeader_GoesToTheBottomOfTheGroup
+          - MainWindowViewModel_DropCard_OnCollapsedGroupHeader_KeepsItCollapsedAndUpdatesTheCount
+          - MainWindowViewModel_DropCard_OnFavoritesAndUngroupedHeaders_MoveTheCardThere
+
+      - id: AgentControl-MainWindowViewModel-ReorderOffWhileFiltering
+        title: >-
+          The MainWindowViewModel class shall report reordering as off while the filter has text, refuse
+          a move and a drop then, and leave the stored order unchanged by filtering.
+        justification: |
+          A filtered list shows only some of the repos, so places in it are not places in the user's
+          order.
+        tests:
+          - MainWindowViewModel_FilterText_DisablesReorderingAndRefusesMoveAndDrop
+          - MainWindowViewModel_FilterText_DoesNotChangeTheStoredOrder
+          - MainWindowViewModel_IsReorderEnabled_RaisesPropertyChangedWithTheFilter
+
+      - id: AgentControl-MainWindowViewModel-OrderPersisted
+        title: >-
+          The MainWindowViewModel class shall save the repo order in the settings with every change of
+          it, and keep the order of the remaining repos when a repo is removed.
+        justification: |
+          The order is the user's data; it must be in the file as soon as it is shown, and removing a
+          repo must not disturb the others.
+        tests:
+          - MainWindowViewModel_MoveCard_OrderIsPersistedAndReloaded
+          - MainWindowViewModel_RemoveRepo_LeavesTheRestOfTheOrderAndPersistsIt
+
+      - id: AgentControl-MainWindowViewModel-OrderKeptOnApplySettings
+        title: >-
+          The MainWindowViewModel class shall keep the repo order, and the fact that it is the user's
+          order, when settings from the Settings window are applied.
+        justification: |
+          The Settings window builds a new settings object that knows nothing about the repo list; the
+          order must not be lost or seeded again by applying it.
+        tests:
+          - MainWindowViewModel_ApplySettings_KeepsTheRepoOrder
 
       - id: AgentControl-MainWindowViewModel-ApplySettings
         title: >-
@@ -247,10 +398,11 @@ sections:
 
       - id: AgentControl-MainWindowViewModel-GroupSectionRepoOrder
         title: >-
-          The MainWindowViewModel class shall order the repos within a section by most recent
-          launch, those never launched last.
+          The MainWindowViewModel class shall order the repos within a section in the user's own
+          order (the order of the repo list), whatever their launch times.
         justification: |
-          Inside a section the repo used last is the one most likely wanted next.
+          Each section shows its repos in the same relative order as the user's one list, so a
+          repo keeps its place when it moves between sections and the order does not change with use.
         tests:
           - MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered
 

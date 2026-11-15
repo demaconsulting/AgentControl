@@ -202,7 +202,7 @@ public class ThemeResourceTests
         foreach (var graphic in new[]
                  {
                      "StatusAccentUpToDate", "StatusAccentUpgrade", "StatusAccentProblem",
-                     "StatusAccentNeutral", "FavoriteStarForeground"
+                     "StatusAccentNeutral", "FavoriteStarForeground", "RepoDropIndicator"
                  })
         {
             CheckText(graphic, Opaque(palette, graphic), card, GraphicContrast);
@@ -245,6 +245,36 @@ public class ThemeResourceTests
             // Assert
             Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
         });
+
+    /// <summary>
+    ///     Test that the drag-and-drop feedback is legible in both themes: the insertion line reaches
+    ///     graphics contrast against the card and the page it is drawn on, and the group header's text
+    ///     keeps AA contrast on the tint a header gets while a card is dragged over it.
+    /// </summary>
+    /// <param name="variantName">The theme variant to check.</param>
+    [Theory]
+    [InlineData("Light")]
+    [InlineData("Dark")]
+    public void ThemeResources_DropIndicator_IsLegibleInLightAndDark(string variantName) => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var palette = LoadPalette(variantName == "Light" ? ThemeVariant.Light : ThemeVariant.Dark);
+        var card = Opaque(palette, "RepoCardBackground");
+        var page = Opaque(palette, "PageBackground");
+        var indicator = Opaque(palette, "RepoDropIndicator");
+        var tinted = Over(Brush(palette, "RepoDropTargetBackground"), page);
+
+        // Act / Assert: the line against the card and the page, the header text on the tint
+        Assert.True(Contrast(indicator, card) >= GraphicContrast, $"line on card: {Contrast(indicator, card):F2}");
+        Assert.True(Contrast(indicator, page) >= GraphicContrast, $"line on page: {Contrast(indicator, page):F2}");
+        Assert.True(
+            Contrast(Opaque(palette, "GroupHeaderForeground"), tinted) >= TextContrast,
+            $"header text on the drop tint: {Contrast(Opaque(palette, "GroupHeaderForeground"), tinted):F2}");
+        Assert.True(
+            Contrast(Opaque(palette, "MenuGroupHeaderForeground"), tinted) >= TextContrast,
+            $"header chevron on the drop tint: {Contrast(Opaque(palette, "MenuGroupHeaderForeground"), tinted):F2}");
+        Assert.NotEqual(page, tinted);
+    });
 
     /// <summary>
     ///     Loads the theme dictionary of one variant from the shared styles file.
