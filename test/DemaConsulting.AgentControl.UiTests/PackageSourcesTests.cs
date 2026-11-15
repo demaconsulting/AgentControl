@@ -81,10 +81,10 @@ public sealed class PackageSourcesTests
             // Assert: the source was persisted as a zip source
             var settingsPath = Path.Combine(context.ConfigDirectory, "settings.json");
             Assert.True(Retry.WhileFalse(
-                () => File.Exists(settingsPath) && File.ReadAllText(settingsPath).Contains("\"Contoso\"", StringComparison.Ordinal),
+                () => File.Exists(settingsPath) && SharedFile.ReadAllText(settingsPath).Contains("\"Contoso\"", StringComparison.Ordinal),
                 TimeSpan.FromSeconds(10),
                 TimeSpan.FromMilliseconds(200)).Result);
-            var json = File.ReadAllText(settingsPath);
+            var json = SharedFile.ReadAllText(settingsPath);
             Assert.Contains("\"Type\": \"Zip\"", json, StringComparison.Ordinal);
         }
         finally
@@ -208,10 +208,10 @@ public sealed class PackageSourcesTests
             Find(settingsWindow, "SaveSettingsButton").AsButton().Invoke();
             var settingsPath = Path.Combine(context.ConfigDirectory, "settings.json");
             Assert.True(Retry.WhileFalse(
-                () => File.Exists(settingsPath) && File.ReadAllText(settingsPath).Contains("\"Feed\"", StringComparison.Ordinal),
+                () => File.Exists(settingsPath) && SharedFile.ReadAllText(settingsPath).Contains("\"Feed\"", StringComparison.Ordinal),
                 TimeSpan.FromSeconds(10),
                 TimeSpan.FromMilliseconds(200)).Result);
-            var json = File.ReadAllText(settingsPath);
+            var json = SharedFile.ReadAllText(settingsPath);
             Assert.Contains("\"Type\": \"NuGet\"", json, StringComparison.Ordinal);
             Assert.Contains("contoso-agents", json, StringComparison.Ordinal);
         }

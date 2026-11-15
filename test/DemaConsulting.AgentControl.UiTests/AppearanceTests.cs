@@ -270,7 +270,7 @@ public sealed class AppearanceTests
     private static string ReadSettings(AgentControlTestContext context)
     {
         var path = Path.Combine(context.ConfigDirectory, "settings.json");
-        return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+        return File.Exists(path) ? SharedFile.ReadAllText(path) : string.Empty;
     }
 
     /// <summary>

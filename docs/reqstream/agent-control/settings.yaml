@@ -52,6 +52,7 @@ sections:
           - AgentControl-SettingsStore-LegacySourceMigration
           - AgentControl-SettingsStore-NoSecretsPersisted
           - AgentControl-SettingsStore-AtomicSave
+          - AgentControl-SettingsStore-LockedFileTolerance
         tests:
           - SettingsStore_SaveThenLoad_RoundTripsAllFields
           - SettingsStore_Load_LegacyPackageSourcePath_MigratesToDefaultZipSource

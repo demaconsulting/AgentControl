@@ -56,7 +56,8 @@ with `SettingsStore_SaveThenLoad_RoundTripsAllFields`,
 `SettingsStore_Save_FullyPopulatedSources_JsonContainsNoSecretLikeProperties` cited directly at
 the subsystem level, covering `AgentControl-Settings-PackageSources` (children:
 `AgentControl-SettingsStore-SourcesRoundTrip`, `AgentControl-SettingsStore-LegacySourceMigration`,
-`AgentControl-SettingsStore-NoSecretsPersisted`, `AgentControl-SettingsStore-AtomicSave`).
+`AgentControl-SettingsStore-NoSecretsPersisted`, `AgentControl-SettingsStore-AtomicSave`,
+`AgentControl-SettingsStore-LockedFileTolerance`).
 
 **Settings_Appearance_ChosenThemeSurvivesSessionsAndDamagedValueReadsAsSystemDefault**: Each theme choice (system
 default, light, dark) is saved by one session together with another setting and is the theme chosen, and the other

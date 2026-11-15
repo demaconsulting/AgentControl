@@ -48,6 +48,45 @@ internal static class SettingsStore
     private const string LoggerCategoryName = "DemaConsulting.AgentControl.Settings.SettingsStore";
 
     /// <summary>
+    ///     Total number of attempts (the first try plus the retries) made to move the temporary file
+    ///     over the settings file before a lock is treated as permanent.
+    /// </summary>
+    /// <remarks>
+    ///     Another process (an antivirus scanner, the Windows Search indexer, a cloud-sync client or a
+    ///     backup tool) can hold the settings file open without delete sharing for a moment, and that
+    ///     makes the replace fail. Such a hold normally lasts well under a second, so a handful of
+    ///     attempts covers it while a permanent failure still surfaces quickly.
+    /// </remarks>
+    internal const int ReplaceMaxAttempts = 8;
+
+    /// <summary>
+    ///     Wait before the first retry of the replace; each further wait doubles, up to
+    ///     <see cref="ReplaceMaxDelay"/>.
+    /// </summary>
+    internal static readonly TimeSpan ReplaceInitialDelay = TimeSpan.FromMilliseconds(20);
+
+    /// <summary>
+    ///     Longest single wait between two replace attempts.
+    /// </summary>
+    /// <remarks>
+    ///     With <see cref="ReplaceMaxAttempts"/> and <see cref="ReplaceInitialDelay"/> the waits are
+    ///     20, 40, 80, 160, 200, 200 and 200 ms: at most 900 ms in total, because a save usually runs
+    ///     on the UI thread and must not freeze the window for long when the lock never clears.
+    /// </remarks>
+    internal static readonly TimeSpan ReplaceMaxDelay = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>
+    ///     Win32 error code for a sharing violation (the file is open in another process without
+    ///     the sharing the operation needs).
+    /// </summary>
+    private const int ErrorSharingViolation = 32;
+
+    /// <summary>
+    ///     Win32 error code for a lock violation (part of the file is locked by another process).
+    /// </summary>
+    private const int ErrorLockViolation = 33;
+
+    /// <summary>
     ///     JSON serialization options shared by <see cref="Load"/> and <see cref="Save"/>.
     /// </summary>
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -81,9 +120,16 @@ internal static class SettingsStore
     ///     values for the source list, the recent-repos list or a source's package IDs are
     ///     normalized to empty collections.
     /// </returns>
+    /// <param name="replaceFile">Test seam: moves a temporary file over the settings file when the
+    ///     load writes the seeded repo order back; <see langword="null"/> for the real move.</param>
+    /// <param name="delay">Test seam: waits between replace attempts; <see langword="null"/> to
+    ///     really sleep.</param>
     /// <exception cref="InvalidOperationException">Thrown when the settings file exists but
     ///     cannot be read or contains invalid JSON.</exception>
-    public static AppSettings Load(string? configDirectory = null)
+    public static AppSettings Load(
+        string? configDirectory = null,
+        Action<string, string>? replaceFile = null,
+        Action<TimeSpan>? delay = null)
     {
         var directory = configDirectory ?? GetDefaultConfigDirectory();
         var filePath = Path.Combine(directory, SettingsFileName);
@@ -116,7 +162,7 @@ internal static class SettingsStore
             // instead of seeding again from launch times that have changed since
             if (seedsRepoOrder)
             {
-                PersistSeededRepoOrder(settings, directory);
+                PersistSeededRepoOrder(settings, directory, replaceFile, delay);
             }
 
             return settings;
@@ -132,15 +178,20 @@ internal static class SettingsStore
     /// </summary>
     /// <param name="settings">The settings that were just loaded and seeded.</param>
     /// <param name="directory">The configuration directory the settings were loaded from.</param>
+    /// <param name="replaceFile">Test seam for the file replace, passed on to <see cref="Save"/>.</param>
+    /// <param name="delay">Test seam for the wait between replace attempts, passed on to
+    ///     <see cref="Save"/>.</param>
     /// <remarks>
     ///     A failed write never fails the load: it is logged and the in-memory order is still used. The
     ///     file then stays unmarked, so the arrangement is attempted and persisted again on the next load.
+    ///     The write tolerates a briefly locked file exactly like every other save.
     /// </remarks>
-    private static void PersistSeededRepoOrder(AppSettings settings, string directory)
+    private static void PersistSeededRepoOrder(
+        AppSettings settings, string directory, Action<string, string>? replaceFile, Action<TimeSpan>? delay)
     {
         try
         {
-            Save(settings, directory);
+            Save(settings, directory, replaceFile, delay);
         }
         catch (InvalidOperationException ex)
         {
@@ -160,15 +211,26 @@ internal static class SettingsStore
     ///     Writes the effective package sources in <c>Sources</c> and never the legacy
     ///     <c>PackageSourcePath</c>. The file is replaced atomically (written to a temporary file in
     ///     the same directory, then moved over the settings file) so a crash or full disk never
-    ///     leaves a truncated settings file. The persisted model has no field that can hold a
-    ///     password, token or other secret, so none can be written.
+    ///     leaves a truncated settings file. The move is retried a bounded number of times
+    ///     (<see cref="ReplaceMaxAttempts"/>, backing off from <see cref="ReplaceInitialDelay"/> to
+    ///     <see cref="ReplaceMaxDelay"/>) when another process briefly holds the file open, so a
+    ///     virus scanner or indexer does not cause a spurious failure. The persisted model has no
+    ///     field that can hold a password, token or other secret, so none can be written.
     /// </remarks>
+    /// <param name="replaceFile">Test seam: moves the temporary file (first argument) over the
+    ///     settings file (second argument), replacing it; <see langword="null"/> for the real move.</param>
+    /// <param name="delay">Test seam: waits between replace attempts; <see langword="null"/> to
+    ///     really sleep.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when a source location embeds a
     ///     credential (nothing is written), the configuration directory cannot be created, or the
     ///     settings file cannot be written.</exception>
-    public static void Save(AppSettings settings, string? configDirectory = null)
+    public static void Save(
+        AppSettings settings,
+        string? configDirectory = null,
+        Action<string, string>? replaceFile = null,
+        Action<TimeSpan>? delay = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -195,7 +257,11 @@ internal static class SettingsStore
             // Write beside the target, then move over it, so readers never see a partial file
             temporaryPath = filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllText(temporaryPath, json);
-            File.Move(temporaryPath, filePath, overwrite: true);
+            ReplaceWithRetry(
+                temporaryPath,
+                filePath,
+                replaceFile ?? ((source, destination) => File.Move(source, destination, overwrite: true)),
+                delay ?? Thread.Sleep);
             temporaryPath = null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
@@ -215,5 +281,61 @@ internal static class SettingsStore
                 File.Delete(temporaryPath);
             }
         }
+    }
+
+    /// <summary>
+    ///     Moves the temporary file over the settings file, retrying while the failure looks like a
+    ///     transient lock held by another process.
+    /// </summary>
+    /// <param name="temporaryPath">The fully written temporary file.</param>
+    /// <param name="filePath">The settings file to replace.</param>
+    /// <param name="replaceFile">Moves the first path over the second, replacing it.</param>
+    /// <param name="delay">Waits between attempts.</param>
+    /// <remarks>
+    ///     Only <see cref="IsTransientReplaceFailure"/> failures are retried, up to
+    ///     <see cref="ReplaceMaxAttempts"/> attempts in all; any other failure, and the failure of the
+    ///     last attempt, propagates unchanged to the caller's normal error handling.
+    /// </remarks>
+    private static void ReplaceWithRetry(
+        string temporaryPath, string filePath, Action<string, string> replaceFile, Action<TimeSpan> delay)
+    {
+        var wait = ReplaceInitialDelay;
+        var attempt = 1;
+        while (true)
+        {
+            try
+            {
+                replaceFile(temporaryPath, filePath);
+                return;
+            }
+            catch (Exception ex) when (attempt < ReplaceMaxAttempts && IsTransientReplaceFailure(ex))
+            {
+                delay(wait);
+                wait = TimeSpan.FromTicks(Math.Min(wait.Ticks * 2, ReplaceMaxDelay.Ticks));
+                attempt++;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Determines whether a failed replace is the kind another process's brief hold on the file causes.
+    /// </summary>
+    /// <param name="ex">The exception the replace threw.</param>
+    /// <returns>
+    ///     <see langword="true"/> for an <see cref="UnauthorizedAccessException"/> (what Windows reports
+    ///     when the destination is open elsewhere without delete sharing or is pending deletion) or an
+    ///     <see cref="IOException"/> carrying the sharing-violation or lock-violation error;
+    ///     <see langword="false"/> for everything else, such as a missing directory or a full disk.
+    /// </returns>
+    private static bool IsTransientReplaceFailure(Exception ex)
+    {
+        if (ex is UnauthorizedAccessException)
+        {
+            return true;
+        }
+
+        // The low 16 bits of an IOException HResult carry the Win32 error code
+        return ex is IOException io
+               && (io.HResult & 0xFFFF) is ErrorSharingViolation or ErrorLockViolation;
     }
 }

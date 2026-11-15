@@ -109,10 +109,10 @@ public sealed class GitSourceTests
         // Assert: the source was persisted as a Git source with its address, pattern and package name
         var settingsPath = Path.Combine(context.ConfigDirectory, "settings.json");
         Assert.True(Retry.WhileFalse(
-            () => File.Exists(settingsPath) && File.ReadAllText(settingsPath).Contains("\"Repo\"", StringComparison.Ordinal),
+            () => File.Exists(settingsPath) && SharedFile.ReadAllText(settingsPath).Contains("\"Repo\"", StringComparison.Ordinal),
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(200)).Result);
-        var json = File.ReadAllText(settingsPath);
+        var json = SharedFile.ReadAllText(settingsPath);
         Assert.Contains("\"Type\": \"Git\"", json, StringComparison.Ordinal);
         using var settings = JsonDocument.Parse(json);
         var source = settings.RootElement.GetProperty("Sources").EnumerateArray()

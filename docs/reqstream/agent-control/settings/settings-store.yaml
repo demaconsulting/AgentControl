@@ -97,6 +97,27 @@ sections:
         tests:
           - SettingsStore_Save_RepeatedSaves_LeavesOnlySettingsFileWithLatestContent
 
+      - id: AgentControl-SettingsStore-LockedFileTolerance
+        title: >-
+          The SettingsStore class shall, when another process briefly holds the settings file
+          open so that it cannot be replaced, retry the replace a bounded number of times with a
+          short back-off and then save normally, shall report a lock that outlasts the retries
+          and any other failure as a failed save without retrying the other failures, and shall
+          apply this to every write of the settings file, including the write-back made while
+          loading.
+        justification: |
+          Virus scanners, search indexers and sync clients routinely open a file for a moment
+          without allowing it to be replaced; a user must not see a "settings could not be saved"
+          error, or lose a change, because of such a transient hold, while a real failure such as a
+          full disk must still be reported at once. The wait is bounded because saves commonly run
+          on the UI thread.
+        tests:
+          - SettingsStore_Save_ReplaceBrieflyLocked_RetriesAndSaves
+          - SettingsStore_Save_ReplaceLockedBeyondRetries_ThrowsInvalidOperationAndCleansUp
+          - SettingsStore_Save_NonTransientReplaceFailure_IsNotRetried
+          - SettingsStore_Save_SettingsFileHeldOpenThenReleased_Saves
+          - SettingsStore_Load_SeedWriteBrieflyLocked_RetriesAndPersistsSeededOrder
+
       - id: AgentControl-SettingsStore-Theme
         title: >-
           The SettingsStore class shall save the user's theme choice (system default, light or

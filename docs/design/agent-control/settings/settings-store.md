@@ -19,6 +19,12 @@ global/static mutable state.
 **JsonOptions**: `static readonly JsonSerializerOptions` — shared `WriteIndented = true`
 options used by both `Load` and `Save`.
 
+**Replace retry policy**: `ReplaceMaxAttempts` (`8`, the first try plus seven retries),
+`ReplaceInitialDelay` (`20 ms`) and `ReplaceMaxDelay` (`200 ms`). A hold by another process (virus scanner, search
+indexer, sync client) normally lasts well under a second, so eight attempts cover it. The wait doubles from 20 ms and
+is capped at 200 ms (20, 40, 80, 160, 200, 200, 200 ms), at most 900 ms in all, because `Save` usually runs on the UI
+thread and must not freeze the window for long when a lock never clears.
+
 #### Key Methods
 
 **GetDefaultConfigDirectory**: Gets the default configuration directory.
@@ -76,7 +82,10 @@ path.
 
 **Save**: Saves `AppSettings` to a configuration directory, creating the directory if needed.
 
-- *Parameters*: `AppSettings settings`, `string? configDirectory = null`.
+- *Parameters*: `AppSettings settings`, `string? configDirectory = null`, and two optional test seams (`Action<string,
+  string>? replaceFile`, which moves the temporary file over the settings file, and `Action<TimeSpan>? delay`, which
+  waits between attempts; `null` selects `File.Move(..., overwrite: true)` and `Thread.Sleep`). `Load` takes the same
+  two seams and passes them to the write-back of the seeded repo order.
 - *Returns*: `void`.
 - *Postconditions*: The settings file at the configuration directory reflects `settings`
   (`AgentControl-SettingsStore-Save`) with the effective package sources in `Sources` and no
@@ -84,7 +93,14 @@ path.
   changed (`AgentControl-SettingsStore-SourcesRoundTrip`). The JSON is written to a uniquely
   named temporary file in the same directory and moved over the settings file, so a failure
   never leaves a truncated or partial file, and a leftover temporary file is removed
-  (`AgentControl-SettingsStore-AtomicSave`). Because the model has no secret-bearing member,
+  (`AgentControl-SettingsStore-AtomicSave`). The move over the settings file is retried (per the replace retry
+  policy above) while it fails with a failure another process's brief hold causes: an `UnauthorizedAccessException`
+  (what Windows reports for a destination that is open without delete sharing or pending deletion) or an
+  `IOException` whose Win32 error is a sharing violation (32) or a lock violation (33). Any other failure - a missing
+  directory, a full disk, any other I/O error - is not retried, and a lock that is still there after the last attempt
+  fails like any other failure, so a briefly locked file never shows as a failed save while a real failure still does
+  (`AgentControl-SettingsStore-LockedFileTolerance`). The write-back of the seeded repo order made by `Load` goes
+  through `Save` and so has the same tolerance. Because the model has no secret-bearing member,
   nothing secret is written, and before anything is written every effective source is checked with
   `PackageSourceDefinition.GetCredentialProblem`: a location with URL user information (or a
   server URL with a query string or fragment) makes `Save` throw `InvalidOperationException`
@@ -109,7 +125,8 @@ provider is created for it.
 contains invalid JSON (wrapping `IOException`/`UnauthorizedAccessException`/`JsonException`); a failure to write back
 the seeded repo order is logged and does not throw.
 `Save` throws `ArgumentNullException` for a null `settings` and `InvalidOperationException`
-when the configuration directory cannot be created or the file cannot be written.
+when the configuration directory cannot be created or the file cannot be written, including when a lock on the
+settings file outlasts the retries; the temporary file is removed in every failure case.
 
 #### Dependencies
 
@@ -119,7 +136,8 @@ when the configuration directory cannot be created or the file cannot be written
 - **RepoGroupName** (same subsystem, its own unit) — the rules that repair stored group names.
 - **PackageSourceDefinition** (`AgentPackageManagement` subsystem) — the source data type held in
   `AppSettings.Sources`.
-- **.NET BCL** — `System.Text.Json`, `Environment.GetFolderPath`.
+- **.NET BCL** — `System.Text.Json`, `Environment.GetFolderPath`, `File.Move`, `Thread.Sleep` (the defaults of the
+  replace and delay seams).
 - **AppLogging** (`Logging` subsystem) — the logger factory used to log a seeded repo order that could not be saved.
 
 #### Callers

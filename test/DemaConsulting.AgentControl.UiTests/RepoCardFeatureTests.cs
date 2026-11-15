@@ -136,7 +136,7 @@ public sealed class RepoCardFeatureTests
             Assert.True(removed.Success);
 
             var settingsJson = Retry.WhileTrue(
-                () => File.ReadAllText(Path.Combine(confirmContext.ConfigDirectory, "settings.json"))
+                () => SharedFile.ReadAllText(Path.Combine(confirmContext.ConfigDirectory, "settings.json"))
                     .Contains(confirmContext.RepoPath, StringComparison.OrdinalIgnoreCase),
                 timeout: TimeSpan.FromSeconds(10),
                 interval: TimeSpan.FromMilliseconds(200));

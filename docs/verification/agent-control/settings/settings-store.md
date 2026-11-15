@@ -5,7 +5,9 @@
 `SettingsStore` is verified with unit tests defined in `SettingsStoreTests.cs` and, for the user's own organizing
 choices (a repo's group and card color, the collapsed sections), `SettingsStoreOrganizingTests.cs`, and for the user's
 own repo order (the stored sequence, the one-time arrangement of a file without it, a damaged marker),
-`SettingsStoreRepoOrderTests.cs`. Every test
+`SettingsStoreRepoOrderTests.cs`, and for tolerance of a briefly locked settings file `SettingsStoreLockTests.cs` (the
+file replace and the wait are replaced by test doubles, so no test depends on real timing; one test holds the real
+file open). Every test
 uses a real temporary configuration directory on disk, so load/save round-tripping, the
 no-file-yet default case, and directory-creation-on-save are exercised against genuine
 filesystem state.
@@ -34,6 +36,9 @@ N/A - standard test environment.
 - The theme round-trips by name, a settings file without a theme loads as the system default, and an unknown or
   invalid theme value reads as the system default without failing the load.
 - A save leaves only the settings file, holding the latest content.
+- A settings file that is briefly locked while it is replaced is still saved (retried with a growing back-off, at most
+  eight attempts and about 0.9 s of waiting), also for the write-back made by a load; a lock that outlasts the retries
+  fails the save as before, leaving the old file and no temporary file; a failure that is not a lock is not retried.
 - Settings saved and then loaded again return every field unchanged.
 - Loading with no settings file present returns default settings rather than throwing.
 - Saving creates the configuration directory when it does not yet exist.
@@ -95,6 +100,20 @@ and without the password appearing in the error. This scenario is tested by
 configuration directory holds exactly the settings file, with the second save's content. This
 scenario is tested by `SettingsStore_Save_RepeatedSaves_LeavesOnlySettingsFileWithLatestContent`,
 covering `AgentControl-SettingsStore-AtomicSave`.
+
+**SettingsStore_LockedFileTolerance_RetriesTransientLocksOnly**: A replace that fails with a sharing violation, a
+lock violation or access denied three times and then works saves the settings with waits of 20, 40 and 80 ms and no
+error; a replace that always fails with a sharing violation is attempted exactly `ReplaceMaxAttempts` times with
+bounded waits (each at most `ReplaceMaxDelay`, at most 1 s in total), then fails with `InvalidOperationException`,
+keeps the earlier file and leaves no temporary file; a full-disk error, a missing directory and a plain I/O error are
+attempted once, without waiting; the settings file really held open without delete sharing, and released during the
+back-off, is saved (on Windows after exactly two waits); and the seeded repo order written back by a load survives two
+locked attempts and reaches the file. This scenario is tested by `SettingsStore_Save_ReplaceBrieflyLocked_RetriesAndSaves`,
+`SettingsStore_Save_ReplaceLockedBeyondRetries_ThrowsInvalidOperationAndCleansUp`,
+`SettingsStore_Save_NonTransientReplaceFailure_IsNotRetried`,
+`SettingsStore_Save_SettingsFileHeldOpenThenReleased_Saves` and
+`SettingsStore_Load_SeedWriteBrieflyLocked_RetriesAndPersistsSeededOrder`, covering
+`AgentControl-SettingsStore-LockedFileTolerance`.
 
 **SettingsStore_Theme_RoundTripsByName**: Each of system default, light and dark survives a save and a load, and the
 file holds it by name. This scenario is tested by `SettingsStore_SaveThenLoad_Theme_RoundTripsByName`, covering
