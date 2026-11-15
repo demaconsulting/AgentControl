@@ -186,22 +186,23 @@ public sealed class RepoOrderTests
         mainWindow.SetForeground();
         Assert.Equal(["Work, 1 repo, expanded", "Ungrouped, 2 repos, expanded"], HeaderNames(mainWindow));
 
-        // Act: grab the last card and drop it on the Work header
+        // Act: grab the middle card (the last card's status bar sits in the list's bottom auto-scroll zone in the
+        // default window, which would scroll the list during the drag) and drop it on the Work header
         var accents = Accents(mainWindow);
         var header = Find(mainWindow, "GroupHeaderToggleButton", candidate => candidate.Name.StartsWith("Work", StringComparison.Ordinal));
-        Drag(Center(accents[2]), Center(header));
+        Drag(Center(accents[1]), Center(header));
 
         // Assert: Work now has two repos, Ungrouped one, and the group is stored for the dropped repo
         Assert.True(Retry.WhileFalse(
             () => HeaderNames(mainWindow).SequenceEqual(["Work, 2 repos, expanded", "Ungrouped, 1 repo, expanded"]),
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(200)).Result);
-        Assert.Equal(["repo", "third", "second"], RepoNames(mainWindow));
+        Assert.Equal(["repo", "second", "third"], RepoNames(mainWindow));
         Assert.True(Retry.WhileFalse(
             () => ReadSettings(context).Split("\"GroupName\": \"Work\"").Length == 3,
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(200)).Result);
-        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(context.RootDirectory, "third")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(context.RootDirectory, "second")));
     }
 
     /// <summary>
