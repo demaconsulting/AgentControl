@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1060" height="510" viewBox="0 0 1060 510" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1e293b"/>
+    </marker>
+  </defs>
+  <!-- Opaque rounded card keeps the diagram readable in light and dark themes -->
+  <rect x="4" y="4" width="1052" height="502" rx="20" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+
+  <!-- Company package sources -->
+  <rect x="30" y="30" width="250" height="300" rx="12" fill="#f5f3ff" stroke="#5b21b6" stroke-width="2"/>
+  <path d="M30,90 L30,42 Q30,30 42,30 L268,30 Q280,30 280,42 L280,90 Z" fill="#5b21b6"/>
+  <text x="155" y="55" font-size="17" font-weight="700" fill="#ffffff" text-anchor="middle">Company publishes</text>
+  <text x="155" y="76" font-size="13.5" fill="#ffffff" text-anchor="middle">versioned agent packages</text>
+  <rect x="45" y="104" width="220" height="56" rx="8" fill="#ffffff" stroke="#5b21b6" stroke-width="1.5"/>
+  <text x="155" y="128" font-size="14.5" font-weight="700" fill="#1e1b4b" text-anchor="middle">Zip folder</text>
+  <text x="155" y="148" font-size="13" fill="#1e1b4b" text-anchor="middle">contoso-agents-1.2.0.zip</text>
+  <rect x="45" y="172" width="220" height="56" rx="8" fill="#ffffff" stroke="#5b21b6" stroke-width="1.5"/>
+  <text x="155" y="196" font-size="14.5" font-weight="700" fill="#1e1b4b" text-anchor="middle">NuGet folder or server</text>
+  <text x="155" y="216" font-size="13" fill="#1e1b4b" text-anchor="middle">contoso-agents 1.2.0</text>
+  <rect x="45" y="240" width="220" height="56" rx="8" fill="#ffffff" stroke="#5b21b6" stroke-width="1.5"/>
+  <text x="155" y="264" font-size="14.5" font-weight="700" fill="#1e1b4b" text-anchor="middle">Git repository</text>
+  <text x="155" y="284" font-size="13" fill="#1e1b4b" text-anchor="middle">tag v1.2.0</text>
+  <text x="155" y="318" font-size="12.5" font-style="italic" fill="#1e1b4b" text-anchor="middle">You configure which sources to use</text>
+
+  <!-- AgentControl -->
+  <rect x="405" y="30" width="250" height="300" rx="12" fill="#eff6ff" stroke="#1d4ed8" stroke-width="2"/>
+  <path d="M405,90 L405,42 Q405,30 417,30 L643,30 Q655,30 655,42 L655,90 Z" fill="#1d4ed8"/>
+  <text x="530" y="55" font-size="17" font-weight="700" fill="#ffffff" text-anchor="middle">AgentControl</text>
+  <text x="530" y="76" font-size="13.5" fill="#ffffff" text-anchor="middle">on the developer's computer</text>
+  <rect x="420" y="104" width="220" height="56" rx="8" fill="#ffffff" stroke="#1d4ed8" stroke-width="1.5"/>
+  <text x="530" y="128" font-size="14.5" font-weight="700" fill="#1e3a8a" text-anchor="middle">Fetch</text>
+  <text x="530" y="148" font-size="13" fill="#1e3a8a" text-anchor="middle">the pinned package version</text>
+  <rect x="420" y="172" width="220" height="56" rx="8" fill="#ffffff" stroke="#1d4ed8" stroke-width="1.5"/>
+  <text x="530" y="196" font-size="14.5" font-weight="700" fill="#1e3a8a" text-anchor="middle">Verify</text>
+  <text x="530" y="216" font-size="13" fill="#1e3a8a" text-anchor="middle">files match the fingerprint</text>
+  <rect x="420" y="240" width="220" height="56" rx="8" fill="#ffffff" stroke="#1d4ed8" stroke-width="1.5"/>
+  <text x="530" y="264" font-size="14.5" font-weight="700" fill="#1e3a8a" text-anchor="middle">Restore or keep</text>
+  <text x="530" y="284" font-size="13" fill="#1e3a8a" text-anchor="middle">if files differ, you choose</text>
+
+  <!-- Developer's public repo -->
+  <rect x="780" y="30" width="250" height="300" rx="12" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+  <path d="M780,90 L780,42 Q780,30 792,30 L1018,30 Q1030,30 1030,42 L1030,90 Z" fill="#15803d"/>
+  <text x="905" y="55" font-size="17" font-weight="700" fill="#ffffff" text-anchor="middle">Developer's public repo</text>
+  <text x="905" y="76" font-size="13.5" fill="#ffffff" text-anchor="middle">source code stays public</text>
+  <rect x="795" y="104" width="220" height="84" rx="8" fill="#ffffff" stroke="#15803d" stroke-width="2"/>
+  <text x="905" y="128" font-size="14.5" font-weight="700" fill="#14532d" text-anchor="middle">.agentcontrol.json</text>
+  <text x="905" y="150" font-size="13" font-weight="700" fill="#14532d" text-anchor="middle">COMMITTED</text>
+  <text x="905" y="170" font-size="13" fill="#14532d" text-anchor="middle">package, version, fingerprint</text>
+  <rect x="795" y="204" width="220" height="104" rx="8" fill="#ffffff" stroke="#15803d" stroke-width="2" stroke-dasharray="7 4"/>
+  <text x="905" y="228" font-size="14.5" font-weight="700" fill="#14532d" text-anchor="middle">.github/agents, standards,</text>
+  <text x="905" y="247" font-size="14.5" font-weight="700" fill="#14532d" text-anchor="middle">templates, skills</text>
+  <text x="905" y="272" font-size="13" font-weight="700" fill="#14532d" text-anchor="middle">NORMALLY GIT-IGNORED</text>
+  <text x="905" y="292" font-size="13" fill="#14532d" text-anchor="middle">added to .gitignore for you</text>
+
+  <!-- Arrows between the boxes -->
+  <line x1="284" y1="200" x2="401" y2="200" stroke="#1e293b" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="342" y="168" font-size="14" font-weight="700" fill="#0f172a" text-anchor="middle">2 Fetch the</text>
+  <text x="342" y="186" font-size="14" fill="#0f172a" text-anchor="middle">pinned version</text>
+
+  <line x1="776" y1="146" x2="659" y2="146" stroke="#1e293b" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="717" y="114" font-size="14" font-weight="700" fill="#0f172a" text-anchor="middle">1 Read the</text>
+  <text x="717" y="132" font-size="14" fill="#0f172a" text-anchor="middle">pin file</text>
+
+  <line x1="659" y1="272" x2="776" y2="272" stroke="#1e293b" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="717" y="240" font-size="14" font-weight="700" fill="#0f172a" text-anchor="middle">3 Place the</text>
+  <text x="717" y="258" font-size="14" fill="#0f172a" text-anchor="middle">verified files</text>
+
+  <line x1="530" y1="334" x2="530" y2="398" stroke="#1e293b" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="545" y="360" font-size="14" font-weight="700" fill="#0f172a">4 Launch</text>
+  <text x="545" y="378" font-size="14" fill="#0f172a">in the repo's folder</text>
+
+  <!-- Agentic CLI tool -->
+  <rect x="405" y="402" width="250" height="92" rx="12" fill="#fffbeb" stroke="#b45309" stroke-width="2"/>
+  <text x="530" y="430" font-size="16" font-weight="700" fill="#78350f" text-anchor="middle">Your agentic CLI tool</text>
+  <text x="530" y="454" font-size="13" fill="#78350f" text-anchor="middle">Copilot CLI, Claude Code,</text>
+  <text x="530" y="473" font-size="13" fill="#78350f" text-anchor="middle">Cursor or a custom command</text>
+</svg>

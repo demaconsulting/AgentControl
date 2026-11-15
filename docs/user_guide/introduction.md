@@ -1211,7 +1211,8 @@ Tools section](images/settings-dark.png)
 # About
 
 The About dialog, reachable from the **About** (information) button in the main window's app bar, is a simple
-dialog (the main window waits until you close it) showing the running build's application version
+dialog (the main window waits until you close it) showing the application logo, a short mission tagline and the
+running build's application version
 (a labeled **Version** row; hover over it for the full build version, including the build identifier after
 a `+`), copyright, and license text, so you can identify the running build without inspecting file
 properties, along with a scrollable list of this application's direct third-party dependencies and their licenses.

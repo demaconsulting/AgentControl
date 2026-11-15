@@ -8,390 +8,80 @@
 [![Quality Gate][badge-quality]][link-quality]
 [![Security][badge-security]][link-security]
 
-AgentControl is a Windows desktop launcher that lets a company distribute proprietary
-AI-agent configuration (Copilot/agentic-CLI instruction files, standards, templates, and
-skills) alongside public source repositories, without ever committing that proprietary
-content to source control. A developer picks a repo from a repo list, AgentControl
-makes sure the repo's `.github/agents`, `.github/standards`, `.github/templates`, and
-`.github/skills` folders match the version pinned in that repo's `.agentcontrol.json` file,
-then launches the developer's preferred agentic CLI tool (for example, GitHub Copilot CLI)
-in that repo's working directory.
+AgentControl is a Windows desktop launcher that lets a company distribute proprietary AI-agent configuration
+alongside public source repositories, without committing that content to source control. Each repo pins an exact
+package version in its `.agentcontrol.json` file. AgentControl syncs the repo's `.github/agents`,
+`.github/standards`, `.github/templates`, and `.github/skills` folders to that version, then launches your agentic
+CLI tool in the repo.
 
-![Architecture: the launcher syncs agent packages into a repo, then launches the agentic CLI tool][architecture]
+![Concept: a company publishes versioned agent packages; AgentControl reads the pin in a developer's public repo,
+fetches that version from the developer's configured sources, verifies the files against the pinned fingerprint,
+places them in the .github folders (normally git-ignored), and launches the agentic CLI tool][workflow]
 
-## Screenshots
+## Screenshot
 
 ![AgentControl main window, dark theme: app bar, then repo cards in sections with status bars][shot-main-dark]
 
-![AgentControl main window, light theme: the same repo cards][shot-main-light]
-
-The cards, the card menu, Settings and the package-source editor are shown in the
-[User Guide][link-guide].
-
 ## Features
 
-- **Compact app bar and themes**: one slim bar at the top of the main window holds the logo, a filter box and the
-  **Add repository**, **Settings** and **About** buttons; the whole application follows the **System default**,
-  **Light** or **Dark** theme, with legible text in both
-- **Repo list**: add repos via a folder-browse button; each repo is shown as a card
-  with a colored **status bar** (green up to date, amber upgrade available, red a problem, grey no
-  agent package - always backed by words and tooltips), a favorite star, its display name, a tile with its
-  initials (or the repo's own root `icon.png`/`logo.png`), its path, and labeled chips for the pinned agent
-  package (name, version and source, with a small check mark when it is the newest), an available upgrade, and
-  the current git branch; **Launch** sits on the card and everything else (Git Pull, Refresh - **Check again**
-  for a repo whose folder is missing - Select Package/Change package/Upgrade, Move to group, Reorder, Card
-  color, Remove) in
-  its grouped
-  "..." menu; a long path is shortened to fit - the folder part first, then the middle of a very long folder
-  name - so the start and the end of the repo's folder name stay visible
-- **Your own, stable repo order**: the list stays in the order you choose - Launch, Refresh and every other action
-  leave the cards where they are; a new repo goes to the bottom of its section; favorites are still listed first
-  (the Favorites section, or the top of the list while there are no groups). Reorder with **Move to top**, **Move
-  up**, **Move down** and **Move to bottom** in the **Reorder** submenu of a card's "..." menu (keyboard-reachable;
-  items that do not apply are disabled, with a tooltip saying why) or by dragging a card by anywhere that is not
-  one of its buttons: a line
-  shows where it will land, and dropping into another section or on a section header moves the repo there, exactly
-  like **Move to group** and the favorite star. Reordering is off while the filter box has text (filtering never
-  changes the order). The order is stored only in your own AgentControl settings, never in the repository or its
-  `.agentcontrol.json`; existing users keep the order they last saw
-- **Repo groups and card colors (just for you)**: put repos into groups of your own (**Move to group** in a
-  card's "..." menu, then an existing group or **New group...**) and the list becomes collapsible sections -
-  **Favorites** first, your groups alphabetically, **Ungrouped** last - with the number of repos in each; the
-  collapsed state is remembered, add a repository to a group, rename it or remove it from the group header's "..."
-  menu, and the filter box still
-  finds a repo inside a collapsed group. **Card color...** gives a repo's tile a color of your choice from a
-  palette (or **Automatic**); the status bar keeps its fixed colors. Both are stored only in your own AgentControl
-  settings - never in the repository or its `.agentcontrol.json` - so they are never shared through git
-- **Version-pinned agent packages**: every repo names an exact agent package name and
-  semantic version and a content identity (a SHA-256 over the delivered agent files, the same for a zip, a NuGet
-  package or a Git tag) in its `.agentcontrol.json` pin file - and no package source and no Git commit, because
-  sources are each user's own configuration: your configured sources are asked, and the one that delivers the files
-  with that identity supplies them, whatever it is called and whatever kind of source it is. There
-  is no floating "latest" mode, so upgrades are always a deliberate, visible action. A published version whose
-  files later change (a republished zip or NuGet package, a Git tag moved to other files) is never applied
-  silently: an install or update at launch and Upgrade refuse it, and you accept it on purpose with
-  **Change package...** in
-  the card's "..." menu
-- **Status chips**: each repo card shows an amber upgrade chip ("Upgrade to" and the version an upgrade
-  would move to; click it to upgrade), an uncommitted-changes warning, a committed-agent-files
-  warning (flags when the managed folders were committed to git; Select Package, Change package and
-  Upgrade then offer to stop git tracking them before applying the package, and ask first), a
-  missing-folder indicator when the path no longer exists on disk, a
-  package-source-problem indicator when the pinned package cannot be obtained (no configured source offers the
-  version, or none delivers the files the repo was set up with; a newer version is still offered as an upgrade), and a
-  sign-in-needed indicator
-  when a server or Git repository needs a sign-in. Separately,
-  AgentControl proactively ensures the repo's `.gitignore` covers the four managed
-  folders immediately after every "Select Package..."/Upgrade, making an accidental commit
-  much less likely in the first place
-- **Check before launch**: clicking Launch first checks that the four managed agent folders hold the files of the
-  package the repo is pinned to. A repo with no agent files (for example a fresh clone) silently gets the currently
-  pinned version installed — never a newer one. Otherwise the files in the folders are compared, byte for byte, with the
-  fingerprint the pin recorded, on your own machine and without downloading anything: when they match, the tool
-  starts at once. When they differ (a file is missing, changed or added) AgentControl asks whether to **Update from
-  package** or **Keep current files** (the default), and asks again on every launch while they differ. If files that
-  were needed cannot be installed, you choose **Launch anyway** or **Cancel** (the default). Repos with committed agent
-  files skip the check entirely, repos with no pin launch anyway, and a repo whose pin was made by an older version
-  (no recorded fingerprint) keeps the simple check that its four folders exist until you choose its package again
-- **Git integration**: pull the latest commits for a repo with **Git Pull** in its card's "..." menu (enabled
-  only when the working tree is clean), with a configurable git executable override. A Git repository package
-  source needs Git 2.29 or newer
-- **Configurable agent tool**: choose GitHub Copilot CLI, Cursor, Claude Code, or a custom
-  command line, plus a shell/terminal preference
-- **Multiple package sources**: configure any number of agent package sources, each with its
-  own alias — a folder of zip packages, a folder of NuGet packages (local drive, mapped
-  drive, or UNC share), a **NuGet-package server** such as JFrog Artifactory or Azure Artifacts, or a
-  **Git repository**.
-  A repo's pin records no source, so what you call a source and what kind it is are your own choice: AgentControl asks
-  your configured sources which offer the pinned version and takes the files from the one that delivers the
-  identical files the pin recorded, remembering it (in your own settings only) as that repo's supplier. If a source is
-  removed, a repo that got its files from it uses another configured source that delivers the identical files, or
-  shows a package source problem if there is none
-- **Git repository source**: one Git repository is one package, and its **tags are the versions** - the tags that
-  match a configurable tag pattern (default `v{version}`, for example `v1.2.3`; also `release/V{version}` or
-  `ver{version}`; the version part is a strict SemVer such as `1.2.3` or `1.2.3-beta.1`, and the fixed parts of the
-  pattern are case-sensitive). The repository is given as `https://host/org/repo.git`, `git@host:org/repo.git`,
-  `ssh://git@host/org/repo.git` or a local or UNC path, and the package layout (`.github/` folders,
-  `release-notes.md`, `AGENTS.md`) may sit in an optional subfolder. **Test connection** lists the tags without
-  cloning and shows which ones match. Sign-in is whatever your own Git setup already does (Git Credential Manager or
-  another credential helper for https, your SSH keys or ssh-agent for SSH); AgentControl never stores credentials.
-  Only work you start (**Test connection**, **Select Package...**, **Change package...**, **Upgrade** and the card's
-  **Refresh**) may open your own sign-in; background checks never prompt - a repo whose Git source needs a sign-in
-  shows a red **Sign-in needed** chip until you choose **Refresh** in its "..." menu
-- **Protected package servers**: a server source is added with its feed address (https; plain http only
-  after an explicit "Allow insecure HTTP" tick), can be checked with **Test connection** before it is saved,
-  and asks you to sign in only when the server needs it. Credentials are used for the current session
-  only and are never saved by AgentControl; you can opt in, per sign-in, to **Remember on this computer**,
-  which has your own Git credential helper keep it (AgentControl itself never stores a secret)
-- **Signed-package enforcement**: a NuGet source (folder or server) can **Require signed packages**,
-  optionally pinned to your publisher's certificate fingerprint. A package that is not validly signed (or
-  not signed by that publisher) is never installed — even one already downloaded earlier — and a platform
-  that cannot verify signatures refuses such a source instead of skipping the check
-- **Responsive**: package sources are read in the background with progress and a Cancel button, so a
-  slow or offline network share or server never freezes the window, and one unreachable source does not
-  hide the packages or upgrades of the others
-- **Upgrade notifications**: an upgrade chip and release-notes viewer let you see when a newer agent
-  package version is available and what changed before you apply it
-- **About dialog**: reachable from the main window, shows the application logo, a short
-  mission tagline, the running app's version, copyright, license, and a scrollable list of
-  this application's direct third-party dependencies and their licenses
-
-### Security notes
-
-- A package source location must never contain credentials (a user name or password in a URL or
-  path is refused), and AgentControl never stores secrets: `settings.json` holds only aliases,
-  locations, NuGet package IDs, the insecure-HTTP flag of a server source and, per NuGet source, the
-  signature settings — whether signed packages are required (`RequireSignedPackages`) and the optional signer
-  fingerprint (`SignerFingerprint`), which is the SHA-256 fingerprint of a publisher's public certificate and
-  not a secret.
-- A password or token you type into the sign-in dialog is kept in memory for the current session
-  only — AgentControl does not write it to the settings, a repo's pin file, the log or anywhere else — and
-  offers it only to the server it was typed for, and only when that server asks for it. The dialog shows
-  the server that will receive it. A server on plain `http` is flagged and needs an explicit opt-in.
-- **Remember on this computer** (off by default, and disabled with an explanation when no Git credential
-  helper is configured) hands the sign-in to your own Git credential helper — Git Credential Manager,
-  the macOS keychain, libsecret or the credential-store file — after it has been shown to work. AgentControl
-  itself never stores a secret. A saved sign-in is read back once per server per session, without a dialog and
-  only for that server's exact scheme, host and port; if the server rejects it, it is removed from the helper
-  and you are asked once. **Forget saved sign-in** in the server source's editor removes it too.
-- Credentials AgentControl does not need to ask for are reused: a `nuget.config` source with the same
-  address (and its stored credentials) and NuGet credential-provider plug-ins such as the Azure Artifacts
-  Credential Provider are tried before the dialog. Background checks never open the dialog.
-- **Signed packages.** Per NuGet source you can require validly signed packages and, recommended, pin the
-  publisher by the SHA-256 fingerprint of the package **author** certificate. Without a pin, any validly
-  signed package from any publisher your machine trusts is accepted. The check is made every time a package is
-  used, including one already in AgentControl's cache; your own NuGet trusted-signer settings neither widen nor
-  narrow it; verification is supported on Windows, Linux and macOS, and elsewhere a source that requires
-  signatures is refused (fails closed) rather than skipped. Zip packages carry no signatures.
-- Exceptions that reach AgentControl's last-resort handlers are logged only after secrets (passwords,
-  authorization values, URL user information and query strings) have been removed from them.
-- **Only add servers you trust.** A server's own index tells the NuGet client where its package resources
-  are, and once a server has authenticated, the NuGet client can answer sign-in challenges from other hosts
-  that the index names with the same credential. AgentControl itself only ever offers a credential to the
-  server's own address, but cannot stop the NuGet client from doing that.
-- A repo's pin names no source: aliases and kinds of source are each user's own configuration, so a committed pin
-  must not carry them. A package is taken only from one of your configured sources that is verified to deliver the
-  **identical files** the pin recorded - never merely because it has a package of the same name; a pin with no
-  recorded file fingerprint (an older pin) has nothing to verify, is never refused, and uses the source it was last
-  supplied from or the first one that offers the version, and when nothing offers it, or nothing delivers the
-  recorded files, the card shows a package-source problem.
-- A version number is only a label: depending on the source, a published version can be overwritten with different
-  content (a shared folder by anyone who can write to it, some servers when redeploy is allowed, a Git tag that is
-  moved). AgentControl
-  records a fingerprint of the agent files of each package it applies and does not replace a repo's agent files with a
-  package of the
-  same version whose content changed (an Upgrade or an install or update at launch stops with a message; choosing that
-  version again with **Change package...** asks for confirmation). The fingerprint detects a changed package; it
-  does not prove who published it. For a NuGet package it describes the copy cached on this computer, so a server-side
-  republish of a version this computer already has cached is not noticed until that cached copy is cleared. See the
-  User Guide's section "Version Immutability and Trust" for how to guard
-  against it.
-- **Git repository sources.** AgentControl runs your own `git` with a hardened command line: no hooks, no
-  submodules, no Git LFS, no remote helpers (such as `ext::`), and only `https`, `ssh` or a local path (never plain
-  `http` or `git://`). Only the package layout is read, straight from the fetched commit - nothing is checked out, so no
-  filter or line-ending conversion can change a file: the four managed folders, `release-notes.md` and
-  `AGENTS.md`; a symbolic link or submodule inside it is refused, nothing else in the repository is read, and the
-  `.git` folder is never copied into your repo. The pin records the fingerprint of the files, not the tag or the
-  commit. A tag that is **moved** to other files afterwards is refused when the files would be applied (the same
-  fingerprint check as for any package) and accepted only with **Change package...**, while a moved tag that delivers
-  the identical files is irrelevant; still, never move a tag - publish a new version instead. For SSH, connect
-  once with `ssh` so the host key is trusted; AgentControl never accepts a host key on your behalf.
-- AgentControl never reads or writes the target repo's `nuget.config`, and keeps its NuGet
-  caches in its own folder under the user profile.
-
-See [architecture.md](architecture.md) for the full system design.
+- 📌 **Version-Pinned Packages**: Pins an exact package version per repo in `.agentcontrol.json`
+- 🔒 **Verified Agent Files**: Checks package-managed files against the pin's recorded fingerprint at launch
+- 🔁 **Restore or Keep**: Asks whether to restore the pinned files or keep your changes
+- 🗂️ **Multiple Package Sources**: Zip folders, NuGet folders and servers, or Git repository tags
+- 🔑 **Protected Servers**: Signs in per session, with optional Git credential helper storage
+- ✍️ **Signed Packages**: Requires validly signed NuGet packages, optionally from one publisher
+- ⬆️ **Upgrade Notifications**: Shows newer versions and their release notes before you upgrade
+- 📄 **AGENTS.md Template**: Offers a package's starter AGENTS.md to repos that lack one
+- 🚀 **Configurable Agent Tool**: Launches Copilot CLI, Claude Code, Cursor, or a custom command
+- 🐚 **Shell Choice**: Picks the launch shell and can keep it open after the tool exits
+- 🌿 **Git Integration**: Shows the branch, runs Git Pull, and warns about committed agent files
+- 🏷️ **Repo Cards**: Show a status bar and chips for package, upgrade, and branch
+- ⭐ **Groups and Favorites**: Organizes repos with groups, favorites, card colors, and your own order
+- 🌗 **Light and Dark Themes**: Follows the system theme or uses a fixed choice
+- ⚡ **Responsive**: Reads package sources in the background, with progress and Cancel
+- 📦 **Easy Install**: Ships as an MSI installer with a self-contained .NET runtime
 
 ## Installation
 
-AgentControl is distributed as a Windows MSI installer, built from
-[`src/DemaConsulting.AgentControl.Msi/`](src/DemaConsulting.AgentControl.Msi/README.md).
-
-1. Download the latest `AgentControl-{version}.msi` from the
-   [releases][link-build] for this repository.
+1. Download the latest `AgentControl-{version}.msi` from the [releases][link-releases] page.
 2. Run the installer and follow the prompts.
 3. Launch **AgentControl** from the Start menu.
 
-Running an AgentControl installer always replaces the AgentControl that is installed - an upgrade, a reinstall of
-the same version, or an older version (a downgrade) - so there is only ever one installed copy.
+The application is self-contained, so the machine needs no .NET runtime. Only a Git repository package source needs
+[Git](https://git-scm.com/downloads) 2.29 or newer; the other source kinds need no Git.
 
-A Git repository package source also needs [Git](https://git-scm.com/downloads) **2.29 or newer** on the machine
-(AgentControl says "Git is too old" otherwise; **Settings > Git executable path override** can point to a newer
-one). The other source kinds need no Git.
+## Getting Started
 
-The installed application is **self-contained and single-file** — it bundles its own copy of
-the .NET 10 runtime, so the target machine needs no pre-installed runtime.
+1. Open **Settings** and add a package source: a zip folder, a NuGet folder or server, or a Git repository.
+2. Click **Add repository** and choose the root folder of a Git repository.
+3. In the repo card's "..." menu, choose **Select Package...** and pick a package and version.
+4. Click **Launch** to start your agentic CLI tool in the repo.
 
-## Usage
+See the [User Guide][link-guide] for everything else: groups, upgrades, sign-in, and the Settings window.
 
-### Adding a repo
+## Security
 
-Click the folder-plus icon button in the app bar at the top of the main window and browse to a repository's root
-folder.
-The repo is added to the repo list as a card showing its display name, path, and chips
-for the pinned package (name, version and source), an available upgrade, and the current git
-branch.
+- AgentControl never stores secrets. A sign-in is kept in memory for the session, unless you choose to hand it to
+  your own Git credential helper.
+- When a pin records a content fingerprint, agent files are verified against it, so a republished version is not
+  applied silently (a cached NuGet copy can hide a server-side republish until the cache is cleared; pins from older
+  versions have no fingerprint).
+- Git sources run with a hardened command line (no hooks, submodules, or LFS), and NuGet sources can require signed
+  packages.
 
-### Selecting a package
+See the User Guide sections on [version immutability and trust][link-guide-trust],
+[signed packages][link-guide-signed], and [what is stored][link-guide-stored].
 
-A repo that has never been synced shows a grey **No agent package** chip, and a **Select
-Package...** action (in place of **Upgrade**) in its card's "..." menu. The dialog shows three
-columns: the configured package sources, the packages of the selected source, and that package's
-available versions (defaulting to the latest). Choosing one extracts it into the repo and pins its name, version and
-content fingerprint (not the source: the source you chose is remembered only in your own settings). If a source is a
-server that needs a sign-in, a sign-in dialog opens
-when you choose it; if reading a source fails, a **Retry** button appears beside the message.
+## Documentation
 
-A repo that already has a package shows **Change package...** in its "..." menu instead. It opens the same dialog
-preselected on the source that supplies the repo's files, the package and the version; choosing another version or
-package simply changes it, and
-choosing the **same** version whose files have changed (a republished zip or NuGet package, or a moved Git tag that
-delivers other files) asks for
-confirmation first (the default is **No**) before replacing the agent files and recording the new identity.
-
-### Upgrading
-
-Once a repo is pinned, its card shows an amber upgrade chip (for example **Upgrade to 1.1.0**) whenever a
-newer version of the pinned package is available at any of your configured sources (the newest wins); click the chip,
-or use
-**Upgrade to 1.1.0** in the card's "..." menu, to upgrade. Upgrading re-runs the
-same validate → delete → extract → pin sequence, offers the package's `AGENTS.md` template when it applies
-(below) and then shows the new package's `release-notes.md` (when present) in a non-modal window, in front.
-
-### AGENTS.md template offer
-
-An agent package may optionally include a root-level `AGENTS.md` entry — a starting template,
-not a finished file (the same convention as the existing root-level `release-notes.md` entry:
-it lives outside the four managed folders, so it's never touched by the blind-delete-and-replace
-sync). Whenever a package is extracted (Select Package, Upgrade, or an install at launch) and the repo has no
-root-level `AGENTS.md` of its own, and the package
-being applied has a template to offer, AgentControl shows a modal Yes/No dialog asking whether
-to place the template at the repo root, clearly noting that you are responsible for
-customizing it afterward. A pre-existing `AGENTS.md` is never touched or overwritten, and if
-you decline, AgentControl remembers that choice for the repo so you're not asked again on
-every subsequent sync.
-
-### Launching
-
-Click **Launch** (labeled with your agent tool, for example **Launch Copilot**) to start your
-configured agentic CLI tool in the repo's working directory.
-Before launching, AgentControl checks a pinned repo's agent files against the package the repo is pinned to; it never
-upgrades to a newer version on your behalf. What happens depends on what it finds:
-
-- **No agent files** in the four managed folders (absent or empty): the pinned version is installed silently.
-- **The files match** the fingerprint recorded in the pin: the tool starts at once. The comparison is made locally,
-  byte for byte (line endings included), and nothing is downloaded or read from a package source.
-- **The files differ** (a file is missing, changed or added, or a folder cannot be read): AgentControl asks whether to
-  **Update from package** (replace the four folders with the pinned package's files, discarding changes there) or
-  **Keep current files** (the default; also what Escape does), which launches with the files as they are. The question
-  is asked again on every launch while the files differ.
-- **Needed files cannot be installed** (no source offers the pinned version, a source cannot be read, or the package
-  was republished with other files): AgentControl says why and asks **Launch anyway** or **Cancel** (the default).
-  Cancel starts nothing.
-- A repo with **committed agent files** skips the check entirely (the managed folders are never touched), and a repo
-  with **no pin** at all still launches — an agentic CLI tool remains useful even with zero managed agent files
-  present, and can help with migrating away from committed agent files.
-- A repo whose pin was made by an older version of AgentControl has **no recorded fingerprint**, so its files cannot
-  be compared: it launches when all four managed folders exist and is repaired silently when one is missing. Choose
-  its package again once with **Change package...** to record a fingerprint and switch on the full check.
-
-Launch is only stopped by your own **Cancel** after a failed install; every other outcome launches.
-
-### Pulling changes
-
-**Git Pull**, in the "..." menu of a repo card (under *Repository*), runs `git pull` in that repo. The item is
-always present, and is enabled only when the working tree is clean (it is disabled, with a tooltip that says
-why, while the status is dirty or cannot be determined).
-
-### Card icon
-
-A repo card shows the repository's own picture instead of the generated initials tile when the repo's **root
-folder** has an `icon.png` (or else a `logo.png`; the name's case does not matter). Only a plain PNG file of
-at most 1 MB is used - never a link, and never a file in a subfolder - and anything else is ignored, so a
-repository you do not trust cannot make AgentControl read other files or load huge images. Choose **Refresh** in
-the card's "..." menu after adding or changing the file.
-
-### Groups and card colors
-
-Both are personal ways to organize the list and are stored **only in your own AgentControl settings file**
-(`%APPDATA%\AgentControl\settings.json`); nothing is written to a repository or its `.agentcontrol.json`.
-
-- **Groups.** In a card's "..." menu choose **Organize > Move to group**, then one of your groups, **New group...**
-  (a small prompt: up to 40 characters; *Favorites* and *Ungrouped* are built-in names; letter case does not make a
-  new group) or **Remove from group**. As soon as one repo is in a group the list shows sections with a header
-  each - **Favorites** (a favorite is listed only there, and its card shows its group as a chip), then your groups
-  alphabetically, then **Ungrouped** - with the number of repos; click a header to collapse or expand it (the choice
-  is remembered). A group's header has a "..." menu with **Add repository...** (choose a folder and it goes straight
-  into that group), **Rename group...** and **Remove group** (its repos stay
-  in the list, ungrouped). With no groups at all there are no headers and the list looks as it always did.
-  Typing in the filter box shows every match, expanding collapsed groups while you filter.
-- **Card color.** **Organize > Card color...** opens a palette of ten colors that work in the light and dark
-  themes, plus **Automatic** (the color AgentControl derives from the repo's path). The color goes on the card's
-  tile (as a ring around a repo's own picture); the status bar on the card's left edge keeps its meaning.
-- **Order.** The list is in your own, stable order: nothing moves because of **Launch**, **Refresh** or any other
-  action, and a new repo goes to the bottom of its section (a repo you add to a group again moves to the bottom of
-  that group). Favorites are listed first. In a card's "..." menu, **Organize > Reorder > Move to top**, **Move up**,
-  **Move down** and **Move to bottom** move the card within its section (the first repo cannot go up, the last cannot
-  go down, and **Reorder** itself is disabled for the only repo of its section; a disabled item's tooltip says why).
-  You can also drag a card by any part that is not a button, such as its
-  status bar: a line shows where it lands (upper half of the card under the pointer = before, lower half = after).
-  Dropping into another section moves the repo there like **Move to group** and the favorite star do - into a
-  group sets that group, into **Ungrouped** removes it, into **Favorites** makes it a favorite (it keeps its
-  group), out of **Favorites** removes the favorite mark - and dropping on a section header (even a collapsed one,
-  which stays collapsed) puts the card at the bottom of that section. With no groups, dragging only reorders within
-  the favorites or within the other repos. While the filter box has text, reordering is off (dragging does nothing
-  and the Reorder submenu is disabled), because only some repos are shown. The order is kept in your own settings file;
-  removing a repo removes it from the order, and existing users keep the order they last saw.
-
-### Settings
-
-The Settings window lets you configure:
-
-- **Package sources** — a list of the configured sources (alias, kind, location and whether the
-  folder can be found; a server or remote Git repository shows a neutral **Online source** status because AgentControl
-  contacts it only when it
-  needs to, and a NuGet source that requires signed packages shows a **Signed only** badge). Use **Add** (a menu of
-  **Zip-package folder**, **NuGet-package folder**, **NuGet-package server** and
-  **Git repository**)
-  to add a source, and **Edit** or **Remove** to change one; a NuGet source also lists the package
-  IDs it offers, a server or a Git repository can be checked with **Test connection** before it is saved, and a NuGet
-  source can
-  **Require signed packages** (optionally pinned to a publisher's certificate fingerprint). An alias cannot
-  be changed once created, because each repo card remembers which source supplies its files by alias. A single
-  package source folder configured in an earlier version appears as a zip source named `Default`.
-  See the [User Guide][link-guide] chapter "Package Sources".
-- **Appearance** (its own section) — the **Theme**: **System default** (follow the operating system's light/dark
-  setting, live), **Light** or **Dark**; applied as soon as you save, without a restart
-- **Git executable override** — a specific `git` executable to use instead of resolving it
-  from `PATH`
-- **Agent tool selection** — GitHub Copilot CLI, Cursor, Claude Code, or a custom command
-- **Shell/terminal preference** — which shell to launch the agent tool in, picked from an
-  OS-appropriate dropdown (`pwsh`/`powershell`/`cmd` on Windows, `bash`/`zsh`/`sh` elsewhere)
-  or typed in directly for a custom shell; leave unset to let AgentControl auto-detect the
-  best available shell
-- **Keep the shell open after the agent tool exits** — on by default; turn it off to have the terminal window close
-  together with the tool (PowerShell and the Command shell on Windows). With it on, the window stays open so error
-  messages stay visible and you stay at a prompt in the repo. Applied from the next launch.
-
-### About
-
-The About dialog (the info button in the main window's app bar) shows the application logo, a short mission
-tagline, and the running build's version, copyright, and license, so it can be identified
-without inspecting file properties, along with a scrollable list of this application's direct
-third-party dependencies and their licenses.
-
-## Authoring agent packages
-
-Agent packages are plain zip files, NuGet packages (served from a folder or a NuGet
-server) or tagged Git repositories following a naming and content
-convention that AgentControl's package sources and extractor understand. See the
-[**Authoring Agent Packages**](docs/user_guide/introduction.md#authoring-agent-packages)
-section of the [User Guide][link-guide] for the full, source-verified guide to naming,
-versioning, and structuring a package zip, NuGet package or Git repository.
+- [User Guide][link-guide]: installation, using AgentControl, and configuring package sources
+- [Authoring Agent Packages][link-guide-authoring]: how to build a zip, NuGet, or Git agent package
+- [Architecture][link-architecture]: the system design
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/demaconsulting/AgentControl/blob/main/CONTRIBUTING.md) for
-guidelines on reporting bugs, suggesting features, and submitting pull requests.
+See [CONTRIBUTING.md][link-contributing] for guidelines on reporting bugs, suggesting features, and submitting pull
+requests.
 
 ## License
 
@@ -408,9 +98,9 @@ By contributing to this project, you agree that your contributions will be licen
 [badge-quality]: https://sonarcloud.io/api/project_badges/measure?project=demaconsulting_AgentControl&metric=alert_status
 [badge-security]: https://sonarcloud.io/api/project_badges/measure?project=demaconsulting_AgentControl&metric=security_rating
 
-<!-- Screenshot References -->
+<!-- Image References -->
+[workflow]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/images/agent-workflow.png
 [shot-main-dark]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/user_guide/images/main-window-dark.png
-[shot-main-light]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/user_guide/images/main-window-light.png
 
 <!-- Link References -->
 [link-forks]: https://github.com/demaconsulting/AgentControl/network/members
@@ -420,5 +110,11 @@ By contributing to this project, you agree that your contributions will be licen
 [link-build]: https://github.com/demaconsulting/AgentControl/actions/workflows/build_on_push.yaml
 [link-quality]: https://sonarcloud.io/dashboard?id=demaconsulting_AgentControl
 [link-security]: https://sonarcloud.io/dashboard?id=demaconsulting_AgentControl
+[link-releases]: https://github.com/demaconsulting/AgentControl/releases
+[link-contributing]: https://github.com/demaconsulting/AgentControl/blob/main/CONTRIBUTING.md
+[link-architecture]: https://github.com/demaconsulting/AgentControl/blob/main/architecture.md
 [link-guide]: https://github.com/demaconsulting/AgentControl/blob/main/docs/user_guide/introduction.md
-[architecture]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/images/architecture.png
+[link-guide-authoring]: https://github.com/demaconsulting/AgentControl/blob/main/docs/user_guide/introduction.md#authoring-agent-packages
+[link-guide-trust]: https://github.com/demaconsulting/AgentControl/blob/main/docs/user_guide/introduction.md#version-immutability-and-trust
+[link-guide-signed]: https://github.com/demaconsulting/AgentControl/blob/main/docs/user_guide/introduction.md#requiring-signed-packages
+[link-guide-stored]: https://github.com/demaconsulting/AgentControl/blob/main/docs/user_guide/introduction.md#what-is-stored
