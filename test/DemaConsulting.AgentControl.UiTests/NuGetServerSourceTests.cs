@@ -312,7 +312,7 @@ public sealed class NuGetServerSourceTests
     /// <returns>The file's text.</returns>
     private static string ReadSharedText(string path)
     {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }

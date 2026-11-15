@@ -859,6 +859,7 @@ reviews:
       - "test/**/Settings/SettingsStoreTests.cs"
       - "test/**/Settings/SettingsStoreOrganizingTests.cs"
       - "test/**/Settings/SettingsStoreRepoOrderTests.cs"
+      - "test/**/Settings/SettingsStoreLockTests.cs"
 
   - id: AgentControl-Settings-RepoGroupName
     title: Review of Agent Control RepoGroupName unit implementation

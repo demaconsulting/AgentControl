@@ -45,7 +45,8 @@ card colors, collapsed sections, the order of the repo list) (`AgentControl-Sett
 - *Contract*: Creates the configuration directory if it does not yet exist
   (`AgentControl-SettingsStore-Save`), writes the configured sources and never the legacy path,
   and replaces the file atomically (`AgentControl-SettingsStore-AtomicSave`,
-  `AgentControl-SettingsStore-SourcesRoundTrip`).
+  `AgentControl-SettingsStore-SourcesRoundTrip`), retrying the replace while another process briefly
+  holds the file (`AgentControl-SettingsStore-LockedFileTolerance`).
 - *Constraints*: Rejects a null `AppSettings` value with `ArgumentNullException`.
 
 **SettingsStore.GetDefaultConfigDirectory**: Resolves the default configuration directory.

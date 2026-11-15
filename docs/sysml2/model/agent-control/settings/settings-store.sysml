@@ -6,7 +6,7 @@ package AgentControl {
 
         metadata info : SoftwareInfo {
             sourceFiles = ("src/DemaConsulting.AgentControl/Settings/SettingsStore.cs");
-            testFiles = ("test/DemaConsulting.AgentControl.Tests/Settings/SettingsStoreTests.cs", "test/DemaConsulting.AgentControl.Tests/Settings/SettingsStoreOrganizingTests.cs", "test/DemaConsulting.AgentControl.Tests/Settings/SettingsStoreRepoOrderTests.cs");
+            testFiles = ("test/DemaConsulting.AgentControl.Tests/Settings/SettingsStoreTests.cs", "test/DemaConsulting.AgentControl.Tests/Settings/SettingsStoreOrganizingTests.cs", "test/DemaConsulting.AgentControl.Tests/Settings/SettingsStoreRepoOrderTests.cs", "test/DemaConsulting.AgentControl.Tests/Settings/SettingsStoreLockTests.cs");
             designFiles = ("docs/design/agent-control/settings/settings-store.md");
             verificationFiles = ("docs/verification/agent-control/settings/settings-store.md");
             requirementFiles = ("docs/reqstream/agent-control/settings/settings-store.yaml");

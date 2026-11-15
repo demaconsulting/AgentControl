@@ -145,7 +145,7 @@ public sealed class ShellSettingTests
     {
         try
         {
-            return File.ReadAllText(Path.Combine(context.ConfigDirectory, "settings.json"));
+            return SharedFile.ReadAllText(Path.Combine(context.ConfigDirectory, "settings.json"));
         }
         catch (IOException)
         {
