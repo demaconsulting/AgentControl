@@ -2394,7 +2394,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="outcomeOnSuccess">The outcome to report when the files were installed.</param>
     /// <param name="updateInstalledFiles"><see langword="true"/> when the files being replaced are
     ///     the user's current files (an explicit update), which only changes the wording of the
-    ///     failure question.</param>
+    ///     failure question: a failed update may have left the files partially updated or
+    ///     incomplete, so the question says so instead of promising the earlier files.</param>
     /// <param name="cancellationToken">Cancels reading the source and waiting for an answer.</param>
     /// <returns><paramref name="outcomeOnSuccess"/> on success. On failure with a subscriber:
     ///     <see cref="AgentFilesSyncOutcome.FailedLaunchAnyway"/> when the user chooses to launch
@@ -2421,11 +2422,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return outcomeOnSuccess;
         }
 
-        // A failed restore: the user decides whether the tool starts without (all of) its files
-        var startsWith = updateInstalledFiles ? "with your current files" : "without (all of) them";
+        // A failed restore: the user decides whether the tool starts without (all of) its files. A failed
+        // update may already have deleted the managed folders and extracted only part of the package, so
+        // the files on disk can no longer be promised to be the user's earlier ones
+        var consequence = updateInstalledFiles
+            ? "The agent files could not be updated from the package, so the files in the repo may be partially " +
+              "updated or incomplete. Launching anyway starts the agent tool with the files as they are now."
+            : "The agent files could not be restored, so the agent tool would start without (all of) them.";
         var answer = await AskAgentFilesChoiceAsync(
-            $"{result.Reason}\n\nThe agent files could not be restored, so the agent tool would start {startsWith}. " +
-            "Launch anyway?",
+            $"{result.Reason}\n\n{consequence} Launch anyway?",
             confirmText: "Launch anyway",
             declineText: "Cancel",
             cancellationToken);

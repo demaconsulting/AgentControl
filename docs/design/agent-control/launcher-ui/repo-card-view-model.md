@@ -548,8 +548,11 @@ them or asks when they are not.
   source cannot be read, none delivers the recorded files, or the copy fails (`InvalidOperationException`,
   `DirectoryNotFoundException`, `IOException` and `UnauthorizedAccessException` are all caught; the last two used to
   escape and surface as "The operation failed") - raises `AgentFilesChoiceRequested` with the plain-language
-  reason followed by a sentence saying that the agent tool would start without (all of) the files, or with the
-  user's current files after a chosen update, and "Launch anyway?". The confirm button reads "Launch anyway"
+  reason followed by a sentence: after a restore (`updateInstalledFiles` false) that the agent tool would start without
+  (all of) the files; after a chosen update (`updateInstalledFiles` true) that the files could not be updated, that the
+  files in the repo may be partially updated or incomplete (the update may already have deleted the managed folders and
+  extracted only part of the package) and that launching anyway starts the tool with the files as they are now. Both end
+  with "Launch anyway?". The confirm button reads "Launch anyway"
   (`FailedLaunchAnyway`) and the decline button "Cancel", the default and the answer of Escape (`LaunchCanceled`).
   With no subscriber nobody can be asked, so the failure is reported passively through `ErrorOccurred` - the reason
   followed by the old sentence ("Launching without syncing agent files.", "Launching without them." plus the advice,

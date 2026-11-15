@@ -241,14 +241,18 @@ sections:
         title: >-
           The SettingsStore class shall, when loading a file without the repo-order marker, arrange the
           repos once as favorites first, then the most recently launched with never launched repos
-          last (repos with equal keys keeping their sequence), and mark the result as the user's
-          order; a file with the marker keeps its sequence.
+          last (repos with equal keys keeping their sequence), mark the result as the user's
+          order and write the arrangement and the marker back to the file so it happens only once,
+          without failing the load when that write fails; a file with the marker keeps its sequence.
         justification: |
           A file written before the order was stored lists the repos in the order they were added, not
           in the order the user saw; arranging it once keeps the list where it was without ever
-          re-sorting an order the user made.
+          re-sorting an order the user made. Unless the result is written back, the next start would
+          seed again from launch times that have since changed and cards could move.
         tests:
           - SettingsStore_Load_FileWithoutOrderMarker_SeedsFavoritesFirstThenMostRecentlyLaunched
+          - SettingsStore_Load_FileWithoutOrderMarker_PersistsSeededOrderSoLaterLoadsDoNotReorder
+          - SettingsStore_Load_FileWithoutOrderMarker_SeedWriteFails_LoadStillSucceedsAndFileIsUnchanged
           - SettingsStore_Load_FileWithOrderMarker_KeepsTheStoredSequence
 
       - id: AgentControl-SettingsStore-RepoOrderMarkerRepaired

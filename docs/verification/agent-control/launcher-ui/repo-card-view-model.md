@@ -368,8 +368,11 @@ then with no handler; also run the launch command with each answer. Assert: the 
 labels "Launch anyway" and "Cancel"; Cancel gives the "launch canceled" outcome, the launch command starts nothing and
 records no launch; "Launch anyway" launches and records the launch; with no handler the failure is reported through
 `ErrorOccurred` and the launch proceeds; a republished package extracts nothing and leaves the files and the pin
-untouched; and a plain I/O failure is reported rather than escaping as an unhandled error. This scenario is tested by
+untouched; a plain I/O failure is reported rather than escaping as an unhandled error; and when an update the user chose
+fails, the question says the files may be partially updated or incomplete and that launching anyway uses them as they
+are now (it does not call them "current files"). This scenario is tested by
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndSourceUnreachable_AsksLaunchAnywayWithReason_DeclineCancelsLaunch`,
+`RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UpdateFails_QuestionWarnsFilesMayBePartiallyUpdated`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndSourceUnreachable_LaunchAnywayChosen_OutcomeFailedLaunchAnyway`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndOnlyRepublishedPackage_AsksLaunchAnywayAndNothingExtracted`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchAndUpdate_RepublishedPackageOnlySource_RefusesFilesUntouchedAndOffersLaunchAnyway`,

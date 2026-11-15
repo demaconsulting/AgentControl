@@ -422,6 +422,35 @@ public sealed class RepoCardLaunchVerificationTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that when an explicit update fails (the source cannot be read), the question that follows
+    ///     does not promise the earlier files: it says the files may be partially updated or incomplete and
+    ///     that launching anyway uses them as they are.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UpdateFails_QuestionWarnsFilesMayBePartiallyUpdated()
+    {
+        // Arrange: a repo with an edited file, a user who chooses to update, and a source that is gone
+        var (repo, _, _) = CreatePinnedRepo("v1");
+        await File.WriteAllTextAsync(
+            Path.Combine(repo, ".github", "agents", "copilot.md"), "my experiment", TestContext.Current.CancellationToken);
+        var settings = new AppSettings { Sources = [ZipSource("Contoso", Path.Combine(CreateTempDirectory(), "missing"))] };
+        var card = CreateCard(repo, settings);
+        var (requests, _) = Watch(card, answers: [true, false]);
+
+        // Act
+        var outcome = await card.EnsureAgentFilesSyncedBeforeLaunchAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the failure question warns about partial files and no longer says "current files"
+        Assert.Equal(AgentFilesSyncOutcome.LaunchCanceled, outcome);
+        Assert.Equal(2, requests.Count);
+        Assert.Multiple(
+            () => Assert.Contains("partially updated or incomplete", requests[1].Message, StringComparison.Ordinal),
+            () => Assert.Contains("as they are now", requests[1].Message, StringComparison.Ordinal),
+            () => Assert.DoesNotContain("current files", requests[1].Message, StringComparison.Ordinal),
+            () => Assert.EndsWith("Launch anyway?", requests[1].Message, StringComparison.Ordinal));
+    }
+
+    /// <summary>
     ///     Test that a managed folder that is a directory junction cannot be verified, so it is treated as a
     ///     difference: the user is asked (and keeping launches), never silently overwritten (Windows).
     /// </summary>

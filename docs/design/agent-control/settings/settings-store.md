@@ -64,6 +64,10 @@ path.
   `HasUserRepoOrder`) says that it already is. A file without the marker - written before the order existed - has its
   repo list arranged exactly once, favorites first and then most recently launched (a repo never launched last), and
   loads with the marker set; a file with the marker keeps its repo sequence as it is, whatever the launch times.
+  The arrangement is written back at once (`Save`, through `PersistSeededRepoOrder`) so that it really happens only
+  once: the next load finds the marker and does not seed again from launch times that have changed since. A failed
+  write-back (for example an unwritable file) never fails the load: it is logged as a warning, the in-memory order is
+  used, and the file stays unmarked so the next load tries again.
   `Save` writes the list in its sequence and the marker, and `Load` reads both back, so the sequence
   round-trips (`AgentControl-SettingsStore-RepoOrder`, `-RepoOrderLegacySeed`). A marker that is null or not a
   boolean reads as not set, without failing the load, so the one-time arrangement runs
@@ -102,7 +106,8 @@ provider is created for it.
 #### Error Handling
 
 `Load` throws `InvalidOperationException` when the settings file exists but cannot be read or
-contains invalid JSON (wrapping `IOException`/`UnauthorizedAccessException`/`JsonException`).
+contains invalid JSON (wrapping `IOException`/`UnauthorizedAccessException`/`JsonException`); a failure to write back
+the seeded repo order is logged and does not throw.
 `Save` throws `ArgumentNullException` for a null `settings` and `InvalidOperationException`
 when the configuration directory cannot be created or the file cannot be written.
 
@@ -115,6 +120,7 @@ when the configuration directory cannot be created or the file cannot be written
 - **PackageSourceDefinition** (`AgentPackageManagement` subsystem) — the source data type held in
   `AppSettings.Sources`.
 - **.NET BCL** — `System.Text.Json`, `Environment.GetFolderPath`.
+- **AppLogging** (`Logging` subsystem) — the logger factory used to log a seeded repo order that could not be saved.
 
 #### Callers
 

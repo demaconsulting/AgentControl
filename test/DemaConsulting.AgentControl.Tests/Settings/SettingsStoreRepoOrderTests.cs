@@ -25,7 +25,7 @@ namespace DemaConsulting.AgentControl.Tests.Settings;
 /// <summary>
 ///     Tests of how <see cref="SettingsStore"/> persists and reads the user's own repo order: the
 ///     stored sequence and its marker survive a save and a load, a file without the marker is
-///     arranged once the way older versions displayed the list, and a marker of the wrong type reads
+///     arranged once the way older versions displayed the list and written back with the marker, and a marker of the wrong type reads
 ///     as "not arranged yet" without failing the load.
 /// </summary>
 public class SettingsStoreRepoOrderTests
@@ -101,6 +101,91 @@ public class SettingsStoreRepoOrderTests
                 () => Assert.True(loaded.HasUserRepoOrder),
                 () => Assert.Equal(
                     ["fav", "new", "old", "never1", "never2"], loaded.RecentRepos.Select(repo => repo.Path)));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that loading a file without the marker writes the seeded order and the marker back, so a
+    ///     second load keeps that order even though the launch times now say something else.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_FileWithoutOrderMarker_PersistsSeededOrderSoLaterLoadsDoNotReorder()
+    {
+        // Arrange: an unmarked file whose seeded order is fav, new, old
+        var configDir = CreateTempDirectory();
+        var filePath = Path.Combine(configDir, "settings.json");
+        try
+        {
+            File.WriteAllText(
+                filePath,
+                "{ \"RecentRepos\": [" +
+                " { \"Path\": \"old\", \"LastLaunchedUtc\": \"2026-01-01T00:00:00+00:00\" }," +
+                " { \"Path\": \"new\", \"LastLaunchedUtc\": \"2026-06-01T00:00:00+00:00\" }," +
+                " { \"Path\": \"fav\", \"IsFavorite\": true }" +
+                "] }");
+
+            // Act: the first load migrates the file
+            var first = SettingsStore.Load(configDir);
+            var json = File.ReadAllText(filePath);
+            var storedPaths = System.Text.Json.Nodes.JsonNode.Parse(json)!["RecentRepos"]!.AsArray()
+                .Select(repo => repo!["Path"]!.GetValue<string>())
+                .ToList();
+
+            // Act: the launch times change on disk (as launching a repo would), then the file is loaded again
+            var changed = json.Replace("2026-01-01T00:00:00+00:00", "2027-01-01T00:00:00+00:00", StringComparison.Ordinal);
+            File.WriteAllText(filePath, changed);
+            Assert.NotEqual(json, changed);
+            var second = SettingsStore.Load(configDir);
+
+            // Assert: the marker and the seeded order are on disk, and the second load did not re-sort
+            Assert.Multiple(
+                () => Assert.Equal(["fav", "new", "old"], first.RecentRepos.Select(repo => repo.Path)),
+                () => Assert.Contains("\"HasUserRepoOrder\": true", json, StringComparison.Ordinal),
+                () => Assert.Equal(["fav", "new", "old"], storedPaths),
+                () => Assert.True(second.HasUserRepoOrder),
+                () => Assert.Equal(["fav", "new", "old"], second.RecentRepos.Select(repo => repo.Path)));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a failed write of the seeded order does not fail the load: the order is still seeded
+    ///     in memory, the file is left as it was (still unmarked, so the next load tries again) and no
+    ///     temporary file is left behind. The save is made to fail with a source address that embeds a
+    ///     credential.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_FileWithoutOrderMarker_SeedWriteFails_LoadStillSucceedsAndFileIsUnchanged()
+    {
+        // Arrange: an unmarked file that cannot be saved back
+        var configDir = CreateTempDirectory();
+        var filePath = Path.Combine(configDir, "settings.json");
+        try
+        {
+            File.WriteAllText(
+                filePath,
+                "{ \"Sources\": [ { \"Alias\": \"Repo\", \"Type\": \"Git\"," +
+                " \"Location\": \"https://user:SentinelSecretValue@example.invalid/org/repo.git\"," +
+                " \"TagPattern\": \"release/{version}\", \"PackageIds\": [ \"contoso-agents\" ] } ]," +
+                " \"RecentRepos\": [ { \"Path\": \"plain\" }, { \"Path\": \"fav\", \"IsFavorite\": true } ] }");
+            var before = File.ReadAllText(filePath);
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.Multiple(
+                () => Assert.True(loaded.HasUserRepoOrder),
+                () => Assert.Equal(["fav", "plain"], loaded.RecentRepos.Select(repo => repo.Path)),
+                () => Assert.Equal(before, File.ReadAllText(filePath)),
+                () => Assert.Equal(["settings.json"], Directory.GetFileSystemEntries(configDir).Select(Path.GetFileName)));
         }
         finally
         {

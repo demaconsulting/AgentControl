@@ -909,7 +909,8 @@ files - it does **not** quietly replace your agent files:
   message that no configured source delivers the package "with the files this repo was set up with" (it "now contains
   different files than the copy this repo was set up with, although the version number is the same") and may have been
   republished. At launch the message is the one of the "Launch anyway?" question: **Launch anyway** starts your tool
-  without the files (or with your current files, after an **Update from package**), **Cancel** (the default) starts
+  without the files (or, after an **Update from package** that failed part-way, with the files exactly as they are on
+  disk, which may be partially updated), **Cancel** (the default) starts
   nothing. The right fix is for the package's maintainer
   to publish the changed files as a **new version**. If you trust the
   change and want the new content anyway, use the card's "..." menu > **Change package...** and choose the same
@@ -1140,7 +1141,9 @@ version but none delivers the files this repo was set up with (the version has b
 or its Git tag moved to other files; see *Republished Versions*, in which case nothing is installed) —
 AgentControl tells you why in a window that ends with "Launch anyway?". The buttons are **Launch anyway** and
 **Cancel**; **Cancel** is the default (and **Esc** or closing the window also cancels). **Launch anyway** starts the
-tool without (all of) its agent files, or with your current files after an Update that failed. **Cancel** starts
+tool without (all of) its agent files. After an **Update from package** that failed, the agent files may already be
+partially updated or incomplete (the update replaces the managed folders before it copies the package's files), and
+the window says so; **Launch anyway** then starts the tool with the files as they are on disk. **Cancel** starts
 nothing and records no launch. If you cancel the wait itself while the check is running, the tool is launched as well.
 
 # Pulling Changes

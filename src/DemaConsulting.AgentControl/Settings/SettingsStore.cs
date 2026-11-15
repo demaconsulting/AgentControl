@@ -19,6 +19,8 @@
 // SOFTWARE.
 
 using System.Text.Json;
+using DemaConsulting.AgentControl.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.Settings;
 
@@ -39,6 +41,11 @@ internal static class SettingsStore
     ///     File name used for the persisted settings JSON within the configuration directory.
     /// </summary>
     private const string SettingsFileName = "settings.json";
+
+    /// <summary>
+    ///     Category of the logger used to report a repo order that could not be saved.
+    /// </summary>
+    private const string LoggerCategoryName = "DemaConsulting.AgentControl.Settings.SettingsStore";
 
     /// <summary>
     ///     JSON serialization options shared by <see cref="Load"/> and <see cref="Save"/>.
@@ -68,7 +75,9 @@ internal static class SettingsStore
     ///     <c>PackageSourcePath</c> in the file is migrated into <c>Sources</c> as the
     ///     <c>Default</c> zip source when no sources are configured. A file without the repo-order
     ///     marker has its repos arranged once as favorites first, then the most recently launched,
-    ///     and is marked as holding the user's order. Explicit JSON <c>null</c>
+    ///     and is marked as holding the user's order; that arrangement and the marker are written
+    ///     back to the file at once, so it happens only once (a failed write is logged, never fails
+    ///     the load, and is retried on the next load). Explicit JSON <c>null</c>
     ///     values for the source list, the recent-repos list or a source's package IDs are
     ///     normalized to empty collections.
     /// </returns>
@@ -100,12 +109,43 @@ internal static class SettingsStore
 
             // A file written before the repo order was stored holds the repos in the order they
             // were added; arrange them once the way older versions displayed them
+            var seedsRepoOrder = !settings.HasUserRepoOrder;
             settings.EnsureRepoOrder();
+
+            // Persist the one-time arrangement and its marker now, so the next load keeps this order
+            // instead of seeding again from launch times that have changed since
+            if (seedsRepoOrder)
+            {
+                PersistSeededRepoOrder(settings, directory);
+            }
+
             return settings;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             throw new InvalidOperationException($"Failed to load settings from '{filePath}': {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    ///     Writes the freshly seeded repo order and its marker back to the settings file.
+    /// </summary>
+    /// <param name="settings">The settings that were just loaded and seeded.</param>
+    /// <param name="directory">The configuration directory the settings were loaded from.</param>
+    /// <remarks>
+    ///     A failed write never fails the load: it is logged and the in-memory order is still used. The
+    ///     file then stays unmarked, so the arrangement is attempted and persisted again on the next load.
+    /// </remarks>
+    private static void PersistSeededRepoOrder(AppSettings settings, string directory)
+    {
+        try
+        {
+            Save(settings, directory);
+        }
+        catch (InvalidOperationException ex)
+        {
+            AppLogging.Factory.CreateLogger(LoggerCategoryName).LogWarning(
+                ex, "The seeded repo order could not be saved; it will be saved again on the next load");
         }
     }
 

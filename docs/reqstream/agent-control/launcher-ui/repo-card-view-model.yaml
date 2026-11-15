@@ -361,16 +361,21 @@ sections:
           with Cancel as the default answer and the answer that Escape gives, shall start the
           agent tool only when the user chooses Launch anyway and shall otherwise neither start it
           nor record a launch, and shall report the failure to a user who cannot be asked and
-          launch.
+          launch. When the failed install was an update the user chose, the question shall say the
+          files in the repo may be partially updated or incomplete rather than promise the earlier
+          files.
         justification: |
           Starting an agentic tool without the agent files it was meant to follow, or with files
           the user wanted replaced, is a decision the developer should make knowingly; a message
-          shown while the tool is already starting leaves no choice. A refused package of the same
+          shown while the tool is already starting leaves no choice. A failed update may already
+          have replaced part of the files, so the question must not claim they are unchanged. A
+          refused package of the same
           version with other content is one of these failures, and nothing is extracted for it.
           Where no one can be asked the launch still proceeds, so a host without a window is never
           blocked.
         tests:
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndSourceUnreachable_AsksLaunchAnywayWithReason_DeclineCancelsLaunch
+          - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_UpdateFails_QuestionWarnsFilesMayBePartiallyUpdated
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndSourceUnreachable_LaunchAnywayChosen_OutcomeFailedLaunchAnyway
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_NoFilesAndOnlyRepublishedPackage_AsksLaunchAnywayAndNothingExtracted
           - RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MismatchAndUpdate_RepublishedPackageOnlySource_RefusesFilesUntouchedAndOffersLaunchAnyway

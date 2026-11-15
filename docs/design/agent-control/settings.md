@@ -32,8 +32,10 @@ card colors, collapsed sections, the order of the repo list) (`AgentControl-Sett
   that only has the legacy single package-folder path loads with it as a zip source named
   `Default` (`AgentControl-SettingsStore-LegacySourceMigration`). A settings file that has no stored repo order yet
   (written before the order was the user's) loads with its repo list arranged once - favorites first, then most
-  recently launched - and marked as the user's order (`AgentControl-Settings-RepoOrder`,
+  recently launched - and marked as the user's order, with the arrangement and marker written back to the file at once so
+  it happens only once (`AgentControl-Settings-RepoOrder`,
   `AgentControl-SettingsStore-RepoOrderLegacySeed`); a file that already has the marker keeps its repo sequence as it is.
+  A failed write-back is logged and never fails the load.
 - *Constraints*: None beyond standard JSON deserialization failure modes.
 
 **SettingsStore.Save**: Saves settings to the configuration directory.

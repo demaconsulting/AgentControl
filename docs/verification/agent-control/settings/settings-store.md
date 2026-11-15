@@ -171,8 +171,13 @@ scenario is tested by `SettingsStore_SaveThenLoad_RepoOrder_RoundTripsInTheStore
 **SettingsStore_RepoOrder_FileWithoutMarkerIsSeededOnce**: A file without the marker, listing repos in the order they
 were added, loads arranged as the favorite first, then the repos by most recent launch with the never-launched ones last
 (keeping their sequence), and marked as holding the user's order; a file with the marker keeps its sequence exactly,
-whatever the favorites and launch times say. This scenario is tested by
-`SettingsStore_Load_FileWithoutOrderMarker_SeedsFavoritesFirstThenMostRecentlyLaunched` and
+whatever the favorites and launch times say. The arrangement and the marker are written back to the file on that first
+load: a second load, after a launch time has changed on disk, keeps the seeded order, and when the write-back fails (a
+source address that embeds a credential makes the save refuse) the load still succeeds with the seeded order, leaves the
+file and the folder unchanged and so tries again next time. This scenario is tested by
+`SettingsStore_Load_FileWithoutOrderMarker_SeedsFavoritesFirstThenMostRecentlyLaunched`,
+`SettingsStore_Load_FileWithoutOrderMarker_PersistsSeededOrderSoLaterLoadsDoNotReorder`,
+`SettingsStore_Load_FileWithoutOrderMarker_SeedWriteFails_LoadStillSucceedsAndFileIsUnchanged` and
 `SettingsStore_Load_FileWithOrderMarker_KeepsTheStoredSequence`, covering
 `AgentControl-SettingsStore-RepoOrderLegacySeed`. A first run (no file) returns an empty, unmarked list, which the view
 model arranges (`SettingsStore_Load_NoFile_ReturnsEmptyUnseededSettings`).
