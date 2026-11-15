@@ -25,7 +25,7 @@ places them in the .github folders (normally git-ignored), and launches the agen
 ## Features
 
 - 📌 **Version-Pinned Packages**: Pins an exact package version per repo in `.agentcontrol.json`
-- 🔒 **Verified Agent Files**: Checks files against the pinned fingerprint before every launch
+- 🔒 **Verified Agent Files**: Checks package-managed files against the pin's recorded fingerprint at launch
 - 🔁 **Restore or Keep**: Asks whether to restore the pinned files or keep your changes
 - 🗂️ **Multiple Package Sources**: Zip folders, NuGet folders and servers, or Git repository tags
 - 🔑 **Protected Servers**: Signs in per session, with optional Git credential helper storage
@@ -63,8 +63,9 @@ See the [User Guide][link-guide] for everything else: groups, upgrades, sign-in,
 
 - AgentControl never stores secrets. A sign-in is kept in memory for the session, unless you choose to hand it to
   your own Git credential helper.
-- Agent files are verified against a content fingerprint recorded in the pin, so a republished version is never
-  applied silently.
+- When a pin records a content fingerprint, agent files are verified against it, so a republished version is not
+  applied silently (a cached NuGet copy can hide a server-side republish until the cache is cleared; pins from older
+  versions have no fingerprint).
 - Git sources run with a hardened command line (no hooks, submodules, or LFS), and NuGet sources can require signed
   packages.
 
