@@ -30,11 +30,11 @@
 
   <!-- Code Analysis Dependencies -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.403">
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="11.0.100">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.35.0.4138">
+    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.36.0.15337">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -48,7 +48,7 @@
 
   <!-- WMI, to read a running process's command line (instance validation) -->
   <ItemGroup>
-    <PackageReference Include="System.Management" Version="10.0.14" />
+    <PackageReference Include="System.Management" Version="11.0.0" />
   </ItemGroup>
 
   <!-- The unit tests cover argument, chord, registry and fixture logic directly -->
