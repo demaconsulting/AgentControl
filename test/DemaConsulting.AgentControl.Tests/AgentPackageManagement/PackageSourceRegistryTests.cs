@@ -158,7 +158,7 @@ public class PackageSourceRegistryTests
     public void PackageSourceRegistry_Constructor_DuplicateOrBlankAlias_ThrowsInvalidOperationException()
     {
         // Arrange
-        PackageSourceDefinition Source(string alias) =>
+        static PackageSourceDefinition Source(string alias) =>
             new() { Alias = alias, Type = PackageSourceType.Zip, Location = "x" };
 
         // Act / Assert

@@ -54,7 +54,7 @@ internal sealed class SourceFailureMemo
     /// <summary>
     ///     Guards <see cref="_failures"/>.
     /// </summary>
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     /// <summary>
     ///     The first failure recorded per source alias (case-insensitive) and package ID.
@@ -160,7 +160,7 @@ internal sealed class PackageVersionCache
     /// <summary>
     ///     Guards <see cref="_sources"/> and the per-source entries.
     /// </summary>
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     /// <summary>
     ///     The cached data per source alias (case-insensitive).

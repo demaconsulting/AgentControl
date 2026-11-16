@@ -99,7 +99,7 @@ internal sealed class PackageCredentialCallback
     /// <summary>
     ///     Serializes creation of the memoized answer.
     /// </summary>
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     /// <summary>
     ///     The memoized answer to the feed's first challenge (a credential, or <see langword="null"/>

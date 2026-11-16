@@ -198,7 +198,7 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
     /// <summary>
     ///     Serializes the one-time preparation of <see cref="_root"/>.
     /// </summary>
-    private readonly object _prepareLock = new();
+    private readonly Lock _prepareLock = new();
 
     /// <summary>
     ///     Whether <see cref="_root"/> and its generated configuration have been prepared.

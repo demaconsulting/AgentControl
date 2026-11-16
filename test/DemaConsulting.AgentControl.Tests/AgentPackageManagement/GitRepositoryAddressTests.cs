@@ -384,7 +384,7 @@ public sealed class GitRepositoryAddressTests
     public void GitRepositoryAddress_CacheKey_SchemeAndHostCaseDoNotChangeIt()
     {
         // Arrange
-        GitRepositoryAddress Parse(string text)
+        static GitRepositoryAddress Parse(string text)
         {
             Assert.True(GitRepositoryAddress.TryParse(text, out var address, out var problem), problem);
             return address!;
@@ -408,7 +408,7 @@ public sealed class GitRepositoryAddressTests
     public void GitRepositoryAddress_CacheKey_DifferentRepositoriesHaveDifferentKeys()
     {
         // Arrange
-        GitRepositoryAddress Parse(string text)
+        static GitRepositoryAddress Parse(string text)
         {
             Assert.True(GitRepositoryAddress.TryParse(text, out var address, out var problem), problem);
             return address!;

@@ -1134,7 +1134,7 @@ internal sealed class GitSourceProvider : IPackageSourceProvider, IGitTagPreview
         /// <summary>
         ///     Guards <see cref="Counts"/> and serializes the pruning decisions.
         /// </summary>
-        private static readonly object Gate = new();
+        private static readonly Lock Gate = new();
 
         /// <summary>
         ///     The number of readers holding each folder; a folder with no reader has no entry.

@@ -37,7 +37,7 @@ internal sealed class FakeAgentToolProcessStarter : IAgentToolProcessStarter
     /// <summary>
     ///     Guards <see cref="_started"/>.
     /// </summary>
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     /// <summary>
     ///     The start information received so far, as copies.
