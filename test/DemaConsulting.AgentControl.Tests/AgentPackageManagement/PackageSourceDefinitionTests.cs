@@ -372,7 +372,7 @@ public class PackageSourceDefinitionTests
     public void PackageSourceDefinition_GetGitSettingsProblem_ChecksAddressPatternSubfolderAndPackageId()
     {
         // Arrange
-        PackageSourceDefinition Valid() => new()
+        static PackageSourceDefinition Valid() => new()
         {
             Alias = "Repo",
             Type = PackageSourceType.Git,
@@ -508,7 +508,7 @@ public class PackageSourceDefinitionTests
     {
         // Arrange
         var invalid = "not-a-fingerprint-4419";
-        PackageSourceDefinition Make(PackageSourceType type, bool require, string? fingerprint) =>
+        static PackageSourceDefinition Make(PackageSourceType type, bool require, string? fingerprint) =>
             new() { Alias = "S", Type = type, Location = @"C:\a", RequireSignedPackages = require, SignerFingerprint = fingerprint };
 
         // Act

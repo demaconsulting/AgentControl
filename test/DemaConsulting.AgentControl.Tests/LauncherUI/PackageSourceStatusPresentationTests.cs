@@ -104,7 +104,7 @@ public class PackageSourceStatusPresentationTests
     public void PackageSourceItemViewModel_RequiresSignature_OnlyForSignedNuGetSources()
     {
         // Arrange
-        PackageSourceItemViewModel Row(PackageSourceType type, string location, bool signed) =>
+        static PackageSourceItemViewModel Row(PackageSourceType type, string location, bool signed) =>
             new(new PackageSourceDefinition { Alias = "S", Type = type, Location = location, RequireSignedPackages = signed }, 0);
 
         // Act / Assert
