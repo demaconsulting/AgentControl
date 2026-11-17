@@ -31,8 +31,12 @@ requirements-only precedent already established for other tools in this repo.
 WiX Toolset is consumed via the `DemaConsulting.AgentControl.Msi` project's NuGet package
 references and MSBuild targets, building an MSI from `DemaConsulting.AgentControl`'s published
 output — now a self-contained, single-file publish output rather than a framework-dependent
-one (no `HarvestDirectory` change was required, since it harvests whatever is physically
-present in the published directory). The `package-msi` job in `build.yaml` builds this MSI
-on every pipeline run, then asserts (via FileAssert's `WixToolset_BuildMsiPackage` check) that
+one. `HarvestDirectory` harvests whatever is physically present in the published directory, so
+the switch needed no change to its paths. It does set `SuppressRegistry`: the application
+registers no COM servers or registry data, and heat's registry harvesting otherwise tries to load
+the single-file host `DemaConsulting.AgentControl.exe` as an assembly, which fails with warning
+`HEAT5151`. The harvested file list is unchanged by this setting. The `package-msi` job in
+`build.yaml` builds this MSI on every pipeline run, then asserts (via FileAssert's
+`WixToolset_BuildMsiPackage` check) that
 a non-trivial MSI file exists at the expected output path — a real, TRX-backed evidence
 source. No automated test in this repository installs or exercises the resulting package.
