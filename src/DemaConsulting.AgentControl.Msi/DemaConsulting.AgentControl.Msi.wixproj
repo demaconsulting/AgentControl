@@ -128,11 +128,19 @@
          not at MSBuild item-evaluation time, so it cannot be used directly as a HarvestDirectory
          Include path here. The PublishAgentControlForHarvest target above places its isolated
          "dotnet publish" output at $(AgentControlPublishDir), so that known, real path is
-         harvested instead. -->
+         harvested instead.
+
+         SuppressRegistry (the heat "suppress registry" option) disables heat's registry harvesting,
+         which tries to reflection-load every .exe/.dll as a .NET assembly to extract COM/registry
+         data. The single-file AgentControl.exe is a native host bundle, and reflection-only
+         loading is unsupported on the .NET heat build, so that probe fails with warning HEAT5151.
+         AgentControl registers no COM servers or registry data, so there is nothing to harvest;
+         the generated file/component authoring is identical with or without this setting. -->
     <HarvestDirectory Include="$(AgentControlPublishDir)">
       <ComponentGroupName>AgentControlPublishedComponents</ComponentGroupName>
       <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
       <SuppressRootDirectory>true</SuppressRootDirectory>
+      <SuppressRegistry>true</SuppressRegistry>
     </HarvestDirectory>
   </ItemGroup>
 

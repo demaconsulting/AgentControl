@@ -45,5 +45,11 @@ physically present in the published output directory.
 - `HarvestDirectory` and an explicit `BindPath` both point at that isolated
   publish output directory, so every published file - including
   publish-only native runtime assets - harvests and resolves correctly.
+- `HarvestDirectory` sets `SuppressRegistry` (the heat "suppress registry"
+  option). The application registers no COM servers or registry data, and
+  heat's registry harvesting otherwise tries to reflection-load the native
+  single-file host `DemaConsulting.AgentControl.exe` as an assembly, which
+  fails with warning `HEAT5151`. The harvested file list is unchanged by this
+  setting.
 - See the inline comments in `DemaConsulting.AgentControl.Msi.wixproj` and `Package.wxs`
   for the full root-cause explanation and rationale.
