@@ -39,6 +39,7 @@ input-files:
   - docs/design/agent-control/agent-package-management/package-source-registry.md
   - docs/design/agent-control/agent-package-management/zip-folder-source-provider.md
   - docs/design/agent-control/agent-package-management/nuget-source-provider.md
+  - docs/design/agent-control/agent-package-management/signature-verification-support.md
   - docs/design/agent-control/agent-package-management/package-version.md
   - docs/design/agent-control/agent-package-management/package-version-cache.md
   - docs/design/agent-control/agent-package-management/package-content-identity.md
@@ -54,6 +55,7 @@ input-files:
   - docs/design/agent-control/repo-sync/package-content-extractor.md
   - docs/design/agent-control/repo-sync/package-zip-extractor.md
   - docs/design/agent-control/repo-sync/release-notes-viewer-view-model.md
+  - docs/design/agent-control/repo-sync/git-ignore-ensurer.md
   - docs/design/agent-control/repo-config.md
   - docs/design/agent-control/repo-config/repo-pin-store.md
   - docs/design/agent-control/agent-tool-launcher.md
@@ -63,9 +65,11 @@ input-files:
   - docs/design/agent-control/git-integration.md
   - docs/design/agent-control/git-integration/git-client.md
   - docs/design/agent-control/git-integration/committed-agent-files-cache.md
+  - docs/design/agent-control/git-integration/git-credential-client.md
   - docs/design/agent-control/git-integration/git-remote-client.md
   - docs/design/agent-control/settings.md
   - docs/design/agent-control/settings/settings-store.md
+  - docs/design/agent-control/settings/repo-group-name.md
   - docs/design/agent-control/logging.md
   - docs/design/agent-control/startup.md
   - docs/design/agent-control/startup/startup-options.md

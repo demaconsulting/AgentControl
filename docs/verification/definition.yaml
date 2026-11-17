@@ -36,6 +36,7 @@ input-files:
   - docs/verification/agent-control/agent-package-management/package-source-registry.md
   - docs/verification/agent-control/agent-package-management/zip-folder-source-provider.md
   - docs/verification/agent-control/agent-package-management/nuget-source-provider.md
+  - docs/verification/agent-control/agent-package-management/signature-verification-support.md
   - docs/verification/agent-control/agent-package-management/package-version.md
   - docs/verification/agent-control/agent-package-management/package-version-cache.md
   - docs/verification/agent-control/agent-package-management/package-content-identity.md
@@ -51,6 +52,7 @@ input-files:
   - docs/verification/agent-control/repo-sync/package-content-extractor.md
   - docs/verification/agent-control/repo-sync/package-zip-extractor.md
   - docs/verification/agent-control/repo-sync/release-notes-viewer-view-model.md
+  - docs/verification/agent-control/repo-sync/git-ignore-ensurer.md
   - docs/verification/agent-control/repo-config.md
   - docs/verification/agent-control/repo-config/repo-pin-store.md
   - docs/verification/agent-control/agent-tool-launcher.md
@@ -60,9 +62,11 @@ input-files:
   - docs/verification/agent-control/git-integration.md
   - docs/verification/agent-control/git-integration/git-client.md
   - docs/verification/agent-control/git-integration/committed-agent-files-cache.md
+  - docs/verification/agent-control/git-integration/git-credential-client.md
   - docs/verification/agent-control/git-integration/git-remote-client.md
   - docs/verification/agent-control/settings.md
   - docs/verification/agent-control/settings/settings-store.md
+  - docs/verification/agent-control/settings/repo-group-name.md
   - docs/verification/agent-control/logging.md
   - docs/verification/agent-control/startup.md
   - docs/verification/agent-control/startup/startup-options.md
