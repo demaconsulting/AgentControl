@@ -43,7 +43,8 @@ covering `AgentControl-RepoGroupHeaderViewModel-AccessibleNameIsText`.
 
 **RepoGroupHeaderViewModel_UpdatesInPlace**: The same header instance is updated twice, to one repo expanded and to
 three repos collapsed, and raises the change notification of its accessible name. This scenario is tested by
-`RepoGroupHeaderViewModel_Update_DescribesCountAndState`, covering `AgentControl-RepoGroupHeaderViewModel-UpdatesInPlace`.
+`RepoGroupHeaderViewModel_Update_DescribesCountAndState`, covering
+`AgentControl-RepoGroupHeaderViewModel-UpdatesInPlace`.
 
 **RepoGroupHeaderViewModel_Toggle**: With toggling enabled the toggle command can execute and raises one request.
 This scenario is tested by `RepoGroupHeaderViewModel_ToggleCommand_FollowsToggleEnabled`, covering

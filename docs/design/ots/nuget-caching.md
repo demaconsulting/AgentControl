@@ -78,7 +78,7 @@ The library is consumed as a NuGet package reference in the main project. Every 
 per-user local application-data folder unless a base folder is supplied) so NuGet's configuration
 discovery starts there and never at the target repository or the current directory; the folder
 contains a generated `nuget.config` that redirects the global packages folder into the same
-folder and - only for a source that requires signed packages - states the trusted signers (see _Features Used_).
+folder and - only for a source that requires signed packages - states the trusted signers (see *Features Used*).
 The provider names the configured folder or server address as the only source for each call, verifies the
 unpacked package landed inside that private cache (failing closed if the `NUGET_PACKAGES`
 environment variable redirected it), and reads the package's `content` folder through

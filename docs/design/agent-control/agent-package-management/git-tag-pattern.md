@@ -14,7 +14,7 @@ matching rules are pure and security-relevant (a server chooses the tag names), 
 **GitTagPattern**: `internal sealed class`, immutable and thread-safe, created only by `TryCreate`.
 
 | Member | Type | Meaning and invariant |
-| ------ | ---- | --------------------- |
+| --- | --- | --- |
 | `Placeholder` | `const string` | `{version}`, the only accepted spelling |
 | `Text` | `string` | the validated pattern text, at most 200 characters |
 | `ListingGlob` | `string` | `refs/tags/` + `prefix` + `*`; only narrows the remote listing |

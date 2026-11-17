@@ -36,12 +36,11 @@ give no name. This scenario is tested by `RepoGroupName_Normalize_CleansWhiteSpa
 `AgentControl-RepoGroupName-Normalize` (the cases with text) and `AgentControl-RepoGroupName-NormalizeNothingLeft`
 (the cases with nothing left).
 
-**RepoGroupName_Validate_ReportsEachProblem**: A usable name and a name of exactly 40 characters are acceptable; a
-name of 41 characters is too long; white space and `null` are empty; `Favorites` and `ungrouped` with surrounding spaces
-are reserved. This
-scenario is tested by `RepoGroupName_Validate_ReportsEachProblem`, covering `AgentControl-RepoGroupName-AcceptsUsableName`,
-`AgentControl-RepoGroupName-RefusesBlankName`, `AgentControl-RepoGroupName-RefusesTooLongName` and
-`AgentControl-RepoGroupName-RefusesReservedNames`.
+**RepoGroupName_Validate_ReportsEachProblem**: A usable name and a name of exactly 40 characters are acceptable; a name
+of 41 characters is too long; white space and `null` are empty; `Favorites` and `ungrouped` with surrounding spaces are
+reserved. This scenario is tested by `RepoGroupName_Validate_ReportsEachProblem`, covering
+`AgentControl-RepoGroupName-AcceptsUsableName`, `AgentControl-RepoGroupName-RefusesBlankName`,
+`AgentControl-RepoGroupName-RefusesTooLongName` and `AgentControl-RepoGroupName-RefusesReservedNames`.
 
 **RepoGroupName_Sanitize_RepairsStoredNames**: A name with surrounding spaces is cleaned; a name 15 characters over the
 limit is cut to 40 characters; `FAVORITES`, `Ungrouped`, an empty text and `null` give no group. This scenario is

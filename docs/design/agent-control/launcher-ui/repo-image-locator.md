@@ -4,17 +4,17 @@
 
 #### Purpose
 
-`RepoImageLocator` finds and decodes the picture a repo offers for its card: `icon.png`, else `logo.png`, in the
-repo's root folder. A repo may be untrusted (the user clones whatever they are asked to work on), so the unit's
-single responsibility is to turn "a file some repo put in its folder" into either a small bitmap that is safe to
-show or no picture at all, without ever reading outside the repo, exhausting memory or throwing. Its behavior is
-specified by the unit requirements `AgentControl-RepoImageLocator-FindsPicture`, `-LogoFallback`,
-`-CaseInsensitiveNames`, `-MissingFolder`, `-RootOnly`, `-CrowdedRoot`, `-OnlyGenuinePng`, `-NoEmptyFile`,
-`-HeaderChunkLength`, `-SizeLimit`, `-DimensionLimit`, `-DecodeDimensionLimit`, `-NoLinks`, `-LinkSwap`, `-LinkedRoot`,
-`-LinkedRootSwap`, `-LinkedParentKept`, `-StaysInRoot`, `-ChangedFileRefused`, `-OpenFileVerified`,
-`-MacOsOpenFileVerified`, `-DecodeToTile`, `-NeverFails` and `-ChangeIdentity` (each prefixed
-`AgentControl-RepoImageLocator`), and together with `RepoCardViewModel` (which asks for the picture in the background
-and exposes it, `AgentControl-RepoCardViewModel-RepoPicture`) it provides `AgentControl-LauncherUI-CardIdentityAndStatus`.
+`RepoImageLocator` finds and decodes the picture a repo offers for its card: `icon.png`, else `logo.png`, in the repo's
+root folder. A repo may be untrusted (the user clones whatever they are asked to work on), so the unit's single
+responsibility is to turn "a file some repo put in its folder" into either a small bitmap that is safe to show or no
+picture at all, without ever reading outside the repo, exhausting memory or throwing. Its behavior is specified by the
+unit requirements `AgentControl-RepoImageLocator-FindsPicture`, `-LogoFallback`, `-CaseInsensitiveNames`,
+`-MissingFolder`, `-RootOnly`, `-CrowdedRoot`, `-OnlyGenuinePng`, `-NoEmptyFile`, `-HeaderChunkLength`, `-SizeLimit`,
+`-DimensionLimit`, `-DecodeDimensionLimit`, `-NoLinks`, `-LinkSwap`, `-LinkedRoot`, `-LinkedRootSwap`,
+`-LinkedParentKept`, `-StaysInRoot`, `-ChangedFileRefused`, `-OpenFileVerified`, `-MacOsOpenFileVerified`,
+`-DecodeToTile`, `-NeverFails` and `-ChangeIdentity` (each prefixed `AgentControl-RepoImageLocator`), and together with
+`RepoCardViewModel` (which asks for the picture in the background and exposes it,
+`AgentControl-RepoCardViewModel-RepoPicture`) it provides `AgentControl-LauncherUI-CardIdentityAndStatus`.
 
 #### Data Model
 

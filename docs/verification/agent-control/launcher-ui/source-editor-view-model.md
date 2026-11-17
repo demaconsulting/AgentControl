@@ -111,18 +111,17 @@ a server with its settings. This scenario is tested by
 `AgentControl-SourceEditorViewModel-ServerSource`, `-ServerExamples`, `-InsecureHttpChoice`, `-InsecureHttpWarning`
 (the last tested by the insecure-HTTP toggle test above), `-ServerSettingsSaved` and `-ServerSettingsEdited`.
 
-**SourceEditorViewModel_TestConnection_ReportsEveryOutcomeInWords**: The test is available only with a valid
-address and a package ID (the disabled button's tooltip says what is missing). A successful test lists the
-first package ID only, uses a placeholder alias when none was typed, and reports the version count and newest;
-a server without the package is "Package not found"; each failure kind - sign-in failed, access denied, sign-in canceled,
-timed out, server unreachable - gets its own headline with the provider's message; a configuration error
-raised when the provider is created and an unexpected failure are both reported in the dialog; canceling a
-running test shows progress naming the package, ends with a neutral "canceled" result, and the test can be run
-again; a result is dropped when the address changes. A test that is still running when the address, the package IDs
-or the "Allow insecure HTTP" choice change is canceled and its eventual result is never shown: the test holds the
-fake provider at the gate, edits the input, releases the provider and observes that no result, title or error appears
-and that the dialog can test again. This scenario is tested by
-`SourceEditorViewModel_CanTestConnection_NeedsValidAddressAndPackageId`,
+**SourceEditorViewModel_TestConnection_ReportsEveryOutcomeInWords**: The test is available only with a valid address and
+a package ID (the disabled button's tooltip says what is missing). A successful test lists the first package ID only,
+uses a placeholder alias when none was typed, and reports the version count and newest; a server without the package is
+"Package not found"; each failure kind - sign-in failed, access denied, sign-in canceled, timed out, server
+unreachable - gets its own headline with the provider's message; a configuration error raised when the provider is
+created and an unexpected failure are both reported in the dialog; canceling a running test shows progress naming the
+package, ends with a neutral "canceled" result, and the test can be run again; a result is dropped when the address
+changes. A test that is still running when the address, the package IDs or the "Allow insecure HTTP" choice change is
+canceled and its eventual result is never shown: the test holds the fake provider at the gate, edits the input, releases
+the provider and observes that no result, title or error appears and that the dialog can test again. This scenario is
+tested by `SourceEditorViewModel_CanTestConnection_NeedsValidAddressAndPackageId`,
 `SourceEditorViewModel_TestConnection_ServerAnswers_ReportsVersionCountAndLatest`,
 `SourceEditorViewModel_TestConnection_PackageMissing_ReportsPackageNotFound`,
 `SourceEditorViewModel_TestConnection_ProviderFails_ReportsHeadlineAndMessage`,

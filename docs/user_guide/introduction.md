@@ -1219,15 +1219,15 @@ properties, along with a scrollable list of this application's direct third-part
 
 # Using the Keyboard in Dialogs
 
-Every dialog (Settings, the package source editors, the sign-in dialog, Select Package, confirmations, message
-boxes, the group name prompt and About) is modal: the window behind it cannot be used until you close it. When a
-dialog opens, the keyboard focus is already in it - on its first field or button (a confirmation starts on the safe
-answer, **No**) - and, when you use the keyboard, it is drawn with a focus ring. **Tab** and **Shift+Tab** move between
-the dialog's controls and wrap around inside the dialog; they never reach the window behind it. **Escape** cancels a
-dialog that can be cancelled (a confirmation answers No; a message box, About, Select Package, the group name prompt,
-the source editors and the sign-in dialog close without applying anything). Settings has no Escape, so a stray key press
-cannot throw away your changes; use **Save**, or the window's close button to leave without saving. When a dialog closes,
-the focus is back where it was in the main window.
+Every dialog (Settings, the package source editors, the sign-in dialog, Select Package, confirmations, message boxes,
+the group name prompt and About) is modal: the window behind it cannot be used until you close it. When a dialog opens,
+the keyboard focus is already in it - on its first field or button (a confirmation starts on the safe answer, **No**) -
+and, when you use the keyboard, it is drawn with a focus ring. **Tab** and **Shift+Tab** move between the dialog's
+controls and wrap around inside the dialog; they never reach the window behind it. **Escape** cancels a dialog that can
+be cancelled (a confirmation answers No; a message box, About, Select Package, the group name prompt, the source editors
+and the sign-in dialog close without applying anything). Settings has no Escape, so a stray key press cannot throw away
+your changes; use **Save**, or the window's close button to leave without saving. When a dialog closes, the focus is
+back where it was in the main window.
 
 # Authoring Agent Packages
 

@@ -101,14 +101,14 @@ configuration directory holds exactly the settings file, with the second save's 
 scenario is tested by `SettingsStore_Save_RepeatedSaves_LeavesOnlySettingsFileWithLatestContent`,
 covering `AgentControl-SettingsStore-AtomicSave`.
 
-**SettingsStore_LockedFileTolerance_RetriesTransientLocksOnly**: A replace that fails with a sharing violation, a
-lock violation or access denied three times and then works saves the settings with waits of 20, 40 and 80 ms and no
-error; a replace that always fails with a sharing violation is attempted exactly `ReplaceMaxAttempts` times with
-bounded waits (each at most `ReplaceMaxDelay`, at most 1 s in total), then fails with `InvalidOperationException`,
-keeps the earlier file and leaves no temporary file; a full-disk error, a missing directory and a plain I/O error are
-attempted once, without waiting; the settings file really held open without delete sharing, and released during the
-back-off, is saved (on Windows after exactly two waits); and the seeded repo order written back by a load survives two
-locked attempts and reaches the file. This scenario is tested by `SettingsStore_Save_ReplaceBrieflyLocked_RetriesAndSaves`,
+**SettingsStore_LockedFileTolerance_RetriesTransientLocksOnly**: A replace that fails with a sharing violation, a lock
+violation or access denied three times and then works saves the settings with waits of 20, 40 and 80 ms and no error; a
+replace that always fails with a sharing violation is attempted exactly `ReplaceMaxAttempts` times with bounded waits
+(each at most `ReplaceMaxDelay`, at most 1 s in total), then fails with `InvalidOperationException`, keeps the earlier
+file and leaves no temporary file; a full-disk error, a missing directory and a plain I/O error are attempted once,
+without waiting; the settings file really held open without delete sharing, and released during the back-off, is saved
+(on Windows after exactly two waits); and the seeded repo order written back by a load survives two locked attempts and
+reaches the file. This scenario is tested by `SettingsStore_Save_ReplaceBrieflyLocked_RetriesAndSaves`,
 `SettingsStore_Save_ReplaceLockedBeyondRetries_ThrowsInvalidOperationAndCleansUp`,
 `SettingsStore_Save_NonTransientReplaceFailure_IsNotRetried`,
 `SettingsStore_Save_SettingsFileHeldOpenThenReleased_Saves` and
@@ -123,11 +123,11 @@ file holds it by name. This scenario is tested by `SettingsStore_SaveThenLoad_Th
 (as does a new `AppSettings`). This scenario is tested by `SettingsStore_Load_NoThemeValue_DefaultsToSystem`,
 covering `AgentControl-SettingsStore-ThemeDefaultsToSystem`.
 
-**SettingsStore_Theme_InvalidValueReadsAsSystem**: An unknown name, an empty string, an out-of-range or negative
-number, null, a boolean, an object and an array all load as the system default - with the setting that follows the
-value still read, proving the reader stays positioned - while a name in another letter case and a defined number are
-accepted as the theme they name. This scenario is tested by `SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem`,
-covering `AgentControl-SettingsStore-ThemeInvalidReadsAsSystem`.
+**SettingsStore_Theme_InvalidValueReadsAsSystem**: An unknown name, an empty string, an out-of-range or negative number,
+null, a boolean, an object and an array all load as the system default - with the setting that follows the value still
+read, proving the reader stays positioned - while a name in another letter case and a defined number are accepted as the
+theme they name. This scenario is tested by `SettingsStore_Load_UnknownOrInvalidTheme_FallsBackToSystem`, covering
+`AgentControl-SettingsStore-ThemeInvalidReadsAsSystem`.
 
 **SettingsStore_KeepShellOpen_RoundTrips**: Both keep-shell-open choices survive a save and a load, and the file holds
 a JSON boolean. This scenario is tested by `SettingsStore_SaveThenLoad_KeepShellOpen_RoundTrips`, covering

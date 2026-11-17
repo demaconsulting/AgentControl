@@ -75,12 +75,10 @@
     },
     {
       "label": "lint markdown",
-      "command": "npx",
+      "command": "dotnet",
       "type": "shell",
       "args": [
-        "markdownlint-cli2",
-        "\"**/*.md\"",
-        "\"#node_modules\""
+        "lintmark"
       ],
       "problemMatcher": [],
       "presentation": {
@@ -102,11 +100,25 @@
       }
     },
     {
+      "label": "setup python venv",
+      "detail": "Creates .venv and installs pip-requirements.txt, as lint.ps1 and fix.ps1 do",
+      "type": "shell",
+      "command": "python3 -m venv .venv && .venv/bin/pip install -r pip-requirements.txt --quiet --disable-pip-version-check",
+      "windows": {
+        "command": "python -m venv .venv; if ($?) { .venv\\Scripts\\pip install -r pip-requirements.txt --quiet --disable-pip-version-check }"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "lint yaml",
-      "command": "npx",
+      "dependsOn": "setup python venv",
+      "command": "${workspaceFolder}/.venv/bin/yamllint",
+      "windows": {
+        "command": "${workspaceFolder}\\.venv\\Scripts\\yamllint.exe"
+      },
+      "detail": "Uses the .venv that lint.ps1 and fix.ps1 create from pip-requirements.txt",
       "type": "shell",
       "args": [
-        "yamllint",
         "."
       ],
       "problemMatcher": [],

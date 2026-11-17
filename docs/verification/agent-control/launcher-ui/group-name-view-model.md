@@ -33,13 +33,13 @@ the limit, and a valid name typed; the message and `CanAccept` follow the curren
 tested by `GroupNameViewModel_TooLongName_ShowsLengthMessage` and
 `GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName`, covering `AgentControl-GroupNameViewModel-ValidatesAsTyped`.
 
-**GroupNameViewModel_NeutralUntilTyped**: A new-group prompt with nothing typed has no error and cannot be accepted
-(the accept command cannot execute). This scenario is tested by
-`GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName`, covering `AgentControl-GroupNameViewModel-NeutralUntilTyped`.
+**GroupNameViewModel_NeutralUntilTyped**: A new-group prompt with nothing typed has no error and cannot be accepted (the
+accept command cannot execute). This scenario is tested by `GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName`,
+covering `AgentControl-GroupNameViewModel-NeutralUntilTyped`.
 
-**GroupNameViewModel_RefusesBlankName**: A blank name is typed; the message says it cannot be blank, the name cannot
-be accepted and nothing completes. This scenario is tested by
-`GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept`, covering `AgentControl-GroupNameViewModel-RefusesBlankName`.
+**GroupNameViewModel_RefusesBlankName**: A blank name is typed; the message says it cannot be blank, the name cannot be
+accepted and nothing completes. This scenario is tested by `GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept`,
+covering `AgentControl-GroupNameViewModel-RefusesBlankName`.
 
 **GroupNameViewModel_RefusesTooLongName**: A name one over the limit shows the message that names the limit and cannot
 be accepted; a name of exactly the limit has no error and can be accepted. This scenario is tested by
@@ -52,7 +52,8 @@ says they are built in, they cannot be accepted and nothing completes. This scen
 
 **GroupNameViewModel_AcceptsUsableName**: A valid name padded with spaces and with repeated inner spaces has no error
 and no note, can be accepted, and the prompt completes with the cleaned name. This scenario is tested by
-`GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName`, covering `AgentControl-GroupNameViewModel-AcceptsUsableName`.
+`GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName`, covering
+`AgentControl-GroupNameViewModel-AcceptsUsableName`.
 
 **GroupNameViewModel_NewGroup**: With the group *Work* existing, the name `work` is typed; there is no error and the
 name can be accepted. This scenario is tested by `GroupNameViewModel_NewGroup_ExistingName_HintsAndAdoptsSpelling`,

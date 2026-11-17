@@ -75,8 +75,15 @@
       ],
       "rollForward": false
     },
+    "demaconsulting.lintmark": {
+      "version": "0.1.0-beta.2",
+      "commands": [
+        "lintmark"
+      ],
+      "rollForward": false
+    },
     "demaconsulting.canvasnet.tool": {
-      "version": "0.2.0-beta.10",
+      "version": "0.2.0-beta.11",
       "commands": [
         "canvasnet"
       ],

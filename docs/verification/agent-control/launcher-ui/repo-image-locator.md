@@ -18,14 +18,14 @@ test run on an account that may not create a link skips the test, like the repo'
 test is no evidence). The replacement cases model the race by changing the folder between `Find` and `Decode`.
 
 A swap between the check and the open cannot be forced from a test, so the check of the open handle is verified from
-both sides that can be reached. `RepoImageLocator_GetFinalPath_OpenedThroughLinkedFolder_NamesTheRealFile` opens a
-file through a symbolic-linked folder and asserts that the operating system's answer to "which file is this handle?"
+both sides that can be reached. `RepoImageLocator_GetFinalPath_OpenedThroughLinkedFolder_NamesTheRealFile` opens a file
+through a symbolic-linked folder and asserts that the operating system's answer to "which file is this handle?"
 (`GetFinalPath`, the same call the open uses) is the real path, with the link on the way resolved.
 `RepoImageLocator_FindAndDecode_OrdinaryRepo_PassesTheOpenHandleCheck` runs the whole `Find`/`Decode` path on an
-ordinary repo on every operating system: because an unknown answer means no picture, a missing or wrong answer
-(on macOS, the file-control call with its ARM64 variadic quirk) would make it fail. Those two tests, run on macOS, are the
-evidence for the macOS handle check. The positive side of a repo under a linked parent folder, where the resolved
-paths differ from the given ones, is verified as well; the rest is by review of the design.
+ordinary repo on every operating system: because an unknown answer means no picture, a missing or wrong answer (on
+macOS, the file-control call with its ARM64 variadic quirk) would make it fail. Those two tests, run on macOS, are the
+evidence for the macOS handle check. The positive side of a repo under a linked parent folder, where the resolved paths
+differ from the given ones, is verified as well; the rest is by review of the design.
 
 The crowded-root case creates thousands of unrelated files next to a picture spelled in another case; it proves the
 picture is still found when the root is looked into by name, not that the cost is flat (no timing assertion is made).
@@ -132,8 +132,8 @@ outside the repo is refused by `Decode`. This scenario is tested by
 `macos@RepoImageLocator_Decode_IconReplacedBySymbolicLinkAfterFind_ReturnsNull`, covering
 `AgentControl-RepoImageLocator-LinkSwap`.
 
-**RepoImageLocator_LinkedRoot**: A root that is a junction (Windows only) or a symbolic link, leading to a folder with
-a valid `icon.png`, has no picture. This scenario is tested by `windows@RepoImageLocator_Find_RootIsJunction_ReturnsNull`
+**RepoImageLocator_LinkedRoot**: A root that is a junction (Windows only) or a symbolic link, leading to a folder with a
+valid `icon.png`, has no picture. This scenario is tested by `windows@RepoImageLocator_Find_RootIsJunction_ReturnsNull`
 and by `RepoImageLocator_Find_RootIsSymbolicLink_ReturnsNull` on `windows@`, `ubuntu@` and `macos@`, covering
 `AgentControl-RepoImageLocator-LinkedRoot`.
 
@@ -156,8 +156,9 @@ for a file one folder below the root is refused by `Decode`. This scenario is te
 `RepoImageLocator_Decode_FileOutsideTheRecordedRoot_ReturnsNull`, covering `AgentControl-RepoImageLocator-StaysInRoot`.
 
 **RepoImageLocator_ChangedFileRefused**: A corrupt (valid header, no image data), a deleted and a replaced (no longer a
-PNG) file give no bitmap. This scenario is tested by `RepoImageLocator_Decode_CorruptVanishedOrReplacedFile_ReturnsNull`,
-covering `AgentControl-RepoImageLocator-ChangedFileRefused`.
+PNG) file give no bitmap. This scenario is tested by
+`RepoImageLocator_Decode_CorruptVanishedOrReplacedFile_ReturnsNull`, covering
+`AgentControl-RepoImageLocator-ChangedFileRefused`.
 
 **RepoImageLocator_OpenFileVerified**: The operating system's final path of a file opened through a symbolic-linked
 folder names the real file (not the linked folder), and the picture of an ordinary repo is offered and decoded, which
