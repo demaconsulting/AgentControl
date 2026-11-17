@@ -741,8 +741,8 @@ over several lines (up to a maximum height, then it scrolls), has a tooltip with
 
 `MainWindow` explicitly tracks every non-modal child window it opens (the `ReleaseNotesViewer`)
 in an `_openChildWindows` list via a `ShowTrackedChildWindow(Window)` helper,
-which also subscribes to each window's `Closed` event to remove it from the list, and force-
-closes any still-open entries from a `MainWindow_Closing` handler before the main window
+which also subscribes to each window's `Closed` event to remove it from the list, and force-closes
+any still-open entries from a `MainWindow_Closing` handler before the main window
 itself finishes closing. This deliberately does *not* use Avalonia/Win32 window ownership
 (`Show(owner)`): an earlier attempt at that approach caused an owned child window to actively
 block its owner's own close on Windows, a worse regression than the one being fixed. Without

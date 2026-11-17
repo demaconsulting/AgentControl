@@ -296,8 +296,8 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
 - *Parameters*: `AppSettings updated`.
 - *Returns*: `void`.
 - *Preconditions*: `updated` is not null.
-- *Postconditions*: The live settings instance is replaced (preserving the existing recent-
-  repos list in its order together with its `HasUserRepoOrder` marker, and the collapsed-section names, since
+- *Postconditions*: The live settings instance is replaced (preserving the existing recent-repos
+  list in its order together with its `HasUserRepoOrder` marker, and the collapsed-section names, since
   `SettingsWindowViewModel` never owns them - `AgentControl-MainWindowViewModel-OrderKeptOnApplySettings`) only after
   the candidate has been
   persisted successfully — if the write fails, the previous instance stays live, so a later save

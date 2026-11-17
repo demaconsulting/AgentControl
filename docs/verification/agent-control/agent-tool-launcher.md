@@ -12,11 +12,11 @@ Windows shell. The `ShellKind` enum and the `IAgentToolProcessStarter` interface
 dedicated test file and are exercised as values and a seam used by the units and the subsystem
 tests.
 
-Per the naming-collision convention shared with `docs/reqstream/agent-control/agent-tool-
-launcher.yaml`, this subsystem and one of its units share the plain name "AgentToolLauncher";
-the folder/file path disambiguates them (this file lives at `agent-control/agent-tool-
-launcher.md` for the subsystem, versus `agent-control/agent-tool-launcher/agent-tool-
-launcher.md` for the unit).
+Per the naming-collision convention shared with `docs/reqstream/agent-control/agent-tool-launcher.yaml`,
+this subsystem and one of its units share the plain name "AgentToolLauncher";
+the folder/file path disambiguates them (this file lives at `agent-control/agent-tool-launcher.md`
+for the subsystem, versus `agent-control/agent-tool-launcher/agent-tool-launcher.md`
+for the unit).
 
 ### Test Environment
 
