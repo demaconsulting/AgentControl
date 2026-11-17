@@ -183,33 +183,30 @@ a trailing separator; `string.GetHashCode` is deliberately not used because it i
 would change a repo's color on every launch. The view model carries no color: the style class selects theme-aware
 `AvatarBackgroundN`/`AvatarForegroundN` resources (letter color chosen for contrast) from `AppStyles.axaml`.
 
-**Group and card color** (user-specific; stored only on the repo's `RecentRepo` in the per-user settings, never in
-the repository or its pin file). **GroupName** reads the stored name through `RepoGroupName.Sanitize` (a blank,
-overlong or reserved stored value yields a valid name or none), **HasGroup** is `GroupName is not null`, and
-**ShowGroupChip** (`IsFavorite && HasGroup`, `AgentControl-RepoCardViewModel-GroupChipForFavorites`) tells the card to
-show its group as a chip - needed only for a favorite,
-because a favorite is listed under Favorites instead of under its group. **MoveToGroup(name)** moves the repo into a
-group or, with `null`/blank, out of every group: the name is cleaned up, refused (returns `false`, nothing changes)
-when `RepoGroupName.Validate` fails (too long, or *Favorites*/*Ungrouped*), and given the spelling of an existing
-group that matches ignoring letter case (`GetExistingGroupNames()`, from the groups of all repos in the live
-settings, `AgentControl-RepoCardViewModel-GroupNameRules`, `-GroupList`); a real change is made through the owner
-(see *Changes go through the owner*) and, once saved, raises `GroupChanged` for `MainWindowViewModel` to re-section
-(`AgentControl-RepoCardViewModel-MoveToGroup`). **NewGroupCommand** raises `NewGroupRequested` (the view shows the
-name prompt and calls `MoveToGroup`; `-NewGroupPrompt`); **RemoveFromGroupCommand** (available while `HasGroup`) calls
-`MoveToGroup(null)`. **CardColorName** is the palette color's name read through `CardColorPalette.Find` - a missing,
-blank or unknown stored name gives `null`, the automatic color (**HasCustomCardColor**, **IsCardColorAutomatic**,
-`-CardColorStoredFallback`) -
-and **SetCardColor(name)** stores a palette name (letter case ignored; refused with `false` when not in the palette,
-`-CardColorUnknownRefused`)
-or `null` for Automatic, through the owner, then raises `CardColorChanged` and changes
-`AvatarColorIndex`/`AvatarStyleClass` (`-CardColor`, `-CardColorRecorded`). Only the tile
-changes: **Status**, the accent bar and every chip are independent of the color
-(`AgentControl-RepoCardViewModel-CardColorKeepsStatus`). `CardColorPalette` is a small static helper of this unit: ten named
-entries (Blue, Violet, Magenta, Green, Amber, Teal, Orange, Indigo, Red, Lime) whose position is the index of the
-theme-aware `AvatarBackgroundN`/`AvatarForegroundN` resources, so a chosen color is the same palette the automatic
-colors come from. Where the repo shows its own picture the tile keeps its light backing (so a logo drawn for a
-white page stays legible) and a chosen color is drawn as a 3 px ring around the picture (the `customColor`
-class); with no picture the color fills the tile and the letters use the entry's foreground resource.
+**Group and card color** (user-specific; stored only on the repo's `RecentRepo` in the per-user settings, never in the
+repository or its pin file). **GroupName** reads the stored name through `RepoGroupName.Sanitize` (a blank, overlong or
+reserved stored value yields a valid name or none), **HasGroup** is `GroupName is not null`, and **ShowGroupChip**
+(`IsFavorite && HasGroup`, `AgentControl-RepoCardViewModel-GroupChipForFavorites`) tells the card to show its group as a
+chip - needed only for a favorite, because a favorite is listed under Favorites instead of under its group.
+**MoveToGroup(name)** moves the repo into a group or, with `null`/blank, out of every group: the name is cleaned up,
+refused (returns `false`, nothing changes) when `RepoGroupName.Validate` fails (too long, or *Favorites*/*Ungrouped*),
+and given the spelling of an existing group that matches ignoring letter case (`GetExistingGroupNames()`, from the
+groups of all repos in the live settings, `AgentControl-RepoCardViewModel-GroupNameRules`, `-GroupList`); a real change
+is made through the owner (see *Changes go through the owner*) and, once saved, raises `GroupChanged` for
+`MainWindowViewModel` to re-section (`AgentControl-RepoCardViewModel-MoveToGroup`). **NewGroupCommand** raises
+`NewGroupRequested` (the view shows the name prompt and calls `MoveToGroup`; `-NewGroupPrompt`);
+**RemoveFromGroupCommand** (available while `HasGroup`) calls `MoveToGroup(null)`. **CardColorName** is the palette
+color's name read through `CardColorPalette.Find` - a missing, blank or unknown stored name gives `null`, the automatic
+color (**HasCustomCardColor**, **IsCardColorAutomatic**, `-CardColorStoredFallback`) - and **SetCardColor(name)** stores
+a palette name (letter case ignored; refused with `false` when not in the palette, `-CardColorUnknownRefused`) or `null`
+for Automatic, through the owner, then raises `CardColorChanged` and changes `AvatarColorIndex`/`AvatarStyleClass`
+(`-CardColor`, `-CardColorRecorded`). Only the tile changes: **Status**, the accent bar and every chip are independent
+of the color (`AgentControl-RepoCardViewModel-CardColorKeepsStatus`). `CardColorPalette` is a small static helper of
+this unit: ten named entries (Blue, Violet, Magenta, Green, Amber, Teal, Orange, Indigo, Red, Lime) whose position is
+the index of the theme-aware `AvatarBackgroundN`/`AvatarForegroundN` resources, so a chosen color is the same palette
+the automatic colors come from. Where the repo shows its own picture the tile keeps its light backing (so a logo drawn
+for a white page stays legible) and a chosen color is drawn as a 3 px ring around the picture (the `customColor` class);
+with no picture the color fills the tile and the letters use the entry's foreground resource.
 
 **Repo picture** (`AgentControl-RepoCardViewModel-RepoPicture`): **RepoImage** (`Bitmap?`), **HasRepoImage**,
 **ShowAvatarInitials** and **ShowAvatarFolderGlyph** tell the tile what to show. `RefreshCheap` starts
@@ -565,24 +562,23 @@ them or asks when they are not.
   own precedent.
 
 **Pull**: Runs `git pull` in the repo, then refreshes the whole card the way `RefreshAsync` does
-(`AgentControl-RepoCardViewModel-Pull`). Reports success/failure via `StatusMessage`, never
-throwing for a failed pull. A pull can change the pin file, the branch, which agent files are committed and the working
-tree, so after every completed pull - a refused one too, because a merge that stopped on a conflict has already changed
-the working tree and may have written conflict markers into the pin file - it runs the shared private refresh core
-(`RefreshCheap`, the upgrade check with `allowPrompt: true` and `relistSources: true`, then `RefreshDirtyStatus`,
-the very sequence behind `RefreshAsync`). The core runs inside the pull's own busy operation and does not take
-`IsBusy` again, so there is no nested operation to be refused. The user explicitly acted, so, like Refresh, the check
-may ask for a sign-in and reads every source again. The refresh token is the operation's token (the pull itself is
-never interrupted and has no Cancel button; only `Retire` or the caller's token can cancel the refresh part). A pull that
-has completed cannot be undone, so canceling the refresh part never loses its outcome: the cancellation is caught
-inside the pull operation (it does not reach the generic "The operation was canceled." handling), the pull's
-`StatusMessage` and `LastActionFailed` are kept, the working-tree status is still read (cheap, and the most direct effect
-of a pull) unless the card was retired - a retired card checks nothing - and the upgrade state stays as it was, as for a
-cancelled Refresh. The
-refresh must not replace the pull's outcome: `StatusMessage` and `LastActionFailed` keep the pull's result, and the only
-status text the refresh can set - a failure to read the pin file the pull just changed - is appended after it. A pull
-that could not be started at all (`InvalidOperationException` from `GitClient.Pull`) is reported through
-`ErrorOccurred` and refreshes nothing.
+(`AgentControl-RepoCardViewModel-Pull`). Reports success/failure via `StatusMessage`, never throwing for a failed pull.
+A pull can change the pin file, the branch, which agent files are committed and the working tree, so after every
+completed pull - a refused one too, because a merge that stopped on a conflict has already changed the working tree and
+may have written conflict markers into the pin file - it runs the shared private refresh core (`RefreshCheap`, the
+upgrade check with `allowPrompt: true` and `relistSources: true`, then `RefreshDirtyStatus`, the very sequence behind
+`RefreshAsync`). The core runs inside the pull's own busy operation and does not take `IsBusy` again, so there is no
+nested operation to be refused. The user explicitly acted, so, like Refresh, the check may ask for a sign-in and reads
+every source again. The refresh token is the operation's token (the pull itself is never interrupted and has no Cancel
+button; only `Retire` or the caller's token can cancel the refresh part). A pull that has completed cannot be undone, so
+canceling the refresh part never loses its outcome: the cancellation is caught inside the pull operation (it does not
+reach the generic "The operation was canceled." handling), the pull's `StatusMessage` and `LastActionFailed` are kept,
+the working-tree status is still read (cheap, and the most direct effect of a pull) unless the card was retired - a
+retired card checks nothing - and the upgrade state stays as it was, as for a cancelled Refresh. The refresh must not
+replace the pull's outcome: `StatusMessage` and `LastActionFailed` keep the pull's result, and the only status text the
+refresh can set - a failure to read the pin file the pull just changed - is appended after it. A pull that could not be
+started at all (`InvalidOperationException` from `GitClient.Pull`) is reported through `ErrorOccurred` and refreshes
+nothing.
 
 **Upgrade**: Finds the newest version of the pinned package across all configured sources that offer it (a tie keeps
 Settings order), then

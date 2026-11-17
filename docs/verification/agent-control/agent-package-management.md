@@ -329,15 +329,16 @@ covering `AgentControl-AgentPackageManagement-ContentIdentity` and
 `AgentControl-AgentPackageManagement-ContentIdentityComparable`.
 
 **AgentPackageManagement_InstalledFilesIdentity_UntouchedExtractionHasThePackagesIdentity**: The identity of the agent
-files installed in a repo (`PackageContentIdentity.ComputeInstalledFilesIdentity`) is the same algorithm that
-identifies a package, so the files of a zip package, an unpacked package folder and a layout folder, each extracted
-into a repo, have exactly the identity the package's reader reported, while a missing, changed, renamed or extra file
-gives another one and a linked managed folder is refused. The end-to-end round trip through the real readers and the
-extractor is the `RepoSync` subsystem test, which is cited here because the subsystem has no reader of its own for a
-repo's files; the individual rules are verified by the `PackageContentIdentity` unit tests. This scenario is tested by
+files installed in a repo (`PackageContentIdentity.ComputeInstalledFilesIdentity`) is the same algorithm that identifies
+a package, so the files of a zip package, an unpacked package folder and a layout folder, each extracted into a repo,
+have exactly the identity the package's reader reported, while a missing, changed, renamed or extra file gives another
+one and a linked managed folder is refused. The end-to-end round trip through the real readers and the extractor is the
+`RepoSync` subsystem test, which is cited here because the subsystem has no reader of its own for a repo's files; the
+individual rules are verified by the `PackageContentIdentity` unit tests. This scenario is tested by
 `RepoSync_InstalledFiles_ExtractionFromZipFolderAndLayoutPackages_HasThePackagesIdentity`, covering
-`AgentControl-AgentPackageManagement-InstalledFilesIdentity` (children: `AgentControl-PackageContentIdentity-InstalledFilesIdentity`,
-`-InstalledIdentityDetectsDifferences` and `-InstalledIdentityFailsSafely`).
+`AgentControl-AgentPackageManagement-InstalledFilesIdentity` (children:
+`AgentControl-PackageContentIdentity-InstalledFilesIdentity`, `-InstalledIdentityDetectsDifferences` and
+`-InstalledIdentityFailsSafely`).
 
 **AgentPackageManagement_AcrossSources_ListsOffersInConfigurationOrderAndNewestWins**: Through the registry and the
 version cache, three zip sources offer the package, one of them being excluded from the listing, and a fourth

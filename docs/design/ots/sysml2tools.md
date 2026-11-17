@@ -5,13 +5,12 @@ and renders its declared views to SVG diagrams consumed by the design documentat
 
 ### Purpose
 
-SysML2Tools provides the toolchain that keeps AgentControl's architecture model
-(`docs/sysml2/model/**/*.sysml`, with shared metadata in `docs/sysml2/common/`) and its declared views (`docs/sysml2/views/design-views.sysml`)
-consistent with the design documentation. It validates the model for syntax and reference errors,
-and renders each declared view to an SVG diagram embedded directly in the corresponding design
-document (for example `docs/design/introduction.md` embeds `SoftwareStructureView.svg`). AI agents
-also query the model directly via the `sysml2tools-query` skill rather than parsing the rendered
-diagrams or hand-maintained prose.
+SysML2Tools provides the toolchain that keeps AgentControl's architecture model (`docs/sysml2/model/**/*.sysml`, with
+shared metadata in `docs/sysml2/common/`) and its declared views (`docs/sysml2/views/design-views.sysml`) consistent
+with the design documentation. It validates the model for syntax and reference errors, and renders each declared view to
+an SVG diagram embedded directly in the corresponding design document (for example `docs/design/introduction.md` embeds
+`SoftwareStructureView.svg`). AI agents also query the model directly via the `sysml2tools-query` skill rather than
+parsing the rendered diagrams or hand-maintained prose.
 
 SysML2Tools is chosen because it is the reference implementation for the SysML v2 subset used by
 this project's Continuous Compliance methodology, and it integrates directly with the same

@@ -91,9 +91,9 @@ latest version is offered). This scenario is tested by
 `PackageVersionCache_IsNewerVersionAvailable_PinDoesNotParse_OffersLatest`.
 
 **PackageVersionCache_ListAcrossSources_ConfigurationOrderAndExclusion**: Through a registry of fake sources, listing
-across sources returns each source's offers in the order the sources are configured, each source's versions from
-highest to lowest, leaves out the source it is told to exclude without contacting it, and reads each source only once.
-This scenario is tested by `PackageVersionCache_GetVersionsAcrossSources_ReturnsOffersInConfigurationOrderAndExcludesAlias`,
+across sources returns each source's offers in the order the sources are configured, each source's versions from highest
+to lowest, leaves out the source it is told to exclude without contacting it, and reads each source only once. This
+scenario is tested by `PackageVersionCache_GetVersionsAcrossSources_ReturnsOffersInConfigurationOrderAndExcludesAlias`,
 covering `AgentControl-PackageVersionCache-ListAcrossSources`.
 
 **PackageVersionCache_ListAcrossSources_ToleratesFailingSources**: A source that cannot be read is skipped and the

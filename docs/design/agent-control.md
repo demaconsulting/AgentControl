@@ -272,14 +272,13 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   sensible control takes the focus when it opens, and Escape cancels a dialog that can be cancelled.
 
 **Where the user's choices live, and what a failed save does.** Favorites, last-launch times, the order of the repos,
-groups, card colors,
-which sections are collapsed and the theme are the user's own: they are stored only in the per-user settings file
-(`Settings`), never in a repo and not in its `.agentcontrol.json`, which holds nothing but the package pin. A change
-the user makes in the main window is made as one transaction by `MainWindowViewModel`: it is tried on a candidate copy of
-the settings, the candidate is saved, and only when the save succeeded is the same change applied to the live
-settings and the list refreshed (candidate copy, save, commit, refresh). A change that comes from a card goes through
-a callback the owner supplies to `RepoCardViewModel`. When the save fails nothing changes: the live settings, the
-cards, the displayed list and the file stay as they were, so a later unrelated save can never write the failed
+groups, card colors, which sections are collapsed and the theme are the user's own: they are stored only in the per-user
+settings file (`Settings`), never in a repo and not in its `.agentcontrol.json`, which holds nothing but the package
+pin. A change the user makes in the main window is made as one transaction by `MainWindowViewModel`: it is tried on a
+candidate copy of the settings, the candidate is saved, and only when the save succeeded is the same change applied to
+the live settings and the list refreshed (candidate copy, save, commit, refresh). A change that comes from a card goes
+through a callback the owner supplies to `RepoCardViewModel`. When the save fails nothing changes: the live settings,
+the cards, the displayed list and the file stay as they were, so a later unrelated save can never write the failed
 change, and the user is told. Card and header changes (including collapsing a section) are reported through the
 view-model's `SettingsSaveFailed` event, which the main window shows in a message box; adding or removing a repo and
 renaming or removing a group fail with an `InvalidOperationException` that the window reports. Settings edited in the
@@ -583,32 +582,28 @@ an unwanted or repeated file write.
    (`AgentControl-System-ResponsiveOperations`). In the same refresh it asks `RepoImageLocator` on a worker thread for
    the repo's picture (an untrusted file; see *Risk Control Measures*), and a repo whose folder is missing is marked
    so, keeping only the "Check again" refresh available (`AgentControl-System-MissingRepoRecheck`).
-4. User actions on a card dispatch to the relevant subsystem: Pull to `GitClient.Pull`
-   (gated on a clean working tree, `AgentControl-System-Pull`); Launch to
-   `RepoCardViewModel`'s pre-launch check (`PackageContentExtractor.HasInstalledFiles`, then
-   `PackageContentIdentity.ComputeInstalledFilesIdentity` compared with the pin's identity - no package access when
-   the files match; a silent install, a keep-or-update question or a launch-anyway-or-cancel question otherwise,
-   re-extracting via `PackageContentExtractor` only when files must be installed or updated) followed by
-   `AgentToolLauncher.BuildProcessStartInfo` (with the keep-shell-open setting) and an injected process starter
-   (`AgentControl-System-Launch`, `AgentControl-System-VerifyAgentFiles`); Select Package to the chosen source's provider
-   (`IPackageSourceProvider.ListVersionsAsync`/`AcquireAsync`) - for a NuGet server the provider signs
-   in as needed, asking through `AvaloniaCredentialPrompt` and the `CredentialPromptViewModel` dialog
-   when the user started the action and keeping what was typed in `SessionCredentialStore` once the
-   operation succeeded (and, when the user ticked "Remember on this computer", in their Git credential helper
-   through `GitCredentialClient`), and - when the source requires signed packages - checking the package's
-   signature before it is handed on - followed by
-   `PackageContentExtractor.Extract` and `RepoPinStore.Save` recording the package name, version and files identity
-   (`AgentControl-System-SelectPackage`, `AgentControl-System-PinFile`); Upgrade to the newest version across all the
-   configured sources that offer the package, followed by the same extract/pin/`ReleaseNotesViewerViewModel`
-   display sequence (`AgentControl-System-Upgrade`); Settings to
-   `SettingsWindowViewModel.Save` (sources are added and edited through `SourceEditorViewModel`, which can
-   test a server's connection before it is saved),
-   applied back through `MainWindowViewModel.ApplySettings`
-   (`AgentControl-System-Settings`); and, after a Select Package, Upgrade, or Launch-time
-   restore or update genuinely occurs, `RepoCardViewModel` decides whether to offer the package's
-   optional root-level `AGENTS.md` template (`PackageContentExtractor.ReadAgentsMdTemplate`),
-   writes it via `AcceptAgentsMdTemplate`, or persists a decline via `RepoPinStore.Save`
-   (`AgentControl-System-AgentsMdTemplate`).
+4. User actions on a card dispatch to the relevant subsystem: Pull to `GitClient.Pull` (gated on a clean working tree,
+   `AgentControl-System-Pull`); Launch to `RepoCardViewModel`'s pre-launch check
+   (`PackageContentExtractor.HasInstalledFiles`, then `PackageContentIdentity.ComputeInstalledFilesIdentity` compared
+   with the pin's identity - no package access when the files match; a silent install, a keep-or-update question or a
+   launch-anyway-or-cancel question otherwise, re-extracting via `PackageContentExtractor` only when files must be
+   installed or updated) followed by `AgentToolLauncher.BuildProcessStartInfo` (with the keep-shell-open setting) and an
+   injected process starter (`AgentControl-System-Launch`, `AgentControl-System-VerifyAgentFiles`); Select Package to
+   the chosen source's provider (`IPackageSourceProvider.ListVersionsAsync`/`AcquireAsync`) - for a NuGet server the
+   provider signs in as needed, asking through `AvaloniaCredentialPrompt` and the `CredentialPromptViewModel` dialog
+   when the user started the action and keeping what was typed in `SessionCredentialStore` once the operation succeeded
+   (and, when the user ticked "Remember on this computer", in their Git credential helper through
+   `GitCredentialClient`), and - when the source requires signed packages - checking the package's signature before it
+   is handed on - followed by `PackageContentExtractor.Extract` and `RepoPinStore.Save` recording the package name,
+   version and files identity (`AgentControl-System-SelectPackage`, `AgentControl-System-PinFile`); Upgrade to the
+   newest version across all the configured sources that offer the package, followed by the same
+   extract/pin/`ReleaseNotesViewerViewModel` display sequence (`AgentControl-System-Upgrade`); Settings to
+   `SettingsWindowViewModel.Save` (sources are added and edited through `SourceEditorViewModel`, which can test a
+   server's connection before it is saved), applied back through `MainWindowViewModel.ApplySettings`
+   (`AgentControl-System-Settings`); and, after a Select Package, Upgrade, or Launch-time restore or update genuinely
+   occurs, `RepoCardViewModel` decides whether to offer the package's optional root-level `AGENTS.md` template
+   (`PackageContentExtractor.ReadAgentsMdTemplate`), writes it via `AcceptAgentsMdTemplate`, or persists a decline via
+   `RepoPinStore.Save` (`AgentControl-System-AgentsMdTemplate`).
 5. **Git repository source.** The normal flow of a Git source (`AgentControl-System-GitSources`) is: (a) the user adds
    the source in Settings; `SourceEditorViewModel` validates the address, tag pattern, sub-folder and package name
    (`GitRepositoryAddress`, `GitTagPattern`) and its Test connection lists the remote's tags through

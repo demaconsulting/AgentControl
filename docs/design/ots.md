@@ -13,22 +13,22 @@ scope; only how this project integrates and uses each item is documented.
 
 The following OTS items have integration design documentation:
 
-- Avalonia (_avalonia.md_) — cross-platform UI framework
-- BuildMark (_buildmark.md_) — build-notes documentation tool
-- FileAssert (_fileassert.md_) — document assertion tool
-- FlaUI (_flaui.md_) — Windows UI Automation testing library
-- NuGetCaching (_nuget-caching.md_) — NuGet package listing and caching library
-- Pandoc (_pandoc.md_) — Markdown-to-HTML conversion tool
-- ReqStream (_reqstream.md_) — requirements traceability tool
-- ReviewMark (_reviewmark.md_) — file review enforcement tool
-- SarifMark (_sarifmark.md_) — SARIF report conversion tool
-- Serilog (_serilog.md_) — structured-logging library
-- SonarMark (_sonarmark.md_) — SonarCloud quality report tool
-- SysML2Tools (_sysml2tools.md_) — architecture model validation and diagram rendering tool
-- VersionMark (_versionmark.md_) — tool-version documentation tool
-- WeasyPrint (_weasyprint.md_) — HTML-to-PDF conversion tool
-- WiX Toolset (_wixtoolset.md_) — Windows MSI installer packaging tool
-- xUnit (_xunit.md_) — unit-testing framework
+- Avalonia (*avalonia.md*) — cross-platform UI framework
+- BuildMark (*buildmark.md*) — build-notes documentation tool
+- FileAssert (*fileassert.md*) — document assertion tool
+- FlaUI (*flaui.md*) — Windows UI Automation testing library
+- NuGetCaching (*nuget-caching.md*) — NuGet package listing and caching library
+- Pandoc (*pandoc.md*) — Markdown-to-HTML conversion tool
+- ReqStream (*reqstream.md*) — requirements traceability tool
+- ReviewMark (*reviewmark.md*) — file review enforcement tool
+- SarifMark (*sarifmark.md*) — SARIF report conversion tool
+- Serilog (*serilog.md*) — structured-logging library
+- SonarMark (*sonarmark.md*) — SonarCloud quality report tool
+- SysML2Tools (*sysml2tools.md*) — architecture model validation and diagram rendering tool
+- VersionMark (*versionmark.md*) — tool-version documentation tool
+- WeasyPrint (*weasyprint.md*) — HTML-to-PDF conversion tool
+- WiX Toolset (*wixtoolset.md*) — Windows MSI installer packaging tool
+- xUnit (*xunit.md*) — unit-testing framework
 
 ## References
 

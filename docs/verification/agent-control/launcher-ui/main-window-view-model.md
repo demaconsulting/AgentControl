@@ -4,15 +4,13 @@
 
 `MainWindowViewModel` is verified with unit tests defined in `MainWindowViewModelTests.cs`, `RepoGroupingTests.cs`
 (sections, collapse, filter, rename and removal of groups), `RepoOrderingTests.cs` (the user's own order: stability, new
-repos, the legacy seed, Move, drag and drop, filtering, persistence), `MainWindowViewModelPersistenceTests.cs` (every change
-the user makes when the settings file cannot be written) and `MainWindowViewModelRecheckTests.cs` (the periodic upgrade
-re-check, on a fake clock).
-Each test constructs a real `MainWindowViewModel` against a unique temporary configuration
-directory (via `SettingsStore`) and unique temporary repo directories, so tests are hermetic
-and can run in parallel with each other, subject to the `RealProcess` xUnit collection (which
-disables parallelization) since constructing a view model with recent repos spawns real git
-subprocesses via `GitStub` or the system git executable as part of each card's eager
-`RefreshCheap()`. No Avalonia `Window` is constructed; only the view-model class itself is
+repos, the legacy seed, Move, drag and drop, filtering, persistence), `MainWindowViewModelPersistenceTests.cs` (every
+change the user makes when the settings file cannot be written) and `MainWindowViewModelRecheckTests.cs` (the periodic
+upgrade re-check, on a fake clock). Each test constructs a real `MainWindowViewModel` against a unique temporary
+configuration directory (via `SettingsStore`) and unique temporary repo directories, so tests are hermetic and can run
+in parallel with each other, subject to the `RealProcess` xUnit collection (which disables parallelization) since
+constructing a view model with recent repos spawns real git subprocesses via `GitStub` or the system git executable as
+part of each card's eager `RefreshCheap()`. No Avalonia `Window` is constructed; only the view-model class itself is
 under test.
 
 #### Test Environment
@@ -29,8 +27,8 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - A launch, a refresh and applying settings never reorder the cards; a new repo goes to the end; settings without a
   stored order are arranged once as favorites first and then by recency, and a stored order is kept as it is.
 - Move and drop reorder within a section (and between sections, setting group or favorite as the menu and the star do),
-  refuse what does not apply, change nothing when saving fails, are off while the filter has text, and the order is saved
-  and survives applying settings and removing a repo.
+  refuse what does not apply, change nothing when saving fails, are off while the filter has text, and the order is
+  saved and survives applying settings and removing a repo.
 - Applying updated settings preserves the repo list and its order and invalidates the shared
   package-version cache.
 - Applying settings drops cached package results only for sources that were edited or removed.
@@ -144,10 +142,10 @@ that leads nowhere is refused without saving (`MainWindowViewModel_MoveCard_AtBo
 when the cards of two sections alternate in the stored list a move changes only the moved card's place and leaves the
 other section's order alone (`MainWindowViewModel_MoveCard_SectionsInterleavedInTheList_KeepsOtherSectionsOrder`); and
 when the order cannot be saved nothing changes, the user is told once, and the same move works once saving works
-(`MainWindowViewModel_MoveCard_SaveFails_ChangesNothingAndReports`), covering `AgentControl-MainWindowViewModel-MoveCard`.
-`CanMoveCard` reports each of the four moves for the first, a middle and the last card
-(`MainWindowViewModel_CanMoveCard_FirstMiddleAndLast_ReportsEachItem`), and `GetMoveDisabledReason` names the reason -
-first, last, or the filter - and is `null` when the move is allowed
+(`MainWindowViewModel_MoveCard_SaveFails_ChangesNothingAndReports`), covering
+`AgentControl-MainWindowViewModel-MoveCard`. `CanMoveCard` reports each of the four moves for the first, a middle and
+the last card (`MainWindowViewModel_CanMoveCard_FirstMiddleAndLast_ReportsEachItem`), and `GetMoveDisabledReason` names
+the reason - first, last, or the filter - and is `null` when the move is allowed
 (`MainWindowViewModel_GetMoveDisabledReason_NamesTheReason`), and `GetReorderDisabledReason` is `null` for repos with a
 section neighbor and names the filter or "the only one in its section" otherwise
 (`MainWindowViewModel_GetReorderDisabledReason_NamesTheReason`), covering
@@ -167,11 +165,13 @@ leaving Favorites, into a group or into Ungrouped, each at the drop position and
 `MainWindowViewModel_DropCard_IntoFavorites_MarksFavoriteAndKeepsTheGroup`,
 `MainWindowViewModel_DropCard_OutOfFavoritesIntoGroup_ClearsFavoriteAndSetsTheGroup` and
 `MainWindowViewModel_DropCard_OutOfFavoritesIntoUngrouped_ClearsFavoriteAndGroup`); when the section change cannot be
-saved nothing changes and the user is told once (`MainWindowViewModel_DropCard_SectionChangeSaveFails_ChangesNothingAndReports`),
-covering `AgentControl-MainWindowViewModel-DropChangesSection`. A drop on a group's header puts the card at the bottom
-of the group; on a collapsed group's header it does the same, leaves the group collapsed (the same header object, still
+saved nothing changes and the user is told once
+(`MainWindowViewModel_DropCard_SectionChangeSaveFails_ChangesNothingAndReports`), covering
+`AgentControl-MainWindowViewModel-DropChangesSection`. A drop on a group's header puts the card at the bottom of the
+group; on a collapsed group's header it does the same, leaves the group collapsed (the same header object, still
 collapsed) and updates its count; on the Favorites and Ungrouped headers it favorites, or un-favorites and takes the
-card out of its group, at the bottom of that section (`MainWindowViewModel_DropCard_OnGroupHeader_GoesToTheBottomOfTheGroup`,
+card out of its group, at the bottom of that section
+(`MainWindowViewModel_DropCard_OnGroupHeader_GoesToTheBottomOfTheGroup`,
 `MainWindowViewModel_DropCard_OnCollapsedGroupHeader_KeepsItCollapsedAndUpdatesTheCount` and
 `MainWindowViewModel_DropCard_OnFavoritesAndUngroupedHeaders_MoveTheCardThere`), covering
 `AgentControl-MainWindowViewModel-DropOnHeader`.
@@ -185,8 +185,8 @@ notification for `IsReorderEnabled` (`MainWindowViewModel_IsReorderEnabled_Raise
 covering `AgentControl-MainWindowViewModel-ReorderOffWhileFiltering`.
 
 **MainWindowViewModel_RepoOrder_IsPersistedAndKept**: A move is in the settings file, with the marker, and a view model
-built from the loaded settings shows the same order (`MainWindowViewModel_MoveCard_OrderIsPersistedAndReloaded`); removing
-a repo leaves the others in the order the user gave them, in the list and in the file
+built from the loaded settings shows the same order (`MainWindowViewModel_MoveCard_OrderIsPersistedAndReloaded`);
+removing a repo leaves the others in the order the user gave them, in the list and in the file
 (`MainWindowViewModel_RemoveRepo_LeavesTheRestOfTheOrderAndPersistsIt`), covering
 `AgentControl-MainWindowViewModel-OrderPersisted`. Applying settings from a fresh `AppSettings` (as the Settings
 window's Save builds it) keeps the order, the marker and the saved file's order
@@ -281,27 +281,27 @@ PowerShell without `-NoExit`, with no process started. This scenario is tested b
 persistence tests' launch case (`MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports`) uses the same
 fake starter.
 
-**MainWindowViewModel_GroupSections_FlatListWithoutGroupsSectionedListWithThem**: Tested by
-`RepoGroupingTests.cs` (same `RealProcess` collection and temporary-directory approach, with repos
-created under a unique parent so the card name is the folder name). Settings with no group give a flat
-list without any header, favorites first (`AgentControl-MainWindowViewModel-FlatListWithoutGroups`, tested by
-`MainWindowViewModel_DisplayedItems_NoGroups_FlatListWithoutHeaders`). Settings with groups give Favorites first,
-the groups alphabetically ignoring letter case, then Ungrouped; names that differ only in letter case form one
-section (`AgentControl-MainWindowViewModel-GroupSections`, tested by
+**MainWindowViewModel_GroupSections_FlatListWithoutGroupsSectionedListWithThem**: Tested by `RepoGroupingTests.cs` (same
+`RealProcess` collection and temporary-directory approach, with repos created under a unique parent so the card name is
+the folder name). Settings with no group give a flat list without any header, favorites first
+(`AgentControl-MainWindowViewModel-FlatListWithoutGroups`, tested by
+`MainWindowViewModel_DisplayedItems_NoGroups_FlatListWithoutHeaders`). Settings with groups give Favorites first, the
+groups alphabetically ignoring letter case, then Ungrouped; names that differ only in letter case form one section
+(`AgentControl-MainWindowViewModel-GroupSections`, tested by
 `MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered` and
-`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection`). Each section has a header with its count
-and a section without a repo has none (`AgentControl-MainWindowViewModel-GroupSectionHeaders`, tested by
+`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection`). Each section has a header with its count and a
+section without a repo has none (`AgentControl-MainWindowViewModel-GroupSectionHeaders`, tested by
 `MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered` and
-`MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader`); repos within a section are in the user's own order, not
-by launch time (`AgentControl-MainWindowViewModel-GroupSectionRepoOrder`, tested by
-`MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered`). A favorite is listed only under Favorites, and
-back in its group when it is no longer a favorite (`AgentControl-MainWindowViewModel-FavoriteListedOnce`, tested by
+`MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader`); repos within a section are in the user's own order,
+not by launch time (`AgentControl-MainWindowViewModel-GroupSectionRepoOrder`, tested by
+`MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered`). A favorite is listed only under Favorites, and back
+in its group when it is no longer a favorite (`AgentControl-MainWindowViewModel-FavoriteListedOnce`, tested by
 `MainWindowViewModel_Favorite_IsListedOnlyUnderFavoritesAndKeepsItsGroup`). Settings built in memory with a null
 collapsed list, blank, reserved, overlong or look-alike group names load without failing
 (`AgentControl-MainWindowViewModel-DamagedGroupSettings`, tested by
 `MainWindowViewModel_Constructor_NullAndInvalidOrganizingSettings_FallBack` and
-`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection`). The header rows themselves are verified by
-the `RepoGroupHeaderViewModel` unit.
+`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection`). The header rows themselves are verified by the
+`RepoGroupHeaderViewModel` unit.
 
 **MainWindowViewModel_GroupCollapse_HidesCardsAndIsRemembered**: Collapsing a group leaves its header (with
 its count) and no cards, and expanding forgets it (letter case ignored); Favorites and Ungrouped collapse the same

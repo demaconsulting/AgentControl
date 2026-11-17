@@ -57,8 +57,8 @@ start time, executable and `--config-dir`). Every command validates the record b
   is split with the Windows rules and the paths are compared after normalization, so a nested folder or one that only
   shares a prefix does not match; checked when the command line can be read).
 
-The validated process handle is opened before the check and kept for the whole command, so `quit` (waiting, `--kill`) and
-failed-`launch` cleanup act on that process only and never on an unrelated program that reused the process id.
+The validated process handle is opened before the check and kept for the whole command, so `quit` (waiting, `--kill`)
+and failed-`launch` cleanup act on that process only and never on an unrelated program that reused the process id.
 
 All UI Automation lookups are scoped to the process id of the instance, never to a window title.
 
@@ -140,8 +140,8 @@ dialogs can repeat the main window's ids, so every element command accepts two s
   given name (exact, ignoring case; else a unique part of the name), or the card at that zero-based index. A name that
   fits several cards is refused (use the index). Example: `click LaunchButton --item my-repo`,
   `read RepoPinnedVersionText --item 0 --raw`. The repo list is virtualized, so an index counts the cards that are
-  currently realized (those scrolled out of view may not exist); prefer names. `--item-list <id>` names another list whose
-  items should be searched (matched by any text the item shows).
+  currently realized (those scrolled out of view may not exist); prefer names. `--item-list <id>` names another list
+  whose items should be searched (matched by any text the item shows).
 - `--window <title>` limits the lookup to the windows of the instance with that title (exact, ignoring case; else a
   part of the title), for example `type GitExecutablePathTextBox "C:\tools\git.exe" --window "Agent Control Settings"`.
 
@@ -150,9 +150,8 @@ without it.
 
 ### AutomationIds
 
-- **Main** (`Agent Control`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`, `AddRepoButton`,
-  `OpenSettingsButton`, `OpenAboutButton`,
-  `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`.
+- **Main** (`Agent Control`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`,
+  `AddRepoButton`, `OpenSettingsButton`, `OpenAboutButton`, `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`.
 - **Group header** (repeated, one per section, in `RepoListBox`; only present once a repo is in a group):
   `GroupHeaderToggleButton` (collapses or expands; its name says the section, count and state, for example
   `Work, 2 repos, collapsed`, and so does its list item), `GroupHeaderNameText`, `GroupHeaderCountText`, and, for
@@ -340,8 +339,8 @@ git --git-dir "$env:TEMP\acp-git\git-source.git" tag -f release/1.0.0 "release/1
 | 11 | Target not on the instance's window; real input refused |
 | 99 | Unexpected error (add `--trace` for the stack) |
 
-Code 12 of other Puppets (an application automation endpoint rejected a command) does not exist here: AgentControl has no
-such endpoint.
+Code 12 of other Puppets (an application automation endpoint rejected a command) does not exist here: AgentControl has
+no such endpoint.
 
 ## Worked example: fixture, settings, select a package, pull
 
@@ -397,5 +396,5 @@ menu offers `UpgradeMenuItem` (version 1.1.0) instead of `SelectPackageMenuItem`
   main window by its AutomationId (`MainWindowRoot`) or its title, not by what Windows calls the process's main window.
 - The Puppet is not part of AgentControl: it is built and unit-tested (argument, chord, placement, hover planning,
   instance-record validation, launch arguments, build lookup, list-item matching and fixture creation) in
-  `tools/DemaConsulting.AgentControl.Puppet.Tests`, but no UI runs in those tests. The unit tests and the build run in CI;
-  the Puppet itself only runs on Windows.
+  `tools/DemaConsulting.AgentControl.Puppet.Tests`, but no UI runs in those tests. The unit tests and the build run in
+  CI; the Puppet itself only runs on Windows.

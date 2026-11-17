@@ -75,13 +75,13 @@ inline messages, `null` when the value is acceptable.
 **CanSave**: `bool` (derived) — `true` only when the alias, the location and (for NuGet) the
 package identifier list are all acceptable.
 
-**CanTestConnection**, **TestConnectionCommand**, **CancelTestCommand**, **IsTesting**,
-**TestProgressText**, **TestResultKind**, **TestResultTitle**, **TestResultDetail**: The connection
-test. It can run when the source is a server with an acceptable address and at least one package ID
-(the alias is not needed). `TestConnectionCommand` is an `AsyncRelayCommand`, so a second request while
-one runs is ignored and `CancelTestCommand` cancels it; the view labels its button "Cancel test" so it cannot be
-mistaken for the dialog's own Cancel button, which is visible at the same time. The result is a `ConnectionTestResultKind`
-(`None`, `Succeeded`, `Failed`, `Canceled`) with a headline and an explanation.
+**CanTestConnection**, **TestConnectionCommand**, **CancelTestCommand**, **IsTesting**, **TestProgressText**,
+**TestResultKind**, **TestResultTitle**, **TestResultDetail**: The connection test. It can run when the source is a
+server with an acceptable address and at least one package ID (the alias is not needed). `TestConnectionCommand` is an
+`AsyncRelayCommand`, so a second request while one runs is ignored and `CancelTestCommand` cancels it; the view labels
+its button "Cancel test" so it cannot be mistaken for the dialog's own Cancel button, which is visible at the same time.
+The result is a `ConnectionTestResultKind` (`None`, `Succeeded`, `Failed`, `Canceled`) with a headline and an
+explanation.
 
 **_providerFactory**: `Func<PackageSourceDefinition, IPackageSourceProvider>` — creates the provider the
 test uses; by default (`CreateDefaultProvider`) an interactive `GitSourceProvider` that enforces the minimum git

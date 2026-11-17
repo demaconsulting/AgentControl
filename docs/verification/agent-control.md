@@ -171,8 +171,8 @@ port, and the real `git upload-pack`).
   sections while no repo is in a group; a collapsed section is still collapsed after a restart; the filter finds a
   repo inside a collapsed group; groups and card colors are stored only in the user's settings (the repository stays
   untouched), and a chosen card color leaves the card's status unchanged.
-- Launching a repo leaves its card where it is; the card menu's Reorder items and a real mouse drag reorder the cards and
-  a drag onto a group's header moves a card into the group; the order is stored only in the user's settings and is
+- Launching a repo leaves its card where it is; the card menu's Reorder items and a real mouse drag reorder the cards
+  and a drag onto a group's header moves a card into the group; the order is stored only in the user's settings and is
   still there after a restart.
 - The AGENTS.md question of an upgrade is shown before its release notes.
 - A source that requires signed packages is refused an unsigned package end to end and the repo is left unchanged;
@@ -205,8 +205,8 @@ scenario is tested by
 `windows@FilterTextBox_TypingNonMatchingText_HidesRepoCard_ClearingRestoresIt`, covering
 `AgentControl-System-SearchFilter`.
 
-**AgentControl_RepoOrder_LaunchingARepo_KeepsTheCardWhereItIs**: The published application is started over three
-repos in the user's stored order, with launch times that the earlier "most recently launched first" order would have used;
+**AgentControl_RepoOrder_LaunchingARepo_KeepsTheCardWhereItIs**: The published application is started over three repos
+in the user's stored order, with launch times that the earlier "most recently launched first" order would have used;
 Launch is clicked on the last card and the stubbed agent tool records its invocation. The cards are in the same order
 afterwards, in the window and in the settings file. This scenario is tested by
 `windows@RepoList_LaunchingARepo_KeepsTheCardWhereItIs`, covering `AgentControl-System-RepoOrder`. That a repo added
@@ -316,22 +316,20 @@ release-notes window exists, and the release-notes window appears only after the
 is tested by `windows@MainWindow_UpgradeWithAgentsMdOfferInRealUi_ShowsQuestionFirstThenReleaseNotes`, covering
 `AgentControl-System-AgentsMdOfferBeforeReleaseNotes`.
 
-**AgentControl_Settings_SourceDialogs_AddSourcesAndPersistPreferences**: The Settings window is
-opened, a zip-package folder source is added through the add dialog and appears in the sources
-list, and a NuGet-package folder source is added through its dialog, which cannot be saved until
-a package ID is listed; after saving, the settings file in the isolated configuration directory
-holds both sources. `SettingsWindowViewModel`'s `SaveCommand` is also executed with edited
-git/agent-tool overrides and shell preference, proving the edited preferences are captured and
-communicated for persistence (this part is verified only by the view-model's own unit test, a
-disclosed granularity limitation). The Add NuGet-Package Server dialog is also exercised: plain `http` is refused
-until "Allow insecure HTTP" is ticked, and after saving the source is listed as an "Online source" and persisted with its
-insecure-HTTP choice. The tooltip that shows the whole location of a source in the editor is not exercised end to
-end; it is verified in the `LauncherUI` subsystem tests. This scenario is tested by
-`windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt`,
+**AgentControl_Settings_SourceDialogs_AddSourcesAndPersistPreferences**: The Settings window is opened, a zip-package
+folder source is added through the add dialog and appears in the sources list, and a NuGet-package folder source is
+added through its dialog, which cannot be saved until a package ID is listed; after saving, the settings file in the
+isolated configuration directory holds both sources. `SettingsWindowViewModel`'s `SaveCommand` is also executed with
+edited git/agent-tool overrides and shell preference, proving the edited preferences are captured and communicated for
+persistence (this part is verified only by the view-model's own unit test, a disclosed granularity limitation). The Add
+NuGet-Package Server dialog is also exercised: plain `http` is refused until "Allow insecure HTTP" is ticked, and after
+saving the source is listed as an "Online source" and persisted with its insecure-HTTP choice. The tooltip that shows
+the whole location of a source in the editor is not exercised end to end; it is verified in the `LauncherUI` subsystem
+tests. This scenario is tested by `windows@SettingsWindow_AddZipPackageFolderViaDialog_ListsSourceAndPersistsIt`,
 `windows@SettingsWindow_AddNuGetPackageFolderViaDialog_RequiresPackageIdAndPersistsIt`,
 `windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword` and
-`SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved`,
-covering `AgentControl-System-Settings`.
+`SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved`, covering
+`AgentControl-System-Settings`.
 
 **AgentControl_ConnectionTest_ServerSource_ReportsResultInWords**: In the Add NuGet-Package Server dialog,
 **Test connection** against the mock server opens the sign-in dialog and, once the user has signed in, reports

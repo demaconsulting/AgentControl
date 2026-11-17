@@ -104,8 +104,8 @@ using the cached descending list; the highest entry is the latest
 - *Returns*: `Task<IReadOnlyList<DiscoveredPackage>>` - the offers source by source in the order of
   `registry.Definitions` (the order the user configured), each source's versions highest first.
 - *Algorithm*: For each definition other than `excludeAlias` (which is never contacted), calls
-  `GetVersionsDescendingAsync`, so every source is read through - and cached for at most five minutes in - its own entry.
-  The repo card passes no `excludeAlias`: a pin names no source, so every configured source is asked.
+  `GetVersionsDescendingAsync`, so every source is read through - and cached for at most five minutes in - its own
+  entry. The repo card passes no `excludeAlias`: a pin names no source, so every configured source is asked.
 - *Postconditions*: A source that fails with an I/O, permission or `InvalidOperationException` error (which includes
   `PackageSourceAccessException`) is skipped, remembering the first failure and passing each one to
   `onSourceFailure`, so the others' offers still arrive and a caller can tell "nobody offers it" from "a source that
@@ -119,8 +119,8 @@ using the cached descending list; the highest entry is the latest
 **IsNewerVersionAvailableAcrossSourcesAsync**: The upgrade question across all configured sources, which is how a
 repo's upgrade is resolved because its pin names no source (`AgentControl-PackageVersionCache-NewestAcrossSources`).
 
-- *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string pinnedVersion`, `CancellationToken`, and an
-  optional `SourceFailureMemo? failureMemo` (forwarded to `GetVersionsAcrossSourcesAsync`).
+- *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string pinnedVersion`, `CancellationToken`, and
+  an optional `SourceFailureMemo? failureMemo` (forwarded to `GetVersionsAcrossSourcesAsync`).
 - *Returns*: `Task<UpgradeCheck>` built by the same private `BuildUpgradeCheck` as the single-source method: the latest
   is the first offer that no later offer exceeds - a later offer replaces the choice only when strictly newer, so a
   tie keeps the earlier source, i.e. Settings order.

@@ -41,42 +41,40 @@ path.
 
 - *Parameters*: `string? configDirectory = null` (defaults to `GetDefaultConfigDirectory`).
 - *Returns*: `AppSettings`, with the repo list in the user's order.
-- *Postconditions*: Returns a fresh default `AppSettings` instance if no settings file exists
-  yet — first run is expected, not an error (`AgentControl-SettingsStore-Load`). An explicit JSON
-  `null` for the source list, the recent-repos list or a source's package IDs (which bypasses the
-  property initializers) is normalized to an empty collection by `AppSettings.NormalizeNulls`
-  before migration runs, so it can never crash migration, startup or a source provider. A missing
-  `Theme` value loads as `ThemePreference.System` (`AgentControl-SettingsStore-ThemeDefaultsToSystem`), and an
-  unknown or invalid one does too instead of failing the load (`AgentControl-SettingsStore-ThemeInvalidReadsAsSystem`);
-  `Save` writes the theme by name and `Load` reads it back (`AgentControl-SettingsStore-Theme`). A missing
-  `KeepShellOpen` value loads as `true` (`AgentControl-SettingsStore-KeepShellOpenDefaultsToOn`), and a null or
-  non-boolean one does too instead of failing the load (`AgentControl-SettingsStore-KeepShellOpenInvalidReadsAsOn`);
-  `Save` writes it as a boolean and `Load` reads it back (`AgentControl-SettingsStore-KeepShellOpen`). A repo's `GroupName`
-  and `CardColor` and the `CollapsedGroups` list are written to the settings file only and read back
-  (`AgentControl-SettingsStore-RepoOrganization`); `Save` omits a group or color that is `null`
-  (`AgentControl-SettingsStore-RepoOrganizationOmitsUnset`). They are read tolerantly: a file without them loads as no
-  group, the automatic color and an empty list (`AgentControl-SettingsStore-RepoOrganizationDefaults`), a group or
-  color that is null or of the wrong type reads as `null` and the values after it are still read
-  (`AgentControl-SettingsStore-InvalidGroupOrColorReadsAsNone`), and a collapsed list that is not an array of strings
-  reads as empty while a damaged array keeps its clean, distinct string entries
-  (`AgentControl-SettingsStore-InvalidCollapsedGroupsRepaired`). `AppSettings.NormalizeNulls` (run by `Load`) then
-  repairs what was read: every group name goes through the `RepoGroupName` rules - the store only applies them, the
-  rules are the `RepoGroupName` unit's (`AgentControl-SettingsStore-GroupNamesRepaired`) - and a card color name
-  that is not one of the known colors (`RecentRepo.CardColorNames`) is read as `null`, the automatic color, so a later
-  `Save` does not write it back, while a known name in any letter case or with surrounding white space is kept in its
-  canonical spelling (`RecentRepo.NormalizeCardColor`) (`AgentControl-SettingsStore-UnknownCardColorIsAutomatic`).
-  Last, once the legacy source is migrated, `AppSettings.EnsureRepoOrder` seeds the repo order: the order of
-  `RecentRepos` is the user's display order and `AppSettings.HasUserRepoOrder` (written as a boolean named
-  `HasUserRepoOrder`) says that it already is. A file without the marker - written before the order existed - has its
-  repo list arranged exactly once, favorites first and then most recently launched (a repo never launched last), and
-  loads with the marker set; a file with the marker keeps its repo sequence as it is, whatever the launch times.
-  The arrangement is written back at once (`Save`, through `PersistSeededRepoOrder`) so that it really happens only
-  once: the next load finds the marker and does not seed again from launch times that have changed since. A failed
-  write-back (for example an unwritable file) never fails the load: it is logged as a warning, the in-memory order is
-  used, and the file stays unmarked so the next load tries again.
-  `Save` writes the list in its sequence and the marker, and `Load` reads both back, so the sequence
-  round-trips (`AgentControl-SettingsStore-RepoOrder`, `-RepoOrderLegacySeed`). A marker that is null or not a
-  boolean reads as not set, without failing the load, so the one-time arrangement runs
+- *Postconditions*: Returns a fresh default `AppSettings` instance if no settings file exists yet — first run is
+  expected, not an error (`AgentControl-SettingsStore-Load`). An explicit JSON `null` for the source list, the
+  recent-repos list or a source's package IDs (which bypasses the property initializers) is normalized to an empty
+  collection by `AppSettings.NormalizeNulls` before migration runs, so it can never crash migration, startup or a source
+  provider. A missing `Theme` value loads as `ThemePreference.System`
+  (`AgentControl-SettingsStore-ThemeDefaultsToSystem`), and an unknown or invalid one does too instead of failing the
+  load (`AgentControl-SettingsStore-ThemeInvalidReadsAsSystem`); `Save` writes the theme by name and `Load` reads it
+  back (`AgentControl-SettingsStore-Theme`). A missing `KeepShellOpen` value loads as `true`
+  (`AgentControl-SettingsStore-KeepShellOpenDefaultsToOn`), and a null or non-boolean one does too instead of failing
+  the load (`AgentControl-SettingsStore-KeepShellOpenInvalidReadsAsOn`); `Save` writes it as a boolean and `Load` reads
+  it back (`AgentControl-SettingsStore-KeepShellOpen`). A repo's `GroupName` and `CardColor` and the `CollapsedGroups`
+  list are written to the settings file only and read back (`AgentControl-SettingsStore-RepoOrganization`); `Save` omits
+  a group or color that is `null` (`AgentControl-SettingsStore-RepoOrganizationOmitsUnset`). They are read tolerantly: a
+  file without them loads as no group, the automatic color and an empty list
+  (`AgentControl-SettingsStore-RepoOrganizationDefaults`), a group or color that is null or of the wrong type reads as
+  `null` and the values after it are still read (`AgentControl-SettingsStore-InvalidGroupOrColorReadsAsNone`), and a
+  collapsed list that is not an array of strings reads as empty while a damaged array keeps its clean, distinct string
+  entries (`AgentControl-SettingsStore-InvalidCollapsedGroupsRepaired`). `AppSettings.NormalizeNulls` (run by `Load`)
+  then repairs what was read: every group name goes through the `RepoGroupName` rules - the store only applies them, the
+  rules are the `RepoGroupName` unit's (`AgentControl-SettingsStore-GroupNamesRepaired`) - and a card color name that is
+  not one of the known colors (`RecentRepo.CardColorNames`) is read as `null`, the automatic color, so a later `Save`
+  does not write it back, while a known name in any letter case or with surrounding white space is kept in its canonical
+  spelling (`RecentRepo.NormalizeCardColor`) (`AgentControl-SettingsStore-UnknownCardColorIsAutomatic`). Last, once the
+  legacy source is migrated, `AppSettings.EnsureRepoOrder` seeds the repo order: the order of `RecentRepos` is the
+  user's display order and `AppSettings.HasUserRepoOrder` (written as a boolean named `HasUserRepoOrder`) says that it
+  already is. A file without the marker - written before the order existed - has its repo list arranged exactly once,
+  favorites first and then most recently launched (a repo never launched last), and loads with the marker set; a file
+  with the marker keeps its repo sequence as it is, whatever the launch times. The arrangement is written back at once
+  (`Save`, through `PersistSeededRepoOrder`) so that it really happens only once: the next load finds the marker and
+  does not seed again from launch times that have changed since. A failed write-back (for example an unwritable file)
+  never fails the load: it is logged as a warning, the in-memory order is used, and the file stays unmarked so the next
+  load tries again. `Save` writes the list in its sequence and the marker, and `Load` reads both back, so the sequence
+  round-trips (`AgentControl-SettingsStore-RepoOrder`, `-RepoOrderLegacySeed`). A marker that is null or not a boolean
+  reads as not set, without failing the load, so the one-time arrangement runs
   (`AgentControl-SettingsStore-RepoOrderMarkerRepaired`). A first run, which has no file, returns a default
   `AppSettings` with an empty list and no marker; the main window's view model seeds it.
 

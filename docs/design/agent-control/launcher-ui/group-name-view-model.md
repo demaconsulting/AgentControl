@@ -7,13 +7,13 @@
 `GroupNameViewModel` backs the small prompt that asks for a repo group's name. It is used both to create a group (and
 move a repo into it) and to rename one. Its single responsibility is to validate the typed name as the user types and
 let only a usable name through, and to run the prompt's accept/cancel lifecycle so the window itself stays free of
-logic. The rules for what a name may be live in `RepoGroupName` (`Settings` subsystem unit); this unit adds the messages,
-the "does it clash with another group" check that needs the existing groups, and completion. Its behavior is
+logic. The rules for what a name may be live in `RepoGroupName` (`Settings` subsystem unit); this unit adds the
+messages, the "does it clash with another group" check that needs the existing groups, and completion. Its behavior is
 specified by the unit requirements `AgentControl-GroupNameViewModel-ValidatesAsTyped`, `-NeutralUntilTyped`,
-`-RefusesBlankName`, `-RefusesTooLongName`, `-RefusesBuiltInNames`, `-AcceptsUsableName`, `-NewGroup`,
-`-NewGroupHint`, `-NewGroupAdoptsSpelling`, `-Rename`, `-RenameStartsWithCurrentName`, `-RenameAcceptsCaseChange`,
-`-CompletesOnce`, `-CancelCompletesOnce` and `-RequiresArguments` (each prefixed `AgentControl-GroupNameViewModel`),
-and together with `MainWindowViewModel` and `RepoCardViewModel` it provides `AgentControl-LauncherUI-RepoGroups`.
+`-RefusesBlankName`, `-RefusesTooLongName`, `-RefusesBuiltInNames`, `-AcceptsUsableName`, `-NewGroup`, `-NewGroupHint`,
+`-NewGroupAdoptsSpelling`, `-Rename`, `-RenameStartsWithCurrentName`, `-RenameAcceptsCaseChange`, `-CompletesOnce`,
+`-CancelCompletesOnce` and `-RequiresArguments` (each prefixed `AgentControl-GroupNameViewModel`), and together with
+`MainWindowViewModel` and `RepoCardViewModel` it provides `AgentControl-LauncherUI-RepoGroups`.
 
 #### Data Model
 

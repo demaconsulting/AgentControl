@@ -198,11 +198,11 @@ sections. This scenario is tested by `MainWindow_Launch_DoesNotMoveTheCard` and
 
 **LauncherUI_RepoOrderMenu_MoveItemsReorderAndDisableAtTheBoundaries**: The card menu's Organize group holds exactly
 "Move to group", "Reorder" and "Card color..."; the Reorder submenu has an AutomationId, an icon and a tooltip and holds
-the items Move to top, Move up, Move down and Move to bottom, each with an AutomationId, an icon and a tooltip; the first
-repo's Top and Up items are disabled with the reason as their tooltip, the last repo's Down and Bottom items likewise;
-choosing an enabled item (the menu item's click) reorders the rows; the Reorder submenu itself is disabled, with the
-reason as its tooltip, for the only repo of its section and enabled for a repo with a neighbor. This
-scenario is tested by `MainWindow_CardMenu_MoveItems_ReorderAndDisableAtTheBoundaries`,
+the items Move to top, Move up, Move down and Move to bottom, each with an AutomationId, an icon and a tooltip; the
+first repo's Top and Up items are disabled with the reason as their tooltip, the last repo's Down and Bottom items
+likewise; choosing an enabled item (the menu item's click) reorders the rows; the Reorder submenu itself is disabled,
+with the reason as its tooltip, for the only repo of its section and enabled for a repo with a neighbor. This scenario
+is tested by `MainWindow_CardMenu_MoveItems_ReorderAndDisableAtTheBoundaries`,
 `MainWindow_CardMenu_OrganizeGroupHasReorderSubmenuWithMoveItems` and
 `MainWindow_CardMenu_Reorder_DisabledForTheOnlyRepoOfItsSection`, covering `AgentControl-LauncherUI-RepoOrderMenu`.
 
@@ -637,13 +637,13 @@ scenario is tested by `SelectPackageWindowViewModel_Retry_SourceFailedThenAnswer
 `SelectPackageWindowViewModel_Retry_StillFailing_KeepsErrorAndRetryAvailable`, covering
 `AgentControl-LauncherUI-RetryFailedRead`.
 
-**LauncherUI_StaleResultsDiscarded_SupersededReadNeverOverwritesNewerState**: When a newer upgrade check starts
-the older check's late answer is discarded, and a slower earlier version load is superseded by a later package
-selection. This scenario is tested by
-`RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded` and
+**LauncherUI_StaleResultsDiscarded_SupersededReadNeverOverwritesNewerState**: When a newer upgrade check starts the
+older check's late answer is discarded, and a slower earlier version load is superseded by a later package selection.
+This scenario is tested by `RepoCardViewModel_RefreshUpgradeStatusAsync_NewerCheckStarted_OlderResultIsDiscarded` and
 `SelectPackageWindowViewModel_ChangeSelectedPackageName_SupersedesSlowerEarlierLoad`, covering
-`AgentControl-LauncherUI-StaleResultsDiscarded` (children also: `AgentControl-RepoCardViewModel-StaleUpgradeCheckDiscarded`
-and `AgentControl-RepoCardViewModel-UpgradeStateResetOnRefresh`, whose unit tests are in the `RepoCardViewModel`
+`AgentControl-LauncherUI-StaleResultsDiscarded` (children also:
+`AgentControl-RepoCardViewModel-StaleUpgradeCheckDiscarded` and
+`AgentControl-RepoCardViewModel-UpgradeStateResetOnRefresh`, whose unit tests are in the `RepoCardViewModel`
 verification design: an answer that arrives after the pin changed or the repo became missing is not published).
 
 **LauncherUI_CardIdentityAndStatus_AccentIsTheCardStatusInColorAndWords**: The status the accent bar shows (up to
@@ -730,8 +730,9 @@ model's test is in its unit verification design).
 **LauncherUI_KeepShellOpen_ChangeAppliesToTheNextLaunch**: With a recording process starter and a deterministic shell
 detector handed to the main window view model, a launch asks for PowerShell with `-NoExit`; after settings that clear
 the choice are applied (as Save does), the next launch of the same card asks for PowerShell without `-NoExit`; no
-process is started. This scenario is tested by `MainWindowViewModel_ApplySettings_KeepShellOpenChanged_NextLaunchUsesIt`,
-covering `AgentControl-LauncherUI-KeepShellOpenApplied` (child: `AgentControl-RepoCardViewModel-KeepShellOpen`).
+process is started. This scenario is tested by
+`MainWindowViewModel_ApplySettings_KeepShellOpenChanged_NextLaunchUsesIt`, covering
+`AgentControl-LauncherUI-KeepShellOpenApplied` (child: `AgentControl-RepoCardViewModel-KeepShellOpen`).
 
 **LauncherUI_ThemeApplied_ChoiceTakesEffectOnTheRunningApplication**: Each theme choice maps to the matching Avalonia
 variant (system default to `ThemeVariant.Default`, which follows the operating system) and applying a choice changes
@@ -834,13 +835,13 @@ dialog tests below. The dialogs are views without a unit of their own. This scen
 `AgentControl-LauncherUI-DialogModal`. That the operating system really disables the window behind Settings and About,
 and that clicks and keys do not reach it, is verified end to end (system verification).
 
-**LauncherUI_DialogKeyboard_TabStaysInsideTheDialog**: Settings shown as a modal dialog over a window that has the
-focus keeps the focus inside the dialog through more Tab presses than the dialog has stops (the window behind never
-gets it; the last control, Save, is reached and the focus wraps to the first) and wraps backwards with Shift+Tab; the
-confirmation (Tab and Shift+Tab cycle between No and Yes) and the other small dialogs do the same. The Select
-Package dialog is the one dialog whose keyboard behavior is verified end to end only, because it is opened from a
-repo card with real package sources: its focus starts inside, Tab and Shift+Tab cycle inside it and never reach the
-window behind. This scenario is tested by `SettingsWindow_ShownModally_FocusStartsInsideTabCyclesInsideAndReturnsToOwner`,
+**LauncherUI_DialogKeyboard_TabStaysInsideTheDialog**: Settings shown as a modal dialog over a window that has the focus
+keeps the focus inside the dialog through more Tab presses than the dialog has stops (the window behind never gets it;
+the last control, Save, is reached and the focus wraps to the first) and wraps backwards with Shift+Tab; the
+confirmation (Tab and Shift+Tab cycle between No and Yes) and the other small dialogs do the same. The Select Package
+dialog is the one dialog whose keyboard behavior is verified end to end only, because it is opened from a repo card with
+real package sources: its focus starts inside, Tab and Shift+Tab cycle inside it and never reach the window behind. This
+scenario is tested by `SettingsWindow_ShownModally_FocusStartsInsideTabCyclesInsideAndReturnsToOwner`,
 `Dialogs_ConfirmationMessageBoxAbout_InitialFocusTabCycleAndEscape` and
 `windows@SelectPackageWindow_Opened_FocusStartsInsideTabCyclesAndEscapeCancels`, covering
 `AgentControl-LauncherUI-DialogKeyboard` (children: `AgentControl-DialogBehavior-TabStaysInside`,
@@ -1040,16 +1041,17 @@ choice, and the end-to-end scenarios of the system verification
 (`AgentControl_PackageContentIntegrity_MovedGitTagIs...`)
 take it through to the confirmation with a real Git repository.
 
-**LauncherUI_ConvertCommittedAgentFiles_AsksFirstAndConvertsOnlyWhenConfirmed**: Applying a package to a
-repo whose managed agent folders are tracked by git asks first, in a modal question, and changes nothing until it is
-answered. Against a real temporary git repository that tracks an agents folder and a README, with a package source
-serving one package, the headless window test `MainWindow_ApplyingToRepoWithTrackedAgentFolders_AsksFirstAndConvertsOnlyWhenConfirmed`
-applies the package and finds one `ConfirmationWindow` owned by the main window while the card is still busy and no
-pin file exists; answering No leaves the question gone, the card idle, the file tracked by git, the old file on disk and
-the pin absent; applying again and answering Yes leaves git no longer tracking the agents folder, the old file replaced
-by the package, the pin written, the status message telling the user to commit the change and the committed-files
-badge cleared. The same test is the system-level evidence of `AgentControl-System-ConvertCommittedAgentFiles` (the real
-window and card with a real git repository; it is not a UI-automation test), and
+**LauncherUI_ConvertCommittedAgentFiles_AsksFirstAndConvertsOnlyWhenConfirmed**: Applying a package to a repo whose
+managed agent folders are tracked by git asks first, in a modal question, and changes nothing until it is answered.
+Against a real temporary git repository that tracks an agents folder and a README, with a package source serving one
+package, the headless window test
+`MainWindow_ApplyingToRepoWithTrackedAgentFolders_AsksFirstAndConvertsOnlyWhenConfirmed` applies the package and finds
+one `ConfirmationWindow` owned by the main window while the card is still busy and no pin file exists; answering No
+leaves the question gone, the card idle, the file tracked by git, the old file on disk and the pin absent; applying
+again and answering Yes leaves git no longer tracking the agents folder, the old file replaced by the package, the pin
+written, the status message telling the user to commit the change and the committed-files badge cleared. The same test
+is the system-level evidence of `AgentControl-System-ConvertCommittedAgentFiles` (the real window and card with a real
+git repository; it is not a UI-automation test), and
 `RepoCardViewModel_ApplySelectedPackage_TrackedAgentFoldersDeclined_ChangesNothing` is cited at the subsystem level
 besides it, covering `AgentControl-LauncherUI-ConvertCommittedAgentFiles` (children
 `AgentControl-RepoCardViewModel-CheckTrackedFoldersFresh`, `-ConfirmBeforeConverting`, `-DeclineConvertChangesNothing`,
@@ -1108,17 +1110,14 @@ connection test and Select Package, and never prompts in the background. This sc
 `SourceEditorWindow_GitSource_ShowsGitSectionsAndHidesNuGetOnes`, covering `AgentControl-LauncherUI-GitSignInGuidance`
 (child: `AgentControl-SourceEditorViewModel-GitSignInNote`).
 
-**LauncherUI_GitSourcePresentation_IconTypeNameStatusAndTag**: A Git source has the Git icon and the
-type name "Git
+**LauncherUI_GitSourcePresentation_IconTypeNameStatusAndTag**: A Git source has the Git icon and the type name "Git
 repository" (and the short name "git repository") in the lists that show sources; the Select Package source list shows
 the same icon and name; a Git source on a remote address is listed as an "Online source" and never asks for its folder,
-while one
-on a local path gets the folder status, and the classification of the zip, NuGet folder and server kinds is unchanged;
-and a card whose package a Git source supplies shows the Git icon and the alias in its package chip. This scenario is
-tested by
-`PackageSourceIcons_GitSource_HasGitIconAndNames`,
-`SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName`
-and `RepoCardViewModel_SuppliedByGitSource_ShowsGitIconAndAlias` (covering `AgentControl-LauncherUI-GitSourcePresentation`,
+while one on a local path gets the folder status, and the classification of the zip, NuGet folder and server kinds is
+unchanged; and a card whose package a Git source supplies shows the Git icon and the alias in its package chip. This
+scenario is tested by `PackageSourceIcons_GitSource_HasGitIconAndNames`,
+`SelectPackageWindowViewModel_Constructor_GitSource_ShowsGitIconAndTypeName` and
+`RepoCardViewModel_SuppliedByGitSource_ShowsGitIconAndAlias` (covering `AgentControl-LauncherUI-GitSourcePresentation`,
 child `AgentControl-RepoCardViewModel-GitSourceAwareness`),
 `PackageSourceItemViewModel_RemoteGitSource_IsOnlineSourceAndNeverAsksTheFolder`,
 `PackageSourceItemViewModel_LocalGitSource_ChecksTheFolder` and
@@ -1126,14 +1125,14 @@ child `AgentControl-RepoCardViewModel-GitSourceAwareness`),
 `AgentControl-LauncherUI-GitSourceRowStatus`, children `AgentControl-SettingsWindowViewModel-GitSourceRowStatus`,
 `-GitSourceLocalFolderStatus` and `-GitSourcePersisted`) and
 `RepoCardViewModel_PackageChipTooltip_GitSource_NamesTagOnly` (the tag in the chip's tooltip, with no commit, covering
-`AgentControl-LauncherUI-GitSourceCardTooltip`, child `AgentControl-RepoCardViewModel-GitSourceTooltip`; the tag
-follows the source's current tag pattern, by `RepoCardViewModel_PinnedTagName_TagPatternEdited_FollowsTheSourcesPattern`,
-and a zip source has none, by `RepoCardViewModel_PackageChipTooltip_ZipSource_HasNoTag`), and by the headless main
-window test `MainWindow_GitSourceCard_ChipShowsGitIconAliasAndTag`: the chip drawn for a repo supplied by a Git
-source holds the Git icon, the alias and the package, and its tooltip names the tag (the
-window-level evidence of both `AgentControl-LauncherUI-GitSourcePresentation` and
-`AgentControl-LauncherUI-GitSourceCardTooltip`; the source is a local folder, so nothing is fetched).
-The drawn icon is shown only as ink in the end-to-end test (`SettingsWindow_AddMenu_OffersAllFourSourceTypes...`).
+`AgentControl-LauncherUI-GitSourceCardTooltip`, child `AgentControl-RepoCardViewModel-GitSourceTooltip`; the tag follows
+the source's current tag pattern, by `RepoCardViewModel_PinnedTagName_TagPatternEdited_FollowsTheSourcesPattern`, and a
+zip source has none, by `RepoCardViewModel_PackageChipTooltip_ZipSource_HasNoTag`), and by the headless main window test
+`MainWindow_GitSourceCard_ChipShowsGitIconAliasAndTag`: the chip drawn for a repo supplied by a Git source holds the Git
+icon, the alias and the package, and its tooltip names the tag (the window-level evidence of both
+`AgentControl-LauncherUI-GitSourcePresentation` and `AgentControl-LauncherUI-GitSourceCardTooltip`; the source is a
+local folder, so nothing is fetched). The drawn icon is shown only as ink in the end-to-end test
+(`SettingsWindow_AddMenu_OffersAllFourSourceTypes...`).
 
 **LauncherUI_RefreshRelistsSources_NewVersionIsOfferedAndBackgroundChecksUseTheCache**: A card refresh the user starts
 reads every configured source again - Git, NuGet and zip folder - so a version published after a listing was cached is

@@ -55,13 +55,13 @@ and the reader being returned - and hands it to the reader it returns: the retur
 (`LeasedPackageContentReader`) that delegates to the layout reader and, when it is disposed, disposes the layout reader
 and releases the lease, exactly once however often `Dispose` is called. An acquisition that fails releases its lease
 itself, because no reader exists to do so. The registry is shared by every provider instance, so two sources over the
-same cache protect each other's readers. Taking a lease, releasing it and the pruning decision happen under one lock, and
-a prune deletes a folder under that lock, so a reader cannot take a folder between the check and the deletion (a lease
-taken while a deletion runs waits, then finds the folder gone and fetches it again). **Residual risk**: only readers of
-this process are known. Another process that prunes the same cache (a second AgentControl instance with the same cache
-root) does not know of them and can delete a folder an open reader is using; the only protection there is that pruning
-orders folders by last-write time, which every acquisition of a commit refreshes, so a recently acquired folder is among
-the newest (a reader held for a long time is not protected). The leases also do not outlive the process.
+same cache protect each other's readers. Taking a lease, releasing it and the pruning decision happen under one lock,
+and a prune deletes a folder under that lock, so a reader cannot take a folder between the check and the deletion (a
+lease taken while a deletion runs waits, then finds the folder gone and fetches it again). **Residual risk**: only
+readers of this process are known. Another process that prunes the same cache (a second AgentControl instance with the
+same cache root) does not know of them and can delete a folder an open reader is using; the only protection there is
+that pruning orders folders by last-write time, which every acquisition of a commit refreshes, so a recently acquired
+folder is among the newest (a reader held for a long time is not protected). The leases also do not outlive the process.
 
 #### Key Methods
 

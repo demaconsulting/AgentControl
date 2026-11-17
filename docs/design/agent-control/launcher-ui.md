@@ -292,71 +292,60 @@ upgrade checks and picture loads still in flight, clears all its events (so noth
 box, release notes or a prompt), and disposes its picture; `MainWindow` detaches its per-card handlers when a card
 leaves `RepoCards` and forgets its bookkeeping for it.
 
-`SelectPackageWindowViewModel` backs the package-selection dialog opened from a card's **Select Package...**
-(a repo with no pin) or **Change package...** (a repo with a pin). It shows three columns - source, package, version.
-For Change package it is given the source that supplies the repo's files, the package and the version and, once that
-source has been read, selects the
-package and its version (keeping the newest version when the pinned one is no longer listed, and selecting nothing
-when the source failed, does not offer the package or is not configured), so choosing the version the repo already
-uses again is one click; it never overrides a choice the user made while the source was loading
-(`AgentControl-LauncherUI-ChangePackage`). Selecting a source loads that
-source's package names from `PackageVersionCache` in the background (the dialog first invalidates every source, so it
-shows what the sources offer now, and reuses what it fetched while it stays open), with a progress indicator
-and cancellation; a source that cannot be read shows its error inline, with a **Retry** button that reads
-only that source (or, when only a package's versions failed, only those) again, and never blocks the other
-sources (`AgentControl-LauncherUI-ResponsiveOperations`, `AgentControl-LauncherUI-SourceFailureIsolation`,
-`AgentControl-LauncherUI-RetryFailedRead`). A source whose folder is missing is explained in
-words, naming the folder; until a package is selected the version column says "Select a package to see its
-versions." (`ShowVersionsHint`); each source row has a UI Automation name made of its alias, kind and status
-(`AutomationName`). Selecting a package lists its versions in
-descending order (defaulting to latest), and
-confirming reports the full package reference - source alias, name and version - from which the card applies the
-package and records only its name, version and files identity (the source it was selected from is remembered as the
-card's supplier in the user's own settings, not in the pin). The three-column layout was chosen over a grouped single
-list because the
+`SelectPackageWindowViewModel` backs the package-selection dialog opened from a card's **Select Package...** (a repo
+with no pin) or **Change package...** (a repo with a pin). It shows three columns - source, package, version. For Change
+package it is given the source that supplies the repo's files, the package and the version and, once that source has
+been read, selects the package and its version (keeping the newest version when the pinned one is no longer listed, and
+selecting nothing when the source failed, does not offer the package or is not configured), so choosing the version the
+repo already uses again is one click; it never overrides a choice the user made while the source was loading
+(`AgentControl-LauncherUI-ChangePackage`). Selecting a source loads that source's package names from
+`PackageVersionCache` in the background (the dialog first invalidates every source, so it shows what the sources offer
+now, and reuses what it fetched while it stays open), with a progress indicator and cancellation; a source that cannot
+be read shows its error inline, with a **Retry** button that reads only that source (or, when only a package's versions
+failed, only those) again, and never blocks the other sources (`AgentControl-LauncherUI-ResponsiveOperations`,
+`AgentControl-LauncherUI-SourceFailureIsolation`, `AgentControl-LauncherUI-RetryFailedRead`). A source whose folder is
+missing is explained in words, naming the folder; until a package is selected the version column says "Select a package
+to see its versions." (`ShowVersionsHint`); each source row has a UI Automation name made of its alias, kind and status
+(`AutomationName`). Selecting a package lists its versions in descending order (defaulting to latest), and confirming
+reports the full package reference - source alias, name and version - from which the card applies the package and
+records only its name, version and files identity (the source it was selected from is remembered as the card's supplier
+in the user's own settings, not in the pin). The three-column layout was chosen over a grouped single list because the
 same package name can exist in several sources and the user must see which source they pick from.
-`SettingsWindowViewModel` seeds its editable properties from the current `AppSettings` on
-construction and exposes `IsCustomAgentToolSelected` to drive the settings window's
-custom-command entry field visibility. It lists the configured package sources as
-`PackageSourceItemViewModel` rows (alias, kind icon from `PackageSourceIcons`, shortened
+`SettingsWindowViewModel` seeds its editable properties from the current `AppSettings` on construction and exposes
+`IsCustomAgentToolSelected` to drive the settings window's custom-command entry field visibility. It lists the
+configured package sources as `PackageSourceItemViewModel` rows (alias, kind icon from `PackageSourceIcons`, shortened
 location, and a folder-exists status computed on a background thread; a server source and a Git source on a remote
 address show the neutral status "Online source" with a cloud icon - no warning styling - because they are never
-contacted merely to draw the list (the tooltip says when they are contacted and points to Edit > Test connection),
-while a Git source on a local path is a folder like any other; a NuGet source that requires signed packages also shows
-a small "Signed only" badge (`SourceSignedOnlyBadge`, a shield icon in the neutral `Chip` style) whose tooltip says
-signed packages are required and, when a publisher is pinned, that only that publisher is accepted, naming it by the
-start and end of its certificate fingerprint only, as the repo card's shield does) offers one **Add** button whose
-menu lists the
+contacted merely to draw the list (the tooltip says when they are contacted and points to Edit > Test connection), while
+a Git source on a local path is a folder like any other; a NuGet source that requires signed packages also shows a small
+"Signed only" badge (`SourceSignedOnlyBadge`, a shield icon in the neutral `Chip` style) whose tooltip says signed
+packages are required and, when a publisher is pinned, that only that publisher is accepted, naming it by the start and
+end of its certificate fingerprint only, as the repo card's shield does) offers one **Add** button whose menu lists the
 source types (zip-package folder, NuGet-package folder, NuGet-package server, Git repository), with Edit and Remove
-(which act
-on the selected row) beside it on the list's header line, and also exposes the **Theme** choice (system
-default, light or dark) saved with the other settings, and asks the window to open a
-`SourceEditorViewModel` dialog for adding and editing; removal asks for confirmation and warns
-that repos that get their agent package from the source will use another configured source that delivers the
-identical files, or show a source problem if there is none. `SourceEditorViewModel` validates the alias
-(required, unique ignoring case, fixed once the source exists), the location (absolute folder
-path, no embedded credentials; for a server an `https` address ending in `index.json`, or `http` only after an
-explicit "Allow insecure HTTP" tick, whose warning is shown while it is on) and, for a NuGet source, a non-empty
-list of package
-identifiers, reusing the `PackageSourceDefinition` validation of `AgentPackageManagement`;
-its Save command stays disabled while anything is invalid. For a server it also offers
-**Test connection**, which lists the versions of the first package ID with progress and Cancel, and states
-the result in words (*Connection OK* with the version count and newest; *Sign-in failed*; *Access denied*; *Sign-in canceled*;
-*Package not found*; *Timed out*; *Server unreachable*; *Connection failed*), and shows example addresses for
-JFrog Artifactory and Azure Artifacts
+(which act on the selected row) beside it on the list's header line, and also exposes the **Theme** choice (system
+default, light or dark) saved with the other settings, and asks the window to open a `SourceEditorViewModel` dialog for
+adding and editing; removal asks for confirmation and warns that repos that get their agent package from the source will
+use another configured source that delivers the identical files, or show a source problem if there is none.
+`SourceEditorViewModel` validates the alias (required, unique ignoring case, fixed once the source exists), the location
+(absolute folder path, no embedded credentials; for a server an `https` address ending in `index.json`, or `http` only
+after an explicit "Allow insecure HTTP" tick, whose warning is shown while it is on) and, for a NuGet source, a
+non-empty list of package identifiers, reusing the `PackageSourceDefinition` validation of `AgentPackageManagement`; its
+Save command stays disabled while anything is invalid. For a server it also offers **Test connection**, which lists the
+versions of the first package ID with progress and Cancel, and states the result in words (*Connection OK* with the
+version count and newest; *Sign-in failed*; *Access denied*; *Sign-in canceled*; *Package not found*; *Timed out*;
+*Server unreachable*; *Connection failed*), and shows example addresses for JFrog Artifactory and Azure Artifacts
 (`AgentControl-LauncherUI-TestConnection`, `AgentControl-LauncherUI-ServerSourceEditor`,
-`AgentControl-LauncherUI-InsecureHttpChoice`). For a Git repository the editor is the same window with its own
-sections (see *Git repository sources* below). For a NuGet source it also
-offers the **Package signatures** section: a "Require signed packages" checkbox (off by default; disabled, with
-its tooltip shown even though it is disabled, where `SignatureVerificationSupport` says signatures cannot be
-verified) with help text that explains the limit of requiring signatures without a pinned publisher, and a
-"Trusted signer certificate fingerprint (SHA-256)" field that is enabled only while signatures are required,
-accepts the fingerprint as pasted and explains how to find it. A server's editor also has **Forget saved
-sign-in**: the view shows a `ConfirmationWindow` that names the server, and only on "Yes" calls the view model, which
-reports the outcome in words below the button; the button is disabled, with a tooltip saying why, when no
-credential helper can be reached from the window. `SettingsWindowViewModel` passes the application's
-`PackageCredentialContext` to the editor for that purpose
-(`AgentControl-LauncherUI-SignatureOptions`, `AgentControl-LauncherUI-ForgetSavedSignIn`).
+`AgentControl-LauncherUI-InsecureHttpChoice`). For a Git repository the editor is the same window with its own sections
+(see *Git repository sources* below). For a NuGet source it also offers the **Package signatures** section: a "Require
+signed packages" checkbox (off by default; disabled, with its tooltip shown even though it is disabled, where
+`SignatureVerificationSupport` says signatures cannot be verified) with help text that explains the limit of requiring
+signatures without a pinned publisher, and a "Trusted signer certificate fingerprint (SHA-256)" field that is enabled
+only while signatures are required, accepts the fingerprint as pasted and explains how to find it. A server's editor
+also has **Forget saved sign-in**: the view shows a `ConfirmationWindow` that names the server, and only on "Yes" calls
+the view model, which reports the outcome in words below the button; the button is disabled, with a tooltip saying why,
+when no credential helper can be reached from the window. `SettingsWindowViewModel` passes the application's
+`PackageCredentialContext` to the editor for that purpose (`AgentControl-LauncherUI-SignatureOptions`,
+`AgentControl-LauncherUI-ForgetSavedSignIn`).
 
 `AsyncRelayCommand` is the asynchronous counterpart of `RelayCommand`: it runs a task-returning
 operation with a cancellation token, ignores a new request while one is running, exposes
@@ -625,19 +614,19 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
 - *Drag and drop.* **Drag source**: the window observes the pointer on the `RepoListBox` on the way down (also for
   events a row already handled). A press with the left button on a card is remembered as a possible drag, unless it is
   on a `Button`, `TextBox`, `MenuItem` or `ScrollBar` in the card (the star, the chips, the menu keep their own
-  behavior), on a section header, or while reordering is off; the drag starts once the pointer has moved 6 device-independent
-  pixels in either direction with the button held, which keeps a plain or slightly unsteady click a click. The dragged
-  data is one item of the application data format `DemaConsulting.AgentControl.RepoCard` carrying the card's repo path,
-  and the dragged card's row gets the `dragging` style class (dimmed) until the drag ends however it ends. The operating
-  system's drag is started through the `DragStarter` seam, whose default is `DragDrop.DoDragDropAsync`; as with the
-  folder picker seam (`RepoFolderPicker`), a headless test supplies its own starter that records the data and then
-  raises the drop events on the list. **Drop target**: the list is a drop target (`DragDrop.AllowDrop`) with
-  drag-enter, drag-over, drag-leave and drop handlers. The pointer is hit-tested to the row it is over: over a card, the
-  upper half of the row (`IsUpperHalf`) means "before that card" and the lower half "after it", giving a
-  `RepoDropTarget.ForCard` with the card's section (`GetSectionOf`); over a section header, `RepoDropTarget.ForHeader`
-  (no anchor: the end of that section). Drag-over asks `MainWindowViewModel.CanDrop` and answers `Move` or `None` as
-  the drag effect; drop calls `MainWindowViewModel.DropCard`. A drag that does not carry this data format, or a repo
-  that is not listed, is ignored.
+  behavior), on a section header, or while reordering is off; the drag starts once the pointer has moved 6
+  device-independent pixels in either direction with the button held, which keeps a plain or slightly unsteady click a
+  click. The dragged data is one item of the application data format `DemaConsulting.AgentControl.RepoCard` carrying the
+  card's repo path, and the dragged card's row gets the `dragging` style class (dimmed) until the drag ends however it
+  ends. The operating system's drag is started through the `DragStarter` seam, whose default is
+  `DragDrop.DoDragDropAsync`; as with the folder picker seam (`RepoFolderPicker`), a headless test supplies its own
+  starter that records the data and then raises the drop events on the list. **Drop target**: the list is a drop target
+  (`DragDrop.AllowDrop`) with drag-enter, drag-over, drag-leave and drop handlers. The pointer is hit-tested to the row
+  it is over: over a card, the upper half of the row (`IsUpperHalf`) means "before that card" and the lower half "after
+  it", giving a `RepoDropTarget.ForCard` with the card's section (`GetSectionOf`); over a section header,
+  `RepoDropTarget.ForHeader` (no anchor: the end of that section). Drag-over asks `MainWindowViewModel.CanDrop` and
+  answers `Move` or `None` as the drag effect; drop calls `MainWindowViewModel.DropCard`. A drag that does not carry
+  this data format, or a repo that is not listed, is ignored.
 - *What a drop does* (`AgentControl-LauncherUI-RepoDragReorder`, `-RepoDragBetweenSections`,
   `-RepoDropOnHeader`): within a
   section it moves the card to the drop position. Into another section it first changes the card's section - the group
@@ -660,10 +649,10 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   of the list's scroll viewer the list scrolls a little per drag event (best effort), so a long list can be reordered
   without dropping first.
 - *No reordering while filtering* (`AgentControl-LauncherUI-ReorderOffWhileFiltering`): while the filter box has text
-  only some repos are shown, so their positions cannot be changed. `MainWindowViewModel.IsReorderEnabled` is then `false`:
-  no drag starts, the **Reorder** submenu and its four Move items are disabled with the tooltip
-  `ReorderDisabledWhileFilteringMessage`, and
-  `MoveCard`, `CanDrop` and `DropCard` refuse as well. Filtering never changes the stored order.
+  only some repos are shown, so their positions cannot be changed. `MainWindowViewModel.IsReorderEnabled` is then
+  `false`: no drag starts, the **Reorder** submenu and its four Move items are disabled with the tooltip
+  `ReorderDisabledWhileFilteringMessage`, and `MoveCard`, `CanDrop` and `DropCard` refuse as well. Filtering never
+  changes the stored order.
 - *Collection moves.* A reorder moves cards inside `MainWindowViewModel.RepoCards` (`Move` notifications). The window's
   `OnRepoCardsChanged` ignores a `Move`, because the cards stay attached and the per-card state the window keeps
   (pending prompts, shown dialogs) must survive the reorder.
@@ -673,38 +662,31 @@ restart, and for a settings file written before this existed is seeded once from
 first, then most recently launched), so nothing jumps on upgrade (`AgentControl-LauncherUI-RepoOrderRemembered`;
 system level `AgentControl-System-RepoOrderRemembered`, subsystem `AgentControl-Settings-RepoOrder`).
 
-**Settings window package-source actions.** One **Add** button opens a menu with the source types that can be
-added (zip-package folder, NuGet-package folder, NuGet-package server, Git repository), each with its type's icon
-(the one
-the sources list uses) and a one-line description; another source type is added as one more menu item
-(`AgentControl-LauncherUI-AddSourceMenu`).
-The `.axaml` Views other than `MainWindow`
-(`AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`,
-`SettingsWindow`, `SourceEditorWindow`, `CredentialPromptWindow`) contain no logic beyond Avalonia's XAML-loading boilerplate,
-`AutomationProperties.AutomationId` assignments that let FlaUI locate controls, and - for the dialogs that
-return an answer or pick a folder - closing the window with the view model's answer, treating any other close
-as a cancel, or opening the folder picker; all behavior
-lives in the view models above. `MainWindow`'s code-behind is the one exception: it owns
-dialog-orchestration, view-layer plumbing that requires a live Avalonia `Window` — subscribing
-to each `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`,
-`ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`,
-`CommittedFilesConversionRequested`, `AgentFilesChoiceRequested`, `ErrorOccurred`) and deciding which
-dialog/window to show and how to route the user's response back into the view model (e.g.
-calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the `ConfirmationWindow` shown
-for the AGENTS.md template offer). `AboutWindow` (opened via a
-toolbar command with no dedicated view model, as a modal dialog over the main window) shows the application
-logo (reused from
-`Assets/AppIcon.ico`, the same icon already used for the main window/taskbar - no new binary
-image asset was added), a short mission tagline, a labeled "Version" row with the running version
-(`Program.Version` without its `+` build metadata, via `AboutWindow.DisplayVersion`; the full build version is
-the row's tooltip) and the copyright, and a scrollable list of this application's direct runtime third-party
-dependencies and their SPDX license identifiers (package versions are intentionally omitted so
-dependency updates do not require edits here), sourced from a static
-`ThirdPartyDependencies` list rather than parsed at runtime from the project file
-(`AgentControl-LauncherUI-About`). Adding a repo
-(`AgentControl-LauncherUI-AddRepo`) is likewise driven directly by `MainWindowViewModel`
-rather than a dedicated unit, since its logic (path-existence and duplicate-path validation)
-is simple enough not to warrant a separate class.
+**Settings window package-source actions.** One **Add** button opens a menu with the source types that can be added
+(zip-package folder, NuGet-package folder, NuGet-package server, Git repository), each with its type's icon (the one the
+sources list uses) and a one-line description; another source type is added as one more menu item
+(`AgentControl-LauncherUI-AddSourceMenu`). The `.axaml` Views other than `MainWindow` (`AboutWindow`,
+`ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`, `SettingsWindow`, `SourceEditorWindow`,
+`CredentialPromptWindow`) contain no logic beyond Avalonia's XAML-loading boilerplate,
+`AutomationProperties.AutomationId` assignments that let FlaUI locate controls, and - for the dialogs that return an
+answer or pick a folder - closing the window with the view model's answer, treating any other close as a cancel, or
+opening the folder picker; all behavior lives in the view models above. `MainWindow`'s code-behind is the one exception:
+it owns dialog-orchestration, view-layer plumbing that requires a live Avalonia `Window` — subscribing to each
+`RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`, `ReleaseNotesReady`,
+`AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `CommittedFilesConversionRequested`,
+`AgentFilesChoiceRequested`, `ErrorOccurred`) and deciding which dialog/window to show and how to route the user's
+response back into the view model (e.g. calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the
+`ConfirmationWindow` shown for the AGENTS.md template offer). `AboutWindow` (opened via a toolbar command with no
+dedicated view model, as a modal dialog over the main window) shows the application logo (reused from
+`Assets/AppIcon.ico`, the same icon already used for the main window/taskbar - no new binary image asset was added), a
+short mission tagline, a labeled "Version" row with the running version (`Program.Version` without its `+` build
+metadata, via `AboutWindow.DisplayVersion`; the full build version is the row's tooltip) and the copyright, and a
+scrollable list of this application's direct runtime third-party dependencies and their SPDX license identifiers
+(package versions are intentionally omitted so dependency updates do not require edits here), sourced from a static
+`ThirdPartyDependencies` list rather than parsed at runtime from the project file (`AgentControl-LauncherUI-About`).
+Adding a repo (`AgentControl-LauncherUI-AddRepo`) is likewise driven directly by `MainWindowViewModel` rather than a
+dedicated unit, since its logic (path-existence and duplicate-path validation) is simple enough not to warrant a
+separate class.
 
 **Dialog keyboard behavior.** Every dialog (Settings, the source editors, the sign-in prompt, the package
 picker, the confirmations, the message boxes, the group-name prompt and About) is shown with
@@ -806,16 +788,15 @@ saying so. A newer version a source offers is still offered as an upgrade then (
 chip coexist, the accent bar is red), and Upgrade resolves across all configured sources, the newest version winning
 and a tie keeping Settings order (`AgentControl-LauncherUI-PinnedSourceSupplierShown`, `-UpgradeAcrossSources`).
 
-**Moved tags and Change package.** A Git tag that is moved, or a package that is republished, so that the same
-version delivers other files has another files identity, whichever source delivers it: the restore before launch
-and Upgrade refuse it (nothing is applied), and Change package asks for confirmation before the changed files replace
-the repo's (a moved tag that delivers identical files is irrelevant, and nothing is shown for it). There is no
-separate warning chip. The card's Refresh command, which the user starts, reads every configured source (NuGet, zip
-folder and Git) again instead of reusing a cached listing, so that a newly published version or pushed tag shows up at
-once, while the background check may use a listing less than five minutes old (`AgentControl-LauncherUI-RefreshRelistsSources`).
-The way to accept changed files is the card menu's "Change package...", which
-opens the Select Package dialog on the source that supplies the repo's files (when known), its package and version;
-choosing the pinned version again asks for confirmation before the changed content replaces the files
-(`AgentControl-LauncherUI-ChangePackage`, `AgentControl-LauncherUI-ContentChangeConfirmation`). The Select Package
-dialog never replaces a choice the
-user made while the sources were loading with the repo's own source and package.
+**Moved tags and Change package.** A Git tag that is moved, or a package that is republished, so that the same version
+delivers other files has another files identity, whichever source delivers it: the restore before launch and Upgrade
+refuse it (nothing is applied), and Change package asks for confirmation before the changed files replace the repo's (a
+moved tag that delivers identical files is irrelevant, and nothing is shown for it). There is no separate warning chip.
+The card's Refresh command, which the user starts, reads every configured source (NuGet, zip folder and Git) again
+instead of reusing a cached listing, so that a newly published version or pushed tag shows up at once, while the
+background check may use a listing less than five minutes old (`AgentControl-LauncherUI-RefreshRelistsSources`). The way
+to accept changed files is the card menu's "Change package...", which opens the Select Package dialog on the source that
+supplies the repo's files (when known), its package and version; choosing the pinned version again asks for confirmation
+before the changed content replaces the files (`AgentControl-LauncherUI-ChangePackage`,
+`AgentControl-LauncherUI-ContentChangeConfirmation`). The Select Package dialog never replaces a choice the user made
+while the sources were loading with the repo's own source and package.

@@ -5,7 +5,7 @@
 #### Purpose
 
 `NuGetSourceProvider` serves NuGet packages held in a local or network folder feed, or on a NuGet V3
-server, through the package-source provider contract, using the NuGet caching OTS item (see _NuGetCaching_
+server, through the package-source provider contract, using the NuGet caching OTS item (see *NuGetCaching*
 in the OTS integration design) to list versions and to unpack the chosen package. A NuGet agent package
 keeps its content under the package's `content` folder (`content/.github/...`,
 `content/release-notes.md`, `content/AGENTS.md`) — the zip layout rooted at `content` — which
@@ -178,7 +178,7 @@ package (`AgentControl-NuGetSourceProvider-RequireSigned`,
 **EnsureSignatureVerificationPossible** (private): When the source requires signed packages and the platform
 cannot verify signatures, throws a `PackageSourceAccessException` of kind `SignatureRejected` whose message says
 that verification is not supported on this platform, so no package can be used from the source, and what to do.
-It runs at the start of both listing and acquiring. It _fails closed_ on purpose: the alternative - ignoring the
+It runs at the start of both listing and acquiring. It *fails closed* on purpose: the alternative - ignoring the
 requirement - would install packages the user required to be checked, and a hand-edited settings file can enable the
 requirement on any machine (`AgentControl-NuGetSourceProvider-FailClosedWithoutVerification`). A source that
 does not require signatures is never affected by the answer
@@ -224,37 +224,33 @@ credential callback and `AuthenticationTimeout` (`AgentControl-NuGetSourceProvid
 The library registers its credential dispatcher once for the process and applies these options to the one call
 only, so one source's callback and timeout never affect another operation.
 
-**RunAsync** (private): Runs one library call. A folder calls the library directly (only mapping a signature
-failure to words). A server call is made up
-to **twice**, which is what gives the credential order (below): attempt 1 is _silent_ — a
-`PackageCredentialCallback` over the session store and the user's own credential store, without a prompt — and only
-if the server then refuses with
-HTTP 401 and a prompt is available does attempt 2 run with a callback that may ask the user, once
-(`PromptAndRetryAsync`). A refusal with **HTTP 403** is different: the server knows the user and says no, so
+**RunAsync** (private): Runs one library call. A folder calls the library directly (only mapping a signature failure to
+words). A server call is made up to **twice**, which is what gives the credential order (below): attempt 1 is *silent* —
+a `PackageCredentialCallback` over the session store and the user's own credential store, without a prompt — and only if
+the server then refuses with HTTP 401 and a prompt is available does attempt 2 run with a callback that may ask the
+user, once (`PromptAndRetryAsync`). A refusal with **HTTP 403** is different: the server knows the user and says no, so
 neither attempt asks (attempt 2 does not run), no remembered credential is forgotten (the server accepted it) and a
 credential typed in attempt 2 is not kept; the operation ends as `AccessDenied` with the server's reason
 (`AgentControl-NuGetSourceProvider-AccessDenied`). The library fails a 403 before it asks the credential callback or any
 credential provider, so against a server that answers 403 attempt 1 never even consults the stores. `IsAccessDenied`
 (internal) recognizes a 403 from `NuGetAuthenticationException.StatusCode` and takes the server's explanation from
-`ServerReason`; the exception's message is never parsed (the library reports every 401 or 403 as this exception type with
-its status, including a raw HTTP 403 whose reason it recorded for the source, so no other shape needs handling). The
-reason, which the library has already reduced to one line, is reduced again to one line of at most 300 characters through
-`SecretRedactor` because it comes from the server, and every URL in it is reduced to its origin
+`ServerReason`; the exception's message is never parsed (the library reports every 401 or 403 as this exception type
+with its status, including a raw HTTP 403 whose reason it recorded for the source, so no other shape needs handling).
+The reason, which the library has already reduced to one line, is reduced again to one line of at most 300 characters
+through `SecretRedactor` because it comes from the server, and every URL in it is reduced to its origin
 (`scheme://host[:port]`, `[link]` for any other or unreadable URL; `ReduceUrlsToOrigins`) so that no path, query,
 fragment or user information of a server address reaches the message, the card, the dialog or the log. The library's
 exception is not kept as the inner exception of an access denial either (`CreateAccessDenied(reason)` takes none): its
 message can name the feed's full address, and callers that log a whole exception would write that path to the log; the
-status and the sanitized reason are already in the message and in the warning.
-`CreateAccessDenied` logs a warning
-with the reason and builds "Signed in, but 'host' refused access: reason. ..." with a hint to ask the feed's
-administrator for read permission (Reader / ReadPackages on Azure DevOps). The `AccessDenied` handling of attempt 2 is
-still needed, for a 403 that follows a 401 the user's sign-in answered (for example the service index accepts the
-credential and the package resource then refuses it).
-A credential the user typed is committed to the session store only after attempt 2
-succeeded - and handed to the user's credential store at that moment when the user ticked "Remember on this
-computer"; a credential the server rejected (from the stores in attempt 1, or typed in attempt 2) is forgotten and,
-when it came from the user's credential store, removed from there. The removal is not abandoned just because the
-caller cancelled (it has its own time limit). A caller's cancellation is never turned into a failure
+status and the sanitized reason are already in the message and in the warning. `CreateAccessDenied` logs a warning with
+the reason and builds "Signed in, but 'host' refused access: reason. ..." with a hint to ask the feed's administrator
+for read permission (Reader / ReadPackages on Azure DevOps). The `AccessDenied` handling of attempt 2 is still needed,
+for a 403 that follows a 401 the user's sign-in answered (for example the service index accepts the credential and the
+package resource then refuses it). A credential the user typed is committed to the session store only after attempt 2
+succeeded - and handed to the user's credential store at that moment when the user ticked "Remember on this computer"; a
+credential the server rejected (from the stores in attempt 1, or typed in attempt 2) is forgotten and, when it came from
+the user's credential store, removed from there. The removal is not abandoned just because the caller cancelled (it has
+its own time limit). A caller's cancellation is never turned into a failure
 (`AgentControl-NuGetSourceProvider-AskUserOnce`, `AgentControl-NuGetSourceProvider-CredentialRememberedAfterSuccess`,
 `AgentControl-NuGetSourceProvider-RejectedCredentialForgotten`,
 `AgentControl-NuGetSourceProvider-RejectedSavedSignInRemoved`,
@@ -301,7 +297,7 @@ one preemptively.
   listing and acquiring, and another inspects the product assembly's type references to guard
   the design constraint (`AgentControl-NuGetSourceProvider-NoCredentialServiceRegistration`).
   Signature enforcement likewise relies only on the per-call options and the generated per-source
-  configuration (see _PrepareRoot_), never on process-wide or machine-wide NuGet settings.
+  configuration (see *PrepareRoot*), never on process-wide or machine-wide NuGet settings.
 - Callback scoping: the callback answers only requests for the server's own origin and declines every
   other host without asking the user (`AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin`).
   **Limit of that guarantee:** AgentControl itself only ever supplies a credential for the configured
@@ -345,7 +341,7 @@ reported as `PackageSourceAccessException` (derived from
 - `Unreachable` — the server could not be reached or the address did not answer as a NuGet feed (the
   library reports this, and a package that cannot be downloaded, as `InvalidOperationException`);
 - `NotFound` is defined in the enumeration for a server that answers but lacks the package; the provider
-  itself reports a package the server does not have as an _empty version list_, which the connection test
+  itself reports a package the server does not have as an *empty version list*, which the connection test
   turns into "Package not found", and a download that fails is reported as `Unreachable` with a message that
   says the package may no longer exist there.
 
