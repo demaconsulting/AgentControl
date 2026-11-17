@@ -1339,6 +1339,8 @@ and open in your default web browser - only for `http` and `https` addresses; an
 plain text and never opened. A package with no `release-notes.md` entry is still extracted successfully — the
 release-notes display is simply skipped.
 
+<a id="agentsmd-template-offer"></a>
+
 ## AGENTS.md Template Offer
 
 A package zip may also optionally include a root-level `AGENTS.md` entry, following the same
