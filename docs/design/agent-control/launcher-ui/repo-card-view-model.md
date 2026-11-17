@@ -5,8 +5,8 @@
 #### Purpose
 
 `RepoCardViewModel` backs a single card in the main window's recent-repos list: it tracks the
-repo's pin, git status, and upgrade availability, and drives Launch/Pull/Upgrade/Select-
-Package/Favorite/Remove actions for that repo. All business logic (upgrade detection, launch
+repo's pin, git status, and upgrade availability, and drives Launch/Pull/Upgrade/Select-Package/Favorite/Remove
+actions for that repo. All business logic (upgrade detection, launch
 orchestration, pull-eligibility checks) is implemented here or delegated to `GitClient`,
 `PackageSourceRegistry`, `PackageContentExtractor`, `RepoPinStore`, and `AgentToolLauncher`
 rather than in any view code-behind, so this class is fully unit-testable without an Avalonia
