@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using System.Xml.Linq;
+using System.Text.Json;
 using DemaConsulting.AgentControl.LauncherUI;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
@@ -29,43 +29,37 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 public class ThirdPartyDependenciesTests
 {
     /// <summary>
-    ///     Item-group labels (the comment text immediately preceding each <c>ItemGroup</c> in
-    ///     <c>DemaConsulting.AgentControl.csproj</c>) whose <c>PackageReference</c> entries are
-    ///     this application's direct runtime dependencies, as opposed to build-only/analyzer-only
-    ///     packages which are deliberately excluded from <see cref="ThirdPartyDependencies.All"/>.
+    ///     The name of the application's dependency manifest, which the build writes next to the
+    ///     application (and copies into this test project's output with it).
     /// </summary>
-    private static readonly string[] RuntimeDependencyItemGroupComments =
-    [
-        " Logging Dependencies ",
-        " Agent Package Source Dependencies ",
-        " Avalonia UI Dependencies "
-    ];
+    private const string ApplicationDepsFile = "DemaConsulting.AgentControl.deps.json";
 
     /// <summary>
-    ///     Test that the dependency list's names match the csproj's actual
-    ///     "Logging Dependencies"/"Agent Package Source Dependencies"/"Avalonia UI Dependencies"
-    ///     <c>PackageReference</c> entries
-    ///     exactly, order-independent, so the hand-maintained list cannot silently drift from the
-    ///     project file it documents. Versions are deliberately not compared so dependency-update
-    ///     tooling can bump them freely. The license column cannot be derived from the csproj (NuGet
-    ///     package metadata, not project-file content), so it is checked only for non-emptiness by
-    ///     <see cref="ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense"/>.
+    ///     Test that the dependency list's names match the application's direct runtime dependencies
+    ///     exactly, order-independent, so the hand-maintained list cannot silently drift from what the
+    ///     application ships. The direct runtime dependencies are read from the dependency manifest the
+    ///     build produced for the application: the packages the application depends on directly that
+    ///     contribute runtime or native files of their own (build-only and analyzer packages contribute
+    ///     none). Versions are deliberately not compared so dependency-update tooling can bump them
+    ///     freely. The license column cannot be derived from the manifest, so it is checked only for
+    ///     non-emptiness by <see cref="ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense"/>.
     /// </summary>
     [Fact]
-    public void ThirdPartyDependencies_All_MatchesCsprojDirectRuntimeDependencies()
+    public void ThirdPartyDependencies_All_MatchesTheApplicationsDirectRuntimeDependencies()
     {
-        // Arrange: read the actual direct runtime PackageReference entries straight from the
-        // csproj file, rather than hardcoding a second, independently-maintained copy of them
-        // here (which could drift from the implementation list without either side noticing).
-        var expected = ReadRuntimeDependenciesFromCsproj()
+        // Arrange: the direct runtime dependencies recorded in the application's build output
+        var expected = ReadDirectRuntimeDependencies(Path.Combine(AppContext.BaseDirectory, ApplicationDepsFile))
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
+
+        // Act
         var actual = ThirdPartyDependencies.All
             .Select(d => d.Name)
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
 
-        // Act / Assert: the hand-maintained list matches the csproj's actual package references
+        // Assert: the hand-maintained list matches what the application ships
+        Assert.NotEmpty(expected);
         Assert.Equal(expected, actual);
     }
 
@@ -112,96 +106,35 @@ public class ThirdPartyDependenciesTests
     }
 
     /// <summary>
-    ///     Reads the <c>PackageReference</c> <c>Include</c> names from the
-    ///     <c>ItemGroup</c>s immediately preceded by one of
-    ///     <see cref="RuntimeDependencyItemGroupComments"/> in
-    ///     <c>DemaConsulting.AgentControl.csproj</c>.
+    ///     Reads the names of the application's direct runtime dependencies from its dependency
+    ///     manifest: the packages listed as dependencies of the application itself whose own entry
+    ///     contributes runtime or native files.
     /// </summary>
-    /// <returns>The direct runtime dependencies' names, as declared in the csproj.</returns>
-    private static IEnumerable<string> ReadRuntimeDependenciesFromCsproj()
+    /// <param name="depsFilePath">The path of the application's <c>.deps.json</c> file.</param>
+    /// <returns>The direct runtime dependencies' names.</returns>
+    private static List<string> ReadDirectRuntimeDependencies(string depsFilePath)
     {
-        var csprojPath = FindAgentControlCsproj();
-        var document = XDocument.Load(csprojPath);
+        using var document = JsonDocument.Parse(File.ReadAllText(depsFilePath));
+        var root = document.RootElement;
+        var runtimeTarget = root.GetProperty("runtimeTarget").GetProperty("name").GetString()!;
+        var target = root.GetProperty("targets").GetProperty(runtimeTarget);
+        var libraries = root.GetProperty("libraries");
 
-        foreach (var itemGroup in document.Descendants("ItemGroup"))
+        var application = target.EnumerateObject()
+            .Single(entry => entry.Name.StartsWith("DemaConsulting.AgentControl/", StringComparison.Ordinal));
+
+        var names = new List<string>();
+        foreach (var dependency in application.Value.GetProperty("dependencies").EnumerateObject())
         {
-            if (!HasPrecedingLabelComment(itemGroup))
+            var key = $"{dependency.Name}/{dependency.Value.GetString()}";
+            var isPackage = libraries.GetProperty(key).GetProperty("type").GetString() == "package";
+            var entry = target.GetProperty(key);
+            if (isPackage && (entry.TryGetProperty("runtime", out _) || entry.TryGetProperty("native", out _)))
             {
-                continue;
-            }
-
-            var names = itemGroup.Elements("PackageReference")
-                .Select(packageReference => packageReference.Attribute("Include")?.Value)
-                .Where(name => !string.IsNullOrWhiteSpace(name));
-
-            foreach (var name in names)
-            {
-                yield return name!;
-            }
-        }
-    }
-
-    /// <summary>
-    ///     Determines whether <paramref name="itemGroup"/> is immediately preceded - skipping any
-    ///     number of XML comments and whitespace-only text nodes, but nothing else - by one of
-    ///     <see cref="RuntimeDependencyItemGroupComments"/>. Each runtime-dependency
-    ///     <c>ItemGroup</c> is preceded by a short label comment and then a longer explanatory
-    ///     comment, so this cannot simply check the single nearest preceding comment.
-    /// </summary>
-    /// <param name="itemGroup">The <c>ItemGroup</c> element to check.</param>
-    /// <returns><see langword="true"/> if a matching label comment precedes this item group.</returns>
-    private static bool HasPrecedingLabelComment(XElement itemGroup)
-    {
-        var node = itemGroup.PreviousNode;
-        while (node is not null)
-        {
-            switch (node)
-            {
-                case XComment comment when RuntimeDependencyItemGroupComments.Contains(comment.Value):
-                    return true;
-
-                case XComment:
-                    node = node.PreviousNode;
-                    continue;
-
-                case XText text when string.IsNullOrWhiteSpace(text.Value):
-                    node = node.PreviousNode;
-                    continue;
-
-                default:
-                    return false;
+                names.Add(dependency.Name);
             }
         }
 
-        return false;
-    }
-
-    /// <summary>
-    ///     Walks up from this test assembly's own output directory to find
-    ///     <c>src/DemaConsulting.AgentControl/DemaConsulting.AgentControl.csproj</c>, identifying
-    ///     the repository root by the presence of <c>DemaConsulting.AgentControl.slnx</c>.
-    /// </summary>
-    /// <returns>The absolute path to <c>DemaConsulting.AgentControl.csproj</c>.</returns>
-    /// <exception cref="DirectoryNotFoundException">Thrown when no ancestor directory contains
-    ///     the solution file.</exception>
-    private static string FindAgentControlCsproj()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "DemaConsulting.AgentControl.slnx")))
-            {
-                return Path.Combine(
-                    directory.FullName,
-                    "src",
-                    "DemaConsulting.AgentControl",
-                    "DemaConsulting.AgentControl.csproj");
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new DirectoryNotFoundException(
-            $"Could not locate the repository root (DemaConsulting.AgentControl.slnx) above '{AppContext.BaseDirectory}'.");
+        return names;
     }
 }

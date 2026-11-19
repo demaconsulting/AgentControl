@@ -46,6 +46,13 @@ internal sealed partial class GitRemoteStub
     public const string FinishedMarker = "FINISHED";
 
     /// <summary>
+    ///     How long a command hangs in the tests that check it is stopped: well past their one-second
+    ///     limit or cancellation, yet short enough that a command that was not stopped finishes while
+    ///     <see cref="RanToTheEndOfItsHangAsync"/> waits, so a missing kill is detected.
+    /// </summary>
+    public const int HangSeconds = 4;
+
+    /// <summary>
     ///     The environment variables the stub records.
     /// </summary>
     private static readonly string[] RecordedVariables =
@@ -184,6 +191,19 @@ internal sealed partial class GitRemoteStub
     /// <returns><see langword="true"/> when the marker was written.</returns>
     public bool WroteFinishedMarker() =>
         File.Exists(LogPath) && File.ReadAllLines(LogPath).Any(line => line.Trim() == FinishedMarker);
+
+    /// <summary>
+    ///     Waits as long as a command answered with a <see cref="HangSeconds"/> sleep takes to finish
+    ///     on its own, then reports whether one got as far as its post-sleep marker. The command
+    ///     started before this is called, so one that was not killed has written the marker by the
+    ///     time the wait ends.
+    /// </summary>
+    /// <returns><see langword="true"/> when the marker was written.</returns>
+    public async Task<bool> RanToTheEndOfItsHangAsync()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(HangSeconds), TestContext.Current.CancellationToken);
+        return WroteFinishedMarker();
+    }
 
     /// <summary>
     ///     Deletes the stub, its log and its canned answers.

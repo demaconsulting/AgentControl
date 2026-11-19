@@ -245,7 +245,7 @@ public class GitIntegrationSubsystemTests
         // Arrange: one stub that reports an old version, and one whose tag listing hangs
         var folder = CreateTempDirectory();
         var old = GitRemoteStub.Create().Respond("version", "git version 2.20.1\n");
-        var hung = GitRemoteStub.Create().Respond("ls-remote", sleepSeconds: 30);
+        var hung = GitRemoteStub.Create().Respond("ls-remote", sleepSeconds: GitRemoteStub.HangSeconds);
         try
         {
             var oldClient = new GitRemoteClient(new GitRemoteOptions(() => old.Path, Path.Combine(folder, "old")));
@@ -258,6 +258,7 @@ public class GitIntegrationSubsystemTests
                 () => oldClient.EnsureSupportedVersionAsync(TestContext.Current.CancellationToken));
             var timedOut = await Assert.ThrowsAsync<GitRemoteException>(
                 () => hungClient.ListTagsAsync(target, "refs/tags/*", TestContext.Current.CancellationToken));
+            var hungRanToTheEnd = await hung.RanToTheEndOfItsHangAsync();
 
             // Assert
             Assert.Multiple(
@@ -265,7 +266,7 @@ public class GitIntegrationSubsystemTests
                 () => Assert.Contains("Settings > Git executable", tooOld.Message, StringComparison.Ordinal),
                 () => Assert.Equal(["version"], old.ReadInvocations().Select(invocation => invocation.Command)),
                 () => Assert.Equal(GitFailureKind.TimedOut, timedOut.Kind),
-                () => Assert.False(hung.WroteFinishedMarker()));
+                () => Assert.False(hungRanToTheEnd));
         }
         finally
         {

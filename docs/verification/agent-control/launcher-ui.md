@@ -339,11 +339,12 @@ window over the main window and confirming the mission tagline, version, copyrig
 text are all present and non-empty, and that the third-party dependency list control is present and
 rendered with at least one entry. The application logo image is not automated-asserted (it has
 no text content to check) and remains a visual-inspection-only element. The dependency list's
-underlying data source (name/license entries matching the project file's package names, no
+underlying data source (name/license entries matching the direct runtime dependencies in the application's
+build-produced dependency manifest, no
 duplicates, no empty fields, and the expected display format) has direct unit coverage. This scenario is tested by
 `windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright`,
 `MainWindow_AboutClicked_OpensModalAboutOwnedByMainWindow`,
-`ThirdPartyDependencies_All_MatchesCsprojDirectRuntimeDependencies`,
+`ThirdPartyDependencies_All_MatchesTheApplicationsDirectRuntimeDependencies`,
 `ThirdPartyDependencies_All_NoDuplicateNames`,
 `ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense`,
 and `DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat`, covering

@@ -309,7 +309,8 @@ package and its version; Keep leaves every file exactly as it was, reads no pack
 replaces the four folders with the package's files and reports "updated"; the same difference is asked about again on
 the next launch (two requests for two launches); with nobody to ask the files are kept and no package source is
 touched; and the `LaunchCommand` launches after Keep and after a successful Update. The `AgentFilesChoiceRequest`
-itself keeps the first answer only, rejects null arguments and completes its answer asynchronously. This scenario is
+itself keeps the first answer only, rejects null arguments and completes its answer asynchronously (the answering call
+returns while a continuation waiting on the answer is still blocked). This scenario is
 tested by
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_MissingFile_AsksAndKeepLeavesFilesUntouched`,
 `RepoCardViewModel_EnsureAgentFilesSyncedBeforeLaunch_HalfOfTheFilesMissing_AsksAndUpdateRestoresAllFiles`,

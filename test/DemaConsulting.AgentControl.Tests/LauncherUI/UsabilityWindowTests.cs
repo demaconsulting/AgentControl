@@ -969,8 +969,7 @@ public sealed class UsabilityWindowTests : IDisposable
 
             // Act: answer it
             DialogWindowTests.Click(question, "ConfirmationYesButton");
-            await Task.Delay(50, TestContext.Current.CancellationToken);
-            Dispatcher.UIThread.RunJobs();
+            await PumpUntilAsync(() => window.OpenChildWindows.Count > 0);
 
             // Assert: now the release notes window is open, and the question is gone
             Assert.Empty(window.OwnedWindows);
@@ -1021,8 +1020,7 @@ public sealed class UsabilityWindowTests : IDisposable
             Dispatcher.UIThread.RunJobs();
             var question = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
             DialogWindowTests.Click(question, "ConfirmationNoButton");
-            await Task.Delay(50, TestContext.Current.CancellationToken);
-            Dispatcher.UIThread.RunJobs();
+            await PumpUntilAsync(() => window.OwnedWindows.Count == 0 && !card.IsBusy);
 
             // Assert 1: the question was asked before anything changed, and No changed nothing
             Assert.Empty(window.OwnedWindows);

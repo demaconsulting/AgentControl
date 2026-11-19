@@ -823,28 +823,26 @@ public sealed class RepoCardLaunchVerificationTests : IDisposable
 
     /// <summary>
     ///     Test that answering a request never runs the waiting operation inside the answering call: the
-    ///     continuation runs on another thread, so the dialog's close handling is never re-entered.
+    ///     answering call returns while a waiting continuation is still blocked, so the dialog's close
+    ///     handling is never re-entered.
     /// </summary>
     [Fact]
     public async Task AgentFilesChoiceRequest_Answer_CompletesAsynchronously()
     {
-        // Arrange: a continuation attached before the answer is given from a dedicated thread
+        // Arrange: a continuation that blocks until the answering call has returned. Run inside that
+        // call, it would hold the call up, so the call could never return and release it; the wait
+        // gives up after a while only so that such a failure ends the test instead of hanging it
         var request = new AgentFilesChoiceRequest("m", "a", "b");
-        var continuationThread = request.Answer.ContinueWith(
-            _ => Environment.CurrentManagedThreadId, TaskContinuationOptions.ExecuteSynchronously);
-        var respondingThread = 0;
-        var thread = new Thread(() =>
-        {
-            respondingThread = Environment.CurrentManagedThreadId;
-            request.Respond(true);
-        });
+        using var respondReturned = new ManualResetEventSlim();
+        var continuation = request.Answer.ContinueWith(
+            _ => respondReturned.Wait(TimeSpan.FromSeconds(30)), TaskContinuationOptions.ExecuteSynchronously);
 
         // Act
-        thread.Start();
-        thread.Join();
+        request.Respond(true);
+        respondReturned.Set();
 
-        // Assert
-        Assert.NotEqual(respondingThread, await continuationThread);
+        // Assert: the continuation saw the answering call return
+        Assert.True(await continuation);
     }
 
     /// <inheritdoc />

@@ -211,14 +211,13 @@ list, a wrong type or a relative cache root fail at construction with nothing ru
 interactive flag decides `GCM_INTERACTIVE`/askpass handling; authentication, host key, not-found and unreachable git
 failures, a timeout, a missing git and an unsafe repository owner map to the provider's failure kinds or a plain error
 whose message contains neither git's text nor the address nor the path git named; an untrusted ssh host key is reported
-as
-unreachable with the instruction to connect once with ssh and accept the key; a missing repository is `NotFound`;
-cancellation raises `OperationCanceledException`; with a limit of two, only the two most recently used of four commits
-remain. This scenario is tested by `GitSourceProvider_Constructor_InvalidSettings_FailsClosed`,
+as unreachable with the instruction to connect once with ssh and accept the key; a missing repository is `NotFound`;
+cancellation raises `OperationCanceledException` and stops git before it finishes; with a limit of two, only the two
+most recently used of four commits remain. This scenario is tested by
+`GitSourceProvider_Constructor_InvalidSettings_FailsClosed`,
 `GitSourceProvider_Constructor_WrongTypeBlankAliasOrRelativeCache_ThrowsArgumentException`,
 `GitSourceProvider_InteractiveFlag_IsHonored`, `GitSourceProvider_GitFailure_IsTranslatedToFailureKind`,
-`GitSourceProvider_GitFailure_UntrustedHostKey_TellsHowToTrustIt`,
-`GitSourceProvider_OtherFailures_AreReportedClearly`,
+`GitSourceProvider_GitFailure_UntrustedHostKey_TellsHowToTrustIt`, `GitSourceProvider_OtherFailures_AreReportedClearly`,
 `GitSourceProvider_ListVersions_RepositoryMissing_ReportsNotFound`,
 `GitSourceProvider_ListVersions_Cancelled_ThrowsOperationCanceled`,
 `GitSourceProvider_Acquire_AlreadyCancelled_ThrowsOperationCanceled` and
