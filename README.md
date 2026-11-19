@@ -8,6 +8,12 @@
 [![Quality Gate][badge-quality]][link-quality]
 [![Security][badge-security]][link-security]
 
+![AgentControl banner: the AgentControl name with the tagline 'Agent files, pinned. One click to launch.' and a
+.agentcontrol.json pin naming the package 'Acme.AI' at version '2.1.0'. Agent packages, the repo's version pin,
+package signature checks, and the Git repository flow on curved arrows into the AgentControl desktop app, and arrows
+lead out to the repo's synced .github agents, standards, templates, and skills folders, the launched agentic CLI,
+the release notes of a newer version, and an offered AGENTS.md template][hero]
+
 AgentControl is a Windows desktop launcher that lets a company distribute proprietary AI-agent configuration
 alongside public source repositories, without committing that content to source control. Each repo pins an exact
 package version in its `.agentcontrol.json` file. AgentControl syncs the repo's `.github/agents`,
@@ -99,6 +105,7 @@ By contributing to this project, you agree that your contributions will be licen
 [badge-security]: https://sonarcloud.io/api/project_badges/measure?project=demaconsulting_AgentControl&metric=security_rating
 
 <!-- Image References -->
+[hero]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/images/hero.png
 [workflow]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/images/agent-workflow.png
 [shot-main-dark]: https://raw.githubusercontent.com/demaconsulting/AgentControl/main/docs/user_guide/images/main-window-dark.png
 
