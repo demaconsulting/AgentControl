@@ -13,7 +13,6 @@ tools:
     command: git --version
     regex: '(?i)git version (?<version>\d+\.\d+\.\d+)'
 
-
   # SonarScanner for .NET (from dotnet tool list)
   dotnet-sonarscanner:
     command: dotnet tool list
