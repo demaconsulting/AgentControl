@@ -18,10 +18,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using System.Reflection;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoConfig;
@@ -253,33 +253,35 @@ public sealed class MainWindowTests : IDisposable
     });
 
     /// <summary>
-    ///     Test that the card menu-item handlers route through the card's commands.
+    ///     Test that the card's "Select Package..." and "Remove from list" menu items, clicked from the
+    ///     card's open menu, route through the card's commands: Select Package reports the missing
+    ///     source, and Remove asks for confirmation before removing anything.
     /// </summary>
     [Fact]
     public void MainWindow_MenuItemHandlers_RouteThroughCardCommands() => HeadlessTestApp.Run(() =>
     {
-        // Arrange
+        // Arrange: a window with one card and no package source configured
         var window = CreateWindow(out var viewModel);
         window.Show();
         viewModel.AddRepo(CreateTempDirectory());
-        var card = viewModel.RepoCards[0];
-        var removeRequested = false;
-        card.RemoveRequested += (_, _) => removeRequested = true;
-        var menuItem = new MenuItem { DataContext = card };
+        Dispatcher.UIThread.RunJobs();
 
-        // Act
-        InvokeStatic("RemoveMenuItem_Click", menuItem);
-        InvokeStatic("SelectPackageMenuItem_Click", menuItem);
-        InvokeStatic("RemoveMenuItem_Click", new MenuItem());
-        InvokeStatic("SelectPackageMenuItem_Click", new MenuItem());
+        // Act: choose "Select Package..." from the card's menu
+        ClickCardMenuItem(window, "SelectPackageMenuItem");
 
-        // Assert
-        Assert.True(removeRequested);
-        foreach (var owned in window.OwnedWindows.ToArray())
-        {
-            owned.Close();
-        }
+        // Assert: the card's command ran and reported that no source is configured
+        var message = Assert.Single(window.OwnedWindows.OfType<MessageBoxWindow>());
+        message.Close();
+        Dispatcher.UIThread.RunJobs();
 
+        // Act: choose "Remove from list" from the card's menu
+        ClickCardMenuItem(window, "RemoveMenuItem");
+
+        // Assert: the removal is confirmed first, and nothing is removed yet
+        var question = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+        Assert.Single(viewModel.RepoCards);
+        question.Close();
+        Dispatcher.UIThread.RunJobs();
         window.Close();
     });
 
@@ -459,8 +461,28 @@ public sealed class MainWindowTests : IDisposable
         return path;
     }
 
-    private static void InvokeStatic(string methodName, object sender) =>
-        typeof(MainWindow)
-            .GetMethod(methodName, BindingFlags.Static | BindingFlags.NonPublic)!
-            .Invoke(null, [sender, new RoutedEventArgs()]);
+    /// <summary>
+    ///     Clicks an item of the only card's "..." menu the way a user does: opens the menu from its
+    ///     button, raises <see cref="MenuItem.ClickEvent"/> on the named item and closes the menu.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="name">The menu item's XAML name.</param>
+    private static void ClickCardMenuItem(MainWindow window, string name)
+    {
+        var button = window.GetVisualDescendants().OfType<Button>().Single(candidate => candidate.Name == "MoreActionsButton");
+        var menu = Assert.IsType<MenuFlyout>(button.Flyout);
+        menu.ShowAt(button);
+        Dispatcher.UIThread.RunJobs();
+        try
+        {
+            menu.Items.OfType<MenuItem>().Single(item => item.Name == name)
+                .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        }
+        finally
+        {
+            menu.Hide();
+        }
+
+        Dispatcher.UIThread.RunJobs();
+    }
 }

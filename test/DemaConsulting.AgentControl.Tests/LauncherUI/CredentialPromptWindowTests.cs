@@ -20,6 +20,7 @@
 
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Threading;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.NuGet.Caching;
@@ -268,11 +269,13 @@ public class CredentialPromptWindowTests
         {
             var prompt = new AvaloniaCredentialPrompt(() => owner);
 
-            // Act: two questions at once
+            // Act: two questions at once. The second is asked from this thread, so by the time the call
+            // returns it has reached the point where it either waits its turn or shows its dialog, and
+            // running the pending UI work shows any dialog it scheduled
             var first = Task.Run(() => prompt.PromptAsync(CreateRequest(), CancellationToken.None));
             var firstDialog = await WaitForDialogAsync(owner);
-            var second = Task.Run(() => prompt.PromptAsync(CreateRequest(), CancellationToken.None));
-            await Task.Delay(300, TestContext.Current.CancellationToken);
+            var second = prompt.PromptAsync(CreateRequest(), CancellationToken.None);
+            Dispatcher.UIThread.RunJobs();
 
             // Assert: still just the first dialog
             Assert.Single(owner.OwnedWindows.OfType<CredentialPromptWindow>());

@@ -1659,7 +1659,7 @@ sections:
           # underlying data source has direct unit coverage.
           - windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright
           - MainWindow_AboutClicked_OpensModalAboutOwnedByMainWindow
-          - ThirdPartyDependencies_All_MatchesCsprojDirectRuntimeDependencies
+          - ThirdPartyDependencies_All_MatchesTheApplicationsDirectRuntimeDependencies
           - ThirdPartyDependencies_All_NoDuplicateNames
           - ThirdPartyDependencies_All_EveryEntryHasNonEmptyLicense
           - DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat
