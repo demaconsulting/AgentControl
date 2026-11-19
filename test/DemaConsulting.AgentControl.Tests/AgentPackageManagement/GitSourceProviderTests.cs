@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using System.Diagnostics;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Tests.GitIntegration;
@@ -290,17 +289,16 @@ public sealed class GitSourceProviderTests : IDisposable
     [Fact]
     public async Task GitSourceProvider_ListVersions_Cancelled_ThrowsOperationCanceled()
     {
-        // Arrange
-        var stub = NewStub().Respond("ls-remote", sleepSeconds: 30);
+        // Arrange: git that hangs well past the moment the caller cancels
+        var stub = NewStub().Respond("ls-remote", sleepSeconds: GitRemoteStub.HangSeconds);
         var provider = new GitSourceProvider(Definition(), new GitSourceOptions(() => stub.Path, NewFolder()));
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         cancellation.CancelAfter(TimeSpan.FromSeconds(1));
-        var stopwatch = Stopwatch.StartNew();
 
-        // Act / Assert
+        // Act / Assert: the cancellation surfaces, and git never got to finish
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => provider.ListVersionsAsync("contoso-agents", cancellation.Token));
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(20));
+        Assert.False(await stub.RanToTheEndOfItsHangAsync());
     }
 
     /// <summary>

@@ -605,9 +605,9 @@ public sealed class GitRemoteClientTests : IDisposable
     [Fact]
     public async Task GitRemoteClient_ReadBlobs_ExceedsTimeLimit_KillsProcessAndReportsTimedOut()
     {
-        // Arrange: git that hangs for 30 seconds, against a limit of one second
+        // Arrange: git that hangs well past a limit of one second
         var stub = NewStub();
-        stub.Respond("cat-file", sleepSeconds: 30);
+        stub.Respond("cat-file", sleepSeconds: GitRemoteStub.HangSeconds);
         var client = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder(), FetchTimeout: TimeSpan.FromSeconds(1)));
 
         // Act
@@ -616,8 +616,7 @@ public sealed class GitRemoteClientTests : IDisposable
 
         // Assert: timed out, and the process never got to finish
         Assert.Equal(GitFailureKind.TimedOut, failure.Kind);
-        await Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
-        Assert.False(stub.WroteFinishedMarker());
+        Assert.False(await stub.RanToTheEndOfItsHangAsync());
     }
 
     /// <summary>
@@ -627,44 +626,38 @@ public sealed class GitRemoteClientTests : IDisposable
     [Fact]
     public async Task GitRemoteClient_ListTags_ExceedsTimeLimit_KillsProcessAndReportsTimedOut()
     {
-        // Arrange: git that hangs for 30 seconds, against a limit of one second
+        // Arrange: git that hangs well past a limit of one second
         var stub = NewStub();
-        stub.Respond("ls-remote", sleepSeconds: 30);
+        stub.Respond("ls-remote", sleepSeconds: GitRemoteStub.HangSeconds);
         var client = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder(), ListTimeout: TimeSpan.FromSeconds(1)));
-        var stopwatch = Stopwatch.StartNew();
 
         // Act
         var failure = await Assert.ThrowsAsync<GitRemoteException>(() => client.ListTagsAsync(
             new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*",
             TestContext.Current.CancellationToken));
 
-        // Assert: reported promptly, and the process never got to finish
+        // Assert: reported as a timeout, and the process never got to finish
         Assert.Equal(GitFailureKind.TimedOut, failure.Kind);
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(20));
-        await Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
-        Assert.False(stub.WroteFinishedMarker());
+        Assert.False(await stub.RanToTheEndOfItsHangAsync());
     }
 
     /// <summary>
-    ///     Test that canceling stops the command promptly and kills the process.
+    ///     Test that canceling stops the command and kills the process.
     /// </summary>
     [Fact]
     public async Task GitRemoteClient_ListTags_Cancelled_KillsProcessAndThrowsOperationCanceled()
     {
-        // Arrange
+        // Arrange: git that hangs well past the moment the caller cancels
         var stub = NewStub();
-        stub.Respond("ls-remote", sleepSeconds: 30);
+        stub.Respond("ls-remote", sleepSeconds: GitRemoteStub.HangSeconds);
         var client = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder()));
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         cancellation.CancelAfter(TimeSpan.FromSeconds(1));
-        var stopwatch = Stopwatch.StartNew();
 
-        // Act / Assert
+        // Act / Assert: the cancellation surfaces, and the process never got to finish
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.ListTagsAsync(
             new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*", cancellation.Token));
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(20));
-        await Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
-        Assert.False(stub.WroteFinishedMarker());
+        Assert.False(await stub.RanToTheEndOfItsHangAsync());
     }
 
     /// <summary>
@@ -686,7 +679,6 @@ public sealed class GitRemoteClientTests : IDisposable
             KillProcessTree = process => started.Add(process.Id),
             StopTimeout = TimeSpan.FromSeconds(1)
         });
-        var stopwatch = Stopwatch.StartNew();
 
         try
         {
@@ -695,13 +687,14 @@ public sealed class GitRemoteClientTests : IDisposable
                 new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*",
                 TestContext.Current.CancellationToken));
 
-            // Assert: the kill was attempted, termination was not confirmed, and the message is fixed
+            // Assert: the kill was attempted, termination was not confirmed, and the message is fixed.
+            // The process is still running (it sleeps far longer), so this outcome is only reachable
+            // when the wait for it gave up at the stop timeout instead of hanging until it ended
             Assert.Equal(GitFailureKind.ProcessNotStopped, failure.Kind);
             Assert.Single(started);
             Assert.Equal(
                 "git ls-remote was stopped but could not be confirmed to have ended, so a git process may still be running.",
                 failure.Message);
-            Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(20));
         }
         finally
         {

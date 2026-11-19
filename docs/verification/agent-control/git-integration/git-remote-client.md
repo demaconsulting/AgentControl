@@ -180,13 +180,15 @@ parent a failure message contains no trace text. This scenario is tested by
 `GitRemoteClient_RealGit_TraceVariablesInParent_ProduceNoTraceOutput`, covering
 `AgentControl-GitRemoteClient-NoTraceVariables` and `AgentControl-GitRemoteClient-NeutralWorkingFolder`.
 
-**GitRemoteClient_Process_TimeoutCancelAndTerminationConfirmed**: a command that sleeps 30 seconds is killed at a
+**GitRemoteClient_Process_TimeoutCancelAndTerminationConfirmed**: a command that sleeps four seconds is killed at a
 one-second limit and reported as `TimedOut` with the message `git ls-remote did not finish within 1 seconds and was
 stopped.`, and is killed when cancelled and reported as an `OperationCanceledException`; the process never finishes in
-either case. With a test seam that replaces the termination (it records the process and leaves it running, or throws an
-access error), a timeout and a cancellation are both reported as a `GitRemoteException` of kind `ProcessNotStopped`
-with the fixed message "was stopped but could not be confirmed to have ended" within the one-second stop timeout,
-and the
+either case - after the call returns the test waits as long as the whole sleep, which a process that was not killed
+would complete, and finds no finished marker. With a test seam that replaces the termination (it records the process
+and leaves it running, or throws an access error), a timeout and a cancellation are both reported as a
+`GitRemoteException` of kind `ProcessNotStopped` with the fixed message "was stopped but could not be confirmed to have
+ended" while the 30-second stub is still running, an outcome only reachable when the wait for it gives up at the
+one-second stop timeout instead of hanging, and the
 test kills the stub itself afterwards. This scenario is tested by
 `GitRemoteClient_ListTags_ExceedsTimeLimit_KillsProcessAndReportsTimedOut`,
 `GitRemoteClient_ListTags_Cancelled_KillsProcessAndThrowsOperationCanceled`,

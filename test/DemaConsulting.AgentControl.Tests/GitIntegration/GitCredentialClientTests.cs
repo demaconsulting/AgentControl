@@ -18,7 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using System.Diagnostics;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.Tests.PackageCredentials;
@@ -518,26 +517,23 @@ public class GitCredentialClientTests
 
     /// <summary>
     ///     Test that a git process that does not finish in time is stopped (killed) and reported as
-    ///     "nothing", promptly, and that it never gets to finish what it was doing.
+    ///     "nothing", and that it never gets to finish what it was doing.
     /// </summary>
     [Fact]
     public async Task GitCredentialClient_Fill_ProcessHangs_IsKilledAtTheTimeLimitAndReturnsNull()
     {
-        // Arrange: a stub that hangs for 3 seconds, and a limit of a quarter of a second
+        // Arrange: a stub that answers with a credential after 3 seconds, and a limit of a quarter of a second
         var stub = GitCredentialStub.Create(fillOutput: "username=svc|password=pw", sleepSeconds: 3);
         var folder = CreateTempDirectory();
         try
         {
             var client = new GitCredentialClient(stub.Path, timeout: TimeSpan.FromMilliseconds(250), workingDirectory: folder);
-            var stopwatch = Stopwatch.StartNew();
 
             // Act
             var credential = await client.FillAsync(Origin, TestContext.Current.CancellationToken);
-            stopwatch.Stop();
 
-            // Assert: given up long before the stub would have finished
+            // Assert: given up at the limit - the stub's credential would have been returned had it been waited for
             Assert.Null(credential);
-            Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2.5), $"Took {stopwatch.Elapsed}.");
 
             // Assert: the process was killed, so it never reaches the end of its sleep
             await Task.Delay(TimeSpan.FromSeconds(3.5), TestContext.Current.CancellationToken);
