@@ -106,29 +106,6 @@ from `.github/standards/`. Use this matrix to determine which to load:
 
 Load only the standards relevant to your specific task scope.
 
-# Repository-Specific Standards Exceptions
-
-The files in `.github/standards/` are shared verbatim across repositories. This repository applies these accepted
-exceptions on top of them:
-
-## Existing Internals-Based Tests (`testing-principles.md`, "Assert Observable Behavior")
-
-Some existing tests predate the "Assert Observable Behavior" rule and assert on things it now lists as off-limits:
-
-- Wall-clock bounds on kill/cancel paths (the elapsed-time checks in
-  `GitCredentialClient_Fill_ProcessHangs_IsKilledAtTheTimeLimitAndReturnsNull`,
-  `GitSourceProvider_ListVersions_Cancelled_ThrowsOperationCanceled`, and the three `GitRemoteClient_ListTags_*`
-  time-limit and cancellation tests)
-- Thread identity (`AgentFilesChoiceRequest_Answer_CompletesAsynchronously` in `RepoCardLaunchVerificationTests`)
-- Private members through reflection (the `InvokeStatic` helper behind
-  `MainWindow_MenuItemHandlers_RouteThroughCardCommands` in `MainWindowTests`)
-- Text of checked-in repository files (`ThirdPartyDependencies_All_MatchesCsprojDirectRuntimeDependencies` reads
-  `DemaConsulting.AgentControl.csproj`)
-
-These tests are accepted as they are: do not rewrite them just to satisfy the rule, and do not weaken the shared
-standard. New tests MUST follow the rule; when one of these tests is next changed for another reason, prefer moving
-it to observable behavior.
-
 # Agent Delegation Guidelines
 
 The default agent should handle simple, straightforward tasks directly.
