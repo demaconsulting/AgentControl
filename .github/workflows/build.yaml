@@ -34,7 +34,6 @@ jobs:
         run: >
           dotnet tool restore
 
-
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
@@ -459,12 +458,10 @@ jobs:
       # This section installs all required dependencies and tools for document generation.
       # Downstream projects: Add any additional dependency installations here.
 
-
       - name: Setup dotnet
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.x
-
 
       - name: Restore Tools
         run: dotnet tool restore
