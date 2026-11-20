@@ -71,6 +71,10 @@ public sealed class AddRepoTests
 
         var mainWindow = context.Launch();
         mainWindow.SetForeground();
+
+        // The list shows only the rows that fit, so give it the whole screen now, while no dialog is
+        // open (a window that owns an open dialog cannot change its state)
+        mainWindow.Patterns.Window.Pattern.SetWindowVisualState(WindowVisualState.Maximized);
         Assert.Equal(["repo"], RepoNames(mainWindow));
 
         // Act: Add opens the folder picker; open the folder and select all three, as a user does
@@ -114,8 +118,14 @@ public sealed class AddRepoTests
         // Act: dismiss the message
         Find(messageBox, "MessageBoxOkButton").AsButton().Invoke();
 
+        // Assert: the message box is gone and the main window can be used again
+        Assert.True(Retry.WhileFalse(
+            () => context.WaitForDialog("MessageText", TimeSpan.FromMilliseconds(200)) is null,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.True(DialogInputProbe.WaitForEnabled(mainWindow, expected: true));
+
         // Assert: both repositories are listed and stored, the plain folder is neither, and it is untouched
-        mainWindow.Patterns.Window.Pattern.SetWindowVisualState(WindowVisualState.Maximized);
         Assert.True(Retry.WhileFalse(
             () => RepoNames(mainWindow).Order(StringComparer.Ordinal).SequenceEqual(["alpha-repo", "beta-repo", "repo"]),
             TimeSpan.FromSeconds(10),
