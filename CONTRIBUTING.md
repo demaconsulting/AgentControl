@@ -163,6 +163,11 @@ dotnet test --filter "FullyQualifiedName~YourTestName"
 dotnet test --collect "XPlat Code Coverage"
 ```
 
+`pwsh ./build.ps1` builds the solution and runs every test project, including the FlaUI UI tests in
+`test/DemaConsulting.AgentControl.UiTests`, which launch the application and take over the mouse and keyboard. Use
+`pwsh ./build.ps1 -SkipUiTests` to build everything but run only the headless test projects while you keep working on
+the machine; the UI tests still run in CI.
+
 #### Self-Validation Tests
 
 ```bash

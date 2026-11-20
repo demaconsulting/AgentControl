@@ -84,7 +84,9 @@ commands that send real mouse or keyboard input.
 - **`pip-requirements.txt`** - Python dependencies for yamllint and yamlfix
 - **`docs/sysml2/`** - SysML2 architecture model; authoritative source for software structure
 - **`fix.ps1`** - Applies all auto-fixers silently (dotnet format, LintMark, YAML). Always exits 0.
-- **`build.ps1`** - Builds the solution and runs all tests.
+- **`build.ps1`** - Builds the solution and runs all tests. `-SkipUiTests` still builds everything but runs only the
+  headless test projects, skipping the FlaUI UI tests that take over the desktop. Use `pwsh ./build.ps1 -SkipUiTests`
+  when the user is working on the machine, unless they have given permission to drive the desktop.
 
 # Standards Application (ALL Agents Must Follow)
 
