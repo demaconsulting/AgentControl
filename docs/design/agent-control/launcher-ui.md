@@ -103,7 +103,11 @@ new section is collapsed) has no star to focus.)
   `CancelOperationCommand` (`AgentControl-LauncherUI-OneOperationPerRepo`,
   `AgentControl-LauncherUI-CancelOperation`, `AgentControl-LauncherUI-OperationProgress`). The card also
   exposes the chip properties (package, upgrade, branch, status) the view binds to
-  (`AgentControl-LauncherUI-RepoCardChips`, `AgentControl-LauncherUI-StatusBadges`).
+  (`AgentControl-LauncherUI-RepoCardChips`, `AgentControl-LauncherUI-StatusBadges`). `RefreshCommand` is bound
+  both to the card menu's Refresh item and to the "Sign-in needed" chip button
+  (`AgentControl-LauncherUI-SignInNeededChipSignsIn`); when the sign-in that check asks for is canceled, closed or
+  rejected, the card keeps the same chip and tooltip rather than a failed check
+  (`AgentControl-LauncherUI-SignInNotGivenKeepsChip`).
 - *Constraints*: Never mutates state before a required confirmation (see `RemoveRequest`
   below); never replaces agent files that differ from the pin without the user choosing to update them, and never
   starts the agent tool after the user cancelled a launch whose needed agent files could not be installed.
@@ -125,7 +129,10 @@ selection.
 - *Contract*: Invokes an `onSave` callback with the current property values, including the
   edited list of package sources, and raises `Saved`, letting
   `MainWindowViewModel.ApplySettings` persist the change and invalidate the cached package
-  data of every edited or removed source (`AgentControl-LauncherUI-Settings`).
+  data of every edited or removed source (`AgentControl-LauncherUI-Settings`). Whenever the Settings window
+  closes, saved or not, `MainWindow` calls `MainWindowViewModel.RecheckAfterSettingsClosed(settingsSaved)` with
+  whether `Saved` was raised, which re-checks the cards that show a source problem or a failed upgrade check
+  when nothing was saved and starts nothing after a save (`AgentControl-LauncherUI-SettingsClosedRechecksProblems`).
 - *Constraints*: None beyond standard `ICommand` semantics.
 
 **SourceEditorViewModel.SaveCommand** / **TestConnectionCommand**: Accepts an edited package source
@@ -196,7 +203,13 @@ a grey "No agent
 package" chip when nothing is pinned, a branch chip, and color-coded status chips (uncommitted
 changes, committed agent files, folder missing, and a red chip for a source problem with the actual problem in
 its tooltip - "Sign-in needed" when the server needs a sign-in, otherwise "Package source problem"
-(`SourceProblemChipText`)); the outcome of the last Launch/Pull/Upgrade action (`StatusMessage`) is shown
+(`SourceProblemChipText`)). The "Sign-in needed" chip (`SourceNeedsSignIn`) is a chip button bound to the
+card's `RefreshCommand`: clicking it starts the same user-started check as the menu's Refresh, which may ask
+for the sign-in, under the same busy guard, and its tooltip says to click it or use Refresh; every other source
+problem keeps the tooltip-only red chip (`ShowSourceProblemChip`), and the two are never shown together. Like
+the other chip buttons it shows hover and pressed tints (`ChipRedBackgroundHover`/`ChipRedBackgroundPressed`/
+`ChipRedBorderHover` in both theme palettes) (`AgentControl-LauncherUI-SignInNeededChipSignsIn`); the
+outcome of the last Launch/Pull/Upgrade action (`StatusMessage`) is shown
 under the repo path; a repo whose folder is missing offers no upgrade; the Launch button is labeled with a
 short name of the configured agent tool
 (falling back to plain "Launch" for a long or unknown name) and Git Pull is an item of the card's "..." menu
@@ -369,8 +382,21 @@ background check never opens the
 sign-in dialog (`RefreshUpgradeStatusAsync` defaults to `allowPrompt: false`): for a server it uses the
 credentials already typed this session or saved with the user's Git credential helper (read without any dialog)
 and otherwise sets the card's source problem to say a sign-in is
-needed and to use the card's menu > Refresh, which is a check the user started and so may ask
-(`AgentControl-LauncherUI-BackgroundChecksDoNotPrompt`).
+needed and to click the card's "Sign-in needed" chip or use the card's menu > Refresh, either of which is a check
+the user started and so may ask
+(`AgentControl-LauncherUI-BackgroundChecksDoNotPrompt`, `AgentControl-LauncherUI-SignInNeededChipSignsIn`). When
+the user then cancels or closes the sign-in dialog that check opened, or the server rejects the sign-in typed, the
+source still needs a sign-in, so the card shows the same "Sign-in needed" chip with the same tooltip - not "Update
+check failed" - and the user can click it again at once; the check asks at most once, and nothing asks again by
+itself because every automatic check never prompts. Every other failure of that check is still shown as a failed
+check (`AgentControl-LauncherUI-SignInNotGivenKeepsChip`). A
+sign-in made with the Settings window's Test connection is kept in the session's credential store the cards share,
+so when the Settings window closes, `MainWindow` calls `MainWindowViewModel.RecheckAfterSettingsClosed`, passing
+whether `SettingsWindowViewModel.Saved` was raised: after a save it starts nothing (`ApplySettings` has already
+started the check of every card), otherwise it re-checks in the background - the same never-prompting check,
+alongside any check that is running - only the cards that are not busy, not missing, pinned, and show a source
+problem or a failed upgrade check, so the sign-in (or a connection that came back) shows on them at once
+(`AgentControl-LauncherUI-SettingsClosedRechecksProblems`).
 
 **Sign-in dialog.** When a NuGet server needs credentials for something the user started - Select Package,
 Upgrade, Refresh, or the editor's Test connection - the `PackageCredentials` subsystem calls
@@ -536,7 +562,9 @@ be left with a color that exists in one theme only. The same file defines the sh
 (surface, soft shadow,
 hover lift with 140 ms transitions, selection and keyboard-focus ring), the status accent bar, the avatar
 tile, the chips (one height, padding and font, tinted fill with a matching foreground, a flat button wrapper
-for clickable chips), the action buttons (primary accent with hover, pressed and disabled states, and a
+for clickable chips, whose amber, grey and red chips tint on hover, and amber and red also when pressed), the action
+buttons (primary
+accent with hover, pressed and disabled states, and a
 tinted secondary), the ghost icon buttons without a border (favorite star, "more actions"), the group headers of the
 card menu, the drag-and-drop feedback (see *Reordering repos*) and the empty state. Per-control color setters are
 avoided on purpose.

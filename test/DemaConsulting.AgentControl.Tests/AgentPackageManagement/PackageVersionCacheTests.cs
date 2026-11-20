@@ -774,6 +774,36 @@ public sealed class PackageVersionCacheTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a cleared failure memo no longer answers with a failure it recorded: the source is
+    ///     read again and its listing is returned once it answers.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_FailureMemo_Cleared_ReadsTheSourceAgain()
+    {
+        // Arrange: a round's memo that recorded a failure of a source which has since recovered
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("unreachable")
+        };
+        var registry = CreateRegistry(feed);
+        var cache = new PackageVersionCache();
+        var memo = new SourceFailureMemo();
+        await Assert.ThrowsAsync<IOException>(
+            () => cache.GetVersionsDescendingAsync(registry, "Feed", "contoso-agents", CancellationToken.None, memo));
+        feed.ListVersionsException = null;
+
+        // Act: the memo is cleared (the user signed in, or the connection came back) and the round reads again
+        memo.Clear();
+        var versions = await cache.GetVersionsDescendingAsync(
+            registry, "Feed", "contoso-agents", CancellationToken.None, memo);
+
+        // Assert: the source was read again and its listing returned; nothing is remembered for it
+        Assert.Equal(2, feed.ListVersionsCalls);
+        Assert.Single(versions);
+        Assert.False(memo.TryGetFailure("Feed", "contoso-agents", out _));
+    }
+
+    /// <summary>
     ///     Test that the cross-source upgrade check reports the newest version across the sources, that a
     ///     version offered by several sources is attributed to the first of them in configuration order.
     /// </summary>

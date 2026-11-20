@@ -128,6 +128,12 @@ that a newer one superseded counts until it has unwound, although `PendingRefres
 tick starts no round while it is above zero or `_recheckCancellation` is set, so a superseded check still inside a
 provider call that ignores cancellation never overlaps a round.
 
+**_activeFailureMemos** / **_activeFailureMemosLock**: `List<SourceFailureMemo>` behind a `Lock` — the failure memos of
+the background checks that are running: `RecheckUpgradesAsync` and `CheckUpgradesAsync` register the memo they create
+(`RegisterFailureMemo`) and drop it in their `finally` (`UnregisterFailureMemo`), so a superseded check stays listed
+until it has unwound. `ForgetRecordedSourceFailures` clears every listed memo; `RecheckAfterSettingsClosed` calls it.
+The lock is there because without a UI-thread runner (tests) a check may finish on a thread-pool continuation.
+
 **Credentials**: `PackageCredentialContext?` — The session credential store and sign-in prompt created by
 `App`, passed to every `RepoCardViewModel` and to the connection-test provider so that a sign-in made in one
 place is remembered for all of them; `null` (tests, or no sign-in facilities) leaves server sources with only
@@ -192,7 +198,8 @@ with many tracked repos.
   holds up only the cards' own checks, never the window, and a check still running for earlier settings (including a
   periodic round) is cancelled. The window calls it once it is shown; `AddRepo` checks the new card's upgrade status the
   same way, and `ApplySettings` starts a new round against the new sources
-  (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`).
+  (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`); closing the Settings window without saving re-checks
+  only the cards that show a problem (`RecheckAfterSettingsClosed`, below).
 
 **StartPeriodicUpgradeRecheck**: Starts a timer that checks every card's upgrade availability again every
 `_upgradeRecheckInterval` (five minutes) until the view model is disposed
@@ -242,6 +249,42 @@ with many tracked repos.
   cancelled, disposed and cleared the way `StartUpgradeRefresh` replaces it), so neither keeps waiting for a slow
   source or updates cards after the window closed, and refuses further starts (a repo added afterwards starts no
   check); calling it twice is harmless.
+
+**RecheckAfterSettingsClosed**: Checks again, in the background, the cards that show a package source problem or a
+failed upgrade check, once the Settings window has closed
+(`AgentControl-MainWindowViewModel-RecheckAfterSettingsClosed`).
+
+- *Parameters*: `bool settingsSaved` — whether the Settings window saved the settings (its `Saved` event was raised)
+  before it closed; `false` for Cancel, Escape or closing it without saving (including after a save that failed).
+- *Returns*: A task that completes when the check it started has finished (cancellation is not an error); after a save
+  it returns `PendingRefresh` (the check the save started); already completed when the view model is disposed or no
+  card needs checking. The window ignores it; tests await it.
+- *Behavior*: While Settings is open the user may sign in with **Test connection** - whose provider
+  (`CreateConnectionTestProvider`) uses `Credentials`, the same `SessionCredentialStore` the cards read without a prompt
+  (`WithoutPrompt`) - or the network may come back, so without this the cards would keep showing "Sign-in needed" or a
+  failed check until the next periodic round. A disposed view model starts nothing. After a save nothing is started,
+  because `ApplySettings` always ends with `BeginUpgradeRefresh`, which checks every card: checking again would read
+  every source twice. Otherwise it takes the cards that `CanRecheckUpgrade` accepts (pinned, not busy, folder present)
+  and that have `HasSourceProblem` or `IsUpgradeStatusUnknown`, and checks them with `CheckUpgradesAsync` - the
+  launch-style check: `allowPrompt` false (no sign-in dialog), `relistSources` false (the cache is not cleared: a
+  failure is never cached, so these cards read their sources again, while a listing cached for another card still
+  serves), a shared `SourceFailureMemo`, a few at a time, counted in `_launchChecksInFlight` so no periodic round starts
+  over it. Like the check of an added repo (`BeginSingleCardUpgradeRefresh`) it runs with the token of
+  `_refreshCancellation`, does not cancel a check that is running, is canceled by a later `StartUpgradeRefresh` or by
+  `Dispose`, and is merged into `PendingRefresh` (`Task.WhenAll(PendingRefresh, check)`); the cards' generation
+  counter keeps the newest result where it overlaps another check.
+- *Failures recorded before the sign-in*: before choosing the cards (so also when none needs checking) it calls
+  `ForgetRecordedSourceFailures`, which clears the `SourceFailureMemo` of every check that is running - a periodic round
+  or a launch-style check started before Settings closed. Such a check may have recorded "sign-in needed" or
+  "unreachable" for a source before the user signed in or the connection came back; without this, a card that check
+  reaches afterwards would be given the old failure without the source being read, and because that check of the card
+  started after this re-check's, the card would show the old failure in place of the re-check's result. After the
+  clear, those cards read the source again (with the session's sign-in). The memos are cleared whole rather than per
+  source: every card reads the same configured sources, and a forgotten failure costs one more read. After a save
+  nothing is cleared: `StartUpgradeRefresh` cancels the running checks and starts one with a new memo. The
+  package-version cache needs no clearing on this path: it never holds a failure, so the source behind a problem has
+  no listing to serve, and the listings of sources that answered are within their five minutes, as for any background
+  check (the chip's Refresh relists every source).
 
 **AddRepo**: Adds a repository to the recent-repos list.
 
@@ -503,7 +546,8 @@ succeeding.
   upgrade check and the periodic re-check (`BeginUpgradeRefresh`, `StartPeriodicUpgradeRecheck`) when the view
   model is attached, disposes the view model when it closes, subscribes to
   `SettingsSaveFailed` to show a message for the changes that come from cards and headers, and reads `Settings` to open
-  `SettingsWindow`, passing `CreateConnectionTestProvider` as its provider factory; fills each card
+  `SettingsWindow`, passing `CreateConnectionTestProvider` as its provider factory, and once that window closes calls
+  `RecheckAfterSettingsClosed` with whether its `Saved` event was raised (not awaited); fills each card
   menu's "Move to group" submenu when the menu opens, shows the `GroupNameWindow` prompt and the
   removal confirmation for the `GroupRenameRequested`/`GroupRemoveRequested`/`NewGroupRequested`
   requests, opens the card color palette pop-up, and calls `RenameGroup`/`RemoveGroup`.

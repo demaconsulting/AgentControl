@@ -161,7 +161,10 @@ without it.
 - **Repo card** (repeated, one per list item): `RepoNameText`, `RepoStatusAccent` (the status bar; its name is the
   status in words), `RepoAvatarText`, `RepoAvatarImage`, `UpgradeAvailableBadge` (a button: click it to upgrade),
   `SourceProblemChip` (with `SourceProblemBadge`: the red
-  package-source-problem or sign-in-needed chip; it can be shown together with `UpgradeAvailableBadge`),
+  package-source-problem chip for any problem other than a missing sign-in; tooltip only, not clickable),
+  `SignInNeededChip` (a button: the red "Sign-in needed" chip; click it to refresh the card, which may open the
+  sign-in dialog; its text is also `SourceProblemBadge`, and only one of the two chips is shown; either can be shown
+  together with `UpgradeAvailableBadge`),
   `PackageSourceIcon` and `PackageSourceAliasText` (the icon and alias of the source that currently supplies the
   files, in the package chip; hidden when no source is known),
   CommittedAgentFilesBadge, DirtyWorkingTreeBadge, MissingRepoBadge, RepoPathText (a text control whose name is the

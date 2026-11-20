@@ -36,6 +36,11 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 ///     against an in-process mock feed: the card's chip identifies the source, and the background
 ///     upgrade check never opens the sign-in dialog while a check the user asked for may.
 /// </summary>
+/// <remarks>
+///     Runs in the <c>RealProcess</c> collection because the card's Refresh runs the working-tree
+///     check, which may start git.
+/// </remarks>
+[Collection("RealProcess")]
 public sealed class RepoCardServerSourceTests : IAsyncLifetime
 {
     /// <summary>
@@ -149,7 +154,39 @@ public sealed class RepoCardServerSourceTests : IAsyncLifetime
         Assert.Contains("needs a sign-in", card.SourceProblem, StringComparison.Ordinal);
         Assert.Contains("Refresh", card.SourceProblem, StringComparison.Ordinal);
         Assert.True(card.SourceNeedsSignIn);
+        Assert.False(card.ShowSourceProblemChip);
+        Assert.Contains("Sign-in needed", card.SourceProblem, StringComparison.Ordinal);
         Assert.Equal("Sign-in needed", card.SourceProblemChipText);
+    }
+
+    /// <summary>
+    ///     Test the action of the card's "Sign-in needed" chip (the card's Refresh): after a background check
+    ///     found that the server needs a sign-in, the refresh asks for it once, finds the upgrade and clears
+    ///     the sign-in-needed state.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshAsync_AfterBackgroundCheckNeedsSignIn_AsksOnceAndClearsSignInNeeded()
+    {
+        // Arrange: the background check reported that a sign-in is needed
+        var feed = await StartFeedAsync("1.0.0", "1.1.0");
+        RequireSignIn(feed);
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential(FeedUser, FeedPassword));
+        var card = CreateCard(feed, new PackageCredentialContext(new SessionCredentialStore(), prompt));
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.SourceNeedsSignIn);
+        Assert.True(card.RefreshCommand.CanExecute(null));
+
+        // Act: the command the chip runs
+        await card.RefreshCommand.ExecuteAsync();
+
+        // Assert: asked once, and the card shows the upgrade instead of the problem
+        Assert.Equal(1, prompt.AskCount);
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.False(card.HasSourceProblem);
+        Assert.False(card.ShowSourceProblemChip);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", card.LatestAvailableVersion);
     }
 
     /// <summary>
@@ -188,6 +225,131 @@ public sealed class RepoCardServerSourceTests : IAsyncLifetime
     }
 
     /// <summary>
+    ///     Test that canceling (or closing) the sign-in dialog that the card's "Sign-in needed" chip
+    ///     opened leaves the card showing the same sign-in-needed chip and tooltip it showed before,
+    ///     not a failed upgrade check, after asking once.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshAsync_SignInCanceled_KeepsSignInNeeded()
+    {
+        // Arrange: the background check shows the chip, and the user will cancel the dialog
+        var feed = await StartFeedAsync("1.0.0", "1.1.0");
+        RequireSignIn(feed);
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(null);
+        var card = CreateCard(feed, new PackageCredentialContext(new SessionCredentialStore(), prompt));
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.SourceNeedsSignIn);
+        var backgroundTooltip = card.SourceProblem;
+
+        // Act: the command the chip runs
+        await card.RefreshCommand.ExecuteAsync();
+
+        // Assert: asked once, and the card still shows the same clickable chip and tooltip
+        Assert.Equal(1, prompt.AskCount);
+        Assert.True(card.SourceNeedsSignIn);
+        Assert.False(card.ShowSourceProblemChip);
+        Assert.Equal("Sign-in needed", card.SourceProblemChipText);
+        Assert.Equal(backgroundTooltip, card.SourceProblem);
+        Assert.Contains("needs a sign-in", card.SourceProblem, StringComparison.Ordinal);
+        Assert.Contains("Click \"Sign-in needed\"", card.SourceProblem, StringComparison.Ordinal);
+        Assert.DoesNotContain("canceled", card.SourceProblem, StringComparison.Ordinal);
+
+        // Assert: a problem the user can act on, not a failed check, and the chip can be clicked again
+        Assert.Equal(RepoCardStatus.Problem, card.Status);
+        Assert.Equal("Needs attention", card.StatusText);
+        Assert.False(card.IsUpgradeAvailable);
+        Assert.True(card.RefreshCommand.CanExecute(null));
+    }
+
+    /// <summary>
+    ///     Test that after a canceled sign-in the user can try again straight away: the chip asks
+    ///     again, and the sign-in then given clears the problem and finds the upgrade.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshAsync_SignInCanceledThenRetried_AsksAgainAndSignsIn()
+    {
+        // Arrange: the first dialog is canceled, the second is answered
+        var feed = await StartFeedAsync("1.0.0", "1.1.0");
+        RequireSignIn(feed);
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(null);
+        prompt.EnqueueAnswer(new NuGetCredential(FeedUser, FeedPassword));
+        var card = CreateCard(feed, new PackageCredentialContext(new SessionCredentialStore(), prompt));
+        await card.RefreshCommand.ExecuteAsync();
+        Assert.True(card.SourceNeedsSignIn);
+
+        // Act: the chip again
+        await card.RefreshCommand.ExecuteAsync();
+
+        // Assert: asked again, signed in, and the card shows the upgrade instead of the problem
+        Assert.Equal(2, prompt.AskCount);
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.False(card.HasSourceProblem);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", card.LatestAvailableVersion);
+    }
+
+    /// <summary>
+    ///     Test that a sign-in the server rejects (a wrong password typed in the dialog) leaves the
+    ///     card showing the same sign-in-needed chip and tooltip as the background check, not a
+    ///     failed upgrade check, after asking once.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshAsync_CredentialsRejected_KeepsSignInNeeded()
+    {
+        // Arrange: the background check shows the chip, and the user will type a wrong password
+        var feed = await StartFeedAsync("1.0.0", "1.1.0");
+        RequireSignIn(feed);
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential(FeedUser, "wrong-" + FeedPassword));
+        var card = CreateCard(feed, new PackageCredentialContext(new SessionCredentialStore(), prompt));
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        var backgroundTooltip = card.SourceProblem;
+
+        // Act: the command the chip runs
+        await card.RefreshCommand.ExecuteAsync();
+
+        // Assert: asked once, and the card still shows the same chip and tooltip
+        Assert.Equal(1, prompt.AskCount);
+        Assert.True(card.SourceNeedsSignIn);
+        Assert.Equal("Sign-in needed", card.SourceProblemChipText);
+        Assert.Equal(backgroundTooltip, card.SourceProblem);
+        Assert.DoesNotContain("wrong-" + FeedPassword, card.SourceProblem, StringComparison.Ordinal);
+        Assert.Equal("Needs attention", card.StatusText);
+        Assert.True(card.RefreshCommand.CanExecute(null));
+    }
+
+    /// <summary>
+    ///     Test that a canceled sign-in is not asked for a second time in the same check, even when
+    ///     another configured source offers the pinned version (so the check goes on to read every
+    ///     source for a newer version), and the card shows what that source offers.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshAsync_SignInCanceledWhileAnotherSourceOffersThePin_AsksOnce()
+    {
+        // Arrange: "Feed" needs a sign-in (first in Settings order), "Open" is anonymous and offers
+        // the pinned version and a newer one; the user cancels the dialog
+        var feed = await StartFeedAsync("1.0.0", "1.1.0");
+        RequireSignIn(feed);
+        var open = await StartFeedAsync("1.0.0", "1.1.0");
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(null);
+        prompt.EnqueueAnswer(null);
+        var card = CreateCard(
+            feed, new PackageCredentialContext(new SessionCredentialStore(), prompt), (Alias: "Open", Feed: open));
+
+        // Act: a check the user started
+        await card.RefreshCommand.ExecuteAsync();
+
+        // Assert: asked once only, and the card shows the upgrade the open source offers
+        Assert.Equal(1, prompt.AskCount);
+        Assert.False(card.HasSourceProblem);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", card.LatestAvailableVersion);
+    }
+
+    /// <summary>
     ///     Starts a mock feed serving the given versions of the test package.
     /// </summary>
     /// <param name="versions">The versions to serve.</param>
@@ -217,10 +379,15 @@ public sealed class RepoCardServerSourceTests : IAsyncLifetime
     /// <summary>
     ///     Creates a card for a repo pinned to <c>contoso-agents 1.0.0</c> from the feed's source.
     /// </summary>
-    /// <param name="feed">The feed.</param>
+    /// <param name="feed">The feed, configured as the source <c>Feed</c>.</param>
     /// <param name="credentials">The credential facilities, or <see langword="null"/>.</param>
+    /// <param name="otherSources">Further anonymous feeds, configured after <c>Feed</c> in this
+    ///     order under the given aliases.</param>
     /// <returns>The card.</returns>
-    private RepoCardViewModel CreateCard(MockNuGetFeed feed, PackageCredentialContext? credentials)
+    private RepoCardViewModel CreateCard(
+        MockNuGetFeed feed,
+        PackageCredentialContext? credentials,
+        params (string Alias, MockNuGetFeed Feed)[] otherSources)
     {
         var repoRoot = CreateTempDirectory();
         RepoPinStore.Save(repoRoot, new RepoPin { PackageName = PackageId, Version = "1.0.0" });
@@ -228,14 +395,8 @@ public sealed class RepoCardServerSourceTests : IAsyncLifetime
         {
             Sources =
             [
-                new PackageSourceDefinition
-                {
-                    Alias = "Feed",
-                    Type = PackageSourceType.NuGet,
-                    Location = feed.IndexUrl,
-                    PackageIds = [PackageId],
-                    AllowInsecureHttp = true
-                }
+                ServerSource("Feed", feed),
+                .. otherSources.Select(source => ServerSource(source.Alias, source.Feed))
             ]
         };
         var recentRepo = new RecentRepo
@@ -249,6 +410,21 @@ public sealed class RepoCardServerSourceTests : IAsyncLifetime
         return new RepoCardViewModel(
             recentRepo, () => settings, new PackageVersionCache(), startupOptions, credentials: credentials);
     }
+
+    /// <summary>
+    ///     Creates the definition of a NuGet server source for a mock feed.
+    /// </summary>
+    /// <param name="alias">The source alias.</param>
+    /// <param name="feed">The feed.</param>
+    /// <returns>The definition.</returns>
+    private static PackageSourceDefinition ServerSource(string alias, MockNuGetFeed feed) => new()
+    {
+        Alias = alias,
+        Type = PackageSourceType.NuGet,
+        Location = feed.IndexUrl,
+        PackageIds = [PackageId],
+        AllowInsecureHttp = true
+    };
 
     /// <summary>
     ///     Creates a new empty temporary directory removed when the test ends.

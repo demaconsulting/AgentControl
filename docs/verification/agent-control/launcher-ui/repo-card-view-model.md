@@ -549,13 +549,48 @@ and `RepoCardViewModel_UpgradeCommand_NuGetFolderSource_UpgradesToHighestVersion
 server (see the `NuGetSourceProvider` verification; plain HTTP with the source's explicit opt-in), an
 anonymous server answers the upgrade check with the newer version; a background check (the default,
 `allowPrompt` false) against a server that requires a sign-in never calls the scripted prompt and sets the
-card's source problem to say a sign-in is needed and to use the card's menu > Refresh; a check the user
+card's source problem to say a sign-in is needed and to click "Sign-in needed" or use the card's menu > Refresh; a
+check the user
 requested (`allowPrompt` true) asks once, finds the upgrade, and a later background check - even by another
 card - reuses the remembered credential without asking. This scenario is tested by
 `RepoCardViewModel_RefreshUpgradeStatusAsync_AnonymousServer_OffersNewerVersion`,
 `RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains` and
 `RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential`,
 in `RepoCardServerSourceTests.cs`, covering `AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`.
+
+**RepoCardViewModel_SignInNeededChip_RefreshSignsInAndOnlyOneChipShows**: Against the same mock server requiring a
+sign-in, a background check sets `SourceNeedsSignIn` (the clickable chip), not `ShowSourceProblemChip`, and its problem
+says to click "Sign-in needed"; running `RefreshCommand` - the chip's command - then asks the scripted prompt once,
+clears `SourceNeedsSignIn` and `HasSourceProblem` and offers the upgrade. A card with no configured source has a
+problem that shows only the plain chip (`ShowSourceProblemChip` true, `SourceNeedsSignIn` false), and when a card's
+problem changes from an access refusal (plain chip) to a missing sign-in, `PropertyChanged` is raised for
+`ShowSourceProblemChip`, `SourceNeedsSignIn` and `SourceProblemChipText`, so the view swaps the chips. This scenario
+is tested by `RepoCardViewModel_RefreshAsync_AfterBackgroundCheckNeedsSignIn_AsksOnceAndClearsSignInNeeded`,
+`RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains` (in
+`RepoCardServerSourceTests.cs`), `RepoCardViewModel_ShowSourceProblemChip_ProblemOtherThanSignIn_ShowsThePlainChipOnly`
+and `RepoCardViewModel_ShowSourceProblemChip_PropertyChanged_RaisedWithSourceProblem` (in `RepoCardViewModelTests.cs`),
+covering `AgentControl-RepoCardViewModel-SignInNeededChip`.
+
+**RepoCardViewModel_SignInNotGiven_KeepsSignInNeeded**: Against a mock server requiring a sign-in, a background check
+shows the sign-in-needed chip; running `RefreshCommand` (the chip's command) while the scripted prompt answers as if the
+dialog were canceled asks once and leaves `SourceNeedsSignIn` true, `ShowSourceProblemChip` false, the chip text
+"Sign-in needed", `SourceProblem` exactly equal to the background check's text (no "canceled" in it), `StatusText`
+"Needs attention" and `RefreshCommand` available. Running it again with a valid answer asks a second time, clears the
+problem and offers the upgrade. A wrong password typed into the prompt likewise asks once and leaves the same chip and
+text. With a second, anonymous source that offers the pinned version and a newer one, a canceled sign-in on the first
+source is asked for only once in the check (two cancel answers are queued, and only one is used), and the upgrade from
+the second source is offered with no problem. Over a fake source, a user-started check whose read fails with
+`SignInCanceled` or `AuthenticationFailed` shows the failure's sign-in-needed words (or, when it gives none, its own
+message) followed by the "Click "Sign-in needed"" instruction, with status "Needs attention", while a failure of kind
+`Unreachable`, `TimedOut` or `NotFound` still shows "Update check failed" with no source problem and no sign-in chip.
+This scenario is tested by `RepoCardViewModel_RefreshAsync_SignInCanceled_KeepsSignInNeeded`,
+`RepoCardViewModel_RefreshAsync_SignInCanceledThenRetried_AsksAgainAndSignsIn`,
+`RepoCardViewModel_RefreshAsync_CredentialsRejected_KeepsSignInNeeded`,
+`RepoCardViewModel_RefreshAsync_SignInCanceledWhileAnotherSourceOffersThePin_AsksOnce` (in
+`RepoCardServerSourceTests.cs`),
+`RepoCardViewModel_RefreshUpgradeStatusAsync_UserCheckSignInNotGiven_ShowsSignInNeededChip` and
+`RepoCardViewModel_RefreshUpgradeStatusAsync_UserCheckSourceFailsOtherwise_ShowsCheckFailedWithoutSignInChip` (in
+`RepoCardViewModelTests.cs`), covering `AgentControl-RepoCardViewModel-SignInNotGivenStillNeeded`.
 
 **RepoCardViewModel_AccessDenied_ShownOnTheCardWithoutSignInOffer**: A pinned card whose source throws a
 `PackageSourceAccessException` of kind `AccessDenied` shows the message (with the server's reason) as its source

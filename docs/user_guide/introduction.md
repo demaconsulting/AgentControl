@@ -282,8 +282,10 @@ button](images/card-color-palette.png)
   sources *does* deliver the identical files, there is no problem: the package chip names that source instead (see
   *Sharing a Repo With a Team*).
 - **Sign-in needed** (red) — a server or a Git repository of yours needs a sign-in, and the
-  background check never asks. Use the card's "..." menu > **Refresh** to sign in (see *Signing In* and *Adding a
-  Git Repository*).
+  background check never asks. Click the chip (or use the card's "..." menu > **Refresh**) to sign in; the chip says
+  so in its tooltip (see *Signing In* and *Adding a Git Repository*). If you then cancel or close the sign-in window,
+  or the server rejects what you typed, the chip stays, so you can click it again to retry. The other red source
+  chips are not clickable: their tooltip explains what to change.
 
 Below the chips, a card shows the outcome of the last action you started on it - for example the reason a
 **Git Pull** failed - in small text under the repo's path (hover for the full text).
@@ -403,7 +405,9 @@ credential first can take several seconds to answer). The result tells you in wo
   machine.
 - **Connection failed** — anything else; the message says what.
 
-The test may open the sign-in dialog, exactly as selecting a package would. If you change the
+The test may open the sign-in dialog, exactly as selecting a package would. The sign-in you give is kept for the
+session, so when you close Settings - saved or not - the cards that showed **Sign-in needed** are checked again with
+it (see *Signing In*). If you change the
 address, the insecure-HTTP tick or the package IDs, the last result is cleared, because it described
 the old values.
 
@@ -502,8 +506,11 @@ window all mean "do not sign in". What happens next:
 - **Wrong user name or password** — the server refuses it, AgentControl forgets it, and the operation
   reports *Sign-in failed*. It asks only once per operation and never loops; start the action again
   (for example with **Retry** in the Select Package dialog) to get a fresh dialog, which tells you the
-  last attempt was rejected.
-- **Cancel** — the operation stops with *Sign-in canceled*; nothing is remembered.
+  last attempt was rejected. On a repo card, the card keeps its **Sign-in needed** chip: click it to try again.
+- **Cancel** — the operation stops with *Sign-in canceled*; nothing is remembered. If you opened the
+  dialog from a repo card (its **Sign-in needed** chip or **Refresh**), the card keeps showing **Sign-in needed**,
+  not *Update check failed*, so you can click the chip again whenever you are ready. AgentControl does not ask
+  again by itself.
 - **Taking too long** — if the sign-in is not completed within **2 minutes** AgentControl stops the
   operation and reports *Timed out*, so an abandoned dialog never holds anything up forever.
 - **Success** — the credential is remembered **in memory for the rest of this session**, so the next
@@ -520,8 +527,14 @@ checks each repo's package against your configured sources for upgrades in the b
 For a server
 that needs a sign-in, that check uses a credential you already typed this session (or saved, see below)
 and otherwise does
-**not** ask: the card shows a **Sign-in needed** chip. Use
-the card's "..." menu > **Refresh** (or Select Package / Upgrade) - actions you start - to sign in.
+**not** ask: the card shows a **Sign-in needed** chip. Click that chip, or use
+the card's "..." menu > **Refresh** (or Select Package / Upgrade) - actions you start - to sign in. Each click asks
+once; if you cancel, or the server rejects the sign-in, the chip stays for the next try.
+
+**Closing Settings checks the cards again.** When you close the Settings window without saving, AgentControl checks
+again, in the background and without asking you to sign in, the cards that show a **Sign-in needed** chip, another
+source problem or a failed check. So if you signed in with **Test connection** (or your network came back), the
+cards show it as soon as you close Settings. When you save, every card is checked anyway.
 
 ## Troubleshooting a Server Source
 
@@ -721,7 +734,8 @@ the sign-in your own Git setup already provides:
 Sign-in may be asked for only when **you** start the action: **Test connection**, **Select Package...**,
 **Change package...**, **Upgrade** and the card's **Refresh**. The background checks AgentControl makes (at start,
 after you change Settings and when you add a repo) **never prompt**. When one needs a sign-in, the repo's card shows a
-red **Sign-in needed** chip; sign in with Git as above, then choose the card's "..." menu > **Refresh**.
+red **Sign-in needed** chip; sign in with Git as above, then click the chip or choose the card's "..." menu >
+**Refresh**.
 
 ### Git on Your Computer
 
@@ -956,10 +970,13 @@ folder of zips or as a Git tag). What a source offers is therefore never trusted
 - **Upgrade badges follow without you doing anything.** While AgentControl is open it checks every card's package
   against your sources again every five minutes - the same check as at start, which never opens a sign-in dialog and
   skips a card whose folder is missing or that is busy - so a new version appears as an upgrade chip within about five
-  minutes. A source that cannot be read, or that needs a sign-in, is reported on the card as at start; use **Refresh**
-  to sign in. Each source is read once per round, however many repos use its packages (a source that is down is not
-  asked again for each repo, only again in the next round). The checking stops when you
-  close the window.
+  minutes. A source that cannot be read, or that needs a sign-in, is reported on the card as at start; click **Sign-in
+  needed** or use **Refresh** to sign in. Each source is read once per round, however many repos use its packages (a
+  source that is down is not asked again for each repo, only again in the next round). The checking stops when you close
+  the window.
+- **Closing Settings re-checks the cards with a problem.** Closing the Settings window without saving checks again
+  the cards that show a source problem or a failed check (saving checks every card anyway), so a sign-in made with
+  **Test connection**, or a connection that came back, shows on them at once.
 
 ## Selecting an Initial Package
 

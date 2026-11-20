@@ -20,9 +20,13 @@
 
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
+using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.Settings;
+using DemaConsulting.AgentControl.Startup;
 using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
+using DemaConsulting.AgentControl.Tests.PackageCredentials;
+using DemaConsulting.NuGet.Caching;
 using Microsoft.Extensions.Time.Testing;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
@@ -646,6 +650,294 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
 
         // Assert: one round, one read
         Assert.Equal(1, feed.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that closing Settings without saving checks a card that needed a sign-in again, so once the
+    ///     source answers the card no longer says "Sign-in needed" and offers the upgrade.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_RecheckAfterSettingsClosed_SourceNoLongerNeedsSignIn_ClearsTheProblem()
+    {
+        // Arrange: the launch check found that the source needs a sign-in
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new PackageSourceAccessException(
+                PackageSourceFailureKind.AuthenticationFailed, "Source 'Feed' needs a sign-in.")
+        };
+        var viewModel = CreateViewModel(clock, feed, out var card);
+        await viewModel.BeginUpgradeRefresh();
+        Assert.True(card.SourceNeedsSignIn);
+
+        // Act: the source now answers (a sign-in was made during the connection test) and Settings closes
+        feed.ListVersionsException = null;
+        feed.Publish("contoso-agents", "1.1.0");
+        await viewModel.RecheckAfterSettingsClosed(settingsSaved: false);
+
+        // Assert: the problem is gone and the check's result is shown
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.False(card.HasSourceProblem);
+        Assert.False(card.IsUpgradeStatusUnknown);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", card.LatestAvailableVersion);
+    }
+
+    /// <summary>
+    ///     Test that closing Settings without saving checks again a card whose last check failed because
+    ///     the source could not be reached, so the card shows the result once the connection is back.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_RecheckAfterSettingsClosed_SourceUnreachableBefore_ChecksAgain()
+    {
+        // Arrange: the launch check could not reach the source
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"))
+        {
+            ListVersionsException = new IOException("Feed is unreachable.")
+        };
+        var viewModel = CreateViewModel(clock, feed, out var card);
+        await viewModel.BeginUpgradeRefresh();
+        Assert.True(card.IsUpgradeStatusUnknown);
+
+        // Act: the connection is back and Settings closes without saving
+        feed.ListVersionsException = null;
+        await viewModel.RecheckAfterSettingsClosed(settingsSaved: false);
+
+        // Assert
+        Assert.False(card.IsUpgradeStatusUnknown);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", card.LatestAvailableVersion);
+    }
+
+    /// <summary>
+    ///     Test that closing Settings without saving reads no source when no card shows a problem or a
+    ///     failed check.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_RecheckAfterSettingsClosed_NoCardHasAProblem_ReadsNoSource()
+    {
+        // Arrange: every card's launch check succeeded
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"));
+        var viewModel = CreateViewModel(clock, feed, repoCount: 3);
+        await viewModel.BeginUpgradeRefresh();
+        var callsBefore = feed.ListVersionsCalls;
+
+        // Act
+        await viewModel.RecheckAfterSettingsClosed(settingsSaved: false);
+
+        // Assert: nothing was read again
+        Assert.Equal(callsBefore, feed.ListVersionsCalls);
+    }
+
+    /// <summary>
+    ///     Test that after Settings was saved (which already checks every card) closing it starts no
+    ///     second check.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_RecheckAfterSettingsClosed_SettingsSaved_StartsNoSecondCheck()
+    {
+        // Arrange: a card that needs a sign-in, so any check reads the source again (failures are not cached)
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new PackageSourceAccessException(
+                PackageSourceFailureKind.AuthenticationFailed, "Source 'Feed' needs a sign-in.")
+        };
+        var viewModel = CreateViewModel(clock, feed, out var card);
+        await viewModel.BeginUpgradeRefresh();
+        viewModel.ApplySettings(viewModel.Settings);
+        await viewModel.PendingRefresh;
+        var callsAfterSave = feed.ListVersionsCalls;
+
+        // Act: Settings closes after the save
+        await viewModel.RecheckAfterSettingsClosed(settingsSaved: true);
+        await viewModel.PendingRefresh;
+
+        // Assert: the save's own check was the only one
+        Assert.Equal(callsAfterSave, feed.ListVersionsCalls);
+        Assert.True(card.SourceNeedsSignIn);
+    }
+
+    /// <summary>
+    ///     Test that a card busy with an action of its own is not checked when Settings closes, while another
+    ///     card whose last check failed is.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_RecheckAfterSettingsClosed_CardIsBusy_IsSkipped()
+    {
+        // Arrange: two cards whose last check failed; the first is now busy refreshing itself, held at its
+        // source read
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"))
+        {
+            ListVersionsException = new IOException("Feed is unreachable.")
+        };
+        var viewModel = CreateViewModel(clock, feed, repoCount: 2);
+        var busy = viewModel.RepoCards[0];
+        var idle = viewModel.RepoCards[1];
+        await viewModel.BeginUpgradeRefresh();
+        Assert.True(idle.IsUpgradeStatusUnknown);
+        var gate = new TaskCompletionSource();
+        feed.ListVersionsGate = gate.Task;
+        var refresh = busy.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.True(busy.IsBusy);
+        var callsWhileBusy = feed.ListVersionsCalls;
+
+        // Act: Settings closes while the first card is busy; then the source answers
+        var check = viewModel.RecheckAfterSettingsClosed(settingsSaved: false);
+        var callsOfTheCheck = feed.ListVersionsCalls - callsWhileBusy;
+        feed.ListVersionsException = null;
+        gate.SetResult();
+        await check;
+        await refresh;
+
+        // Assert: the source was read for the idle card only, which now shows the result
+        Assert.Equal(1, callsOfTheCheck);
+        Assert.False(idle.IsUpgradeStatusUnknown);
+        Assert.True(idle.IsUpgradeAvailable);
+    }
+
+    /// <summary>
+    ///     Test that closing Settings after the main window's view model was disposed checks nothing.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_RecheckAfterSettingsClosed_Disposed_ChecksNothing()
+    {
+        // Arrange: a card whose last check failed, and the window closed
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new IOException("Feed is unreachable.")
+        };
+        var viewModel = CreateViewModel(clock, feed, out var card);
+        await viewModel.BeginUpgradeRefresh();
+        var callsBefore = feed.ListVersionsCalls;
+        viewModel.Dispose();
+
+        // Act
+        var check = viewModel.RecheckAfterSettingsClosed(settingsSaved: false);
+
+        // Assert: nothing was started
+        Assert.True(check.IsCompleted);
+        await check;
+        Assert.Equal(callsBefore, feed.ListVersionsCalls);
+        Assert.True(card.IsUpgradeStatusUnknown);
+    }
+
+    /// <summary>
+    ///     Test that closing Settings without saving makes a periodic round that is still running forget
+    ///     the sign-in failure it recorded before the sign-in: the round reads the source again for the
+    ///     cards it checks afterwards, instead of putting "Sign-in needed" back on a card the re-check
+    ///     clears.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_RecheckAfterSettingsClosed_RoundRecordedFailureBeforeSignIn_RoundReadsTheSourceAgain()
+    {
+        // Arrange: two cards whose package only a server that needs a sign-in offers (a second source
+        // offers nothing); the launch check reports "Sign-in needed" on both
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new PackageSourceAccessException(
+                PackageSourceFailureKind.AuthenticationFailed, "Source 'Feed' needs a sign-in.")
+        };
+        var other = new FakePackageSourceProvider("Other");
+        var viewModel = CreateViewModel(clock, [feed, other], repoCount: 2);
+        await viewModel.BeginUpgradeRefresh();
+        Assert.All(viewModel.RepoCards, card => Assert.True(card.SourceNeedsSignIn));
+
+        // Arrange: a periodic round records the server's failure for the first card and is then held
+        // at the second source, before it reaches the second card
+        var otherGate = new TaskCompletionSource();
+        other.ListVersionsGate = otherGate.Task;
+        viewModel.StartPeriodicUpgradeRecheck();
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+        var round = viewModel.PendingPeriodicRecheck;
+        Assert.False(round.IsCompleted);
+
+        // Act: the user signs in (the server now answers, after a moment) and closes Settings without
+        // saving; then the round goes on to the second card
+        var feedGate = new TaskCompletionSource();
+        feed.ListVersionsGate = feedGate.Task;
+        feed.ListVersionsException = null;
+        feed.Publish("contoso-agents", "1.1.0");
+        var recheck = viewModel.RecheckAfterSettingsClosed(settingsSaved: false);
+        var readsBeforeRoundResumes = feed.ListVersionsCalls;
+        otherGate.SetResult();
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (!round.IsCompleted && feed.ListVersionsCalls == readsBeforeRoundResumes && waited.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+
+        var roundReadTheServer = feed.ListVersionsCalls > readsBeforeRoundResumes;
+        feedGate.SetResult();
+        await recheck;
+        await round;
+
+        // Assert: the round asked the server again for the second card rather than replaying the old
+        // failure, so no card is left saying "Sign-in needed" and both offer the upgrade
+        Assert.True(roundReadTheServer);
+        Assert.All(viewModel.RepoCards, card =>
+        {
+            Assert.False(card.SourceNeedsSignIn);
+            Assert.False(card.IsUpgradeStatusUnknown);
+            Assert.True(card.IsUpgradeAvailable);
+        });
+    }
+
+    /// <summary>
+    ///     Test the user's scenario end to end against a NuGet server that needs a sign-in: the background
+    ///     check says "Sign-in needed" without asking, the user signs in through Settings' Test connection,
+    ///     and closing Settings without saving clears the chip using that sign-in, without asking again.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_RecheckAfterSettingsClosed_SignedInDuringConnectionTest_UsesTheSignInWithoutAsking()
+    {
+        // Arrange: a server that needs a sign-in, a card pinned to an older version, and a sign-in prompt
+        await using var feed = await MockNuGetFeed.StartAsync();
+        feed.AddPackage("contoso-agents", "1.0.0");
+        feed.AddPackage("contoso-agents", "1.1.0");
+        feed.RequiredUser = "svc-agents";
+        feed.RequiredPassword = "recheck-test-pw-7741";
+        var prompt = new FakeCredentialPrompt();
+        prompt.EnqueueAnswer(new NuGetCredential("svc-agents", "recheck-test-pw-7741"));
+        var repo = CreateTempDirectory();
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var source = new PackageSourceDefinition
+        {
+            Alias = "Feed",
+            Type = PackageSourceType.NuGet,
+            Location = feed.IndexUrl,
+            PackageIds = ["contoso-agents"],
+            AllowInsecureHttp = true
+        };
+        var settings = new AppSettings { Sources = [source], RecentRepos = [new RecentRepo { Path = repo }] };
+        var viewModel = new MainWindowViewModel(
+            settings,
+            startupOptions: StartupOptions.Parse(["--config-dir", CreateTempDirectory()]),
+            configDirectory: CreateTempDirectory(),
+            credentials: new PackageCredentialContext(new SessionCredentialStore(), prompt));
+        var card = viewModel.RepoCards[0];
+        await viewModel.BeginUpgradeRefresh();
+        Assert.True(card.SourceNeedsSignIn);
+        Assert.Equal(0, prompt.AskCount);
+
+        // Act: Test connection signs in (the user answers the prompt), then Settings closes without saving
+        var testProvider = viewModel.CreateConnectionTestProvider(source);
+        await testProvider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
+        Assert.Equal(1, prompt.AskCount);
+        await viewModel.RecheckAfterSettingsClosed(settingsSaved: false);
+
+        // Assert: the card used the session's sign-in, without asking again
+        Assert.Equal(1, prompt.AskCount);
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.False(card.HasSourceProblem);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", card.LatestAvailableVersion);
+        viewModel.Dispose();
     }
 
     /// <summary>

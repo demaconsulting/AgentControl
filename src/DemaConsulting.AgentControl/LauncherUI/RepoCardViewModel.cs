@@ -689,7 +689,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             if (SetField(ref _sourceProblem, value))
             {
+                // Every chip binding depends on whether a problem is set, so all of them are told
                 OnPropertyChanged(nameof(HasSourceProblem));
+                OnPropertyChanged(nameof(SourceNeedsSignIn));
+                OnPropertyChanged(nameof(ShowSourceProblemChip));
                 OnPropertyChanged(nameof(SourceProblemChipText));
                 RaiseStatusChanged();
             }
@@ -704,10 +707,30 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets a value indicating whether the source problem is that the pinned package's server
-    ///     needs a sign-in (which the background check never asks for), so the card can say so on
-    ///     the chip itself instead of the generic "Package source problem".
+    ///     needs a sign-in (which the background check never asks for, or which the user did not
+    ///     give when a check they started asked), so the card can say so on the chip itself instead
+    ///     of the generic "Package source problem".
     /// </summary>
+    /// <remarks>
+    ///     Also decides whether the card shows its clickable "Sign-in needed" chip, which runs
+    ///     <see cref="RefreshCommand"/> - the user-started check that may ask for the sign-in. It is
+    ///     never <see langword="true"/> together with <see cref="ShowSourceProblemChip"/>, so the
+    ///     card shows at most one source-problem chip.
+    /// </remarks>
     public bool SourceNeedsSignIn => _sourceProblem is not null && _sourceNeedsSignIn;
+
+    /// <summary>
+    ///     Gets a value indicating whether the card shows its plain (tooltip-only) red
+    ///     source-problem chip: there is a source problem and it is not a missing sign-in.
+    /// </summary>
+    /// <remarks>
+    ///     A missing sign-in has its own clickable chip (see <see cref="SourceNeedsSignIn"/>)
+    ///     because a refresh the user starts can fix it; every other source problem (no source
+    ///     offers the pin, access denied, invalid source configuration, Git too old) needs the
+    ///     user to change something outside the card, so its chip only explains the problem in
+    ///     its tooltip. The two are mutually exclusive.
+    /// </remarks>
+    public bool ShowSourceProblemChip => _sourceProblem is not null && !_sourceNeedsSignIn;
 
     /// <summary>
     ///     Gets the text of the card's red source-problem chip: <c>Sign-in needed</c> when the
@@ -1732,7 +1755,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     Re-reads every configured package source (rather than serving the cache), so the card
     ///     shows what the sources offer now; the cache still serves automatic checks for at most five
-    ///     minutes, see <see cref="PackageVersionCache"/>.
+    ///     minutes, see <see cref="PackageVersionCache"/>. It is also the command of the card's
+    ///     clickable "Sign-in needed" chip (see <see cref="SourceNeedsSignIn"/>): as a check the
+    ///     user started it may ask for the sign-in the background check could not, and it is
+    ///     unavailable while another operation of the card runs.
     /// </remarks>
     public AsyncRelayCommand RefreshCommand { get; }
 
@@ -4017,17 +4043,21 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     dialog. <see langword="false"/> (the default) for the background check at start-up and
     ///     after settings change, which must never interrupt the user with a dialog: it uses a
     ///     remembered credential if there is one and otherwise reports that a sign-in is needed.
-    ///     <see langword="true"/> when the user asked for the check.</param>
+    ///     <see langword="true"/> when the user asked for the check; when the user then cancels or
+    ///     closes that dialog, or the server rejects the sign-in given, the card reports the same
+    ///     sign-in-needed problem, in the same words, as the background check.</param>
     /// <param name="relistSources">Whether every configured source is read again instead of
     ///     answered from the cache. <see langword="true"/> when the user asked for the check (so a
     ///     package published since the last listing - a new NuGet version, a zip added to a folder,
     ///     a pushed tag - is offered at once); <see langword="false"/> (the default) for the
     ///     background check, which may reuse cached listings no older than five minutes.</param>
     /// <param name="failureMemo">The failures of the background check round this check belongs to,
-    ///     or <see langword="null"/> (the default; a check the user asked for, or one on its own). A
-    ///     source that already failed in the round is not read again - this card ends in the same
-    ///     state the card that hit the failure did - and a failure here is recorded for the cards
-    ///     that follow. Nothing in it outlives the round.</param>
+    ///     or <see langword="null"/> (the default; a check the user asked for, or one on its own),
+    ///     in which case the check keeps a memo of its own for its length, so a source that failed -
+    ///     a sign-in the user canceled included - is read, and the user asked, at most once per
+    ///     check. A source that already failed in the round is not read again - this card ends in
+    ///     the same state the card that hit the failure did - and a failure here is recorded for
+    ///     the cards that follow. Nothing in it outlives the round.</param>
     /// <returns>A task that completes when the card's upgrade state is current.</returns>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is cancelled; the card keeps its previous upgrade state.</exception>
@@ -4065,6 +4095,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         var pinnedPackageName = PinnedPackageName!;
         var pinnedVersion = PinnedPackageVersion ?? string.Empty;
+
+        // Within one check a source that could not be read - a sign-in the user canceled or the
+        // server rejected included - is read once: a check given no round's memo (one the user
+        // started) keeps one of its own for its length, so the user is never asked twice
+        var failures = failureMemo ?? new SourceFailureMemo();
         IsCheckingUpgrade = true;
         try
         {
@@ -4086,7 +4121,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // The pin names no source: the user's configured sources, in Settings order, are asked
             // what they offer of the pinned package and version
             var (offering, firstFailure, listingAccessDenied) = await FindOfferingSourcesAsync(
-                registry, pinnedPackageName, pinnedVersion, cancellationToken, failureMemo);
+                registry, pinnedPackageName, pinnedVersion, cancellationToken, failures);
 
             // Nothing offers it and a source could not be read: nothing is known (a sign-in that is
             // needed, a share that is down), which is not "no source offers it"
@@ -4135,7 +4170,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // keeps Settings order). With a problem it is still offered when newer: upgrading is the
             // natural way out of it.
             var check = await _packageVersionCache.IsNewerVersionAvailableAcrossSourcesAsync(
-                registry, pinnedPackageName, pinnedVersion, cancellationToken, failureMemo);
+                registry, pinnedPackageName, pinnedVersion, cancellationToken, failures);
 
             if (generation == _upgradeCheckGeneration)
             {
@@ -4166,13 +4201,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 IsUpgradeStatusUnknown = true;
                 LatestAvailableVersion = null;
 
-                // A server that needs a sign-in is worth telling the user about, because the
-                // background check must not ask: the card says what to do instead
-                if (ex is PackageSourceAccessException { Kind: PackageSourceFailureKind.AuthenticationFailed } && !allowPrompt)
+                // A server that needs a sign-in is worth telling the user about: the background
+                // check must not ask, and a check the user started whose sign-in dialog was
+                // canceled or closed, or whose sign-in the server rejected, still has none. Either
+                // way the source still needs a sign-in, so the card shows the same problem in the
+                // same words and says what to do - click its "Sign-in needed" chip or choose
+                // Refresh, both of which run the check that may ask
+                if (ex is PackageSourceAccessException
+                    {
+                        Kind: PackageSourceFailureKind.AuthenticationFailed or PackageSourceFailureKind.SignInCanceled
+                    } signIn)
                 {
-                    SetSourceProblem(
-                        $"{SecretRedactor.SafeMessage(ex)} Use the card's \"...\" menu > Refresh to sign in.",
-                        needsSignIn: true);
+                    SetSourceProblem(DescribeSignInNeeded(signIn), needsSignIn: true);
                 }
                 else if (ex is PackageSourceAccessException { Kind: PackageSourceFailureKind.AccessDenied })
                 {
@@ -4252,6 +4292,17 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Describes a source that still needs a sign-in, for the card's "Sign-in needed" chip.
+    /// </summary>
+    /// <param name="failure">The failure of the read: the server needs a sign-in, rejected the
+    ///     one given, or the user canceled the sign-in.</param>
+    /// <returns>The source's sign-in-needed message - the same words whether or not the user was
+    ///     asked - followed by what to do.</returns>
+    private static string DescribeSignInNeeded(PackageSourceAccessException failure) =>
+        $"{SecretRedactor.Redact(failure.SignInNeededMessage ?? failure.Message)} " +
+        "Click \"Sign-in needed\" (or use the card's \"...\" menu > Refresh) to sign in.";
+
+    /// <summary>
     ///     Sets the source problem and whether it is a missing sign-in, notifying the chip's
     ///     bindings even when only the kind of problem changed.
     /// </summary>
@@ -4265,6 +4316,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         if (kindChanged)
         {
             OnPropertyChanged(nameof(SourceNeedsSignIn));
+            OnPropertyChanged(nameof(ShowSourceProblemChip));
             OnPropertyChanged(nameof(SourceProblemChipText));
         }
     }

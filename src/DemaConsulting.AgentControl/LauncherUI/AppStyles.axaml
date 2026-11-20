@@ -70,7 +70,10 @@
                     <SolidColorBrush x:Key="ChipAmberBorderHover" Color="#F5A623" />
                     <SolidColorBrush x:Key="ChipAmberForeground" Color="#FFD479" />
                     <SolidColorBrush x:Key="ChipRedBackground" Color="#40F85149" />
+                    <SolidColorBrush x:Key="ChipRedBackgroundHover" Color="#59F85149" />
+                    <SolidColorBrush x:Key="ChipRedBackgroundPressed" Color="#66F85149" />
                     <SolidColorBrush x:Key="ChipRedBorder" Color="#80F85149" />
+                    <SolidColorBrush x:Key="ChipRedBorderHover" Color="#F85149" />
                     <SolidColorBrush x:Key="ChipRedForeground" Color="#FFA198" />
 
                     <!-- Buttons: primary (accent), secondary (tinted outline), ghost (icon only) -->
@@ -174,7 +177,10 @@
                     <SolidColorBrush x:Key="ChipAmberBorderHover" Color="#B77A00" />
                     <SolidColorBrush x:Key="ChipAmberForeground" Color="#6B4100" />
                     <SolidColorBrush x:Key="ChipRedBackground" Color="#1ACF222E" />
+                    <SolidColorBrush x:Key="ChipRedBackgroundHover" Color="#2BCF222E" />
+                    <SolidColorBrush x:Key="ChipRedBackgroundPressed" Color="#40CF222E" />
                     <SolidColorBrush x:Key="ChipRedBorder" Color="#66CF222E" />
+                    <SolidColorBrush x:Key="ChipRedBorderHover" Color="#CF222E" />
                     <SolidColorBrush x:Key="ChipRedForeground" Color="#A5161F" />
 
                     <SolidColorBrush x:Key="ButtonPrimaryBackground" Color="{DynamicResource SystemAccentColor}" />
@@ -527,6 +533,13 @@
     </Style>
     <Style Selector="Button.chipButton:pressed Border.Chip.amber">
         <Setter Property="Background" Value="{DynamicResource ChipAmberBackgroundPressed}" />
+    </Style>
+    <Style Selector="Button.chipButton:pointerover Border.Chip.red">
+        <Setter Property="Background" Value="{DynamicResource ChipRedBackgroundHover}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ChipRedBorderHover}" />
+    </Style>
+    <Style Selector="Button.chipButton:pressed Border.Chip.red">
+        <Setter Property="Background" Value="{DynamicResource ChipRedBackgroundPressed}" />
     </Style>
     <Style Selector="Button.chipButton:pointerover Border.Chip.grey">
         <Setter Property="Background" Value="{DynamicResource ChipGreyBackgroundHover}" />

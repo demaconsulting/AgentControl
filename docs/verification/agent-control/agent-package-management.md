@@ -246,13 +246,15 @@ tests (`AgentPackageManagementSubsystemTests.cs`); the finer evidence for each c
   `AgentPackageManagementSubsystem_ServerSource_ResourcesOnAnotherOrigin_PromptsOnlyForTheFeedOrigin`, covering
   `AgentControl-AgentPackageManagement-NuGetServerOriginScoping` (child:
   `AgentControl-NuGetSourceProvider-CredentialOnlyForFeedOrigin`).
-- Failures: a sign-in that is needed but cannot be asked for, a cancelled sign-in, a sign-in that takes too long
-  and an address that is not a feed are distinct failures without a secret or address path, and a caller's
+- Failures: a sign-in that is needed but cannot be asked for, a canceled sign-in, a sign-in that takes too long
+  and an address that is not a feed are distinct failures without a secret or address path; the needed and the
+  canceled sign-in both carry the words saying the server needs a sign-in, the others carry none; and a caller's
   cancellation during a sign-in is not a failure, by
   `AgentPackageManagementSubsystem_ServerSource_Failures_AreDistinctAndNameNeitherSecretNorPath` and
   `AgentPackageManagementSubsystem_ServerSource_CallerCancelsWhileSigningIn_IsCancellationNotFailure`, covering
   `AgentControl-AgentPackageManagement-NuGetServerFailures` (children:
-  `AgentControl-NuGetSourceProvider-ServerFailures`, `AgentControl-NuGetSourceProvider-SignInTimeLimit`,
+  `AgentControl-NuGetSourceProvider-ServerFailures`, `AgentControl-NuGetSourceProvider-SignInNeededWords`,
+  `AgentControl-NuGetSourceProvider-SignInTimeLimit`,
   `AgentControl-NuGetSourceProvider-CallerCancellationNotAFailure`).
 - Secret safety: no password, encoded credential or secret-bearing inner exception reaches the log or an
   exception, whether a sign-in succeeds or fails, by
@@ -413,7 +415,7 @@ credential manager free (git never reads a terminal in either case); this scenar
 `AgentPackageManagementSubsystem_GitSource_OnlyUserStartedWorkMayPrompt`, covering
 `AgentControl-AgentPackageManagement-GitSourceSignIn` (child: `AgentControl-GitSourceProvider-InteractiveFlagHonored`).
 With the real git, a repository that is not there is reported as "not found" without the path, a git that cannot be
-started points to Settings and a cancelled request stops with a cancellation; with a stub that reports an old git, the
+started points to Settings and a canceled request stops with a cancellation; with a stub that reports an old git, the
 listing is refused with advice before any other command ran. This part is tested by
 `AgentPackageManagementSubsystem_GitSource_FailuresAreClassifiedAndNeverRepeatTheAddress` and
 `AgentPackageManagementSubsystem_GitSource_TooOldGitIsRefusedWithAdviceBeforeAnyTagIsListed`, covering

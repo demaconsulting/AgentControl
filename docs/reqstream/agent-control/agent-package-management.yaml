@@ -348,14 +348,19 @@ sections:
           The AgentPackageManagement subsystem shall report each way a NuGet package server can
           fail - it needs a sign-in, rejects the credential, the user cancels the sign-in, the
           sign-in takes longer than the allowed time, the address does not answer as a NuGet
-          feed - as a distinct failure whose message names no secret or address path, and shall
-          honor cancellation by the caller during a sign-in without reporting a failure.
+          feed - as a distinct failure whose message names no secret or address path, shall give
+          every one of these failures that a sign-in can fix the same words saying the server still
+          needs a sign-in, and shall honor cancellation by the caller during a sign-in without
+          reporting a failure.
         justification: |
           The user must be told what to do - sign in, correct the address, try again - and a user
           who cancels an operation has not met a problem; an abandoned sign-in dialog must not
-          hold an operation forever.
+          hold an operation forever. A server whose sign-in was canceled or rejected still needs
+          one, and the application must be able to say so in the same words as when nobody was
+          asked.
         children:
           - AgentControl-NuGetSourceProvider-ServerFailures
+          - AgentControl-NuGetSourceProvider-SignInNeededWords
           - AgentControl-NuGetSourceProvider-AccessDenied
           - AgentControl-NuGetSourceProvider-SignInTimeLimit
           - AgentControl-NuGetSourceProvider-CallerCancellationNotAFailure

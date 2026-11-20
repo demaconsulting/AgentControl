@@ -232,6 +232,9 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
         Assert.Contains("rejected the credentials", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(SentinelPassword, ex.ToString(), StringComparison.Ordinal);
 
+        // The source still needs a sign-in, in the same words a read that could not ask reports
+        Assert.Equal($"Source 'Feed' ({FeedOrigin.Create(new Uri(feed.IndexUrl))}) needs a sign-in.", ex.SignInNeededMessage);
+
         // The library's exception object is not kept, only a secret-free description of it
         Assert.IsType<SanitizedException>(ex.InnerException);
     }
@@ -255,9 +258,12 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
         var ex = await Assert.ThrowsAsync<PackageSourceAccessException>(
             () => provider.ListVersionsAsync(id, CancellationToken.None));
 
-        // Assert
+        // Assert: canceled, and the source still needs a sign-in, in the same words a read that
+        // could not ask reports
         Assert.Equal(PackageSourceFailureKind.SignInCanceled, ex.Kind);
         Assert.Equal(1, prompt.AskCount);
+        Assert.Contains("was canceled", ex.Message, StringComparison.Ordinal);
+        Assert.Equal($"Source 'Feed' ({FeedOrigin.Create(new Uri(feed.IndexUrl))}) needs a sign-in.", ex.SignInNeededMessage);
     }
 
     /// <summary>
@@ -280,6 +286,7 @@ public sealed class NuGetSourceProviderServerTests : IAsyncLifetime
         // Assert
         Assert.Equal(PackageSourceFailureKind.AuthenticationFailed, ex.Kind);
         Assert.Contains("needs a sign-in", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(ex.Message, ex.SignInNeededMessage);
     }
 
     /// <summary>

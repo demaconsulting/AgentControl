@@ -144,6 +144,9 @@ port, and the real `git upload-pack`).
 - A Git repository that needs a sign-in is never prompted for by a background check (the card shows "Sign-in needed",
   the user's helper was asked but could not prompt, the server saw no credential) and may be prompted for by work the
   user starts (Refresh on the card, Test connection in the editor).
+- A NuGet server that needs a sign-in is never prompted for by the background check (the card shows a red
+  "Sign-in needed" chip), and clicking that chip asks for the sign-in, after which the chip is gone and the newer
+  version is offered.
 - A package's content identity (a SHA-256 over its agent files, the same for every kind of source) is recorded in the
   pin for a zip, a NuGet-package and a Git source; a republished zip or NuGet package of the pinned version is not
   synced at launch.
@@ -287,9 +290,15 @@ a UI-automation test (the other system scenarios above are) and so carries no `w
 credentials is added; the user starts an operation on it (testing the connection, then selecting a package) and the
 sign-in dialog opens, naming the server's origin and saying the credential is used for this session only. After
 signing in, the operation continues, and selecting a package from the server asks for no second sign-in; the
-pin then holds no source and the card chip shows the alias of the server source that supplies it. This scenario is
-tested by
-`windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`, covering
+pin then holds no source and the card chip shows the alias of the server source that supplies it. A repo pinned to
+a server that needs a sign-in shows the red "Sign-in needed" chip after the background check; clicking the chip
+opens the sign-in dialog, and once the user has signed in the chip is gone and the newer version is offered. When the
+user instead cancels the dialog the chip opened, the dialog closes, the card's status is "Needs attention" (not
+"Update check failed"), the "Sign-in needed" chip is still there, and clicking it again opens the dialog again. This
+scenario is tested by
+`windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`,
+`windows@RepoCard_PinnedToServerNeedingSignIn_ClickingSignInNeededChipSignsIn` and
+`windows@RepoCard_PinnedToServerNeedingSignIn_CancelingSignInKeepsSignInNeededChip`, covering
 `AgentControl-System-ServerSignIn`.
 
 **AgentControl_Upgrade_UpgradeMenuItem_SyncsManagedFoldersAndShowsReleaseNotes**: The Upgrade
@@ -338,11 +347,12 @@ tests. This scenario is tested by `windows@SettingsWindow_AddZipPackageFolderVia
 `windows@SettingsWindow_SignInWithRememberTicked_SavedOnlyByTheUsersCredentialHelper`, covering
 `AgentControl-System-ConnectionTest`.
 
-**AgentControl_ResponsiveOperations_BackgroundCheckOfServerNeedingSignIn_NeverPrompts**: A repo pinned to a NuGet
-server that needs a sign-in is shown when the application starts; the background upgrade check does not open the
-sign-in dialog, and the card shows a red "Sign-in needed" chip instead. Window responsiveness, progress and
-cancellation are verified one level down (see the Verification Approach). This scenario is tested by
-`windows@RepoCard_PinnedToServerNeedingSignIn_BackgroundCheckNeverOpensSignInDialog`, covering
+**AgentControl_ResponsiveOperations_BackgroundCheckOfServerNeedingSignIn_NeverPrompts**: A repo pinned to a NuGet server
+that needs a sign-in is shown when the application starts; the background upgrade check does not open the sign-in
+dialog, and the card shows a red "Sign-in needed" chip instead (clicking it is covered by the server sign-in
+scenario above). Window
+responsiveness, progress and cancellation are verified one level down (see the Verification Approach). This scenario is
+tested by `windows@RepoCard_PinnedToServerNeedingSignIn_BackgroundCheckNeverOpensSignInDialog`, covering
 `AgentControl-System-ResponsiveOperations`.
 
 **AgentControl_DiagnosticLogging_AnyPassingTest_ConfirmsSerilogInitializedWithoutThrowing**:

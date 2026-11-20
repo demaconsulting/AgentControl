@@ -44,9 +44,15 @@ internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? La
 ///     cards that pin the same package would retry an unreachable (or sign-in-requiring) source for
 ///     every card. A caller creates one instance per round, passes it to the cache's read methods
 ///     and drops it when the round ends: nothing recorded here outlives the round, so the next round
-///     (and every action the user starts, which passes none) reads the source again. The recorded
-///     exception is rethrown to every later reader, so each card ends in the same state as the first
-///     one. Safe for concurrent use.
+///     reads the source again. The background rounds (the periodic round and the launch-time check)
+///     each pass one; <see cref="Clear"/> empties those that are running when the Settings window
+///     closes without saving, so a sign-in made there is not overridden by an older failure. A
+///     single repo card's check that is given no round's memo - one the user started, such as
+///     Refresh or the "Sign-in needed" chip - uses one of its own for the length of that check, so
+///     within it a source that failed (a sign-in the user canceled included) is read, and the user
+///     asked, at most once. Other reads (Upgrade, Select Package, restoring pinned files at
+///     launch) pass none and always read the source. The recorded exception is rethrown to every
+///     later reader, so each card ends in the same state as the first one. Safe for concurrent use.
 ///     </para>
 /// </remarks>
 internal sealed class SourceFailureMemo
@@ -88,6 +94,25 @@ internal sealed class SourceFailureMemo
         lock (_lock)
         {
             _failures.TryAdd((sourceAlias, packageId), failure);
+        }
+    }
+
+    /// <summary>
+    ///     Forgets every failure recorded so far, so the next read of each source in the round
+    ///     reaches it again; a failure recorded afterwards is remembered as usual.
+    /// </summary>
+    /// <remarks>
+    ///     For when something that may have fixed the failures happened while the round was
+    ///     running - the user signed in, or the connection came back: without this the cards the
+    ///     round checks after that moment would be given the failure that no longer holds. Every
+    ///     entry is dropped rather than those of some sources, because the cards of a round share
+    ///     the same configured sources and a forgotten failure only costs one more read.
+    /// </remarks>
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            _failures.Clear();
         }
     }
 
@@ -134,8 +159,9 @@ internal sealed class SourceFailureMemo
 ///     </para>
 ///     <para>
 ///     A cached empty result (no versions found) is a valid, distinct entry from "not yet queried",
-///     and a failed fetch is never cached (a background check round may pass a
-///     <see cref="SourceFailureMemo"/> so that a failure is remembered for that round only). An
+///     and a failed fetch is never cached (a background check round, or a single repo card's check,
+///     may pass a <see cref="SourceFailureMemo"/> so that a failure is remembered for that round or
+///     check only). An
 ///     expired entry is treated as not yet queried.
 ///     <see cref="Invalidate()"/> clears everything, while
 ///     <see cref="Invalidate(string)"/> clears one source so editing or removing a source does not
@@ -235,11 +261,15 @@ internal sealed class PackageVersionCache
     /// <param name="sourceAlias">The source alias.</param>
     /// <param name="packageId">The package name or ID.</param>
     /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
-    /// <param name="failureMemo">The failures of the current background check round, or
-    ///     <see langword="null"/> (a user action, or any call outside a round). When given, a cache
-    ///     miss whose read already failed in the round rethrows that failure without reading the
-    ///     source again, and a new failure is recorded in it; the cache itself still never keeps a
-    ///     failure.</param>
+    /// <param name="failureMemo">The failures recorded so far by the current background check
+    ///     round (the periodic round or the launch-time check), or by a single repo card's check the
+    ///     user started (Refresh, the "Sign-in needed" chip), which keeps a memo of its own for its
+    ///     length; or <see langword="null"/> for a read outside any such check (Upgrade, Select
+    ///     Package, restoring pinned files at launch). When given, a cache miss whose read already
+    ///     failed in the round or check rethrows that failure without reading the source again, and
+    ///     a new failure is recorded in it; the cache itself still never keeps a failure. A round's
+    ///     memo may be emptied (<see cref="SourceFailureMemo.Clear"/>) while the round runs, after
+    ///     which the source is read again.</param>
     /// <returns>The discovered packages ordered from highest to lowest version.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry"/> is
     ///     <see langword="null"/>.</exception>
@@ -349,9 +379,9 @@ internal sealed class PackageVersionCache
     /// <param name="onSourceFailure">Called with the failure of each source that could not be read
     ///     (and was skipped), or <see langword="null"/>. Lets a caller tell "no source offers the
     ///     package" from "a source that might have could not be read".</param>
-    /// <param name="failureMemo">The failures of the current background check round, or
-    ///     <see langword="null"/> outside a round; see
-    ///     <see cref="GetVersionsDescendingAsync"/>. A source that failed in the round is skipped
+    /// <param name="failureMemo">The failures of the current background check round or repo card
+    ///     check, or <see langword="null"/> outside one; see
+    ///     <see cref="GetVersionsDescendingAsync"/>. A source that already failed in it is skipped
     ///     (and reported to <paramref name="onSourceFailure"/>) without being read again.</param>
     /// <returns>The discovered packages source by source in configuration order (the order of
     ///     Settings), each source's versions from highest to lowest; empty when no source offers
@@ -435,9 +465,9 @@ internal sealed class PackageVersionCache
     /// <param name="packageId">The package name or ID.</param>
     /// <param name="pinnedVersion">The repo's current pinned version text.</param>
     /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
-    /// <param name="failureMemo">The failures of the current background check round, or
-    ///     <see langword="null"/> outside a round; see
-    ///     <see cref="GetVersionsAcrossSourcesAsync"/>.</param>
+    /// <param name="failureMemo">The failures of the current background check round or repo card
+    ///     check, or <see langword="null"/> outside one; see
+    ///     <see cref="GetVersionsDescendingAsync"/>.</param>
     /// <returns>The upgrade check result; see <see cref="UpgradeCheck"/>. The newest version
     ///     across the sources wins, and a version offered by several sources is attributed to the
     ///     first of them in configuration order.</returns>

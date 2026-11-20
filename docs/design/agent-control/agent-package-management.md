@@ -62,7 +62,10 @@ OTS item.
   `SignatureRejected` - lets a
   caller react
   (the connection test, the Select Package window, the card's background check) and whose message never
-  contains a secret or more of the server's address than its scheme, host and port.
+  contains a secret or more of the server's address than its scheme, host and port. A failure a sign-in can fix
+  may also carry `SignInNeededMessage`: the words saying the source still needs a sign-in, the same whether the
+  sign-in was never asked for, canceled or rejected, for a caller that shows the state of the source (a repo card's
+  "Sign-in needed" chip) rather than what happened (`AgentControl-AgentPackageManagement-NuGetServerFailures`).
 - *Content identity.* The reader that `AcquireAsync` returns reports a `ContentIdentity` (see *Content identity*
   below): `files-sha256:{hex}`, computed from the delivered agent files, the same form for every kind of source, so
   the same files from a zip folder, a NuGet source or a Git source have the same identity, which is why it alone

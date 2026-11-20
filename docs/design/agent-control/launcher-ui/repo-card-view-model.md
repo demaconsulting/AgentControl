@@ -295,6 +295,13 @@ session credentials and the user's saved sign-in (read without any dialog) but c
 - *Status chips* — uncommitted changes, committed agent files, folder missing and package source
   problem (whose tooltip is the actual problem), each color-coded amber or red
   (`AgentControl-LauncherUI-StatusBadges`).
+- *Sign-in-needed chip* — a missing sign-in (`SourceNeedsSignIn`) is shown as its own red chip, a button bound to
+  `RefreshCommand`, while every other source problem shows the plain tooltip-only chip (`ShowSourceProblemChip`, a
+  source problem that is not a missing sign-in); the two are mutually exclusive, both read their text from
+  `SourceProblemChipText` and their tooltip from `SourceProblem`. The `SourceProblem` setter raises
+  `HasSourceProblem`, `SourceNeedsSignIn`, `ShowSourceProblemChip` and `SourceProblemChipText`, and
+  `SetSourceProblem` raises the last three again when only the kind of problem changed
+  (`AgentControl-RepoCardViewModel-SignInNeededChip`).
 - *Launch label* — `LaunchButtonText` is "Launch" followed by the short display name of the
   configured agent tool, or plain "Launch" when the name is unknown or longer than ten characters
   (`AgentControl-RepoCardViewModel-LaunchLabel`).
@@ -390,9 +397,25 @@ the previous state in place (`AgentControl-RepoCardViewModel-CancelOperation`). 
 five minutes, after a
 repo is added and after settings change uses: it reads a server through the remembered session
 credentials and **never opens the sign-in dialog**. A server that then answers that it needs a sign-in
-(`PackageSourceFailureKind.AuthenticationFailed`) sets `SourceProblem` to the provider's secret-free message
-followed by *Use the card's "..." menu > Refresh to sign in*, so the card says what to do instead of
-interrupting the user. The card's **Refresh** command runs the same check with `allowPrompt` true, and the
+(`PackageSourceFailureKind.AuthenticationFailed`) sets `SourceProblem` to the provider's secret-free sign-in-needed
+words (`PackageSourceAccessException.SignInNeededMessage`, else its message) followed by *Click "Sign-in needed" (or
+use the card's "..." menu > Refresh) to sign in* (`DescribeSignInNeeded`), so the card says what to
+do instead of interrupting the user. The card's **Refresh** command runs the same check with `allowPrompt` true - it
+is also the command of the clickable "Sign-in needed" chip, so the chip and the menu item run the same check, may
+open the dialog and clear the sign-in-needed state once it succeeds
+(`AgentControl-RepoCardViewModel-SignInNeededChip`). When the user cancels or closes that dialog
+(`PackageSourceFailureKind.SignInCanceled`) or the server rejects the sign-in typed (`AuthenticationFailed` again),
+the source still needs a sign-in, so the check sets the same sign-in-needed problem, through the same
+`DescribeSignInNeeded`: the NuGet provider gives both failures the sign-in-needed words of a read that could not ask,
+so the chip and its tooltip are exactly those of the background check and the card is not "Update check failed".
+The user can click the chip again at once; nothing asks again by itself, because every automatic check passes
+`allowPrompt` false. Every other failure of that check (unreachable, timed out, not found, any other error) is still
+"Update check failed". A check that is given no round's `SourceFailureMemo` (one the user started) creates one of its
+own for its length and passes it to both listings of the check (`FindOfferingSourcesAsync` and
+`IsNewerVersionAvailableAcrossSourcesAsync`), so a source whose sign-in was canceled or rejected is read - and the user
+asked - only once even when another source offers the pinned version and the check goes on to look for a newer one
+(`AgentControl-RepoCardViewModel-SignInNotGivenStillNeeded`). The sign-in time-out (`TimedOut`) is not treated as a
+missing sign-in, because the same kind also reports network and Git time-outs. The
 Select Package and Upgrade actions the user chooses use a source registry that may open the dialog
 (`AgentControl-RepoCardViewModel-BackgroundChecksNeverPrompt`). A server that answers 403
 (`PackageSourceFailureKind.AccessDenied`: signed in, no permission to read the feed) sets `SourceProblem` to the
